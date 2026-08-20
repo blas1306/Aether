@@ -1,10 +1,9 @@
-"""Explicit, test-only Initial IR shadow validation instrumentation.
+"""Explicit, test-only dual-verifier validation instrumentation.
 
 The harness is intentionally outside the installed ``aether`` package.  It
 injects one already-constructed coordinator into otherwise ordinary
-``IRBackend`` constructions for the lifetime of a pytest session.  Python
-verification remains authoritative because all verification still flows
-through ``ShadowVerifierCoordinator``.
+``IRBackend`` constructions for the lifetime of a pytest session. Authority
+is resolved by the production RP3 configuration in ``ShadowVerifierCoordinator``.
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ from aether.ir import (
     ShadowVerificationReport,
     ShadowVerifierCoordinator,
 )
-from aether.ir.rust_verifier import SubprocessRustVerifierClient
+from aether.ir.rust_verifier import PersistentSubprocessRustVerifierClient
 from aether.pipeline import IRBackend
 
 
@@ -77,7 +76,7 @@ class ShadowValidationHarness:
     ) -> None:
         explicit_executable = Path(executable).resolve()
         self.sink = ValidationReportSink()
-        self.client = SubprocessRustVerifierClient(
+        self.client = PersistentSubprocessRustVerifierClient(
             executable=explicit_executable,
             timeout_seconds=timeout_seconds,
         )
@@ -127,6 +126,7 @@ class ShadowValidationHarness:
             return
         IRBackend.__init__ = original_init  # type: ignore[method-assign]
         self._restore_backend_init = None
+        self.client.close()
 
     @contextmanager
     def injected(self) -> Iterator[ShadowValidationHarness]:
@@ -174,7 +174,15 @@ class ShadowValidationHarness:
             tuple[str, str, str | None, str | None]
         ] = Counter()
         for report in reports:
-            if not isinstance(report.authoritative, PythonShadowRejected):
+            python_outcome = (
+                report.authoritative
+                if isinstance(
+                    report.authoritative,
+                    (PythonShadowAccepted, PythonShadowRejected),
+                )
+                else report.shadow
+            )
+            if not isinstance(python_outcome, PythonShadowRejected):
                 continue
             rust_invariant = (
                 report.shadow.diagnostic.invariant_id
@@ -189,7 +197,7 @@ class ShadowValidationHarness:
                 else type(report.shadow).__name__
             )
             key = (
-                report.authoritative.invariant_id,
+                python_outcome.invariant_id,
                 rust_outcome,
                 rust_invariant,
                 report.comparison.documented_rule_id,
@@ -200,6 +208,7 @@ class ShadowValidationHarness:
 
         accepted = sum(
             isinstance(report.authoritative, PythonShadowAccepted)
+            or isinstance(report.shadow, PythonShadowAccepted)
             for report in reports
         )
         rejected = len(reports) - accepted

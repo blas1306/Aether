@@ -61,6 +61,9 @@ from aether.pipeline import IRBackend
 
 
 EMPTY_REGISTRY = ExactShadowDivergenceRegistry()
+RP2_ROLLBACK = VerifierAuthorityConfiguration(
+    VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
+)
 
 
 def _accepted_module() -> IRModule:
@@ -333,17 +336,17 @@ def test_coordinator_acceptance_returns_python_identity_and_emits_safe_report() 
         report.comparison.reason = "changed"  # type: ignore[misc]
 
 
-def test_default_authority_configuration_is_closed_and_python_authoritative() -> None:
+def test_default_authority_configuration_is_closed_and_rust_authoritative() -> None:
     pipeline = VerifierAuthorityPipeline(
         client=FakeClient(RustVerifierAcceptedOutcome())
     )
     configuration = pipeline.configuration
 
-    assert configuration.mode is VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
+    assert configuration.mode is VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
     assert configuration.environment is VerifierAuthorityEnvironment.DEFAULT
     assert not configuration.is_canary
-    assert configuration.authority is VerifierImplementation.PYTHON
-    assert configuration.shadow is VerifierImplementation.RUST
+    assert configuration.authority is VerifierImplementation.RUST
+    assert configuration.shadow is VerifierImplementation.PYTHON
     with pytest.raises(TypeError, match="VerifierAuthorityMode"):
         VerifierAuthorityConfiguration("python")  # type: ignore[arg-type]
     with pytest.raises(TypeError, match="Python result"):
@@ -351,13 +354,9 @@ def test_default_authority_configuration_is_closed_and_python_authoritative() ->
             VerifierImplementation.PYTHON,
             ShadowRustAccepted(),
         )
-    with pytest.raises(
-        ValueError,
-        match="Rust authority requires the canary environment",
-    ):
-        VerifierAuthorityConfiguration(
-            VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
-        )
+    assert VerifierAuthorityConfiguration(
+        VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
+    ).environment is VerifierAuthorityEnvironment.DEFAULT
 
 
 def test_environment_variables_cannot_activate_rust_authority(
@@ -372,7 +371,7 @@ def test_environment_variables_cannot_activate_rust_authority(
 
     assert (
         pipeline.configuration.mode
-        is VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
+        is VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
     )
     assert (
         pipeline.configuration.environment
@@ -401,7 +400,7 @@ def test_internal_authority_flag_is_the_pipeline_default(
     assert pipeline.configuration is rust_authority
 
 
-def test_python_authority_routes_results_and_preserves_default_snapshot() -> None:
+def test_rust_authority_routes_results_and_preserves_default_snapshot() -> None:
     module = _accepted_module()
     default_sink = CollectingShadowReportSink()
     explicit_sink = CollectingShadowReportSink()
@@ -413,7 +412,7 @@ def test_python_authority_routes_results_and_preserves_default_snapshot() -> Non
         client=FakeClient(RustVerifierAcceptedOutcome()),
         sink=explicit_sink,
         configuration=VerifierAuthorityConfiguration(
-            VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
+            VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
         ),
     )
 
@@ -423,12 +422,12 @@ def test_python_authority_routes_results_and_preserves_default_snapshot() -> Non
     explicit_report = explicit_sink.reports[0]
     assert isinstance(default_pipeline, VerifierAuthorityPipeline)
     assert default_report.authority_result == AuthorityResult(
-        VerifierImplementation.PYTHON,
-        PythonShadowAccepted(),
-    )
-    assert default_report.shadow_result == ShadowResult(
         VerifierImplementation.RUST,
         ShadowRustAccepted(),
+    )
+    assert default_report.shadow_result == ShadowResult(
+        VerifierImplementation.PYTHON,
+        PythonShadowAccepted(),
     )
     assert isinstance(default_report.comparison, ComparisonResult)
     assert (
@@ -602,6 +601,7 @@ def test_rust_rejection_and_request_construction_failure_do_not_change_acceptanc
             RustVerifierRejectedOutcome(_diagnostic("IRV-018"))
         ),
         sink=rejection_sink,
+        configuration=RP2_ROLLBACK,
     ).verify(module)
 
     assert result is module
@@ -628,6 +628,7 @@ def test_rust_rejection_and_request_construction_failure_do_not_change_acceptanc
         ShadowVerifierCoordinator(
             client=client,
             sink=construction_sink,
+            configuration=RP2_ROLLBACK,
         ).verify(module)
         is module
     )
@@ -658,6 +659,7 @@ def test_coordinator_reraises_the_original_python_error_after_rust_disagrees(
     coordinator = ShadowVerifierCoordinator(
         client=FakeClient(RustVerifierAcceptedOutcome()),
         sink=sink,
+        configuration=RP2_ROLLBACK,
     )
 
     with pytest.raises(IRVerificationError) as raised:
@@ -683,6 +685,7 @@ def test_infrastructure_and_integration_failures_never_change_python_result() ->
         ShadowVerifierCoordinator(
             client=FakeClient(infrastructure),
             sink=infrastructure_sink,
+            configuration=RP2_ROLLBACK,
         ).verify(module)
         is module
     )
@@ -701,6 +704,7 @@ def test_infrastructure_and_integration_failures_never_change_python_result() ->
         ShadowVerifierCoordinator(
             client=RaisingClient(timeout),
             sink=integration_sink,
+            configuration=RP2_ROLLBACK,
         ).verify(module)
         is module
     )
@@ -723,6 +727,7 @@ def test_sink_failure_policy_preserves_rejection_and_is_nonstrict_by_default() -
         ShadowVerifierCoordinator(
             client=FakeClient(RustVerifierAcceptedOutcome()),
             sink=FailingSink(),
+            configuration=RP2_ROLLBACK,
         ).verify(module)
         is module
     )
@@ -732,12 +737,14 @@ def test_sink_failure_policy_preserves_rejection_and_is_nonstrict_by_default() -
             client=FakeClient(RustVerifierAcceptedOutcome()),
             sink=FailingSink(),
             strict_sink_errors=True,
+            configuration=RP2_ROLLBACK,
         ).verify(_rejected_module())
     with pytest.raises(LookupError, match="sink failed"):
         ShadowVerifierCoordinator(
             client=FakeClient(RustVerifierAcceptedOutcome()),
             sink=FailingSink(),
             strict_sink_errors=True,
+            configuration=RP2_ROLLBACK,
         ).verify(module)
 
 
@@ -802,6 +809,7 @@ def test_enabled_backend_preserves_python_rendered_diagnostic_and_cause() -> Non
         shadow_verifier=ShadowVerifierCoordinator(
             client=FakeClient(RustVerifierAcceptedOutcome()),
             sink=sink,
+            configuration=RP2_ROLLBACK,
         )
     )
 
@@ -873,6 +881,7 @@ def test_rust_diagnostic_message_prose_does_not_affect_reports() -> None:
                 )
             ),
             sink=sink,
+            configuration=RP2_ROLLBACK,
         )
         with pytest.raises(IRVerificationError):
             coordinator.verify(_rejected_module())

@@ -46,21 +46,20 @@ class _AcceptingClient:
         )
 
 
-def test_authority_and_phase_remain_python_rp2() -> None:
+def test_historical_artifact_remains_python_rp2_but_default_is_promoted() -> None:
     record = json.loads(ARTIFACT.read_text(encoding="utf-8"))
     assert record["current_authority"] == "python"
     assert record["current_migration_phase"] == "RP2"
     assert record["final_decision"] == "RP3_OPERATIONAL_READINESS_BLOCKED"
     configuration = VerifierAuthorityPipeline(client=_AcceptingClient()).configuration
-    assert configuration.mode is VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
+    assert configuration.mode is VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
     assert configuration.environment is VerifierAuthorityEnvironment.DEFAULT
 
 
-def test_rp3_mode_is_explicit_canary_only_and_rollback_is_configuration_only() -> None:
-    with pytest.raises(ValueError, match="canary"):
-        VerifierAuthorityConfiguration(
-            VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
-        )
+def test_rp3_default_and_rollback_are_configuration_only() -> None:
+    production = VerifierAuthorityConfiguration(
+        VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
+    )
     rp3 = VerifierAuthorityConfiguration(
         VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW,
         VerifierAuthorityEnvironment.CANARY,
@@ -69,6 +68,7 @@ def test_rp3_mode_is_explicit_canary_only_and_rollback_is_configuration_only() -
         VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
     )
     assert rp3.authority.value == "rust"
+    assert production.authority.value == "rust"
     assert rollback.authority.value == "python"
 
 

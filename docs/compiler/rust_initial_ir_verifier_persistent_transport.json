@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "milestone": "RUST-2.P",
+  "authority": "rust",
+  "mandatory_shadow": "python",
+  "rollback_mode": "python_authority_rust_shadow",
+  "semantic_protocol_version": 1,
+  "transport": {
+    "framing": "u32_be_length_prefix",
+    "identity_frame": "first",
+    "request_payload": "unchanged_protocol_v1_json",
+    "automatic_restart": false,
+    "concurrency": "serialized"
+  },
+  "focused_measurement": {
+    "requests": 50,
+    "one_shot_process_startups": 51,
+    "persistent_process_startups": 1,
+    "one_shot_seconds": 0.632522,
+    "persistent_seconds": 0.099952,
+    "speedup": 6.33
+  },
+  "semantics_changed": false,
+  "qualification": {
+    "canary_cases": 404,
+    "canary_semantic_mismatches": 0,
+    "cargo_workspace": "pass",
+    "full_python_passed": 4667,
+    "full_python_skipped": 4,
+    "full_python_failures_before_rp2_expectation_correction": 26,
+    "full_python_wall_seconds": 1364.02,
+    "remaining_failures": "24 host ptrace/leak_sanitizer failures"
+  },
+  "probando_nr3_timeout": {
+    "before_seconds": 20,
+    "after_seconds": 45,
+    "classification": "pre_existing_timeout_calibration_debt",
+    "rust_transport_improvement": false
+  }
+}

@@ -1,9 +1,9 @@
 """Initial IR authority execution with continuous cross-verifier comparison.
 
-The repository default remains Python-authoritative.  The pipeline always runs
-both verifier engines, compares their semantic outcomes, emits one bounded
-report, and only then resolves the selected authority.  Rust authority is
-representable only by an explicitly canary-scoped configuration.
+Rust is the production authority and Python remains the required RP3 shadow.
+The pipeline always runs both verifier engines, compares their semantic
+outcomes, emits one bounded report, and only then resolves the selected
+authority.
 """
 
 from __future__ import annotations
@@ -101,11 +101,6 @@ class VerifierAuthorityConfiguration:
             raise TypeError(
                 "environment must be a VerifierAuthorityEnvironment"
             )
-        if (
-            self.mode is VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
-            and self.environment is not VerifierAuthorityEnvironment.CANARY
-        ):
-            raise ValueError("Rust authority requires the canary environment")
 
     @property
     def authority(self) -> VerifierImplementation:
@@ -124,11 +119,11 @@ class VerifierAuthorityConfiguration:
         return self.environment is VerifierAuthorityEnvironment.CANARY
 
 
-# Production default.  Canary execution must pass a separate, explicit
-# configuration object; no environment variable or user-facing selector
-# participates in this policy.
+# Production default. No environment variable or user-facing selector
+# participates in this policy. The previous Python-authority mode remains an
+# explicit rollback/development configuration.
 _AUTHORITY_CONFIGURATION = VerifierAuthorityConfiguration(
-    VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
+    VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW
 )
 
 
@@ -814,7 +809,7 @@ class VerifierAuthorityPipeline:
 
 
 class ShadowVerifierCoordinator(VerifierAuthorityPipeline):
-    """Compatibility name for the default Python-authoritative pipeline."""
+    """Compatibility name for the default dual-verifier authority pipeline."""
 
 
 def _normalize_rust_invocation(

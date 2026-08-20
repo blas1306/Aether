@@ -40,7 +40,10 @@ from aether.ir import (
     verify_module_with_rust,
 )
 from aether.ir.dto import ir_module_to_dto
-from aether.ir.rust_verifier import SubprocessRustVerifierClient
+from aether.ir.rust_verifier import (
+    PersistentSubprocessRustVerifierClient,
+    SubprocessRustVerifierClient,
+)
 
 
 NONTRANSPORTABLE_CASES = {
@@ -121,6 +124,29 @@ def test_real_executable_results_are_deterministic(
     second = verify_module_with_rust(module, executable=rust_verifier_executable)
 
     assert first == second
+
+
+def test_persistent_client_reuses_one_process_for_multiple_outcomes(
+    rust_verifier_executable: Path,
+) -> None:
+    client = PersistentSubprocessRustVerifierClient(
+        executable=rust_verifier_executable
+    )
+    requests = [
+        build_canonical_rust_verifier_request(module)
+        for module in (_accepted_module(), _rejected_module(), _accepted_module())
+    ]
+    try:
+        outcomes = [client.verify(request).outcome for request in requests]
+        identity = client.inspect_identity()
+    finally:
+        client.close()
+
+    assert isinstance(outcomes[0], RustVerifierAcceptedOutcome)
+    assert isinstance(outcomes[1], RustVerifierRejectedOutcome)
+    assert outcomes[0] == outcomes[2]
+    assert identity.executable == "aether-ir-verifier"
+    assert client.process_start_count == 1
 
 
 def test_all_transportable_corpus_cases_cross_the_adapter_with_expected_parity(

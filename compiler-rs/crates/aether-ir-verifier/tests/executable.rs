@@ -42,6 +42,22 @@ fn run_argument(argument: &str) -> Output {
         .expect("verifier binary must start")
 }
 
+fn read_frame(stream: &mut impl std::io::Read) -> Vec<u8> {
+    let mut header = [0_u8; 4];
+    stream.read_exact(&mut header).expect("frame header");
+    let mut payload = vec![0; u32::from_be_bytes(header) as usize];
+    stream.read_exact(&mut payload).expect("frame payload");
+    payload
+}
+
+fn write_frame(stream: &mut impl std::io::Write, payload: &[u8]) {
+    stream
+        .write_all(&(payload.len() as u32).to_be_bytes())
+        .expect("frame header");
+    stream.write_all(payload).expect("frame payload");
+    stream.flush().expect("frame flush");
+}
+
 fn value(output: &Output) -> Value {
     serde_json::from_slice(&output.stdout).expect("stdout must be one JSON response")
 }
@@ -94,7 +110,7 @@ fn unknown_arguments_fail_with_one_stable_diagnostic() {
     assert!(output.stdout.is_empty());
     assert_eq!(
         output.stderr,
-        b"aether-ir-verifier: expected no arguments, --identity, --metadata, or --version\n"
+        b"aether-ir-verifier: expected no arguments, --identity, --metadata, --persistent, or --version\n"
     );
 }
 
@@ -155,4 +171,26 @@ fn repeated_execution_is_byte_for_byte_deterministic() {
         assert_normal_process_result(&second);
         assert_eq!(first.stdout, second.stdout);
     }
+}
+
+#[test]
+fn persistent_mode_services_multiple_framed_requests() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aether-ir-verifier"))
+        .arg("--persistent")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("persistent verifier must start");
+    let mut input = child.stdin.take().expect("stdin");
+    let mut output = child.stdout.take().expect("stdout");
+    let identity: Value = serde_json::from_slice(&read_frame(&mut output)).expect("identity");
+    assert_eq!(identity["executable"], "aether-ir-verifier");
+    for request in [ACCEPTED, REJECTED, ACCEPTED] {
+        write_frame(&mut input, request);
+        let response: Value = serde_json::from_slice(&read_frame(&mut output)).expect("response");
+        assert_eq!(response["protocol_version"], 1);
+    }
+    drop(input);
+    assert!(child.wait().expect("clean shutdown").success());
 }

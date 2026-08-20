@@ -141,7 +141,7 @@ print(sha256(request.payload).hexdigest())
     assert len(hashes[0]) == 64
 
 
-def test_missing_rust_process_does_not_change_cli_stdout_stderr_or_exit_code(
+def test_missing_rust_process_fails_closed_under_rp3_rust_authority(
     tmp_path: Path,
 ) -> None:
     program = tmp_path / "observational.ae"
@@ -168,7 +168,11 @@ def test_missing_rust_process_does_not_change_cli_stdout_stderr_or_exit_code(
     with harness.injected():
         enabled = run()
 
-    assert disabled == enabled == (0, "unchanged\n", "")
+    assert disabled == (0, "unchanged\n", "")
+    assert enabled[0] == 1
+    assert enabled[1] == ""
+    assert "rust authoritative verifier failed: executable_not_found" in enabled[2]
+    assert "at observational.ae" in enabled[2]
     assert harness.summary(population="failure_injection")["classifications"] == {
         "rust_integration_failure": 1
     }

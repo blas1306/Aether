@@ -9,6 +9,7 @@ on:
       - "scripts/package_rust_verifier.py"
       - "scripts/check_rust_verifier_companion_packaging.py"
       - "scripts/check_rust_verifier_rp3_final_qualification.py"
+      - "scripts/check_rust_verifier_authority_promotion.py"
       - "docs/compiler/rust_verifier_companion_packaging.json"
       - "docs/compiler/rust_initial_ir_verifier_rp3_final_qualification.json"
       - "scripts/rust_verifier_canary.py"
@@ -76,7 +77,7 @@ jobs:
           assert len(payloads) == 1, "Linux, Windows, and macOS snapshots differ"
 
   rust-authority-canary:
-    # This is a promotion gate only; production authority remains Python.
+    # Production-default RP3 gate, retaining the explicit canary harness.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -108,8 +109,8 @@ jobs:
           --output-directory rust-authority-canary-reports
       - name: Require deterministic RP3 final qualification
         run: >-
-          python scripts/check_rust_verifier_rp3_final_qualification.py
-          --check --require-ready
+          python scripts/check_rust_verifier_authority_promotion.py
+          --check --require-promoted
       - uses: actions/upload-artifact@v4
         if: always()
         with:

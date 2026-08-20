@@ -13,6 +13,9 @@ use aether_ir_verifier::{
 
 fn main() -> ExitCode {
     let arguments: Vec<_> = env::args_os().skip(1).collect();
+    if arguments.len() == 1 && arguments[0] == "--persistent" {
+        return run_persistent();
+    }
     if !arguments.is_empty() {
         return run_metadata_command(&arguments);
     }
@@ -38,6 +41,60 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+
+/// Persistent transport v1: unsigned 32-bit big-endian length followed by the
+/// unchanged protocol-v1 JSON payload.  The first frame is executable identity.
+fn run_persistent() -> ExitCode {
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let mut input = stdin.lock();
+    let mut output = stdout.lock();
+    let Ok(identity) = encode_executable_identity() else {
+        return ExitCode::FAILURE;
+    };
+    if write_frame(&mut output, &identity).is_err() {
+        return ExitCode::FAILURE;
+    }
+    loop {
+        let mut header = [0_u8; 4];
+        match input.read(&mut header[..1]) {
+            Ok(0) => return ExitCode::SUCCESS,
+            Ok(1) => {}
+            Ok(_) => unreachable!(),
+            Err(_) => return ExitCode::FAILURE,
+        }
+        if input.read_exact(&mut header[1..]).is_err() {
+            return ExitCode::FAILURE;
+        }
+        let length = u32::from_be_bytes(header) as usize;
+        if length > MAX_FRAME_BYTES {
+            let _ = io::stderr()
+                .write_all(b"aether-ir-verifier: request frame exceeds transport limit\n");
+            return ExitCode::FAILURE;
+        }
+        let mut request = vec![0_u8; length];
+        if input.read_exact(&mut request).is_err() {
+            return ExitCode::FAILURE;
+        }
+        let response = catch_request_panic(&request);
+        let Ok(encoded) = encode_response(&response) else {
+            return ExitCode::FAILURE;
+        };
+        if write_frame(&mut output, &encoded).is_err() {
+            return ExitCode::FAILURE;
+        }
+    }
+}
+
+fn write_frame(output: &mut impl io::Write, payload: &[u8]) -> io::Result<()> {
+    let length = u32::try_from(payload.len())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "frame is too large"))?;
+    output.write_all(&length.to_be_bytes())?;
+    output.write_all(payload)?;
+    output.flush()
+}
+
 fn run_metadata_command(arguments: &[std::ffi::OsString]) -> ExitCode {
     let encoded = if arguments.len() == 1
         && (arguments[0] == "--identity" || arguments[0] == "--metadata")
@@ -53,7 +110,7 @@ fn run_metadata_command(arguments: &[std::ffi::OsString]) -> ExitCode {
         .into_bytes())
     } else {
         let _ = io::stderr().write_all(
-            b"aether-ir-verifier: expected no arguments, --identity, --metadata, or --version\n",
+            b"aether-ir-verifier: expected no arguments, --identity, --metadata, --persistent, or --version\n",
         );
         return ExitCode::from(2);
     };

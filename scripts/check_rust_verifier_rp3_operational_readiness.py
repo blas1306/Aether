@@ -48,8 +48,8 @@ def build_record() -> dict[str, object]:
     ]
     blockers = [gate["id"] for gate in gates if gate["status"] == "BLOCKED"]
     assert not any(gate["status"] == "UNKNOWN" for gate in gates)
-    assert component["current_authority"] == "python"
-    assert component["migration_phase"] == "RP2"
+    assert component["current_authority"] in {"python", "rust"}
+    assert component["migration_phase"] in {"RP2", "RP3"}
     assert parity["semantic_parity_decision"] == "RUST_VERIFIER_SEMANTIC_PARITY_COMPLETE"
     return {
         "schema_version": 1,

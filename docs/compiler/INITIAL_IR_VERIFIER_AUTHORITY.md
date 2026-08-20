@@ -1,13 +1,10 @@
 # Initial IR verifier authority infrastructure
 
-## Phase 4.5B scope
+## Current RP3 policy
 
-Phase 4.5B makes authority a centralized internal policy without changing the
-active policy. Python remains authoritative, Rust remains observational, and
-the existing direct Python path remains available when no dual-verifier
-pipeline is explicitly configured. This phase performs no subprocess rollout,
-executable discovery, CLI or environment-variable selection, fallback, PyO3
-integration, or verifier semantic change.
+RUST-2 promotes Rust to the Initial IR verifier production authority while
+retaining Python as the required RP3 shadow. This is a policy/default change;
+it does not alter verifier or IR semantics, protocol, packaging, or fallback.
 
 The internal feature flag is the single `_AUTHORITY_CONFIGURATION` assignment
 in `aether.ir.shadow_verifier`. It contains one
@@ -20,7 +17,7 @@ in `aether.ir.shadow_verifier`. It contains one
 
 There are no independent authority/shadow booleans and no representation for
 both-authoritative, both-shadow, Python-only, Rust-only, or disabled-shadow
-policy. The repository default is `PYTHON_AUTHORITY_RUST_SHADOW`.
+policy. The repository default is `RUST_AUTHORITY_PYTHON_SHADOW`.
 `VerifierAuthorityPipeline` reads the configuration once when it is
 constructed. Focused tests may pass the other immutable configuration
 directly; ordinary compiler and harness construction uses the internal
@@ -117,11 +114,10 @@ to propagate rather than being relabeled as semantic or transport results.
 
 ## Backward compatibility
 
-With the default Python-authoritative configuration:
+With the default Rust-authoritative configuration:
 
-- the original Python module identity or `IRVerificationError` remains the
-  compiler result;
-- Rust failures remain observational;
+- Rust acceptance/rejection is the compiler validity result;
+- Python remains a required comparison shadow during RP3;
 - canonical protocol-v1 bytes and SHA-256 request hashes are unchanged;
 - comparison and divergence registry policy remain independent of authority;
 - semantic report snapshots are unchanged; and
@@ -129,8 +125,8 @@ With the default Python-authoritative configuration:
   selected by the new configuration.
 
 The full migration corpus and shadow regression remain the compatibility
-oracles. Rust-authority tests use controlled clients and do not alter the
-repository-wide feature flag.
+oracles. `PYTHON_AUTHORITY_RUST_SHADOW` remains available as the explicit RP2
+rollback/development configuration.
 
 ## Phase 4.6 canary boundary
 
@@ -153,7 +149,6 @@ the reference because IR v1 gives no semantic meaning to `cond`, `for.cond`, or
 any other non-entry label. Python now implements the same property, and the
 former exact outcome-divergence rule has been retired.
 
-`_AUTHORITY_CONFIGURATION` remains `PYTHON_AUTHORITY_RUST_SHADOW`. Python still
-determines the compiler result, Rust still runs only as the observation, both
-outcomes are still compared and reported, and no fallback or rollout behavior
-was added.
+That historical semantic-alignment phase did not switch authority. RUST-2 later
+changed `_AUTHORITY_CONFIGURATION` to `RUST_AUTHORITY_PYTHON_SHADOW`; both
+outcomes remain compared and reported, and no fallback behavior was added.

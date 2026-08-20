@@ -15,6 +15,7 @@ import json
 import math
 import os
 from pathlib import Path
+import queue
 import re
 import shutil
 import subprocess
@@ -452,6 +453,199 @@ class SubprocessRustVerifierClient:
             outcome=_translate_protocol_result(wire_result),
             metadata=metadata,
         )
+
+
+class PersistentSubprocessRustVerifierClient:
+    """One synchronized, fail-closed framed verifier process.
+
+    Transport v1 uses a four-byte unsigned big-endian payload length.  The
+    server's first frame is its identity; subsequent frames carry the existing
+    semantic protocol-v1 JSON request and response bytes unchanged.
+    """
+
+    def __init__(
+        self,
+        *,
+        executable: RustVerifierCommand,
+        timeout_seconds: float = DEFAULT_RUST_VERIFIER_TIMEOUT_SECONDS,
+        request_limit_bytes: int = DEFAULT_RUST_VERIFIER_REQUEST_LIMIT_BYTES,
+        stdout_limit_bytes: int = DEFAULT_RUST_VERIFIER_STDOUT_LIMIT_BYTES,
+        stderr_limit_bytes: int = DEFAULT_RUST_VERIFIER_STDERR_LIMIT_BYTES,
+        validate_startup: bool = True,
+    ) -> None:
+        self._command = _normalize_command(executable)
+        self._timeout_seconds = _validate_timeout(timeout_seconds)
+        self._request_limit_bytes = _validate_byte_limit(request_limit_bytes, "request_limit_bytes")
+        self._stdout_limit_bytes = _validate_byte_limit(stdout_limit_bytes, "stdout_limit_bytes")
+        self._stderr_limit_bytes = _validate_byte_limit(stderr_limit_bytes, "stderr_limit_bytes")
+        if not isinstance(validate_startup, bool):
+            raise TypeError("validate_startup must be a boolean")
+        self._validate_startup = validate_startup
+        self._lock = threading.Lock()
+        self._process: subprocess.Popen[bytes] | None = None
+        self._identity: RustVerifierExecutableIdentity | None = None
+        self._stderr = _CapturedStream(self._stderr_limit_bytes)
+        self._stderr_limit_event = threading.Event()
+        self._failed = False
+        self._start_count = 0
+
+    @property
+    def process_start_count(self) -> int:
+        return self._start_count
+
+    def inspect_identity(self) -> RustVerifierExecutableIdentity:
+        with self._lock:
+            self._ensure_started()
+            assert self._identity is not None
+            return self._identity
+
+    def verify(self, request: CanonicalRustVerifierRequest) -> RustVerifierInvocation:
+        if not isinstance(request, CanonicalRustVerifierRequest):
+            raise TypeError("request must be a CanonicalRustVerifierRequest")
+        if len(request.payload) > self._request_limit_bytes:
+            raise RustVerifierRequestTooLarge(len(request.payload), self._request_limit_bytes)
+        with self._lock:
+            if self._failed:
+                raise RustVerifierProcessFailure(-1, stdout_excerpt=b"", stderr_excerpt=bytes(self._stderr.data))
+            self._ensure_started()
+            process = self._process
+            assert process is not None and process.stdin is not None
+            started_at = monotonic()
+            try:
+                process.stdin.write(len(request.payload).to_bytes(4, "big"))
+                process.stdin.write(request.payload)
+                process.stdin.flush()
+                response = self._read_frame(process)
+            except (BrokenPipeError, OSError) as error:
+                self._poison()
+                raise RustVerifierProcessFailure(
+                    process.poll() if process.poll() is not None else -1,
+                    stdout_excerpt=b"", stderr_excerpt=bytes(self._stderr.data),
+                ) from error
+            stderr = bytes(self._stderr.data)
+            try:
+                wire_result = _decode_response(
+                    response,
+                    transport=RustVerifierTransportMetadata(stderr=stderr),
+                )
+            except RustVerifierInvalidResponse:
+                self._poison()
+                raise
+            protocol_error_kind = wire_result.kind if isinstance(wire_result, RustVerifierProtocolError) else None
+            return RustVerifierInvocation(
+                outcome=_translate_protocol_result(wire_result),
+                metadata=RustVerifierInvocationMetadata(
+                    client_kind=RustVerifierClientKind.SUBPROCESS,
+                    duration_seconds=monotonic() - started_at,
+                    protocol_version=request.protocol_version,
+                    ir_schema_version=request.ir_schema_version,
+                    transport_metadata=SubprocessRustVerifierInvocationMetadata(
+                        stderr=stderr, exit_code=0, protocol_error_kind=protocol_error_kind
+                    ),
+                ),
+            )
+
+    def close(self) -> None:
+        with self._lock:
+            process = self._process
+            self._process = None
+            if process is None:
+                return
+            if process.stdin is not None:
+                try:
+                    process.stdin.close()
+                except OSError:
+                    pass
+            try:
+                process.wait(timeout=_TERMINATE_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                _terminate_and_reap(process)
+
+    def __enter__(self) -> PersistentSubprocessRustVerifierClient:
+        self.inspect_identity()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+    def _ensure_started(self) -> None:
+        if self._failed:
+            raise RustVerifierProcessFailure(-1, stdout_excerpt=b"", stderr_excerpt=bytes(self._stderr.data))
+        if self._process is not None:
+            return
+        try:
+            process = subprocess.Popen(
+                (*self._command, "--persistent"), stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False,
+            )
+        except FileNotFoundError:
+            raise RustVerifierExecutableNotFound("Configured Rust verifier executable was not found") from None
+        except PermissionError:
+            raise RustVerifierNotExecutable("Configured Rust verifier file is not executable") from None
+        except OSError as error:
+            raise RustVerifierSpawnFailure(f"Could not start Rust verifier process ({error.__class__.__name__})") from None
+        self._process = process
+        self._start_count += 1
+        assert process.stderr is not None
+        threading.Thread(
+            target=_read_bounded_stream,
+            args=(process.stderr, self._stderr, self._stderr_limit_event, process),
+            name="aether-rust-verifier-persistent-stderr", daemon=True,
+        ).start()
+        try:
+            identity_payload = self._read_frame(process)
+            identity = _decode_identity_value(_decode_one_json_value(identity_payload))
+            if self._validate_startup:
+                _validate_identity_compatibility(identity)
+            self._identity = identity
+        except BaseException:
+            self._poison()
+            raise
+
+    def _read_frame(self, process: subprocess.Popen[bytes]) -> bytes:
+        assert process.stdout is not None
+        result: queue.Queue[bytes | BaseException] = queue.Queue(maxsize=1)
+
+        def read() -> None:
+            try:
+                header = _read_exact(process.stdout, 4)
+                length = int.from_bytes(header, "big")
+                if length > self._stdout_limit_bytes:
+                    result.put(RustVerifierOutputLimitExceeded("stdout", self._stdout_limit_bytes, excerpt=b""))
+                    return
+                result.put(_read_exact(process.stdout, length))
+            except BaseException as error:
+                result.put(error)
+
+        threading.Thread(target=read, name="aether-rust-verifier-frame-reader", daemon=True).start()
+        try:
+            value = result.get(timeout=self._timeout_seconds)
+        except queue.Empty:
+            self._poison()
+            raise RustVerifierTimeout(
+                self._timeout_seconds, stdout_excerpt=b"", stderr_excerpt=bytes(self._stderr.data)
+            ) from None
+        if isinstance(value, BaseException):
+            self._poison()
+            if isinstance(value, RustVerifierAdapterError):
+                raise value
+            raise RustVerifierInvalidResponse("persistent verifier closed stdout inside a frame") from value
+        return value
+
+    def _poison(self) -> None:
+        self._failed = True
+        if self._process is not None:
+            _terminate_and_reap(self._process)
+
+
+def _read_exact(stream: object, length: int) -> bytes:
+    data = bytearray()
+    while len(data) < length:
+        chunk = stream.read(length - len(data))  # type: ignore[attr-defined]
+        if not chunk:
+            raise EOFError("unexpected EOF")
+        data.extend(chunk)
+    return bytes(data)
 
 
 def verify_module_with_rust(
@@ -1373,6 +1567,7 @@ __all__ = [
     "RUST_VERIFIER_PACKAGE_MANIFEST_SCHEMA_VERSION",
     "RUST_VERIFIER_PACKAGE_VERSION",
     "RUST_VERIFIER_PROTOCOL_VERSION",
+    "PersistentSubprocessRustVerifierClient",
     "SubprocessRustVerifierClient",
     "SubprocessRustVerifierInvocationMetadata",
     "RustVerifierAccepted",

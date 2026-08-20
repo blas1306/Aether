@@ -15,7 +15,8 @@ def build_record() -> dict[str, object]:
     platforms = {"linux-x86_64": "x86_64-unknown-linux-gnu", "windows-x86_64": "x86_64-pc-windows-msvc",
                  "macos-arm64": "aarch64-apple-darwin", "macos-x86_64": "x86_64-apple-darwin"}
     script = (ROOT / "scripts/package_rust_verifier.py").read_text()
-    assert component["current_authority"] == "python" and component["migration_phase"] == "RP2"
+    assert component["current_authority"] in {"python", "rust"}
+    assert component["migration_phase"] in {"RP2", "RP3"}
     assert "target/release" in script and "requires a target/release binary" in script
     assert (ROOT / "docs/compiler/rust_initial_ir_verifier_rp3_operational_readiness.json").exists()
     return {

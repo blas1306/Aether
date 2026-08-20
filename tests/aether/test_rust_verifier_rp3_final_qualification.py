@@ -41,13 +41,13 @@ def test_semantic_parity_and_all_operational_gates_are_required() -> None:
     assert qualification.evaluate(blocked)[0] == "RP3_AUTHORITY_SWITCH_BLOCKED"
 
 
-def test_python_authority_rp2_and_no_authority_switch() -> None:
+def test_historical_record_preserves_python_rp2_after_authority_switch() -> None:
     value = record()
     assert value["current_authority"] == "python"
     assert value["current_migration_phase"] == "RP2"
     assert value["authority_configuration"]["current_default"] == "PYTHON_AUTHORITY_RUST_SHADOW"
     source = (ROOT / value["switch_point"]["file"]).read_text(encoding="utf-8")
-    assert "_AUTHORITY_CONFIGURATION = VerifierAuthorityConfiguration(\n    VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW\n)" in source
+    assert "_AUTHORITY_CONFIGURATION = VerifierAuthorityConfiguration(\n    VerifierAuthorityMode.RUST_AUTHORITY_PYTHON_SHADOW\n)" in source
 
     for field, replacement in (("current_authority", "rust"), ("current_migration_phase", "RP3")):
         blocked = deepcopy(value)

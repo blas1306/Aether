@@ -46,18 +46,15 @@ Python 3.11 plus NumPy, SciPy, SymPy and Matplotlib.
 | Crate | Actual responsibility |
 | --- | --- |
 | `aether-ir` | Owned Rust Initial IR, schema-v1 import, JSON/wire DTOs, including the SSA wire representation. |
-| `aether-verifier` | Combined and focused structure, type, CFG, dominance, SSA, lifecycle/borrow, and all-path-return verification over owned Rust IR. It does not own production authority. |
+| `aether-verifier` | Combined and focused structure, type, CFG, dominance, SSA, lifecycle/borrow, and all-path-return verification over owned Rust IR. Its Initial IR verifier owns production authority. |
 | `aether-ir-verifier` | Protocol-v1 library and bounded stdin/stdout executable that imports schema-v1 IR and invokes the combined verifier. |
 | `aether-python` | Empty future integration seam; no PyO3 binding or production integration exists. |
 
 Python↔Rust differential tests, a shadow coordinator, content-identified
 platform packaging, operational CI, soak tooling and an explicit fail-closed
-Rust-authority canary exist. The checked-in production/default policy remains
-Python authority with Rust observational shadow when the dual pipeline is
-explicitly installed; ordinary compilation can still use direct Python
-verification. Rust authority is representable only in the explicit canary.
-Therefore Initial IR verification is **RP2**: Python authority plus qualified,
-required-in-canary Rust execution—not RP3 production authority. Initial IR and
+Rust-authority canary exist. The checked-in production/default dual-verifier
+policy is Rust authority with required Python shadow. Therefore Initial IR
+verification is **RP3**. Initial IR and
 SSA Rust representations/verifiers are RP1 infrastructure where they are not
 on the production authority path.
 
@@ -301,7 +298,7 @@ translation and error payload ownership is explicit.
 | Lexer, parser, AST | Python | Rust golden/differential port | Rust Stage0; optional Aether parser | Tokens/versioned syntax schema; parser needs differential migration. |
 | Resolver, typechecker, lowering | Python | Rust | Rust | Golden corpus plus differential for semantic phases; typed core API. |
 | Initial IR model | Python, Rust owned shadow model | Versioned schema parity | Rust | Schema/wire protocol. |
-| Initial IR verifier | Python authority, Rust canary/shadow | RP2→RP3→RP5 | Rust | `DIFFERENTIAL_MIGRATION`, protocol v1+. |
+| Initial IR verifier | Rust authority, Python shadow | RP3→RP4→RP5 | Rust | `DIFFERENTIAL_MIGRATION`, protocol v1+. |
 | SSA construction | Python | Rust port | Rust | Golden normalized SSA corpus. |
 | SSA verifier | Python authority, Rust implementation off production path | Rust differential qualification | Rust | SSA wire/owned API. |
 | Analyses, optimizer | Python | Pass-by-pass Rust ports | Rust | Golden/differential according to semantic risk; owned IR. |
@@ -336,11 +333,9 @@ parser where diagnostics/acceptance matter), `DIRECT_PORT_WITH_GOLDEN_CORPUS`
 for deterministic utilities and isolated transforms, and `NO_PORT_NEEDED` for
 permanent Python tooling or responsibilities intentionally owned by Aether.
 
-The exact next Rust milestone is **Initial IR verifier authority-readiness
-audit**, not an authority switch: close cross-platform canary/release evidence,
-define zero-unexpected-outcome-divergence and accepted diagnostic policy,
-latency/operational thresholds, monitoring, rollback owner and a bounded Python
-shadow-retirement window. A later separately approved milestone may enact RP3.
+RUST-2 enacted the separately qualified authority switch. RP3 retains Python
+as a required shadow for soak evidence and explicit rollback; a later,
+separately approved milestone may enact RP4 or RP5.
 
 That verifier is also the first Python production authority to retire. Switch
 only after the audit: RP3 keeps Python shadow for a release-window defined by
@@ -352,7 +347,7 @@ archived. No Python code is deleted by ARCH-1.
 Recommended sequence:
 
 1. Accept ARCH-1 and enforce the registry (this milestone).
-2. Complete Initial IR verifier authority-readiness; separately approve RP3.
+2. Complete Initial IR verifier authority-readiness and promote to RP3 (done).
 3. Audit and design the canonical runtime ABI schema (String/Array first).
 4. Qualify one further coherent Rust core boundary—owned Initial IR through
    verification—without requiring a wholesale compiler rewrite.
@@ -374,7 +369,7 @@ expand a retiring Python authority without a migration plan.
 
 ## Immediate milestone decisions
 
-The Initial IR verifier remains at RP2 (Python authority, Rust shadow/canary).
+The Initial IR verifier is at RP3 (Rust authority, Python shadow).
 The RUST-1 qualification result is `KEEP_RUST_SHADOW`; see
 [`RUST_INITIAL_IR_VERIFIER_AUTHORITY_READINESS.md`](../compiler/RUST_INITIAL_IR_VERIFIER_AUTHORITY_READINESS.md)
 and its deterministic JSON artifact. This readiness reference does not change
@@ -391,8 +386,8 @@ RUST-1.2.2 subsequently qualified the four official platform release artifacts
 and clean-install contract. RUST-1.3 now records
 `READY_FOR_RP3_AUTHORITY_SWITCH`; see
 [`RUST_INITIAL_IR_VERIFIER_RP3_FINAL_QUALIFICATION.md`](../compiler/RUST_INITIAL_IR_VERIFIER_RP3_FINAL_QUALIFICATION.md).
-This readiness state does not change Python authority or RP2. Only RUST-2 may
-change the default authority and phase.
+RUST-2 used that readiness result to change the default authority and phase;
+see [`RUST_INITIAL_IR_VERIFIER_AUTHORITY_PROMOTION.md`](../compiler/RUST_INITIAL_IR_VERIFIER_AUTHORITY_PROMOTION.md).
 
 - First Rust: Initial IR verifier authority-readiness audit.
 - First C/C ABI: runtime ABI architecture and canonical schema audit, starting

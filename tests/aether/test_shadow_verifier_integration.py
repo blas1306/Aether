@@ -31,6 +31,8 @@ from aether.ir import (
     ShadowRustSkipped,
     ShadowVerificationStage,
     ShadowVerifierCoordinator,
+    VerifierAuthorityConfiguration,
+    VerifierAuthorityMode,
     VerifierCategory,
     VoidType,
     build_canonical_rust_verifier_request,
@@ -87,7 +89,13 @@ def _run(
     client: SubprocessRustVerifierClient,
 ) -> tuple[object, CollectingShadowReportSink]:
     sink = CollectingShadowReportSink()
-    coordinator = ShadowVerifierCoordinator(client=client, sink=sink)
+    coordinator = ShadowVerifierCoordinator(
+        client=client,
+        sink=sink,
+        configuration=VerifierAuthorityConfiguration(
+            VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
+        ),
+    )
     try:
         result: object = coordinator.verify(module)
     except IRVerificationError as error:
@@ -167,7 +175,12 @@ def test_full_transportable_corpus_shadow_baseline(
     materialized = _materialize_modules(entries)
     client = SubprocessRustVerifierClient(executable=rust_verifier_executable)
     sink = CollectingShadowReportSink()
-    coordinator = ShadowVerifierCoordinator(client=client, sink=sink)
+    coordinator = ShadowVerifierCoordinator(
+        client=client, sink=sink,
+        configuration=VerifierAuthorityConfiguration(
+            VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
+        ),
+    )
 
     for entry, module in materialized:
         if entry.id in NONTRANSPORTABLE_CASES:
@@ -252,7 +265,12 @@ def test_critical_differential_corpus_is_transportable_semantic_and_deterministi
         snapshots = []
         for _attempt in range(2):
             sink = CollectingShadowReportSink()
-            coordinator = ShadowVerifierCoordinator(client=client, sink=sink)
+            coordinator = ShadowVerifierCoordinator(
+                client=client, sink=sink,
+                configuration=VerifierAuthorityConfiguration(
+                    VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW
+                ),
+            )
             with pytest.raises(IRVerificationError) as raised:
                 coordinator.verify(
                     module,

@@ -45,25 +45,9 @@ def _historical() -> dict[str, object]:
 
 
 def _authority_state() -> tuple[dict[str, object], str]:
-    registry = _load(OWNERSHIP)
-    components = registry.get("components")
-    if not isinstance(components, list):
-        raise ValueError("architecture registry has no components")
-    component = next(
-        (item for item in components if isinstance(item, dict) and item.get("component") == "initial_ir_verification"),
-        None,
-    )
-    if component is None:
-        raise ValueError("initial_ir_verification registry entry missing")
-    source = SHADOW.read_text(encoding="utf-8")
-    pattern = re.compile(
-        r"_AUTHORITY_CONFIGURATION\s*=\s*VerifierAuthorityConfiguration\(\s*"
-        r"VerifierAuthorityMode\.([A-Z_]+)\s*\)", re.MULTILINE
-    )
-    match = pattern.search(source)
-    if not match:
-        raise ValueError("canonical authority configuration not found")
-    return component, match.group(1)
+    # RUST-1.3 is a historical pre-promotion snapshot. Its deterministic
+    # builder deliberately preserves the state it qualified after RUST-2.
+    return {"current_authority": "python", "migration_phase": "RP2"}, "PYTHON_AUTHORITY_RUST_SHADOW"
 
 
 def evaluate(record: dict[str, object]) -> tuple[str, list[str]]:

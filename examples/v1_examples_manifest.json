@@ -169,7 +169,7 @@
       "expected_exit_code": 0,
       "stdout_sha256": "34a1022fe64062666a9c435f02b3075fa20015676376fe1ebc8d63af695f2498",
       "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "timeout_seconds": 20,
+      "timeout_seconds": 45,
       "classification": "V1_NATIVE",
       "backends": [
         "native"

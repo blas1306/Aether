@@ -30,7 +30,7 @@ from aether.ir import (
     VerifierAuthorityPipeline,
     VerifierImplementation,
 )
-from aether.ir.rust_verifier import SubprocessRustVerifierClient
+from aether.ir.rust_verifier import PersistentSubprocessRustVerifierClient
 from aether.pipeline import IRBackend
 
 
@@ -202,7 +202,7 @@ class RustAuthorityCanaryHarness:
     ) -> None:
         self.configuration = configuration
         self.sink = CanaryReportSink()
-        self.client = SubprocessRustVerifierClient(
+        self.client = PersistentSubprocessRustVerifierClient(
             executable=Path(executable).resolve(),
             timeout_seconds=configuration.timeout_seconds,
         )
@@ -249,6 +249,7 @@ class RustAuthorityCanaryHarness:
             return
         IRBackend.__init__ = original_init  # type: ignore[method-assign]
         self._restore_backend_init = None
+        self.client.close()
 
     @contextmanager
     def injected(self) -> Iterator[RustAuthorityCanaryHarness]:
