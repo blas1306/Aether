@@ -6,28 +6,43 @@ from aether.ssa.verifier import SSAVerificationError, SSAVerifier
 from .printer import LLVMPrinter
 from .native_boundary import NativeBoundaryVerifier
 from .types import LLVMBackendError
+from .profiling import LLVMGenerationProfiler
 
 
 class LLVMBackend:
     """Small facade for emitting textual LLVM IR from SSA modules."""
 
-    def __init__(self, printer: LLVMPrinter | None = None) -> None:
-        self._printer = printer or LLVMPrinter()
+    def __init__(
+        self,
+        printer: LLVMPrinter | None = None,
+        *,
+        profiler: LLVMGenerationProfiler | None = None,
+    ) -> None:
+        self._profiler = profiler
+        self._printer = printer or LLVMPrinter(profiler=profiler)
 
     def emit(self, module: SSAModule, *, native_entry: bool = False) -> str:
         # Boundary declarations and private ABI facts must fail with their
         # specific diagnostics even when an internal test hook also constructs
         # SSA that the general verifier would call undefined.  The complete SSA
         # verifier still runs last, immediately before textual LLVM emission.
-        NativeBoundaryVerifier(
-            module,
-            exception_runtime_abi_version=self._printer.exception_runtime_abi_version,
-            exception_strategy=self._printer.exception_strategy,
-        ).verify()
-        try:
-            SSAVerifier(module).verify()
-        except SSAVerificationError as exc:
-            raise LLVMBackendError(
-                f"LLVM backend rejected malformed or unverified SSA: {exc}"
-            ) from exc
-        return self._printer.print_module(module, native_entry=native_entry)
+        def verify() -> None:
+            NativeBoundaryVerifier(
+                module,
+                exception_runtime_abi_version=self._printer.exception_runtime_abi_version,
+                exception_strategy=self._printer.exception_strategy,
+            ).verify()
+            try:
+                SSAVerifier(module).verify()
+            except SSAVerificationError as exc:
+                raise LLVMBackendError(
+                    f"LLVM backend rejected malformed or unverified SSA: {exc}"
+                ) from exc
+
+        if self._profiler is None:
+            verify()
+            return self._printer.print_module(module, native_entry=native_entry)
+        with self._profiler.phase("verification"):
+            verify()
+        with self._profiler.phase("textual_emission"):
+            return self._printer.print_module(module, native_entry=native_entry)

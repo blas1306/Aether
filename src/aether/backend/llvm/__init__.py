@@ -12,6 +12,7 @@ from .build import (
 from .printer import LLVMPrinter, print_llvm
 from .run import LLVMRunError, LLVMRunner
 from .types import LLVMBackendError, llvm_type
+from .profiling import LLVMGenerationProfiler
 
 __all__ = [
     "LLVMBackend",
@@ -25,6 +26,7 @@ __all__ = [
     "ToolchainInvocationError",
     "ToolchainUnavailableError",
     "LLVMPrinter",
+    "LLVMGenerationProfiler",
     "llvm_type",
     "print_llvm",
 ]

@@ -110,6 +110,7 @@ from aether.ssa.model import (
 )
 
 from .types import LLVMBackendError, llvm_type
+from .profiling import LLVMGenerationProfiler
 from .layout import LLVMTypeLayouts
 from .array_runtime import LLVMArrayRuntime
 from .io_runtime import LLVMRuntimeIO
@@ -209,7 +210,12 @@ class LLVMPrinter:
         exception_runtime_abi_version: int = EXCEPTION_RUNTIME_ABI_VERSION,
         exception_strategy: ExceptionLoweringStrategy | str = ExceptionLoweringStrategy.EVENT_OUT,
         allow_test_exception_strategy: bool = False,
+        profiler: LLVMGenerationProfiler | None = None,
     ) -> None:
+        self._profiler = profiler
+        self._profiling_module = False
+        self._profiling_function = False
+        self._profiling_instruction = False
         if exception_runtime_abi_version != EXCEPTION_RUNTIME_ABI_VERSION:
             raise LLVMBackendError(
                 "LLVM private exception runtime ABI mismatch: "
@@ -241,6 +247,13 @@ class LLVMPrinter:
         return self._exception_strategy
 
     def print_module(self, module: SSAModule, *, native_entry: bool = False) -> str:
+        if self._profiler is not None and not self._profiling_module:
+            self._profiling_module = True
+            try:
+                with self._profiler.phase("module_generation"):
+                    return self.print_module(module, native_entry=native_entry)
+            finally:
+                self._profiling_module = False
         self._native_entry = native_entry
         self._entry_symbol = "__aether_program_main"
         occupied_symbols = {function.name for function in module.functions if function.name != "main"}
@@ -341,6 +354,7 @@ class LLVMPrinter:
         self._class_alloc_types: set[ClassRefType] = set()
 
         functions = [self._print_function(function) for function in module.functions]
+        runtime_started = self._profiler.start() if self._profiler is not None else None
         self._register_class_payload_lifecycle()
         nullable_types = [
             f"{llvm_type(type_)} = type {{ i1, {llvm_type(type_.inner)} }}"
@@ -668,6 +682,8 @@ class LLVMPrinter:
             for global_ in self._string_globals_by_value.values()
             if (rendered := self._print_string_global(global_))
         ]
+        if self._profiler is not None and runtime_started is not None:
+            self._profiler.finish("runtime_helper_emission", runtime_started)
         # Named aggregate bodies must precede every helper that performs a
         # typed GEP/load.  This also makes collection layout independent of
         # which user function happened to mention a struct first.
@@ -687,7 +703,10 @@ class LLVMPrinter:
             + functions
             + wrappers
         )
-        return "\n\n".join(sections)
+        if self._profiler is None:
+            return "\n\n".join(sections)
+        with self._profiler.phase("final_text_rendering"):
+            return "\n\n".join(sections)
 
     def _collect_exception_nominal_types(
         self,
@@ -959,6 +978,13 @@ class LLVMPrinter:
         return sorted(found, key=str), has_array, has_list
 
     def _print_function(self, function: SSAFunction) -> str:
+        if self._profiler is not None and not self._profiling_function:
+            self._profiling_function = True
+            try:
+                with self._profiler.phase("function_lowering"):
+                    return self._print_function(function)
+            finally:
+                self._profiling_function = False
         self._current_function = function
         self._current_block = ""
         self._constants: dict[str, str] = {}
@@ -1234,6 +1260,16 @@ class LLVMPrinter:
         instruction: SSAInstruction,
         function: SSAFunction,
     ) -> str | None:
+        if self._profiler is not None and not self._profiling_instruction:
+            self._profiling_instruction = True
+            try:
+                with self._profiler.phase("instruction_lowering"):
+                    with self._profiler.phase(
+                        f"instruction_family:{type(instruction).__name__}"
+                    ):
+                        return self._print_instruction(instruction, function)
+            finally:
+                self._profiling_instruction = False
         if isinstance(instruction, SSAConst):
             self._record_const(instruction)
             return None
