@@ -1,0 +1,33 @@
+{
+  "audit": "TEST-PERF-2-O2.13-LLVM-evidence-performance-audit",
+  "decision": "O2_13_NO_SAFE_REUSE_OPPORTUNITY",
+  "determinism": {
+    "instrumentation_changes_canonical_artifact": false,
+    "historical_artifacts_rewritten": false
+  },
+  "full_baseline_test": {
+    "exact_duplicate_llvm_requests": 0,
+    "llvm_lowerings": 78,
+    "llvm_textual_emissions": 78,
+    "native_compiler_invocations": 0,
+    "native_executable_invocations": 0,
+    "ssa_requests": 52,
+    "supported_workloads": 26,
+    "workloads": 30
+  },
+  "o2_13_test_module": {
+    "exact_duplicate_llvm_requests": 18,
+    "llvm_lowerings": 96,
+    "llvm_textual_emissions": 96,
+    "native_compiler_invocations": 0,
+    "native_executable_invocations": 0,
+    "tests": 5,
+    "workload_generations": 36
+  },
+  "schema_version": 1,
+  "timing_reference_seconds": {
+    "checked_in_baseline_regeneration": 129.61,
+    "o2_13_test_module_approximate": 129.9,
+    "two_workload_candidate_determinism": 0.13
+  }
+}
