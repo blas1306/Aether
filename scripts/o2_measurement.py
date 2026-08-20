@@ -16,7 +16,8 @@ import tempfile
 import time
 
 from aether.analysis.dominators import DominatorAnalysis
-from aether.benchmark import _build_ir, _build_native, _optimized_ssa, _typed_program
+from aether.benchmark import _build_ir, _build_native, _typed_program
+from aether.o2_evidence_materialization import optimized_ssa as _optimized_ssa
 from aether.backend.llvm import LLVMBuilder
 from aether.optimization import optimization_profile
 from aether.ssa.analysis import LoopAnalysis

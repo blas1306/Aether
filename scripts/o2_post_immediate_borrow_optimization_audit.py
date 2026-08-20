@@ -12,7 +12,7 @@ from collections import Counter
 import json
 from pathlib import Path
 
-from aether.benchmark import _optimized_ssa
+from aether.o2_evidence_materialization import optimized_ssa as _optimized_ssa
 from aether.optimization import optimization_profile
 from aether.ssa import model as m
 from aether.ssa.analysis import LoopAnalysis

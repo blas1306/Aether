@@ -9,7 +9,7 @@ from pathlib import Path
 import subprocess
 
 from aether.backend.llvm.layout import LLVMTypeLayouts
-from aether.benchmark import _optimized_ssa
+from aether.o2_evidence_materialization import optimized_ssa as _optimized_ssa
 from aether.ir.types import ArrayType, InterfaceType, ListType, StringType, StructType
 from aether.optimization import optimization_profile
 from aether.ssa import model as m

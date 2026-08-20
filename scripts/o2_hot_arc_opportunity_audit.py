@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 import subprocess
 
-from aether.benchmark import _optimized_ssa
+from aether.o2_evidence_materialization import optimized_ssa as _optimized_ssa
 from aether.optimization import optimization_profile
 from aether.ir.types import ArrayType, InterfaceType, ListType, MethodResultType, StringType, StructType
 from aether.analysis.dominators import DominatorAnalysis

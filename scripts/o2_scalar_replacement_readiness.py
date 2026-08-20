@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import subprocess
 
-from aether.benchmark import _optimized_ssa
+from aether.o2_evidence_materialization import optimized_ssa as _optimized_ssa
 from aether.ir.types import MethodResultType, StructType
 from aether.optimization import optimization_profile
 from aether.ssa import model as m
