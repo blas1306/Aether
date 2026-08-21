@@ -3,13 +3,16 @@ from __future__ import annotations
 import copy
 import pytest
 
+from aether.ir.model import IRSourceLocation
 from aether.ir.types import IntType
 from aether.ssa.dto import (
     SSADTOError, ssa_module_from_dto, ssa_module_to_dto, ssa_module_to_json,
 )
 from aether.ssa.model import (
-    SSAArrayGet, SSAArraySet, SSABasicBlock, SSAFunction, SSAListGet, SSAListSet,
-    SSAMatrixGet, SSAMatrixSet, SSAModule, SSAValue, SSAVectorGet, SSAVectorSet,
+    SSAArrayCopy, SSAArrayGet, SSAArraySet, SSAArraySlice, SSABasicBlock,
+    SSABinaryOp, SSACall, SSAFunction, SSAInvoke, SSAListCopy, SSAListGet,
+    SSAListSet, SSAListSlice, SSAMatrixGet, SSAMatrixSet, SSAModule,
+    SSAPackException, SSAValue, SSAVectorGet, SSAVectorSet,
 )
 
 
@@ -81,3 +84,55 @@ def test_version_dispatch_and_required_v2_field_are_strict() -> None:
         unsupported = {**dto, "schema_version": version}
         with pytest.raises(SSADTOError, match="Unsupported SSA schema version"):
             ssa_module_from_dto(unsupported)
+
+
+SOURCE_LOCATION_FACTORIES = {
+    "array_copy": lambda location: SSAArrayCopy(_value("r"), _value("a"), location),
+    "array_get": lambda location: SSAArrayGet(
+        _value("r"), _value("a"), _value("i"), source_location=location
+    ),
+    "array_slice": lambda location: SSAArraySlice(
+        _value("r"), _value("a"), _value("s"), _value("e"), location
+    ),
+    "binary_op": lambda location: SSABinaryOp(
+        _value("r"), "add", _value("l"), _value("r2"), location
+    ),
+    "call": lambda location: SSACall("callee", source_location=location),
+    "invoke": lambda location: SSAInvoke(
+        "callee", (), None, _value("exception"), "normal", "exceptional",
+        source_location=location,
+    ),
+    "list_copy": lambda location: SSAListCopy(_value("r"), _value("l"), location),
+    "list_get": lambda location: SSAListGet(
+        _value("r"), _value("l"), _value("i"), source_location=location
+    ),
+    "list_slice": lambda location: SSAListSlice(
+        _value("r"), _value("l"), _value("s"), _value("e"), location
+    ),
+    "pack_exception": lambda location: SSAPackException(
+        _value("r"), _value("payload"), "Error", location
+    ),
+}
+
+
+@pytest.mark.parametrize("kind", SOURCE_LOCATION_FACTORIES)
+def test_every_source_location_capable_instruction_round_trips_exactly(kind: str) -> None:
+    location = IRSourceLocation(101, 203, f"adversarial/{kind}.ae")
+    dto = ssa_module_to_dto(_module(SOURCE_LOCATION_FACTORIES[kind](location)))
+    encoded = dto["functions"][0]["blocks"][0]["instructions"][0]
+    assert encoded["source_location"] == {
+        "tag": "source_location", "line": 101, "column": 203,
+        "path": f"adversarial/{kind}.ae",
+    }
+    decoded = ssa_module_from_dto(dto)
+    assert decoded.functions[0].blocks[0].instructions[0].source_location == location
+    assert ssa_module_to_dto(decoded) == dto
+    assert ssa_module_to_dto(ssa_module_from_dto(dto)) == dto
+
+
+@pytest.mark.parametrize("kind", SOURCE_LOCATION_FACTORIES)
+def test_absent_source_location_is_not_synthesized(kind: str) -> None:
+    dto = ssa_module_to_dto(_module(SOURCE_LOCATION_FACTORIES[kind](None)))
+    decoded = ssa_module_from_dto(dto)
+    assert decoded.functions[0].blocks[0].instructions[0].source_location is None
+    assert ssa_module_to_dto(decoded) == dto

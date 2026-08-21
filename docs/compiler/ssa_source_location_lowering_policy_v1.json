@@ -1,0 +1,81 @@
+{
+  "policy_version": 1,
+  "decision": "SSA_SOURCE_LOCATION_LOWERING_POLICY_V1_QUALIFIED",
+  "normative_rule": "A direct Initial IR instruction preserves source_location exactly when both models support it; explicit absence remains absent. Synthetic instructions never fabricate a location.",
+  "schema": {"initial_ir": 1, "ssa": 2, "changed": false},
+  "direct_preserve": [
+    "IRBinaryOp", "IRCall", "IRInvoke", "IRArrayCopy", "IRListCopy",
+    "IRArrayGet", "IRArraySlice", "IRListSlice", "IRListGet", "IRPackException"
+  ],
+  "direct_without_source_location": [
+    "IRConst", "IRUnaryOp", "IRCompareOp", "IRCast", "IRFunctionRef",
+    "IRCallIndirect", "IRInvokeIndirect", "IRPrint", "IRStructNew",
+    "IRClassNew", "IRClassGet", "IRClassSet", "IRInterfaceConstruct",
+    "IRInterfaceCall", "IRInvokeInterface", "IRStructGet", "IRStructSet",
+    "IRMethodResultNew", "IRMethodResultReceiver", "IRMethodResultValue",
+    "IRArrayNew", "IRListNew", "IRListContains", "IRListIndexOf",
+    "IRListClear", "IRListPush", "IRListInsert", "IRListRemoveAt",
+    "IRListPop", "IRListReverse", "IRSequenceSort", "IRVectorNew",
+    "IRMatrixNew", "IRVectorAdd", "IRVectorSub", "IRVectorScale",
+    "IRVectorDot", "IROuterProduct", "IRMatrixAdd", "IRMatrixSub",
+    "IRMatrixScale", "IRMatrixMatMul", "IRMatrixVectorMul",
+    "IRVectorMatrixMul", "IRVectorGet", "IRMatrixGet", "IRVectorLength",
+    "IRMatrixRows", "IRMatrixColumns", "IRArraySet", "IRListSet",
+    "IRVectorSet", "IRMatrixSet", "IRArrayLength", "IRListLength",
+    "IRListIsEmpty", "IRCatchEntry", "IRExceptionMatch",
+    "IRExceptionPayload", "IRExceptionDestroy", "IRThrow", "IRRethrow",
+    "IRPropagate", "IRBranch", "IRJump", "IRReturn"
+  ],
+  "elided_storage": ["IRLoad", "IRStore"],
+  "lifecycle_pseudo_instructions": [
+    "IRInitDefault", "IRCopyInit", "IRMoveInit", "IRAssign", "IRDestroy",
+    "IRRelocate"
+  ],
+  "audit_columns": {
+    "direct_preserve": {
+      "initial_ir_carries": true,
+      "ssa_model_carries": true,
+      "schema_v2_represents": true,
+      "python_preserves": true,
+      "rust_preserves": true,
+      "normative": "preserved exactly, including null"
+    },
+    "direct_without_source_location": {
+      "initial_ir_carries": false,
+      "ssa_model_carries": false,
+      "schema_v2_represents": false,
+      "python_preserves": false,
+      "rust_preserves": false,
+      "normative": "absent"
+    },
+    "elided_storage": {
+      "initial_ir_carries": false,
+      "ssa_model_carries": false,
+      "schema_v2_represents": false,
+      "python_preserves": false,
+      "rust_preserves": false,
+      "normative": "no SSA instruction is emitted"
+    },
+    "lifecycle_pseudo_instructions": {
+      "initial_ir_carries": true,
+      "ssa_model_carries": false,
+      "schema_v2_represents": false,
+      "python_preserves": false,
+      "rust_preserves": false,
+      "normative": "consumed; generated normalization instructions are absent"
+    }
+  },
+  "synthetic_categories": {
+    "phi": "absent; a merge has no unique source instruction",
+    "lifecycle_normalization": "absent, as frozen by lifecycle_normalization_policy_v1",
+    "cfg_lowering": "absent unless it is a direct mapping; do not inherit a neighboring location",
+    "constructor_exceptional_cleanup": "generated catch_entry, release, and propagate are absent",
+    "constructor_trampoline": "all trampoline instructions are absent"
+  },
+  "known_mismatches": {
+    "kinds": ["IRArrayCopy", "IRArrayGet", "IRArraySlice", "IRListCopy", "IRListGet", "IRListSlice"],
+    "root_cause": "Python SSARenamer omitted source_location constructor arguments; lifecycle and schema-v2 preserved them and Rust generic DTO lowering retained them.",
+    "incorrect_implementation": "Python before RUST-3.B3"
+  },
+  "authorities_unchanged": {"production_lowering": "Python", "rp3": "Rust Initial IR verification"}
+}

@@ -327,12 +327,14 @@ class SSAListNew(AllocationMixin, SSAInstruction):
 class SSAArrayCopy(ReadingAllocationMixin, SSAInstruction):
     result: SSAValue
     array: SSAValue
+    source_location: Any | None = None
 
 
 @dataclass(frozen=True)
 class SSAListCopy(ReadingAllocationMixin, SSAInstruction):
     result: SSAValue
     list_value: SSAValue
+    source_location: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -524,6 +526,7 @@ class SSAArrayGet(MemoryReadMayTrapMixin, SSAInstruction):
     borrowed: bool = False
     borrow_scope: str | None = None
     bounds_checked: bool = True
+    source_location: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -532,6 +535,7 @@ class SSAArraySlice(ReadingAllocationMixin, SSAInstruction):
     array: SSAValue
     start: SSAValue
     end: SSAValue
+    source_location: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -540,6 +544,7 @@ class SSAListSlice(ReadingAllocationMixin, SSAInstruction):
     list_value: SSAValue
     start: SSAValue
     end: SSAValue
+    source_location: Any | None = None
 
 @dataclass(frozen=True)
 class SSAListGet(MemoryReadMayTrapMixin, SSAInstruction):
@@ -549,6 +554,7 @@ class SSAListGet(MemoryReadMayTrapMixin, SSAInstruction):
     borrowed: bool = False
     borrow_scope: str | None = None
     bounds_checked: bool = True
+    source_location: Any | None = None
 
 
 @dataclass(frozen=True)

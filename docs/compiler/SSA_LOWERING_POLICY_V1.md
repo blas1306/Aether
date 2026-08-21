@@ -80,6 +80,9 @@ schema-v2 are copied exactly. This includes retained source locations,
 aggregate shape, nominal structs, erased/class/interface metadata, function
 references and indirect callees, ownership calls, `transferred_storage`, and
 exception metadata. The serialization reference is SSA schema-v2.
+The complete source-location inventory and synthetic attribution rules are
+frozen separately by
+[`SSA_SOURCE_LOCATION_LOWERING_POLICY_V1.md`](SSA_SOURCE_LOCATION_LOWERING_POLICY_V1.md).
 
 Initial IR schema-v1 has no `bounds_checked` field. Each Initial IR Array,
 List, Vector, and Matrix get/set instruction therefore synthesizes

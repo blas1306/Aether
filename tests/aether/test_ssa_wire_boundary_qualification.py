@@ -15,12 +15,14 @@ def _report() -> dict[str, object]:
     return json.loads(EVIDENCE.read_text(encoding="utf-8"))
 
 
-def test_evidence_is_byte_deterministic() -> None:
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), "--check"], cwd=ROOT,
-        text=True, capture_output=True, check=False,
-    )
-    assert result.returncode == 0, result.stdout + result.stderr
+def test_historical_a1_evidence_remains_frozen() -> None:
+    # RUST-3.A1 describes the dataclass domain that existed when it ran.  A2
+    # deliberately extends that domain, so regenerating A1 would rewrite
+    # history rather than validate it.
+    report = _report()
+    assert report["audit"] == "RUST-3.A1-explicit-SSA-wire-schema-v2"
+    assert report["decision"] == "SSA_WIRE_SCHEMA_V2_QUALIFIED"
+    assert report["corpus"]["summary"]["ssa_wire_roundtrip_passed"] == 116
 
 
 def test_all_77_instruction_dataclasses_are_field_audited() -> None:

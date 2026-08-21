@@ -550,13 +550,13 @@ class SSARenamer:
             result = self._define_value(instruction.result)
             array = self._resolve_value(instruction.array)
             self._bind_value(result.name, result, bound_values)
-            return SSAArrayCopy(result, array)
+            return SSAArrayCopy(result, array, instruction.source_location)
 
         if isinstance(instruction, IRListCopy):
             result = self._define_value(instruction.result)
             list_value = self._resolve_value(instruction.list_value)
             self._bind_value(result.name, result, bound_values)
-            return SSAListCopy(result, list_value)
+            return SSAListCopy(result, list_value, instruction.source_location)
 
         if isinstance(instruction, IRListContains):
             result = self._define_value(instruction.result)
@@ -715,6 +715,7 @@ class SSARenamer:
             return SSAArrayGet(
                 result, array, index, instruction.borrowed, instruction.borrow_scope,
                 bounds_checked=True,
+                source_location=instruction.source_location,
             )
 
         if isinstance(instruction, IRArraySlice):
@@ -723,7 +724,9 @@ class SSARenamer:
             start = self._resolve_value(instruction.start)
             end = self._resolve_value(instruction.end)
             self._bind_value(result.name, result, bound_values)
-            return SSAArraySlice(result, array, start, end)
+            return SSAArraySlice(
+                result, array, start, end, instruction.source_location
+            )
 
         if isinstance(instruction, IRListSlice):
             result = self._define_value(instruction.result)
@@ -731,7 +734,9 @@ class SSARenamer:
             start = self._resolve_value(instruction.start)
             end = self._resolve_value(instruction.end)
             self._bind_value(result.name, result, bound_values)
-            return SSAListSlice(result, list_value, start, end)
+            return SSAListSlice(
+                result, list_value, start, end, instruction.source_location
+            )
 
         if isinstance(instruction, IRListGet):
             result = self._define_value(instruction.result)
@@ -745,6 +750,7 @@ class SSARenamer:
                 instruction.borrowed,
                 instruction.borrow_scope,
                 bounds_checked=True,
+                source_location=instruction.source_location,
             )
 
         if isinstance(instruction, IRVectorGet):
