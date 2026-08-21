@@ -12,6 +12,7 @@ mod instruction;
 mod json;
 mod module;
 mod source;
+mod ssa;
 mod structure;
 mod types;
 mod value;
@@ -29,6 +30,10 @@ pub use instruction::{IRErasedBoxLayout, IRInstruction, IRWitnessMethodSlot, IRW
 pub use json::{IRModuleJsonImportError, import_module_json, parse_strict_json_value};
 pub use module::IRModule;
 pub use source::IRSourceLocation;
+pub use ssa::{
+    BlockId, FunctionId, OwnedSsaBlock, OwnedSsaCodecError, OwnedSsaFunction, OwnedSsaInstruction,
+    OwnedSsaModule, PhiIncoming, SsaValueId,
+};
 pub use structure::IRStructDefinition;
 pub use types::{
     ArrayType, BoolType, ClassRefType, ComplexType, DoubleType, EnumType, ExceptionEventType,
