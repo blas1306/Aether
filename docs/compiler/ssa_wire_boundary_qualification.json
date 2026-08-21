@@ -1,0 +1,2361 @@
+{
+  "audit": "RUST-3.A1-explicit-SSA-wire-schema-v2",
+  "compatibility_policy": {
+    "cross_version_interpretation": false,
+    "missing_v2_bounds_checked": "reject; no default or inference",
+    "new_serialization_version": 2,
+    "unsupported_versions": "reject deterministically",
+    "v1_affected_instructions": "reject because bounds_checked was not serialized",
+    "v1_decode": "explicit; unaffected instructions decode normally"
+  },
+  "corpus": {
+    "files": [
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "benchmarks/arithmetic.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "benchmarks/array_sum.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "benchmarks/if_else.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "benchmarks/list_for_sum.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "benchmarks/list_push.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "benchmarks/matrix_mul.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "benchmarks/nested_loops.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "benchmarks/sum_to.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "benchmarks/vector_dot.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "benchmarks/while_countdown.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/duplicate_handlers.ae",
+        "pre_ssa_failure": "AetherTypeError at line 8, column 5 [exception]:\n  Duplicate catch for exact type 'DuplicateError'.\n  Hint: the first catch for this type is at line 7, column 5.",
+        "pre_ssa_failure_type": "AetherTypeError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/illegal_rethrow.ae",
+        "pre_ssa_failure": "AetherTypeError at line 2, column 5 [exception]:\n  Bare rethrow is only valid inside an active catch body.\n  Hint: use 'throw error;' to create a new exception event.",
+        "pre_ssa_failure_type": "AetherTypeError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/invalid_catch_ordering.ae",
+        "pre_ssa_failure": "AetherTypeError at line 8, column 5 [exception]:\n  Catch for 'OrderedError' is unreachable because Error is already caught.\n  Hint: the Error catch starts at line 7, column 5 and must be last.",
+        "pre_ssa_failure_type": "AetherTypeError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/invalid_throw.ae",
+        "pre_ssa_failure": "AetherTypeError at line 2, column 11 [exception]:\n  Thrown value of type 'int' does not implement Error.\n  Hint: declare a struct or class that implements Error.",
+        "pre_ssa_failure_type": "AetherTypeError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/malformed_catch.ae",
+        "pre_ssa_failure": "AetherSyntaxError at line 4, column 5:\n  Expected '{' before block. near 'return'.",
+        "pre_ssa_failure_type": "AetherSyntaxError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/malformed_throw.ae",
+        "pre_ssa_failure": "AetherSyntaxError at line 3, column 1:\n  Expected an expression or ';' after 'throw'. near '}'.",
+        "pre_ssa_failure_type": "AetherSyntaxError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/non_error_catch.ae",
+        "pre_ssa_failure": "AetherTypeError at line 7, column 5 [exception]:\n  Catch type 'NotAnError' does not implement Error.\n  Hint: catch a concrete Error implementation or Error itself.",
+        "pre_ssa_failure_type": "AetherTypeError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/non_error_throwable.ae",
+        "pre_ssa_failure": "AetherTypeError at line 6, column 11 [exception]:\n  Thrown value of type 'NotAnError' does not implement Error.\n  Hint: declare a struct or class that implements Error.",
+        "pre_ssa_failure_type": "AetherTypeError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/null_throw.ae",
+        "pre_ssa_failure": "AetherTypeError at line 2, column 11 [exception]:\n  Cannot throw null or a nullable value.\n  Hint: throw a non-null value whose type implements Error.",
+        "pre_ssa_failure_type": "AetherTypeError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "corpus/exceptions/positive/cleanup_during_unwinding.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "corpus/exceptions/positive/constructor_failure.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "corpus/exceptions/positive/function_recursion.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "corpus/exceptions/positive/indirect_call.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "corpus/exceptions/positive/method_interface_dispatch.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "corpus/exceptions/positive/multiple_and_root_catches.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "corpus/exceptions/positive/nested_rethrow_chain.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "corpus/exceptions/positive/owned_aggregates_arc.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "corpus/exceptions/positive/panic_vs_exception.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "corpus/exceptions/positive/root_reporting.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "corpus/exceptions/positive/throw_and_typed_catch.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/ControlesALN/1erControl/Ej1/Biseccion.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/ControlesALN/1erControl/Ej1/ej1.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 12, column 1:\n  IR backend does not support identifier 'Plots' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- co",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/ControlesALN/1erControl/Ej2/PuntoFijo.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/ControlesALN/1erControl/Ej2/ej2.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/ControlesALN/2doControl/Ej1/ej1.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 21, column 1:\n  IR backend does not support identifier 'pl' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compa",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/ControlesALN/2doControl/Ej2/ej2.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/FormulaNumerosPrimos.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/LeetCode/isPalindrome.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/LeetCode/twoSum.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/Miller-Rabbin.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 87, column 18:\n  IR backend does not support InputCall yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comparisons\n- if/else\n- while\n",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/ProbandoNR/probandoNR2.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/ProbandoNR/probandoNR3.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/SNL.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 16, column 40:\n  IR backend requires known dimensions for Matrix * Vector<Column>.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compari",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/Sorts/IllegalArgumentException.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/Sorts/Main.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/Sorts/Sortings.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/aggregate_collections/particles.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/classes/const_with_mutable_alias.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/classes/counter_basic.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/classes/custom_constructor.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/classes/implements_interface.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/classes/invalid_cases.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/classes/private_field_public_methods.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/classes/reference_aliasing.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/esPrimo2.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/expense_tracker/Ledger.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/expense_tracker/Main.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/expense_tracker/Persistence.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/expense_tracker/Reports.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/expense_tracker/Transaction.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/hello.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/interactive/fibonacci.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 19, column 18:\n  IR backend does not support InputCall yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comparisons\n- if/else\n- while\n",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/interactive/primes_interactive.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 48, column 18:\n  IR backend does not support InputCall yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comparisons\n- if/else\n- while\n",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/interactive/sum_calculator.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 6, column 18:\n  IR backend does not support InputCall yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comparisons\n- if/else\n- while\n-",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/ir/constant_fold.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/ir/local_const.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/ir/sumTo.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/linear_algebra/basic_operations.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 5, column 3:\n  IR backend does not support assignment to 'A' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comp",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/linear_algebra/primes_advanced.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 43, column 22:\n  IR backend does not support identifier 'z' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compa",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/linear_algebra/primes_check.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 34, column 3:\n  IR backend does not support assignment to 'm' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- com",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/lists/list_api.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 15, column 19:\n  IR backend does not support CallExpression (method 'size' on 'list<int>') yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithme",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/arithmetic.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/array_sort.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/array_sum.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/countdown.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/double_add.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/double_compare.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/double_to_int.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/for_break_continue.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/for_sum.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/gcd_iterative.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/identity_call.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/int_to_double.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/list_clear.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/list_contains.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/list_copy.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/list_for_sum.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/list_index.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/list_index_of.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/list_insert.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/list_literal.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/list_pop.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/list_pop_alias.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/list_push.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/list_push_alias.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/list_remove_at.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/list_reverse.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/list_set_alias.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/list_sort.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/matrix_add.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/matrix_column_mul.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/matrix_index.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/matrix_literal.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/matrix_matmul.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/matrix_rows_columns.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/matrix_scalar_mul.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/matrix_set.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/matrix_sub.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/max.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/outer_product.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/return_5.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/string_choose.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/string_identity.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/sum_to_n.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/vector_add.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/vector_column_inferred.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/vector_column_literal.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/vector_dot.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/vector_index.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/vector_length.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/vector_literal.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/vector_matrix_mul.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/vector_scalar_mul.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/vector_set.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/llvm/vector_sub.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/minCuad.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 16, column 15:\n  IR backend does not support identifier 'z' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compa",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/minCuad2.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 17, column 15:\n  IR backend does not support identifier 'z' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compa",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/minimos_cuadrados/MinimosCuadrados.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 7, column 8:\n  IR backend does not support assignment to 'yt' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- com",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/nonlinear_systems/newton_system.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 34, column 8:\n  IR backend does not support assignment to 'f1' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- co",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/nonlinear_systems/nr2.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 17, column 14:\n  IR backend does not support identifier 'LA' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comp",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/nose.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/nose2.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 1, column 16:\n  IR backend does not support InputCall yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comparisons\n- if/else\n- while\n-",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/numerical_methods/Functions.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/numerical_methods/Integration.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/numerical_methods/Problems.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/numerical_methods/Results.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/numerical_methods/Roots.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/numerical_methods/main.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/probando.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 6, column 1:\n  IR backend does not support identifier 'pl' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compar",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/probandoNR.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 22, column 7:\n  IR backend does not support assignment to 'solNR' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n-",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/pruebaException.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/structs/Geometry.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/structs/custom_constructor_and_equality.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      },
+      {
+        "initial_ir_wire_roundtrip": true,
+        "path": "examples/structs/main.ae",
+        "reached_verified_python_ssa": true,
+        "ssa_wire_roundtrip": true
+      }
+    ],
+    "pre_ssa_failures": [
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/duplicate_handlers.ae",
+        "pre_ssa_failure": "AetherTypeError at line 8, column 5 [exception]:\n  Duplicate catch for exact type 'DuplicateError'.\n  Hint: the first catch for this type is at line 7, column 5.",
+        "pre_ssa_failure_type": "AetherTypeError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/illegal_rethrow.ae",
+        "pre_ssa_failure": "AetherTypeError at line 2, column 5 [exception]:\n  Bare rethrow is only valid inside an active catch body.\n  Hint: use 'throw error;' to create a new exception event.",
+        "pre_ssa_failure_type": "AetherTypeError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/invalid_catch_ordering.ae",
+        "pre_ssa_failure": "AetherTypeError at line 8, column 5 [exception]:\n  Catch for 'OrderedError' is unreachable because Error is already caught.\n  Hint: the Error catch starts at line 7, column 5 and must be last.",
+        "pre_ssa_failure_type": "AetherTypeError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/invalid_throw.ae",
+        "pre_ssa_failure": "AetherTypeError at line 2, column 11 [exception]:\n  Thrown value of type 'int' does not implement Error.\n  Hint: declare a struct or class that implements Error.",
+        "pre_ssa_failure_type": "AetherTypeError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/malformed_catch.ae",
+        "pre_ssa_failure": "AetherSyntaxError at line 4, column 5:\n  Expected '{' before block. near 'return'.",
+        "pre_ssa_failure_type": "AetherSyntaxError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/malformed_throw.ae",
+        "pre_ssa_failure": "AetherSyntaxError at line 3, column 1:\n  Expected an expression or ';' after 'throw'. near '}'.",
+        "pre_ssa_failure_type": "AetherSyntaxError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/non_error_catch.ae",
+        "pre_ssa_failure": "AetherTypeError at line 7, column 5 [exception]:\n  Catch type 'NotAnError' does not implement Error.\n  Hint: catch a concrete Error implementation or Error itself.",
+        "pre_ssa_failure_type": "AetherTypeError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/non_error_throwable.ae",
+        "pre_ssa_failure": "AetherTypeError at line 6, column 11 [exception]:\n  Thrown value of type 'NotAnError' does not implement Error.\n  Hint: declare a struct or class that implements Error.",
+        "pre_ssa_failure_type": "AetherTypeError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "corpus/exceptions/negative/null_throw.ae",
+        "pre_ssa_failure": "AetherTypeError at line 2, column 11 [exception]:\n  Cannot throw null or a nullable value.\n  Hint: throw a non-null value whose type implements Error.",
+        "pre_ssa_failure_type": "AetherTypeError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/ControlesALN/1erControl/Ej1/ej1.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 12, column 1:\n  IR backend does not support identifier 'Plots' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- co",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/ControlesALN/2doControl/Ej1/ej1.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 21, column 1:\n  IR backend does not support identifier 'pl' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compa",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/Miller-Rabbin.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 87, column 18:\n  IR backend does not support InputCall yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comparisons\n- if/else\n- while\n",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/SNL.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 16, column 40:\n  IR backend requires known dimensions for Matrix * Vector<Column>.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compari",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/interactive/fibonacci.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 19, column 18:\n  IR backend does not support InputCall yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comparisons\n- if/else\n- while\n",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/interactive/primes_interactive.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 48, column 18:\n  IR backend does not support InputCall yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comparisons\n- if/else\n- while\n",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/interactive/sum_calculator.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 6, column 18:\n  IR backend does not support InputCall yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comparisons\n- if/else\n- while\n-",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/linear_algebra/basic_operations.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 5, column 3:\n  IR backend does not support assignment to 'A' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comp",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/linear_algebra/primes_advanced.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 43, column 22:\n  IR backend does not support identifier 'z' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compa",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/linear_algebra/primes_check.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 34, column 3:\n  IR backend does not support assignment to 'm' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- com",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/lists/list_api.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 15, column 19:\n  IR backend does not support CallExpression (method 'size' on 'list<int>') yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithme",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/minCuad.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 16, column 15:\n  IR backend does not support identifier 'z' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compa",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/minCuad2.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 17, column 15:\n  IR backend does not support identifier 'z' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compa",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/minimos_cuadrados/MinimosCuadrados.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 7, column 8:\n  IR backend does not support assignment to 'yt' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- com",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/nonlinear_systems/newton_system.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 34, column 8:\n  IR backend does not support assignment to 'f1' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- co",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/nonlinear_systems/nr2.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 17, column 14:\n  IR backend does not support identifier 'LA' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comp",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/nose2.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 1, column 16:\n  IR backend does not support InputCall yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comparisons\n- if/else\n- while\n-",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/probando.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 6, column 1:\n  IR backend does not support identifier 'pl' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compar",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      },
+      {
+        "initial_ir_wire_roundtrip": false,
+        "path": "examples/probandoNR.ae",
+        "pre_ssa_failure": "IRBackendUnsupportedFeatureError at line 22, column 7:\n  IR backend does not support assignment to 'solNR' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n-",
+        "pre_ssa_failure_type": "IRBackendUnsupportedFeatureError",
+        "reached_verified_python_ssa": false,
+        "ssa_wire_roundtrip": false
+      }
+    ],
+    "summary": {
+      "discovered": 144,
+      "pre_ssa_failures_excluded_from_denominator": 28,
+      "ssa_wire_roundtrip_failed": 0,
+      "ssa_wire_roundtrip_passed": 116,
+      "verified_python_ssa_denominator": 116
+    },
+    "verified_ssa_codec_failures": []
+  },
+  "decision": "SSA_WIRE_SCHEMA_V2_QUALIFIED",
+  "evidence_schema_version": 2,
+  "instruction_dataclass_count": 77,
+  "instruction_inventory": [
+    {
+      "dataclass": "SSAArrayCopy",
+      "field_count": 2,
+      "fields": [
+        "result",
+        "array"
+      ],
+      "kind": "array_copy",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAArrayGet",
+      "field_count": 6,
+      "fields": [
+        "result",
+        "array",
+        "index",
+        "borrowed",
+        "borrow_scope",
+        "bounds_checked"
+      ],
+      "kind": "array_get",
+      "schema_v1_status": "REJECTED_AMBIGUOUS",
+      "schema_v2_added_fields": [
+        "bounds_checked"
+      ],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAArrayLength",
+      "field_count": 2,
+      "fields": [
+        "result",
+        "array"
+      ],
+      "kind": "array_length",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAArrayNew",
+      "field_count": 2,
+      "fields": [
+        "result",
+        "elements"
+      ],
+      "kind": "array_new",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAArraySet",
+      "field_count": 4,
+      "fields": [
+        "array",
+        "index",
+        "value",
+        "bounds_checked"
+      ],
+      "kind": "array_set",
+      "schema_v1_status": "REJECTED_AMBIGUOUS",
+      "schema_v2_added_fields": [
+        "bounds_checked"
+      ],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAArraySlice",
+      "field_count": 4,
+      "fields": [
+        "result",
+        "array",
+        "start",
+        "end"
+      ],
+      "kind": "array_slice",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSABinaryOp",
+      "field_count": 5,
+      "fields": [
+        "result",
+        "operator",
+        "left",
+        "right",
+        "source_location"
+      ],
+      "kind": "binary_op",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSABranch",
+      "field_count": 3,
+      "fields": [
+        "condition",
+        "true_target",
+        "false_target"
+      ],
+      "kind": "branch",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSACall",
+      "field_count": 5,
+      "fields": [
+        "function",
+        "arguments",
+        "result",
+        "builtin",
+        "source_location"
+      ],
+      "kind": "call",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSACallIndirect",
+      "field_count": 3,
+      "fields": [
+        "callee",
+        "arguments",
+        "result"
+      ],
+      "kind": "call_indirect",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSACast",
+      "field_count": 2,
+      "fields": [
+        "result",
+        "value"
+      ],
+      "kind": "cast",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSACatchEntry",
+      "field_count": 3,
+      "fields": [
+        "event",
+        "handler_id",
+        "catch_types"
+      ],
+      "kind": "catch_entry",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAClassGet",
+      "field_count": 4,
+      "fields": [
+        "result",
+        "object",
+        "field_index",
+        "field_name"
+      ],
+      "kind": "class_get",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAClassNew",
+      "field_count": 1,
+      "fields": [
+        "result"
+      ],
+      "kind": "class_new",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAClassSet",
+      "field_count": 5,
+      "fields": [
+        "object",
+        "field_index",
+        "field_name",
+        "value",
+        "initialize"
+      ],
+      "kind": "class_set",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSACompareOp",
+      "field_count": 5,
+      "fields": [
+        "result",
+        "operator",
+        "left",
+        "right",
+        "aggregate_shape"
+      ],
+      "kind": "compare_op",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAConst",
+      "field_count": 2,
+      "fields": [
+        "result",
+        "value"
+      ],
+      "kind": "const",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAExceptionDestroy",
+      "field_count": 1,
+      "fields": [
+        "event"
+      ],
+      "kind": "exception_destroy",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAExceptionMatch",
+      "field_count": 4,
+      "fields": [
+        "result",
+        "event",
+        "catch_type",
+        "catch_all"
+      ],
+      "kind": "exception_match",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAExceptionPayload",
+      "field_count": 3,
+      "fields": [
+        "result",
+        "event",
+        "catch_type"
+      ],
+      "kind": "exception_payload",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAFunctionRef",
+      "field_count": 2,
+      "fields": [
+        "result",
+        "function"
+      ],
+      "kind": "function_ref",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAInterfaceCall",
+      "field_count": 4,
+      "fields": [
+        "receiver",
+        "arguments",
+        "slot",
+        "result"
+      ],
+      "kind": "interface_call",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAInterfaceConstruct",
+      "field_count": 3,
+      "fields": [
+        "result",
+        "carrier",
+        "witness"
+      ],
+      "kind": "interface_construct",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAInvoke",
+      "field_count": 10,
+      "fields": [
+        "function",
+        "arguments",
+        "result",
+        "exception",
+        "normal_target",
+        "exceptional_target",
+        "normal_arguments",
+        "exceptional_arguments",
+        "builtin",
+        "source_location"
+      ],
+      "kind": "invoke",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAInvokeIndirect",
+      "field_count": 8,
+      "fields": [
+        "callee",
+        "arguments",
+        "result",
+        "exception",
+        "normal_target",
+        "exceptional_target",
+        "normal_arguments",
+        "exceptional_arguments"
+      ],
+      "kind": "invoke_indirect",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAInvokeInterface",
+      "field_count": 9,
+      "fields": [
+        "receiver",
+        "arguments",
+        "slot",
+        "result",
+        "exception",
+        "normal_target",
+        "exceptional_target",
+        "normal_arguments",
+        "exceptional_arguments"
+      ],
+      "kind": "invoke_interface",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAJump",
+      "field_count": 1,
+      "fields": [
+        "target"
+      ],
+      "kind": "jump",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAListClear",
+      "field_count": 1,
+      "fields": [
+        "list_value"
+      ],
+      "kind": "list_clear",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAListContains",
+      "field_count": 3,
+      "fields": [
+        "result",
+        "list_value",
+        "value"
+      ],
+      "kind": "list_contains",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAListCopy",
+      "field_count": 2,
+      "fields": [
+        "result",
+        "list_value"
+      ],
+      "kind": "list_copy",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAListGet",
+      "field_count": 6,
+      "fields": [
+        "result",
+        "list_value",
+        "index",
+        "borrowed",
+        "borrow_scope",
+        "bounds_checked"
+      ],
+      "kind": "list_get",
+      "schema_v1_status": "REJECTED_AMBIGUOUS",
+      "schema_v2_added_fields": [
+        "bounds_checked"
+      ],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAListIndexOf",
+      "field_count": 3,
+      "fields": [
+        "result",
+        "list_value",
+        "value"
+      ],
+      "kind": "list_index_of",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAListInsert",
+      "field_count": 3,
+      "fields": [
+        "list_value",
+        "index",
+        "value"
+      ],
+      "kind": "list_insert",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAListIsEmpty",
+      "field_count": 2,
+      "fields": [
+        "result",
+        "list_value"
+      ],
+      "kind": "list_is_empty",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAListLength",
+      "field_count": 2,
+      "fields": [
+        "result",
+        "list_value"
+      ],
+      "kind": "list_length",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAListNew",
+      "field_count": 2,
+      "fields": [
+        "result",
+        "elements"
+      ],
+      "kind": "list_new",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAListPop",
+      "field_count": 2,
+      "fields": [
+        "result",
+        "list_value"
+      ],
+      "kind": "list_pop",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAListPush",
+      "field_count": 2,
+      "fields": [
+        "list_value",
+        "value"
+      ],
+      "kind": "list_push",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAListRemoveAt",
+      "field_count": 3,
+      "fields": [
+        "result",
+        "list_value",
+        "index"
+      ],
+      "kind": "list_remove_at",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAListReverse",
+      "field_count": 1,
+      "fields": [
+        "list_value"
+      ],
+      "kind": "list_reverse",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAListSet",
+      "field_count": 4,
+      "fields": [
+        "list_value",
+        "index",
+        "value",
+        "bounds_checked"
+      ],
+      "kind": "list_set",
+      "schema_v1_status": "REJECTED_AMBIGUOUS",
+      "schema_v2_added_fields": [
+        "bounds_checked"
+      ],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAListSlice",
+      "field_count": 4,
+      "fields": [
+        "result",
+        "list_value",
+        "start",
+        "end"
+      ],
+      "kind": "list_slice",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAMatrixAdd",
+      "field_count": 5,
+      "fields": [
+        "result",
+        "left",
+        "right",
+        "rows",
+        "cols"
+      ],
+      "kind": "matrix_add",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAMatrixColumns",
+      "field_count": 3,
+      "fields": [
+        "result",
+        "matrix",
+        "columns"
+      ],
+      "kind": "matrix_columns",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAMatrixGet",
+      "field_count": 6,
+      "fields": [
+        "result",
+        "matrix",
+        "row",
+        "column",
+        "cols",
+        "bounds_checked"
+      ],
+      "kind": "matrix_get",
+      "schema_v1_status": "REJECTED_AMBIGUOUS",
+      "schema_v2_added_fields": [
+        "bounds_checked"
+      ],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAMatrixMatMul",
+      "field_count": 6,
+      "fields": [
+        "result",
+        "left",
+        "right",
+        "rows",
+        "inner",
+        "cols"
+      ],
+      "kind": "matrix_mat_mul",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAMatrixNew",
+      "field_count": 4,
+      "fields": [
+        "result",
+        "elements",
+        "rows",
+        "cols"
+      ],
+      "kind": "matrix_new",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAMatrixRows",
+      "field_count": 3,
+      "fields": [
+        "result",
+        "matrix",
+        "rows"
+      ],
+      "kind": "matrix_rows",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAMatrixScale",
+      "field_count": 5,
+      "fields": [
+        "result",
+        "matrix",
+        "scalar",
+        "rows",
+        "cols"
+      ],
+      "kind": "matrix_scale",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAMatrixSet",
+      "field_count": 6,
+      "fields": [
+        "matrix",
+        "row",
+        "column",
+        "value",
+        "cols",
+        "bounds_checked"
+      ],
+      "kind": "matrix_set",
+      "schema_v1_status": "REJECTED_AMBIGUOUS",
+      "schema_v2_added_fields": [
+        "bounds_checked"
+      ],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAMatrixSub",
+      "field_count": 5,
+      "fields": [
+        "result",
+        "left",
+        "right",
+        "rows",
+        "cols"
+      ],
+      "kind": "matrix_sub",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAMatrixVectorMul",
+      "field_count": 5,
+      "fields": [
+        "result",
+        "matrix",
+        "vector",
+        "rows",
+        "inner"
+      ],
+      "kind": "matrix_vector_mul",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAMethodResultNew",
+      "field_count": 3,
+      "fields": [
+        "result",
+        "receiver",
+        "value"
+      ],
+      "kind": "method_result_new",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAMethodResultReceiver",
+      "field_count": 2,
+      "fields": [
+        "result",
+        "method_result"
+      ],
+      "kind": "method_result_receiver",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAMethodResultValue",
+      "field_count": 2,
+      "fields": [
+        "result",
+        "method_result"
+      ],
+      "kind": "method_result_value",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAOuterProduct",
+      "field_count": 5,
+      "fields": [
+        "result",
+        "column",
+        "row",
+        "rows",
+        "cols"
+      ],
+      "kind": "outer_product",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAPackException",
+      "field_count": 4,
+      "fields": [
+        "result",
+        "payload",
+        "dynamic_type",
+        "source_location"
+      ],
+      "kind": "pack_exception",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAPhi",
+      "field_count": 2,
+      "fields": [
+        "result",
+        "incoming"
+      ],
+      "kind": "phi",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAPrint",
+      "field_count": 3,
+      "fields": [
+        "value",
+        "newline",
+        "aggregate_shape"
+      ],
+      "kind": "print",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAPropagate",
+      "field_count": 3,
+      "fields": [
+        "event",
+        "target",
+        "exceptional_arguments"
+      ],
+      "kind": "propagate",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSARethrow",
+      "field_count": 3,
+      "fields": [
+        "event",
+        "target",
+        "exceptional_arguments"
+      ],
+      "kind": "rethrow",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAReturn",
+      "field_count": 1,
+      "fields": [
+        "value"
+      ],
+      "kind": "return",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSASequenceSort",
+      "field_count": 1,
+      "fields": [
+        "sequence"
+      ],
+      "kind": "sequence_sort",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAStructGet",
+      "field_count": 4,
+      "fields": [
+        "result",
+        "struct",
+        "field_index",
+        "field_name"
+      ],
+      "kind": "struct_get",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAStructNew",
+      "field_count": 2,
+      "fields": [
+        "result",
+        "fields"
+      ],
+      "kind": "struct_new",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAStructSet",
+      "field_count": 5,
+      "fields": [
+        "result",
+        "struct",
+        "field_index",
+        "field_name",
+        "value"
+      ],
+      "kind": "struct_set",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAThrow",
+      "field_count": 3,
+      "fields": [
+        "event",
+        "target",
+        "exceptional_arguments"
+      ],
+      "kind": "throw",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAUnaryOp",
+      "field_count": 3,
+      "fields": [
+        "result",
+        "operator",
+        "operand"
+      ],
+      "kind": "unary_op",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAVectorAdd",
+      "field_count": 5,
+      "fields": [
+        "result",
+        "left",
+        "right",
+        "length",
+        "orientation"
+      ],
+      "kind": "vector_add",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAVectorDot",
+      "field_count": 4,
+      "fields": [
+        "result",
+        "left",
+        "right",
+        "length"
+      ],
+      "kind": "vector_dot",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAVectorGet",
+      "field_count": 4,
+      "fields": [
+        "result",
+        "vector",
+        "index",
+        "bounds_checked"
+      ],
+      "kind": "vector_get",
+      "schema_v1_status": "REJECTED_AMBIGUOUS",
+      "schema_v2_added_fields": [
+        "bounds_checked"
+      ],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAVectorLength",
+      "field_count": 2,
+      "fields": [
+        "result",
+        "vector"
+      ],
+      "kind": "vector_length",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAVectorMatrixMul",
+      "field_count": 5,
+      "fields": [
+        "result",
+        "vector",
+        "matrix",
+        "rows",
+        "cols"
+      ],
+      "kind": "vector_matrix_mul",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAVectorNew",
+      "field_count": 3,
+      "fields": [
+        "result",
+        "elements",
+        "orientation"
+      ],
+      "kind": "vector_new",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAVectorScale",
+      "field_count": 5,
+      "fields": [
+        "result",
+        "vector",
+        "scalar",
+        "length",
+        "orientation"
+      ],
+      "kind": "vector_scale",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAVectorSet",
+      "field_count": 4,
+      "fields": [
+        "vector",
+        "index",
+        "value",
+        "bounds_checked"
+      ],
+      "kind": "vector_set",
+      "schema_v1_status": "REJECTED_AMBIGUOUS",
+      "schema_v2_added_fields": [
+        "bounds_checked"
+      ],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    },
+    {
+      "dataclass": "SSAVectorSub",
+      "field_count": 5,
+      "fields": [
+        "result",
+        "left",
+        "right",
+        "length",
+        "orientation"
+      ],
+      "kind": "vector_sub",
+      "schema_v1_status": "REPRESENTABLE",
+      "schema_v2_added_fields": [],
+      "schema_v2_status": "REPRESENTABLE",
+      "unrepresentable_v2_fields": []
+    }
+  ],
+  "invariant": "Python SSA -> schema-v2 DTO -> Python SSA",
+  "rust_dto_readiness": {
+    "all_eight_bounds_checked_shapes": true,
+    "explicit_v1_v2_dispatch": true,
+    "rust_ssa_lowering": false,
+    "schema_v2_envelope": true
+  },
+  "schema_delta": {
+    "added_fields": {
+      "array_get": [
+        "bounds_checked"
+      ],
+      "array_set": [
+        "bounds_checked"
+      ],
+      "list_get": [
+        "bounds_checked"
+      ],
+      "list_set": [
+        "bounds_checked"
+      ],
+      "matrix_get": [
+        "bounds_checked"
+      ],
+      "matrix_set": [
+        "bounds_checked"
+      ],
+      "vector_get": [
+        "bounds_checked"
+      ],
+      "vector_set": [
+        "bounds_checked"
+      ]
+    },
+    "all_other_instruction_shapes_changed": false,
+    "fields_added_without_existing_ssa_semantics": [],
+    "from": 1,
+    "to": 2
+  },
+  "scope_constraints": {
+    "backend_changed": false,
+    "initial_ir_authority_changed": false,
+    "optimizer_changed": false,
+    "rp3_changed": false,
+    "rust_ssa_lowering_implemented": false,
+    "schema_v1_changed": false,
+    "ssa_semantics_changed": false,
+    "verification_weakened": false
+  },
+  "ssa_wire_schema_version": 2
+}

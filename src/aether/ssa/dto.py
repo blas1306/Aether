@@ -42,7 +42,15 @@ from .model import (
 )
 
 
-SSA_SCHEMA_VERSION = 1
+SSA_SCHEMA_VERSION_V1 = 1
+SSA_SCHEMA_VERSION_V2 = 2
+# New SSA documents use the lossless contract.  Initial IR remains schema-v1.
+SSA_SCHEMA_VERSION = SSA_SCHEMA_VERSION_V2
+
+_BOUNDS_CHECKED_KINDS = frozenset({
+    "array_get", "array_set", "list_get", "list_set",
+    "matrix_get", "matrix_set", "vector_get", "vector_set",
+})
 
 
 class SSADTOError(ValueError):
@@ -81,13 +89,19 @@ def _instruction_types() -> dict[str, type[SSAInstruction]]:
 _INSTRUCTION_TYPES = _instruction_types()
 
 
-def ssa_module_to_dto(module: SSAModule) -> dict[str, object]:
+def ssa_module_to_dto(
+    module: SSAModule, *, schema_version: int = SSA_SCHEMA_VERSION
+) -> dict[str, object]:
     if type(module) is not SSAModule:
         raise TypeError(f"Expected SSAModule, got {type(module).__name__}")
+    if schema_version not in {SSA_SCHEMA_VERSION_V1, SSA_SCHEMA_VERSION_V2}:
+        raise SSADTOError(f"Unsupported SSA schema version {schema_version!r}")
     return {
-        "schema_version": SSA_SCHEMA_VERSION,
+        "schema_version": schema_version,
         "representation": "aether_ssa",
-        "functions": [_function_to_dto(function) for function in module.functions],
+        "functions": [
+            _function_to_dto(function, schema_version) for function in module.functions
+        ],
         "structs": [
             ir_struct_definition_to_dto(definition)
             for definition in module.structs
@@ -102,7 +116,8 @@ def ssa_module_from_dto(dto: Mapping[str, object]) -> SSAModule:
         {"schema_version", "representation", "functions", "structs"},
         "SSA module",
     )
-    if mapping["schema_version"] != SSA_SCHEMA_VERSION:
+    schema_version = mapping["schema_version"]
+    if schema_version not in {SSA_SCHEMA_VERSION_V1, SSA_SCHEMA_VERSION_V2}:
         raise SSADTOError(
             f"Unsupported SSA schema version {mapping['schema_version']!r}"
         )
@@ -110,7 +125,7 @@ def ssa_module_from_dto(dto: Mapping[str, object]) -> SSAModule:
         raise SSADTOError("SSA module representation must be 'aether_ssa'")
     return SSAModule(
         [
-            _function_from_dto(item)
+            _function_from_dto(item, schema_version)
             for item in _sequence(mapping["functions"], "SSA functions")
         ],
         [
@@ -142,12 +157,12 @@ def ssa_module_from_json(data: str | bytes | bytearray) -> SSAModule:
     return ssa_module_from_dto(_mapping(decoded, "SSA module"))
 
 
-def _function_to_dto(function: SSAFunction) -> dict[str, object]:
+def _function_to_dto(function: SSAFunction, schema_version: int) -> dict[str, object]:
     dto: dict[str, object] = {
         "name": function.name,
         "parameters": [_parameter_to_dto(value) for value in function.parameters],
         "return_type": ir_type_to_dto(function.return_type),
-        "blocks": [_block_to_dto(block) for block in function.blocks],
+        "blocks": [_block_to_dto(block, schema_version) for block in function.blocks],
         "entry_block": function.entry_block,
     }
     if function.may_throw:
@@ -155,7 +170,7 @@ def _function_to_dto(function: SSAFunction) -> dict[str, object]:
     return dto
 
 
-def _function_from_dto(dto: object) -> SSAFunction:
+def _function_from_dto(dto: object, schema_version: int) -> SSAFunction:
     mapping = _mapping(dto, "SSA function")
     expected = {"name", "parameters", "return_type", "blocks", "entry_block"}
     if "may_throw" in mapping:
@@ -174,7 +189,7 @@ def _function_from_dto(dto: object) -> SSAFunction:
         ],
         ir_type_from_dto(mapping["return_type"]),
         [
-            _block_from_dto(item)
+            _block_from_dto(item, schema_version)
             for item in _sequence(mapping["blocks"], "SSA function.blocks")
         ],
         _string(mapping["entry_block"], "SSA function.entry_block"),
@@ -182,29 +197,31 @@ def _function_from_dto(dto: object) -> SSAFunction:
     )
 
 
-def _block_to_dto(block: SSABasicBlock) -> dict[str, object]:
+def _block_to_dto(block: SSABasicBlock, schema_version: int) -> dict[str, object]:
     return {
         "name": block.name,
         "instructions": [
-            _instruction_to_dto(instruction)
+            _instruction_to_dto(instruction, schema_version)
             for instruction in block.instructions
         ],
     }
 
 
-def _block_from_dto(dto: object) -> SSABasicBlock:
+def _block_from_dto(dto: object, schema_version: int) -> SSABasicBlock:
     mapping = _mapping(dto, "SSA block")
     _fields(mapping, {"name", "instructions"}, "SSA block")
     return SSABasicBlock(
         _string(mapping["name"], "SSA block.name"),
         [
-            _instruction_from_dto(item)
+            _instruction_from_dto(item, schema_version)
             for item in _sequence(mapping["instructions"], "SSA instructions")
         ],
     )
 
 
-def _instruction_to_dto(instruction: SSAInstruction) -> dict[str, object]:
+def _instruction_to_dto(
+    instruction: SSAInstruction, schema_version: int
+) -> dict[str, object]:
     if type(instruction) not in _INSTRUCTION_TYPES.values():
         raise TypeError(
             f"Unsupported SSA instruction {type(instruction).__name__}"
@@ -222,8 +239,15 @@ def _instruction_to_dto(instruction: SSAInstruction) -> dict[str, object]:
             ],
         }
 
-    ir_instruction = _ssa_instruction_to_ir(instruction)
+    kind = _kind(type(instruction).__name__[3:])
+    if schema_version == SSA_SCHEMA_VERSION_V1 and kind in _BOUNDS_CHECKED_KINDS:
+        raise SSADTOError(
+            f"SSA schema-v1 cannot represent required field bounds_checked for '{kind}'"
+        )
+    ir_instruction = _ssa_instruction_to_ir(instruction, omit_bounds_checked=True)
     dto = ir_instruction_to_dto(ir_instruction)
+    if schema_version == SSA_SCHEMA_VERSION_V2 and kind in _BOUNDS_CHECKED_KINDS:
+        dto["bounds_checked"] = instruction.bounds_checked
     if isinstance(
         instruction,
         (SSAInvoke, SSAInvokeIndirect, SSAInvokeInterface),
@@ -246,7 +270,7 @@ def _instruction_to_dto(instruction: SSAInstruction) -> dict[str, object]:
     return dto
 
 
-def _instruction_from_dto(dto: object) -> SSAInstruction:
+def _instruction_from_dto(dto: object, schema_version: int) -> SSAInstruction:
     mapping = _mapping(dto, "SSA instruction")
     kind = _string(mapping.get("kind"), "SSA instruction.kind")
     if kind == "phi":
@@ -271,6 +295,32 @@ def _instruction_from_dto(dto: object) -> SSAInstruction:
         type_ = _INSTRUCTION_TYPES.get("pack_exception")
     if type_ is None:
         raise SSADTOError(f"Unknown SSA instruction kind '{kind}'")
+
+    if kind in _BOUNDS_CHECKED_KINDS:
+        if schema_version == SSA_SCHEMA_VERSION_V1:
+            raise SSADTOError(
+                f"SSA schema-v1 '{kind}' omitted bounds_checked and cannot be decoded losslessly"
+            )
+        if "bounds_checked" not in mapping:
+            raise SSADTOError(
+                f"SSA instruction '{kind}' has invalid fields: missing bounds_checked"
+            )
+        bounds_checked = mapping["bounds_checked"]
+        if type(bounds_checked) is not bool:
+            raise SSADTOError(
+                f"SSA instruction '{kind}'.bounds_checked must be boolean"
+            )
+        ir_dto = dict(mapping)
+        ir_dto.pop("bounds_checked")
+        try:
+            base = _ir_instruction_to_ssa(ir_instruction_from_dto(ir_dto))
+            return type_(**{
+                **{field.name: getattr(base, field.name)
+                   for field in fields(type_) if field.name != "bounds_checked"},
+                "bounds_checked": bounds_checked,
+            })
+        except (TypeError, ValueError) as error:
+            raise SSADTOError(f"Invalid SSA instruction '{kind}': {error}") from error
 
     try:
         if issubclass(
@@ -359,7 +409,9 @@ def _instruction_from_dto(dto: object) -> SSAInstruction:
         ) from error
 
 
-def _ssa_instruction_to_ir(instruction: SSAInstruction):
+def _ssa_instruction_to_ir(
+    instruction: SSAInstruction, *, omit_bounds_checked: bool = False
+):
     if isinstance(instruction, SSAInvoke):
         return ir_model.IRInvoke(
             instruction.function,
@@ -413,6 +465,7 @@ def _ssa_instruction_to_ir(instruction: SSAInstruction):
         **{
             field.name: _to_ir(getattr(instruction, field.name))
             for field in fields(instruction)
+            if not (omit_bounds_checked and field.name == "bounds_checked")
         }
     )
 

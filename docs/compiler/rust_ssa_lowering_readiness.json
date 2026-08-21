@@ -1,0 +1,5074 @@
+{
+  "algorithm": {
+    "cfg_edges": [
+      "jump:normal",
+      "branch:true/false normal",
+      "invoke*:normal+exceptional",
+      "throw/rethrow/propagate:optional exceptional",
+      "return:none"
+    ],
+    "mutation": "input is not mutated; lifecycle expansion and SSA construction allocate new frozen dataclasses/lists",
+    "order": [
+      "expand_lifecycle",
+      "CFGBuilder",
+      "DominatorAnalysis",
+      "DominanceFrontierAnalysis",
+      "PhiPlacement",
+      "SSARenamer",
+      "SSAVerifier"
+    ],
+    "phi": "iterated dominance frontier, pruned by live-in or definitely-initialized slot dataflow",
+    "post_verifier": "SSAVerifier always called by GeneralSSABuilder.build_module/build_function",
+    "pre_verifier": "not called by GeneralSSABuilder; production lower_to_verified_ssa expects caller/pipeline verified Initial IR",
+    "renaming": "dominator-tree traversal with value bindings and per-slot stacks; source block order retained"
+  },
+  "audit": "Initial-IR-to-Rust-SSA-lowering-readiness",
+  "blocking_rule_ids": [
+    "SSA-003",
+    "SSA-004",
+    "SSA-005",
+    "SSA-006",
+    "SSA-007",
+    "SSA-008",
+    "SSA-009",
+    "SSA-010",
+    "SSA-011",
+    "SSA-012",
+    "SSA-013",
+    "SSA-014",
+    "SSA-015",
+    "SSA-019",
+    "SSA-020",
+    "SSA-021",
+    "SSA-023",
+    "SSA-024",
+    "SSA-025"
+  ],
+  "classification_counts": {
+    "ARCHITECTURE_GAP": 4,
+    "RUST_READY": 6,
+    "SEMANTIC_GAP": 9,
+    "TEST_GAP": 5,
+    "WIRE_GAP": 1
+  },
+  "corpus": {
+    "by_category": {
+      "examples": {
+        "demonstrated_rust_roundtrip_percent": 0.0,
+        "discovered": 144,
+        "initial_ir": 116,
+        "initial_wire_lossless": 116,
+        "python_ssa": 116,
+        "python_ssa_wire_eligible_percent": 100.0,
+        "rust_ssa_roundtrip_demonstrated": 0,
+        "ssa_wire_lossless": 116
+      },
+      "exceptions": {
+        "demonstrated_rust_roundtrip_percent": 0.0,
+        "discovered": 22,
+        "initial_ir": 13,
+        "initial_wire_lossless": 13,
+        "python_ssa": 13,
+        "python_ssa_wire_eligible_percent": 100.0,
+        "rust_ssa_roundtrip_demonstrated": 0,
+        "ssa_wire_lossless": 13
+      },
+      "expense_tracker": {
+        "demonstrated_rust_roundtrip_percent": 0.0,
+        "discovered": 5,
+        "initial_ir": 5,
+        "initial_wire_lossless": 5,
+        "python_ssa": 5,
+        "python_ssa_wire_eligible_percent": 100.0,
+        "rust_ssa_roundtrip_demonstrated": 0,
+        "ssa_wire_lossless": 5
+      },
+      "function_values": {
+        "demonstrated_rust_roundtrip_percent": 0.0,
+        "discovered": 6,
+        "initial_ir": 6,
+        "initial_wire_lossless": 6,
+        "python_ssa": 6,
+        "python_ssa_wire_eligible_percent": 100.0,
+        "rust_ssa_roundtrip_demonstrated": 0,
+        "ssa_wire_lossless": 6
+      },
+      "numerical_workloads": {
+        "demonstrated_rust_roundtrip_percent": 0.0,
+        "discovered": 34,
+        "initial_ir": 30,
+        "initial_wire_lossless": 30,
+        "python_ssa": 30,
+        "python_ssa_wire_eligible_percent": 100.0,
+        "rust_ssa_roundtrip_demonstrated": 0,
+        "ssa_wire_lossless": 30
+      },
+      "string_array_list": {
+        "demonstrated_rust_roundtrip_percent": 0.0,
+        "discovered": 35,
+        "initial_ir": 33,
+        "initial_wire_lossless": 33,
+        "python_ssa": 33,
+        "python_ssa_wire_eligible_percent": 100.0,
+        "rust_ssa_roundtrip_demonstrated": 0,
+        "ssa_wire_lossless": 33
+      },
+      "structs_classes_interfaces": {
+        "demonstrated_rust_roundtrip_percent": 0.0,
+        "discovered": 36,
+        "initial_ir": 30,
+        "initial_wire_lossless": 30,
+        "python_ssa": 30,
+        "python_ssa_wire_eligible_percent": 100.0,
+        "rust_ssa_roundtrip_demonstrated": 0,
+        "ssa_wire_lossless": 30
+      }
+    },
+    "files": [
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 29,
+        "path": "benchmarks/arithmetic.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 43,
+        "path": "benchmarks/array_sum.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAArrayGet",
+          "SSAArrayLength",
+          "SSAArrayNew",
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 32,
+        "path": "benchmarks/if_else.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 39,
+        "path": "benchmarks/list_for_sum.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAListGet",
+          "SSAListLength",
+          "SSAListNew",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 33,
+        "path": "benchmarks/list_push.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAListGet",
+          "SSAListLength",
+          "SSAListNew",
+          "SSAListPush",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 38,
+        "path": "benchmarks/matrix_mul.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAMatrixGet",
+          "SSAMatrixMatMul",
+          "SSAMatrixNew",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 30,
+        "path": "benchmarks/nested_loops.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 21,
+        "path": "benchmarks/sum_to.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 30,
+        "path": "benchmarks/vector_dot.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn",
+          "SSAVectorDot",
+          "SSAVectorNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 22,
+        "path": "benchmarks/while_countdown.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "failure": "AetherTypeError at line 8, column 5 [exception]:\n  Duplicate catch for exact type 'DuplicateError'.\n  Hint: the first catch for this type is at line 7, column 5.",
+        "failure_stage": "initial_ir",
+        "failure_type": "AetherTypeError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "corpus/exceptions/negative/duplicate_handlers.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples",
+          "exceptions",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "failure": "AetherTypeError at line 2, column 5 [exception]:\n  Bare rethrow is only valid inside an active catch body.\n  Hint: use 'throw error;' to create a new exception event.",
+        "failure_stage": "initial_ir",
+        "failure_type": "AetherTypeError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "corpus/exceptions/negative/illegal_rethrow.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples",
+          "exceptions"
+        ]
+      },
+      {
+        "failure": "AetherTypeError at line 8, column 5 [exception]:\n  Catch for 'OrderedError' is unreachable because Error is already caught.\n  Hint: the Error catch starts at line 7, column 5 and must be last.",
+        "failure_stage": "initial_ir",
+        "failure_type": "AetherTypeError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "corpus/exceptions/negative/invalid_catch_ordering.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples",
+          "exceptions",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "failure": "AetherTypeError at line 2, column 11 [exception]:\n  Thrown value of type 'int' does not implement Error.\n  Hint: declare a struct or class that implements Error.",
+        "failure_stage": "initial_ir",
+        "failure_type": "AetherTypeError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "corpus/exceptions/negative/invalid_throw.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples",
+          "exceptions"
+        ]
+      },
+      {
+        "failure": "AetherSyntaxError at line 4, column 5:\n  Expected '{' before block. near 'return'.",
+        "failure_stage": "initial_ir",
+        "failure_type": "AetherSyntaxError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "corpus/exceptions/negative/malformed_catch.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples",
+          "exceptions"
+        ]
+      },
+      {
+        "failure": "AetherSyntaxError at line 3, column 1:\n  Expected an expression or ';' after 'throw'. near '}'.",
+        "failure_stage": "initial_ir",
+        "failure_type": "AetherSyntaxError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "corpus/exceptions/negative/malformed_throw.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples",
+          "exceptions"
+        ]
+      },
+      {
+        "failure": "AetherTypeError at line 7, column 5 [exception]:\n  Catch type 'NotAnError' does not implement Error.\n  Hint: catch a concrete Error implementation or Error itself.",
+        "failure_stage": "initial_ir",
+        "failure_type": "AetherTypeError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "corpus/exceptions/negative/non_error_catch.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples",
+          "exceptions",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "failure": "AetherTypeError at line 6, column 11 [exception]:\n  Thrown value of type 'NotAnError' does not implement Error.\n  Hint: declare a struct or class that implements Error.",
+        "failure_stage": "initial_ir",
+        "failure_type": "AetherTypeError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "corpus/exceptions/negative/non_error_throwable.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples",
+          "exceptions",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "failure": "AetherTypeError at line 2, column 11 [exception]:\n  Cannot throw null or a nullable value.\n  Hint: throw a non-null value whose type implements Error.",
+        "failure_stage": "initial_ir",
+        "failure_type": "AetherTypeError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "corpus/exceptions/negative/null_throw.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples",
+          "exceptions"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 59,
+        "path": "corpus/exceptions/positive/cleanup_during_unwinding.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABranch",
+          "SSACall",
+          "SSACatchEntry",
+          "SSAConst",
+          "SSAExceptionDestroy",
+          "SSAExceptionMatch",
+          "SSAExceptionPayload",
+          "SSAInvoke",
+          "SSAJump",
+          "SSAMethodResultNew",
+          "SSAMethodResultReceiver",
+          "SSAMethodResultValue",
+          "SSAPackException",
+          "SSAPrint",
+          "SSAPropagate",
+          "SSARethrow",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew",
+          "SSAThrow"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "exceptions",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 58,
+        "path": "corpus/exceptions/positive/constructor_failure.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAArrayNew",
+          "SSABranch",
+          "SSACall",
+          "SSACatchEntry",
+          "SSAClassNew",
+          "SSAClassSet",
+          "SSAConst",
+          "SSAExceptionDestroy",
+          "SSAExceptionMatch",
+          "SSAExceptionPayload",
+          "SSAInvoke",
+          "SSAJump",
+          "SSAMethodResultNew",
+          "SSAMethodResultReceiver",
+          "SSAMethodResultValue",
+          "SSAPackException",
+          "SSAPrint",
+          "SSAPropagate",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew",
+          "SSAThrow"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "exceptions",
+          "string_array_list",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 43,
+        "path": "corpus/exceptions/positive/function_recursion.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACatchEntry",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAExceptionDestroy",
+          "SSAExceptionMatch",
+          "SSAExceptionPayload",
+          "SSAInvoke",
+          "SSAJump",
+          "SSAMethodResultNew",
+          "SSAMethodResultReceiver",
+          "SSAMethodResultValue",
+          "SSAPackException",
+          "SSAPrint",
+          "SSAPropagate",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew",
+          "SSAThrow"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "exceptions",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 33,
+        "path": "corpus/exceptions/positive/indirect_call.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABranch",
+          "SSACall",
+          "SSACatchEntry",
+          "SSAClassGet",
+          "SSAClassNew",
+          "SSAClassSet",
+          "SSAConst",
+          "SSAExceptionDestroy",
+          "SSAExceptionMatch",
+          "SSAExceptionPayload",
+          "SSAFunctionRef",
+          "SSAInvoke",
+          "SSAInvokeIndirect",
+          "SSAJump",
+          "SSAPackException",
+          "SSAPrint",
+          "SSAPropagate",
+          "SSAReturn",
+          "SSAThrow"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "exceptions",
+          "function_values",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 45,
+        "path": "corpus/exceptions/positive/method_interface_dispatch.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABranch",
+          "SSACall",
+          "SSACatchEntry",
+          "SSAClassGet",
+          "SSAClassNew",
+          "SSAClassSet",
+          "SSAConst",
+          "SSAExceptionDestroy",
+          "SSAExceptionMatch",
+          "SSAExceptionPayload",
+          "SSAInterfaceConstruct",
+          "SSAInvoke",
+          "SSAInvokeInterface",
+          "SSAJump",
+          "SSAMethodResultNew",
+          "SSAMethodResultReceiver",
+          "SSAMethodResultValue",
+          "SSAPackException",
+          "SSAPrint",
+          "SSAPropagate",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew",
+          "SSAThrow"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "exceptions",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 73,
+        "path": "corpus/exceptions/positive/multiple_and_root_catches.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABranch",
+          "SSACall",
+          "SSACatchEntry",
+          "SSAClassGet",
+          "SSAClassNew",
+          "SSAClassSet",
+          "SSAConst",
+          "SSAExceptionDestroy",
+          "SSAExceptionMatch",
+          "SSAExceptionPayload",
+          "SSAInterfaceCall",
+          "SSAInterfaceConstruct",
+          "SSAJump",
+          "SSAMethodResultNew",
+          "SSAPackException",
+          "SSAPrint",
+          "SSAPropagate",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew",
+          "SSAThrow"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "exceptions",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 64,
+        "path": "corpus/exceptions/positive/nested_rethrow_chain.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABranch",
+          "SSACall",
+          "SSACatchEntry",
+          "SSAConst",
+          "SSAExceptionDestroy",
+          "SSAExceptionMatch",
+          "SSAExceptionPayload",
+          "SSAInvoke",
+          "SSAJump",
+          "SSAMethodResultNew",
+          "SSAMethodResultReceiver",
+          "SSAMethodResultValue",
+          "SSAPackException",
+          "SSAPrint",
+          "SSAPropagate",
+          "SSARethrow",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew",
+          "SSAThrow"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "exceptions",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 55,
+        "path": "corpus/exceptions/positive/owned_aggregates_arc.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAArrayNew",
+          "SSABranch",
+          "SSACall",
+          "SSACatchEntry",
+          "SSAConst",
+          "SSAExceptionDestroy",
+          "SSAExceptionMatch",
+          "SSAExceptionPayload",
+          "SSAInvoke",
+          "SSAJump",
+          "SSAListNew",
+          "SSAMethodResultNew",
+          "SSAMethodResultReceiver",
+          "SSAMethodResultValue",
+          "SSAPackException",
+          "SSAPrint",
+          "SSAPropagate",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew",
+          "SSAThrow"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "exceptions",
+          "string_array_list",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 23,
+        "path": "corpus/exceptions/positive/panic_vs_exception.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABranch",
+          "SSACall",
+          "SSACatchEntry",
+          "SSAConst",
+          "SSAExceptionDestroy",
+          "SSAExceptionMatch",
+          "SSAExceptionPayload",
+          "SSAJump",
+          "SSAListNew",
+          "SSAListPop",
+          "SSAMethodResultNew",
+          "SSAPackException",
+          "SSAPrint",
+          "SSAPropagate",
+          "SSAReturn",
+          "SSAStructNew",
+          "SSAThrow"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "exceptions",
+          "string_array_list",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 19,
+        "path": "corpus/exceptions/positive/root_reporting.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSACall",
+          "SSACatchEntry",
+          "SSAConst",
+          "SSAInvoke",
+          "SSAMethodResultNew",
+          "SSAPackException",
+          "SSAPropagate",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew",
+          "SSAThrow"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "exceptions",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 32,
+        "path": "corpus/exceptions/positive/throw_and_typed_catch.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABranch",
+          "SSACall",
+          "SSACatchEntry",
+          "SSAConst",
+          "SSAExceptionDestroy",
+          "SSAExceptionMatch",
+          "SSAExceptionPayload",
+          "SSAJump",
+          "SSAMethodResultNew",
+          "SSAMethodResultReceiver",
+          "SSAMethodResultValue",
+          "SSAPackException",
+          "SSAPrint",
+          "SSAPropagate",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew",
+          "SSAThrow"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "exceptions",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 34,
+        "path": "examples/ControlesALN/1erControl/Ej1/Biseccion.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACallIndirect",
+          "SSACast",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "function_values"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 12, column 1:\n  IR backend does not support identifier 'Plots' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- co",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/ControlesALN/1erControl/Ej1/ej1.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 25,
+        "path": "examples/ControlesALN/1erControl/Ej2/PuntoFijo.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACallIndirect",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn",
+          "SSAStructNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "function_values",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 78,
+        "path": "examples/ControlesALN/1erControl/Ej2/ej2.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACallIndirect",
+          "SSACast",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAFunctionRef",
+          "SSAJump",
+          "SSAPhi",
+          "SSAPrint",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 21, column 1:\n  IR backend does not support identifier 'pl' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compa",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/ControlesALN/2doControl/Ej1/ej1.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 0,
+        "path": "examples/ControlesALN/2doControl/Ej2/ej2.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 73,
+        "path": "examples/FormulaNumerosPrimos.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACast",
+          "SSACatchEntry",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAInvoke",
+          "SSAJump",
+          "SSAPhi",
+          "SSAPrint",
+          "SSAPropagate",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 36,
+        "path": "examples/LeetCode/isPalindrome.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACast",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAPrint",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 66,
+        "path": "examples/LeetCode/twoSum.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAListGet",
+          "SSAListLength",
+          "SSAListNew",
+          "SSAPhi",
+          "SSAPrint",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 87, column 18:\n  IR backend does not support InputCall yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comparisons\n- if/else\n- while\n",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/Miller-Rabbin.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples",
+          "numerical_workloads",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 58,
+        "path": "examples/ProbandoNR/probandoNR2.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACallIndirect",
+          "SSACast",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAFunctionRef",
+          "SSAJump",
+          "SSAPhi",
+          "SSAPrint",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "function_values",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 65,
+        "path": "examples/ProbandoNR/probandoNR3.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACallIndirect",
+          "SSACast",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAFunctionRef",
+          "SSAJump",
+          "SSAPhi",
+          "SSAPrint",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew",
+          "SSAUnaryOp"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "function_values",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 16, column 40:\n  IR backend requires known dimensions for Matrix * Vector<Column>.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compari",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/SNL.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 7,
+        "path": "examples/Sorts/IllegalArgumentException.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSACall",
+          "SSAMethodResultNew",
+          "SSAReturn",
+          "SSAStructGet"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "exceptions",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 160,
+        "path": "examples/Sorts/Main.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAArrayCopy",
+          "SSAArrayGet",
+          "SSAArrayLength",
+          "SSAArrayNew",
+          "SSAArraySet",
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAPrint",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 134,
+        "path": "examples/Sorts/Sortings.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAArrayCopy",
+          "SSAArrayGet",
+          "SSAArrayLength",
+          "SSAArrayNew",
+          "SSAArraySet",
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 125,
+        "path": "examples/aggregate_collections/particles.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAArrayCopy",
+          "SSAArrayGet",
+          "SSAArrayLength",
+          "SSAArrayNew",
+          "SSAArraySet",
+          "SSAArraySlice",
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAPrint",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew",
+          "SSAStructSet",
+          "SSAUnaryOp"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 18,
+        "path": "examples/classes/const_with_mutable_alias.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSACall",
+          "SSAClassGet",
+          "SSAClassNew",
+          "SSAClassSet",
+          "SSAConst",
+          "SSAPrint",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 16,
+        "path": "examples/classes/counter_basic.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSACall",
+          "SSAClassGet",
+          "SSAClassNew",
+          "SSAClassSet",
+          "SSAConst",
+          "SSAPrint",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 18,
+        "path": "examples/classes/custom_constructor.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSACall",
+          "SSAClassGet",
+          "SSAClassNew",
+          "SSAClassSet",
+          "SSAConst",
+          "SSAPrint",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 19,
+        "path": "examples/classes/implements_interface.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSACall",
+          "SSAClassGet",
+          "SSAClassNew",
+          "SSAClassSet",
+          "SSAConst",
+          "SSAInterfaceCall",
+          "SSAInterfaceConstruct",
+          "SSAPrint",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 18,
+        "path": "examples/classes/invalid_cases.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSACall",
+          "SSAClassGet",
+          "SSAClassNew",
+          "SSAClassSet",
+          "SSAConst",
+          "SSAPrint",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 19,
+        "path": "examples/classes/private_field_public_methods.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSACall",
+          "SSAClassGet",
+          "SSAClassNew",
+          "SSAClassSet",
+          "SSAConst",
+          "SSAPrint",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 20,
+        "path": "examples/classes/reference_aliasing.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSACall",
+          "SSAClassGet",
+          "SSAClassNew",
+          "SSAClassSet",
+          "SSAConst",
+          "SSAPrint",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 63,
+        "path": "examples/esPrimo2.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACast",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAListGet",
+          "SSAListLength",
+          "SSAListNew",
+          "SSAListPush",
+          "SSAPhi",
+          "SSAPrint",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 13,
+        "path": "examples/expense_tracker/Ledger.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAListPush",
+          "SSAReturn",
+          "SSAStructNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "expense_tracker",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 3028,
+        "path": "examples/expense_tracker/Main.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAArrayGet",
+          "SSAArrayLength",
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAListContains",
+          "SSAListCopy",
+          "SSAListGet",
+          "SSAListIndexOf",
+          "SSAListLength",
+          "SSAListNew",
+          "SSAListPush",
+          "SSAListSet",
+          "SSAListSlice",
+          "SSAPhi",
+          "SSAPrint",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew",
+          "SSAStructSet",
+          "SSAUnaryOp"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "expense_tracker",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 2224,
+        "path": "examples/expense_tracker/Persistence.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAArrayGet",
+          "SSAArrayLength",
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAListContains",
+          "SSAListGet",
+          "SSAListLength",
+          "SSAListNew",
+          "SSAListPush",
+          "SSAPhi",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew",
+          "SSAUnaryOp"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "expense_tracker",
+          "string_array_list",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 94,
+        "path": "examples/expense_tracker/Reports.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAListGet",
+          "SSAListLength",
+          "SSAListNew",
+          "SSAListPush",
+          "SSAPhi",
+          "SSAPrint",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "expense_tracker",
+          "string_array_list",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 0,
+        "path": "examples/expense_tracker/Transaction.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "expense_tracker",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 4,
+        "path": "examples/hello.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAConst",
+          "SSAPrint",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 19, column 18:\n  IR backend does not support InputCall yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comparisons\n- if/else\n- while\n",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/interactive/fibonacci.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 48, column 18:\n  IR backend does not support InputCall yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comparisons\n- if/else\n- while\n",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/interactive/primes_interactive.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 6, column 18:\n  IR backend does not support InputCall yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comparisons\n- if/else\n- while\n-",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/interactive/sum_calculator.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 6,
+        "path": "examples/ir/constant_fold.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSAConst",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 4,
+        "path": "examples/ir/local_const.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSAConst",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 15,
+        "path": "examples/ir/sumTo.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 5, column 3:\n  IR backend does not support assignment to 'A' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comp",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/linear_algebra/basic_operations.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 43, column 22:\n  IR backend does not support identifier 'z' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compa",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/linear_algebra/primes_advanced.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 34, column 3:\n  IR backend does not support assignment to 'm' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- com",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/linear_algebra/primes_check.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 15, column 19:\n  IR backend does not support CallExpression (method 'size' on 'list<int>') yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithme",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/lists/list_api.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 12,
+        "path": "examples/llvm/arithmetic.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSAConst",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 21,
+        "path": "examples/llvm/array_sort.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAArrayGet",
+          "SSAArrayNew",
+          "SSABinaryOp",
+          "SSACall",
+          "SSAConst",
+          "SSAReturn",
+          "SSASequenceSort"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 14,
+        "path": "examples/llvm/array_sum.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAArrayGet",
+          "SSAArrayNew",
+          "SSABinaryOp",
+          "SSACall",
+          "SSAConst",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 12,
+        "path": "examples/llvm/countdown.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 12,
+        "path": "examples/llvm/double_add.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 34,
+        "path": "examples/llvm/double_compare.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 5,
+        "path": "examples/llvm/double_to_int.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSACall",
+          "SSACast",
+          "SSAConst",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 28,
+        "path": "examples/llvm/for_break_continue.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 17,
+        "path": "examples/llvm/for_sum.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 19,
+        "path": "examples/llvm/gcd_iterative.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 4,
+        "path": "examples/llvm/identity_call.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSACall",
+          "SSAConst",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 8,
+        "path": "examples/llvm/int_to_double.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSACall",
+          "SSACast",
+          "SSAConst",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 21,
+        "path": "examples/llvm/list_clear.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAListClear",
+          "SSAListIsEmpty",
+          "SSAListLength",
+          "SSAListNew",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 12,
+        "path": "examples/llvm/list_contains.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABranch",
+          "SSACall",
+          "SSAConst",
+          "SSAListContains",
+          "SSAListNew",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 18,
+        "path": "examples/llvm/list_copy.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSACall",
+          "SSAConst",
+          "SSAListCopy",
+          "SSAListGet",
+          "SSAListNew",
+          "SSAListSet",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 20,
+        "path": "examples/llvm/list_for_sum.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAListGet",
+          "SSAListLength",
+          "SSAListNew",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 8,
+        "path": "examples/llvm/list_index.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSACall",
+          "SSAConst",
+          "SSAListGet",
+          "SSAListNew",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 18,
+        "path": "examples/llvm/list_index_of.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSACall",
+          "SSAConst",
+          "SSAListIndexOf",
+          "SSAListNew",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 16,
+        "path": "examples/llvm/list_insert.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSACall",
+          "SSAConst",
+          "SSAListGet",
+          "SSAListInsert",
+          "SSAListNew",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 12,
+        "path": "examples/llvm/list_literal.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABranch",
+          "SSACall",
+          "SSAConst",
+          "SSAListIsEmpty",
+          "SSAListLength",
+          "SSAListNew",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 11,
+        "path": "examples/llvm/list_pop.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSACall",
+          "SSAConst",
+          "SSAListLength",
+          "SSAListNew",
+          "SSAListPop",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 15,
+        "path": "examples/llvm/list_pop_alias.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSACall",
+          "SSAConst",
+          "SSAListLength",
+          "SSAListNew",
+          "SSAListPop",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 15,
+        "path": "examples/llvm/list_push.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSACall",
+          "SSAConst",
+          "SSAListGet",
+          "SSAListNew",
+          "SSAListPush",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 24,
+        "path": "examples/llvm/list_push_alias.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAListGet",
+          "SSAListLength",
+          "SSAListNew",
+          "SSAListPush",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 15,
+        "path": "examples/llvm/list_remove_at.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSACall",
+          "SSAConst",
+          "SSAListGet",
+          "SSAListLength",
+          "SSAListNew",
+          "SSAListRemoveAt",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 15,
+        "path": "examples/llvm/list_reverse.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSACall",
+          "SSAConst",
+          "SSAListGet",
+          "SSAListNew",
+          "SSAListReverse",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 13,
+        "path": "examples/llvm/list_set_alias.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSACall",
+          "SSAConst",
+          "SSAListGet",
+          "SSAListNew",
+          "SSAListSet",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 21,
+        "path": "examples/llvm/list_sort.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSACall",
+          "SSAConst",
+          "SSAListGet",
+          "SSAListNew",
+          "SSAReturn",
+          "SSASequenceSort"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "string_array_list"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 27,
+        "path": "examples/llvm/matrix_add.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSAConst",
+          "SSAMatrixAdd",
+          "SSAMatrixGet",
+          "SSAMatrixNew",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 15,
+        "path": "examples/llvm/matrix_column_mul.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSAConst",
+          "SSAMatrixNew",
+          "SSAMatrixVectorMul",
+          "SSAReturn",
+          "SSAVectorGet",
+          "SSAVectorNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 9,
+        "path": "examples/llvm/matrix_index.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAConst",
+          "SSAMatrixGet",
+          "SSAMatrixNew",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 7,
+        "path": "examples/llvm/matrix_literal.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAConst",
+          "SSAMatrixNew",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 19,
+        "path": "examples/llvm/matrix_matmul.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAConst",
+          "SSAMatrixGet",
+          "SSAMatrixMatMul",
+          "SSAMatrixNew",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 11,
+        "path": "examples/llvm/matrix_rows_columns.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSAConst",
+          "SSAMatrixColumns",
+          "SSAMatrixNew",
+          "SSAMatrixRows",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 41,
+        "path": "examples/llvm/matrix_scalar_mul.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSAConst",
+          "SSAMatrixGet",
+          "SSAMatrixNew",
+          "SSAMatrixScale",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 13,
+        "path": "examples/llvm/matrix_set.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAConst",
+          "SSAMatrixGet",
+          "SSAMatrixNew",
+          "SSAMatrixSet",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 27,
+        "path": "examples/llvm/matrix_sub.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSAConst",
+          "SSAMatrixGet",
+          "SSAMatrixNew",
+          "SSAMatrixSub",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 11,
+        "path": "examples/llvm/max.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 32,
+        "path": "examples/llvm/outer_product.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSAConst",
+          "SSAMatrixGet",
+          "SSAOuterProduct",
+          "SSAReturn",
+          "SSAVectorNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 2,
+        "path": "examples/llvm/return_5.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAConst",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 19,
+        "path": "examples/llvm/string_choose.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABranch",
+          "SSACall",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 11,
+        "path": "examples/llvm/string_identity.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSACall",
+          "SSAConst",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 15,
+        "path": "examples/llvm/sum_to_n.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 18,
+        "path": "examples/llvm/vector_add.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSAConst",
+          "SSAReturn",
+          "SSAVectorAdd",
+          "SSAVectorGet",
+          "SSAVectorNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 6,
+        "path": "examples/llvm/vector_column_inferred.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAConst",
+          "SSAReturn",
+          "SSAVectorNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 6,
+        "path": "examples/llvm/vector_column_literal.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAConst",
+          "SSAReturn",
+          "SSAVectorNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 10,
+        "path": "examples/llvm/vector_dot.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAConst",
+          "SSAReturn",
+          "SSAVectorDot",
+          "SSAVectorNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 7,
+        "path": "examples/llvm/vector_index.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAConst",
+          "SSAReturn",
+          "SSAVectorGet",
+          "SSAVectorNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 6,
+        "path": "examples/llvm/vector_length.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAConst",
+          "SSAReturn",
+          "SSAVectorLength",
+          "SSAVectorNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 6,
+        "path": "examples/llvm/vector_literal.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAConst",
+          "SSAReturn",
+          "SSAVectorNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 15,
+        "path": "examples/llvm/vector_matrix_mul.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSAConst",
+          "SSAMatrixNew",
+          "SSAReturn",
+          "SSAVectorGet",
+          "SSAVectorMatrixMul",
+          "SSAVectorNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 26,
+        "path": "examples/llvm/vector_scalar_mul.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSAConst",
+          "SSAReturn",
+          "SSAVectorGet",
+          "SSAVectorNew",
+          "SSAVectorScale"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 10,
+        "path": "examples/llvm/vector_set.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAConst",
+          "SSAReturn",
+          "SSAVectorGet",
+          "SSAVectorNew",
+          "SSAVectorSet"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 18,
+        "path": "examples/llvm/vector_sub.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSAConst",
+          "SSAReturn",
+          "SSAVectorGet",
+          "SSAVectorNew",
+          "SSAVectorSub"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 16, column 15:\n  IR backend does not support identifier 'z' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compa",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/minCuad.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 17, column 15:\n  IR backend does not support identifier 'z' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compa",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/minCuad2.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 7, column 8:\n  IR backend does not support assignment to 'yt' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- com",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/minimos_cuadrados/MinimosCuadrados.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 34, column 8:\n  IR backend does not support assignment to 'f1' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- co",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/nonlinear_systems/newton_system.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 17, column 14:\n  IR backend does not support identifier 'LA' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comp",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/nonlinear_systems/nr2.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 20,
+        "path": "examples/nose.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAPrint",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 1, column 16:\n  IR backend does not support InputCall yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- comparisons\n- if/else\n- while\n-",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/nose2.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 0,
+        "path": "examples/numerical_methods/Functions.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "function_values",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 85,
+        "path": "examples/numerical_methods/Integration.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACallIndirect",
+          "SSACast",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn",
+          "SSAStructNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 13,
+        "path": "examples/numerical_methods/Problems.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSAConst",
+          "SSAReturn"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 0,
+        "path": "examples/numerical_methods/Results.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 201,
+        "path": "examples/numerical_methods/Roots.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACallIndirect",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAJump",
+          "SSAPhi",
+          "SSAReturn",
+          "SSAStructNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 519,
+        "path": "examples/numerical_methods/main.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACallIndirect",
+          "SSACast",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAFunctionRef",
+          "SSAJump",
+          "SSAPhi",
+          "SSAPrint",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew",
+          "SSAUnaryOp"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "numerical_workloads"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 6, column 1:\n  IR backend does not support identifier 'pl' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n- compar",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/probando.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "failure": "IRBackendUnsupportedFeatureError at line 22, column 7:\n  IR backend does not support assignment to 'solNR' outside local scope yet.\n  Hint: Supported IR backend subset:\n- functions\n- local variables\n- int/bool/string literals\n- arithmetic\n-",
+        "failure_stage": "initial_ir",
+        "failure_type": "IRBackendUnsupportedFeatureError",
+        "initial_ir": false,
+        "initial_wire_lossless": false,
+        "path": "examples/probandoNR.ae",
+        "python_ssa": false,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_wire_lossless": false,
+        "tags": [
+          "examples"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 29,
+        "path": "examples/pruebaException.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSABinaryOp",
+          "SSABranch",
+          "SSACall",
+          "SSACast",
+          "SSACatchEntry",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAInvoke",
+          "SSAMethodResultNew",
+          "SSAPackException",
+          "SSAPropagate",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew",
+          "SSAThrow"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "exceptions",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 0,
+        "path": "examples/structs/Geometry.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 32,
+        "path": "examples/structs/custom_constructor_and_equality.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSACall",
+          "SSACompareOp",
+          "SSAConst",
+          "SSAMethodResultNew",
+          "SSAMethodResultReceiver",
+          "SSAPrint",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew",
+          "SSAStructSet"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples",
+          "structs_classes_interfaces"
+        ]
+      },
+      {
+        "initial_ir": true,
+        "initial_wire_lossless": true,
+        "instruction_count": 7,
+        "path": "examples/structs/main.ae",
+        "python_ssa": true,
+        "rust_ssa_roundtrip_demonstrated": false,
+        "ssa_instruction_types": [
+          "SSAConst",
+          "SSAPrint",
+          "SSAReturn",
+          "SSAStructGet",
+          "SSAStructNew"
+        ],
+        "ssa_wire_lossless": true,
+        "tags": [
+          "examples"
+        ]
+      }
+    ],
+    "summary": {
+      "demonstrated_rust_roundtrip_percent": 0.0,
+      "discovered": 144,
+      "initial_ir": 116,
+      "initial_wire_lossless": 116,
+      "python_ssa": 116,
+      "python_ssa_wire_eligible_percent": 100.0,
+      "rust_ssa_roundtrip_demonstrated": 0,
+      "ssa_wire_lossless": 116
+    }
+  },
+  "differential_design": {
+    "comparison": [
+      "verify both outputs",
+      "canonicalize reachable CFG from entry",
+      "match successors by edge kind and structural target",
+      "alpha-rename parameters/results in dominance preorder",
+      "sort phi incoming pairs by canonical predecessor",
+      "compare opcode, IR type, constants, metadata, effects-relevant operands and exceptional edges",
+      "retain source function/block order only as a separate determinism assertion"
+    ],
+    "must_not_ignore": [
+      "exception edge kind",
+      "phi predecessor association",
+      "ownership calls",
+      "transferred_storage",
+      "aggregate_shape",
+      "witness metadata",
+      "source_location"
+    ],
+    "python_lane": [
+      "verified Python Initial IR",
+      "Python GeneralSSABuilder",
+      "Python SSA DTO"
+    ],
+    "rust_lane": [
+      "same canonical Initial IR DTO",
+      "Rust importer",
+      "future Rust lowering",
+      "Rust SSA DTO",
+      "Python SSA importer"
+    ]
+  },
+  "inventories": {
+    "container_types_consumed": [
+      "IRModule",
+      "IRFunction",
+      "IRBasicBlock",
+      "IRParameter",
+      "IRValue",
+      "IRStorage",
+      "IRStructDefinition",
+      "IRType hierarchy"
+    ],
+    "container_types_produced": [
+      "SSAModule",
+      "SSAFunction",
+      "SSABasicBlock",
+      "SSAParameter",
+      "SSAValue",
+      "IRStructDefinition (retained)",
+      "IRType hierarchy (retained)"
+    ],
+    "initial_ir_instruction_types": [
+      {
+        "fields": [
+          "result",
+          "array",
+          "source_location"
+        ],
+        "name": "IRArrayCopy",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "array",
+          "index",
+          "borrowed",
+          "borrow_scope",
+          "source_location"
+        ],
+        "name": "IRArrayGet",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "array"
+        ],
+        "name": "IRArrayLength",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "elements"
+        ],
+        "name": "IRArrayNew",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "array",
+          "index",
+          "value"
+        ],
+        "name": "IRArraySet",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "array",
+          "start",
+          "end",
+          "source_location"
+        ],
+        "name": "IRArraySlice",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "destination",
+          "source",
+          "source_location"
+        ],
+        "name": "IRAssign",
+        "normalized_by_lifecycle": true,
+        "renamer_direct": false
+      },
+      {
+        "fields": [
+          "result",
+          "operator",
+          "left",
+          "right",
+          "source_location"
+        ],
+        "name": "IRBinaryOp",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "condition",
+          "true_target",
+          "false_target"
+        ],
+        "name": "IRBranch",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "function",
+          "arguments",
+          "result",
+          "builtin",
+          "source_location",
+          "may_throw_effect"
+        ],
+        "name": "IRCall",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "callee",
+          "arguments",
+          "result"
+        ],
+        "name": "IRCallIndirect",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "value"
+        ],
+        "name": "IRCast",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "event",
+          "handler_id",
+          "catch_types"
+        ],
+        "name": "IRCatchEntry",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "object",
+          "field_index",
+          "field_name"
+        ],
+        "name": "IRClassGet",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result"
+        ],
+        "name": "IRClassNew",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "object",
+          "field_index",
+          "field_name",
+          "value",
+          "initialize"
+        ],
+        "name": "IRClassSet",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "operator",
+          "left",
+          "right",
+          "aggregate_shape"
+        ],
+        "name": "IRCompareOp",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "value"
+        ],
+        "name": "IRConst",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "destination",
+          "source",
+          "source_location"
+        ],
+        "name": "IRCopyInit",
+        "normalized_by_lifecycle": true,
+        "renamer_direct": false
+      },
+      {
+        "fields": [
+          "value",
+          "source_location"
+        ],
+        "name": "IRDestroy",
+        "normalized_by_lifecycle": true,
+        "renamer_direct": false
+      },
+      {
+        "fields": [
+          "event"
+        ],
+        "name": "IRExceptionDestroy",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "event",
+          "catch_type",
+          "catch_all"
+        ],
+        "name": "IRExceptionMatch",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "event",
+          "catch_type"
+        ],
+        "name": "IRExceptionPayload",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "function"
+        ],
+        "name": "IRFunctionRef",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "destination",
+          "source_location"
+        ],
+        "name": "IRInitDefault",
+        "normalized_by_lifecycle": true,
+        "renamer_direct": false
+      },
+      {
+        "fields": [
+          "receiver",
+          "arguments",
+          "slot",
+          "result"
+        ],
+        "name": "IRInterfaceCall",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "carrier",
+          "witness"
+        ],
+        "name": "IRInterfaceConstruct",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "function",
+          "arguments",
+          "result",
+          "exception",
+          "normal_target",
+          "exceptional_target",
+          "exceptional_target_event",
+          "builtin",
+          "source_location"
+        ],
+        "name": "IRInvoke",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "callee",
+          "arguments",
+          "result",
+          "exception",
+          "normal_target",
+          "exceptional_target",
+          "exceptional_target_event"
+        ],
+        "name": "IRInvokeIndirect",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "receiver",
+          "arguments",
+          "slot",
+          "result",
+          "exception",
+          "normal_target",
+          "exceptional_target",
+          "exceptional_target_event"
+        ],
+        "name": "IRInvokeInterface",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "target"
+        ],
+        "name": "IRJump",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "list_value"
+        ],
+        "name": "IRListClear",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "list_value",
+          "value"
+        ],
+        "name": "IRListContains",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "list_value",
+          "source_location"
+        ],
+        "name": "IRListCopy",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "list_value",
+          "index",
+          "borrowed",
+          "borrow_scope",
+          "source_location"
+        ],
+        "name": "IRListGet",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "list_value",
+          "value"
+        ],
+        "name": "IRListIndexOf",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "list_value",
+          "index",
+          "value"
+        ],
+        "name": "IRListInsert",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "list_value"
+        ],
+        "name": "IRListIsEmpty",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "list_value"
+        ],
+        "name": "IRListLength",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "elements"
+        ],
+        "name": "IRListNew",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "list_value"
+        ],
+        "name": "IRListPop",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "list_value",
+          "value"
+        ],
+        "name": "IRListPush",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "list_value",
+          "index"
+        ],
+        "name": "IRListRemoveAt",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "list_value"
+        ],
+        "name": "IRListReverse",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "list_value",
+          "index",
+          "value"
+        ],
+        "name": "IRListSet",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "list_value",
+          "start",
+          "end",
+          "source_location"
+        ],
+        "name": "IRListSlice",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "slot"
+        ],
+        "name": "IRLoad",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "left",
+          "right",
+          "rows",
+          "cols"
+        ],
+        "name": "IRMatrixAdd",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "matrix",
+          "columns"
+        ],
+        "name": "IRMatrixColumns",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "matrix",
+          "row",
+          "column",
+          "cols"
+        ],
+        "name": "IRMatrixGet",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "left",
+          "right",
+          "rows",
+          "inner",
+          "cols"
+        ],
+        "name": "IRMatrixMatMul",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "elements",
+          "rows",
+          "cols"
+        ],
+        "name": "IRMatrixNew",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "matrix",
+          "rows"
+        ],
+        "name": "IRMatrixRows",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "matrix",
+          "scalar",
+          "rows",
+          "cols"
+        ],
+        "name": "IRMatrixScale",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "matrix",
+          "row",
+          "column",
+          "value",
+          "cols"
+        ],
+        "name": "IRMatrixSet",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "left",
+          "right",
+          "rows",
+          "cols"
+        ],
+        "name": "IRMatrixSub",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "matrix",
+          "vector",
+          "rows",
+          "inner"
+        ],
+        "name": "IRMatrixVectorMul",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "receiver",
+          "value"
+        ],
+        "name": "IRMethodResultNew",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "method_result"
+        ],
+        "name": "IRMethodResultReceiver",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "method_result"
+        ],
+        "name": "IRMethodResultValue",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "destination",
+          "source",
+          "source_location"
+        ],
+        "name": "IRMoveInit",
+        "normalized_by_lifecycle": true,
+        "renamer_direct": false
+      },
+      {
+        "fields": [
+          "result",
+          "column",
+          "row",
+          "rows",
+          "cols"
+        ],
+        "name": "IROuterProduct",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "payload",
+          "dynamic_type",
+          "source_location"
+        ],
+        "name": "IRPackException",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "value",
+          "newline",
+          "aggregate_shape"
+        ],
+        "name": "IRPrint",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "event",
+          "target",
+          "target_event"
+        ],
+        "name": "IRPropagate",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": false
+      },
+      {
+        "fields": [
+          "destination",
+          "source",
+          "count",
+          "source_location"
+        ],
+        "name": "IRRelocate",
+        "normalized_by_lifecycle": true,
+        "renamer_direct": false
+      },
+      {
+        "fields": [
+          "event",
+          "target",
+          "target_event"
+        ],
+        "name": "IRRethrow",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": false
+      },
+      {
+        "fields": [
+          "value",
+          "transferred_storage"
+        ],
+        "name": "IRReturn",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "sequence"
+        ],
+        "name": "IRSequenceSort",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "slot",
+          "value"
+        ],
+        "name": "IRStore",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "struct",
+          "field_index",
+          "field_name"
+        ],
+        "name": "IRStructGet",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "fields"
+        ],
+        "name": "IRStructNew",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "struct",
+          "field_index",
+          "field_name",
+          "value"
+        ],
+        "name": "IRStructSet",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "event",
+          "target",
+          "target_event"
+        ],
+        "name": "IRThrow",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": false
+      },
+      {
+        "fields": [
+          "result",
+          "operator",
+          "operand"
+        ],
+        "name": "IRUnaryOp",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "left",
+          "right",
+          "length",
+          "orientation"
+        ],
+        "name": "IRVectorAdd",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "left",
+          "right",
+          "length"
+        ],
+        "name": "IRVectorDot",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "vector",
+          "index"
+        ],
+        "name": "IRVectorGet",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "vector"
+        ],
+        "name": "IRVectorLength",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "vector",
+          "matrix",
+          "rows",
+          "cols"
+        ],
+        "name": "IRVectorMatrixMul",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "elements",
+          "orientation"
+        ],
+        "name": "IRVectorNew",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "vector",
+          "scalar",
+          "length",
+          "orientation"
+        ],
+        "name": "IRVectorScale",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "vector",
+          "index",
+          "value"
+        ],
+        "name": "IRVectorSet",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      },
+      {
+        "fields": [
+          "result",
+          "left",
+          "right",
+          "length",
+          "orientation"
+        ],
+        "name": "IRVectorSub",
+        "normalized_by_lifecycle": false,
+        "renamer_direct": true
+      }
+    ],
+    "python_internal_dependencies": [
+      "aether.ir.lifecycle.expand_lifecycle",
+      "aether.analysis.cfg.CFGBuilder",
+      "aether.analysis.dominators.DominatorAnalysis",
+      "aether.analysis.dominance_frontier.DominanceFrontierAnalysis",
+      "aether.ssa.phi_placement.PhiPlacement",
+      "aether.ssa.renaming.SSARenamer",
+      "aether.ssa.verifier.SSAVerifier",
+      "aether.instruction_effects",
+      "aether.ir.dto",
+      "aether.ssa.dto"
+    ],
+    "serializable_boundaries": [
+      "Python Initial IR schema-v1 JSON",
+      "Rust Initial IR schema-v1 DTO/importer",
+      "Python SSA schema-v2 JSON (explicit v1 compatibility decode)",
+      "Rust SSA schema-v2 DTO (wire only; no owned SSA conversion)"
+    ],
+    "ssa_instruction_types": [
+      {
+        "fields": [
+          "result",
+          "array"
+        ],
+        "name": "SSAArrayCopy"
+      },
+      {
+        "fields": [
+          "result",
+          "array",
+          "index",
+          "borrowed",
+          "borrow_scope",
+          "bounds_checked"
+        ],
+        "name": "SSAArrayGet"
+      },
+      {
+        "fields": [
+          "result",
+          "array"
+        ],
+        "name": "SSAArrayLength"
+      },
+      {
+        "fields": [
+          "result",
+          "elements"
+        ],
+        "name": "SSAArrayNew"
+      },
+      {
+        "fields": [
+          "array",
+          "index",
+          "value",
+          "bounds_checked"
+        ],
+        "name": "SSAArraySet"
+      },
+      {
+        "fields": [
+          "result",
+          "array",
+          "start",
+          "end"
+        ],
+        "name": "SSAArraySlice"
+      },
+      {
+        "fields": [
+          "result",
+          "operator",
+          "left",
+          "right",
+          "source_location"
+        ],
+        "name": "SSABinaryOp"
+      },
+      {
+        "fields": [
+          "condition",
+          "true_target",
+          "false_target"
+        ],
+        "name": "SSABranch"
+      },
+      {
+        "fields": [
+          "function",
+          "arguments",
+          "result",
+          "builtin",
+          "source_location"
+        ],
+        "name": "SSACall"
+      },
+      {
+        "fields": [
+          "callee",
+          "arguments",
+          "result"
+        ],
+        "name": "SSACallIndirect"
+      },
+      {
+        "fields": [
+          "result",
+          "value"
+        ],
+        "name": "SSACast"
+      },
+      {
+        "fields": [
+          "event",
+          "handler_id",
+          "catch_types"
+        ],
+        "name": "SSACatchEntry"
+      },
+      {
+        "fields": [
+          "result",
+          "object",
+          "field_index",
+          "field_name"
+        ],
+        "name": "SSAClassGet"
+      },
+      {
+        "fields": [
+          "result"
+        ],
+        "name": "SSAClassNew"
+      },
+      {
+        "fields": [
+          "object",
+          "field_index",
+          "field_name",
+          "value",
+          "initialize"
+        ],
+        "name": "SSAClassSet"
+      },
+      {
+        "fields": [
+          "result",
+          "operator",
+          "left",
+          "right",
+          "aggregate_shape"
+        ],
+        "name": "SSACompareOp"
+      },
+      {
+        "fields": [
+          "result",
+          "value"
+        ],
+        "name": "SSAConst"
+      },
+      {
+        "fields": [
+          "event"
+        ],
+        "name": "SSAExceptionDestroy"
+      },
+      {
+        "fields": [
+          "result",
+          "event",
+          "catch_type",
+          "catch_all"
+        ],
+        "name": "SSAExceptionMatch"
+      },
+      {
+        "fields": [
+          "result",
+          "event",
+          "catch_type"
+        ],
+        "name": "SSAExceptionPayload"
+      },
+      {
+        "fields": [
+          "result",
+          "function"
+        ],
+        "name": "SSAFunctionRef"
+      },
+      {
+        "fields": [
+          "receiver",
+          "arguments",
+          "slot",
+          "result"
+        ],
+        "name": "SSAInterfaceCall"
+      },
+      {
+        "fields": [
+          "result",
+          "carrier",
+          "witness"
+        ],
+        "name": "SSAInterfaceConstruct"
+      },
+      {
+        "fields": [
+          "function",
+          "arguments",
+          "result",
+          "exception",
+          "normal_target",
+          "exceptional_target",
+          "normal_arguments",
+          "exceptional_arguments",
+          "builtin",
+          "source_location"
+        ],
+        "name": "SSAInvoke"
+      },
+      {
+        "fields": [
+          "callee",
+          "arguments",
+          "result",
+          "exception",
+          "normal_target",
+          "exceptional_target",
+          "normal_arguments",
+          "exceptional_arguments"
+        ],
+        "name": "SSAInvokeIndirect"
+      },
+      {
+        "fields": [
+          "receiver",
+          "arguments",
+          "slot",
+          "result",
+          "exception",
+          "normal_target",
+          "exceptional_target",
+          "normal_arguments",
+          "exceptional_arguments"
+        ],
+        "name": "SSAInvokeInterface"
+      },
+      {
+        "fields": [
+          "target"
+        ],
+        "name": "SSAJump"
+      },
+      {
+        "fields": [
+          "list_value"
+        ],
+        "name": "SSAListClear"
+      },
+      {
+        "fields": [
+          "result",
+          "list_value",
+          "value"
+        ],
+        "name": "SSAListContains"
+      },
+      {
+        "fields": [
+          "result",
+          "list_value"
+        ],
+        "name": "SSAListCopy"
+      },
+      {
+        "fields": [
+          "result",
+          "list_value",
+          "index",
+          "borrowed",
+          "borrow_scope",
+          "bounds_checked"
+        ],
+        "name": "SSAListGet"
+      },
+      {
+        "fields": [
+          "result",
+          "list_value",
+          "value"
+        ],
+        "name": "SSAListIndexOf"
+      },
+      {
+        "fields": [
+          "list_value",
+          "index",
+          "value"
+        ],
+        "name": "SSAListInsert"
+      },
+      {
+        "fields": [
+          "result",
+          "list_value"
+        ],
+        "name": "SSAListIsEmpty"
+      },
+      {
+        "fields": [
+          "result",
+          "list_value"
+        ],
+        "name": "SSAListLength"
+      },
+      {
+        "fields": [
+          "result",
+          "elements"
+        ],
+        "name": "SSAListNew"
+      },
+      {
+        "fields": [
+          "result",
+          "list_value"
+        ],
+        "name": "SSAListPop"
+      },
+      {
+        "fields": [
+          "list_value",
+          "value"
+        ],
+        "name": "SSAListPush"
+      },
+      {
+        "fields": [
+          "result",
+          "list_value",
+          "index"
+        ],
+        "name": "SSAListRemoveAt"
+      },
+      {
+        "fields": [
+          "list_value"
+        ],
+        "name": "SSAListReverse"
+      },
+      {
+        "fields": [
+          "list_value",
+          "index",
+          "value",
+          "bounds_checked"
+        ],
+        "name": "SSAListSet"
+      },
+      {
+        "fields": [
+          "result",
+          "list_value",
+          "start",
+          "end"
+        ],
+        "name": "SSAListSlice"
+      },
+      {
+        "fields": [
+          "result",
+          "left",
+          "right",
+          "rows",
+          "cols"
+        ],
+        "name": "SSAMatrixAdd"
+      },
+      {
+        "fields": [
+          "result",
+          "matrix",
+          "columns"
+        ],
+        "name": "SSAMatrixColumns"
+      },
+      {
+        "fields": [
+          "result",
+          "matrix",
+          "row",
+          "column",
+          "cols",
+          "bounds_checked"
+        ],
+        "name": "SSAMatrixGet"
+      },
+      {
+        "fields": [
+          "result",
+          "left",
+          "right",
+          "rows",
+          "inner",
+          "cols"
+        ],
+        "name": "SSAMatrixMatMul"
+      },
+      {
+        "fields": [
+          "result",
+          "elements",
+          "rows",
+          "cols"
+        ],
+        "name": "SSAMatrixNew"
+      },
+      {
+        "fields": [
+          "result",
+          "matrix",
+          "rows"
+        ],
+        "name": "SSAMatrixRows"
+      },
+      {
+        "fields": [
+          "result",
+          "matrix",
+          "scalar",
+          "rows",
+          "cols"
+        ],
+        "name": "SSAMatrixScale"
+      },
+      {
+        "fields": [
+          "matrix",
+          "row",
+          "column",
+          "value",
+          "cols",
+          "bounds_checked"
+        ],
+        "name": "SSAMatrixSet"
+      },
+      {
+        "fields": [
+          "result",
+          "left",
+          "right",
+          "rows",
+          "cols"
+        ],
+        "name": "SSAMatrixSub"
+      },
+      {
+        "fields": [
+          "result",
+          "matrix",
+          "vector",
+          "rows",
+          "inner"
+        ],
+        "name": "SSAMatrixVectorMul"
+      },
+      {
+        "fields": [
+          "result",
+          "receiver",
+          "value"
+        ],
+        "name": "SSAMethodResultNew"
+      },
+      {
+        "fields": [
+          "result",
+          "method_result"
+        ],
+        "name": "SSAMethodResultReceiver"
+      },
+      {
+        "fields": [
+          "result",
+          "method_result"
+        ],
+        "name": "SSAMethodResultValue"
+      },
+      {
+        "fields": [
+          "result",
+          "column",
+          "row",
+          "rows",
+          "cols"
+        ],
+        "name": "SSAOuterProduct"
+      },
+      {
+        "fields": [
+          "result",
+          "payload",
+          "dynamic_type",
+          "source_location"
+        ],
+        "name": "SSAPackException"
+      },
+      {
+        "fields": [
+          "result",
+          "incoming"
+        ],
+        "name": "SSAPhi"
+      },
+      {
+        "fields": [
+          "value",
+          "newline",
+          "aggregate_shape"
+        ],
+        "name": "SSAPrint"
+      },
+      {
+        "fields": [
+          "event",
+          "target",
+          "exceptional_arguments"
+        ],
+        "name": "SSAPropagate"
+      },
+      {
+        "fields": [
+          "event",
+          "target",
+          "exceptional_arguments"
+        ],
+        "name": "SSARethrow"
+      },
+      {
+        "fields": [
+          "value"
+        ],
+        "name": "SSAReturn"
+      },
+      {
+        "fields": [
+          "sequence"
+        ],
+        "name": "SSASequenceSort"
+      },
+      {
+        "fields": [
+          "result",
+          "struct",
+          "field_index",
+          "field_name"
+        ],
+        "name": "SSAStructGet"
+      },
+      {
+        "fields": [
+          "result",
+          "fields"
+        ],
+        "name": "SSAStructNew"
+      },
+      {
+        "fields": [
+          "result",
+          "struct",
+          "field_index",
+          "field_name",
+          "value"
+        ],
+        "name": "SSAStructSet"
+      },
+      {
+        "fields": [
+          "event",
+          "target",
+          "exceptional_arguments"
+        ],
+        "name": "SSAThrow"
+      },
+      {
+        "fields": [
+          "result",
+          "operator",
+          "operand"
+        ],
+        "name": "SSAUnaryOp"
+      },
+      {
+        "fields": [
+          "result",
+          "left",
+          "right",
+          "length",
+          "orientation"
+        ],
+        "name": "SSAVectorAdd"
+      },
+      {
+        "fields": [
+          "result",
+          "left",
+          "right",
+          "length"
+        ],
+        "name": "SSAVectorDot"
+      },
+      {
+        "fields": [
+          "result",
+          "vector",
+          "index",
+          "bounds_checked"
+        ],
+        "name": "SSAVectorGet"
+      },
+      {
+        "fields": [
+          "result",
+          "vector"
+        ],
+        "name": "SSAVectorLength"
+      },
+      {
+        "fields": [
+          "result",
+          "vector",
+          "matrix",
+          "rows",
+          "cols"
+        ],
+        "name": "SSAVectorMatrixMul"
+      },
+      {
+        "fields": [
+          "result",
+          "elements",
+          "orientation"
+        ],
+        "name": "SSAVectorNew"
+      },
+      {
+        "fields": [
+          "result",
+          "vector",
+          "scalar",
+          "length",
+          "orientation"
+        ],
+        "name": "SSAVectorScale"
+      },
+      {
+        "fields": [
+          "vector",
+          "index",
+          "value",
+          "bounds_checked"
+        ],
+        "name": "SSAVectorSet"
+      },
+      {
+        "fields": [
+          "result",
+          "left",
+          "right",
+          "length",
+          "orientation"
+        ],
+        "name": "SSAVectorSub"
+      }
+    ]
+  },
+  "purity": {
+    "conceptually_pure": true,
+    "implicit_inputs": [
+      "lifecycle expansion policy",
+      "instruction effect registry",
+      "CFG terminator table",
+      "name-allocation policy",
+      "verifier policy"
+    ],
+    "input_mutated": false,
+    "mathematical_signature": "lower(verified_initial_ir, lowering_policy_v1) -> verified_ssa | deterministic_error",
+    "note": "InitialIRModule -> SSAModule is adequate only after freezing policy and requiring verified input; the current API hides those preconditions."
+  },
+  "rules": [
+    {
+      "capability": "initial_ir_wire",
+      "classification": "RUST_READY",
+      "evidence": "Rust owns a strict schema-v1 Initial IR DTO/importer.",
+      "id": "SSA-001"
+    },
+    {
+      "capability": "ssa_wire",
+      "classification": "RUST_READY",
+      "evidence": "Explicit Python and Rust schema-v2 DTOs preserve bounds_checked for all eight affected SSA instructions; Rust lowering remains out of scope.",
+      "id": "SSA-002"
+    },
+    {
+      "capability": "owned_rust_ssa_model",
+      "classification": "ARCHITECTURE_GAP",
+      "evidence": "Rust has wire DTOs but no owned SSA model capable of representing SSAPhi.",
+      "id": "SSA-003"
+    },
+    {
+      "capability": "rust_lowering_entrypoint",
+      "classification": "ARCHITECTURE_GAP",
+      "evidence": "No Rust InitialIR -> SSA lowering entry point exists.",
+      "id": "SSA-004"
+    },
+    {
+      "capability": "lifecycle_expansion",
+      "classification": "SEMANTIC_GAP",
+      "evidence": "Python expands lifecycle pseudo-instructions before CFG/SSA; Rust has no parity transform.",
+      "id": "SSA-005"
+    },
+    {
+      "capability": "cfg_construction",
+      "classification": "SEMANTIC_GAP",
+      "evidence": "Python recognizes normal and exceptional terminators; no Rust construction parity exists.",
+      "id": "SSA-006"
+    },
+    {
+      "capability": "dominators",
+      "classification": "SEMANTIC_GAP",
+      "evidence": "Rust verifies dominance on owned Initial IR but has no lowering-time SSA dominator contract.",
+      "id": "SSA-007"
+    },
+    {
+      "capability": "dominance_frontiers",
+      "classification": "SEMANTIC_GAP",
+      "evidence": "No Rust dominance-frontier implementation for lowering.",
+      "id": "SSA-008"
+    },
+    {
+      "capability": "pruned_phi_placement",
+      "classification": "SEMANTIC_GAP",
+      "evidence": "No Rust live-in/definite-initialization filtered Cytron phi placement.",
+      "id": "SSA-009"
+    },
+    {
+      "capability": "ssa_renaming",
+      "classification": "SEMANTIC_GAP",
+      "evidence": "No Rust dominator-tree renaming or slot stack implementation.",
+      "id": "SSA-010"
+    },
+    {
+      "capability": "deterministic_block_order",
+      "classification": "TEST_GAP",
+      "evidence": "Python retains source block order, but cross-language parity is not frozen by a differential corpus.",
+      "id": "SSA-011"
+    },
+    {
+      "capability": "deterministic_value_numbering",
+      "classification": "TEST_GAP",
+      "evidence": "Python uses collision-aware preferred names/counters; Rust parity and normalization tests are absent.",
+      "id": "SSA-012"
+    },
+    {
+      "capability": "deterministic_phi_order",
+      "classification": "TEST_GAP",
+      "evidence": "Phi assembly is sorted, but cross-language predecessor/instruction order parity is untested.",
+      "id": "SSA-013"
+    },
+    {
+      "capability": "exception_cfg",
+      "classification": "SEMANTIC_GAP",
+      "evidence": "Wire carries invoke/throw/rethrow/propagate edges; Rust lowering behavior is absent.",
+      "id": "SSA-014"
+    },
+    {
+      "capability": "ownership_metadata",
+      "classification": "SEMANTIC_GAP",
+      "evidence": "Wire preserves lifecycle calls and transferred_storage, but Rust lowering has no ownership parity.",
+      "id": "SSA-015"
+    },
+    {
+      "capability": "aggregate_metadata",
+      "classification": "RUST_READY",
+      "evidence": "Schema v1 carries aggregate_shape and nominal struct metadata.",
+      "id": "SSA-016"
+    },
+    {
+      "capability": "class_interface_metadata",
+      "classification": "RUST_READY",
+      "evidence": "Schema v1 carries class ops, witness slots/tables and erased layouts.",
+      "id": "SSA-017"
+    },
+    {
+      "capability": "function_values_indirect_calls",
+      "classification": "RUST_READY",
+      "evidence": "Both wire schemas represent function_ref, call_indirect and invoke_indirect.",
+      "id": "SSA-018"
+    },
+    {
+      "capability": "source_debug_metadata",
+      "classification": "WIRE_GAP",
+      "evidence": "Only selected call/binary operations carry source_location; SSA has no module/function/block debug scope model.",
+      "id": "SSA-019"
+    },
+    {
+      "capability": "side_effect_contract",
+      "classification": "SEMANTIC_GAP",
+      "evidence": "Effects are Python class/property behavior and are not serialized as a lowering contract.",
+      "id": "SSA-020"
+    },
+    {
+      "capability": "pre_verification",
+      "classification": "ARCHITECTURE_GAP",
+      "evidence": "GeneralSSABuilder does not itself verify Initial IR; correctness depends on its caller.",
+      "id": "SSA-021"
+    },
+    {
+      "capability": "post_verification",
+      "classification": "RUST_READY",
+      "evidence": "Python GeneralSSABuilder always executes SSAVerifier after module construction.",
+      "id": "SSA-022"
+    },
+    {
+      "capability": "semantic_ssa_comparator",
+      "classification": "TEST_GAP",
+      "evidence": "No alpha/CFG-isomorphism semantic comparator exists for the future differential.",
+      "id": "SSA-023"
+    },
+    {
+      "capability": "rust_corpus_roundtrip",
+      "classification": "TEST_GAP",
+      "evidence": "No end-to-end corpus test currently sends Initial IR to Rust and receives SSA.",
+      "id": "SSA-024"
+    },
+    {
+      "capability": "pure_function_contract",
+      "classification": "ARCHITECTURE_GAP",
+      "evidence": "The result is deterministic for valid input, but implicit policy/code tables and required pre-verification are outside the value argument.",
+      "id": "SSA-025"
+    }
+  ],
+  "schema_version": 1,
+  "scope_constraints": {
+    "authority_changed": false,
+    "backend_changed": false,
+    "optimizer_changed": false,
+    "rp3_changed": false,
+    "rust_lowering_implemented": false,
+    "ssa_semantics_changed": false
+  },
+  "verdict": "RUST_SSA_LOWERING_NOT_READY"
+}

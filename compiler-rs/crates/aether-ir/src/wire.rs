@@ -1,4 +1,4 @@
-//! Schema-v1 serialization DTOs shared with the Python IR boundary.
+//! Frozen Initial IR schema-v1 DTOs and versioned Python SSA wire DTOs.
 //!
 //! These types describe only the wire representation. They deliberately do not
 //! convert to the owned Rust IR or perform semantic verification.
@@ -10,6 +10,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// The frozen Python/Rust interchange schema version represented here.
 pub const IR_SCHEMA_VERSION: i64 = 1;
+/// Lossless Python SSA interchange schema version.
+pub const SSA_SCHEMA_VERSION_V2: i64 = 2;
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -154,6 +156,20 @@ where
     }
 }
 
+fn deserialize_ssa_schema_version_v2<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let version = i64::deserialize(deserializer)?;
+    if version == SSA_SCHEMA_VERSION_V2 {
+        Ok(version)
+    } else {
+        Err(D::Error::custom(format_args!(
+            "unsupported SSA DTO schema version {version}; expected {SSA_SCHEMA_VERSION_V2}"
+        )))
+    }
+}
+
 /// Complete schema-versioned SSA module envelope.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
@@ -168,6 +184,87 @@ pub struct SSAModuleDTO {
     pub functions: Vec<SSAFunctionDTO>,
     /// Nominal definitions in retained module order.
     pub structs: Vec<IRStructDefinitionDTO>,
+}
+
+/// Explicit version-dispatched SSA wire envelope.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SSAWireModuleDTO {
+    /// Frozen, historically lossy schema-v1 contract.
+    V1(SSAModuleDTO),
+    /// Lossless schema-v2 contract.
+    V2(SSAModuleV2DTO),
+}
+
+impl Serialize for SSAWireModuleDTO {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::V1(value) => value.serialize(serializer),
+            Self::V2(value) => value.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SSAWireModuleDTO {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let version = value
+            .get("schema_version")
+            .and_then(serde_json::Value::as_i64)
+            .ok_or_else(|| D::Error::custom("SSA module schema_version must be an integer"))?;
+        match version {
+            IR_SCHEMA_VERSION => serde_json::from_value(value)
+                .map(Self::V1)
+                .map_err(D::Error::custom),
+            SSA_SCHEMA_VERSION_V2 => serde_json::from_value(value)
+                .map(Self::V2)
+                .map_err(D::Error::custom),
+            _ => Err(D::Error::custom(format_args!(
+                "unsupported SSA DTO schema version {version}"
+            ))),
+        }
+    }
+}
+
+/// Lossless schema-v2 SSA module envelope. This is a wire DTO only.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[allow(missing_docs)]
+pub struct SSAModuleV2DTO {
+    #[serde(deserialize_with = "deserialize_ssa_schema_version_v2")]
+    pub schema_version: i64,
+    #[serde(deserialize_with = "deserialize_ssa_representation")]
+    pub representation: String,
+    pub functions: Vec<SSAFunctionV2DTO>,
+    pub structs: Vec<IRStructDefinitionDTO>,
+}
+
+/// Schema-v2 SSA function container.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[allow(missing_docs)]
+pub struct SSAFunctionV2DTO {
+    pub name: String,
+    pub parameters: Vec<IRParameterDTO>,
+    pub return_type: IRTypeDTO,
+    pub blocks: Vec<SSABasicBlockV2DTO>,
+    pub entry_block: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub may_throw: bool,
+}
+
+/// Schema-v2 SSA block.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[allow(missing_docs)]
+pub struct SSABasicBlockV2DTO {
+    pub name: String,
+    pub instructions: Vec<SSAInstructionV2DTO>,
 }
 
 /// Function container for value-based SSA.
@@ -329,6 +426,125 @@ impl<'de> Deserialize<'de> for SSAInstructionDTO {
             ));
         }
         Ok(Self::Ordinary(instruction))
+    }
+}
+
+/// The eight schema-v2 instruction shapes whose existing SSA semantics require
+/// an explicit bounds-check bit.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[allow(missing_docs)]
+pub enum SSABoundsCheckedInstructionV2DTO {
+    ArrayGet {
+        result: IRValueDTO,
+        array: IRValueDTO,
+        index: IRValueDTO,
+        borrowed: bool,
+        borrow_scope: NullableDTO<String>,
+        source_location: NullableDTO<IRSourceLocationDTO>,
+        bounds_checked: bool,
+    },
+    ArraySet {
+        array: IRValueDTO,
+        index: IRValueDTO,
+        value: IRValueDTO,
+        bounds_checked: bool,
+    },
+    ListGet {
+        result: IRValueDTO,
+        list_value: IRValueDTO,
+        index: IRValueDTO,
+        borrowed: bool,
+        borrow_scope: NullableDTO<String>,
+        source_location: NullableDTO<IRSourceLocationDTO>,
+        bounds_checked: bool,
+    },
+    ListSet {
+        list_value: IRValueDTO,
+        index: IRValueDTO,
+        value: IRValueDTO,
+        bounds_checked: bool,
+    },
+    VectorGet {
+        result: IRValueDTO,
+        vector: IRValueDTO,
+        index: IRValueDTO,
+        bounds_checked: bool,
+    },
+    VectorSet {
+        vector: IRValueDTO,
+        index: IRValueDTO,
+        value: IRValueDTO,
+        bounds_checked: bool,
+    },
+    MatrixGet {
+        result: IRValueDTO,
+        matrix: IRValueDTO,
+        row: IRValueDTO,
+        column: IRValueDTO,
+        shape: [i64; 1],
+        bounds_checked: bool,
+    },
+    MatrixSet {
+        matrix: IRValueDTO,
+        row: IRValueDTO,
+        column: IRValueDTO,
+        value: IRValueDTO,
+        shape: [i64; 1],
+        bounds_checked: bool,
+    },
+}
+
+/// Strict schema-v2 SSA instruction DTO.
+#[derive(Clone, Debug, PartialEq)]
+pub enum SSAInstructionV2DTO {
+    /// One of the eight collection access shapes extended by schema-v2.
+    BoundsChecked(SSABoundsCheckedInstructionV2DTO),
+    /// Any unchanged SSA instruction shape inherited byte-for-byte from v1.
+    Unchanged(SSAInstructionDTO),
+}
+
+impl Serialize for SSAInstructionV2DTO {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::BoundsChecked(value) => value.serialize(serializer),
+            Self::Unchanged(value) => value.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SSAInstructionV2DTO {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let kind = value
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| D::Error::custom("SSA instruction.kind must be a string"))?;
+        if matches!(
+            kind,
+            "array_get"
+                | "array_set"
+                | "list_get"
+                | "list_set"
+                | "vector_get"
+                | "vector_set"
+                | "matrix_get"
+                | "matrix_set"
+        ) {
+            serde_json::from_value(value)
+                .map(Self::BoundsChecked)
+                .map_err(D::Error::custom)
+        } else {
+            serde_json::from_value(value)
+                .map(Self::Unchanged)
+                .map_err(D::Error::custom)
+        }
     }
 }
 
