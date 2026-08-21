@@ -46,6 +46,25 @@ IDENTITY = {
     "capabilities": ["verify"],
 }
 ACCEPTED = {"protocol_version": 1, "status": "accepted"}
+MAX_SUBPROCESS_DIAGNOSTIC_CHARACTERS = 3_000
+
+
+def _subprocess_diagnostics(
+    completed: subprocess.CompletedProcess[str],
+) -> str:
+    def bounded(value: str) -> str:
+        if len(value) <= MAX_SUBPROCESS_DIAGNOSTIC_CHARACTERS:
+            return value
+        marker = f"\n...[truncated; original_chars={len(value)}]\n"
+        remaining = MAX_SUBPROCESS_DIAGNOSTIC_CHARACTERS - len(marker)
+        head = remaining // 2
+        return value[:head] + marker + value[-(remaining - head) :]
+
+    return (
+        f"subprocess exited with status {completed.returncode}\n"
+        f"===== stdout =====\n{bounded(completed.stdout)}\n"
+        f"===== stderr =====\n{bounded(completed.stderr)}"
+    )
 
 
 def _identity_command(
@@ -252,10 +271,11 @@ def test_packaging_script_produces_resolvable_release_archive(
             "--arch",
             "x86_64",
         ],
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
+    assert completed.returncode == 0, _subprocess_diagnostics(completed)
     artifact = Path(completed.stdout.strip())
     package_directory = tmp_path / "installed"
     package_directory.mkdir()

@@ -33,6 +33,9 @@ SSA_SHADOW_PRODUCT_VERSION = "0.1.0"
 SSA_SHADOW_PACKAGE_MANIFEST_SCHEMA_VERSION = 1
 SSA_SHADOW_CAPABILITIES = ("lower_verified_ssa_shadow",)
 _SSA_SHADOW_BASENAME = "aether-ssa-shadow"
+RUST_SSA_QUALIFICATION_EXECUTABLE_ENV = (
+    "AETHER_INTERNAL_RUST_SSA_QUALIFICATION_EXECUTABLE"
+)
 
 _SSA_SHADOW_PLATFORMS = {
     "linux-x86_64": "x86_64-unknown-linux-gnu",
@@ -257,10 +260,47 @@ class ProductionRustSSALoweringClient:
 _PRODUCTION_RUST_SSA_CLIENT = ProductionRustSSALoweringClient()
 atexit.register(_PRODUCTION_RUST_SSA_CLIENT.close)
 
+_QUALIFICATION_RUST_SSA_CLIENTS: dict[Path, PersistentRustSSALoweringClient] = {}
+_QUALIFICATION_RUST_SSA_CLIENTS_LOCK = threading.Lock()
+
+
+def _close_qualification_rust_ssa_clients() -> None:
+    with _QUALIFICATION_RUST_SSA_CLIENTS_LOCK:
+        clients = tuple(_QUALIFICATION_RUST_SSA_CLIENTS.values())
+        _QUALIFICATION_RUST_SSA_CLIENTS.clear()
+    for client in clients:
+        client.close()
+
+
+atexit.register(_close_qualification_rust_ssa_clients)
+
 
 def production_rust_ssa_lowering_client() -> ProductionRustSSALoweringClient:
     """Return the process-wide persistent production companion client."""
     return _PRODUCTION_RUST_SSA_CLIENT
+
+
+def default_rust_ssa_lowering_client() -> RustSSALoweringClient:
+    """Select the production client unless a test qualification propagated one.
+
+    The internal environment override is installed only by the pytest
+    qualification harness.  It is deliberately an exact absolute executable,
+    not a production discovery path or fallback.
+    """
+    raw_executable = os.environ.get(RUST_SSA_QUALIFICATION_EXECUTABLE_ENV)
+    if raw_executable is None:
+        return production_rust_ssa_lowering_client()
+    executable = Path(raw_executable)
+    if not executable.is_absolute():
+        raise RuntimeError(
+            "Rust SSA qualification executable must be an absolute path"
+        )
+    with _QUALIFICATION_RUST_SSA_CLIENTS_LOCK:
+        client = _QUALIFICATION_RUST_SSA_CLIENTS.get(executable)
+        if client is None:
+            client = PersistentRustSSALoweringClient(executable)
+            _QUALIFICATION_RUST_SSA_CLIENTS[executable] = client
+        return client
 
 
 def canonical_rust_ssa_shadow_platform_id(

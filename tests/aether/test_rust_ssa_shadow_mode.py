@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import shutil
@@ -17,8 +18,12 @@ from aether.ssa.shadow import (
     SSALoweringAuthorityMode,
     SSAShadowFailure,
     PersistentRustSSALoweringClient,
+    ProductionRustSSALoweringClient,
+    RUST_SSA_QUALIFICATION_EXECUTABLE_ENV,
+    default_rust_ssa_lowering_client,
     discover_packaged_rust_ssa_shadow,
     lower_with_rust_shadow,
+    production_rust_ssa_lowering_client,
 )
 
 
@@ -87,6 +92,25 @@ def test_pipeline_shadow_selection_is_explicit() -> None:
     result = SSAPipeline(authority_configuration=configuration, rust_shadow_client=client).run(IRModule())
     assert result.ssa_module.functions == []
     assert client.request_count == 1
+
+
+def test_qualification_executable_override_is_exact_and_test_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executable = (tmp_path / "exact" / "aether-ssa-shadow").resolve()
+    monkeypatch.setenv(
+        RUST_SSA_QUALIFICATION_EXECUTABLE_ENV, os.fspath(executable)
+    )
+
+    selected = default_rust_ssa_lowering_client()
+
+    assert isinstance(selected, PersistentRustSSALoweringClient)
+    assert selected.command[0] == os.fspath(executable)
+
+    monkeypatch.delenv(RUST_SSA_QUALIFICATION_EXECUTABLE_ENV)
+    restored = default_rust_ssa_lowering_client()
+    assert isinstance(restored, ProductionRustSSALoweringClient)
+    assert restored is production_rust_ssa_lowering_client()
 
 
 @pytest.fixture(scope="module")

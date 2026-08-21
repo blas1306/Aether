@@ -23,6 +23,21 @@ DEFAULT_COMPANION = ROOT / "compiler-rs/target/debug/aether-ssa-shadow"
 MAX_FAILURES = 100
 MAX_DIAGNOSTIC_CHARACTERS = 6_000
 
+_SEMANTIC_MISMATCH_PATTERN = re.compile(
+    r'''["']classification["']\s*:\s*["']semantic_mismatch["']'''
+)
+_INFRASTRUCTURE_PATTERNS = (
+    "packaged Rust SSA companion manifest was not found",
+    "Rust SSA companion startup failure",
+    '"classification": "rust_infrastructure_failure"',
+    "verifier release binary does not exist",
+)
+_ENVIRONMENTAL_PATTERNS = (
+    "Cannot import 'setuptools.build_meta'",
+    'No module named \'setuptools\'',
+    "LeakSanitizer cannot run under ptrace",
+)
+
 
 def _run(
     arguments: list[str],
@@ -70,7 +85,9 @@ def _bounded(value: str) -> str:
     if len(value) <= MAX_DIAGNOSTIC_CHARACTERS:
         return value
     marker = f"...[truncated; original_chars={len(value)}]"
-    return value[: MAX_DIAGNOSTIC_CHARACTERS - len(marker)] + marker
+    remaining = MAX_DIAGNOSTIC_CHARACTERS - len(marker)
+    head = remaining // 2
+    return value[:head] + marker + value[-(remaining - head) :]
 
 
 def _node_id(testcase: ET.Element) -> str:
@@ -165,6 +182,31 @@ def _fallback_failure(
     }
 
 
+def _classify_failures(failures: list[dict[str, str]]) -> dict[str, int]:
+    counts = {
+        "semantic_mismatches": 0,
+        "infrastructure_failures": 0,
+        "environmental_failures": 0,
+        "unclassified_test_failures": 0,
+    }
+    for failure in failures:
+        evidence = "\n".join(
+            failure.get(field, "")
+            for field in ("error_summary", "stdout", "stderr")
+        )
+        if _SEMANTIC_MISMATCH_PATTERN.search(evidence):
+            classification = "semantic_mismatches"
+        elif any(pattern in evidence for pattern in _ENVIRONMENTAL_PATTERNS):
+            classification = "environmental_failures"
+        elif any(pattern in evidence for pattern in _INFRASTRUCTURE_PATTERNS):
+            classification = "infrastructure_failures"
+        else:
+            classification = "unclassified_test_failures"
+        failure["classification"] = classification
+        counts[classification] += 1
+    return counts
+
+
 def _write_pytest_log(
     path: Path, result: subprocess.CompletedProcess[str]
 ) -> None:
@@ -195,6 +237,36 @@ def _sha256(path: Path) -> str | None:
         return digest.hexdigest()
     except OSError:
         return None
+
+
+def _build_required_rust_artifacts(cargo: str) -> None:
+    subprocess.run(
+        [
+            cargo,
+            "build",
+            "--locked",
+            "-p",
+            "aether-verifier",
+            "--bin",
+            "aether-ssa-shadow",
+            "-p",
+            "aether-ir-verifier",
+        ],
+        cwd=ROOT / "compiler-rs",
+        check=True,
+    )
+    subprocess.run(
+        [
+            cargo,
+            "build",
+            "--release",
+            "--locked",
+            "-p",
+            "aether-ir-verifier",
+        ],
+        cwd=ROOT / "compiler-rs",
+        check=True,
+    )
 
 
 def _environment(executable: Path) -> dict[str, object]:
@@ -237,11 +309,7 @@ def main() -> int:
         cargo = shutil.which("cargo")
         if cargo is None:
             raise RuntimeError("cargo is required")
-        subprocess.run(
-            [cargo, "build", "-p", "aether-verifier", "--bin", "aether-ssa-shadow"],
-            cwd=ROOT / "compiler-rs",
-            check=True,
-        )
+        _build_required_rust_artifacts(cargo)
 
     safe_shadow_option = (
         f"--rust-ssa-shadow-qualification-executable={args.executable.resolve()}"
@@ -271,6 +339,10 @@ def main() -> int:
             )
         ]
         reported_failure_count = max(reported_failure_count, 1)
+    failure_classification = _classify_failures(failures)
+    failure_classification["unclassified_test_failures"] += max(
+        0, reported_failure_count - len(failures)
+    )
     native_initial = _run(
         [safe_shadow_option, "tests/aether/test_native_exceptions.py"],
         lsan_compatible=False,
@@ -305,8 +377,8 @@ def main() -> int:
     native_compatible_passed = _count(native_compatible, "passed")
     passed = _qualification_passed(safe, promotion, native_compatible)
     report = {
-        "artifact_schema_version": 1,
-        "milestone": "RUST-3.5b",
+        "artifact_schema_version": 2,
+        "milestone": "RUST-3.5c",
         "qualification_revision": args.revision,
         "decision": (
             "RUST_SSA_AUTHORITY_REQUALIFICATION_FULL_SUITE_PASS"
@@ -318,7 +390,9 @@ def main() -> int:
         "passed": _count(safe, "passed"),
         "failed": _count(safe, "failed"),
         "skipped": _count(safe, "skipped"),
-        "real_semantic_failures": 0 if safe.returncode == 0 else _count(safe, "failed"),
+        **failure_classification,
+        # Compatibility alias retained for the RUST-3.5b aggregate reader.
+        "real_semantic_failures": failure_classification["semantic_mismatches"],
         "failures": failures,
         "reported_failure_count": reported_failure_count,
         "failures_truncated": reported_failure_count > len(failures),

@@ -138,7 +138,9 @@ jobs:
         with: {python-version: "3.13"}
       - uses: dtolnay/rust-toolchain@stable
         with: {toolchain: "1.85"}
-      - run: python -m pip install -r requirements.txt pytest
+      - run: >-
+          python -m pip install -r requirements.txt pytest
+          'setuptools>=77' 'wheel>=0.45'
       - run: >-
           python scripts/qualify_rust_ssa_authority_full_suite.py
           --revision "${{ github.sha }}" --build

@@ -175,7 +175,14 @@ def test_failed_main_writes_diagnostics_and_remains_blocked(
         report["decision"]
         == "RUST_SSA_AUTHORITY_REQUALIFICATION_FULL_SUITE_BLOCKED"
     )
-    assert report["failed"] == report["real_semantic_failures"] == 2
+    assert report["failed"] == 2
+    assert report["semantic_mismatches"] == report["real_semantic_failures"] == 0
+    assert report["infrastructure_failures"] == 0
+    assert report["environmental_failures"] == 0
+    assert report["unclassified_test_failures"] == 2
+    assert {row["classification"] for row in report["failures"]} == {
+        "unclassified_test_failures"
+    }
     assert [row["node_id"] for row in report["failures"]] == [
         "tests/synthetic.py::test_first",
         "tests/synthetic.py::test_second",
@@ -228,6 +235,10 @@ def test_successful_main_keeps_pass_result_without_failures(
     )
     assert report["passed"] == 4828
     assert report["failed"] == report["real_semantic_failures"] == 0
+    assert report["semantic_mismatches"] == 0
+    assert report["infrastructure_failures"] == 0
+    assert report["environmental_failures"] == 0
+    assert report["unclassified_test_failures"] == 0
     assert report["failures"] == []
     assert report["reported_failure_count"] == 0
     assert report["failures_truncated"] is False
@@ -299,3 +310,54 @@ def test_log_and_environment_preserve_complete_diagnostic_evidence(
     assert isinstance(executable, dict)
     assert executable["resolved_path"] == str(Path(sys.executable).resolve())
     assert executable["sha256"]
+
+
+def test_failure_classification_requires_concrete_evidence() -> None:
+    qualifier = _qualifier_module()
+    failures = [
+        {
+            "node_id": "tests/semantic.py::test_mismatch",
+            "error_summary": (
+                'SSAShadowFailure: {"classification": "semantic_mismatch"}'
+            ),
+            "phase": "call",
+            "stdout": "",
+            "stderr": "",
+        },
+        {
+            "node_id": "tests/infrastructure.py::test_companion",
+            "error_summary": (
+                "packaged Rust SSA companion manifest was not found"
+            ),
+            "phase": "call",
+            "stdout": "",
+            "stderr": "",
+        },
+        {
+            "node_id": "tests/environment.py::test_wheel",
+            "error_summary": "Cannot import 'setuptools.build_meta'",
+            "phase": "call",
+            "stdout": "",
+            "stderr": "",
+        },
+        {
+            "node_id": "tests/generic.py::test_assertion",
+            "error_summary": "AssertionError: unrelated failure",
+            "phase": "call",
+            "stdout": "",
+            "stderr": "",
+        },
+    ]
+
+    assert qualifier._classify_failures(failures) == {
+        "semantic_mismatches": 1,
+        "infrastructure_failures": 1,
+        "environmental_failures": 1,
+        "unclassified_test_failures": 1,
+    }
+    assert [failure["classification"] for failure in failures] == [
+        "semantic_mismatches",
+        "infrastructure_failures",
+        "environmental_failures",
+        "unclassified_test_failures",
+    ]

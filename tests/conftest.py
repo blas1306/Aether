@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -21,6 +22,7 @@ from rust_authority_canary_harness import (
 from aether.pipeline import SSAPipeline
 from aether.ssa.shadow import (
     PersistentRustSSALoweringClient,
+    RUST_SSA_QUALIFICATION_EXECUTABLE_ENV,
     SSALoweringAuthorityConfiguration,
     SSALoweringAuthorityMode,
 )
@@ -161,8 +163,15 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         )
     executable = authority_executable or shadow_executable
     if executable is not None:
+        resolved_executable = Path(executable).resolve()
+        previous_qualification_executable = os.environ.get(
+            RUST_SSA_QUALIFICATION_EXECUTABLE_ENV
+        )
+        os.environ[RUST_SSA_QUALIFICATION_EXECUTABLE_ENV] = os.fspath(
+            resolved_executable
+        )
         client = PersistentRustSSALoweringClient(
-            Path(executable).resolve(), timeout_seconds=60
+            resolved_executable, timeout_seconds=60
         )
         original_init = SSAPipeline.__init__
 
@@ -192,7 +201,7 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         setattr(
             session.config,
             _SSA_QUALIFICATION_ATTRIBUTE,
-            (original_init, client),
+            (original_init, client, previous_qualification_executable),
         )
 
 
@@ -225,9 +234,15 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
         session.config, _SSA_QUALIFICATION_ATTRIBUTE, None
     )
     if ssa_qualification is not None:
-        original_init, client = ssa_qualification
+        original_init, client, previous_qualification_executable = ssa_qualification
         SSAPipeline.__init__ = original_init  # type: ignore[method-assign]
         client.close()
+        if previous_qualification_executable is None:
+            os.environ.pop(RUST_SSA_QUALIFICATION_EXECUTABLE_ENV, None)
+        else:
+            os.environ[RUST_SSA_QUALIFICATION_EXECUTABLE_ENV] = (
+                previous_qualification_executable
+            )
     harness = _shadow_harness(session.config)
     if harness is not None:
         harness.set_active_test(None)

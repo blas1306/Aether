@@ -11,6 +11,39 @@ import venv
 
 
 ROOT = Path(__file__).resolve().parents[1]
+MAX_SUBPROCESS_DIAGNOSTIC_CHARACTERS = 3_000
+
+
+def _subprocess_diagnostics(
+    completed: subprocess.CompletedProcess[str],
+) -> str:
+    def bounded(value: str) -> str:
+        if len(value) <= MAX_SUBPROCESS_DIAGNOSTIC_CHARACTERS:
+            return value
+        marker = f"\n...[truncated; original_chars={len(value)}]\n"
+        remaining = MAX_SUBPROCESS_DIAGNOSTIC_CHARACTERS - len(marker)
+        head = remaining // 2
+        return value[:head] + marker + value[-(remaining - head) :]
+
+    return (
+        f"subprocess exited with status {completed.returncode}\n"
+        f"===== stdout =====\n{bounded(completed.stdout)}\n"
+        f"===== stderr =====\n{bounded(completed.stderr)}"
+    )
+
+
+def _run_checked(
+    arguments: list[str], *, cwd: Path
+) -> subprocess.CompletedProcess[str]:
+    completed = subprocess.run(
+        arguments,
+        cwd=cwd,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, _subprocess_diagnostics(completed)
+    return completed
 
 
 def test_clean_wheel_install_has_rust_verifier_metadata(
@@ -18,7 +51,7 @@ def test_clean_wheel_install_has_rust_verifier_metadata(
     rust_verifier_executable: Path,
 ) -> None:
     wheel_directory = tmp_path / "wheel"
-    subprocess.run(
+    _run_checked(
         [
             sys.executable,
             "-m",
@@ -31,9 +64,6 @@ def test_clean_wheel_install_has_rust_verifier_metadata(
             str(ROOT),
         ],
         cwd=tmp_path,
-        check=True,
-        capture_output=True,
-        text=True,
     )
     wheel = next(wheel_directory.glob("aether_language-*.whl"))
     environment = tmp_path / "venv"
@@ -52,12 +82,9 @@ def test_clean_wheel_install_has_rust_verifier_metadata(
         sysconfig.get_path("purelib") + "\n",
         encoding="utf-8",
     )
-    subprocess.run(
+    _run_checked(
         [str(python), "-m", "pip", "install", "--no-deps", str(wheel)],
         cwd=tmp_path,
-        check=True,
-        capture_output=True,
-        text=True,
     )
 
     clean_environment = os.environ.copy()

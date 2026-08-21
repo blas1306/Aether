@@ -208,9 +208,9 @@ class SSAPipeline:
         from .ssa import GeneralSSABuilder, SSABuilder
         from .ssa.shadow import (
             SSALoweringAuthorityConfiguration, SSALoweringAuthorityMode,
+            default_rust_ssa_lowering_client,
             lower_with_rust_authority,
             lower_with_rust_shadow,
-            production_rust_ssa_lowering_client,
         )
 
         if self.builder == "pattern":
@@ -226,7 +226,7 @@ class SSAPipeline:
                 client = (
                     self.rust_shadow_client
                     if self.rust_shadow_client is not None
-                    else production_rust_ssa_lowering_client()
+                    else default_rust_ssa_lowering_client()
                 )
                 authoritative, report = lower_with_rust_shadow(module, client)  # type: ignore[arg-type]
                 self.last_authority_report = report
@@ -236,7 +236,7 @@ class SSAPipeline:
                 client = (
                     self.rust_shadow_client
                     if self.rust_shadow_client is not None
-                    else production_rust_ssa_lowering_client()
+                    else default_rust_ssa_lowering_client()
                 )
                 authoritative, report = lower_with_rust_authority(module, client)  # type: ignore[arg-type]
                 self.last_authority_report = report
