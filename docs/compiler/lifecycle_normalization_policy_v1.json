@@ -1,0 +1,109 @@
+{
+  "abstract_contract": {
+    "input": "ordered verified Initial IR module plus policy version 1",
+    "output": "ordered normalized Initial IR module or deterministic error",
+    "required_context": ["ordered nominal struct definitions", "ordered functions, parameters, blocks and instructions", "complete IR types and operands", "source locations and instruction metadata"],
+    "scope": "module-level entry with function-local value-use/ownership state; nominal type classification requires module structs"
+  },
+  "cfg_and_exceptions": {
+    "pseudo_instruction_expansion": "never creates/removes/splits blocks or edges and never changes a terminator or exceptional target",
+    "all_blocks": "pseudo-instructions are expanded in normal, exceptional, cleanup, continuation, and unreachable blocks alike",
+    "constructor_repair": "the production lifecycle pass separately rewrites owning constructor invokes: each gets a unique exceptional cleanup trampoline containing catch_entry, release(receiver), propagate; an owning struct receiver also gets release(receiver) prepended to its normal continuation; owning class receivers do not",
+    "constructor_order": "scan input blocks and instructions in order; cleanup names use the least constructor.receiver.cleanupN not colliding with an input block; normal releases are prepended in invoke encounter order; cleanup blocks are appended in encounter order"
+  },
+  "dependencies": {
+    "hidden_implementation_dependencies": [],
+    "instruction_effect_registry": "not consulted",
+    "module_input": ["struct definitions for recursive nominal traits", "function list"],
+    "function_derived_state": ["all operand occurrences", "set of used values", "owned-result set", "used value names", "remaining use counts"],
+    "implementation_dependency_graph": ["expand_lifecycle -> lifecycle-helper sentinel/domain dispatch", "LifecycleExpander.expand -> LifecycleTypeRegistry(module.structs)", "_expand_function -> operand/use and owned-result census", "_expand_function -> _expand_instruction in block/instruction order", "_expand_instruction -> traits/_loaded/_default_value/_temporary/_contains_interface", "_expand_function -> return-transfer fold", "expanded function -> constructor invoke ownership repair"]
+  },
+  "deterministic_errors": {
+    "legal_input": "Rust-authoritatively verified Initial IR makes all six pseudo-expansions total",
+    "policy_version": "LifecycleNormalizationPolicyError: Unsupported lifecycle normalization policy version <repr>; expected 1",
+    "invalid_internal_type_state": "ValueError using the stable messages defined by type_traits.errors",
+    "mixed_domain": "policy error: input containing a lifecycle pseudo-instruction and an internal ownership helper is neither legal unnormalized nor normalized IR"
+  },
+  "expansions": {
+    "IRAssign": {
+      "primitive": ["load(source,tmp) iff source is storage", "store(destination,source-or-tmp)"],
+      "owned_interface_or_containing_interface": ["load source iff storage", "interface_copy_owned(source,copy)", "load(destination,old)", "store(destination,copy)", "release(old)"],
+      "owned_non_interface": ["load source iff storage", "retain(source) unless source is an owned temporary, in which case consume that ownership", "load(destination,old)", "store(destination,source)", "release(old)"],
+      "aliasing": "acquire replacement before loading/releasing old value, so self-assignment is safe"
+    },
+    "IRCopyInit": {
+      "primitive": ["load(source,tmp) iff source is storage", "store(destination,source-or-tmp)"],
+      "owned_interface_or_containing_interface": ["load source iff storage", "interface_copy_owned(source,copy)", "store(destination,copy)"],
+      "owned_non_interface": ["load source iff storage", "retain(source) unless source is an owned temporary, in which case consume that ownership", "store(destination,source)"]
+    },
+    "IRDestroy": {
+      "needs_destroy_false": [],
+      "needs_destroy_true": ["load(value,tmp)", "release(tmp)"]
+    },
+    "IRInitDefault": {
+      "all": ["emit default_value(type) recursively", "store(destination,default-result)"],
+      "defaults": {"Array": "array_new(empty)", "List": "list_new(empty)", "Nullable": "const null", "Vector": "vector_new(empty,orientation)", "bool": "const false", "complex_double_float": "const 0.0", "enum": "const first declared variant with ordinal/payload zero", "int": "const 0", "string": "const empty string", "struct": "defaults in declared field order then struct_new"}
+    },
+    "IRMoveInit": {
+      "base": ["load(source,tmp)", "store(destination,tmp)"],
+      "source_reset": "append default_value(source.type), store(source,default) iff needs_destroy and supports_default; otherwise no source store"
+    },
+    "IRRelocate": {
+      "all": ["load(source,tmp)", "store(destination,tmp)"],
+      "count": "verified positive count is semantically validated before normalization but does not multiply the one typed storage value and emits no operand"
+    }
+  },
+  "idempotence": {
+    "domain": "single-pass only: verified pre-normalization Initial IR containing no internal retain, release, or interface_copy_owned helper; output is normalized Initial IR and is not generally a legal input",
+    "rule": "normalization is intentionally not idempotent because it also processes ordinary ownership-producing/consuming instructions; a second pass can change helper-free normalized functions",
+    "production_sentinel": "an input module containing retain, release, or interface_copy_owned is returned by identity; this compatibility shortcut is not a proof that every normalized helper-free module is a fixed point"
+  },
+  "implementation_anchors": {"default_tokens": ["IRStructNew", "IRArrayNew", "IRListNew", "IRVectorNew", "IREnumConstant"]},
+  "input_fields": {
+    "IRAssign": ["destination", "source", "source_location"],
+    "IRCopyInit": ["destination", "source", "source_location"],
+    "IRDestroy": ["value", "source_location"],
+    "IRInitDefault": ["destination", "source_location"],
+    "IRMoveInit": ["destination", "source", "source_location"],
+    "IRRelocate": ["destination", "source", "count", "source_location"]
+  },
+  "instruction_inventory": ["IRInitDefault", "IRCopyInit", "IRMoveInit", "IRAssign", "IRDestroy", "IRRelocate"],
+  "lifecycle_normalization_policy_version": 1,
+  "metadata": {
+    "generated": "generated loads/stores/constants/calls/aggregate operations have no source_location; they carry exact operand/result types and operation-specific metadata stated in expansions",
+    "preserved_module_function_block": "module struct order, function order, function name/parameters/return_type/may_throw, block order/name and all non-rewritten instruction fields are preserved",
+    "pseudo_source_location": "consumed and not copied because normalized operations have no normative source-location attribution",
+    "return_transfer": "IRReturn.transferred_storage is removed after its verified ownership obligation is discharged; trailing return-slot store/load may be folded without changing the returned value",
+    "unrelated": "aggregate shape, field index/name, class/interface witness data, erased layout, types and all metadata on copied ordinary instructions are unchanged"
+  },
+  "ordering": {
+    "adjacent": "expand each completely before the next instruction",
+    "generated_names": "per function, collect parameter and every recursively occurring IRValue name; start at max numeric name + 1 or zero; allocate the next unused decimal integer monotonically",
+    "module": "functions in input order; structs retained in input order",
+    "terminators": "verified pseudo-instructions occur before a block terminator and expansions remain at that position",
+    "traversal": "function order, then input block order including unreachable blocks, then instruction order",
+    "unordered_containers": "sets/counters affect membership only; no iteration order is emitted"
+  },
+  "ownership_state": {
+    "owned_temporary_definition": "results needing destruction from calls, indirect/interface calls, string concatenation, non-borrowed collection extraction, collection construction/copy/slice, struct new/set, method-result new, class new, interface construct, and class get",
+    "copy_or_assign": "an owned source temporary transfers its one ownership into destination; otherwise copy retains or uses interface_copy_owned",
+    "destroy": "release exactly once only for needs_destroy types",
+    "move_relocate": "bitwise typed transfer; source lifetime was consumed by verification; move resets destructible defaultable storage to a valid empty value solely for later concrete storage safety; relocate does not reset",
+    "transferred_storage": "verified return exempts exactly the named live owner; normalization discharges it via preceding move/copy/cleanup, strips the marker, and may fold the return-slot store/load",
+    "whole_function": "owned-result and use census is derived from the complete ordered function; no external mutable state or whole-program analysis"
+  },
+  "qualification": {"adversarial_exact_sequence": true, "corpus_expected_denominator": 116, "decision": "LIFECYCLE_NORMALIZATION_POLICY_V1_QUALIFIED", "independent_checker": "scripts/check_lifecycle_normalization_policy_v1.py"},
+  "type_traits": {
+    "Array_List": [false, true, true, true],
+    "ClassRef_Interface": [false, true, true, false],
+    "Function": [true, true, false, false],
+    "Matrix": [true, true, false, false],
+    "Nullable": "trivially_copyable follows inner; relocatable true; needs_destroy follows inner; supports_default true",
+    "String": [false, true, true, true],
+    "Struct_MethodResult": "recursive conjunction of copyable/relocatable/default and disjunction of needs_destroy in declared field order",
+    "Vector": "trivial copy/relocate/no destroy; default only for row or column orientation",
+    "errors": {"empty_enum_default": "enum '<name>' has no default variant", "missing_struct": "nominal struct '<name>' has no definition", "recursive_struct": "recursive layout", "unsupported_default": "type '<type>' has no lifecycle default", "unknown_type": "unknown IR type", "void": "void has no storage"},
+    "tuple_order": ["trivially_copyable", "trivially_relocatable", "needs_destroy", "supports_default"],
+    "value_scalars": ["Int", "Float", "Double", "Bool", "Complex", "Enum"]
+  }
+}

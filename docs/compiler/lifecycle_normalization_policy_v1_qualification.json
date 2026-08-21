@@ -1,0 +1,1255 @@
+{
+  "adversarial": {
+    "cases": [
+      "all six independently/adjacent",
+      "primitive exact sequence",
+      "owned copy/assign/destroy",
+      "interface copy",
+      "input immutability and single-pass domain"
+    ],
+    "passed": true,
+    "test": "tests/aether/test_lifecycle_normalization_policy_v1.py"
+  },
+  "audit": "RUST-3.B1-lifecycle-normalization-policy-v1",
+  "corpus": {
+    "files": [
+      {
+        "lifecycle_counts": {
+          "IRAssign": 5,
+          "IRCopyInit": 5,
+          "IRDestroy": 4,
+          "IRMoveInit": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "benchmarks/arithmetic.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 3,
+          "IRCopyInit": 6,
+          "IRDestroy": 7
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "benchmarks/array_sum.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 7,
+          "IRDestroy": 4
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "benchmarks/if_else.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 3,
+          "IRCopyInit": 6,
+          "IRDestroy": 7
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "benchmarks/list_for_sum.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 1,
+          "IRCopyInit": 4,
+          "IRDestroy": 4
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "benchmarks/list_push.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 8,
+          "IRDestroy": 13
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "benchmarks/matrix_mul.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 3,
+          "IRCopyInit": 5,
+          "IRDestroy": 5
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "benchmarks/nested_loops.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 4,
+          "IRDestroy": 1,
+          "IRMoveInit": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "benchmarks/sum_to.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 7,
+          "IRDestroy": 6
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "benchmarks/vector_dot.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 4,
+          "IRDestroy": 1,
+          "IRMoveInit": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "benchmarks/while_countdown.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 5,
+          "IRDestroy": 6
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "corpus/exceptions/positive/cleanup_during_unwinding.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "corpus/exceptions/positive/constructor_failure.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "corpus/exceptions/positive/function_recursion.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "corpus/exceptions/positive/indirect_call.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 3
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "corpus/exceptions/positive/method_interface_dispatch.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4,
+          "IRDestroy": 4
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "corpus/exceptions/positive/multiple_and_root_catches.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "corpus/exceptions/positive/nested_rethrow_chain.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "corpus/exceptions/positive/owned_aggregates_arc.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "corpus/exceptions/positive/panic_vs_exception.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "corpus/exceptions/positive/root_reporting.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "corpus/exceptions/positive/throw_and_typed_catch.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 3,
+          "IRCopyInit": 3,
+          "IRDestroy": 2,
+          "IRMoveInit": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/ControlesALN/1erControl/Ej1/Biseccion.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 3,
+          "IRCopyInit": 4,
+          "IRDestroy": 3
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/ControlesALN/1erControl/Ej2/PuntoFijo.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 3,
+          "IRCopyInit": 9,
+          "IRDestroy": 5
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/ControlesALN/1erControl/Ej2/ej2.ae"
+      },
+      {
+        "lifecycle_counts": {},
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/ControlesALN/2doControl/Ej2/ej2.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 5,
+          "IRCopyInit": 9,
+          "IRDestroy": 7
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/FormulaNumerosPrimos.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 8,
+          "IRDestroy": 6
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/LeetCode/isPalindrome.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 9,
+          "IRDestroy": 9
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/LeetCode/twoSum.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 3,
+          "IRCopyInit": 8,
+          "IRDestroy": 4,
+          "IRMoveInit": 2
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/ProbandoNR/probandoNR2.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 5,
+          "IRCopyInit": 10,
+          "IRDestroy": 6,
+          "IRMoveInit": 2
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/ProbandoNR/probandoNR3.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 1,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "examples/Sorts/IllegalArgumentException.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 9,
+          "IRCopyInit": 21,
+          "IRDestroy": 17,
+          "IRMoveInit": 3
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/Sorts/Main.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 9,
+          "IRCopyInit": 16,
+          "IRDestroy": 13,
+          "IRMoveInit": 3
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/Sorts/Sortings.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 5,
+          "IRCopyInit": 9,
+          "IRDestroy": 8
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/aggregate_collections/particles.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4,
+          "IRDestroy": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "examples/classes/const_with_mutable_alias.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/classes/counter_basic.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/classes/custom_constructor.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4,
+          "IRDestroy": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "examples/classes/implements_interface.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/classes/invalid_cases.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "examples/classes/private_field_public_methods.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4,
+          "IRDestroy": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "examples/classes/reference_aliasing.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 9,
+          "IRDestroy": 9
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/esPrimo2.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "examples/expense_tracker/Ledger.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 37,
+          "IRCopyInit": 238,
+          "IRDestroy": 1264,
+          "IRMoveInit": 5
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain",
+          "__aether_string_byte_length",
+          "__aether_string_split",
+          "__aether_string_trim"
+        ],
+        "passed": true,
+        "path": "examples/expense_tracker/Main.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 26,
+          "IRCopyInit": 156,
+          "IRDestroy": 1177,
+          "IRMoveInit": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain",
+          "__aether_string_byte_length",
+          "__aether_string_split"
+        ],
+        "passed": true,
+        "path": "examples/expense_tracker/Persistence.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 5,
+          "IRCopyInit": 9,
+          "IRDestroy": 6,
+          "IRMoveInit": 1
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "examples/expense_tracker/Reports.ae"
+      },
+      {
+        "lifecycle_counts": {},
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/expense_tracker/Transaction.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/hello.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/ir/constant_fold.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/ir/local_const.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 3,
+          "IRDestroy": 1,
+          "IRMoveInit": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/ir/sumTo.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/arithmetic.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "examples/llvm/array_sort.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/llvm/array_sum.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 1,
+          "IRCopyInit": 2,
+          "IRMoveInit": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/countdown.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/double_add.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 9
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/double_compare.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/double_to_int.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 2,
+          "IRDestroy": 1,
+          "IRMoveInit": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/for_break_continue.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 2,
+          "IRDestroy": 1,
+          "IRMoveInit": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/for_sum.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 3,
+          "IRDestroy": 1,
+          "IRMoveInit": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/gcd_iterative.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/identity_call.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/int_to_double.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4,
+          "IRDestroy": 4
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "examples/llvm/list_clear.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/llvm/list_contains.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/llvm/list_copy.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 3,
+          "IRDestroy": 2,
+          "IRMoveInit": 1
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/llvm/list_for_sum.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/llvm/list_index.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4,
+          "IRDestroy": 3
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/llvm/list_index_of.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/llvm/list_insert.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/llvm/list_literal.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4,
+          "IRDestroy": 3
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/llvm/list_pop.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 5,
+          "IRDestroy": 3
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "examples/llvm/list_pop_alias.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/llvm/list_push.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 7,
+          "IRDestroy": 6
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "examples/llvm/list_push_alias.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/llvm/list_remove_at.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [
+          "__aether_release"
+        ],
+        "passed": true,
+        "path": "examples/llvm/list_reverse.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "examples/llvm/list_set_alias.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "examples/llvm/list_sort.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4,
+          "IRDestroy": 3
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/matrix_add.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4,
+          "IRDestroy": 3
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/matrix_column_mul.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/matrix_index.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/matrix_literal.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4,
+          "IRDestroy": 3
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/matrix_matmul.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/matrix_rows_columns.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4,
+          "IRDestroy": 3
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/matrix_scalar_mul.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/matrix_set.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4,
+          "IRDestroy": 3
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/matrix_sub.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 2,
+          "IRMoveInit": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/max.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4,
+          "IRDestroy": 3
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/outer_product.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/return_5.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 3,
+          "IRDestroy": 1,
+          "IRMoveInit": 1
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "examples/llvm/string_choose.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 5,
+          "IRDestroy": 2
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "examples/llvm/string_identity.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 3,
+          "IRDestroy": 1,
+          "IRMoveInit": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/sum_to_n.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4,
+          "IRDestroy": 3
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/vector_add.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/vector_column_inferred.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/vector_column_literal.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 2
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/vector_dot.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/vector_index.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/vector_length.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/vector_literal.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4,
+          "IRDestroy": 3
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/vector_matrix_mul.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4,
+          "IRDestroy": 3
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/vector_scalar_mul.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/vector_set.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4,
+          "IRDestroy": 3
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/llvm/vector_sub.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 3,
+          "IRDestroy": 2
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/nose.ae"
+      },
+      {
+        "lifecycle_counts": {},
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/numerical_methods/Functions.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 5,
+          "IRCopyInit": 12,
+          "IRDestroy": 7
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/numerical_methods/Integration.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 4
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/numerical_methods/Problems.ae"
+      },
+      {
+        "lifecycle_counts": {},
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/numerical_methods/Results.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 12,
+          "IRCopyInit": 34,
+          "IRDestroy": 66
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/numerical_methods/Roots.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 17,
+          "IRCopyInit": 64,
+          "IRDestroy": 86
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/numerical_methods/main.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 3,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [
+          "__aether_release",
+          "__aether_retain"
+        ],
+        "passed": true,
+        "path": "examples/pruebaException.ae"
+      },
+      {
+        "lifecycle_counts": {},
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/structs/Geometry.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRAssign": 2,
+          "IRCopyInit": 5,
+          "IRDestroy": 4
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/structs/custom_constructor_and_equality.ae"
+      },
+      {
+        "lifecycle_counts": {
+          "IRCopyInit": 2,
+          "IRDestroy": 1
+        },
+        "normalized_internal_helpers": [],
+        "passed": true,
+        "path": "examples/structs/main.ae"
+      }
+    ],
+    "summary": {
+      "lifecycle_instruction_counts": {
+        "IRAssign": 199,
+        "IRCopyInit": 930,
+        "IRDestroy": 2881,
+        "IRMoveInit": 31
+      },
+      "policy_validation_failed": 0,
+      "policy_validation_passed": 116,
+      "verified_initial_ir_denominator": 116
+    }
+  },
+  "decision": "LIFECYCLE_NORMALIZATION_POLICY_V1_QUALIFIED",
+  "evidence_schema_version": 1,
+  "inventory": [
+    "IRInitDefault",
+    "IRCopyInit",
+    "IRMoveInit",
+    "IRAssign",
+    "IRDestroy",
+    "IRRelocate"
+  ],
+  "scope": {
+    "python_lowering_authority": true,
+    "rp3_changed": false,
+    "rust_lifecycle_normalization_implemented": false,
+    "rust_ssa_lowering_implemented": false
+  }
+}

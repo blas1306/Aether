@@ -54,9 +54,9 @@
   },
   "lifecycle_normalization": {
     "input_kinds": ["IRInitDefault", "IRCopyInit", "IRMoveInit", "IRAssign", "IRDestroy", "IRRelocate"],
+    "lifecycle_normalization_policy_version": 1,
     "ordering": "expand_lifecycle runs once at module-builder entry before per-function CFG; emitted instructions retain expansion order",
-    "owner": "aether.ir.lifecycle.expand_lifecycle and LifecycleTypeRegistry",
-    "semantics": "type-directed expansion to ordinary loads, stores, constants, aggregate operations and ownership/lifecycle calls; move/relocate consume source lifetime and destroy/rollback use reverse aggregate field order"
+    "policy_path": "docs/compiler/lifecycle_normalization_policy_v1.json"
   },
   "lowering_policy_version": 1,
   "metadata_preservation": {

@@ -13,7 +13,8 @@ SSA schema, verifier protocol, or product releases.
 The interface is `lower(verified_initial_ir, lowering_policy_v1) ->
 verified_ssa | deterministic_error`. Production callers provide Initial IR
 already verified by the Rust-authoritative RP3 path. `GeneralSSABuilder` expands
-lifecycle, builds CFG/dominators/frontiers, places phis, renames, then always
+lifecycle under `lifecycle_normalization_policy_version = 1`, builds
+CFG/dominators/frontiers, places phis, renames, then always
 runs `SSAVerifier`. It does not mutate the input and has no mutable global
 policy. The JSON classifies every influence as input, policy, derived local
 state, or global constant; there are no accepted hidden dependencies.
@@ -58,10 +59,11 @@ free positive number. SSA blocks retain reachable Initial IR order.
 
 The six pseudo-instructions `IRInitDefault`, `IRCopyInit`, `IRMoveInit`,
 `IRAssign`, `IRDestroy`, and `IRRelocate` are expanded before CFG construction
-by `aether.ir.lifecycle.expand_lifecycle`. Expansion is type-directed and
-ordered; aggregate destruction/rollback is reverse-field order. Ownership
-events and move/relocation consumption are preserved by the expanded ordinary
-instructions. Direct renaming never accepts these six kinds.
+under the standalone normative
+[`lifecycle_normalization_policy_v1.json`](lifecycle_normalization_policy_v1.json).
+That artifact, rather than Python behavior, freezes exact type-directed order,
+ownership, naming, metadata, domain, CFG/exception repair, and errors. Direct
+renaming never accepts these six kinds.
 
 The canonical semantic effect owner is `aether.instruction_effects` together
 with instruction-class `effects` attributes in `aether.ir.model`. Lowering's

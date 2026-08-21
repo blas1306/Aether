@@ -1,0 +1,48 @@
+{
+  "decision": "RUST_SSA_LOWERING_BLOCKED",
+  "milestone": "RUST-3.1",
+  "policy_version": 1,
+  "historical_result": true,
+  "blocker_follow_up": {
+    "milestone": "RUST-3.B1",
+    "status": "SATISFIED",
+    "lifecycle_normalization_policy_version": 1,
+    "policy_path": "docs/compiler/lifecycle_normalization_policy_v1.json",
+    "qualification_path": "docs/compiler/lifecycle_normalization_policy_v1_qualification.json",
+    "rust_ssa_lowering_implemented": false
+  },
+  "blockers": [
+    {
+      "phase": "lifecycle_normalization",
+      "kind": "INCOMPLETE_NORMATIVE_CONTRACT",
+      "policy_path": "lifecycle_normalization",
+      "missing": [
+        "exact ordered expansion per lifecycle instruction and type category",
+        "temporary naming and collision rules",
+        "default constants and builtin identities",
+        "ownership and source-location propagation",
+        "aggregate rollback instruction sequences",
+        "deterministic error behavior"
+      ],
+      "current_non_normative_source": "src/aether/ir/lifecycle.py",
+      "constraint": "Python implementation details must not be treated as the specification"
+    }
+  ],
+  "corpus": {
+    "expected_denominator": 116,
+    "executed": 0,
+    "reason": "mandatory first phase is not implementable from the frozen policy"
+  },
+  "claims": {
+    "complete_lowering": false,
+    "instruction_coverage_77": false,
+    "semantic_parity": false,
+    "concrete_determinism": false
+  },
+  "authority_changes": {
+    "python_ssa_lowering": false,
+    "rp3_initial_ir_verification": false
+  },
+  "schema_changes": false,
+  "semantic_changes": false
+}
