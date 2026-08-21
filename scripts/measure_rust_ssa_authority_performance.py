@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record observational RUST-3.6 dual-lane performance measurements."""
+"""Record observational dual-lane SSA authority performance measurements."""
 from __future__ import annotations
 
 import argparse
@@ -34,6 +34,7 @@ def main() -> int:
     parser.add_argument("--executable", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--rounds", type=int, default=7)
+    parser.add_argument("--revision")
     args = parser.parse_args()
     if args.rounds < 1:
         parser.error("--rounds must be positive")
@@ -74,7 +75,8 @@ def main() -> int:
     authority_total = sum(row["rust_authority_python_shadow_median_ns"] for row in rows)
     report = {
         "schema_version": 1,
-        "milestone": "RUST-3.6",
+        "milestone": "RUST-3.5b" if args.revision else "RUST-3.6",
+        **({"qualification_revision": args.revision} if args.revision else {}),
         "measurement_kind": "observational; no timing assertion or absolute gate",
         "workloads": rows,
         "python_only_representative_median_total_ns": python_total,

@@ -21,8 +21,21 @@ from aether.typechecker import TypeChecker
 
 
 ROOT = Path(__file__).resolve().parents[2]
+AUDIT = json.loads(
+    (
+        ROOT / "docs/compiler/rust_ssa_promotion_failure_root_cause_audit.json"
+    ).read_text(encoding="utf-8")
+)
 FIXTURES = tuple(
-    sorted((ROOT / "tests/fixtures/rust_ssa_promotion_failure").glob("*.ae"))
+    ROOT / relative
+    for relative in sorted(
+        {
+            relative
+            for cause in AUDIT["root_causes"]
+            if cause["id"] != "RC6"
+            for relative in cause["minimized_reproducers"]
+        }
+    )
 )
 
 

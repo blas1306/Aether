@@ -1,0 +1,517 @@
+{
+  "attempt": "RUST-3.2",
+  "decision": "RUST_SSA_LOWERING_ADVERSARIAL_QUALIFIED",
+  "divergence": null,
+  "evidence_schema_version": 1,
+  "existing_corpus": {
+    "denominator": 116,
+    "exit_code": 0,
+    "passed": 116,
+    "result": "PASS"
+  },
+  "inventory": [
+    {
+      "blocks": 1,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "straight-line SSA"
+      ],
+      "exact_python_reserialization": true,
+      "id": "straight_one_storage",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 493366,
+        "python_ssa": 1513851,
+        "rust_lifecycle": 2852442,
+        "rust_ssa_and_verify": 4622644
+      }
+    },
+    {
+      "blocks": 1,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "straight-line SSA"
+      ],
+      "exact_python_reserialization": true,
+      "id": "straight_many_storages",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 1049710,
+        "python_ssa": 2504490,
+        "rust_lifecycle": 4117176,
+        "rust_ssa_and_verify": 6790723
+      }
+    },
+    {
+      "blocks": 1,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "straight-line SSA",
+        "liveness"
+      ],
+      "exact_python_reserialization": true,
+      "id": "straight_unused_definitions",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 467848,
+        "python_ssa": 1406700,
+        "rust_lifecycle": 2874464,
+        "rust_ssa_and_verify": 5138994
+      }
+    },
+    {
+      "blocks": 5,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "diamond CFG",
+        "phi required"
+      ],
+      "exact_python_reserialization": true,
+      "id": "diamond_phi_required",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 246353,
+        "python_ssa": 1133668,
+        "rust_lifecycle": 1958466,
+        "rust_ssa_and_verify": 3658495
+      }
+    },
+    {
+      "blocks": 5,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "diamond CFG",
+        "multiple simultaneous phis"
+      ],
+      "exact_python_reserialization": true,
+      "id": "diamond_multiple_phis",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 1153915,
+        "python_ssa": 3350528,
+        "rust_lifecycle": 4553275,
+        "rust_ssa_and_verify": 7293737
+      }
+    },
+    {
+      "blocks": 5,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "diamond CFG",
+        "phi pruning",
+        "definite initialization / liveness"
+      ],
+      "exact_python_reserialization": true,
+      "id": "diamond_unchanged_branch",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 195717,
+        "python_ssa": 818696,
+        "rust_lifecycle": 1597518,
+        "rust_ssa_and_verify": 2862251
+      }
+    },
+    {
+      "blocks": 5,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "diamond CFG",
+        "phi not required"
+      ],
+      "exact_python_reserialization": true,
+      "id": "diamond_no_change",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 167434,
+        "python_ssa": 662954,
+        "rust_lifecycle": 1374530,
+        "rust_ssa_and_verify": 2972237
+      }
+    },
+    {
+      "blocks": 33,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "diamond CFG",
+        "complex dominance"
+      ],
+      "exact_python_reserialization": true,
+      "id": "nested_diamonds",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 1611023,
+        "python_ssa": 5683656,
+        "rust_lifecycle": 6776216,
+        "rust_ssa_and_verify": 14603805
+      }
+    },
+    {
+      "blocks": 4,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "loops",
+        "loop-carried phi"
+      ],
+      "exact_python_reserialization": true,
+      "id": "loop_single_phi",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 169408,
+        "python_ssa": 620975,
+        "rust_lifecycle": 1976118,
+        "rust_ssa_and_verify": 2760991
+      }
+    },
+    {
+      "blocks": 4,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "loops",
+        "multiple loop-carried phis"
+      ],
+      "exact_python_reserialization": true,
+      "id": "loop_multiple_phis",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 681839,
+        "python_ssa": 1652041,
+        "rust_lifecycle": 3635301,
+        "rust_ssa_and_verify": 5637499
+      }
+    },
+    {
+      "blocks": 15,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "loops",
+        "complex dominance"
+      ],
+      "exact_python_reserialization": true,
+      "id": "loop_live_across_blocks",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 1330887,
+        "python_ssa": 4594571,
+        "rust_lifecycle": 6000239,
+        "rust_ssa_and_verify": 10091296
+      }
+    },
+    {
+      "blocks": 23,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "loops",
+        "loop exit phi use"
+      ],
+      "exact_python_reserialization": true,
+      "id": "loop_multiple_backedge_path",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 2703112,
+        "python_ssa": 7762297,
+        "rust_lifecycle": 9320851,
+        "rust_ssa_and_verify": 17828496
+      }
+    },
+    {
+      "blocks": 3,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "unreachable CFG"
+      ],
+      "exact_python_reserialization": true,
+      "id": "unreachable_isolated",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 60383,
+        "python_ssa": 257854,
+        "rust_lifecycle": 1595645,
+        "rust_ssa_and_verify": 1586447
+      }
+    },
+    {
+      "blocks": 4,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "unreachable CFG"
+      ],
+      "exact_python_reserialization": true,
+      "id": "unreachable_chain",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 71103,
+        "python_ssa": 281278,
+        "rust_lifecycle": 1539449,
+        "rust_ssa_and_verify": 1430785
+      }
+    },
+    {
+      "blocks": 4,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "unreachable CFG",
+        "naming collisions"
+      ],
+      "exact_python_reserialization": true,
+      "id": "unreachable_cycle_colliding_names",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 84639,
+        "python_ssa": 318829,
+        "rust_lifecycle": 993494,
+        "rust_ssa_and_verify": 1909312
+      }
+    },
+    {
+      "blocks": 1,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "naming collisions",
+        "preferred names",
+        "generated suffixes"
+      ],
+      "exact_python_reserialization": true,
+      "id": "naming_suffix_pressure",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 2655914,
+        "python_ssa": 3737233,
+        "rust_lifecycle": 6437290,
+        "rust_ssa_and_verify": 9695274
+      }
+    },
+    {
+      "blocks": 10,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "scale",
+        "long linear CFG"
+      ],
+      "exact_python_reserialization": true,
+      "id": "scale_linear_10",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 303460,
+        "python_ssa": 1182870,
+        "rust_lifecycle": 2315315,
+        "rust_ssa_and_verify": 3071283
+      }
+    },
+    {
+      "blocks": 100,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "scale",
+        "long linear CFG"
+      ],
+      "exact_python_reserialization": true,
+      "id": "scale_linear_100",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 2980934,
+        "python_ssa": 11915190,
+        "rust_lifecycle": 9759554,
+        "rust_ssa_and_verify": 30485858
+      }
+    },
+    {
+      "blocks": 1000,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "scale",
+        "long linear CFG"
+      ],
+      "exact_python_reserialization": true,
+      "id": "scale_linear_1000",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 53316070,
+        "python_ssa": 288492716,
+        "rust_lifecycle": 76455551,
+        "rust_ssa_and_verify": 1425060135
+      }
+    },
+    {
+      "blocks": 97,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "scale",
+        "nested diamond family",
+        "large dominance frontiers"
+      ],
+      "exact_python_reserialization": true,
+      "id": "scale_nested_diamond_100",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 3965582,
+        "python_ssa": 13180093,
+        "rust_lifecycle": 11772051,
+        "rust_ssa_and_verify": 36618716
+      }
+    },
+    {
+      "blocks": 100,
+      "canonical_ssa_equivalent": true,
+      "categories": [
+        "scale",
+        "loop family"
+      ],
+      "exact_python_reserialization": true,
+      "id": "scale_loop_100",
+      "input_immutable": true,
+      "lifecycle_equivalent": true,
+      "python_ssa_verified": true,
+      "rust_deterministic": true,
+      "rust_owned_ssa_verified": true,
+      "schema_v2_import": true,
+      "timings_ns": {
+        "python_lifecycle": 40867809,
+        "python_ssa": 37754178,
+        "rust_lifecycle": 40621899,
+        "rust_ssa_and_verify": 86451710
+      }
+    }
+  ],
+  "maximum_cfg_size": 1000,
+  "milestone": "RUST-3.5b",
+  "negative_case_count": 7,
+  "negative_inventory": [
+    {
+      "deterministically_rejected": true,
+      "id": "malformed_cfg_target"
+    },
+    {
+      "deterministically_rejected": true,
+      "id": "invalid_exceptional_target"
+    },
+    {
+      "deterministically_rejected": true,
+      "id": "duplicate_identities"
+    },
+    {
+      "deterministically_rejected": true,
+      "id": "unsupported_lowering_policy_version"
+    },
+    {
+      "deterministically_rejected": true,
+      "id": "use_before_definite_initialization"
+    },
+    {
+      "deterministically_rejected": true,
+      "id": "unresolved_lifecycle_pseudo"
+    },
+    {
+      "deterministically_rejected": true,
+      "id": "invalid_ownership_transfer"
+    }
+  ],
+  "positive_case_count": 21,
+  "qualification_revision": "bb0bc76-worktree-rust-3.5b",
+  "repeat_count": 3,
+  "scope": {
+    "commit_created": false,
+    "lowering_algorithms_changed": false,
+    "production_lowering_authority": "python",
+    "rp3_changed": false
+  }
+}

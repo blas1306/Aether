@@ -18,10 +18,17 @@ from rust_authority_canary_harness import (
     RustAuthorityCanaryConfiguration,
     RustAuthorityCanaryHarness,
 )
+from aether.pipeline import SSAPipeline
+from aether.ssa.shadow import (
+    PersistentRustSSALoweringClient,
+    SSALoweringAuthorityConfiguration,
+    SSALoweringAuthorityMode,
+)
 
 
 _SHADOW_HARNESS_ATTRIBUTE = "_aether_shadow_validation_harness"
 _CANARY_HARNESS_ATTRIBUTE = "_aether_rust_authority_canary_harness"
+_SSA_QUALIFICATION_ATTRIBUTE = "_aether_rust_ssa_authority_qualification"
 _SHADOW_INFRASTRUCTURE_TESTS = (
     "tests/aether/test_shadow_validation_harness.py",
     "tests/aether/test_shadow_verifier.py",
@@ -63,6 +70,22 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--rust-authority-canary-population",
         default=None,
         help="Required configured suite name recorded in the canary summary.",
+    )
+    parser.getgroup("aether-rust-ssa-authority-qualification").addoption(
+        "--rust-ssa-authority-qualification-executable",
+        default=None,
+        help=(
+            "Explicit test-only Rust SSA authority companion for promotion "
+            "subset requalification."
+        ),
+    )
+    parser.getgroup("aether-rust-ssa-authority-qualification").addoption(
+        "--rust-ssa-shadow-qualification-executable",
+        default=None,
+        help=(
+            "Explicit test-only Rust SSA shadow companion for safe-default "
+            "repository requalification."
+        ),
     )
 
 
@@ -125,6 +148,52 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     canary = _canary_harness(session.config)
     if canary is not None:
         canary.install()
+    authority_executable = session.config.getoption(
+        "--rust-ssa-authority-qualification-executable"
+    )
+    shadow_executable = session.config.getoption(
+        "--rust-ssa-shadow-qualification-executable"
+    )
+    if authority_executable is not None and shadow_executable is not None:
+        raise pytest.UsageError(
+            "Rust SSA authority and safe-default shadow qualification are "
+            "mutually exclusive"
+        )
+    executable = authority_executable or shadow_executable
+    if executable is not None:
+        client = PersistentRustSSALoweringClient(
+            Path(executable).resolve(), timeout_seconds=60
+        )
+        original_init = SSAPipeline.__init__
+
+        def qualification_init(
+            pipeline: SSAPipeline,
+            *,
+            builder="general",
+            authority_configuration=None,
+            rust_shadow_client=None,
+        ) -> None:
+            if builder == "general" and authority_configuration is None:
+                authority_configuration = SSALoweringAuthorityConfiguration(
+                    SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
+                    if authority_executable is not None
+                    else SSALoweringAuthorityMode.PYTHON_SSA_AUTHORITY_RUST_SHADOW
+                )
+            if builder == "general" and rust_shadow_client is None:
+                rust_shadow_client = client
+            original_init(
+                pipeline,
+                builder=builder,
+                authority_configuration=authority_configuration,
+                rust_shadow_client=rust_shadow_client,
+            )
+
+        SSAPipeline.__init__ = qualification_init  # type: ignore[method-assign]
+        setattr(
+            session.config,
+            _SSA_QUALIFICATION_ATTRIBUTE,
+            (original_init, client),
+        )
 
 
 def pytest_runtest_setup(item: pytest.Item) -> None:
@@ -152,6 +221,13 @@ def pytest_runtest_teardown(item: pytest.Item) -> None:
 
 
 def pytest_sessionfinish(session: pytest.Session) -> None:
+    ssa_qualification = getattr(
+        session.config, _SSA_QUALIFICATION_ATTRIBUTE, None
+    )
+    if ssa_qualification is not None:
+        original_init, client = ssa_qualification
+        SSAPipeline.__init__ = original_init  # type: ignore[method-assign]
+        client.close()
     harness = _shadow_harness(session.config)
     if harness is not None:
         harness.set_active_test(None)

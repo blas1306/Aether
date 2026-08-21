@@ -1,0 +1,27 @@
+{
+  "artifact_schema_version": 1,
+  "authority_probe": {
+    "explicit_rust_origin": "rust_schema_v2_import",
+    "safe_default_origin": "python_general_ssa_builder"
+  },
+  "ci_integration": "PASS",
+  "decision": "RUST_SSA_AUTHORITY_REQUALIFICATION_OPERATIONAL_PASS",
+  "milestone": "RUST-3.5b",
+  "packaging_and_discovery": "PASS",
+  "qualification_revision": "bb0bc76-worktree-rust-3.5b",
+  "rollback": {
+    "configuration_only": true,
+    "modes": [
+      "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+      "PYTHON_SSA_ONLY"
+    ]
+  },
+  "transport": {
+    "concurrency": "128 requests / 1 process",
+    "fail_closed_infrastructure": "PASS",
+    "fail_closed_semantic_mismatch": "PASS",
+    "long_session": "1000 requests / 1 process",
+    "persistent": "PASS",
+    "same_input": "PASS"
+  }
+}

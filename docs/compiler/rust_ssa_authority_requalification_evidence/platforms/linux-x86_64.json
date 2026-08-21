@@ -1,0 +1,67 @@
+{
+  "artifact": "aether-ssa-shadow-0.1.0-linux-x86_64.tar.gz",
+  "authority": "rust",
+  "checks": {
+    "backend_handoff": "PASS",
+    "mandatory_promotion_fixtures": "PASS",
+    "multiple_requests": "PASS",
+    "optimizer_handoff": "PASS",
+    "packaged_discovery": "PASS",
+    "path_isolation": "PASS",
+    "production_default": "PASS",
+    "python_shadow_comparison": "PASS",
+    "rollback": "PASS",
+    "rust_result_returned": "PASS",
+    "safe_repository_default": "PASS",
+    "three_mode_matrix": "PASS"
+  },
+  "comparison": {
+    "backend_handoffs": 14,
+    "comparisons": 14,
+    "default_returned_ssa_origin": "python_general_ssa_builder",
+    "fixture_mode_matrix_checks": 14,
+    "infrastructure_failures": 0,
+    "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "modes_exercised": [
+      "PYTHON_SSA_ONLY",
+      "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+      "RUST_SSA_AUTHORITY_PYTHON_SHADOW"
+    ],
+    "optimizer_handoffs": 14,
+    "process_startups": 1,
+    "repository_default": "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+    "requests": 30,
+    "returned_ssa_origins": [
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import"
+    ],
+    "rollback_modes": [
+      "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+      "PYTHON_SSA_ONLY"
+    ],
+    "semantic_mismatches": 0
+  },
+  "execution": "clean_release_artifact_outside_checkout",
+  "mandatory_promotion_fixture_count": 8,
+  "milestone": "RUST-3.5b",
+  "platform": "linux-x86_64",
+  "provenance": "executed-native-runner",
+  "returned_ssa_origin": "rust_schema_v2_import",
+  "revision": "bb0bc76-worktree-rust-3.5b",
+  "rust_target": "x86_64-unknown-linux-gnu",
+  "schema_version": 1,
+  "sha256": "2ad89396d637ca287f5d2a42699767141888b9be739dd353f17ba2a3666a835b",
+  "shadow": "python_synchronous"
+}

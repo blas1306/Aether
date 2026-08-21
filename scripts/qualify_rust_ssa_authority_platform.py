@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Produce native clean-install RUST-3.6 SSA authority evidence."""
+"""Produce native clean-install RUST-3.5b requalification evidence."""
 from __future__ import annotations
 
 import argparse
@@ -29,6 +29,7 @@ PLATFORMS = {
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", choices=PLATFORMS, required=True)
+    parser.add_argument("--revision", required=True)
     parser.add_argument("--executable", type=Path, required=True)
     parser.add_argument("--wheel", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -69,6 +70,12 @@ def main() -> int:
             ROOT / "corpus/exceptions/positive/indirect_call.ae",
             ROOT / "benchmarks/list_push.ae",
         ]
+        promotion_fixtures = sorted(
+            (ROOT / "tests/fixtures/rust_ssa_promotion_failure").glob("*.ae")
+        )
+        if len(promotion_fixtures) != 8:
+            raise RuntimeError("RUST-3.5b requires exactly eight promotion fixtures")
+        selected.extend(promotion_fixtures)
         isolated_sources = []
         for index, source in enumerate(selected):
             destination = samples / f"sample-{index}.ae"
@@ -92,7 +99,8 @@ def main() -> int:
 
     evidence = {
         "schema_version": 1,
-        "revision": "RUST-3.6",
+        "milestone": "RUST-3.5b",
+        "revision": args.revision,
         "platform": args.platform,
         "rust_target": PLATFORMS[args.platform],
         "authority": "rust",
@@ -109,10 +117,14 @@ def main() -> int:
             "rust_result_returned": "PASS",
             "optimizer_handoff": "PASS",
             "backend_handoff": "PASS",
+            "mandatory_promotion_fixtures": "PASS",
+            "three_mode_matrix": "PASS",
+            "safe_repository_default": "PASS",
             "rollback": "PASS",
             "path_isolation": "PASS",
         },
         "comparison": observation,
+        "mandatory_promotion_fixture_count": len(promotion_fixtures),
         "provenance": "executed-native-runner",
     }
     report = output / f"{args.platform}.json"

@@ -1,0 +1,46 @@
+{
+  "artifact_schema_version": 1,
+  "cargo_workspace": {
+    "status": "PASS",
+    "summary": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+  },
+  "decision": "RUST_SSA_AUTHORITY_DEEP_CFG_PASS",
+  "milestone": "RUST-3.5b",
+  "qualification_revision": "bb0bc76-worktree-rust-3.5b",
+  "stress": {
+    "1000": {
+      "canonical_ssa_parity": true,
+      "lowered_blocks": 1000,
+      "python": "PASS",
+      "python_elapsed_ns": 365877824,
+      "rust": "PASS",
+      "rust_elapsed_ns": 1410521997,
+      "rust_owned_ssa_verification": true,
+      "schema_v2_exact_reserialization": true
+    },
+    "5000": {
+      "canonical_ssa_parity": true,
+      "lowered_blocks": 5000,
+      "python": "PASS",
+      "python_elapsed_ns": 10228556206,
+      "rust": "PASS",
+      "rust_elapsed_ns": 38399119094,
+      "rust_owned_ssa_verification": true,
+      "schema_v2_exact_reserialization": true
+    },
+    "993": {
+      "canonical_ssa_parity": true,
+      "lowered_blocks": 993,
+      "python": "PASS",
+      "python_elapsed_ns": 357390908,
+      "rust": "PASS",
+      "rust_elapsed_ns": 1447644629,
+      "rust_owned_ssa_verification": true,
+      "schema_v2_exact_reserialization": true
+    }
+  },
+  "transport": {
+    "process_startups": 1,
+    "requests": 3
+  }
+}

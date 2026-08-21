@@ -1,0 +1,48 @@
+{
+  "authority": {
+    "python_shadow": "synchronous_mandatory",
+    "qualification_mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "repository_default": "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+    "returned_ssa": "rust_schema_v2_import",
+    "rust_reaches_optimizer_or_backend": true
+  },
+  "concurrency": {
+    "process_startups": 1,
+    "requests": 128,
+    "serialized_responses": true
+  },
+  "decision": "RUST_SSA_AUTHORITY_SOAK_PASS",
+  "evidence_schema_version": 1,
+  "failures": [],
+  "long_session": {
+    "deterministic": true,
+    "process_startups": 1,
+    "requests": 1000,
+    "rss_end_bytes": 5021696,
+    "rss_observation": "observational only; no fragile CI gate",
+    "rss_start_bytes": 5021696
+  },
+  "milestone": "RUST-3.5b",
+  "performance": {
+    "canonical_comparison_seconds": 0.22995550793712027,
+    "process_startups": 1,
+    "python_lowering_seconds": 0.5175285670629819,
+    "python_plus_rust_shadow_wall_seconds": 3.8825779990293086,
+    "rust_requests": 140
+  },
+  "promotion_coverage": {
+    "denominator_change_reason": "one explicit owning List.is_empty temporary fixture was added by RUST-3.5b",
+    "expected_compared_denominator_before_new_is_empty_fixture": 139,
+    "fixtures_discovered_independently": true,
+    "mandatory_fixture_count": 8
+  },
+  "qualification_revision": "bb0bc76-worktree-rust-3.5b",
+  "soak": {
+    "accepted": 140,
+    "infrastructure_failures": 0,
+    "rejected_before_ssa": 29,
+    "semantic_mismatches": 0,
+    "shadow_compared": 140,
+    "total_programs": 169
+  }
+}

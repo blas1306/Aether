@@ -1,0 +1,30 @@
+{
+  "artifact_schema_version": 1,
+  "decision": "RUST_SSA_AUTHORITY_REQUALIFICATION_FULL_SUITE_PASS",
+  "failed": 0,
+  "lsan_environmental_classification": {
+    "classified_lsan_ptrace_aborts": 24,
+    "initial_failed": 24,
+    "procedure": "LSAN_OPTIONS=detect_leaks=0"
+  },
+  "milestone": "RUST-3.5b",
+  "mode": "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+  "native_exception_ptrace_compatible": "54/54 PASS",
+  "passed": 4828,
+  "promotion_subset": {
+    "failed": 0,
+    "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "passed": 18,
+    "selected": 18
+  },
+  "promotion_subset_rust_authority_failures": 0,
+  "qualification_revision": "bb0bc76-worktree-rust-3.5b",
+  "real_semantic_failures": 0,
+  "skipped": 4,
+  "summaries": {
+    "native_compatible": "54 passed in 5.38s",
+    "native_initial": "24 failed, 30 passed in 5.57s",
+    "promotion_subset": "18 passed in 1.85s",
+    "safe_default": "4828 passed, 4 skipped, 6 warnings in 197.67s (0:03:17)"
+  }
+}

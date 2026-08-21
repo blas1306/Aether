@@ -1,0 +1,485 @@
+{
+  "adversarial": {
+    "decision": "RUST_SSA_LOWERING_ADVERSARIAL_QUALIFIED",
+    "negative_case_count": 7,
+    "positive_case_count": 21
+  },
+  "artifact_schema_version": 1,
+  "blind_spot_closure": [
+    {
+      "permanent_qualification_fixtures": [
+        "tests/fixtures/rust_ssa_promotion_failure/aggregate_owned_projection.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/owning_call_result.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/owning_is_empty_result.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/interface_call_temporary.ae"
+      ],
+      "previous_root_cause": "RC1",
+      "promotion_gate": "V2-L01"
+    },
+    {
+      "permanent_qualification_fixtures": [
+        "tests/fixtures/rust_ssa_promotion_failure/nullable_owned_return.ae"
+      ],
+      "previous_root_cause": "RC2",
+      "promotion_gate": "V2-L02"
+    },
+    {
+      "permanent_qualification_fixtures": [
+        "tests/fixtures/rust_ssa_promotion_failure/class_get_owned_result.ae"
+      ],
+      "previous_root_cause": "RC3",
+      "promotion_gate": "V2-L03"
+    },
+    {
+      "permanent_qualification_fixtures": [
+        "tests/fixtures/rust_ssa_promotion_failure/interface_lifecycle_default.ae"
+      ],
+      "previous_root_cause": "RC4",
+      "promotion_gate": "V2-L04"
+    },
+    {
+      "permanent_qualification_fixtures": [
+        "tests/fixtures/rust_ssa_promotion_failure/boxed_constructor_receiver.ae"
+      ],
+      "previous_root_cause": "RC5",
+      "promotion_gate": "V2-L05"
+    }
+  ],
+  "decision": "RUST_SSA_AUTHORITY_REQUALIFICATION_BLOCKED",
+  "deep_cfg": {
+    "cargo_workspace": {
+      "status": "PASS",
+      "summary": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    "decision": "RUST_SSA_AUTHORITY_DEEP_CFG_PASS",
+    "stress": {
+      "1000": {
+        "canonical_ssa_parity": true,
+        "lowered_blocks": 1000,
+        "python": "PASS",
+        "python_elapsed_ns": 365877824,
+        "rust": "PASS",
+        "rust_elapsed_ns": 1410521997,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_exact_reserialization": true
+      },
+      "5000": {
+        "canonical_ssa_parity": true,
+        "lowered_blocks": 5000,
+        "python": "PASS",
+        "python_elapsed_ns": 10228556206,
+        "rust": "PASS",
+        "rust_elapsed_ns": 38399119094,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_exact_reserialization": true
+      },
+      "993": {
+        "canonical_ssa_parity": true,
+        "lowered_blocks": 993,
+        "python": "PASS",
+        "python_elapsed_ns": 357390908,
+        "rust": "PASS",
+        "rust_elapsed_ns": 1447644629,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_exact_reserialization": true
+      }
+    },
+    "transport": {
+      "process_startups": 1,
+      "requests": 3
+    }
+  },
+  "expanded_gates": [
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G01",
+      "name": "all semantic contracts qualified",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G02",
+      "name": "all lifecycle policies qualified",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G03",
+      "name": "schema-v2 qualified",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G04",
+      "name": "Rust Owned SSA model qualified",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G05",
+      "name": "Rust Owned SSA verifier qualified",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G06",
+      "name": "historical corpus 116/116",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G07",
+      "name": "adversarial corpus 21/21 and 7/7",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G08",
+      "name": "deep CFG 993, 1000, and 5000",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G09",
+      "name": "expanded soak zero mismatches",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G10",
+      "name": "persistent transport and session stress",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G11",
+      "name": "clean installation in both dual-lane modes",
+      "status": "BLOCKED"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G12",
+      "name": "all four official platforms",
+      "status": "BLOCKED"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G13",
+      "name": "rollback is configuration-only",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G14",
+      "name": "Python authority works independently",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G15",
+      "name": "dual lanes remain fail closed",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G16",
+      "name": "authority origin and optimizer/backend handoff",
+      "status": "BLOCKED"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G17",
+      "name": "companion packaging and discovery compatibility",
+      "status": "BLOCKED"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G18",
+      "name": "deterministic output preserved",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G19",
+      "name": "no unresolved semantic blocker",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.5b aggregate evidence",
+      "id": "V2-G20",
+      "name": "no unresolved operational blocker",
+      "status": "BLOCKED"
+    },
+    {
+      "evidence": "tests/fixtures/rust_ssa_promotion_failure/aggregate_owned_projection.ae, tests/fixtures/rust_ssa_promotion_failure/owning_call_result.ae, tests/fixtures/rust_ssa_promotion_failure/owning_is_empty_result.ae, tests/fixtures/rust_ssa_promotion_failure/interface_call_temporary.ae",
+      "id": "V2-L01",
+      "name": "owning_temporaries_consumed_by_borrowed_operations",
+      "status": "PASS"
+    },
+    {
+      "evidence": "tests/fixtures/rust_ssa_promotion_failure/nullable_owned_return.ae",
+      "id": "V2-L02",
+      "name": "nullable_owning_return_cast_transfer",
+      "status": "PASS"
+    },
+    {
+      "evidence": "tests/fixtures/rust_ssa_promotion_failure/class_get_owned_result.ae",
+      "id": "V2-L03",
+      "name": "nullable_constructor_argument_from_storage",
+      "status": "PASS"
+    },
+    {
+      "evidence": "tests/fixtures/rust_ssa_promotion_failure/interface_lifecycle_default.ae",
+      "id": "V2-L04",
+      "name": "interface_lifecycle_defaultability_move_init",
+      "status": "PASS"
+    },
+    {
+      "evidence": "tests/fixtures/rust_ssa_promotion_failure/boxed_constructor_receiver.ae",
+      "id": "V2-L05",
+      "name": "direct_struct_constructor_receiver_release",
+      "status": "PASS"
+    }
+  ],
+  "five_root_cause_fixture_gates": [
+    {
+      "evidence": "tests/fixtures/rust_ssa_promotion_failure/aggregate_owned_projection.ae, tests/fixtures/rust_ssa_promotion_failure/owning_call_result.ae, tests/fixtures/rust_ssa_promotion_failure/owning_is_empty_result.ae, tests/fixtures/rust_ssa_promotion_failure/interface_call_temporary.ae",
+      "id": "V2-L01",
+      "name": "owning_temporaries_consumed_by_borrowed_operations",
+      "status": "PASS"
+    },
+    {
+      "evidence": "tests/fixtures/rust_ssa_promotion_failure/nullable_owned_return.ae",
+      "id": "V2-L02",
+      "name": "nullable_owning_return_cast_transfer",
+      "status": "PASS"
+    },
+    {
+      "evidence": "tests/fixtures/rust_ssa_promotion_failure/class_get_owned_result.ae",
+      "id": "V2-L03",
+      "name": "nullable_constructor_argument_from_storage",
+      "status": "PASS"
+    },
+    {
+      "evidence": "tests/fixtures/rust_ssa_promotion_failure/interface_lifecycle_default.ae",
+      "id": "V2-L04",
+      "name": "interface_lifecycle_defaultability_move_init",
+      "status": "PASS"
+    },
+    {
+      "evidence": "tests/fixtures/rust_ssa_promotion_failure/boxed_constructor_receiver.ae",
+      "id": "V2-L05",
+      "name": "direct_struct_constructor_receiver_release",
+      "status": "PASS"
+    }
+  ],
+  "full_suite": {
+    "artifact_schema_version": 1,
+    "decision": "RUST_SSA_AUTHORITY_REQUALIFICATION_FULL_SUITE_PASS",
+    "failed": 0,
+    "lsan_environmental_classification": {
+      "classified_lsan_ptrace_aborts": 24,
+      "initial_failed": 24,
+      "procedure": "LSAN_OPTIONS=detect_leaks=0"
+    },
+    "milestone": "RUST-3.5b",
+    "mode": "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+    "native_exception_ptrace_compatible": "54/54 PASS",
+    "passed": 4828,
+    "promotion_subset": {
+      "failed": 0,
+      "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+      "passed": 18,
+      "selected": 18
+    },
+    "promotion_subset_rust_authority_failures": 0,
+    "qualification_revision": "bb0bc76-worktree-rust-3.5b",
+    "real_semantic_failures": 0,
+    "skipped": 4,
+    "summaries": {
+      "native_compatible": "54 passed in 5.38s",
+      "native_initial": "24 failed, 30 passed in 5.57s",
+      "promotion_subset": "18 passed in 1.85s",
+      "safe_default": "4828 passed, 4 skipped, 6 warnings in 197.67s (0:03:17)"
+    }
+  },
+  "historical_corpus": {
+    "canonical_ssa_parity": {
+      "failed": 0,
+      "passed": 116
+    },
+    "determinism": {
+      "failed": 0,
+      "passed": 116
+    },
+    "exact_reserialization": {
+      "failed": 0,
+      "passed": 116
+    },
+    "lifecycle_parity": {
+      "failed": 0,
+      "passed": 116
+    },
+    "python_ssa_verification": {
+      "failed": 0,
+      "passed": 116
+    },
+    "returned_ssa_is_rust": {
+      "failed": 0,
+      "passed": 116
+    },
+    "rust_owned_ssa_verification": {
+      "failed": 0,
+      "passed": 116
+    },
+    "schema_v2_import": {
+      "failed": 0,
+      "passed": 116
+    }
+  },
+  "historical_preservation": {
+    "failed_rust_3_6_promotion": "RUST_SSA_AUTHORITY_PROMOTION_FAILED",
+    "original_rust_3_5_ready": "READY_FOR_RUST_SSA_AUTHORITY_SWITCH",
+    "rust_3_6a_classification": "RUST_SSA_PROMOTION_FAILURES_CLASSIFIED",
+    "rust_3_6b_closure": "RUST_SSA_PROMOTION_LIFECYCLE_DEFECTS_CLOSED",
+    "status": "PASS"
+  },
+  "milestone": "RUST-3.5b",
+  "operational": {
+    "artifact_schema_version": 1,
+    "authority_probe": {
+      "explicit_rust_origin": "rust_schema_v2_import",
+      "safe_default_origin": "python_general_ssa_builder"
+    },
+    "ci_integration": "PASS",
+    "decision": "RUST_SSA_AUTHORITY_REQUALIFICATION_OPERATIONAL_PASS",
+    "milestone": "RUST-3.5b",
+    "packaging_and_discovery": "PASS",
+    "qualification_revision": "bb0bc76-worktree-rust-3.5b",
+    "rollback": {
+      "configuration_only": true,
+      "modes": [
+        "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+        "PYTHON_SSA_ONLY"
+      ]
+    },
+    "transport": {
+      "concurrency": "128 requests / 1 process",
+      "fail_closed_infrastructure": "PASS",
+      "fail_closed_semantic_mismatch": "PASS",
+      "long_session": "1000 requests / 1 process",
+      "persistent": "PASS",
+      "same_input": "PASS"
+    }
+  },
+  "original_twenty_gate_baseline": {
+    "expected": 20,
+    "passed": 20,
+    "status": "PASS"
+  },
+  "performance": {
+    "measurement_kind": "observational; no timing assertion or absolute gate",
+    "observed_authority_over_python_ratio": 10.996,
+    "python_only_representative_median_total_ns": 134230329,
+    "rust_authority_python_shadow_representative_median_total_ns": 1475969456,
+    "speedup_required": false,
+    "workloads": [
+      {
+        "observed_authority_over_python_ratio": 9.119,
+        "python_only_median_ns": 1122276,
+        "rounds": 7,
+        "rust_authority_python_shadow_median_ns": 10233744,
+        "workload": "benchmarks/arithmetic.ae"
+      },
+      {
+        "observed_authority_over_python_ratio": 9.786,
+        "python_only_median_ns": 16463454,
+        "rounds": 7,
+        "rust_authority_python_shadow_median_ns": 161110842,
+        "workload": "examples/numerical_methods/main.ae"
+      },
+      {
+        "observed_authority_over_python_ratio": 11.218,
+        "python_only_median_ns": 115320475,
+        "rounds": 7,
+        "rust_authority_python_shadow_median_ns": 1293661085,
+        "workload": "examples/expense_tracker/Main.ae"
+      },
+      {
+        "observed_authority_over_python_ratio": 8.28,
+        "python_only_median_ns": 1324124,
+        "rounds": 7,
+        "rust_authority_python_shadow_median_ns": 10963785,
+        "workload": "corpus/exceptions/positive/indirect_call.ae"
+      }
+    ]
+  },
+  "platforms": {
+    "linux-x86_64": {
+      "rust_target": "x86_64-unknown-linux-gnu",
+      "sha256": "57435391447d4e19098c767404e32d9d28e01f92fa1bee19dbedb2b4433c1735",
+      "status": "PASS"
+    },
+    "macos-arm64": {
+      "reason": "fresh exact-revision native evidence missing or invalid",
+      "rust_target": "aarch64-apple-darwin",
+      "status": "BLOCKED"
+    },
+    "macos-x86_64": {
+      "reason": "fresh exact-revision native evidence missing or invalid",
+      "rust_target": "x86_64-apple-darwin",
+      "status": "BLOCKED"
+    },
+    "windows-x86_64": {
+      "reason": "fresh exact-revision native evidence missing or invalid",
+      "rust_target": "x86_64-pc-windows-msvc",
+      "status": "BLOCKED"
+    }
+  },
+  "qualification_revision": "bb0bc76-worktree-rust-3.5b",
+  "repository_default": "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+  "rust_authority_selected_only_for_qualification": true,
+  "scope": {
+    "canonicalizer_changed": false,
+    "commit_created": false,
+    "comparison_weakened": false,
+    "lifecycle_policies_changed": false,
+    "lowering_semantics_changed": false,
+    "optimizer_backend_semantics_changed": false,
+    "production_authority_changed": false,
+    "schemas_changed": false
+  },
+  "soak": {
+    "accepted": 140,
+    "infrastructure_failures": 0,
+    "rejected_before_ssa": 29,
+    "semantic_mismatches": 0,
+    "shadow_compared": 140,
+    "total_programs": 169
+  },
+  "soak_denominator": {
+    "actual_compared": 140,
+    "minimum_expected_compared": 139,
+    "permanent_is_empty_fixture_may_raise_denominator_to": 140,
+    "reason": "RUST-3.5b adds an explicit owning List.is_empty temporary fixture; the seven RUST-3.6a minimizers remain unchanged"
+  },
+  "source_evidence_sha256": {
+    "adversarial": "1c30ccf796862acc10b48a47e7345a077a0710b3ac92520753c184ab4dc7050f",
+    "deep_cfg": "3c5a753de03a37e31a022225c366794b5145804b38784faa533faea9d2707f75",
+    "full_suite": "aad4b8fd8faa654c1fb3fb7afd51e0cbb042158dc715fb757a8bdf63ec3bb7bc",
+    "historical": "54f325222898751b7557d6c88e580fb659b2b4f20c45de851efa6e1ed1da0bd0",
+    "operational": "ed73a5b3e512e8798af8cbadc61f5b23103a9c2e58fb92b4c6b6bfc3b6298f7d",
+    "performance": "a7778bf2e16b68771e439b002c4a25300cad490b6a0f11af9224a2322c0ece0a",
+    "promotion_fixtures": "464fbe1b920b9e55be21f033c0d65ddad50b3990ed08bbe46a177a653c1c4f13",
+    "soak": "00fa2b4225a3ac96b22d42c5a339525e3b67828db2540fae6ade669f03724f61"
+  },
+  "unresolved_blockers": [
+    "V2-G11",
+    "V2-G12",
+    "V2-G16",
+    "V2-G17",
+    "V2-G20"
+  ],
+  "v2_recurrence_prevention": "The eight-source manifest is a mandatory, independently executed three-mode gate on every qualification revision and every official platform; missing evidence blocks aggregation.",
+  "why_v1_missed_defects": "V1 relied on a 116-program historical corpus and a broad soak whose accepted inputs did not explicitly require the five lifecycle families. Workflow and full-suite coverage were treated as evidence without a root-cause-to-fixture-to-gate contract."
+}

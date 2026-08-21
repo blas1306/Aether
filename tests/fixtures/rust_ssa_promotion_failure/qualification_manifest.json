@@ -1,0 +1,73 @@
+{
+  "artifact_schema_version": 1,
+  "milestone": "RUST-3.5b",
+  "fixture_count": 8,
+  "historical_minimized_fixture_count": 7,
+  "root_causes": [
+    {
+      "id": "RC1",
+      "promotion_gate": "V2-L01",
+      "name": "owning_temporaries_consumed_by_borrowed_operations",
+      "coverage": [
+        "array_length",
+        "list_length",
+        "list_is_empty",
+        "interface_receiver"
+      ],
+      "fixtures": [
+        "tests/fixtures/rust_ssa_promotion_failure/aggregate_owned_projection.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/owning_call_result.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/owning_is_empty_result.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/interface_call_temporary.ae"
+      ]
+    },
+    {
+      "id": "RC2",
+      "promotion_gate": "V2-L02",
+      "name": "nullable_owning_return_cast_transfer",
+      "coverage": [
+        "nullable_cast_ownership",
+        "return_transfer"
+      ],
+      "fixtures": [
+        "tests/fixtures/rust_ssa_promotion_failure/nullable_owned_return.ae"
+      ]
+    },
+    {
+      "id": "RC3",
+      "promotion_gate": "V2-L03",
+      "name": "nullable_constructor_argument_from_storage",
+      "coverage": [
+        "nullable_storage_copy_lifetime",
+        "constructor_argument_cleanup"
+      ],
+      "fixtures": [
+        "tests/fixtures/rust_ssa_promotion_failure/class_get_owned_result.ae"
+      ]
+    },
+    {
+      "id": "RC4",
+      "promotion_gate": "V2-L04",
+      "name": "interface_lifecycle_defaultability_move_init",
+      "coverage": [
+        "interface_non_defaultability",
+        "move_init_source_reset"
+      ],
+      "fixtures": [
+        "tests/fixtures/rust_ssa_promotion_failure/interface_lifecycle_default.ae"
+      ]
+    },
+    {
+      "id": "RC5",
+      "promotion_gate": "V2-L05",
+      "name": "direct_struct_constructor_receiver_release",
+      "coverage": [
+        "normal_receiver_release",
+        "constructor_ownership_metadata"
+      ],
+      "fixtures": [
+        "tests/fixtures/rust_ssa_promotion_failure/boxed_constructor_receiver.ae"
+      ]
+    }
+  ]
+}

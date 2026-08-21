@@ -7,6 +7,7 @@ independent decode of the same canonical schema-v1 document.
 """
 from __future__ import annotations
 
+import argparse
 from copy import deepcopy
 import json
 from pathlib import Path
@@ -241,11 +242,28 @@ def generate() -> dict:
 
 
 def main() -> int:
-    report = generate(); rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
-    if "--check" in sys.argv:
-        if not OUTPUT.exists() or json.loads(OUTPUT.read_text()) != report: print("stale adversarial qualification evidence"); return 1
-    else: OUTPUT.write_text(rendered)
-    print(report["decision"]); return 0 if report["decision"].endswith("_QUALIFIED") else 1
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--check", action="store_true")
+    parser.add_argument("--output", type=Path, default=OUTPUT)
+    parser.add_argument("--revision")
+    args = parser.parse_args()
+    report = generate()
+    if args.revision:
+        report["milestone"] = "RUST-3.5b"
+        report["qualification_revision"] = args.revision
+    rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    if args.check:
+        if (
+            not args.output.exists()
+            or json.loads(args.output.read_text()) != report
+        ):
+            print("stale adversarial qualification evidence")
+            return 1
+    else:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(rendered)
+    print(report["decision"])
+    return 0 if report["decision"].endswith("_QUALIFIED") else 1
 
 
 if __name__ == "__main__": raise SystemExit(main())
