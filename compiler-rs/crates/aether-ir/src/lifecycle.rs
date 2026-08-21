@@ -694,6 +694,42 @@ where
             });
             release_consumed_owner(&pushed, owned, out);
         }
+        I::ArraySet {
+            array,
+            index,
+            value: assigned,
+        } => {
+            out.push(I::ArraySet {
+                array,
+                index,
+                value: assigned.clone(),
+            });
+            release_consumed_owner(&assigned, owned, out);
+        }
+        I::ListSet {
+            list_value,
+            index,
+            value: assigned,
+        } => {
+            out.push(I::ListSet {
+                list_value,
+                index,
+                value: assigned.clone(),
+            });
+            release_consumed_owner(&assigned, owned, out);
+        }
+        I::ListInsert {
+            list_value,
+            index,
+            value: inserted,
+        } => {
+            out.push(I::ListInsert {
+                list_value,
+                index,
+                value: inserted.clone(),
+            });
+            release_consumed_owner(&inserted, owned, out);
+        }
         I::ArrayNew { result, elements } => {
             out.push(I::ArrayNew {
                 result: result.clone(),

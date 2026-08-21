@@ -24,7 +24,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut output = io::stdout().lock();
     write_frame(
         &mut output,
-        &json!({"product":"aether-ssa-shadow","protocol_version":1}),
+        &json!({
+            "product":"aether-ssa-shadow",
+            "product_version":env!("CARGO_PKG_VERSION"),
+            "protocol_version":1,
+            "input_schema_version":1,
+            "output_schema_version":2
+        }),
     )?;
     loop {
         let mut header = [0_u8; 4];

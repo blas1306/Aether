@@ -365,7 +365,7 @@ fn complete_boundary_preserves_nested_nullable_enum_shape_and_borrow_metadata() 
 }
 
 #[test]
-fn migration_json_corpus_contains_and_imports_only_the_canonical_module_fixture() {
+fn migration_json_corpus_contains_and_imports_canonical_module_fixtures() {
     let fixture_directory =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../tests/aether/rust_migration/fixtures");
     let mut json_fixtures = fs::read_dir(fixture_directory)
@@ -382,7 +382,10 @@ fn migration_json_corpus_contains_and_imports_only_the_canonical_module_fixture(
             .iter()
             .filter_map(|path| path.file_name().and_then(|name| name.to_str()))
             .collect::<Vec<_>>(),
-        ["ir_module_v1_golden.json"]
+        [
+            "aggregate_list_set_temporary.initial_ir.json",
+            "ir_module_v1_golden.json",
+        ]
     );
 
     for fixture in json_fixtures {

@@ -255,3 +255,50 @@ fn adversarial_owning_and_borrowed_class_get_sequences_are_exact() {
     );
     assert!(matches!(&instructions[5], I::Return { .. }));
 }
+
+#[test]
+fn collection_mutations_release_consumed_owning_aggregate_temporaries() {
+    let input: IRModuleDTO = serde_json::from_value(json!({
+        "schema_version": 1,
+        "structs": [{"name":"Owner","fields":[
+            {"name":"text","type":{"tag":"string"}}
+        ]}],
+        "functions": [{
+            "name":"mutations", "parameters":[], "return_type":{"tag":"void"}, "may_throw":false,
+            "blocks":[{"name":"entry","instructions":[
+                {"kind":"struct_new","result":{"tag":"value","name":"array_item","type":{"tag":"struct","name":"Owner"}},"fields":[{"tag":"value","name":"array_text","type":{"tag":"string"}}]},
+                {"kind":"array_set","array":{"tag":"value","name":"array","type":{"tag":"array","element":{"tag":"struct","name":"Owner"}}},"index":{"tag":"value","name":"zero","type":{"tag":"int"}},"value":{"tag":"value","name":"array_item","type":{"tag":"struct","name":"Owner"}}},
+                {"kind":"struct_new","result":{"tag":"value","name":"list_item","type":{"tag":"struct","name":"Owner"}},"fields":[{"tag":"value","name":"list_text","type":{"tag":"string"}}]},
+                {"kind":"list_set","list_value":{"tag":"value","name":"list","type":{"tag":"list","element":{"tag":"struct","name":"Owner"}}},"index":{"tag":"value","name":"zero","type":{"tag":"int"}},"value":{"tag":"value","name":"list_item","type":{"tag":"struct","name":"Owner"}}},
+                {"kind":"struct_new","result":{"tag":"value","name":"inserted_item","type":{"tag":"struct","name":"Owner"}},"fields":[{"tag":"value","name":"inserted_text","type":{"tag":"string"}}]},
+                {"kind":"list_insert","list_value":{"tag":"value","name":"list","type":{"tag":"list","element":{"tag":"struct","name":"Owner"}}},"index":{"tag":"value","name":"zero","type":{"tag":"int"}},"value":{"tag":"value","name":"inserted_item","type":{"tag":"struct","name":"Owner"}}},
+                {"kind":"return","value":null,"transferred_storage":null}
+            ]}]
+        }]
+    })).unwrap();
+
+    let output = normalize_lifecycle_v1(&input, 1).unwrap();
+    let instructions = &output.functions[0].blocks[0].instructions;
+    let releases: Vec<_> = instructions
+        .iter()
+        .filter_map(|instruction| match instruction {
+            I::Call {
+                builtin: NullableDTO(Some(name)),
+                arguments,
+                ..
+            } if name == "__aether_release" => Some(super_name(&arguments[0])),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(releases, ["array_item", "list_item", "inserted_item"]);
+    let mutation_release_pairs = instructions
+        .windows(2)
+        .filter(|pair| {
+            matches!(
+                pair[0],
+                I::ArraySet { .. } | I::ListSet { .. } | I::ListInsert { .. }
+            ) && matches!(pair[1], I::Call { .. })
+        })
+        .count();
+    assert_eq!(mutation_release_pairs, 3);
+}

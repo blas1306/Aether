@@ -1,0 +1,7 @@
+struct Item { string text; int count; }
+
+int main() {
+    List<Item> items = {Item("owned", 1)};
+    items[0].count = 2;
+    return 0;
+}

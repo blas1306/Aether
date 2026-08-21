@@ -2,9 +2,16 @@ name: rust-ssa-shadow
 on:
   pull_request:
   workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"
 jobs:
   rust-ssa-shadow:
-    runs-on: ubuntu-latest
+    name: shadow-${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-13, macos-14]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -13,6 +20,18 @@ jobs:
       - run: pip install -e . pytest
       - run: cargo test --manifest-path compiler-rs/crates/aether-verifier/Cargo.toml
       - run: pytest tests/aether/test_rust_ssa_shadow_mode.py
+      - name: clean-install packaged companion discovery
+        run: python -c "from aether.ssa.shadow import discover_packaged_rust_ssa_shadow; print(discover_packaged_rust_ssa_shadow)"
+  full-shadow-qualification:
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pip install -e . pytest
+      - run: python scripts/qualify_rust_ssa_shadow_operational.py
       - run: python scripts/qualify_rust_ssa_lowering.py
       - run: python scripts/qualify_rust_ssa_lowering_adversarial.py
       - run: python scripts/qualify_python_ssa_renamer_deep_cfg.py

@@ -1,0 +1,69 @@
+{
+  "decision": "RUST_AGGREGATE_SSA_DIFFERENTIAL_QUALIFIED",
+  "evidence_schema_version": 1,
+  "milestone": "RUST-3.4a",
+  "first_divergence": {
+    "boundary": "lifecycle-normalized Initial IR",
+    "classification": "required Python instruction missing in Rust",
+    "initial_ir_equal": true,
+    "initial_main_entry_instruction_count": 75,
+    "python_normalized_main_entry_instruction_count_before_fix": 87,
+    "rust_normalized_main_entry_instruction_count_before_fix": 86,
+    "python_ssa_main_entry_instruction_count_before_fix": 56,
+    "rust_ssa_main_entry_instruction_count_before_fix": 55,
+    "instruction": {
+      "kind": "call",
+      "function": "__aether_release",
+      "builtin": "__aether_release",
+      "arguments": [{"name": "40", "tag": "value", "type": {"name": "Item", "tag": "struct"}}],
+      "result": null,
+      "source_location": null
+    },
+    "semantic_role": "discharge the owned Item temporary after list_set copies it into collection storage",
+    "ownership_state": "value 40 is the owning result of struct_set and is consumed at its last use",
+    "storage_value_identity": "sliced list storage -> loaded list value 35; updated Item temporary value 40",
+    "transferred_storage": null,
+    "aggregate_metadata": null,
+    "type_layout": "Item(Label(string text, bool active) label, int count, Tone tone); Item needs destruction recursively through Label.text"
+  },
+  "initial_ir_instruction_kinds": ["const","const","struct_new","const","const","struct_new","copy_init","load","copy_init","load","call","load","const","struct_set","assign","load","print","load","print","load","const","const","struct_new","const","const","struct_new","compare_op","print","load","list_new","copy_init","load","load","list_push","load","print","load","load","list_contains","print","load","load","list_index_of","print","load","const","const","list_slice","copy_init","load","const","list_get","const","struct_set","load","const","list_set","load","const","list_get","struct_get","print","load","const","list_get","struct_get","print","const","copy_init","load","destroy","destroy","destroy","destroy","return"],
+  "root_cause": "Rust lifecycle normalization handled list_push but allowed array_set, list_set, and list_insert to fall through without releasing an owned value temporary consumed by the mutation.",
+  "policy_basis": [
+    "lifecycle_normalization_policy_v1 ownership_state.owned_temporary_definition",
+    "lifecycle_normalization_policy_v1 ownership_state.whole_function",
+    "lifecycle_normalization_policy_v1 metadata.generated",
+    "lowering_policy_v1 preserves normalized ordinary instruction semantics"
+  ],
+  "implementation": {
+    "changed": "compiler-rs/crates/aether-ir/src/lifecycle.rs",
+    "primitive": "collection mutation ownership consumption",
+    "canonicalizer_changed": false,
+    "ssa_algorithms_changed": false,
+    "schemas_changed": false,
+    "policies_changed": false
+  },
+  "regressions": {
+    "source": "tests/aether/rust_migration/fixtures/aggregate_list_set_temporary.aether",
+    "initial_ir": "tests/aether/rust_migration/fixtures/aggregate_list_set_temporary.initial_ir.json",
+    "adversarial_operations": ["array_set", "list_set", "list_insert"],
+    "aether_ir_tests": "PASS",
+    "aether_verifier_tests": "PASS"
+  },
+  "post_fix": {
+    "aggregates_lifecycle_parity": true,
+    "aggregates_normalized_main_entry_instruction_counts": {"python": 87, "rust": 87},
+    "aggregates_canonical_ssa_parity": true,
+    "aggregates_ssa_main_entry_instruction_counts": {"python": 56, "rust": 56},
+    "soak": {"total_programs": 161, "accepted": 132, "rejected_before_ssa": 29, "shadow_compared": 132, "semantic_mismatches": 0, "infrastructure_failures": 0},
+    "historical": {"passed": 116, "denominator": 116}
+  },
+  "scope": {
+    "shadow_architecture_changed": false,
+    "python_ssa_authority": true,
+    "production_default": "PYTHON_SSA_ONLY",
+    "rust_reaches_optimizer_or_backend": false,
+    "rp3_changed": false,
+    "historical_operational_artifact_decision": "RUST_SSA_SHADOW_OPERATIONALLY_BLOCKED",
+    "commit_created": false
+  }
+}

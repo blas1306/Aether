@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, unique
 import json
+import os
 from pathlib import Path
 import queue
 import subprocess
@@ -12,12 +13,20 @@ import threading
 from time import perf_counter
 from typing import Any, Mapping, Protocol
 
+from aether.ir.dto import IR_SCHEMA_VERSION
+
 from aether.ir.dto import ir_module_to_dto
 from aether.ir.model import IRModule
 
 from .dto import ssa_module_from_dto, ssa_module_to_dto
 from .general_builder import GeneralSSABuilder
 from .verifier import SSAVerifier
+
+
+SSA_SHADOW_PROTOCOL_VERSION = 1
+SSA_SHADOW_SCHEMA_VERSION = 2
+SSA_SHADOW_PRODUCT_VERSION = "0.1.0"
+_SSA_SHADOW_BASENAME = "aether-ssa-shadow"
 
 
 @unique
@@ -36,14 +45,14 @@ class SSAShadowFailurePolicy(str, Enum):
 class SSALoweringAuthorityConfiguration:
     mode: SSALoweringAuthorityMode = SSALoweringAuthorityMode.PYTHON_SSA_ONLY
     failure_policy: SSAShadowFailurePolicy = SSAShadowFailurePolicy.FAIL_CLOSED
-    protocol_version: int = 1
+    protocol_version: int = SSA_SHADOW_PROTOCOL_VERSION
 
     def __post_init__(self) -> None:
         if not isinstance(self.mode, SSALoweringAuthorityMode):
             raise TypeError("mode must be an SSALoweringAuthorityMode")
         if not isinstance(self.failure_policy, SSAShadowFailurePolicy):
             raise TypeError("failure_policy must be an SSAShadowFailurePolicy")
-        if self.protocol_version != 1:
+        if self.protocol_version != SSA_SHADOW_PROTOCOL_VERSION:
             raise ValueError("only SSA shadow protocol version 1 is supported")
 
 
@@ -93,20 +102,29 @@ class PersistentRustSSALoweringClient:
     @property
     def request_count(self) -> int: return self._requests
 
+    @property
+    def process_id(self) -> int | None:
+        return self._process.pid if self._process is not None else None
+
     def lower(self, payload: bytes) -> Mapping[str, object]:
         with self._lock:
             process = self._start()
             assert process.stdin is not None
-            process.stdin.write(len(payload).to_bytes(4, "big") + payload)
-            process.stdin.flush()
-            response = self._read_frame(process)
-            self._requests += 1
+            try:
+                process.stdin.write(len(payload).to_bytes(4, "big") + payload)
+                process.stdin.flush()
+                response = self._read_frame(process)
+                self._requests += 1
+            except Exception:
+                self.close()
+                raise
         try:
             decoded = json.loads(response)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             self.close()
             raise RuntimeError("malformed Rust SSA response") from exc
         if not isinstance(decoded, dict):
+            self.close()
             raise RuntimeError("malformed Rust SSA response")
         return decoded
 
@@ -122,7 +140,13 @@ class PersistentRustSSALoweringClient:
         identity = self._read_frame(self._process)
         try:
             value = json.loads(identity)
-            valid = value == {"product": "aether-ssa-shadow", "protocol_version": 1}
+            valid = value == {
+                "product": _SSA_SHADOW_BASENAME,
+                "product_version": SSA_SHADOW_PRODUCT_VERSION,
+                "protocol_version": SSA_SHADOW_PROTOCOL_VERSION,
+                "input_schema_version": IR_SCHEMA_VERSION,
+                "output_schema_version": SSA_SHADOW_SCHEMA_VERSION,
+            }
         except (UnicodeDecodeError, json.JSONDecodeError):
             valid = False
         if not valid:
@@ -159,6 +183,39 @@ class PersistentRustSSALoweringClient:
             process.terminate()
             try: process.wait(timeout=1)
             except subprocess.TimeoutExpired: process.kill(); process.wait()
+
+    def __enter__(self) -> PersistentRustSSALoweringClient:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+
+def discover_packaged_rust_ssa_shadow(
+    package_directory: str | os.PathLike[str],
+) -> Path:
+    """Resolve only the companion in the canonical installed package layout.
+
+    Deliberately performs no PATH or checkout/target fallback. Release tooling
+    installs the native binary under ``aether/native/<platform>/``.
+    """
+    import platform
+    import sys
+
+    raw_os = sys.platform.lower()
+    os_name = "windows" if raw_os.startswith("win") else "macos" if raw_os == "darwin" else "linux"
+    aliases = {"amd64": "x86_64", "x86_64": "x86_64", "aarch64": "arm64", "arm64": "arm64"}
+    try:
+        architecture = aliases[platform.machine().lower().replace("-", "_")]
+    except KeyError:
+        raise RuntimeError("unsupported Rust SSA companion architecture") from None
+    suffix = ".exe" if os_name == "windows" else ""
+    path = Path(package_directory).resolve() / "aether" / "native" / f"{os_name}-{architecture}" / f"{_SSA_SHADOW_BASENAME}{suffix}"
+    if not path.is_file():
+        raise FileNotFoundError("packaged Rust SSA companion was not found")
+    if not os.access(path, os.X_OK):
+        raise PermissionError("packaged Rust SSA companion is not executable")
+    return path
 
 
 def canonical_ssa(dto: Mapping[str, object]) -> dict[str, object]:

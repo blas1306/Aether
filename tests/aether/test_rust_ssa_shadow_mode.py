@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+import shutil
+import subprocess
+import sys
 
 import pytest
 
@@ -11,6 +16,8 @@ from aether.ssa.shadow import (
     SSALoweringAuthorityConfiguration,
     SSALoweringAuthorityMode,
     SSAShadowFailure,
+    PersistentRustSSALoweringClient,
+    discover_packaged_rust_ssa_shadow,
     lower_with_rust_shadow,
 )
 
@@ -76,3 +83,64 @@ def test_pipeline_shadow_selection_is_explicit() -> None:
     result = SSAPipeline(authority_configuration=configuration, rust_shadow_client=client).run(IRModule())
     assert result.ssa_module.functions == []
     assert client.request_count == 1
+
+
+@pytest.fixture(scope="module")
+def rust_ssa_shadow_executable() -> Path:
+    root = Path(__file__).resolve().parents[2]
+    cargo = shutil.which("cargo")
+    if cargo is None:
+        pytest.skip("cargo is required")
+    subprocess.run(
+        [cargo, "build", "-p", "aether-verifier", "--bin", "aether-ssa-shadow"],
+        cwd=root / "compiler-rs", check=True,
+    )
+    suffix = ".exe" if sys.platform == "win32" else ""
+    return root / "compiler-rs" / "target" / "debug" / f"aether-ssa-shadow{suffix}"
+
+
+def test_real_companion_long_session_is_persistent_and_isolated(
+    rust_ssa_shadow_executable: Path,
+) -> None:
+    payload_a = json.dumps(
+        __import__("aether.ir.dto", fromlist=["ir_module_to_dto"]).ir_module_to_dto(IRModule()),
+        sort_keys=True, separators=(",", ":"),
+    ).encode()
+    # Semantically identical, separately allocated input proves no response state leaks.
+    payload_b = bytes(bytearray(payload_a))
+    with PersistentRustSSALoweringClient(rust_ssa_shadow_executable) as client:
+        responses = [client.lower(payload_a if index % 2 == 0 else payload_b) for index in range(500)]
+        assert client.process_start_count == 1
+        assert client.request_count == 500
+        assert all(response == responses[0] for response in responses)
+
+
+def test_real_companion_serializes_concurrent_requests(
+    rust_ssa_shadow_executable: Path,
+) -> None:
+    payload = json.dumps(
+        __import__("aether.ir.dto", fromlist=["ir_module_to_dto"]).ir_module_to_dto(IRModule()),
+        sort_keys=True, separators=(",", ":"),
+    ).encode()
+    with PersistentRustSSALoweringClient(rust_ssa_shadow_executable) as client:
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            responses = list(executor.map(client.lower, [payload] * 64))
+        assert client.process_start_count == 1
+        assert client.request_count == 64
+        assert all(response == responses[0] for response in responses)
+
+
+def test_packaged_discovery_has_no_path_or_checkout_fallback(
+    tmp_path: Path, rust_ssa_shadow_executable: Path,
+) -> None:
+    import platform
+    aliases = {"amd64": "x86_64", "x86_64": "x86_64", "aarch64": "arm64", "arm64": "arm64"}
+    os_name = "windows" if sys.platform.startswith("win") else "macos" if sys.platform == "darwin" else "linux"
+    architecture = aliases[platform.machine().lower().replace("-", "_")]
+    destination = tmp_path / "aether" / "native" / f"{os_name}-{architecture}" / rust_ssa_shadow_executable.name
+    destination.parent.mkdir(parents=True)
+    shutil.copy2(rust_ssa_shadow_executable, destination)
+    destination.chmod(destination.stat().st_mode | 0o111)
+    assert discover_packaged_rust_ssa_shadow(tmp_path) == destination
+    with pytest.raises(FileNotFoundError):
+        discover_packaged_rust_ssa_shadow(tmp_path / "missing")
