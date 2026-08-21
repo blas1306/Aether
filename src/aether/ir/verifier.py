@@ -218,6 +218,10 @@ class IRVerifier:
         self._active_location: VerifierLocation | None = None
         self._active_instruction: IRInstruction | None = None
         self._lifecycle_expanded = False
+        # Scoped to this verifier and to the exact IRFunction objects being
+        # verified.  Function-local storage names are the canonical identity
+        # used by lifecycle dataflow.
+        self._lifecycle_storage_by_function: dict[int, frozenset[str]] = {}
 
     def verify(self) -> IRModule:
         """Verify the module and return it unchanged on success."""
@@ -227,6 +231,7 @@ class IRVerifier:
         self._active_rule = None
         self._active_location = None
         self._active_instruction = None
+        self._lifecycle_storage_by_function = {}
         self._lifecycle_expanded = any(
             isinstance(instruction, IRCall)
             and instruction.builtin
@@ -377,6 +382,9 @@ class IRVerifier:
 
         value_types = self._collect_value_types(function)
         slot_types = self._collect_slot_types(function)
+        self._lifecycle_storage_by_function[id(function)] = (
+            self._build_lifecycle_storage_index(function)
+        )
 
         self._verify_borrowed_elements(function)
         self._verify_reachable_values(function, blocks, value_types, slot_types)
@@ -1268,20 +1276,34 @@ class IRVerifier:
         )
 
     @staticmethod
-    def _is_lifecycle_storage(function: IRFunction, name: str) -> bool:
-        return any(
-            isinstance(instruction, (IRInitDefault, IRCopyInit, IRMoveInit, IRAssign, IRDestroy, IRRelocate))
-            and any(
-                isinstance(value, IRStorage) and value.name == name
+    def _build_lifecycle_storage_index(function: IRFunction) -> frozenset[str]:
+        """Classify lifecycle storage in one linear scan of a function's IR."""
+        names: set[str] = set()
+        for block in function.blocks:
+            for instruction in block.instructions:
+                if not isinstance(
+                    instruction,
+                    (
+                        IRInitDefault,
+                        IRCopyInit,
+                        IRMoveInit,
+                        IRAssign,
+                        IRDestroy,
+                        IRRelocate,
+                    ),
+                ):
+                    continue
                 for value in (
                     getattr(instruction, "destination", None),
                     getattr(instruction, "source", None),
                     getattr(instruction, "value", None),
-                )
-            )
-            for block in function.blocks
-            for instruction in block.instructions
-        )
+                ):
+                    if isinstance(value, IRStorage):
+                        names.add(value.name)
+        return frozenset(names)
+
+    def _is_lifecycle_storage(self, function: IRFunction, name: str) -> bool:
+        return name in self._lifecycle_storage_by_function[id(function)]
 
     def _transfer_block(
         self,
