@@ -1,0 +1,40 @@
+{
+  "authority": {
+    "production_default": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "python_shadow": "synchronous_mandatory",
+    "returned_ssa": "rust_schema_v2_import",
+    "rust_reaches_optimizer_or_backend": true
+  },
+  "concurrency": {
+    "process_startups": 1,
+    "requests": 128,
+    "serialized_responses": true
+  },
+  "decision": "RUST_SSA_AUTHORITY_SOAK_PASS",
+  "evidence_schema_version": 1,
+  "failures": [],
+  "long_session": {
+    "deterministic": true,
+    "process_startups": 1,
+    "requests": 1000,
+    "rss_end_bytes": 4939776,
+    "rss_observation": "observational only; no fragile CI gate",
+    "rss_start_bytes": 4939776
+  },
+  "milestone": "RUST-3.6",
+  "performance": {
+    "canonical_comparison_seconds": 0.19581878696772037,
+    "process_startups": 1,
+    "python_lowering_seconds": 0.4852165779811912,
+    "python_plus_rust_shadow_wall_seconds": 3.6875099409735412,
+    "rust_requests": 132
+  },
+  "soak": {
+    "accepted": 132,
+    "infrastructure_failures": 0,
+    "rejected_before_ssa": 29,
+    "semantic_mismatches": 0,
+    "shadow_compared": 132,
+    "total_programs": 161
+  }
+}

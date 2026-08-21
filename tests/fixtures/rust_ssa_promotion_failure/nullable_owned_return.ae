@@ -1,0 +1,16 @@
+struct Label {
+    int id;
+    string text;
+}
+
+Label? label(boolean present) {
+    if (present) {
+        return Label(4, "four");
+    }
+    return null;
+}
+
+int main() {
+    println(label(true));
+    return 0;
+}

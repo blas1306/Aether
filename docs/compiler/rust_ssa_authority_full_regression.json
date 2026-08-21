@@ -1,0 +1,31 @@
+{
+  "decision": "RUST_SSA_AUTHORITY_FULL_REGRESSION_FAILED",
+  "environmental_failures": 0,
+  "failed": 42,
+  "failure_groups": {
+    "aggregate_collection_lifecycle_parity": [
+      "collection_copy_phase2",
+      "nullable_native",
+      "string_split",
+      "struct_collections_native"
+    ],
+    "class_and_interface_lifecycle_parity": [
+      "native_class_state",
+      "native_interface_abi",
+      "native_interface_dispatch"
+    ],
+    "constructor_owned_ssa_boundary_verification": [
+      "native_struct_interface_boxing"
+    ],
+    "exceptional_lifecycle_and_cleanup_parity": [
+      "native_exceptions"
+    ]
+  },
+  "milestone": "RUST-3.6",
+  "passed": 4768,
+  "python_shadow_fallback_used": false,
+  "skipped": 4,
+  "status": "semantic_blocker",
+  "suite": "python -m pytest -q",
+  "total": 4814
+}

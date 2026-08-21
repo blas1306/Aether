@@ -1,0 +1,20 @@
+interface CounterLike {
+    int get();
+}
+
+class Counter implements CounterLike {
+    int value;
+    constructor(int initial) { value = initial; }
+    public int get() { return value; }
+}
+
+CounterLike identity(CounterLike value) { return value; }
+
+int nested(CounterLike value) {
+    return identity(value).get();
+}
+
+int main() {
+    Counter counter = Counter(1);
+    return nested(counter);
+}

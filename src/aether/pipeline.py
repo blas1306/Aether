@@ -198,6 +198,8 @@ class SSAPipeline:
         self.builder = builder
         self.authority_configuration = authority_configuration
         self.rust_shadow_client = rust_shadow_client
+        self.last_authority_report: object | None = None
+        self.last_returned_ssa_origin: str | None = None
 
     def lower_ir(self, typed_program: TypedProgram) -> IRModule:
         return IRBackend().lower_verified(typed_program)
@@ -206,10 +208,13 @@ class SSAPipeline:
         from .ssa import GeneralSSABuilder, SSABuilder
         from .ssa.shadow import (
             SSALoweringAuthorityConfiguration, SSALoweringAuthorityMode,
+            lower_with_rust_authority,
             lower_with_rust_shadow,
+            production_rust_ssa_lowering_client,
         )
 
         if self.builder == "pattern":
+            self.last_returned_ssa_origin = "python_pattern_builder"
             return SSABuilder().build(module)
         if self.builder == "general":
             configuration = self.authority_configuration
@@ -218,16 +223,27 @@ class SSAPipeline:
             if not isinstance(configuration, SSALoweringAuthorityConfiguration):
                 raise TypeError("authority_configuration must be an SSALoweringAuthorityConfiguration")
             if configuration.mode is SSALoweringAuthorityMode.PYTHON_SSA_AUTHORITY_RUST_SHADOW:
-                if self.rust_shadow_client is None:
-                    raise AetherRuntimeError("Rust SSA shadow mode requires an explicit companion client", kind="ssa")
-                authoritative, _report = lower_with_rust_shadow(module, self.rust_shadow_client)  # type: ignore[arg-type]
+                client = (
+                    self.rust_shadow_client
+                    if self.rust_shadow_client is not None
+                    else production_rust_ssa_lowering_client()
+                )
+                authoritative, report = lower_with_rust_shadow(module, client)  # type: ignore[arg-type]
+                self.last_authority_report = report
+                self.last_returned_ssa_origin = "python_general_ssa_builder"
                 return authoritative  # type: ignore[return-value]
             if configuration.mode is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW:
-                raise AetherRuntimeError(
-                    "Rust SSA authority is reserved but not activated by RUST-3.5",
-                    kind="ssa",
+                client = (
+                    self.rust_shadow_client
+                    if self.rust_shadow_client is not None
+                    else production_rust_ssa_lowering_client()
                 )
+                authoritative, report = lower_with_rust_authority(module, client)  # type: ignore[arg-type]
+                self.last_authority_report = report
+                self.last_returned_ssa_origin = "rust_schema_v2_import"
+                return authoritative  # type: ignore[return-value]
             if configuration.mode is SSALoweringAuthorityMode.PYTHON_SSA_ONLY:
+                self.last_returned_ssa_origin = "python_general_ssa_builder"
                 return GeneralSSABuilder().build(module)
             raise AssertionError("unhandled SSA lowering authority mode")
         raise ValueError(f"Unknown SSA builder '{self.builder}'.")

@@ -1,0 +1,13 @@
+struct Label { string text; }
+struct Item { Label label; int value; }
+Array<Item> identity(Array<Item> values) { return values; }
+
+int main() {
+    Array<Item> values = {Item(Label("old"), 1)};
+    Item copy = values[0];
+    copy.value = 2;
+    values[0] = copy;
+    println(values[0].label.text);
+    println(identity(values).length);
+    return 0;
+}

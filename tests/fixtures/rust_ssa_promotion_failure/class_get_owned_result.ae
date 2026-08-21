@@ -1,0 +1,16 @@
+class Node {
+    public string name;
+    public Node? next;
+    constructor(string name, Node? next) {
+        this.name = name;
+        this.next = next;
+    }
+}
+
+int main() {
+    Node tail = Node("tail", null);
+    Node head = Node("head", tail);
+    head.name = head.name;
+    println(head.name);
+    return 0;
+}

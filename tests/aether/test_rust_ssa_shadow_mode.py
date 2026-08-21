@@ -40,8 +40,12 @@ def empty_response():
     return {"ok": True, "ssa": {"schema_version": 2, "representation": "aether_ssa", "functions": [], "structs": []}}
 
 
-def test_python_only_is_default_and_never_requires_rust() -> None:
-    result = SSAPipeline().run(IRModule()).ssa_module
+def test_python_only_rollback_never_requires_rust() -> None:
+    result = SSAPipeline(
+        authority_configuration=SSALoweringAuthorityConfiguration(
+            SSALoweringAuthorityMode.PYTHON_SSA_ONLY
+        )
+    ).run(IRModule()).ssa_module
     assert ssa_module_to_dto(result) == empty_response()["ssa"]
 
 

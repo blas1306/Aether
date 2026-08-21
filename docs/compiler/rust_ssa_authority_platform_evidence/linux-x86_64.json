@@ -1,0 +1,46 @@
+{
+  "artifact": "aether-ssa-shadow-0.1.0-linux-x86_64.tar.gz",
+  "authority": "rust",
+  "checks": {
+    "backend_handoff": "PASS",
+    "multiple_requests": "PASS",
+    "optimizer_handoff": "PASS",
+    "packaged_discovery": "PASS",
+    "path_isolation": "PASS",
+    "production_default": "PASS",
+    "python_shadow_comparison": "PASS",
+    "rollback": "PASS",
+    "rust_result_returned": "PASS"
+  },
+  "comparison": {
+    "backend_handoffs": 6,
+    "comparisons": 6,
+    "infrastructure_failures": 0,
+    "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "optimizer_handoffs": 6,
+    "process_startups": 1,
+    "requests": 7,
+    "returned_ssa_origins": [
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import"
+    ],
+    "rollback_modes": [
+      "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+      "PYTHON_SSA_ONLY"
+    ],
+    "semantic_mismatches": 0
+  },
+  "execution": "clean_release_artifact_outside_checkout",
+  "platform": "linux-x86_64",
+  "provenance": "executed-native-runner",
+  "returned_ssa_origin": "rust_schema_v2_import",
+  "revision": "RUST-3.6",
+  "rust_target": "x86_64-unknown-linux-gnu",
+  "schema_version": 1,
+  "sha256": "74f79bd26225cfbf939586f53363cf041b69f549757ff0bd16c12ca3564515d9",
+  "shadow": "python_synchronous"
+}

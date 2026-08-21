@@ -1,0 +1,192 @@
+{
+  "artifact_schema_version": 1,
+  "milestone": "RUST-3.6a",
+  "decision": "RUST_SSA_PROMOTION_FAILURES_CLASSIFIED",
+  "repository_default": "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+  "historical_failure_total": 42,
+  "reproduced_total": 42,
+  "rust_ssa_fail_closed_total": 18,
+  "sanitizer_harness_total": 24,
+  "canonical_comparison": {
+    "detected_mismatch": 12,
+    "not_reached_rust_lifecycle_failure": 2,
+    "not_reached_python_import_verification_failure": 4,
+    "not_authority_specific_native_harness_failure": 24,
+    "equal_then_downstream_divergence": 0
+  },
+  "root_causes": [
+    {
+      "id": "RC1",
+      "name": "rust_omits_last_use_release_for_owning_expression_temporary",
+      "affected_tests": 10,
+      "first_divergence_boundary": "B_lifecycle_normalized_initial_ir",
+      "canonical_comparison": "detected",
+      "optimizer_entry": "not_reached",
+      "normative_owner": "Rust violates the qualified lifecycle policy for owned temporaries",
+      "qualification_blind_spot": "corpus_coverage_gap",
+      "minimized_reproducers": [
+        "tests/fixtures/rust_ssa_promotion_failure/aggregate_owned_projection.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/owning_call_result.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/interface_call_temporary.ae"
+      ],
+      "first_observable_state": "Python emits __aether_release after the last borrowed projection or interface use of an owned call result; Rust does not"
+    },
+    {
+      "id": "RC2",
+      "name": "rust_retains_nullable_owned_value_during_return_transfer",
+      "affected_tests": 1,
+      "first_divergence_boundary": "B_lifecycle_normalized_initial_ir",
+      "canonical_comparison": "detected",
+      "optimizer_entry": "not_reached",
+      "normative_owner": "Rust violates return-transfer lifecycle policy",
+      "qualification_blind_spot": "corpus_coverage_gap",
+      "minimized_reproducers": [
+        "tests/fixtures/rust_ssa_promotion_failure/nullable_owned_return.ae"
+      ],
+      "first_observable_state": "Rust emits an extra __aether_retain for the nullable aggregate immediately before return"
+    },
+    {
+      "id": "RC3",
+      "name": "rust_omits_nullable_class_argument_copy_lifetime_around_constructor_call",
+      "affected_tests": 1,
+      "first_divergence_boundary": "B_lifecycle_normalized_initial_ir",
+      "canonical_comparison": "detected",
+      "optimizer_entry": "not_reached",
+      "normative_owner": "Rust violates constructor-argument copy lifetime policy",
+      "qualification_blind_spot": "corpus_coverage_gap",
+      "minimized_reproducers": [
+        "tests/fixtures/rust_ssa_promotion_failure/class_get_owned_result.ae"
+      ],
+      "first_observable_state": "Python surrounds the nullable class argument with __aether_retain/__aether_release; Rust emits neither"
+    },
+    {
+      "id": "RC4",
+      "name": "rust_interface_lifecycle_registry_has_no_default",
+      "affected_tests": 2,
+      "first_divergence_boundary": "B_lifecycle_normalized_initial_ir",
+      "canonical_comparison": "not_reached",
+      "optimizer_entry": "not_reached",
+      "normative_owner": "Rust lifecycle type registry violates the qualified interface lifecycle capability",
+      "qualification_blind_spot": "corpus_coverage_gap",
+      "minimized_reproducers": [
+        "tests/fixtures/rust_ssa_promotion_failure/interface_lifecycle_default.ae"
+      ],
+      "first_observable_state": "Rust normalization rejects Interface Readable with 'has no lifecycle default' while Python produces verified SSA"
+    },
+    {
+      "id": "RC5",
+      "name": "rust_omits_normal_release_of_owning_struct_constructor_receiver",
+      "affected_tests": 4,
+      "first_divergence_boundary": "B_lifecycle_normalized_initial_ir",
+      "canonical_comparison": "not_reached",
+      "optimizer_entry": "not_reached",
+      "normative_owner": "Rust lowering violates constructor receiver policy and the Rust Owned SSA verifier fails to reject it",
+      "qualification_blind_spot": "corpus_coverage_gap_and_verifier_discrepancy",
+      "minimized_reproducers": [
+        "tests/fixtures/rust_ssa_promotion_failure/boxed_constructor_receiver.ae"
+      ],
+      "first_observable_state": "Rust omits __aether_release(receiver) between the constructor call and method_result_receiver; Python's imported-SSA verifier rejects it"
+    },
+    {
+      "id": "RC6",
+      "name": "leak_sanitizer_cannot_initialize_under_ptrace",
+      "affected_tests": 24,
+      "first_divergence_boundary": "J_backend_native_behavior",
+      "canonical_comparison": "not_authority_specific",
+      "optimizer_entry": "passed",
+      "normative_owner": "test execution environment; no SSA policy owner",
+      "qualification_blind_spot": "historical_failure_inventory_misclassification",
+      "minimized_reproducers": [
+        "tests/aether/test_native_exceptions.py"
+      ],
+      "first_observable_state": "native stderr begins 'LeakSanitizer has encountered a fatal error' and changes only by PID; LSAN_OPTIONS=detect_leaks=0 makes all 54 tests pass"
+    }
+  ],
+  "mode_matrix": {
+    "PYTHON_SSA_ONLY": {
+      "returned_ssa_origin": "python_general_ssa_builder",
+      "mismatch_status": "not_compared",
+      "downstream_outcome": "optimizer_pass_for_all_five_ssa_root_cause_reproducers"
+    },
+    "PYTHON_SSA_AUTHORITY_RUST_SHADOW": {
+      "returned_ssa_origin": "none_on_affected_reproducers",
+      "mismatch_status": "12_semantic_mismatch_2_rust_lane_failure_4_import_verifier_failure",
+      "downstream_outcome": "fail_closed_before_optimizer"
+    },
+    "RUST_SSA_AUTHORITY_PYTHON_SHADOW": {
+      "returned_ssa_origin": "none_on_affected_reproducers",
+      "mismatch_status": "12_semantic_mismatch_2_rust_lane_failure_4_import_verifier_failure",
+      "downstream_outcome": "fail_closed_before_optimizer"
+    }
+  },
+  "failure_inventory_note": "RC6 rows inherit every diagnostic field from rc6_shared_fields; the combination is the complete per-failure record.",
+  "failure_inventory": [
+    {"node_id":"tests/aether/test_collection_copy_phase2.py::test_native_copy_handles_strings_structs_nested_collections_and_callables","source_fixture":"embedded collection copy source","function":"main","root_cause":"RC1","pipeline_phase":"canonical_comparison","diagnostic":"instruction count 30 vs 28 at logic.merge0","python_authority_result":"verified Python SSA; downstream expected behavior passes in PYTHON_SSA_ONLY","rust_authority_result":"fail_closed semantic_mismatch","canonical_comparison_passed":false,"optimizer_entry":"not_reached","category":"collection_aggregate_lifecycle","first_observable_state":"missing owned-temporary releases"},
+    {"node_id":"tests/aether/test_nullable_native.py::test_native_nullable_end_to_end_struct_string_and_collection_values","source_fixture":"embedded nullable Label source","function":"label","root_cause":"RC2","pipeline_phase":"canonical_comparison","diagnostic":"instruction count 6 vs 7 at then0","python_authority_result":"verified Python SSA; downstream passes","rust_authority_result":"fail_closed semantic_mismatch","canonical_comparison_passed":false,"optimizer_entry":"not_reached","category":"aggregate_lifecycle","first_observable_state":"extra Rust retain before nullable return"},
+    {"node_id":"tests/aether/test_string_split.py::test_empty_separator_panics_consistently_in_ast_ir_and_native","source_fixture":"return string.split(...).length","function":"main","root_cause":"RC1","pipeline_phase":"canonical_comparison","diagnostic":"instruction count 6 vs 5 at entry","python_authority_result":"verified Python SSA; expected panic","rust_authority_result":"fail_closed semantic_mismatch","canonical_comparison_passed":false,"optimizer_entry":"not_reached","category":"collection_lifecycle","first_observable_state":"missing release of split result after length projection"},
+    {"node_id":"tests/aether/test_string_split.py::test_llvm_split_helper_is_two_pass_length_aware_owned_and_array_exact","source_fixture":"return string.split(...).length","function":"main","root_cause":"RC1","pipeline_phase":"canonical_comparison","diagnostic":"instruction count 6 vs 5 at entry","python_authority_result":"verified Python SSA; LLVM emission passes","rust_authority_result":"fail_closed semantic_mismatch","canonical_comparison_passed":false,"optimizer_entry":"not_reached","category":"collection_lifecycle","first_observable_state":"missing release of split result after length projection"},
+    {"node_id":"tests/aether/test_struct_collections_native.py::test_array_of_struct_native_get_set_slice_return_print_and_value_copy","source_fixture":"embedded Array<Record> source","function":"main","root_cause":"RC1","pipeline_phase":"canonical_comparison","diagnostic":"instruction count 121 vs 120 at entry","python_authority_result":"verified Python SSA; native behavior passes","rust_authority_result":"fail_closed semantic_mismatch","canonical_comparison_passed":false,"optimizer_entry":"not_reached","category":"collection_aggregate_lifecycle","first_observable_state":"missing release after length projection of owned identity result"},
+    {"node_id":"tests/aether/test_struct_collections_native.py::test_list_of_struct_native_reallocation_mutations_copy_clear_and_for_in","source_fixture":"embedded List<Entry> source","function":"main","root_cause":"RC1","pipeline_phase":"canonical_comparison","diagnostic":"instruction count 16 vs 15 at logic.merge3","python_authority_result":"verified Python SSA; native behavior passes","rust_authority_result":"fail_closed semantic_mismatch","canonical_comparison_passed":false,"optimizer_entry":"not_reached","category":"collection_aggregate_lifecycle","first_observable_state":"missing last-use release of owning collection temporary"},
+    {"node_id":"tests/aether/test_native_class_state.py::test_class_owning_field_self_assignment_and_recursive_state_run_natively","source_fixture":"embedded recursive Node source","function":"main","root_cause":"RC3","pipeline_phase":"canonical_comparison","diagnostic":"instruction count 22 vs 20 at entry","python_authority_result":"verified Python SSA; native behavior passes","rust_authority_result":"fail_closed semantic_mismatch","canonical_comparison_passed":false,"optimizer_entry":"not_reached","category":"class_lifecycle","first_observable_state":"missing retain/release around nullable class constructor argument"},
+    {"node_id":"tests/aether/test_native_interface_abi.py::test_interface_values_round_trip_through_dto_ssa_phis_and_optimizers","source_fixture":"SOURCE in test_native_interface_abi.py","function":"choose","root_cause":"RC4","pipeline_phase":"rust_lane.lifecycle_normalization","diagnostic":"Interface Readable has no lifecycle default","python_authority_result":"verified Python SSA","rust_authority_result":"fail_closed rust_lowering_or_verifier_failure","canonical_comparison_passed":"not_reached","optimizer_entry":"not_reached","category":"interface_lifecycle","first_observable_state":"Rust lifecycle registry rejects interface default"},
+    {"node_id":"tests/aether/test_native_interface_abi.py::test_llvm_uses_two_pointer_values_and_immutable_placeholder_tables","source_fixture":"SOURCE in test_native_interface_abi.py","function":"choose","root_cause":"RC4","pipeline_phase":"rust_lane.lifecycle_normalization","diagnostic":"Interface Readable has no lifecycle default","python_authority_result":"verified Python SSA","rust_authority_result":"fail_closed rust_lowering_or_verifier_failure","canonical_comparison_passed":"not_reached","optimizer_entry":"not_reached","category":"interface_lifecycle","first_observable_state":"Rust lifecycle registry rejects interface default"},
+    {"node_id":"tests/aether/test_native_interface_dispatch.py::test_witness_slots_use_stable_native_thunks_and_calls_are_indirect","source_fixture":"SOURCE in test_native_interface_dispatch.py","function":"nested","root_cause":"RC1","pipeline_phase":"canonical_comparison","diagnostic":"instruction count 4 vs 3 at entry","python_authority_result":"verified Python SSA; LLVM emission passes","rust_authority_result":"fail_closed semantic_mismatch","canonical_comparison_passed":false,"optimizer_entry":"not_reached","category":"interface_lifecycle","first_observable_state":"missing release of owned identity result after borrowed interface call"},
+    {"node_id":"tests/aether/test_native_interface_dispatch.py::test_native_dispatch_preserves_alias_visible_mutation_and_collections[0]","source_fixture":"SOURCE in test_native_interface_dispatch.py","function":"nested","root_cause":"RC1","pipeline_phase":"canonical_comparison","diagnostic":"instruction count 4 vs 3 at entry","python_authority_result":"verified Python SSA; O0 native passes","rust_authority_result":"fail_closed semantic_mismatch","canonical_comparison_passed":false,"optimizer_entry":"not_reached","category":"interface_lifecycle","first_observable_state":"missing release of owned identity result after borrowed interface call"},
+    {"node_id":"tests/aether/test_native_interface_dispatch.py::test_native_dispatch_preserves_alias_visible_mutation_and_collections[1]","source_fixture":"SOURCE in test_native_interface_dispatch.py","function":"nested","root_cause":"RC1","pipeline_phase":"canonical_comparison","diagnostic":"instruction count 4 vs 3 at entry","python_authority_result":"verified Python SSA; O1 native passes","rust_authority_result":"fail_closed semantic_mismatch","canonical_comparison_passed":false,"optimizer_entry":"not_reached","category":"interface_lifecycle","first_observable_state":"missing release of owned identity result after borrowed interface call"},
+    {"node_id":"tests/aether/test_native_interface_dispatch.py::test_native_dispatch_preserves_alias_visible_mutation_and_collections[2]","source_fixture":"SOURCE in test_native_interface_dispatch.py","function":"nested","root_cause":"RC1","pipeline_phase":"canonical_comparison","diagnostic":"instruction count 4 vs 3 at entry","python_authority_result":"verified Python SSA; O2 native passes","rust_authority_result":"fail_closed semantic_mismatch","canonical_comparison_passed":false,"optimizer_entry":"not_reached","category":"interface_lifecycle","first_observable_state":"missing release of owned identity result after borrowed interface call"},
+    {"node_id":"tests/aether/test_native_interface_dispatch.py::test_mutually_recursive_interface_dispatch_executes_natively","source_fixture":"embedded Recur/Even/Odd source","function":"Even.step","root_cause":"RC1","pipeline_phase":"canonical_comparison","diagnostic":"instruction count 7 vs 6 at merge0","python_authority_result":"verified Python SSA; native passes","rust_authority_result":"fail_closed semantic_mismatch","canonical_comparison_passed":false,"optimizer_entry":"not_reached","category":"interface_lifecycle","first_observable_state":"missing release of owning interface expression temporary"},
+    {"node_id":"tests/aether/test_native_struct_interface_boxing.py::test_box_layout_dto_verifiers_and_optimizers_preserve_metadata","source_fixture":"SOURCE in test_native_struct_interface_boxing.py","function":"main","root_cause":"RC5","pipeline_phase":"ssa_verification","diagnostic":"constructor receiver 45 lacks exactly one normal release","python_authority_result":"verified Python SSA","rust_authority_result":"fail_closed rust_verifier_failure at Python import boundary","canonical_comparison_passed":"not_reached","optimizer_entry":"not_reached","category":"constructor_ownership","first_observable_state":"missing receiver release before method_result_receiver"},
+    {"node_id":"tests/aether/test_native_struct_interface_boxing.py::test_struct_backed_interfaces_execute_with_value_semantics[0]","source_fixture":"SOURCE in test_native_struct_interface_boxing.py","function":"main","root_cause":"RC5","pipeline_phase":"ssa_verification","diagnostic":"constructor receiver 45 lacks exactly one normal release","python_authority_result":"verified Python SSA; O0 native passes","rust_authority_result":"fail_closed rust_verifier_failure at Python import boundary","canonical_comparison_passed":"not_reached","optimizer_entry":"not_reached","category":"constructor_ownership","first_observable_state":"missing receiver release before method_result_receiver"},
+    {"node_id":"tests/aether/test_native_struct_interface_boxing.py::test_struct_backed_interfaces_execute_with_value_semantics[1]","source_fixture":"SOURCE in test_native_struct_interface_boxing.py","function":"main","root_cause":"RC5","pipeline_phase":"ssa_verification","diagnostic":"constructor receiver 45 lacks exactly one normal release","python_authority_result":"verified Python SSA; O1 native passes","rust_authority_result":"fail_closed rust_verifier_failure at Python import boundary","canonical_comparison_passed":"not_reached","optimizer_entry":"not_reached","category":"constructor_ownership","first_observable_state":"missing receiver release before method_result_receiver"},
+    {"node_id":"tests/aether/test_native_struct_interface_boxing.py::test_struct_backed_interfaces_execute_with_value_semantics[2]","source_fixture":"SOURCE in test_native_struct_interface_boxing.py","function":"main","root_cause":"RC5","pipeline_phase":"ssa_verification","diagnostic":"constructor receiver 45 lacks exactly one normal release","python_authority_result":"verified Python SSA; O2 native passes","rust_authority_result":"fail_closed rust_verifier_failure at Python import boundary","canonical_comparison_passed":"not_reached","optimizer_entry":"not_reached","category":"constructor_ownership","first_observable_state":"missing receiver release before method_result_receiver"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_event_out_and_llvm_eh_execute_the_same_verified_ssa_corpus[0]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_native_managed_struct_snapshot_and_class_identity[event-out]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_native_managed_struct_snapshot_and_class_identity[llvm-eh-prototype]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_shared_native_recursion_aggregate_and_owned_field_corpus[event-out]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_shared_native_recursion_aggregate_and_owned_field_corpus[llvm-eh-prototype]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_native_constructor_failure_rolls_back_caller_and_callee_receivers[0]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_native_constructor_failure_rolls_back_caller_and_callee_receivers[1]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_native_constructor_failure_rolls_back_caller_and_callee_receivers[2]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_native_nested_class_constructor_failure_releases_each_partial_owner[event-out]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_native_nested_class_constructor_failure_releases_each_partial_owner[llvm-eh-prototype]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_constructor_failure_inside_catch_preserves_old_event_ownership[event-out]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_constructor_failure_inside_catch_preserves_old_event_ownership[llvm-eh-prototype]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_native_deep_propagation_and_high_volume_events[event-out]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_native_deep_propagation_and_high_volume_events[llvm-eh-prototype]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_private_runtime_fault_injection_is_fail_fast_and_leak_free[event-out-1-Aether panic: invalid private exception event]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_private_runtime_fault_injection_is_fail_fast_and_leak_free[event-out-2-Aether panic: invalid private exception event]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_private_runtime_fault_injection_is_fail_fast_and_leak_free[event-out-4-Aether panic: exception reporting failed]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_private_runtime_fault_injection_is_fail_fast_and_leak_free[event-out-8-Aether panic: exception reporting failed]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_private_runtime_fault_injection_is_fail_fast_and_leak_free[llvm-eh-prototype-1-Aether panic: invalid private exception event]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_private_runtime_fault_injection_is_fail_fast_and_leak_free[llvm-eh-prototype-2-Aether panic: invalid private exception event]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_private_runtime_fault_injection_is_fail_fast_and_leak_free[llvm-eh-prototype-4-Aether panic: exception reporting failed]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_private_runtime_fault_injection_is_fail_fast_and_leak_free[llvm-eh-prototype-8-Aether panic: exception reporting failed]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_struct_error_payload_allocation_failure_is_fail_fast[event-out]","root_cause":"RC6"},
+    {"node_id":"tests/aether/test_native_exceptions.py::test_struct_error_payload_allocation_failure_is_fail_fast[llvm-eh-prototype]","root_cause":"RC6"}
+  ],
+  "rc6_shared_fields": {
+    "source_fixture": "embedded/shared native exception fixture named by each node ID",
+    "function": "native test entry",
+    "pipeline_phase": "backend/native process startup",
+    "diagnostic": "LeakSanitizer has encountered a fatal error; LeakSanitizer does not work under ptrace",
+    "python_authority_result": "same native harness abort unless leak detection is disabled",
+    "rust_authority_result": "same native harness abort unless leak detection is disabled",
+    "canonical_comparison_passed": "not_authority_specific",
+    "optimizer_entry": "passed",
+    "category": "exception_native_test_harness",
+    "first_observable_state": "J_backend_native_behavior"
+  },
+  "constraints": {
+    "rust_authority_implementation_preserved": true,
+    "python_authority_restored": true,
+    "python_ssa_only_preserved": true,
+    "initial_ir_rp3_unchanged": true,
+    "semantic_fixes_applied": false,
+    "schemas_changed": false,
+    "policies_changed": false,
+    "canonical_comparison_changed": false,
+    "optimizer_backend_changed": false,
+    "historical_promotion_evidence_overwritten": false,
+    "commit_created": false
+  }
+}

@@ -21,11 +21,14 @@ from .dto import (
 from .general_builder import GeneralSSABuildError, GeneralSSABuilder
 from .shadow import (
     PersistentRustSSALoweringClient,
+    ProductionRustSSALoweringClient,
     SSALoweringAuthorityConfiguration,
     SSALoweringAuthorityMode,
     SSAShadowFailure,
     SSAShadowFailurePolicy,
     SSAShadowReport,
+    lower_with_rust_authority,
+    production_rust_ssa_lowering_client,
 )
 from .interpreter import SSAInterpreter
 from .model import (
@@ -122,11 +125,14 @@ __all__ = [
     "GeneralSSABuildError",
     "GeneralSSABuilder",
     "PersistentRustSSALoweringClient",
+    "ProductionRustSSALoweringClient",
     "SSALoweringAuthorityConfiguration",
     "SSALoweringAuthorityMode",
     "SSAShadowFailure",
     "SSAShadowFailurePolicy",
     "SSAShadowReport",
+    "lower_with_rust_authority",
+    "production_rust_ssa_lowering_client",
     "SSABuildError",
     "SSABuilder",
     "SSACFGBuilder",

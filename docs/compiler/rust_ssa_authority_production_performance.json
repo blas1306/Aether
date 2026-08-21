@@ -1,0 +1,40 @@
+{
+  "measurement_kind": "observational; no timing assertion or absolute gate",
+  "milestone": "RUST-3.6",
+  "observed_authority_over_python_ratio": 5.805,
+  "process_startups": 1,
+  "python_only_representative_median_total_ns": 128690209,
+  "requests": 28,
+  "rust_authority_python_shadow_representative_median_total_ns": 747098079,
+  "schema_version": 1,
+  "workloads": [
+    {
+      "observed_authority_over_python_ratio": 6.373,
+      "python_only_median_ns": 1073906,
+      "rounds": 7,
+      "rust_authority_python_shadow_median_ns": 6844491,
+      "workload": "benchmarks/arithmetic.ae"
+    },
+    {
+      "observed_authority_over_python_ratio": 5.716,
+      "python_only_median_ns": 15840138,
+      "rounds": 7,
+      "rust_authority_python_shadow_median_ns": 90544360,
+      "workload": "examples/numerical_methods/main.ae"
+    },
+    {
+      "observed_authority_over_python_ratio": 5.817,
+      "python_only_median_ns": 110491376,
+      "rounds": 7,
+      "rust_authority_python_shadow_median_ns": 642751196,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "observed_authority_over_python_ratio": 5.416,
+      "python_only_median_ns": 1284789,
+      "rounds": 7,
+      "rust_authority_python_shadow_median_ns": 6958032,
+      "workload": "corpus/exceptions/positive/indirect_call.ae"
+    }
+  ]
+}

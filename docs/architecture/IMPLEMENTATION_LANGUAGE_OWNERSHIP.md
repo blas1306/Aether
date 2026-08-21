@@ -48,15 +48,17 @@ Python 3.11 plus NumPy, SciPy, SymPy and Matplotlib.
 | `aether-ir` | Owned Rust Initial IR, schema-v1 import, JSON/wire DTOs, including the SSA wire representation. |
 | `aether-verifier` | Combined and focused structure, type, CFG, dominance, SSA, lifecycle/borrow, and all-path-return verification over owned Rust IR. Its Initial IR verifier owns production authority. |
 | `aether-ir-verifier` | Protocol-v1 library and bounded stdin/stdout executable that imports schema-v1 IR and invokes the combined verifier. |
-| `aether-python` | Empty future integration seam; no PyO3 binding or production integration exists. |
+| `aether-python` | Empty future integration seam; no PyO3 binding exists. Python imports Rust SSA through schema-v2 rather than this crate. |
 
 Python↔Rust differential tests, a shadow coordinator, content-identified
 platform packaging, operational CI, soak tooling and an explicit fail-closed
-Rust-authority canary exist. The checked-in production/default dual-verifier
-policy is Rust authority with required Python shadow. Therefore Initial IR
-verification is **RP3**. Initial IR and
-SSA Rust representations/verifiers are RP1 infrastructure where they are not
-on the production authority path.
+Rust-authority canary exist. Initial IR verification remains Rust authority at
+**RP3**. The failed RUST-3.6 SSA promotion was rolled back to the RP2
+`PYTHON_SSA_AUTHORITY_RUST_SHADOW` default: Python's `GeneralSSABuilder`
+returns the production SSA only after the required synchronous Rust comparison
+succeeds. `RUST_SSA_AUTHORITY_PYTHON_SHADOW` remains explicitly selectable for
+qualification, but is not the repository default. The historical
+`RUST_SSA_AUTHORITY_PROMOTION_FAILED` evidence is preserved.
 
 ### C, C++, and Aether
 

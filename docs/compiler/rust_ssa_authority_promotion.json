@@ -1,0 +1,272 @@
+{
+  "artifact_schema_version": 1,
+  "authority": {
+    "new": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "old": "PYTHON_SSA_ONLY",
+    "production_configuration": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "returned_ssa_origin": "rust_schema_v2_import",
+    "shadow": "python_synchronous_mandatory"
+  },
+  "decision": "RUST_SSA_AUTHORITY_PROMOTION_FAILED",
+  "fail_closed_policy": {
+    "all_rust_python_comparison_and_transport_failures": "abort compilation; return no SSA",
+    "silent_python_fallback": false,
+    "timeout": "terminate affected companion session; do not retry request"
+  },
+  "full_regression": {
+    "decision": "RUST_SSA_AUTHORITY_FULL_REGRESSION_FAILED",
+    "environmental_failures": 0,
+    "failed": 42,
+    "failure_groups": {
+      "aggregate_collection_lifecycle_parity": [
+        "collection_copy_phase2",
+        "nullable_native",
+        "string_split",
+        "struct_collections_native"
+      ],
+      "class_and_interface_lifecycle_parity": [
+        "native_class_state",
+        "native_interface_abi",
+        "native_interface_dispatch"
+      ],
+      "constructor_owned_ssa_boundary_verification": [
+        "native_struct_interface_boxing"
+      ],
+      "exceptional_lifecycle_and_cleanup_parity": [
+        "native_exceptions"
+      ]
+    },
+    "milestone": "RUST-3.6",
+    "passed": 4768,
+    "python_shadow_fallback_used": false,
+    "skipped": 4,
+    "status": "semantic_blocker",
+    "suite": "python -m pytest -q",
+    "total": 4814
+  },
+  "gates": [
+    {
+      "id": "P01",
+      "name": "production default is Rust authority",
+      "status": "PASS"
+    },
+    {
+      "id": "P02",
+      "name": "Python shadow is synchronous and mandatory",
+      "status": "PASS"
+    },
+    {
+      "id": "P03",
+      "name": "returned SSA is the imported Rust result",
+      "status": "PASS"
+    },
+    {
+      "id": "P04",
+      "name": "authority failures are fail closed with no fallback",
+      "status": "PASS"
+    },
+    {
+      "id": "P05",
+      "name": "both Python rollback modes remain configuration selections",
+      "status": "PASS"
+    },
+    {
+      "id": "P06",
+      "name": "Initial IR schema-v1 and SSA schema-v2 are unchanged",
+      "status": "PASS"
+    },
+    {
+      "id": "P07",
+      "name": "post-promotion historical authority corpus is 116/116",
+      "status": "PASS"
+    },
+    {
+      "id": "P08",
+      "name": "qualified adversarial and deep-CFG evidence remains PASS",
+      "status": "PASS"
+    },
+    {
+      "id": "P09",
+      "name": "post-promotion expanded soak has zero failures",
+      "status": "PASS"
+    },
+    {
+      "id": "P10",
+      "name": "Rust Owned SSA and Python SSA verification remain required",
+      "status": "PASS"
+    },
+    {
+      "id": "P11",
+      "name": "optimizer/backend and full repository regressions pass",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "P12",
+      "name": "clean-install RUST-3.6 evidence exists on every platform",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "P13",
+      "name": "all four native platform executions pass",
+      "status": "BLOCKED"
+    },
+    {
+      "id": "P14",
+      "name": "persistent production transport is retained",
+      "status": "PASS"
+    },
+    {
+      "id": "P15",
+      "name": "CI exercises authority and both rollback modes",
+      "status": "PASS"
+    },
+    {
+      "id": "P16",
+      "name": "architecture registry records Rust RP3 authority",
+      "status": "PASS"
+    }
+  ],
+  "historical_qualification": {
+    "post_promotion_artifact_sha256": "b283061a333f17dd0b53bc33c3f28a5f0505f190978de44fb8323e56035be643",
+    "post_promotion_checks": {
+      "canonical_ssa_parity": {
+        "failed": 0,
+        "passed": 116
+      },
+      "determinism": {
+        "failed": 0,
+        "passed": 116
+      },
+      "exact_reserialization": {
+        "failed": 0,
+        "passed": 116
+      },
+      "lifecycle_parity": {
+        "failed": 0,
+        "passed": 116
+      },
+      "python_ssa_verification": {
+        "failed": 0,
+        "passed": 116
+      },
+      "returned_ssa_is_rust": {
+        "failed": 0,
+        "passed": 116
+      },
+      "rust_owned_ssa_verification": {
+        "failed": 0,
+        "passed": 116
+      },
+      "schema_v2_import": {
+        "failed": 0,
+        "passed": 116
+      }
+    },
+    "post_promotion_decision": "RUST_SSA_AUTHORITY_HISTORICAL_PASS",
+    "readiness_artifact_sha256": "ca6b691215116644e626567f09c7b96200c3aa88bd2c27044505e7c1e2b14dac",
+    "readiness_decision": "READY_FOR_RUST_SSA_AUTHORITY_SWITCH"
+  },
+  "milestone": "RUST-3.6",
+  "performance": {
+    "measurement_kind": "observational; no timing assertion or absolute gate",
+    "milestone": "RUST-3.6",
+    "observed_authority_over_python_ratio": 5.805,
+    "process_startups": 1,
+    "python_only_representative_median_total_ns": 128690209,
+    "requests": 28,
+    "rust_authority_python_shadow_representative_median_total_ns": 747098079,
+    "schema_version": 1,
+    "workloads": [
+      {
+        "observed_authority_over_python_ratio": 6.373,
+        "python_only_median_ns": 1073906,
+        "rounds": 7,
+        "rust_authority_python_shadow_median_ns": 6844491,
+        "workload": "benchmarks/arithmetic.ae"
+      },
+      {
+        "observed_authority_over_python_ratio": 5.716,
+        "python_only_median_ns": 15840138,
+        "rounds": 7,
+        "rust_authority_python_shadow_median_ns": 90544360,
+        "workload": "examples/numerical_methods/main.ae"
+      },
+      {
+        "observed_authority_over_python_ratio": 5.817,
+        "python_only_median_ns": 110491376,
+        "rounds": 7,
+        "rust_authority_python_shadow_median_ns": 642751196,
+        "workload": "examples/expense_tracker/Main.ae"
+      },
+      {
+        "observed_authority_over_python_ratio": 5.416,
+        "python_only_median_ns": 1284789,
+        "rounds": 7,
+        "rust_authority_python_shadow_median_ns": 6958032,
+        "workload": "corpus/exceptions/positive/indirect_call.ae"
+      }
+    ]
+  },
+  "post_promotion_platforms": {
+    "linux-x86_64": {
+      "sha256": "5122e588c1719c95c33dfaa568f7ea03796f38a1c313c71254e48957b8c4ac08",
+      "status": "PASS"
+    },
+    "macos-arm64": {
+      "reason": "fresh RUST-3.6 native evidence missing or invalid",
+      "status": "BLOCKED"
+    },
+    "macos-x86_64": {
+      "reason": "fresh RUST-3.6 native evidence missing or invalid",
+      "status": "BLOCKED"
+    },
+    "windows-x86_64": {
+      "reason": "fresh RUST-3.6 native evidence missing or invalid",
+      "status": "BLOCKED"
+    }
+  },
+  "post_promotion_soak": {
+    "accepted": 132,
+    "infrastructure_failures": 0,
+    "rejected_before_ssa": 29,
+    "semantic_mismatches": 0,
+    "shadow_compared": 132,
+    "total_programs": 161
+  },
+  "pre_promotion_soak": {
+    "accepted": 132,
+    "infrastructure_failures": 0,
+    "rejected_before_ssa": 29,
+    "semantic_mismatches": 0,
+    "shadow_compared": 132,
+    "total_programs": 161
+  },
+  "rollback": {
+    "independent": "PYTHON_SSA_ONLY",
+    "primary": "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+    "source_or_schema_change_required": false
+  },
+  "scope": {
+    "commit_created": false,
+    "historical_artifacts_modified": false,
+    "optimizer_or_backend_semantics_changed": false,
+    "policies_changed": false,
+    "production_authority": "rust",
+    "python_implementation_preserved": true,
+    "rust_ssa_reaches_optimizer_or_backend": true,
+    "schemas_changed": false
+  },
+  "unresolved_blockers": {
+    "operational": [
+      "fresh native authority evidence: windows-x86_64",
+      "fresh native authority evidence: macos-arm64",
+      "fresh native authority evidence: macos-x86_64"
+    ],
+    "semantic": [
+      "aggregate_collection_lifecycle_parity: Rust/Python authority parity or Rust boundary verification",
+      "class_and_interface_lifecycle_parity: Rust/Python authority parity or Rust boundary verification",
+      "constructor_owned_ssa_boundary_verification: Rust/Python authority parity or Rust boundary verification",
+      "exceptional_lifecycle_and_cleanup_parity: Rust/Python authority parity or Rust boundary verification"
+    ]
+  }
+}

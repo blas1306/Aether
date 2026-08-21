@@ -1,0 +1,1555 @@
+{
+  "accepted": 116,
+  "checks": {
+    "canonical_ssa_parity": {
+      "failed": 0,
+      "passed": 116
+    },
+    "determinism": {
+      "failed": 0,
+      "passed": 116
+    },
+    "exact_reserialization": {
+      "failed": 0,
+      "passed": 116
+    },
+    "lifecycle_parity": {
+      "failed": 0,
+      "passed": 116
+    },
+    "python_ssa_verification": {
+      "failed": 0,
+      "passed": 116
+    },
+    "returned_ssa_is_rust": {
+      "failed": 0,
+      "passed": 116
+    },
+    "rust_owned_ssa_verification": {
+      "failed": 0,
+      "passed": 116
+    },
+    "schema_v2_import": {
+      "failed": 0,
+      "passed": 116
+    }
+  },
+  "decision": "RUST_SSA_AUTHORITY_HISTORICAL_PASS",
+  "evidence_schema_version": 1,
+  "expected": 116,
+  "milestone": "RUST-3.6",
+  "programs": [
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "benchmarks/arithmetic.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "benchmarks/array_sum.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "benchmarks/if_else.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "benchmarks/list_for_sum.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "benchmarks/list_push.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "benchmarks/matrix_mul.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "benchmarks/nested_loops.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "benchmarks/sum_to.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "benchmarks/vector_dot.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "benchmarks/while_countdown.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "corpus/exceptions/positive/cleanup_during_unwinding.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "corpus/exceptions/positive/constructor_failure.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "corpus/exceptions/positive/function_recursion.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "corpus/exceptions/positive/indirect_call.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "corpus/exceptions/positive/method_interface_dispatch.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "corpus/exceptions/positive/multiple_and_root_catches.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "corpus/exceptions/positive/nested_rethrow_chain.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "corpus/exceptions/positive/owned_aggregates_arc.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "corpus/exceptions/positive/panic_vs_exception.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "corpus/exceptions/positive/root_reporting.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "corpus/exceptions/positive/throw_and_typed_catch.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/ControlesALN/1erControl/Ej1/Biseccion.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/ControlesALN/1erControl/Ej2/PuntoFijo.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/ControlesALN/1erControl/Ej2/ej2.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/ControlesALN/2doControl/Ej2/ej2.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/FormulaNumerosPrimos.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/LeetCode/isPalindrome.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/LeetCode/twoSum.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/ProbandoNR/probandoNR2.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/ProbandoNR/probandoNR3.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/Sorts/IllegalArgumentException.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/Sorts/Main.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/Sorts/Sortings.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/aggregate_collections/particles.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/classes/const_with_mutable_alias.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/classes/counter_basic.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/classes/custom_constructor.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/classes/implements_interface.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/classes/invalid_cases.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/classes/private_field_public_methods.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/classes/reference_aliasing.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/esPrimo2.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/expense_tracker/Ledger.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/expense_tracker/Persistence.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/expense_tracker/Reports.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/expense_tracker/Transaction.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/hello.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/ir/constant_fold.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/ir/local_const.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/ir/sumTo.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/arithmetic.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/array_sort.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/array_sum.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/countdown.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/double_add.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/double_compare.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/double_to_int.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/for_break_continue.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/for_sum.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/gcd_iterative.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/identity_call.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/int_to_double.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/list_clear.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/list_contains.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/list_copy.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/list_for_sum.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/list_index.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/list_index_of.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/list_insert.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/list_literal.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/list_pop.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/list_pop_alias.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/list_push.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/list_push_alias.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/list_remove_at.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/list_reverse.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/list_set_alias.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/list_sort.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/matrix_add.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/matrix_column_mul.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/matrix_index.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/matrix_literal.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/matrix_matmul.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/matrix_rows_columns.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/matrix_scalar_mul.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/matrix_set.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/matrix_sub.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/max.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/outer_product.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/return_5.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/string_choose.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/string_identity.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/sum_to_n.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/vector_add.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/vector_column_inferred.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/vector_column_literal.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/vector_dot.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/vector_index.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/vector_length.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/vector_literal.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/vector_matrix_mul.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/vector_scalar_mul.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/vector_set.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/llvm/vector_sub.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/nose.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/numerical_methods/Functions.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/numerical_methods/Integration.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/numerical_methods/Problems.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/numerical_methods/Results.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/numerical_methods/Roots.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/numerical_methods/main.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/pruebaException.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/structs/Geometry.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/structs/custom_constructor_and_equality.ae"
+    },
+    {
+      "checks": {
+        "canonical_ssa_parity": true,
+        "determinism": true,
+        "exact_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "returned_ssa_is_rust": true,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_import": true
+      },
+      "path": "examples/structs/main.ae"
+    }
+  ],
+  "transport": {
+    "process_startups": 1,
+    "requests": 348
+  }
+}

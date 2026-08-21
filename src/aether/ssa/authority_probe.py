@@ -1,0 +1,79 @@
+"""Clean-install probe for production Rust-authoritative SSA lowering."""
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+
+from aether.backend.llvm import LLVMBackend
+from aether.ir.model import IRModule
+from aether.pipeline import IRBackend, SSAPipeline, prepare_typed_program
+from aether.ssa.dto import ssa_module_to_dto
+from aether.ssa.optimizer import SSAOptimizerPipeline
+from aether.ssa.shadow import (
+    SSALoweringAuthorityConfiguration,
+    SSALoweringAuthorityMode,
+    production_rust_ssa_lowering_client,
+)
+from aether.typechecker import TypeChecker
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("source", nargs="+", type=Path)
+    args = parser.parse_args()
+
+    origins: list[str] = []
+    llvm_modules = 0
+    for path in args.source:
+        source = path.read_text(encoding="utf-8")
+        typed = prepare_typed_program(source, TypeChecker(source_root=path.parent))
+        initial_ir = IRBackend().lower_verified(typed)
+        pipeline = SSAPipeline()
+        compile_result = pipeline.run(initial_ir)
+        if pipeline.last_returned_ssa_origin != "rust_schema_v2_import":
+            raise RuntimeError("SSA returned to the optimizer did not originate from Rust")
+        optimized = SSAOptimizerPipeline(verify_after_each=True).run(
+            compile_result.ssa_module
+        )
+        llvm = LLVMBackend().emit(optimized)
+        if not llvm.strip():
+            raise RuntimeError("backend produced an empty LLVM module")
+        origins.append(pipeline.last_returned_ssa_origin)
+        llvm_modules += 1
+
+    client = production_rust_ssa_lowering_client()
+    python_only = SSAPipeline(
+        authority_configuration=SSALoweringAuthorityConfiguration(
+            SSALoweringAuthorityMode.PYTHON_SSA_ONLY
+        )
+    ).run(IRModule()).ssa_module
+    python_authority = SSAPipeline(
+        authority_configuration=SSALoweringAuthorityConfiguration(
+            SSALoweringAuthorityMode.PYTHON_SSA_AUTHORITY_RUST_SHADOW
+        ),
+        rust_shadow_client=client,
+    ).run(IRModule()).ssa_module
+    if ssa_module_to_dto(python_only) != ssa_module_to_dto(python_authority):
+        raise RuntimeError("SSA rollback configurations diverged")
+    result = {
+        "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+        "comparisons": len(origins),
+        "returned_ssa_origins": origins,
+        "optimizer_handoffs": len(origins),
+        "backend_handoffs": llvm_modules,
+        "rollback_modes": [
+            "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+            "PYTHON_SSA_ONLY",
+        ],
+        "semantic_mismatches": 0,
+        "infrastructure_failures": 0,
+        "process_startups": client.process_start_count,
+        "requests": client.request_count,
+    }
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

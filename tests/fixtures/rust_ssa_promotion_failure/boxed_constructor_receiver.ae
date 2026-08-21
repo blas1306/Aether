@@ -1,0 +1,26 @@
+interface Named {
+    string text();
+}
+
+struct Node : Named {
+    string name;
+    Array<int> data;
+    int? next;
+
+    constructor(string name, Array<int> data, int? next) {
+        this.name = name;
+        this.data = data;
+        this.next = next;
+    }
+
+    string text() {
+        return name;
+    }
+}
+
+int main() {
+    Node node = Node("owned", {1, 2, 3}, null);
+    Named named = node;
+    println(named.text());
+    return 0;
+}

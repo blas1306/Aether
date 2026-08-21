@@ -28,7 +28,11 @@ def test_ownership_registry_has_one_legal_authority_per_responsibility() -> None
             "companion_packaging_model",
             "next_promotion",
         }
-        if entry["component"] != "initial_ir_verification":
+        if entry["component"] not in {
+            "initial_ir_verification",
+            "ssa_construction",
+            "ssa_verification",
+        }:
             assert set(entry) == required
         assert entry["current_authority"] in languages
         assert entry["target_authority"] in languages
@@ -48,6 +52,13 @@ def test_ownership_registry_has_one_legal_authority_per_responsibility() -> None
     assert initial_verifier["semantic_parity_status"] == "complete_rust_1_1"
     assert initial_verifier["operational_readiness_status"] == "promoted_rust_2"
     assert initial_verifier["companion_packaging_model"] == "B1_platform_native_binary_artifact"
+
+    for component in ("ssa_construction", "ssa_verification"):
+        ssa = next(entry for entry in components if entry["component"] == component)
+        assert ssa["current_authority"] == "python"
+        assert ssa["migration_phase"] == "RP2"
+        assert ssa["allowed_shadows"] == ["rust"]
+        assert ssa["operational_readiness_status"] == "promotion_failed_rust_3_6"
 
 
 def test_only_migrations_may_have_shadows() -> None:

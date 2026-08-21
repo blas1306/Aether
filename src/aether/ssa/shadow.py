@@ -1,15 +1,17 @@
-"""Python-authority/Rust-shadow SSA lowering coordination (RUST-3.3)."""
+"""Fail-closed dual-lane SSA lowering authority coordination."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, unique
+import atexit
 import json
 import os
 from pathlib import Path
 import queue
 import re
 import subprocess
+import sys
 import threading
 from hashlib import sha256
 from time import perf_counter
@@ -17,7 +19,7 @@ from typing import Any, Mapping, Protocol
 
 from aether.ir.dto import IR_SCHEMA_VERSION
 
-from aether.ir.dto import ir_module_to_dto
+from aether.ir.dto import ir_module_from_dto, ir_module_to_dto
 from aether.ir.model import IRModule
 
 from .dto import ssa_module_from_dto, ssa_module_to_dto
@@ -44,9 +46,6 @@ _SSA_SHADOW_PLATFORMS = {
 class SSALoweringAuthorityMode(str, Enum):
     PYTHON_SSA_ONLY = "python_ssa_only"
     PYTHON_SSA_AUTHORITY_RUST_SHADOW = "python_ssa_authority_rust_shadow"
-    # Reserved by RUST-3.5 for the later promotion milestone.  The pipeline
-    # rejects this mode until that milestone installs the authoritative
-    # coordinator; merely selecting it can never return Rust SSA today.
     RUST_SSA_AUTHORITY_PYTHON_SHADOW = "rust_ssa_authority_python_shadow"
 
 
@@ -58,7 +57,9 @@ class SSAShadowFailurePolicy(str, Enum):
 
 @dataclass(frozen=True)
 class SSALoweringAuthorityConfiguration:
-    mode: SSALoweringAuthorityMode = SSALoweringAuthorityMode.PYTHON_SSA_ONLY
+    # RUST-3.6a safe default after the failed authority promotion.  Rust
+    # authority remains an explicit, fail-closed qualification selection.
+    mode: SSALoweringAuthorityMode = SSALoweringAuthorityMode.PYTHON_SSA_AUTHORITY_RUST_SHADOW
     failure_policy: SSAShadowFailurePolicy = SSAShadowFailurePolicy.FAIL_CLOSED
     protocol_version: int = SSA_SHADOW_PROTOCOL_VERSION
 
@@ -209,6 +210,57 @@ class PersistentRustSSALoweringClient:
 
     def __exit__(self, *_: object) -> None:
         self.close()
+
+
+class ProductionRustSSALoweringClient:
+    """Lazily use the strictly packaged production companion.
+
+    The package is selected only from the canonical installation prefix.  No
+    PATH, checkout, Cargo target-directory, or debug-binary fallback exists.
+    """
+
+    def __init__(self, *, timeout_seconds: float = 10.0) -> None:
+        self.timeout_seconds = timeout_seconds
+        self._client: PersistentRustSSALoweringClient | None = None
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def package_directory() -> Path:
+        return Path(sys.prefix) / "libexec" / "aether" / "ssa-shadow"
+
+    @property
+    def process_start_count(self) -> int:
+        return self._client.process_start_count if self._client is not None else 0
+
+    @property
+    def request_count(self) -> int:
+        return self._client.request_count if self._client is not None else 0
+
+    def lower(self, payload: bytes) -> Mapping[str, object]:
+        with self._lock:
+            if self._client is None:
+                executable = discover_packaged_rust_ssa_shadow(self.package_directory())
+                self._client = PersistentRustSSALoweringClient(
+                    executable,
+                    timeout_seconds=self.timeout_seconds,
+                )
+            client = self._client
+        return client.lower(payload)
+
+    def close(self) -> None:
+        with self._lock:
+            client, self._client = self._client, None
+        if client is not None:
+            client.close()
+
+
+_PRODUCTION_RUST_SSA_CLIENT = ProductionRustSSALoweringClient()
+atexit.register(_PRODUCTION_RUST_SSA_CLIENT.close)
+
+
+def production_rust_ssa_lowering_client() -> ProductionRustSSALoweringClient:
+    """Return the process-wide persistent production companion client."""
+    return _PRODUCTION_RUST_SSA_CLIENT
 
 
 def canonical_rust_ssa_shadow_platform_id(
@@ -367,38 +419,94 @@ def _difference(left: Any, right: Any, path: str = "$") -> tuple[str, Any, Any] 
     return None
 
 
-def lower_with_rust_shadow(module: IRModule, client: RustSSALoweringClient) -> tuple[object, SSAShadowReport]:
-    """Return only Python SSA, or fail closed with a bounded structured report."""
+def _lower_dual_lane(
+    module: IRModule,
+    client: RustSSALoweringClient,
+    *,
+    rust_authoritative: bool,
+) -> tuple[object, SSAShadowReport]:
+    """Run both qualified lanes and return only the configured authority."""
     snapshot = ir_module_to_dto(module)
     payload = json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()
-    started = perf_counter(); python_ssa = GeneralSSABuilder().build(module); python_seconds = perf_counter() - started
+
+    python_seconds = 0.0
+    rust_seconds = 0.0
+
+    def run_python() -> object:
+        nonlocal python_seconds
+        try:
+            # Both lanes consume representations derived from these exact
+            # bytes.  The frontend and Initial IR lowering never run twice.
+            python_input = ir_module_from_dto(json.loads(payload))
+            started = perf_counter()
+            value = GeneralSSABuilder().build(python_input)
+            SSAVerifier(value).verify()
+            python_seconds = perf_counter() - started
+            return value
+        except Exception as exc:
+            role = "shadow" if rust_authoritative else "authority"
+            raise SSAShadowFailure(
+                SSAShadowReport(
+                    f"python_{role}_failure",
+                    "python_lane",
+                    first_difference=str(exc)[:240],
+                    python_seconds=python_seconds,
+                    rust_seconds=rust_seconds,
+                )
+            ) from exc
+
+    def run_rust() -> object:
+        nonlocal rust_seconds
+        try:
+            started = perf_counter()
+            response = client.lower(payload)
+            rust_seconds = perf_counter() - started
+        except Exception as exc:
+            classification = "timeout" if isinstance(exc, TimeoutError) else "rust_infrastructure_failure"
+            raise SSAShadowFailure(
+                SSAShadowReport(
+                    classification,
+                    "transport",
+                    first_difference=str(exc)[:240],
+                    python_seconds=python_seconds,
+                )
+            ) from exc
+        if response.get("ok") is not True:
+            raise SSAShadowFailure(SSAShadowReport("rust_lowering_or_verifier_failure", "rust_lane",
+                                                  first_difference=str(response.get("error", "unspecified failure"))[:240],
+                                                  python_seconds=python_seconds, rust_seconds=rust_seconds))
+        if not isinstance(response.get("ssa"), dict):
+            raise SSAShadowFailure(SSAShadowReport("malformed_rust_response", "response_decode",
+                                                  python_seconds=python_seconds, rust_seconds=rust_seconds))
+        try:
+            value = ssa_module_from_dto(response["ssa"])
+        except Exception as exc:
+            raise SSAShadowFailure(SSAShadowReport("malformed_rust_response", "schema_v2_import",
+                                                  first_difference=str(exc)[:240], python_seconds=python_seconds,
+                                                  rust_seconds=rust_seconds)) from exc
+        try:
+            SSAVerifier(value).verify()
+        except Exception as exc:
+            raise SSAShadowFailure(SSAShadowReport("rust_verifier_failure", "ssa_verification",
+                                                  first_difference=str(exc)[:240], python_seconds=python_seconds,
+                                                  rust_seconds=rust_seconds)) from exc
+        return value
+
+    if rust_authoritative:
+        rust_ssa = run_rust()
+        python_ssa = run_python()
+    else:
+        python_ssa = run_python()
+        rust_ssa = run_rust()
     if ir_module_to_dto(module) != snapshot:
-        raise SSAShadowFailure(SSAShadowReport("same_input_violation", "input_snapshot"))
-    try:
-        started = perf_counter(); response = client.lower(payload); rust_seconds = perf_counter() - started
-    except Exception as exc:
-        classification = "timeout" if isinstance(exc, TimeoutError) else "rust_infrastructure_failure"
-        raise SSAShadowFailure(SSAShadowReport(classification, "transport", first_difference=str(exc)[:240],
-                                              python_seconds=python_seconds)) from exc
-    if response.get("ok") is not True:
-        raise SSAShadowFailure(SSAShadowReport("rust_lowering_or_verifier_failure", "rust_lane",
-                                              first_difference=str(response.get("error", "unspecified failure"))[:240],
-                                              python_seconds=python_seconds, rust_seconds=rust_seconds))
-    if not isinstance(response.get("ssa"), dict):
-        raise SSAShadowFailure(SSAShadowReport("malformed_rust_response", "response_decode",
-                                              python_seconds=python_seconds, rust_seconds=rust_seconds))
-    try:
-        rust_ssa = ssa_module_from_dto(response["ssa"])
-    except Exception as exc:
-        raise SSAShadowFailure(SSAShadowReport("malformed_rust_response", "schema_v2_import",
-                                              first_difference=str(exc)[:240], python_seconds=python_seconds,
-                                              rust_seconds=rust_seconds)) from exc
-    try:
-        SSAVerifier(rust_ssa).verify()
-    except Exception as exc:
-        raise SSAShadowFailure(SSAShadowReport("rust_verifier_failure", "ssa_verification",
-                                              first_difference=str(exc)[:240], python_seconds=python_seconds,
-                                              rust_seconds=rust_seconds)) from exc
+        raise SSAShadowFailure(
+            SSAShadowReport(
+                "same_input_violation",
+                "input_snapshot",
+                python_seconds=python_seconds,
+                rust_seconds=rust_seconds,
+            )
+        )
     try:
         rust_dto = ssa_module_to_dto(rust_ssa, schema_version=2)
         python_dto = ssa_module_to_dto(python_ssa, schema_version=2)
@@ -428,5 +536,22 @@ def lower_with_rust_shadow(module: IRModule, client: RustSSALoweringClient) -> t
                                               path, repr(py)[:240], repr(rust)[:240], location,
                                               python_seconds=python_seconds, rust_seconds=rust_seconds,
                                               comparison_seconds=compare))
-    return python_ssa, SSAShadowReport("match", "canonical_comparison", python_seconds=python_seconds,
-                                      rust_seconds=rust_seconds, comparison_seconds=compare)
+    authoritative = rust_ssa if rust_authoritative else python_ssa
+    return authoritative, SSAShadowReport("match", "canonical_comparison", python_seconds=python_seconds,
+                                          rust_seconds=rust_seconds, comparison_seconds=compare)
+
+
+def lower_with_rust_shadow(
+    module: IRModule,
+    client: RustSSALoweringClient,
+) -> tuple[object, SSAShadowReport]:
+    """Return verified Python SSA after a synchronous verified Rust match."""
+    return _lower_dual_lane(module, client, rust_authoritative=False)
+
+
+def lower_with_rust_authority(
+    module: IRModule,
+    client: RustSSALoweringClient,
+) -> tuple[object, SSAShadowReport]:
+    """Return imported Rust SSA only after its Python shadow matches."""
+    return _lower_dual_lane(module, client, rust_authoritative=True)

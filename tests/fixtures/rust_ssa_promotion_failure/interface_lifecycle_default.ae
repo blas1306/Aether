@@ -1,0 +1,20 @@
+interface Readable {
+    int read();
+}
+
+class Box implements Readable {
+    public int read() { return 1; }
+}
+
+Readable choose(boolean flag, Box first, Box second) {
+    Readable result = first;
+    if (flag) {
+        result = second;
+    }
+    return result;
+}
+
+int main() {
+    Box box = Box();
+    return choose(true, box, box).read();
+}
