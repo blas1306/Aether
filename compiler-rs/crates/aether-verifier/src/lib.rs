@@ -68,7 +68,7 @@ pub use ssa_error::{
     SSAInstructionLocation, SSAUseLocation,
 };
 pub use ssa_verifier::{verify_function_ssa, verify_module_ssa};
-pub use ssa_wire_verifier::{SSAWireVerificationError, verify_ssa_module_dto};
+pub use ssa_wire_verifier::{SSAWireVerificationError, verify_owned_ssa, verify_ssa_module_dto};
 pub use structure_error::{
     ActualBlockTermination, BlockStructureVerificationError, BranchTarget, ControlFlowRuleError,
     FunctionStructureVerificationError, ModuleStructureVerificationError, TerminatorExpectation,

@@ -1,0 +1,46 @@
+{
+  "attempt": "RUST-3.1d",
+  "constructor_exceptional_repair": {
+    "complete": true,
+    "direct_invoke": true,
+    "exceptional_sequence": [
+      "catch_entry",
+      "release(receiver)",
+      "propagate"
+    ],
+    "indirect_or_interface_constructor_rule": "not specified by policy and not inferred",
+    "normal_owning_class_release": false,
+    "normal_owning_struct_release": true
+  },
+  "corpus": {
+    "authoritative_rust_ssa_verified": 0,
+    "expected": 116,
+    "lifecycle_parity_established": 0,
+    "rust_ssa_construction_established": 0,
+    "semantic_ssa_parity_established": 0
+  },
+  "decision": "RUST_SSA_LOWERING_BLOCKED",
+  "dependency_architecture": {
+    "aether_ir_depends_on_aether_verifier": false,
+    "construction_api_is_qualification_api": false
+  },
+  "mismatches": [],
+  "qualification_blocker": {
+    "classification": "AUTHORITATIVE_VERIFIER_ADAPTER_GAP",
+    "detail": "aether-verifier verifies schema-v1 SSAModuleDTO or the older owned IRModule, but Rust lowering produces OwnedSsaModule/schema-v2 SSAModuleV2DTO; no authoritative entry point accepts that result",
+    "lossy_workaround_rejected": "schema-v2 to schema-v1 would discard explicit bounds_checked",
+    "verifier_duplication_rejected": true
+  },
+  "scope_confirmation": {
+    "historical_blocked_artifacts_changed": false,
+    "initial_ir_schema_v1_changed": false,
+    "lifecycle_policy_changed": false,
+    "lowering_policy_changed": false,
+    "production_ssa_authority_changed": false,
+    "rp3_changed": false,
+    "ssa_schema_v2_changed": false
+  },
+  "timings": {
+    "status": "not_reportable_before_complete_qualification_lane"
+  }
+}

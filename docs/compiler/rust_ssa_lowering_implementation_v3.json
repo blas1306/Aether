@@ -1,0 +1,22 @@
+{
+  "decision": "RUST_SSA_LOWERING_BLOCKED",
+  "attempt": "RUST-3.1c",
+  "rust_lifecycle_api": "normalize_lifecycle_v1",
+  "composed_api": "lower_verified_ir_to_ssa_v1",
+  "six_pseudo_dispatch": true,
+  "input_immutability_tested": true,
+  "determinism_tested": true,
+  "constructor_exception_repair_complete": false,
+  "verified_ssa_composition_complete": false,
+  "semantic_parity": {
+    "expected": 116,
+    "established": 0
+  },
+  "blockers": [
+    "constructor invoke exceptional cleanup and normal-continuation ownership repair is incomplete",
+    "116/116 lifecycle and whole-SSA differential qualification has not been established",
+    "aether-ir cannot invoke the downstream authoritative verifier without a Cargo dependency cycle"
+  ],
+  "historical_artifacts_modified": false,
+  "production_authority_changed": false
+}

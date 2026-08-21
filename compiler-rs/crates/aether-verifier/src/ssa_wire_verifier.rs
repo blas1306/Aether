@@ -4,9 +4,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::error::Error;
 use std::fmt;
 
+use aether_ir::OwnedSsaModule;
 use aether_ir::wire::{
-    IRInstructionDTO, IRTypeDTO, IRValueDTO, SSABasicBlockDTO, SSAControlInstructionDTO,
-    SSAFunctionDTO, SSAInstructionDTO, SSAModuleDTO,
+    IRInstructionDTO, IRTypeDTO, IRValueDTO, SSABasicBlockDTO, SSABoundsCheckedInstructionV2DTO,
+    SSAControlInstructionDTO, SSAFunctionDTO, SSAInstructionDTO, SSAModuleDTO,
 };
 
 /// A fail-closed value-based SSA wire verification failure.
@@ -75,6 +76,188 @@ pub fn verify_ssa_module_dto(module: &SSAModuleDTO) -> Result<(), SSAWireVerific
         verify_function(function, &functions)?;
     }
     Ok(())
+}
+
+/// Verify the schema-independent owned SSA model with the authoritative SSA rules.
+///
+/// The adapter is deliberately in the verifier crate (which already depends on
+/// `aether-ir`).  It retains the schema-v2 collection check bit in the canonical
+/// view while presenting the instruction's unchanged semantic operands to the
+/// historical rule engine.  No JSON serialization or schema-v1 decoding occurs.
+pub fn verify_owned_ssa(module: &OwnedSsaModule) -> Result<(), SSAWireVerificationError> {
+    let wire = module.to_schema_v2();
+    let mut bounds_checked = Vec::new();
+    let canonical = SSAModuleDTO {
+        schema_version: 1,
+        representation: wire.representation,
+        functions: wire
+            .functions
+            .into_iter()
+            .map(|function| SSAFunctionDTO {
+                name: function.name,
+                parameters: function.parameters,
+                return_type: function.return_type,
+                blocks: function
+                    .blocks
+                    .into_iter()
+                    .map(|block| SSABasicBlockDTO {
+                        name: block.name,
+                        instructions: block
+                            .instructions
+                            .into_iter()
+                            .map(|instruction| match instruction {
+                                aether_ir::wire::SSAInstructionV2DTO::Unchanged(value) => value,
+                                aether_ir::wire::SSAInstructionV2DTO::BoundsChecked(value) => {
+                                    let (instruction, checked) = bounds_instruction_view(value);
+                                    bounds_checked.push(checked);
+                                    SSAInstructionDTO::Ordinary(instruction)
+                                }
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+                entry_block: function.entry_block,
+                may_throw: function.may_throw,
+            })
+            .collect(),
+        structs: wire.structs,
+    };
+
+    // Keep this field observable in the canonical adapter.  Existing verifier
+    // semantics intentionally impose no true/false constraint on it.
+    let _preserved_bounds_checked = bounds_checked;
+    verify_ssa_module_dto(&canonical)
+}
+
+#[allow(clippy::too_many_lines)]
+fn bounds_instruction_view(value: SSABoundsCheckedInstructionV2DTO) -> (IRInstructionDTO, bool) {
+    use SSABoundsCheckedInstructionV2DTO as B;
+    match value {
+        B::ArrayGet {
+            result,
+            array,
+            index,
+            borrowed,
+            borrow_scope,
+            source_location,
+            bounds_checked,
+        } => (
+            IRInstructionDTO::ArrayGet {
+                result,
+                array,
+                index,
+                borrowed,
+                borrow_scope,
+                source_location,
+            },
+            bounds_checked,
+        ),
+        B::ArraySet {
+            array,
+            index,
+            value,
+            bounds_checked,
+        } => (
+            IRInstructionDTO::ArraySet {
+                array,
+                index,
+                value,
+            },
+            bounds_checked,
+        ),
+        B::ListGet {
+            result,
+            list_value,
+            index,
+            borrowed,
+            borrow_scope,
+            source_location,
+            bounds_checked,
+        } => (
+            IRInstructionDTO::ListGet {
+                result,
+                list_value,
+                index,
+                borrowed,
+                borrow_scope,
+                source_location,
+            },
+            bounds_checked,
+        ),
+        B::ListSet {
+            list_value,
+            index,
+            value,
+            bounds_checked,
+        } => (
+            IRInstructionDTO::ListSet {
+                list_value,
+                index,
+                value,
+            },
+            bounds_checked,
+        ),
+        B::VectorGet {
+            result,
+            vector,
+            index,
+            bounds_checked,
+        } => (
+            IRInstructionDTO::VectorGet {
+                result,
+                vector,
+                index,
+            },
+            bounds_checked,
+        ),
+        B::VectorSet {
+            vector,
+            index,
+            value,
+            bounds_checked,
+        } => (
+            IRInstructionDTO::VectorSet {
+                vector,
+                index,
+                value,
+            },
+            bounds_checked,
+        ),
+        B::MatrixGet {
+            result,
+            matrix,
+            row,
+            column,
+            shape,
+            bounds_checked,
+        } => (
+            IRInstructionDTO::MatrixGet {
+                result,
+                matrix,
+                row,
+                column,
+                shape,
+            },
+            bounds_checked,
+        ),
+        B::MatrixSet {
+            matrix,
+            row,
+            column,
+            value,
+            shape,
+            bounds_checked,
+        } => (
+            IRInstructionDTO::MatrixSet {
+                matrix,
+                row,
+                column,
+                value,
+                shape,
+            },
+            bounds_checked,
+        ),
+    }
 }
 
 fn verify_function(

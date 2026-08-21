@@ -10,6 +10,8 @@ mod function;
 mod importer;
 mod instruction;
 mod json;
+mod lifecycle;
+mod lowering;
 mod module;
 mod source;
 mod ssa;
@@ -28,6 +30,10 @@ pub use importer::{
 };
 pub use instruction::{IRErasedBoxLayout, IRInstruction, IRWitnessMethodSlot, IRWitnessTable};
 pub use json::{IRModuleJsonImportError, import_module_json, parse_strict_json_value};
+pub use lifecycle::{
+    LifecycleNormalizationError, lower_verified_ir_to_ssa_v1, normalize_lifecycle_v1,
+};
+pub use lowering::{SsaLoweringError, lower_normalized_ir_to_ssa_v1};
 pub use module::IRModule;
 pub use source::IRSourceLocation;
 pub use ssa::{

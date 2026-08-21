@@ -5,32 +5,112 @@
 
 /// Direct evidence for every rule reported as missing by RUST-1.
 pub const RUST_1_1_PARITY_MAPPINGS: &[(&str, &str, &str)] = &[
-    ("IRV-012", "TypeVerifier::require_valid_type", "type_verifier"),
-    ("IRV-013", "TypeVerifier::require_valid_type", "type_verifier"),
-    ("IRV-014", "TypeVerifier::require_valid_type", "type_verifier"),
-    ("IRV-015", "TypeVerifier::require_valid_type", "type_verifier"),
-    ("IRV-023", "IRInstruction exhaustive dispatch", "type_verifier"),
-    ("IRV-031", "SSA/lifecycle name resolution", "lifecycle_verifier"),
-    ("IRV-035", "dominance and lifecycle predecessor intersection", "dominance_verifier"),
-    ("IRV-036", "lifecycle predecessor-state join", "lifecycle_dataflow_verifier"),
-    ("IRV-054", "SSA operands before builtin validation", "builtin_verifier"),
+    (
+        "IRV-012",
+        "TypeVerifier::require_valid_type",
+        "type_verifier",
+    ),
+    (
+        "IRV-013",
+        "TypeVerifier::require_valid_type",
+        "type_verifier",
+    ),
+    (
+        "IRV-014",
+        "TypeVerifier::require_valid_type",
+        "type_verifier",
+    ),
+    (
+        "IRV-015",
+        "TypeVerifier::require_valid_type",
+        "type_verifier",
+    ),
+    (
+        "IRV-023",
+        "IRInstruction exhaustive dispatch",
+        "type_verifier",
+    ),
+    (
+        "IRV-031",
+        "SSA/lifecycle name resolution",
+        "lifecycle_verifier",
+    ),
+    (
+        "IRV-035",
+        "dominance and lifecycle predecessor intersection",
+        "dominance_verifier",
+    ),
+    (
+        "IRV-036",
+        "lifecycle predecessor-state join",
+        "lifecycle_dataflow_verifier",
+    ),
+    (
+        "IRV-054",
+        "SSA operands before builtin validation",
+        "builtin_verifier",
+    ),
     ("IRV-131", "handler entry shape", "exception_verifier"),
-    ("IRV-132", "catch event type validation", "exception_verifier"),
-    ("IRV-133", "handler identity validation", "exception_verifier"),
+    (
+        "IRV-132",
+        "catch event type validation",
+        "exception_verifier",
+    ),
+    (
+        "IRV-133",
+        "handler identity validation",
+        "exception_verifier",
+    ),
     ("IRV-134", "catch metadata uniqueness", "exception_verifier"),
     ("IRV-135", "root catch ordering", "exception_verifier"),
-    ("IRV-137", "invoke exception event type", "exception_verifier"),
-    ("IRV-138", "invoke handler event edge binding", "exception_verifier"),
-    ("IRV-139", "exceptional transfer event type", "exception_verifier"),
-    ("IRV-140", "exceptional target/event pairing", "exception_verifier"),
-    ("IRV-141", "exceptional handler event binding", "exception_verifier"),
-    ("IRV-142", "handler exceptional reachability", "exception_verifier"),
+    (
+        "IRV-137",
+        "invoke exception event type",
+        "exception_verifier",
+    ),
+    (
+        "IRV-138",
+        "invoke handler event edge binding",
+        "exception_verifier",
+    ),
+    (
+        "IRV-139",
+        "exceptional transfer event type",
+        "exception_verifier",
+    ),
+    (
+        "IRV-140",
+        "exceptional target/event pairing",
+        "exception_verifier",
+    ),
+    (
+        "IRV-141",
+        "exceptional handler event binding",
+        "exception_verifier",
+    ),
+    (
+        "IRV-142",
+        "handler exceptional reachability",
+        "exception_verifier",
+    ),
     ("IRV-143", "handler predecessor kind", "exception_verifier"),
     ("IRV-144", "function exception effect", "exception_verifier"),
     ("IRV-145", "throwing call must invoke", "exception_verifier"),
-    ("IRV-146", "invoke requires throwing target", "exception_verifier"),
-    ("IRV-147", "rethrow active-handler provenance", "exception_verifier"),
-    ("IRV-148", "exception event linear consumption", "exception_verifier"),
+    (
+        "IRV-146",
+        "invoke requires throwing target",
+        "exception_verifier",
+    ),
+    (
+        "IRV-147",
+        "rethrow active-handler provenance",
+        "exception_verifier",
+    ),
+    (
+        "IRV-148",
+        "exception event linear consumption",
+        "exception_verifier",
+    ),
 ];
 
 #[cfg(test)]

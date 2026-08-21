@@ -1,0 +1,487 @@
+{
+  "architecture": {
+    "historical_entry_preserved": true,
+    "ir_depends_on_verifier": false,
+    "semantic_rules_duplicated": false,
+    "verifier_depends_on_ir": true
+  },
+  "audit": "RUST-3.D-authoritative-owned-SSA-verifier",
+  "corpus": {
+    "failed": 0,
+    "files": [
+      {
+        "passed": true,
+        "path": "benchmarks/arithmetic.ae"
+      },
+      {
+        "passed": true,
+        "path": "benchmarks/array_sum.ae"
+      },
+      {
+        "passed": true,
+        "path": "benchmarks/if_else.ae"
+      },
+      {
+        "passed": true,
+        "path": "benchmarks/list_for_sum.ae"
+      },
+      {
+        "passed": true,
+        "path": "benchmarks/list_push.ae"
+      },
+      {
+        "passed": true,
+        "path": "benchmarks/matrix_mul.ae"
+      },
+      {
+        "passed": true,
+        "path": "benchmarks/nested_loops.ae"
+      },
+      {
+        "passed": true,
+        "path": "benchmarks/sum_to.ae"
+      },
+      {
+        "passed": true,
+        "path": "benchmarks/vector_dot.ae"
+      },
+      {
+        "passed": true,
+        "path": "benchmarks/while_countdown.ae"
+      },
+      {
+        "passed": true,
+        "path": "corpus/exceptions/positive/cleanup_during_unwinding.ae"
+      },
+      {
+        "passed": true,
+        "path": "corpus/exceptions/positive/constructor_failure.ae"
+      },
+      {
+        "passed": true,
+        "path": "corpus/exceptions/positive/function_recursion.ae"
+      },
+      {
+        "passed": true,
+        "path": "corpus/exceptions/positive/indirect_call.ae"
+      },
+      {
+        "passed": true,
+        "path": "corpus/exceptions/positive/method_interface_dispatch.ae"
+      },
+      {
+        "passed": true,
+        "path": "corpus/exceptions/positive/multiple_and_root_catches.ae"
+      },
+      {
+        "passed": true,
+        "path": "corpus/exceptions/positive/nested_rethrow_chain.ae"
+      },
+      {
+        "passed": true,
+        "path": "corpus/exceptions/positive/owned_aggregates_arc.ae"
+      },
+      {
+        "passed": true,
+        "path": "corpus/exceptions/positive/panic_vs_exception.ae"
+      },
+      {
+        "passed": true,
+        "path": "corpus/exceptions/positive/root_reporting.ae"
+      },
+      {
+        "passed": true,
+        "path": "corpus/exceptions/positive/throw_and_typed_catch.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/ControlesALN/1erControl/Ej1/Biseccion.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/ControlesALN/1erControl/Ej2/PuntoFijo.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/ControlesALN/1erControl/Ej2/ej2.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/ControlesALN/2doControl/Ej2/ej2.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/FormulaNumerosPrimos.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/LeetCode/isPalindrome.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/LeetCode/twoSum.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/ProbandoNR/probandoNR2.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/ProbandoNR/probandoNR3.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/Sorts/IllegalArgumentException.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/Sorts/Main.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/Sorts/Sortings.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/aggregate_collections/particles.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/classes/const_with_mutable_alias.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/classes/counter_basic.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/classes/custom_constructor.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/classes/implements_interface.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/classes/invalid_cases.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/classes/private_field_public_methods.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/classes/reference_aliasing.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/esPrimo2.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/expense_tracker/Ledger.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/expense_tracker/Main.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/expense_tracker/Persistence.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/expense_tracker/Reports.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/expense_tracker/Transaction.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/hello.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/ir/constant_fold.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/ir/local_const.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/ir/sumTo.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/arithmetic.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/array_sort.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/array_sum.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/countdown.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/double_add.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/double_compare.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/double_to_int.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/for_break_continue.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/for_sum.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/gcd_iterative.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/identity_call.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/int_to_double.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/list_clear.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/list_contains.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/list_copy.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/list_for_sum.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/list_index.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/list_index_of.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/list_insert.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/list_literal.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/list_pop.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/list_pop_alias.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/list_push.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/list_push_alias.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/list_remove_at.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/list_reverse.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/list_set_alias.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/list_sort.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/matrix_add.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/matrix_column_mul.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/matrix_index.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/matrix_literal.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/matrix_matmul.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/matrix_rows_columns.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/matrix_scalar_mul.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/matrix_set.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/matrix_sub.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/max.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/outer_product.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/return_5.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/string_choose.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/string_identity.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/sum_to_n.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/vector_add.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/vector_column_inferred.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/vector_column_literal.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/vector_dot.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/vector_index.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/vector_length.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/vector_literal.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/vector_matrix_mul.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/vector_scalar_mul.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/vector_set.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/llvm/vector_sub.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/nose.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/numerical_methods/Functions.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/numerical_methods/Integration.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/numerical_methods/Problems.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/numerical_methods/Results.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/numerical_methods/Roots.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/numerical_methods/main.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/pruebaException.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/structs/Geometry.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/structs/custom_constructor_and_equality.ae"
+      },
+      {
+        "passed": true,
+        "path": "examples/structs/main.ae"
+      }
+    ],
+    "passed": 116,
+    "verified_python_ssa_denominator": 116
+  },
+  "decision": "RUST_OWNED_SSA_VERIFIER_QUALIFIED",
+  "evidence_schema_version": 1,
+  "path": "Python verified SSA -> schema-v2 -> OwnedSsaModule -> aether-verifier -> schema-v2 differential",
+  "scope": {
+    "production_lowering_authority": "python",
+    "rp3_changed": false
+  }
+}
