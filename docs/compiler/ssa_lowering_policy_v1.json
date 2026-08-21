@@ -1,0 +1,98 @@
+{
+  "block_policy": {
+    "concrete_output_order": "input IR function block order, restricted to entry-reachable blocks",
+    "empty_block_successors": [],
+    "entry": "first IR block",
+    "unreachable": "isolated dominance root; empty frontier; not renamed and omitted from SSA output"
+  },
+  "cfg_successors": [
+    {"edge_order": ["target"], "edges": ["normal"], "kind": "IRJump"},
+    {"edge_order": ["true_target", "false_target"], "edges": ["normal", "normal"], "kind": "IRBranch"},
+    {"edge_order": [], "edges": [], "kind": "IRReturn"},
+    {"edge_order": ["normal_target", "exceptional_target"], "edges": ["normal", "exceptional"], "kind": "IRInvoke"},
+    {"edge_order": ["normal_target", "exceptional_target"], "edges": ["normal", "exceptional"], "kind": "IRInvokeIndirect"},
+    {"edge_order": ["normal_target", "exceptional_target"], "edges": ["normal", "exceptional"], "kind": "IRInvokeInterface"},
+    {"edge_order": ["target when non-null"], "edges": ["exceptional when target is non-null"], "kind": "IRThrow"},
+    {"edge_order": ["target when non-null"], "edges": ["exceptional when target is non-null"], "kind": "IRRethrow"},
+    {"edge_order": ["target when non-null"], "edges": ["exceptional when target is non-null"], "kind": "IRPropagate"}
+  ],
+  "dependency_classification": {
+    "DERIVED_LOCAL_STATE": ["CFG", "reachability", "dominators", "dominance frontiers", "liveness", "definite initialization", "definition sites", "slot stacks", "value bindings"],
+    "GLOBAL_CONSTANT": ["lowering policy version 1", "SSA schema version 2"],
+    "HIDDEN_IMPLEMENTATION_DEPENDENCY": [],
+    "INPUT_IR": ["ordered functions/structs/parameters/blocks/instructions", "types", "values", "targets", "all instruction metadata"],
+    "LOWERING_POLICY": ["lifecycle expansion", "CFG table", "dominance", "phi placement", "renaming", "naming", "verification", "error and metadata rules"]
+  },
+  "deterministic_errors": {
+    "boundary": "GeneralSSABuildError",
+    "format": "stage-qualified function error; verifier errors are SSA verification failed",
+    "unsupported_policy_version": "LoweringPolicyError before lowering"
+  },
+  "dominance": {
+    "frontier": "reachable join blocks only; for each reachable predecessor walk immediate dominators until idom(join)",
+    "immediate_dominator": "strict dominator with greatest dominator-set cardinality, ties by later input block index",
+    "reachable_initialization": "entry={entry}; other reachable blocks=all reachable; iterate intersection of reachable predecessors",
+    "tree_child_order": "input block order",
+    "unreachable_dominators": "self only; idom null"
+  },
+  "exception_policy": {
+    "cleanup_blocks": "ordinary blocks governed by the same reachability, dominance and phi rules",
+    "invoke_values": "result is available on normal continuation; exception event is available on exceptional continuation via verifier-governed edge arguments",
+    "merge_phis": "exceptional and normal predecessors are predecessor-labelled identically; edge kind does not alter phi algorithm",
+    "payload_and_lifecycle": "preserved/expanded in instruction order before CFG construction",
+    "throw_rethrow_propagate": "one exceptional successor iff optional target is present; otherwise function exit"
+  },
+  "implementation_anchors": {
+    "cfg_tokens": ["IRJump", "IRBranch", "IRInvokeIndirect", "IRInvokeInterface", "IRThrow", "IRRethrow", "IRPropagate", "exceptional"],
+    "naming_tokens": ["preferred", ".{index}"],
+    "pipeline_tokens": ["expand_lifecycle", "_build_function_unverified", "_verify_module"]
+  },
+  "instruction_effects": {
+    "canonical_owner": "aether.instruction_effects and effects attributes on aether.ir.model instruction classes",
+    "lowering_specific_storage_owner": "PhiPlacement/SSARenamer: only IRStore defines/writes promotable storage and IRLoad reads it",
+    "rule": "effect attributes classify preservation/trap/throw/memory/allocation; lowering converts every supported non-load/store instruction in source order; stores push a slot value and loads bind the current stack top; lifecycle pseudo-instructions never reach direct renaming"
+  },
+  "lifecycle_normalization": {
+    "input_kinds": ["IRInitDefault", "IRCopyInit", "IRMoveInit", "IRAssign", "IRDestroy", "IRRelocate"],
+    "ordering": "expand_lifecycle runs once at module-builder entry before per-function CFG; emitted instructions retain expansion order",
+    "owner": "aether.ir.lifecycle.expand_lifecycle and LifecycleTypeRegistry",
+    "semantics": "type-directed expansion to ordinary loads, stores, constants, aggregate operations and ownership/lifecycle calls; move/relocate consume source lifetime and destroy/rollback use reverse aggregate field order"
+  },
+  "lowering_policy_version": 1,
+  "metadata_preservation": {
+    "contract": "Every field represented by SSA schema-v2 and accepted by the corresponding SSA instruction is copied exactly; absence remains absence",
+    "module": ["ordered nominal struct definitions including ordered fields", "ordered functions"],
+    "required": ["source_location where the SSA model retains it", "aggregate_shape", "bounds_checked", "class field index/name and initialize", "interface witness and slot", "function reference and indirect callee/signature types", "builtin identity", "borrowed and borrow_scope", "transferred_storage", "exception targets/events/edge arguments", "vector/matrix shape and orientation"]
+  },
+  "phi_placement": {
+    "definite_initialization": "forward must analysis: in is intersection of predecessor out sets; out=in union block IRStore definitions; entry/no-predecessor in empty",
+    "definition_sites": "all blocks containing IRStore for the slot",
+    "insertion": "iterated dominance frontier; insert only when slot is live-in OR definitely initialized-in",
+    "liveness": "backward fixed point over IRLoad-before-first-IRStore uses and IRStore kills",
+    "operand_order": "order predecessors are visited by entry-rooted dominator-tree DFS, children in input block order; operands retain predecessor labels",
+    "phi_order": "slot name lexicographic within each block; blocks use input order",
+    "result_type": "unique type collected from every IRLoad/IRStore slot declaration",
+    "storage_exclusions": "only IRLoad/IRStore storage participates after lifecycle normalization"
+  },
+  "purity": "No mutable global policy state. Input is not mutated; lowering allocates lifecycle-expanded IR and SSA objects.",
+  "renaming": {
+    "parameters": "predefine ordered parameters in the value namespace; duplicate names are errors; parameters do not initialize storage slots",
+    "phi_incomings": "after converting a block, append current top-of-stack for every successor phi; missing/type-mismatched values are errors",
+    "slot_stack": "push phi result and each IRStore source; IRLoad binds current top; pop all pushes in reverse on dominator-tree exit",
+    "traversal": "entry-rooted dominator-tree depth-first preorder, children in input block order",
+    "value_binding": "non-storage results retain their IR name and type; duplicate SSA definitions and undefined uses are errors"
+  },
+  "serialization_reference": {
+    "representation": "aether_ssa",
+    "ssa_schema_version": 2
+  },
+  "temporary_naming": {
+    "collision": "non-phi duplicate definitions are errors; phi names use the least positive .N suffix not already defined",
+    "phi_preferred": "first IRLoad result name for that slot in the phi block, else <block>.<slot>.phi",
+    "result_numbering": "no global counter; deterministic least-positive suffix search"
+  },
+  "verification": {
+    "postcondition": "SSAVerifier verifies the complete module after all functions lower; failure is deterministic error",
+    "precondition": "caller supplies Rust-authoritatively verified Initial IR; GeneralSSABuilder does not repeat Initial IR verification"
+  }
+}
