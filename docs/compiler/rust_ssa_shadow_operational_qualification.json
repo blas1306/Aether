@@ -12,7 +12,7 @@
       "rust_ssa_shadow",
       "full_scheduled_or_manual"
     ],
-    "supported_platform_matrix_configured": true
+    "supported_platform_matrix_configured": false
   },
   "concurrency": {
     "process_startups": 1,
@@ -21,20 +21,15 @@
   },
   "decision": "RUST_SSA_SHADOW_OPERATIONALLY_BLOCKED",
   "evidence_schema_version": 1,
-  "failures": [
-    {
-      "failure": "{\"block\": \"entry\", \"classification\": \"semantic_mismatch\", \"comparison_seconds\": 0.0009646650069043972, \"first_difference\": \"$.functions[1].blocks[0].instructions\", \"function\": \"main\", \"phase\": \"canonical_comparison\", \"python_fragment\": \"'length=56'\", \"python_seconds\": 0.002026841997576412, \"rust_fragment\": \"'length=55'\", \"rust_seconds\": 0.00948816399613861, \"source_location\": null}",
-      "path": "tests/aether/parity_corpus/aggregates.ae"
-    }
-  ],
+  "failures": [],
   "gates": [
     {
       "id": "SO1",
-      "status": "BLOCKED"
+      "status": "PASS"
     },
     {
       "id": "SO2",
-      "status": "BLOCKED"
+      "status": "PASS"
     },
     {
       "id": "SO3",
@@ -81,23 +76,23 @@
     "deterministic": true,
     "process_startups": 1,
     "requests": 1000,
-    "rss_end_bytes": 5005312,
+    "rss_end_bytes": 5066752,
     "rss_observation": "observational only; no fragile CI gate",
-    "rss_start_bytes": 5005312
+    "rss_start_bytes": 5066752
   },
   "milestone": "RUST-3.4",
   "performance": {
-    "canonical_comparison_seconds": 0.16879640003753593,
+    "canonical_comparison_seconds": 0.17766322602255968,
     "process_startups": 1,
-    "python_lowering_seconds": 0.405,
-    "python_plus_rust_shadow_wall_seconds": 3.307,
+    "python_lowering_seconds": 0.41682121999474475,
+    "python_plus_rust_shadow_wall_seconds": 3.387679913023021,
     "rust_requests": 132
   },
   "soak": {
     "accepted": 132,
     "infrastructure_failures": 0,
     "rejected_before_ssa": 29,
-    "semantic_mismatches": 1,
+    "semantic_mismatches": 0,
     "shadow_compared": 132,
     "total_programs": 161
   }

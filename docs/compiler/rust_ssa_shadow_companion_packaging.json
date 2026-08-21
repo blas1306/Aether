@@ -1,0 +1,36 @@
+{
+  "architecture": "B1_platform_native_binary_artifact",
+  "artifact_index": "ssa-shadow-companions.json",
+  "capabilities": [
+    "lower_verified_ssa_shadow"
+  ],
+  "checksum": "sha256 lowercase hex over the canonical archive and binary",
+  "discovery": {
+    "checkout_fallback": false,
+    "implicit_path_lookup": false,
+    "layout": "<companion-package>/manifest.json plus the declared binary",
+    "manifest_required": true,
+    "runtime_identity_revalidated": true
+  },
+  "executable": {
+    "posix": "aether-ssa-shadow",
+    "windows": "aether-ssa-shadow.exe"
+  },
+  "manifest_schema_version": 1,
+  "product": "aether-ssa-shadow",
+  "product_version": "0.1.0",
+  "protocol_version": 1,
+  "supported_input_schema_versions": [
+    1
+  ],
+  "supported_output_schema_versions": [
+    2
+  ],
+  "supported_platforms": [
+    "linux-x86_64",
+    "windows-x86_64",
+    "macos-arm64",
+    "macos-x86_64"
+  ],
+  "version_source": "compiler-rs/Cargo.toml workspace.package.version"
+}

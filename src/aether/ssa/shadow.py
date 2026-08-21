@@ -8,8 +8,10 @@ import json
 import os
 from pathlib import Path
 import queue
+import re
 import subprocess
 import threading
+from hashlib import sha256
 from time import perf_counter
 from typing import Any, Mapping, Protocol
 
@@ -26,7 +28,16 @@ from .verifier import SSAVerifier
 SSA_SHADOW_PROTOCOL_VERSION = 1
 SSA_SHADOW_SCHEMA_VERSION = 2
 SSA_SHADOW_PRODUCT_VERSION = "0.1.0"
+SSA_SHADOW_PACKAGE_MANIFEST_SCHEMA_VERSION = 1
+SSA_SHADOW_CAPABILITIES = ("lower_verified_ssa_shadow",)
 _SSA_SHADOW_BASENAME = "aether-ssa-shadow"
+
+_SSA_SHADOW_PLATFORMS = {
+    "linux-x86_64": "x86_64-unknown-linux-gnu",
+    "windows-x86_64": "x86_64-pc-windows-msvc",
+    "macos-arm64": "aarch64-apple-darwin",
+    "macos-x86_64": "x86_64-apple-darwin",
+}
 
 
 @unique
@@ -191,30 +202,114 @@ class PersistentRustSSALoweringClient:
         self.close()
 
 
-def discover_packaged_rust_ssa_shadow(
-    package_directory: str | os.PathLike[str],
-) -> Path:
-    """Resolve only the companion in the canonical installed package layout.
-
-    Deliberately performs no PATH or checkout/target fallback. Release tooling
-    installs the native binary under ``aether/native/<platform>/``.
-    """
+def canonical_rust_ssa_shadow_platform_id(
+    os_name: str | None = None, architecture: str | None = None,
+) -> str:
+    """Return the canonical ID used by native companion artifacts."""
     import platform
     import sys
-
-    raw_os = sys.platform.lower()
-    os_name = "windows" if raw_os.startswith("win") else "macos" if raw_os == "darwin" else "linux"
+    raw_os = (os_name or sys.platform).lower()
+    public_os = "windows" if raw_os.startswith(("win", "mingw")) else "macos" if raw_os in {"darwin", "macos"} else "linux" if raw_os.startswith("linux") else raw_os
     aliases = {"amd64": "x86_64", "x86_64": "x86_64", "aarch64": "arm64", "arm64": "arm64"}
     try:
-        architecture = aliases[platform.machine().lower().replace("-", "_")]
+        public_architecture = aliases[(architecture or platform.machine()).lower().replace("-", "_")]
     except KeyError:
         raise RuntimeError("unsupported Rust SSA companion architecture") from None
-    suffix = ".exe" if os_name == "windows" else ""
-    path = Path(package_directory).resolve() / "aether" / "native" / f"{os_name}-{architecture}" / f"{_SSA_SHADOW_BASENAME}{suffix}"
+    platform_id = f"{public_os}-{public_architecture}"
+    if platform_id not in _SSA_SHADOW_PLATFORMS:
+        raise RuntimeError(f"unsupported Rust SSA companion platform: {platform_id}")
+    return platform_id
+
+
+def rust_ssa_shadow_artifact_name(platform_id: str) -> str:
+    if platform_id not in _SSA_SHADOW_PLATFORMS:
+        raise ValueError(f"unsupported Rust SSA companion platform: {platform_id}")
+    extension = "zip" if platform_id.startswith("windows-") else "tar.gz"
+    return f"{_SSA_SHADOW_BASENAME}-{SSA_SHADOW_PRODUCT_VERSION}-{platform_id}.{extension}"
+
+
+def rust_ssa_shadow_package_manifest(
+    executable: str | os.PathLike[str], *, platform_id: str | None = None,
+) -> dict[str, object]:
+    """Create the canonical manifest for one inspected release companion."""
+    path = Path(executable).resolve()
+    if not path.is_file():
+        raise FileNotFoundError("Rust SSA companion executable was not found")
+    expected_platform = platform_id or canonical_rust_ssa_shadow_platform_id()
+    expected_name = _SSA_SHADOW_BASENAME + (".exe" if expected_platform.startswith("windows-") else "")
+    if path.name != expected_name:
+        raise ValueError(f"expected canonical executable name {expected_name}")
+    with PersistentRustSSALoweringClient(path) as client:
+        client._start()
+    digest = sha256(path.read_bytes()).hexdigest()
+    return {
+        "manifest_schema_version": SSA_SHADOW_PACKAGE_MANIFEST_SCHEMA_VERSION,
+        "product": _SSA_SHADOW_BASENAME,
+        "product_version": SSA_SHADOW_PRODUCT_VERSION,
+        "protocol_version": SSA_SHADOW_PROTOCOL_VERSION,
+        "supported_input_schema_versions": [IR_SCHEMA_VERSION],
+        "supported_output_schema_versions": [SSA_SHADOW_SCHEMA_VERSION],
+        "capabilities": list(SSA_SHADOW_CAPABILITIES),
+        "platform": expected_platform,
+        "architecture": expected_platform.rsplit("-", 1)[1],
+        "binary": expected_name,
+        "build_profile": "release",
+        "sha256": digest,
+        "identity": {
+            "product": _SSA_SHADOW_BASENAME,
+            "product_version": SSA_SHADOW_PRODUCT_VERSION,
+            "protocol_version": SSA_SHADOW_PROTOCOL_VERSION,
+            "input_schema_version": IR_SCHEMA_VERSION,
+            "output_schema_version": SSA_SHADOW_SCHEMA_VERSION,
+        },
+    }
+
+
+def discover_packaged_rust_ssa_shadow(
+    package_directory: str | os.PathLike[str], *, expected_platform: str | None = None,
+) -> Path:
+    """Validate and resolve a companion package without PATH/checkout fallback."""
+    directory = Path(package_directory).expanduser().resolve()
+    try:
+        raw = (directory / "manifest.json").read_bytes()
+    except FileNotFoundError:
+        raise FileNotFoundError("packaged Rust SSA companion manifest was not found") from None
+    if len(raw) > 64 * 1024:
+        raise RuntimeError("Rust SSA companion manifest exceeds 65536 bytes")
+    try:
+        manifest = json.loads(raw)
+        required = {"manifest_schema_version", "product", "product_version", "protocol_version",
+                    "supported_input_schema_versions", "supported_output_schema_versions", "capabilities",
+                    "platform", "architecture", "binary", "build_profile", "sha256", "identity"}
+        if not isinstance(manifest, dict) or set(manifest) != required:
+            raise ValueError("fields")
+        platform_id = expected_platform or canonical_rust_ssa_shadow_platform_id()
+        expected_name = _SSA_SHADOW_BASENAME + (".exe" if platform_id.startswith("windows-") else "")
+        expected_identity = {"product": _SSA_SHADOW_BASENAME, "product_version": SSA_SHADOW_PRODUCT_VERSION,
+                             "protocol_version": SSA_SHADOW_PROTOCOL_VERSION, "input_schema_version": IR_SCHEMA_VERSION,
+                             "output_schema_version": SSA_SHADOW_SCHEMA_VERSION}
+        valid = (manifest["manifest_schema_version"] == SSA_SHADOW_PACKAGE_MANIFEST_SCHEMA_VERSION
+                 and manifest["product"] == _SSA_SHADOW_BASENAME
+                 and manifest["product_version"] == SSA_SHADOW_PRODUCT_VERSION
+                 and manifest["protocol_version"] == SSA_SHADOW_PROTOCOL_VERSION
+                 and manifest["supported_input_schema_versions"] == [IR_SCHEMA_VERSION]
+                 and manifest["supported_output_schema_versions"] == [SSA_SHADOW_SCHEMA_VERSION]
+                 and manifest["capabilities"] == list(SSA_SHADOW_CAPABILITIES)
+                 and manifest["platform"] == platform_id and manifest["binary"] == expected_name
+                 and manifest["build_profile"] == "release" and manifest["identity"] == expected_identity
+                 and isinstance(manifest["sha256"], str) and re.fullmatch(r"[0-9a-f]{64}", manifest["sha256"]))
+        if not valid:
+            raise ValueError("contract")
+    except (json.JSONDecodeError, TypeError, ValueError, KeyError) as exc:
+        raise RuntimeError("Rust SSA companion package manifest is invalid") from exc
+    path = directory / str(manifest["binary"])
     if not path.is_file():
         raise FileNotFoundError("packaged Rust SSA companion was not found")
-    if not os.access(path, os.X_OK):
+    if sha256(path.read_bytes()).hexdigest() != manifest["sha256"]:
+        raise RuntimeError("Rust SSA companion checksum mismatch")
+    if not platform_id.startswith("windows-") and not os.access(path, os.X_OK):
         raise PermissionError("packaged Rust SSA companion is not executable")
+    # Runtime identity is checked again by PersistentRustSSALoweringClient at use.
     return path
 
 

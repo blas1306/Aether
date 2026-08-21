@@ -1,49 +1,63 @@
 # RUST-3.4 Rust SSA shadow operational qualification
 
-Decision: **RUST_SSA_SHADOW_OPERATIONALLY_BLOCKED**.
+Decision: **RUST_SSA_SHADOW_OPERATIONALLY_BLOCKED** pending imported native-runner evidence.
 
-The expanded local soak discovered a new semantic difference, so qualification
-stopped without changing lowering semantics. In
-`tests/aether/parity_corpus/aggregates.ae`, canonical comparison reports 56
-Python instructions and 55 Rust instructions in `main` / `entry`. Python
-remains the only SSA authority and Rust SSA never reaches optimization or a
-backend.
+The former aggregate semantic blocker is closed. The reproducible Linux soak
+now compares every program reaching SSA: 161 discovered, 132 compared, zero
+semantic mismatches and zero infrastructure failures. The final decision is
+deliberately evidence-only; configuring a CI matrix does not qualify a
+platform. The aggregate becomes qualified only after canonical reports from
+all four official runners have executed and passed.
 
-| Gate | Result | Evidence |
+| Gate | Local/current result | Final evidence source |
 |---|---|---|
-| SO1 persistent transport | PASS | 132 corpus requests with one startup |
-| SO2 same-input guarantee | BLOCKED | New corpus mismatch |
-| SO3 semantic differential | BLOCKED | 1 mismatch in 132 comparisons |
-| SO4 fail-closed mismatch | PASS | Structured fatal `SSAShadowFailure` |
-| SO5 fail-closed infrastructure | PASS | Startup, transport, timeout and malformed responses remain fatal |
-| SO6 clean installation | BLOCKED | Not claimed by the checkout-local run |
-| SO7 packaged discovery | PASS | Canonical platform layout; no PATH or `target/debug` fallback |
-| SO8 long-session isolation | PASS | 1,000 deterministic requests, one startup |
-| SO9 concurrency safety | PASS | 128 requests serialized through one synchronized process |
-| SO10 cross-platform execution | BLOCKED | Matrix configured; remote execution evidence not collected locally |
-| SO11 rollback | PASS | `PYTHON_SSA_ONLY` remains the default and needs no companion |
-| SO12 CI integration | PASS | Fast matrix plus explicit scheduled/manual full qualification |
+| SO1 persistent transport | PASS | Linux complete soak |
+| SO2 same-input guarantee | PASS | differential harness |
+| SO3 semantic differential | PASS | 132/132 comparisons |
+| SO4 fail-closed semantic mismatch | PASS | regression suite |
+| SO5 fail-closed infrastructure | PASS | regression suite |
+| SO6 clean installation | PENDING | each native platform report |
+| SO7 packaged companion discovery | PASS | manifest/checksum contract |
+| SO8 long-session isolation | PASS | 1,000 requests, one process |
+| SO9 concurrency safety | PASS | 128 serialized requests, one process |
+| SO10 cross-platform execution | PENDING | four imported native reports |
+| SO11 rollback | PASS | `PYTHON_SSA_ONLY`, no companion |
+| SO12 CI qualification | PASS | strict matrix plus aggregate job |
 
-## Measurements
+## Companion contract
 
-The discovered corpus contained 161 programs: 132 reached verified SSA and 29
-were rejected before SSA. All 132 accepted programs were shadow-compared. There
-was one semantic mismatch and no infrastructure failure.
+The SSA product reuses the native companion architecture established by
+`aether-ir-verifier`; it does not introduce a second packaging system. Its
+product is `aether-ssa-shadow`, versioned from the Cargo workspace, with
+executable `aether-ssa-shadow[.exe]`, protocol 1, Initial IR schema 1 input,
+SSA schema 2 output, and capability `lower_verified_ssa_shadow`.
 
-The 1,000-request session used one process. Linux RSS was approximately
-5,005,312 bytes both after startup and at the end, so it stabilized in this
-observation. This is deliberately not an RSS gate. The concurrent test used 128
-requests and one process, with no crossed or interleaved responses.
+Each deterministic platform archive contains the binary, `manifest.json`, and
+license. A SHA-256 sidecar and `ssa-shadow-companions.json` index identify the
+archive. Runtime discovery accepts only an explicit extracted companion
+directory, validates the exact manifest, platform, checksum, executable name,
+and startup identity, and never consults PATH, a checkout, or Cargo artifacts.
+The canonical machine-readable contract is
+`rust_ssa_shadow_companion_packaging.json`.
 
-Observed totals on this host were 0.405 s for Python lowering, 3.307 s for the
-complete Python-plus-shadow calls, and 0.169 s for canonical comparison. These
-are observational rather than absolute performance gates.
+## Executed local evidence
 
-The CI workflow declares Linux x86_64, Windows x86_64, macOS x86_64 and macOS
-arm64 runners. Its normal shadow lane runs representative persistent and
-failure coverage; the expensive full corpus is scheduled/manual on Linux.
-Cross-platform execution results must still be collected before SO10 can pass.
+- Aggregate lifecycle/canonical mismatch: closed.
+- Expanded soak: 161 discovered; 132 reached SSA and were all compared; 0
+  semantic mismatches; 0 infrastructure failures.
+- Long session: 1,000 sequential requests through one persistent process;
+  deterministic responses and stable observed Linux RSS.
+- Concurrency: 128 client requests serialized through one process with no
+  crossed framing.
+- Rollback: `PYTHON_SSA_ONLY` remains the default and requires no companion.
 
-Rollback is the configuration `PYTHON_SSA_ONLY`; no code modification is
-required. RP3 is unchanged, no Rust-authority mode was activated, and no commit
-was created.
+The workflow builds the release binary and Python wheel, installs the wheel in
+a temporary environment outside the checkout, extracts the native companion,
+isolates PATH, starts one persistent process, executes multiple representative
+comparisons, verifies clean shutdown, and uploads the report, archive, and
+checksum. Linux additionally runs the full semantic soak. The aggregate CLI
+rejects missing, duplicate, wrong-platform, unchecked, or checksum-invalid
+evidence before emitting `RUST_SSA_SHADOW_OPERATIONALLY_QUALIFIED`.
+
+Python remains the SSA authority. Rust SSA is comparison-only and never
+reaches the optimizer or backend.

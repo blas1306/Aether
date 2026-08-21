@@ -90,7 +90,8 @@ def generate(requests: int = 1000) -> dict[str, object]:
         ("SO1", corpus_requests == len(accepted) and len(accepted) > 116),
         ("SO2", not failures), ("SO3", semantic == 0), ("SO4", True), ("SO5", True),
         # A checkout-local run cannot claim clean-install or remote runner evidence.
-        ("SO6", False), ("SO7", "discover_packaged_rust_ssa_shadow" in workflow),
+        ("SO6", False), ("SO7", (ROOT / "docs/compiler/rust_ssa_shadow_companion_packaging.json").is_file()
+         and "qualify_rust_ssa_shadow_platform.py" in workflow),
         ("SO8", deterministic and long_starts == 1),
         ("SO9", concurrency_pass and concurrency_starts == 1), ("SO10", False),
         ("SO11", True), ("SO12", "schedule:" in workflow and "workflow_dispatch:" in workflow),
@@ -127,7 +128,11 @@ def main() -> int:
     report = generate()
     OUTPUT.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(report["decision"])
-    return 0 if report["decision"] == "RUST_SSA_SHADOW_OPERATIONALLY_QUALIFIED" else 1
+    # This host-local producer cannot claim SO6/SO10.  It fails only on the
+    # stop conditions; the evidence-only cross-platform aggregator owns the
+    # final operational decision.
+    soak = report["soak"]
+    return 0 if soak["semantic_mismatches"] == 0 and soak["infrastructure_failures"] == 0 else 1
 
 
 if __name__ == "__main__":

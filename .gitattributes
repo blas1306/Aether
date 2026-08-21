@@ -1,2 +1,3 @@
 # The cross-platform qualification digest identifies canonical LF JSON text.
 docs/compiler/rust_verifier_companion_packaging.json text eol=lf
+docs/compiler/rust_ssa_shadow_companion_packaging.json text eol=lf

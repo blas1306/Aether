@@ -137,10 +137,12 @@ def test_packaged_discovery_has_no_path_or_checkout_fallback(
     aliases = {"amd64": "x86_64", "x86_64": "x86_64", "aarch64": "arm64", "arm64": "arm64"}
     os_name = "windows" if sys.platform.startswith("win") else "macos" if sys.platform == "darwin" else "linux"
     architecture = aliases[platform.machine().lower().replace("-", "_")]
-    destination = tmp_path / "aether" / "native" / f"{os_name}-{architecture}" / rust_ssa_shadow_executable.name
-    destination.parent.mkdir(parents=True)
+    from aether.ssa.shadow import rust_ssa_shadow_package_manifest
+    destination = tmp_path / rust_ssa_shadow_executable.name
     shutil.copy2(rust_ssa_shadow_executable, destination)
     destination.chmod(destination.stat().st_mode | 0o111)
+    manifest = rust_ssa_shadow_package_manifest(destination, platform_id=f"{os_name}-{architecture}")
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     assert discover_packaged_rust_ssa_shadow(tmp_path) == destination
     with pytest.raises(FileNotFoundError):
         discover_packaged_rust_ssa_shadow(tmp_path / "missing")

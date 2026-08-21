@@ -26,6 +26,7 @@ dev = ["pytest>=9,<10", "pip>=26,<27", "setuptools>=77", "wheel>=0.45,<1"]
 [project.scripts]
 aether = "aether.cli:main"
 aether-lsp = "aether_lsp.server:main"
+aether-ssa-shadow-probe = "aether.ssa.operational_probe:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
