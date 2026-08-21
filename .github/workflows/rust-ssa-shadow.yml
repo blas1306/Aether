@@ -145,7 +145,11 @@ jobs:
           --output qualification/full_suite.json
       - uses: actions/upload-artifact@v4
         if: always()
-        with: {name: full-suite-safe-default, path: qualification/full_suite.json}
+        with:
+          name: full-suite-safe-default
+          path: |
+            qualification/full_suite.json
+            qualification/full_suite_pytest.log
 
   performance:
     runs-on: ubuntu-latest
