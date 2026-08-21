@@ -1,9 +1,42 @@
 //! Owned SSA compatibility for the authoritative value-based verifier.
 
-use aether_ir::OwnedSsaModule;
+use aether_ir::wire::IRModuleDTO;
 use aether_ir::wire::SSAWireModuleDTO;
+use aether_ir::{OwnedSsaModule, lower_normalized_ir_to_ssa_v1};
 use aether_verifier::verify_owned_ssa;
 use serde_json::{Value, json};
+
+fn linear_initial_ir(block_count: usize) -> IRModuleDTO {
+    let mut blocks = Vec::with_capacity(block_count);
+    for index in 0..block_count {
+        let instructions = if index + 1 == block_count {
+            vec![json!({"kind":"return","value":null,"transferred_storage":null})]
+        } else {
+            vec![json!({"kind":"jump","target":format!("b{}", index + 1)})]
+        };
+        blocks.push(json!({"name":format!("b{index}"),"instructions":instructions}));
+    }
+    serde_json::from_value(json!({
+        "schema_version":1,
+        "structs":[],
+        "functions":[{
+            "name":"deep_linear",
+            "parameters":[],
+            "return_type":{"tag":"void"},
+            "blocks":blocks,
+            "may_throw":false
+        }]
+    }))
+    .expect("valid Initial IR")
+}
+
+#[test]
+fn lowering_and_verification_are_stack_safe_for_5000_block_dominator_tree() {
+    let lowered = lower_normalized_ir_to_ssa_v1(&linear_initial_ir(5_000))
+        .expect("deep CFG lowering succeeds on the ordinary process stack");
+    assert_eq!(lowered.functions[0].blocks.len(), 5_000);
+    verify_owned_ssa(&lowered).expect("deep lowered SSA verifies");
+}
 
 fn value(name: &str, tag: &str) -> Value {
     json!({"tag":"value", "name":name, "type":{"tag":tag}})

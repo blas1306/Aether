@@ -132,7 +132,7 @@ fn lower_function(function: &IRFunctionDTO) -> Result<SSAFunctionV2DTO, SsaLower
     lowerer.place_phis()?;
     lowerer.initialize()?;
     let entry = function.blocks[0].name.clone();
-    lowerer.rename_block(&entry)?;
+    lowerer.rename_blocks(&entry)?;
     lowerer.finish()
 }
 
@@ -364,82 +364,107 @@ impl<'a> FunctionLowerer<'a> {
         Ok(())
     }
 
-    fn rename_block(&mut self, block_name: &str) -> Result<(), SsaLoweringError> {
-        let mut pushed = Vec::new();
-        let mut bound = Vec::new();
-        if let Some(phis) = self.phis.get(block_name) {
-            for phi in phis.clone() {
-                self.stacks
-                    .entry(phi.slot.clone())
-                    .or_default()
-                    .push(phi.result.clone());
-                pushed.push(phi.slot);
-            }
+    /// Rename the dominator tree in the same depth-first order as the recursive
+    /// algorithm, using explicit enter/exit frames so CFG depth does not consume
+    /// the process call stack.
+    fn rename_blocks(&mut self, entry: &str) -> Result<(), SsaLoweringError> {
+        enum Frame {
+            Enter(String),
+            Exit {
+                pushed: Vec<String>,
+                bound: Vec<String>,
+            },
         }
-        let block = &self.function.blocks[self.block_index[block_name]];
-        let mut emitted = Vec::new();
-        for instruction in &block.instructions {
-            let mut value =
-                serde_json::to_value(instruction).map_err(|e| self.fail(e.to_string()))?;
-            let kind = value
-                .get("kind")
-                .and_then(Value::as_str)
-                .expect("instruction kind")
-                .to_owned();
-            if kind == "store" {
-                let object = value.as_object_mut().expect("instruction object");
-                let slot = value_name(&object["slot"]).expect("slot name").to_owned();
-                let source = self.resolve(&object["value"])?;
-                self.stacks.entry(slot.clone()).or_default().push(source);
-                pushed.push(slot);
+
+        let mut frames = vec![Frame::Enter(entry.to_owned())];
+        while let Some(frame) = frames.pop() {
+            let Frame::Enter(block_name) = frame else {
+                let Frame::Exit { pushed, bound } = frame else {
+                    unreachable!()
+                };
+                for name in bound.into_iter().rev() {
+                    self.bindings.remove(&name);
+                }
+                for slot in pushed.into_iter().rev() {
+                    self.stacks.get_mut(&slot).expect("slot stack").pop();
+                }
                 continue;
+            };
+
+            let mut pushed = Vec::new();
+            let mut bound = Vec::new();
+            if let Some(phis) = self.phis.get(&block_name) {
+                for phi in phis.clone() {
+                    self.stacks
+                        .entry(phi.slot.clone())
+                        .or_default()
+                        .push(phi.result.clone());
+                    pushed.push(phi.slot);
+                }
             }
-            if kind == "load" {
-                let object = value.as_object().expect("instruction object");
-                let slot = value_name(&object["slot"]).expect("slot name");
-                let result = value_name(&object["result"])
-                    .expect("result name")
+            let block = &self.function.blocks[self.block_index[&block_name]];
+            let mut emitted = Vec::new();
+            for instruction in &block.instructions {
+                let mut value =
+                    serde_json::to_value(instruction).map_err(|e| self.fail(e.to_string()))?;
+                let kind = value
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .expect("instruction kind")
                     .to_owned();
-                let current = self
-                    .stacks
-                    .get(slot)
-                    .and_then(|s| s.last())
-                    .cloned()
-                    .ok_or_else(|| self.fail(format!("load from uninitialized slot '%{slot}'")))?;
-                if self.bindings.insert(result.clone(), current).is_some()
-                    && !self.definitions.contains(&result)
-                {
-                    return Err(self.fail(format!("duplicate value binding '%{result}'")));
+                if kind == "store" {
+                    let object = value.as_object_mut().expect("instruction object");
+                    let slot = value_name(&object["slot"]).expect("slot name").to_owned();
+                    let source = self.resolve(&object["value"])?;
+                    self.stacks.entry(slot.clone()).or_default().push(source);
+                    pushed.push(slot);
+                    continue;
                 }
-                bound.push(result);
-                continue;
+                if kind == "load" {
+                    let object = value.as_object().expect("instruction object");
+                    let slot = value_name(&object["slot"]).expect("slot name");
+                    let result = value_name(&object["result"])
+                        .expect("result name")
+                        .to_owned();
+                    let current = self
+                        .stacks
+                        .get(slot)
+                        .and_then(|s| s.last())
+                        .cloned()
+                        .ok_or_else(|| {
+                            self.fail(format!("load from uninitialized slot '%{slot}'"))
+                        })?;
+                    if self.bindings.insert(result.clone(), current).is_some()
+                        && !self.definitions.contains(&result)
+                    {
+                        return Err(self.fail(format!("duplicate value binding '%{result}'")));
+                    }
+                    bound.push(result);
+                    continue;
+                }
+                self.convert_instruction(&mut value, &kind, &mut bound)?;
+                emitted.push(
+                    serde_json::from_value(value)
+                        .map_err(|e| self.fail(format!("schema-v2 construction: {e}")))?,
+                );
             }
-            self.convert_instruction(&mut value, &kind, &mut bound)?;
-            emitted.push(
-                serde_json::from_value(value)
-                    .map_err(|e| self.fail(format!("schema-v2 construction: {e}")))?,
-            );
-        }
-        self.output.insert(block_name.to_owned(), emitted);
-        let successors = self.successors[block_name].clone();
-        for successor in successors {
-            if let Some(phis) = self.phis.get_mut(&successor) {
-                for phi in phis {
-                    let current = self.stacks.get(&phi.slot).and_then(|s| s.last()).cloned()
+            self.output.insert(block_name.clone(), emitted);
+            let successors = self.successors[&block_name].clone();
+            for successor in successors {
+                if let Some(phis) = self.phis.get_mut(&successor) {
+                    for phi in phis {
+                        let current = self.stacks.get(&phi.slot).and_then(|s| s.last()).cloned()
                         .ok_or_else(|| SsaLoweringError::function(&self.function.name, format!("phi for slot '%{}' in '{successor}' has no incoming from '{block_name}'", phi.slot)))?;
-                    phi.incoming
-                        .push(serde_json::json!({"block": block_name, "value": current}));
+                        phi.incoming
+                            .push(serde_json::json!({"block": block_name, "value": current}));
+                    }
                 }
             }
-        }
-        for child in self.children[block_name].clone() {
-            self.rename_block(&child)?;
-        }
-        for name in bound.into_iter().rev() {
-            self.bindings.remove(&name);
-        }
-        for slot in pushed.into_iter().rev() {
-            self.stacks.get_mut(&slot).expect("slot stack").pop();
+            frames.push(Frame::Exit { pushed, bound });
+            // A LIFO stack needs reverse insertion to retain the original child order.
+            for child in self.children[&block_name].iter().rev() {
+                frames.push(Frame::Enter(child.clone()));
+            }
         }
         Ok(())
     }

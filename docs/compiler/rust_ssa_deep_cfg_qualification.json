@@ -1,0 +1,52 @@
+{
+  "attempt": "RUST-SSA-ROBUST-1",
+  "decision": "RUST_SSA_DEEP_CFG_QUALIFIED",
+  "root_cause": {
+    "function": "FunctionLowerer::rename_block",
+    "call_chain": "lower_verified_ir_to_ssa_v1 -> lower_normalized_ir_to_ssa_v1 -> lower_function -> rename_block -> dominator child -> rename_block",
+    "failing_phase": "SSA renaming",
+    "depth_proportional_to_cfg_depth": true,
+    "historical_threshold": {"largest_pass": 1000, "first_observed_failure": 5000}
+  },
+  "architecture": {
+    "old": "recursive dominator-tree DFS",
+    "new": "iterative Vec ENTER/EXIT frames",
+    "time_complexity_changed": false,
+    "traversal_space": "O(d) heap instead of O(d) call stack"
+  },
+  "stress": {
+    "100": "PASS",
+    "993": "PASS",
+    "1000": "PASS",
+    "5000": "PASS_AND_VERIFY",
+    "10000": "NOT_RUN_EXISTING_O_V2_DOMINATOR_SPACE_AND_RUNTIME",
+    "non_linear_positive_adversarial": "21/21 PASS"
+  },
+  "deep_5000_differential": {
+    "lifecycle_parity": true,
+    "python_ssa_verified": true,
+    "rust_owned_ssa_verified": true,
+    "canonical_ssa_parity": true,
+    "schema_v2_import": true,
+    "exact_reserialization": true,
+    "rust_deterministic_three_runs": true,
+    "input_immutable": true,
+    "rust_first_run_ns": 37404652310
+  },
+  "historical_116": {
+    "lifecycle_parity": "116/116",
+    "canonical_ssa_parity": "116/116",
+    "rust_verification_and_import": "116/116",
+    "exact_reserialization": "116/116",
+    "determinism": "116/116"
+  },
+  "scope": {
+    "normal_stack_size": true,
+    "python_changed": false,
+    "policies_changed": false,
+    "schemas_changed": false,
+    "production_authority": "python",
+    "rp3_changed": false,
+    "commit_created": false
+  }
+}
