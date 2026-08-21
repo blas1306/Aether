@@ -523,6 +523,38 @@ where
     F: FnMut(&T) -> V,
 {
     match instruction {
+        I::Cast { result, value }
+            if matches!(ty(&result), T::Nullable { .. })
+                && traits(ty(&result), defs, &mut BTreeSet::new())?.0 =>
+        {
+            if owned.remove(value_name(&value)) {
+                owned.insert(value_name(&result).to_owned());
+                out.push(I::Cast {
+                    result: result.clone(),
+                    value,
+                });
+            } else if contains_interface(ty(&result), defs, &mut BTreeSet::new())? {
+                let raw = temporary(ty(&result));
+                out.push(I::Cast {
+                    result: raw.clone(),
+                    value,
+                });
+                out.push(call(
+                    "__aether_interface_copy_owned",
+                    vec![raw],
+                    Some(result.clone()),
+                ));
+                owned.insert(value_name(&result).to_owned());
+            } else {
+                out.push(I::Cast {
+                    result: result.clone(),
+                    value,
+                });
+                out.push(call("__aether_retain", vec![result.clone()], None));
+                owned.insert(value_name(&result).to_owned());
+            }
+            release_unused_result(&result, used, owned, out);
+        }
         I::ClassGet {
             result,
             object,
@@ -785,6 +817,27 @@ where
             release_consumed_owner(&array, owned, out);
             release_unused_result(&result, used, owned, out);
         }
+        I::ArrayLength { result, array } => {
+            out.push(I::ArrayLength {
+                result,
+                array: array.clone(),
+            });
+            release_consumed_owner(&array, owned, out);
+        }
+        I::ListLength { result, list_value } => {
+            out.push(I::ListLength {
+                result,
+                list_value: list_value.clone(),
+            });
+            release_consumed_owner(&list_value, owned, out);
+        }
+        I::ListIsEmpty { result, list_value } => {
+            out.push(I::ListIsEmpty {
+                result,
+                list_value: list_value.clone(),
+            });
+            release_consumed_owner(&list_value, owned, out);
+        }
         I::ListGet {
             result,
             list_value,
@@ -831,6 +884,26 @@ where
             });
             release_unused_result(&result, used, owned, out);
         }
+        I::InterfaceCall {
+            receiver,
+            arguments,
+            slot,
+            result,
+        } => {
+            out.push(I::InterfaceCall {
+                receiver: receiver.clone(),
+                arguments: arguments.clone(),
+                slot,
+                result: result.clone(),
+            });
+            for argument in &arguments {
+                release_consumed_owner(argument, owned, out);
+            }
+            release_consumed_owner(&receiver, owned, out);
+            if let Some(result) = &result.0 {
+                release_unused_result(result, used, owned, out);
+            }
+        }
         I::Call {
             function,
             arguments,
@@ -850,6 +923,15 @@ where
             for (index, argument) in arguments.iter().enumerate() {
                 if !(function.ends_with(".__ctor") && index == 0) {
                     release_consumed_owner(argument, owned, out);
+                }
+            }
+            if function.ends_with(".__ctor") {
+                if let Some(receiver) = arguments.first() {
+                    if matches!(ty(receiver), T::Struct { .. })
+                        && traits(ty(receiver), defs, &mut BTreeSet::new())?.0
+                    {
+                        out.push(call("__aether_release", vec![receiver.clone()], None));
+                    }
                 }
             }
             if let Some(result) = &result.0 {
@@ -892,7 +974,8 @@ where
             let tmp = temporary(t);
             out.push(load(&source, tmp.clone()));
             out.push(store(&destination, tmp));
-            if traits(t, defs, &mut BTreeSet::new())?.0 {
+            let source_traits = traits(t, defs, &mut BTreeSet::new())?;
+            if source_traits.0 && source_traits.1 {
                 let empty = default_value(t, defs, temporary, out, &mut BTreeSet::new())?;
                 out.push(store(&source, empty));
             }

@@ -1,0 +1,127 @@
+{
+  "artifact_schema_version": 1,
+  "milestone": "RUST-3.6b",
+  "decision": "RUST_SSA_PROMOTION_LIFECYCLE_DEFECTS_CLOSED",
+  "repository_default": "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+  "rust_authority_mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+  "rust_authority_is_explicit": true,
+  "semantic_failures": {
+    "before": 18,
+    "after": 0
+  },
+  "root_causes": [
+    {
+      "id": "RC1",
+      "affected_tests_before": 10,
+      "affected_tests_after": 0,
+      "semantic_bug": "Rust did not discharge owning expression temporaries after borrowed collection length/empty consumers or a borrowed interface receiver call.",
+      "implementation_primitive": "ordinary borrowed-consumer ownership disposition for ArrayLength, ListLength, ListIsEmpty, and InterfaceCall"
+    },
+    {
+      "id": "RC2",
+      "affected_tests_before": 1,
+      "affected_tests_after": 0,
+      "semantic_bug": "A cast to nullable owning type did not transfer an existing temporary owner, so return lowering classified the nullable result as borrowed and retained it again.",
+      "implementation_primitive": "nullable Cast ownership propagation: transfer fresh ownership, copy interface ownership, otherwise retain borrowed ownership"
+    },
+    {
+      "id": "RC3",
+      "affected_tests_before": 1,
+      "affected_tests_after": 0,
+      "semantic_bug": "The same missing nullable Cast classification failed to acquire a borrowed nullable class value, leaving no temporary owner for constructor-argument cleanup.",
+      "implementation_primitive": "nullable Cast copy lifetime plus existing generic call-argument owner disposition"
+    },
+    {
+      "id": "RC4",
+      "affected_tests_before": 2,
+      "affected_tests_after": 0,
+      "semantic_bug": "MoveInit reset every destructible source and ignored supports_default=false, so moving an interface incorrectly requested an unsupported interface default.",
+      "implementation_primitive": "MoveInit source reset now requires both needs_destroy and supports_default"
+    },
+    {
+      "id": "RC5",
+      "affected_tests_before": 4,
+      "affected_tests_after": 0,
+      "semantic_bug": "A direct owning struct constructor call borrowed its pre-construction receiver but emitted no normal receiver release.",
+      "implementation_primitive": "direct struct-constructor receiver disposition after the call; invoke CFG repair remains unchanged"
+    }
+  ],
+  "minimized_reproducers": {
+    "fixtures": 7,
+    "boundary_b_exact": "7/7",
+    "canonical_ssa_equal": "7/7",
+    "python_only_optimizer_pass": "7/7",
+    "python_authority_rust_shadow_match": "7/7",
+    "rust_authority_python_shadow_match": "7/7",
+    "python_authority_origin": "python_general_ssa_builder",
+    "rust_authority_origin": "rust_schema_v2_import"
+  },
+  "qualification": {
+    "classified_failures_under_rust_authority": "18/18 passed",
+    "lifecycle_parity": "116/116",
+    "canonical_ssa_parity": "116/116",
+    "rust_owned_ssa_verification": "116/116",
+    "schema_v2_import": "116/116",
+    "exact_schema_v2_reserialization": "116/116",
+    "determinism": "116/116",
+    "historical_corpus": "RUST_SSA_AUTHORITY_HISTORICAL_PASS",
+    "expanded_soak": {
+      "decision": "RUST_SSA_AUTHORITY_SOAK_PASS",
+      "total_programs": 168,
+      "accepted": 139,
+      "rejected_before_ssa": 29,
+      "shadow_compared": 139,
+      "semantic_mismatches": 0,
+      "infrastructure_failures": 0,
+      "long_session_requests": 1000,
+      "concurrent_requests": 128
+    },
+    "adversarial": {
+      "decision": "RUST_SSA_LOWERING_ADVERSARIAL_QUALIFIED",
+      "positive_cases": 21,
+      "negative_cases": 7
+    },
+    "deep_cfg": "5000-block Rust lowering and Owned SSA verification passed",
+    "cargo_workspace": "passed",
+    "policy_checks": [
+      "LIFECYCLE_NORMALIZATION_POLICY_V1_QUALIFIED",
+      "SSA_SOURCE_LOCATION_LOWERING_POLICY_V1_QUALIFIED"
+    ]
+  },
+  "full_suite": {
+    "rust_authority_first_pass": {
+      "passed": 4799,
+      "failed": 25,
+      "skipped": 4,
+      "classified_lsan_ptrace_aborts": 24,
+      "qualification_harness_default_contract_test": 1,
+      "new_semantic_failures": 0
+    },
+    "ptrace_compatible_rerun": {
+      "environment": "LSAN_OPTIONS=detect_leaks=0",
+      "passed": 4824,
+      "failed": 0,
+      "skipped": 4
+    },
+    "native_exception_module_ptrace_compatible": "54/54 passed"
+  },
+  "new_coverage": {
+    "rust_lifecycle_unit_tests": 5,
+    "permanent_boundary_and_mode_matrix_cases": 7,
+    "early_failure_paths_covered": [
+      "interface lifecycle move without default synthesis",
+      "direct owning struct constructor receiver release"
+    ],
+    "promotion_fixtures_in_expanded_soak": true
+  },
+  "constraints": {
+    "python_lowering_changed": false,
+    "cfg_or_ssa_algorithms_changed": false,
+    "optimizer_or_backend_changed": false,
+    "policies_changed": false,
+    "schemas_changed": false,
+    "canonicalizer_changed": false,
+    "sanitizer_semantics_changed_globally": false,
+    "commit_created": false
+  }
+}

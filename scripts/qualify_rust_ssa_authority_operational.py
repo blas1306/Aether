@@ -30,7 +30,8 @@ def main() -> int:
         else "RUST_SSA_AUTHORITY_SOAK_FAILED"
     )
     report["authority"] = {
-        "production_default": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+        "repository_default": "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+        "qualification_mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
         "returned_ssa": "rust_schema_v2_import",
         "python_shadow": "synchronous_mandatory",
         "rust_reaches_optimizer_or_backend": True,

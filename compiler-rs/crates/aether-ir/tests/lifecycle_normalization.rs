@@ -302,3 +302,135 @@ fn collection_mutations_release_consumed_owning_aggregate_temporaries() {
         .count();
     assert_eq!(mutation_release_pairs, 3);
 }
+
+#[test]
+fn borrowed_collection_consumer_discharges_the_temporary_owner_once() {
+    let input: IRModuleDTO = serde_json::from_value(json!({
+        "schema_version": 1, "structs": [], "functions": [{
+            "name":"last_use", "parameters":[], "return_type":{"tag":"void"}, "may_throw":false,
+            "blocks":[{"name":"entry","instructions":[
+                {"kind":"call","function":"make","arguments":[],"result":{"tag":"value","name":"owner","type":{"tag":"array","element":{"tag":"int"}}},"builtin":null,"source_location":null},
+                {"kind":"array_length","result":{"tag":"value","name":"first","type":{"tag":"int"}},"array":{"tag":"value","name":"owner","type":{"tag":"array","element":{"tag":"int"}}}},
+                {"kind":"array_length","result":{"tag":"value","name":"last","type":{"tag":"int"}},"array":{"tag":"value","name":"owner","type":{"tag":"array","element":{"tag":"int"}}}},
+                {"kind":"return","value":null,"transferred_storage":null}
+            ]}]
+        }]
+    })).unwrap();
+
+    let output = normalize_lifecycle_v1(&input, 1).unwrap();
+    let instructions = &output.functions[0].blocks[0].instructions;
+    assert!(matches!(instructions[1], I::ArrayLength { .. }));
+    assert!(
+        matches!(&instructions[2], I::Call { builtin: NullableDTO(Some(name)), arguments, .. }
+        if name == "__aether_release" && super_name(&arguments[0]) == "owner")
+    );
+    assert!(matches!(instructions[3], I::ArrayLength { .. }));
+    assert_eq!(instructions.len(), 5);
+}
+
+#[test]
+fn borrowed_interface_receiver_is_released_after_its_final_call() {
+    let input: IRModuleDTO = serde_json::from_value(json!({
+        "schema_version": 1, "structs": [], "functions": [{
+            "name":"interface_use", "parameters":[], "return_type":{"tag":"void"}, "may_throw":false,
+            "blocks":[{"name":"entry","instructions":[
+                {"kind":"call","function":"identity","arguments":[],"result":{"tag":"value","name":"owner","type":{"tag":"interface","name":"Readable"}},"builtin":null,"source_location":null},
+                {"kind":"interface_call","receiver":{"tag":"value","name":"owner","type":{"tag":"interface","name":"Readable"}},"arguments":[],"slot":{"index":0,"method_id":"Readable.read","parameter_types":[],"return_type":{"tag":"int"},"thunk_symbol":"","receiver_ownership":"borrowed"},"result":{"tag":"value","name":"read","type":{"tag":"int"}}},
+                {"kind":"return","value":null,"transferred_storage":null}
+            ]}]
+        }]
+    })).unwrap();
+
+    let output = normalize_lifecycle_v1(&input, 1).unwrap();
+    let instructions = &output.functions[0].blocks[0].instructions;
+    assert!(matches!(instructions[1], I::InterfaceCall { .. }));
+    assert!(
+        matches!(&instructions[2], I::Call { builtin: NullableDTO(Some(name)), arguments, .. }
+        if name == "__aether_release" && super_name(&arguments[0]) == "owner")
+    );
+}
+
+#[test]
+fn nullable_cast_transfers_fresh_ownership_and_copies_borrowed_ownership() {
+    let input: IRModuleDTO = serde_json::from_value(json!({
+        "schema_version": 1, "structs": [], "functions": [{
+            "name":"nullable", "parameters":[{"tag":"parameter","name":"borrowed","type":{"tag":"class_ref","name":"Node"}}], "return_type":{"tag":"void"}, "may_throw":false,
+            "blocks":[{"name":"entry","instructions":[
+                {"kind":"class_new","result":{"tag":"value","name":"fresh","type":{"tag":"class_ref","name":"Node"}}},
+                {"kind":"cast","result":{"tag":"value","name":"fresh_nullable","type":{"tag":"nullable","inner":{"tag":"class_ref","name":"Node"}}},"value":{"tag":"value","name":"fresh","type":{"tag":"class_ref","name":"Node"}}},
+                {"kind":"cast","result":{"tag":"value","name":"borrowed_nullable","type":{"tag":"nullable","inner":{"tag":"class_ref","name":"Node"}}},"value":{"tag":"parameter","name":"borrowed","type":{"tag":"class_ref","name":"Node"}}},
+                {"kind":"call","function":"consume","arguments":[{"tag":"value","name":"borrowed_nullable","type":{"tag":"nullable","inner":{"tag":"class_ref","name":"Node"}}}],"result":null,"builtin":null,"source_location":null},
+                {"kind":"return","value":{"tag":"value","name":"fresh_nullable","type":{"tag":"nullable","inner":{"tag":"class_ref","name":"Node"}}},"transferred_storage":null}
+            ]}]
+        }]
+    })).unwrap();
+
+    let output = normalize_lifecycle_v1(&input, 1).unwrap();
+    let instructions = &output.functions[0].blocks[0].instructions;
+    let retains = instructions.iter().filter(|instruction| {
+        matches!(instruction, I::Call { builtin: NullableDTO(Some(name)), .. } if name == "__aether_retain")
+    }).count();
+    let releases = instructions.iter().filter(|instruction| {
+        matches!(instruction, I::Call { builtin: NullableDTO(Some(name)), .. } if name == "__aether_release")
+    }).count();
+    assert_eq!(retains, 1, "only the borrowed nullable copy is retained");
+    assert_eq!(
+        releases, 1,
+        "the borrowed constructor/call lifetime is released"
+    );
+    assert!(
+        matches!(instructions.last(), Some(I::Return { value: NullableDTO(Some(value)), .. }) if super_name(value) == "fresh_nullable")
+    );
+}
+
+#[test]
+fn interface_move_does_not_require_an_unsupported_default() {
+    let interface = T::Interface {
+        name: "Readable".into(),
+    };
+    let source = storage("source", interface.clone());
+    let destination = storage("destination", interface);
+    let output = normalize_lifecycle_v1(
+        &module(vec![
+            I::MoveInit {
+                destination,
+                source,
+                source_location: NullableDTO(None),
+            },
+            I::Return {
+                value: NullableDTO(None),
+                transferred_storage: NullableDTO(None),
+            },
+        ]),
+        1,
+    )
+    .unwrap();
+    let instructions = &output.functions[0].blocks[0].instructions;
+    assert_eq!(instructions.len(), 3);
+    assert!(matches!(instructions[0], I::Load { .. }));
+    assert!(matches!(instructions[1], I::Store { .. }));
+    assert!(matches!(instructions[2], I::Return { .. }));
+}
+
+#[test]
+fn direct_owning_struct_constructor_releases_its_borrowed_receiver() {
+    let input: IRModuleDTO = serde_json::from_value(json!({
+        "schema_version": 1,
+        "structs": [{"name":"Owner","fields":[{"name":"text","type":{"tag":"string"}}]}],
+        "functions": [{
+            "name":"construct", "parameters":[], "return_type":{"tag":"void"}, "may_throw":false,
+            "blocks":[{"name":"entry","instructions":[
+                {"kind":"call","function":"Owner.__ctor","arguments":[{"tag":"value","name":"receiver","type":{"tag":"struct","name":"Owner"}}],"result":null,"builtin":null,"source_location":null},
+                {"kind":"return","value":null,"transferred_storage":null}
+            ]}]
+        }]
+    })).unwrap();
+
+    let output = normalize_lifecycle_v1(&input, 1).unwrap();
+    let instructions = &output.functions[0].blocks[0].instructions;
+    assert!(matches!(instructions[0], I::Call { ref function, .. } if function == "Owner.__ctor"));
+    assert!(
+        matches!(&instructions[1], I::Call { builtin: NullableDTO(Some(name)), arguments, .. }
+        if name == "__aether_release" && super_name(&arguments[0]) == "receiver")
+    );
+}

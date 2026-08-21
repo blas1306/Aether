@@ -27,7 +27,12 @@ from aether.ssa.dto import ssa_module_from_dto, ssa_module_to_dto
 from aether.ssa.general_builder import GeneralSSABuilder
 from aether.ssa.lowering_policy import load_lowering_policy
 
-from qualify_rust_ssa_lowering import canonical_ssa, discover, first_difference
+from qualify_rust_ssa_lowering import (
+    canonical_ssa,
+    discover,
+    first_difference,
+    generate as historical_generate,
+)
 
 OUTPUT = ROOT / "docs/compiler/rust_ssa_lowering_adversarial_qualification.json"
 RUST = ROOT / "compiler-rs/target/debug/examples/verify_owned_ssa"
@@ -195,11 +200,15 @@ def qualify_case(case_id: str, categories: tuple[str, ...], factory: Callable[[]
 
 
 def historical() -> dict:
-    result = subprocess.run([sys.executable, str(ROOT / "scripts/qualify_rust_ssa_lowering.py")], cwd=ROOT, capture_output=True, text=True)
-    evidence = json.loads((ROOT / "docs/compiler/rust_ssa_lowering_full_qualification.json").read_text())
+    evidence = historical_generate()
     denominator = evidence["corpus"]["denominator"]
     passed = evidence["ssa_semantic_parity"]["passed"]
-    return {"passed": passed, "denominator": denominator, "result": "PASS" if passed == denominator == 116 else "FAIL", "exit_code": result.returncode}
+    return {
+        "passed": passed,
+        "denominator": denominator,
+        "result": "PASS" if passed == denominator == 116 else "FAIL",
+        "exit_code": 0 if evidence["decision"] == "RUST_SSA_LOWERING_IMPLEMENTED" else 1,
+    }
 
 
 def generate() -> dict:

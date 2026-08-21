@@ -14,7 +14,11 @@ sys.path.insert(0, str(ROOT / "src"))
 from aether.ir.dto import ir_module_to_dto  # noqa: E402
 from aether.pipeline import IRBackend, SSAPipeline, prepare_typed_program  # noqa: E402
 from aether.ssa.dto import ssa_module_from_dto, ssa_module_to_dto  # noqa: E402
-from aether.ssa.shadow import PersistentRustSSALoweringClient  # noqa: E402
+from aether.ssa.shadow import (  # noqa: E402
+    PersistentRustSSALoweringClient,
+    SSALoweringAuthorityConfiguration,
+    SSALoweringAuthorityMode,
+)
 from aether.typechecker import TypeChecker  # noqa: E402
 
 
@@ -39,7 +43,12 @@ def main() -> int:
                 initial = IRBackend().lower_verified(typed)
             except Exception:
                 continue
-            pipeline = SSAPipeline(rust_shadow_client=client)
+            pipeline = SSAPipeline(
+                authority_configuration=SSALoweringAuthorityConfiguration(
+                    SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
+                ),
+                rust_shadow_client=client,
+            )
             result = pipeline.run(initial)
             snapshot = json.dumps(
                 ir_module_to_dto(initial), sort_keys=True, separators=(",", ":")
