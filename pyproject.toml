@@ -18,9 +18,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-release = [
-    "build>=1.2,<2",
-]
+release = ["build>=1.2,<2"]
+
+[dependency-groups]
+dev = ["pytest>=9,<10", "pip>=26,<27", "setuptools>=77", "wheel>=0.45,<1"]
 
 [project.scripts]
 aether = "aether.cli:main"
@@ -61,16 +62,29 @@ version = { attr = "aether.version.PACKAGE_VERSION" }
     "examples/README.md",
     "examples/v1_examples_manifest.json",
 ]
-"share/aether/examples/ControlesALN/1erControl/Ej1" = ["examples/ControlesALN/1erControl/Ej1/*.ae"]
-"share/aether/examples/ControlesALN/1erControl/Ej2" = ["examples/ControlesALN/1erControl/Ej2/*.ae"]
-"share/aether/examples/ControlesALN/2doControl/Ej1" = ["examples/ControlesALN/2doControl/Ej1/*.ae"]
-"share/aether/examples/ControlesALN/2doControl/Ej2" = ["examples/ControlesALN/2doControl/Ej2/*.ae"]
+"share/aether/examples/ControlesALN/1erControl/Ej1" = [
+    "examples/ControlesALN/1erControl/Ej1/*.ae",
+]
+"share/aether/examples/ControlesALN/1erControl/Ej2" = [
+    "examples/ControlesALN/1erControl/Ej2/*.ae",
+]
+"share/aether/examples/ControlesALN/2doControl/Ej1" = [
+    "examples/ControlesALN/2doControl/Ej1/*.ae",
+]
+"share/aether/examples/ControlesALN/2doControl/Ej2" = [
+    "examples/ControlesALN/2doControl/Ej2/*.ae",
+]
 "share/aether/examples/LeetCode" = ["examples/LeetCode/*.ae"]
 "share/aether/examples/ProbandoNR" = ["examples/ProbandoNR/*.ae"]
 "share/aether/examples/Sorts" = ["examples/Sorts/*.ae"]
-"share/aether/examples/aggregate_collections" = ["examples/aggregate_collections/*.ae"]
+"share/aether/examples/aggregate_collections" = [
+    "examples/aggregate_collections/*.ae",
+]
 "share/aether/examples/classes" = ["examples/classes/*.ae"]
-"share/aether/examples/expense_tracker" = ["examples/expense_tracker/*.ae", "examples/expense_tracker/*.md"]
+"share/aether/examples/expense_tracker" = [
+    "examples/expense_tracker/*.ae",
+    "examples/expense_tracker/*.md",
+]
 "share/aether/examples/interactive" = ["examples/interactive/*.ae"]
 "share/aether/examples/ir" = ["examples/ir/*.ae"]
 "share/aether/examples/linear_algebra" = ["examples/linear_algebra/*.ae"]
@@ -78,7 +92,10 @@ version = { attr = "aether.version.PACKAGE_VERSION" }
 "share/aether/examples/llvm" = ["examples/llvm/*.ae"]
 "share/aether/examples/minimos_cuadrados" = ["examples/minimos_cuadrados/*.ae"]
 "share/aether/examples/nonlinear_systems" = ["examples/nonlinear_systems/*.ae"]
-"share/aether/examples/numerical_methods" = ["examples/numerical_methods/*.ae", "examples/numerical_methods/*.md"]
+"share/aether/examples/numerical_methods" = [
+    "examples/numerical_methods/*.ae",
+    "examples/numerical_methods/*.md",
+]
 "share/aether/examples/structs" = ["examples/structs/*.ae"]
 "share/aether/corpus/exceptions" = [
     "corpus/exceptions/README.md",
