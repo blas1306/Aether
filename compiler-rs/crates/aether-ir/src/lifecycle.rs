@@ -91,6 +91,8 @@ pub fn normalize_lifecycle_v1(
     let mut output = module.clone();
     for function in &mut output.functions {
         let mut owned = BTreeSet::new();
+        let mut used = BTreeSet::new();
+        let mut remaining = BTreeMap::<String, usize>::new();
         let mut names = BTreeSet::new();
         for parameter in &function.parameters {
             collect_json_names(&serde_json::to_value(parameter).unwrap(), &mut names);
@@ -98,6 +100,10 @@ pub fn normalize_lifecycle_v1(
         for block in &function.blocks {
             for instruction in &block.instructions {
                 collect_json_names(&serde_json::to_value(instruction).unwrap(), &mut names);
+                for operand in instruction_operands(instruction) {
+                    used.insert(operand.clone());
+                    *remaining.entry(operand).or_default() += 1;
+                }
                 if let Some(result) = owned_result(instruction, &definitions)? {
                     owned.insert(value_name(result).to_owned());
                 }
@@ -124,16 +130,24 @@ pub fn normalize_lifecycle_v1(
             let old = std::mem::take(&mut block.instructions);
             let mut replacement = Vec::new();
             for instruction in old {
+                let operands = instruction_operands(&instruction);
                 expand(
                     instruction,
                     &definitions,
                     &mut owned,
+                    &used,
+                    &remaining,
                     &mut temporary,
                     &mut replacement,
                 )
                 .map_err(|e| LifecycleNormalizationError::lifecycle(Some(&function.name), e))?;
+                for operand in operands {
+                    if let Some(count) = remaining.get_mut(&operand) {
+                        *count = count.saturating_sub(1);
+                    }
+                }
             }
-            block.instructions = replacement;
+            block.instructions = fold_trivial_return_transfer(replacement);
         }
         repair_constructor_invocations(function, &definitions, &mut temporary)
             .map_err(|e| LifecycleNormalizationError::lifecycle(Some(&function.name), e))?;
@@ -151,6 +165,66 @@ pub fn normalize_lifecycle_v1(
         ));
     }
     Ok(output)
+}
+
+fn fold_trivial_return_transfer(mut instructions: Vec<I>) -> Vec<I> {
+    if instructions.len() < 3 {
+        return instructions;
+    }
+    let length = instructions.len();
+    let (slot, stored) = match &instructions[length - 3] {
+        I::Store { slot, value } => (slot.clone(), value.clone()),
+        _ => return instructions,
+    };
+    let loaded = match &instructions[length - 2] {
+        I::Load {
+            result,
+            slot: loaded_slot,
+        } if loaded_slot == &slot => result.clone(),
+        _ => return instructions,
+    };
+    let transferable = match &instructions[length - 1] {
+        I::Return {
+            value: return_value,
+            transferred_storage,
+        } if return_value.0.as_ref() == Some(&loaded)
+            && (transferred_storage.0.is_none()
+                || transferred_storage
+                    .0
+                    .as_ref()
+                    .is_some_and(|storage| value(storage) == slot)) =>
+        {
+            true
+        }
+        _ => false,
+    };
+    if !transferable {
+        return instructions;
+    }
+    instructions.truncate(length - 3);
+    if let Some(I::Load {
+        result,
+        slot: source_slot,
+    }) = instructions.last().cloned()
+    {
+        if result == stored {
+            instructions.pop();
+            instructions.push(I::Load {
+                result: loaded.clone(),
+                slot: source_slot,
+            });
+            instructions.push(I::Return {
+                value: NullableDTO(Some(loaded)),
+                transferred_storage: NullableDTO(None),
+            });
+            return instructions;
+        }
+    }
+    instructions.push(I::Return {
+        value: NullableDTO(Some(stored)),
+        transferred_storage: NullableDTO(None),
+    });
+    instructions
 }
 
 /// Apply the separately specified edge-specific disposition of an owning
@@ -303,6 +377,41 @@ fn collect_json_names(value: &serde_json::Value, names: &mut BTreeSet<String>) {
         _ => {}
     }
 }
+fn instruction_operands(instruction: &I) -> Vec<String> {
+    let mut json = serde_json::to_value(instruction).expect("instruction serialization");
+    if let serde_json::Value::Object(object) = &mut json {
+        object.remove("result");
+        object.remove("destination");
+        object.remove("source_location");
+    }
+    let mut operands = Vec::new();
+    fn visit(value: &serde_json::Value, operands: &mut Vec<String>) {
+        match value {
+            serde_json::Value::Array(values) => {
+                for value in values {
+                    visit(value, operands);
+                }
+            }
+            serde_json::Value::Object(object) => {
+                if matches!(
+                    object.get("tag").and_then(|value| value.as_str()),
+                    Some("value" | "storage" | "parameter")
+                ) {
+                    if let Some(name) = object.get("name").and_then(|value| value.as_str()) {
+                        operands.push(name.to_owned());
+                        return;
+                    }
+                }
+                for value in object.values() {
+                    visit(value, operands);
+                }
+            }
+            _ => {}
+        }
+    }
+    visit(&json, &mut operands);
+    operands
+}
 fn value(storage: &IRStorageDTO) -> V {
     match storage {
         IRStorageDTO::Storage { name, r#type } => V::Storage {
@@ -405,6 +514,8 @@ fn expand<F>(
     instruction: I,
     defs: &BTreeMap<&str, &IRStructDefinitionDTO>,
     owned: &mut BTreeSet<String>,
+    used: &BTreeSet<String>,
+    remaining: &BTreeMap<String, usize>,
     temporary: &mut F,
     out: &mut Vec<I>,
 ) -> Result<(), String>
@@ -412,6 +523,315 @@ where
     F: FnMut(&T) -> V,
 {
     match instruction {
+        I::ClassGet {
+            result,
+            object,
+            field_index,
+            field_name,
+        } => {
+            let result_owned = traits(ty(&result), defs, &mut BTreeSet::new())?.0;
+            out.push(I::ClassGet {
+                result: result.clone(),
+                object: object.clone(),
+                field_index,
+                field_name,
+            });
+            if result_owned {
+                out.push(call("__aether_retain", vec![result.clone()], None));
+            }
+            release_consumed_owner(&object, owned, out);
+            release_unused_result(&result, used, owned, out);
+        }
+        I::StructNew { result, fields } => {
+            for field in &fields {
+                acquire_aggregate_field(field, defs, owned, out)?;
+            }
+            out.push(I::StructNew {
+                result: result.clone(),
+                fields,
+            });
+            release_unused_result(&result, used, owned, out);
+        }
+        I::StructSet {
+            result,
+            r#struct,
+            field_index,
+            field_name,
+            value: field_value,
+        } => {
+            acquire_aggregate_field(&field_value, defs, owned, out)?;
+            let struct_traits = traits(ty(&r#struct), defs, &mut BTreeSet::new())?;
+            if !owned.remove(value_name(&r#struct)) && struct_traits.0 {
+                out.push(call("__aether_retain", vec![r#struct.clone()], None));
+            }
+            let field_type = match ty(&r#struct) {
+                T::Struct { name } => defs
+                    .get(name.as_str())
+                    .and_then(|definition| definition.fields.get(field_index as usize))
+                    .map(|field| &field.r#type),
+                _ => None,
+            }
+            .ok_or_else(|| "struct_set field has no nominal definition".to_owned())?;
+            if traits(field_type, defs, &mut BTreeSet::new())?.0 {
+                let old = temporary(field_type);
+                out.push(I::StructGet {
+                    result: old.clone(),
+                    r#struct: r#struct.clone(),
+                    field_index,
+                    field_name: field_name.clone(),
+                });
+                out.push(call("__aether_release", vec![old], None));
+            }
+            out.push(I::StructSet {
+                result: result.clone(),
+                r#struct,
+                field_index,
+                field_name,
+                value: field_value,
+            });
+            if struct_traits.0 {
+                owned.insert(value_name(&result).to_owned());
+            }
+            release_unused_result(&result, used, owned, out);
+        }
+        I::MethodResultNew {
+            result,
+            receiver,
+            value: result_value,
+        } => {
+            acquire_aggregate_field(&receiver, defs, owned, out)?;
+            if let Some(field) = &result_value.0 {
+                acquire_aggregate_field(field, defs, owned, out)?;
+            }
+            out.push(I::MethodResultNew {
+                result: result.clone(),
+                receiver,
+                value: result_value,
+            });
+            release_unused_result(&result, used, owned, out);
+        }
+        I::InterfaceConstruct {
+            result,
+            carrier,
+            witness,
+        } => {
+            if matches!(ty(&carrier), T::Struct { .. }) {
+                out.push(I::InterfaceConstruct {
+                    result: result.clone(),
+                    carrier: carrier.clone(),
+                    witness,
+                });
+                release_consumed_owner(&carrier, owned, out);
+            } else {
+                if !owned.remove(value_name(&carrier)) {
+                    out.push(call("__aether_retain", vec![carrier.clone()], None));
+                }
+                out.push(I::InterfaceConstruct {
+                    result: result.clone(),
+                    carrier,
+                    witness,
+                });
+            }
+            release_unused_result(&result, used, owned, out);
+        }
+        I::BinaryOp {
+            result,
+            operator,
+            left,
+            right,
+            source_location,
+        } if operator == "add" && matches!(ty(&result), T::String {}) => {
+            out.push(I::BinaryOp {
+                result: result.clone(),
+                operator,
+                left: left.clone(),
+                right: right.clone(),
+                source_location,
+            });
+            release_consumed_owner(&left, owned, out);
+            release_consumed_owner(&right, owned, out);
+            release_unused_result(&result, used, owned, out);
+        }
+        I::CompareOp {
+            result,
+            operator,
+            left,
+            right,
+            aggregate_shape,
+        } if matches!(operator.as_str(), "eq" | "ne")
+            && traits(ty(&left), defs, &mut BTreeSet::new())?.0 =>
+        {
+            let current = instruction_operands(&I::CompareOp {
+                result: result.clone(),
+                operator: operator.clone(),
+                left: left.clone(),
+                right: right.clone(),
+                aggregate_shape: aggregate_shape.clone(),
+            });
+            out.push(I::CompareOp {
+                result,
+                operator,
+                left: left.clone(),
+                right: right.clone(),
+                aggregate_shape,
+            });
+            for operand in [&left, &right] {
+                let name = value_name(operand);
+                let current_uses = current.iter().filter(|item| item.as_str() == name).count();
+                if owned.contains(name) && remaining.get(name).copied().unwrap_or(0) <= current_uses
+                {
+                    release_consumed_owner(operand, owned, out);
+                }
+            }
+        }
+        I::ListPush {
+            list_value,
+            value: pushed,
+        } => {
+            out.push(I::ListPush {
+                list_value,
+                value: pushed.clone(),
+            });
+            release_consumed_owner(&pushed, owned, out);
+        }
+        I::ArrayNew { result, elements } => {
+            out.push(I::ArrayNew {
+                result: result.clone(),
+                elements: elements.clone(),
+            });
+            for element in &elements {
+                release_consumed_owner(element, owned, out);
+            }
+            release_unused_result(&result, used, owned, out);
+        }
+        I::ListNew { result, elements } => {
+            out.push(I::ListNew {
+                result: result.clone(),
+                elements: elements.clone(),
+            });
+            for element in &elements {
+                release_consumed_owner(element, owned, out);
+            }
+            release_unused_result(&result, used, owned, out);
+        }
+        I::ClassSet {
+            object,
+            field_index,
+            field_name,
+            value: field_value,
+            initialize,
+        } => {
+            out.push(I::ClassSet {
+                object,
+                field_index,
+                field_name,
+                value: field_value.clone(),
+                initialize,
+            });
+            release_consumed_owner(&field_value, owned, out);
+        }
+        I::ArrayGet {
+            result,
+            array,
+            index,
+            borrowed,
+            borrow_scope,
+            source_location,
+        } => {
+            out.push(I::ArrayGet {
+                result: result.clone(),
+                array: array.clone(),
+                index,
+                borrowed,
+                borrow_scope,
+                source_location,
+            });
+            release_consumed_owner(&array, owned, out);
+            release_unused_result(&result, used, owned, out);
+        }
+        I::ListGet {
+            result,
+            list_value,
+            index,
+            borrowed,
+            borrow_scope,
+            source_location,
+        } => {
+            out.push(I::ListGet {
+                result: result.clone(),
+                list_value: list_value.clone(),
+                index,
+                borrowed,
+                borrow_scope,
+                source_location,
+            });
+            release_consumed_owner(&list_value, owned, out);
+            release_unused_result(&result, used, owned, out);
+        }
+        I::MethodResultReceiver {
+            result,
+            method_result,
+        } => {
+            owned.remove(value_name(&method_result));
+            if traits(ty(&result), defs, &mut BTreeSet::new())?.0 {
+                owned.insert(value_name(&result).to_owned());
+            }
+            out.push(I::MethodResultReceiver {
+                result: result.clone(),
+                method_result,
+            });
+            release_unused_result(&result, used, owned, out);
+        }
+        I::MethodResultValue {
+            result,
+            method_result,
+        } => {
+            if traits(ty(&result), defs, &mut BTreeSet::new())?.0 {
+                owned.insert(value_name(&result).to_owned());
+            }
+            out.push(I::MethodResultValue {
+                result: result.clone(),
+                method_result,
+            });
+            release_unused_result(&result, used, owned, out);
+        }
+        I::Call {
+            function,
+            arguments,
+            result,
+            builtin,
+            source_location,
+            may_throw,
+        } => {
+            out.push(I::Call {
+                function: function.clone(),
+                arguments: arguments.clone(),
+                result: result.clone(),
+                builtin,
+                source_location,
+                may_throw,
+            });
+            for (index, argument) in arguments.iter().enumerate() {
+                if !(function.ends_with(".__ctor") && index == 0) {
+                    release_consumed_owner(argument, owned, out);
+                }
+            }
+            if let Some(result) = &result.0 {
+                release_unused_result(result, used, owned, out);
+            }
+        }
+        I::Print {
+            value: printed,
+            newline,
+            aggregate_shape,
+        } => {
+            out.push(I::Print {
+                value: printed.clone(),
+                newline,
+                aggregate_shape,
+            });
+            release_consumed_owner(&printed, owned, out);
+        }
         I::InitDefault { destination, .. } => {
             let (_, t) = storage_parts(&destination);
             let v = default_value(t, defs, temporary, out, &mut BTreeSet::new())?;
@@ -469,6 +889,35 @@ where
         other => out.push(other),
     }
     Ok(())
+}
+fn acquire_aggregate_field(
+    field: &V,
+    defs: &BTreeMap<&str, &IRStructDefinitionDTO>,
+    owned: &mut BTreeSet<String>,
+    out: &mut Vec<I>,
+) -> Result<(), String> {
+    if traits(ty(field), defs, &mut BTreeSet::new())?.0 {
+        if !owned.remove(value_name(field)) {
+            out.push(call("__aether_retain", vec![field.clone()], None));
+        }
+    }
+    Ok(())
+}
+fn release_consumed_owner(value: &V, owned: &mut BTreeSet<String>, out: &mut Vec<I>) {
+    if owned.remove(value_name(value)) {
+        out.push(call("__aether_release", vec![value.clone()], None));
+    }
+}
+fn release_unused_result(
+    result: &V,
+    used: &BTreeSet<String>,
+    owned: &mut BTreeSet<String>,
+    out: &mut Vec<I>,
+) {
+    let name = value_name(result);
+    if !used.contains(name) && owned.remove(name) {
+        out.push(call("__aether_release", vec![result.clone()], None));
+    }
 }
 fn copy_assign<F>(
     destination: IRStorageDTO,
@@ -611,25 +1060,28 @@ fn default_value<F>(
 where
     F: FnMut(&T) -> V,
 {
+    if let T::Struct { name } = t {
+        if !active.insert(name.clone()) {
+            return Err("recursive layout".into());
+        }
+        let d = defs
+            .get(name.as_str())
+            .ok_or_else(|| format!("nominal struct '{name}' has no definition"))?;
+        let mut fields = Vec::new();
+        for f in &d.fields {
+            fields.push(default_value(&f.r#type, defs, temporary, out, active)?)
+        }
+        active.remove(name);
+        let result = temporary(t);
+        out.push(I::StructNew {
+            result: result.clone(),
+            fields,
+        });
+        return Ok(result);
+    }
     let result = temporary(t);
     let instruction = match t {
-        T::Struct { name } => {
-            if !active.insert(name.clone()) {
-                return Err("recursive layout".into());
-            }
-            let d = defs
-                .get(name.as_str())
-                .ok_or_else(|| format!("nominal struct '{name}' has no definition"))?;
-            let mut fields = Vec::new();
-            for f in &d.fields {
-                fields.push(default_value(&f.r#type, defs, temporary, out, active)?)
-            }
-            active.remove(name);
-            I::StructNew {
-                result: result.clone(),
-                fields,
-            }
-        }
+        T::Struct { .. } => unreachable!("struct defaults handled above"),
         T::Array { .. } => I::ArrayNew {
             result: result.clone(),
             elements: vec![],

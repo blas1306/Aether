@@ -1,0 +1,991 @@
+{
+  "adversarial_suite": {
+    "component_tests": "PASS",
+    "qualification_result": "BLOCKED",
+    "reason": "required lifecycle/SSA shapes occur in the failing corpus rows"
+  },
+  "attempt": "RUST-3.1e",
+  "authoritative_verifier_and_schema_v2_import": {
+    "failed": 0,
+    "passed": 116
+  },
+  "concrete_determinism": {
+    "failed": 0,
+    "passed": 116
+  },
+  "corpus": {
+    "denominator": 116,
+    "expected_denominator": 116,
+    "files": [
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "benchmarks/arithmetic.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "benchmarks/array_sum.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "benchmarks/if_else.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "benchmarks/list_for_sum.ae",
+        "python_schema_reserialization_exact": false,
+        "rust_verifier_and_python_import": true,
+        "ssa_mismatch": "$.functions[0].blocks[4].instructions[0].source_location: NoneType != dict",
+        "ssa_semantic_parity": false
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "benchmarks/list_push.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "benchmarks/matrix_mul.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "benchmarks/nested_loops.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "benchmarks/sum_to.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "benchmarks/vector_dot.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "benchmarks/while_countdown.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "corpus/exceptions/positive/cleanup_during_unwinding.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "corpus/exceptions/positive/constructor_failure.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "corpus/exceptions/positive/function_recursion.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "corpus/exceptions/positive/indirect_call.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "corpus/exceptions/positive/method_interface_dispatch.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "corpus/exceptions/positive/multiple_and_root_catches.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "corpus/exceptions/positive/nested_rethrow_chain.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "corpus/exceptions/positive/owned_aggregates_arc.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "corpus/exceptions/positive/panic_vs_exception.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "corpus/exceptions/positive/root_reporting.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "corpus/exceptions/positive/throw_and_typed_catch.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/ControlesALN/1erControl/Ej1/Biseccion.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/ControlesALN/1erControl/Ej2/PuntoFijo.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/ControlesALN/1erControl/Ej2/ej2.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/ControlesALN/2doControl/Ej2/ej2.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/FormulaNumerosPrimos.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/LeetCode/isPalindrome.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/LeetCode/twoSum.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/ProbandoNR/probandoNR2.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/ProbandoNR/probandoNR3.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/Sorts/IllegalArgumentException.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/Sorts/Main.ae",
+        "python_schema_reserialization_exact": false,
+        "rust_verifier_and_python_import": true,
+        "ssa_mismatch": "$.functions[1].blocks[0].instructions[0].source_location: NoneType != dict",
+        "ssa_semantic_parity": false
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/Sorts/Sortings.ae",
+        "python_schema_reserialization_exact": false,
+        "rust_verifier_and_python_import": true,
+        "ssa_mismatch": "$.functions[1].blocks[0].instructions[0].source_location: NoneType != dict",
+        "ssa_semantic_parity": false
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/aggregate_collections/particles.ae",
+        "python_schema_reserialization_exact": false,
+        "rust_verifier_and_python_import": true,
+        "ssa_mismatch": "$.functions[0].blocks[2].instructions[0].source_location: NoneType != dict",
+        "ssa_semantic_parity": false
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/classes/const_with_mutable_alias.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/classes/counter_basic.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/classes/custom_constructor.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/classes/implements_interface.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/classes/invalid_cases.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/classes/private_field_public_methods.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/classes/reference_aliasing.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/esPrimo2.ae",
+        "python_schema_reserialization_exact": false,
+        "rust_verifier_and_python_import": true,
+        "ssa_mismatch": "$.functions[0].blocks[14].instructions[0].source_location: NoneType != dict",
+        "ssa_semantic_parity": false
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/expense_tracker/Ledger.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/expense_tracker/Main.ae",
+        "python_schema_reserialization_exact": false,
+        "rust_verifier_and_python_import": true,
+        "ssa_mismatch": "$.functions[11].blocks[4].instructions[0].source_location: NoneType != dict",
+        "ssa_semantic_parity": false
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/expense_tracker/Persistence.ae",
+        "python_schema_reserialization_exact": false,
+        "rust_verifier_and_python_import": true,
+        "ssa_mismatch": "$.functions[10].blocks[4].instructions[0].source_location: NoneType != dict",
+        "ssa_semantic_parity": false
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/expense_tracker/Reports.ae",
+        "python_schema_reserialization_exact": false,
+        "rust_verifier_and_python_import": true,
+        "ssa_mismatch": "$.functions[0].blocks[2].instructions[0].source_location: NoneType != dict",
+        "ssa_semantic_parity": false
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/expense_tracker/Transaction.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/hello.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/ir/constant_fold.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/ir/local_const.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/ir/sumTo.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/arithmetic.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/array_sort.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/array_sum.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/countdown.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/double_add.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/double_compare.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/double_to_int.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/for_break_continue.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/for_sum.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/gcd_iterative.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/identity_call.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/int_to_double.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/list_clear.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/list_contains.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/list_copy.ae",
+        "python_schema_reserialization_exact": false,
+        "rust_verifier_and_python_import": true,
+        "ssa_mismatch": "$.functions[0].blocks[0].instructions[4].source_location: NoneType != dict",
+        "ssa_semantic_parity": false
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/list_for_sum.ae",
+        "python_schema_reserialization_exact": false,
+        "rust_verifier_and_python_import": true,
+        "ssa_mismatch": "$.functions[0].blocks[2].instructions[0].source_location: NoneType != dict",
+        "ssa_semantic_parity": false
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/list_index.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/list_index_of.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/list_insert.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/list_literal.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/list_pop.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/list_pop_alias.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/list_push.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/list_push_alias.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/list_remove_at.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/list_reverse.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/list_set_alias.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/list_sort.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/matrix_add.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/matrix_column_mul.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/matrix_index.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/matrix_literal.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/matrix_matmul.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/matrix_rows_columns.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/matrix_scalar_mul.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/matrix_set.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/matrix_sub.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/max.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/outer_product.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/return_5.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/string_choose.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/string_identity.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/sum_to_n.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/vector_add.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/vector_column_inferred.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/vector_column_literal.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/vector_dot.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/vector_index.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/vector_length.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/vector_literal.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/vector_matrix_mul.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/vector_scalar_mul.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/vector_set.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/llvm/vector_sub.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/nose.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/numerical_methods/Functions.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/numerical_methods/Integration.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/numerical_methods/Problems.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/numerical_methods/Results.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/numerical_methods/Roots.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/numerical_methods/main.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/pruebaException.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/structs/Geometry.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/structs/custom_constructor_and_equality.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      },
+      {
+        "deterministic": true,
+        "lifecycle_parity": true,
+        "path": "examples/structs/main.ae",
+        "python_schema_reserialization_exact": true,
+        "rust_verifier_and_python_import": true,
+        "ssa_semantic_parity": true
+      }
+    ]
+  },
+  "decision": "RUST_SSA_LOWERING_BLOCKED",
+  "evidence_schema_version": 1,
+  "lifecycle_differential": {
+    "failed": 0,
+    "passed": 116
+  },
+  "negative_tests": {
+    "detail": "wrong lifecycle policy, mixed normalized/pseudo input, pre-normalized lowering, malformed phi, dangling targets, and incomplete exceptional arguments reject deterministically",
+    "result": "PASS"
+  },
+  "phase_timing_note": "Blocked qualification records observable lane totals; internal CFG/dominance/liveness/phi/rename phase instrumentation is not claimed.",
+  "python_schema_v2_exact_reserialization": {
+    "failed": 10,
+    "passed": 106
+  },
+  "scope": {
+    "commit_created": false,
+    "historical_blocked_artifacts_modified": false,
+    "production_lowering_authority": "python",
+    "rp3_changed": false
+  },
+  "ssa_semantic_parity": {
+    "failed": 10,
+    "passed": 106
+  },
+  "timings_ns": {
+    "lifecycle_python_ns": 1689183888,
+    "lifecycle_rust_lane_ns": 7086484804,
+    "python_lane_ns": 2891895893,
+    "rust_lane_ns": 19819070169
+  }
+}

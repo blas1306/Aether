@@ -473,7 +473,13 @@ impl<'a> FunctionLowerer<'a> {
                 }
             }
         }
-        resolve_tree(value, &self.bindings, definition_keys)?;
+        let mut excluded_keys = definition_keys.to_vec();
+        if matches!(kind, "invoke" | "invoke_indirect" | "invoke_interface") {
+            excluded_keys.push("exceptional_target_event");
+        } else if matches!(kind, "throw" | "rethrow" | "propagate") {
+            excluded_keys.push("target_event");
+        }
+        resolve_tree(value, &self.bindings, &excluded_keys)?;
         let object = value.as_object_mut().expect("instruction object");
         match kind {
             "invoke" | "invoke_indirect" | "invoke_interface" => {
@@ -497,6 +503,7 @@ impl<'a> FunctionLowerer<'a> {
                 } else {
                     Vec::new()
                 };
+                object.remove("target_event");
                 object.insert("exceptional_arguments".into(), Value::Array(arguments));
             }
             "return" => {

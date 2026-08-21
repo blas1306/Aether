@@ -221,3 +221,37 @@ fn super_name(value: &V) -> &str {
         V::Value { name, .. } | V::Storage { name, .. } | V::Parameter { name, .. } => name,
     }
 }
+
+#[test]
+fn adversarial_owning_and_borrowed_class_get_sequences_are_exact() {
+    let input: IRModuleDTO = serde_json::from_value(json!({
+        "schema_version": 1, "structs": [], "functions": [{
+            "name":"projection", "parameters":[], "return_type":{"tag":"void"}, "may_throw":false,
+            "blocks":[{"name":"entry","instructions":[
+                {"kind":"class_get","result":{"tag":"value","name":"owned","type":{"tag":"string"}},"object":{"tag":"parameter","name":"self","type":{"tag":"class_ref","name":"C"}},"field_index":0,"field_name":"name"},
+                {"kind":"class_get","result":{"tag":"value","name":"borrowed","type":{"tag":"int"}},"object":{"tag":"parameter","name":"self","type":{"tag":"class_ref","name":"C"}},"field_index":1,"field_name":"count"},
+                {"kind":"print","value":{"tag":"value","name":"owned","type":{"tag":"string"}},"newline":true,"aggregate_shape":null},
+                {"kind":"return","value":null,"transferred_storage":null}
+            ]}]
+        }]
+    })).unwrap();
+    let output = normalize_lifecycle_v1(&input, 1).unwrap();
+    let instructions = &output.functions[0].blocks[0].instructions;
+    assert_eq!(instructions.len(), 6);
+    assert!(
+        matches!(&instructions[0], I::ClassGet { result, .. } if super_name(result) == "owned")
+    );
+    assert!(
+        matches!(&instructions[1], I::Call { builtin: NullableDTO(Some(name)), arguments, .. }
+        if name == "__aether_retain" && super_name(&arguments[0]) == "owned")
+    );
+    assert!(
+        matches!(&instructions[2], I::ClassGet { result, .. } if super_name(result) == "borrowed")
+    );
+    assert!(matches!(&instructions[3], I::Print { value, .. } if super_name(value) == "owned"));
+    assert!(
+        matches!(&instructions[4], I::Call { builtin: NullableDTO(Some(name)), arguments, .. }
+        if name == "__aether_release" && super_name(&arguments[0]) == "owned")
+    );
+    assert!(matches!(&instructions[5], I::Return { .. }));
+}
