@@ -75,11 +75,19 @@ normal and exceptional continuations; throw/rethrow/propagate follow the table
 above. Exception merges use the same predecessor-labelled phi rule, including
 unreachable-region exclusion.
 
-All fields representable by the corresponding SSA instruction and schema-v2
-are copied exactly. This includes retained source locations, aggregate shape,
-nominal structs, erased/class/interface metadata, function references and
-indirect callees, ownership calls, `transferred_storage`, and exception
-metadata. The serialization reference is SSA schema-v2.
+All source fields representable by the corresponding SSA instruction and
+schema-v2 are copied exactly. This includes retained source locations,
+aggregate shape, nominal structs, erased/class/interface metadata, function
+references and indirect callees, ownership calls, `transferred_storage`, and
+exception metadata. The serialization reference is SSA schema-v2.
+
+Initial IR schema-v1 has no `bounds_checked` field. Each Initial IR Array,
+List, Vector, and Matrix get/set instruction therefore synthesizes
+`bounds_checked=true` in the corresponding SSA instruction. This rule covers
+all eight get/set kinds and is synthesis, not preservation; an SSA constructor
+default is not policy authority. `bounds_checked=false` is an SSA-level state
+that may be supplied by schema-v2 or hand-built SSA, or produced later by a
+qualified SSA optimization.
 
 ## Determinism and checking
 

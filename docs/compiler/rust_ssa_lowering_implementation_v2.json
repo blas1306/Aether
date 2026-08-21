@@ -1,0 +1,31 @@
+{
+  "decision": "RUST_SSA_LOWERING_BLOCKED",
+  "milestone": "RUST-3.1b",
+  "original_blocker_closed_by": "RUST-3.B1",
+  "prerequisites": [
+    "SSA_WIRE_SCHEMA_V2_QUALIFIED",
+    "SSA_LOWERING_POLICY_V1_QUALIFIED",
+    "RUST_OWNED_SSA_MODEL_QUALIFIED",
+    "LIFECYCLE_NORMALIZATION_POLICY_V1_QUALIFIED"
+  ],
+  "contract_gap": {
+    "field": "bounds_checked",
+    "affected_instructions": [
+      "array_get",
+      "array_set",
+      "list_get",
+      "list_set",
+      "vector_get",
+      "vector_set",
+      "matrix_get",
+      "matrix_set"
+    ],
+    "initial_ir_schema_v1": "field absent",
+    "lowering_policy_v1": "requires exact copying of the schema-v2 field but specifies no synthesized value",
+    "python_reference": "omits the constructor argument and therefore synthesizes the SSA model default true",
+    "required_closure": "normatively define the Initial IR to schema-v2 bounds_checked mapping"
+  },
+  "implementation_started": false,
+  "production_authority_changed": false,
+  "historical_artifact_rewritten": false
+}

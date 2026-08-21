@@ -46,6 +46,15 @@ def check_lowering_policy_v1() -> tuple[str, ...]:
         errors.append("lifecycle normalization inventory drifted")
     if policy["serialization_reference"]["ssa_schema_version"] != SSA_SCHEMA_VERSION:
         errors.append("SSA serialization reference drifted")
+    expected_bounds_kinds = [
+        "IRArrayGet", "IRArraySet", "IRListGet", "IRListSet",
+        "IRVectorGet", "IRVectorSet", "IRMatrixGet", "IRMatrixSet",
+    ]
+    synthesis = policy.get("bounds_checked_synthesis", {})
+    if synthesis.get("affected_initial_ir_kinds") != expected_bounds_kinds:
+        errors.append("bounds_checked synthesis inventory drifted")
+    if "bounds_checked=true" not in synthesis.get("rule", ""):
+        errors.append("bounds_checked synthesis value drifted")
 
     from aether.analysis.cfg import CFGBuilder
     from aether.ssa.general_builder import GeneralSSABuilder
@@ -57,9 +66,13 @@ def check_lowering_policy_v1() -> tuple[str, ...]:
             GeneralSSABuilder.build_module,
             policy["implementation_anchors"]["pipeline_tokens"],
         ),
-        "SSARenamer": (
+        "SSARenamerNaming": (
             SSARenamer._fresh_name,
             policy["implementation_anchors"]["naming_tokens"],
+        ),
+        "SSARenamerBoundsSynthesis": (
+            SSARenamer._convert_instruction,
+            ["bounds_checked=True"],
         ),
     }
     import inspect

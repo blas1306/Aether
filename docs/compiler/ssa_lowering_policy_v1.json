@@ -60,9 +60,16 @@
   },
   "lowering_policy_version": 1,
   "metadata_preservation": {
-    "contract": "Every field represented by SSA schema-v2 and accepted by the corresponding SSA instruction is copied exactly; absence remains absence",
+    "contract": "Every source field represented by SSA schema-v2 and accepted by the corresponding SSA instruction is copied exactly; fields governed by explicit synthesis rules are synthesized instead of copied; absence otherwise remains absence",
     "module": ["ordered nominal struct definitions including ordered fields", "ordered functions"],
-    "required": ["source_location where the SSA model retains it", "aggregate_shape", "bounds_checked", "class field index/name and initialize", "interface witness and slot", "function reference and indirect callee/signature types", "builtin identity", "borrowed and borrow_scope", "transferred_storage", "exception targets/events/edge arguments", "vector/matrix shape and orientation"]
+    "required": ["source_location where the SSA model retains it", "aggregate_shape", "class field index/name and initialize", "interface witness and slot", "function reference and indirect callee/signature types", "builtin identity", "borrowed and borrow_scope", "transferred_storage", "exception targets/events/edge arguments", "vector/matrix shape and orientation"]
+  },
+  "bounds_checked_synthesis": {
+    "affected_initial_ir_kinds": ["IRArrayGet", "IRArraySet", "IRListGet", "IRListSet", "IRVectorGet", "IRVectorSet", "IRMatrixGet", "IRMatrixSet"],
+    "rule": "Each affected Initial IR instruction lowers to its corresponding SSA instruction with bounds_checked=true",
+    "classification": "synthesis, not preservation",
+    "initial_ir_schema_v1_field": "absent",
+    "ssa_constructor_default_is_authority": false
   },
   "phi_placement": {
     "definite_initialization": "forward must analysis: in is intersection of predecessor out sets; out=in union block IRStore definitions; entry/no-predecessor in empty",

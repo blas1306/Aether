@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import fields
 import json
 
 import pytest
@@ -7,17 +8,24 @@ import pytest
 from aether.analysis.cfg import CFGBuilder
 from aether.analysis.dominators import DominatorAnalysis
 from aether.ir.model import (
-    IRBasicBlock, IRBranch, IRConst, IRFunction, IRInvokeIndirect, IRJump,
-    IRParameter, IRReturn, IRThrow, IRValue,
+    IRArrayGet, IRArraySet, IRBasicBlock, IRBranch, IRConst, IRFunction,
+    IRInvokeIndirect, IRJump, IRListGet, IRListSet, IRMatrixGet, IRMatrixSet,
+    IRParameter, IRReturn, IRThrow, IRValue, IRVectorGet, IRVectorSet,
 )
-from aether.ir.types import BoolType, IntType, VoidType
+from aether.ir.types import (
+    ArrayType, BoolType, IntType, ListType, MatrixType, VectorType, VoidType,
+)
 from aether.ssa.dto import ssa_module_from_dto, ssa_module_to_dto
 from aether.ssa.general_builder import GeneralSSABuilder
 from aether.ssa.lowering_policy import (
     LOWERING_POLICY_PATH, LoweringPolicyError, canonical_policy_json,
     check_lowering_policy_v1, load_lowering_policy,
 )
-from aether.ssa.model import SSAPhi
+from aether.ssa.model import (
+    SSAArrayGet, SSAArraySet, SSAListGet, SSAListSet, SSAMatrixGet,
+    SSAMatrixSet, SSAPhi, SSAVectorGet, SSAVectorSet,
+)
+import aether.ssa.renaming as renaming
 
 
 def _void_function(blocks):
@@ -80,3 +88,66 @@ def test_policy_freezes_phi_predecessor_labels():
     policy = load_lowering_policy()
     assert "predecessor labels" in policy["phi_placement"]["operand_order"]
     assert SSAPhi.__dataclass_fields__["incoming"]
+
+
+@pytest.mark.parametrize(
+    ("ir_type", "ssa_type", "collection_type", "arguments"),
+    [
+        (IRArrayGet, SSAArrayGet, ArrayType(IntType()), "get"),
+        (IRArraySet, SSAArraySet, ArrayType(IntType()), "set"),
+        (IRListGet, SSAListGet, ListType(IntType()), "get"),
+        (IRListSet, SSAListSet, ListType(IntType()), "set"),
+        (IRVectorGet, SSAVectorGet, VectorType(IntType(), "row"), "get"),
+        (IRVectorSet, SSAVectorSet, VectorType(IntType(), "row"), "set"),
+        (IRMatrixGet, SSAMatrixGet, MatrixType(IntType()), "matrix_get"),
+        (IRMatrixSet, SSAMatrixSet, MatrixType(IntType()), "matrix_set"),
+    ],
+)
+def test_all_initial_ir_collection_accesses_explicitly_synthesize_checked(
+    monkeypatch, ir_type, ssa_type, collection_type, arguments
+):
+    collection = IRParameter("collection", collection_type)
+    index = IRParameter("index", IntType())
+    value = IRParameter("value", IntType())
+    result = IRValue("result", IntType())
+    if arguments == "get":
+        instruction = ir_type(result, collection, index)
+    elif arguments == "set":
+        instruction = ir_type(collection, index, value)
+    elif arguments == "matrix_get":
+        instruction = ir_type(result, collection, index, index, 2)
+    else:
+        instruction = ir_type(collection, index, index, value, 2)
+
+    seen = []
+    original = ssa_type
+
+    def constructor(*args, **kwargs):
+        seen.append(kwargs.get("bounds_checked", "omitted"))
+        kwargs.setdefault("bounds_checked", False)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(renaming, ssa_type.__name__, constructor)
+    function = IRFunction(
+        "checked", [collection, index, value], VoidType(),
+        [IRBasicBlock("entry", [instruction, IRReturn()])],
+    )
+    lowered = GeneralSSABuilder().build_function(function)
+    access = next(item for item in lowered.blocks[0].instructions if isinstance(item, ssa_type))
+    assert seen == [True]
+    assert access.bounds_checked is True
+
+
+def test_policy_classifies_bounds_checked_as_synthesis_not_preservation():
+    rule = load_lowering_policy()["bounds_checked_synthesis"]
+    assert rule["classification"] == "synthesis, not preservation"
+    assert rule["initial_ir_schema_v1_field"] == "absent"
+    assert rule["ssa_constructor_default_is_authority"] is False
+
+
+def test_initial_ir_collection_shapes_still_have_no_bounds_checked_field():
+    initial_types = (
+        IRArrayGet, IRArraySet, IRListGet, IRListSet,
+        IRVectorGet, IRVectorSet, IRMatrixGet, IRMatrixSet,
+    )
+    assert all("bounds_checked" not in {field.name for field in fields(kind)} for kind in initial_types)

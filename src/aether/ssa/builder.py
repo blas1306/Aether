@@ -867,7 +867,8 @@ class SSABuilder:
             array = self._resolve_value(instruction.array, state.value_map)
             index = self._resolve_value(instruction.index, state.value_map)
             return SSAArrayGet(
-                result, array, index, instruction.borrowed, instruction.borrow_scope
+                result, array, index, instruction.borrowed, instruction.borrow_scope,
+                bounds_checked=True,
             )
 
         if isinstance(instruction, IRArraySlice):
@@ -894,45 +895,50 @@ class SSABuilder:
                 index,
                 instruction.borrowed,
                 instruction.borrow_scope,
+                bounds_checked=True,
             )
 
         if isinstance(instruction, IRVectorGet):
             result = self._define_value(instruction.result, state.value_map)
             vector = self._resolve_value(instruction.vector, state.value_map)
             index = self._resolve_value(instruction.index, state.value_map)
-            return SSAVectorGet(result, vector, index)
+            return SSAVectorGet(result, vector, index, bounds_checked=True)
 
         if isinstance(instruction, IRMatrixGet):
             result = self._define_value(instruction.result, state.value_map)
             matrix = self._resolve_value(instruction.matrix, state.value_map)
             row = self._resolve_value(instruction.row, state.value_map)
             column = self._resolve_value(instruction.column, state.value_map)
-            return SSAMatrixGet(result, matrix, row, column, instruction.cols)
+            return SSAMatrixGet(
+                result, matrix, row, column, instruction.cols, bounds_checked=True
+            )
 
         if isinstance(instruction, IRArraySet):
             array = self._resolve_value(instruction.array, state.value_map)
             index = self._resolve_value(instruction.index, state.value_map)
             value = self._resolve_value(instruction.value, state.value_map)
-            return SSAArraySet(array, index, value)
+            return SSAArraySet(array, index, value, bounds_checked=True)
 
         if isinstance(instruction, IRListSet):
             list_value = self._resolve_value(instruction.list_value, state.value_map)
             index = self._resolve_value(instruction.index, state.value_map)
             value = self._resolve_value(instruction.value, state.value_map)
-            return SSAListSet(list_value, index, value)
+            return SSAListSet(list_value, index, value, bounds_checked=True)
 
         if isinstance(instruction, IRVectorSet):
             vector = self._resolve_value(instruction.vector, state.value_map)
             index = self._resolve_value(instruction.index, state.value_map)
             value = self._resolve_value(instruction.value, state.value_map)
-            return SSAVectorSet(vector, index, value)
+            return SSAVectorSet(vector, index, value, bounds_checked=True)
 
         if isinstance(instruction, IRMatrixSet):
             matrix = self._resolve_value(instruction.matrix, state.value_map)
             row = self._resolve_value(instruction.row, state.value_map)
             column = self._resolve_value(instruction.column, state.value_map)
             value = self._resolve_value(instruction.value, state.value_map)
-            return SSAMatrixSet(matrix, row, column, value, instruction.cols)
+            return SSAMatrixSet(
+                matrix, row, column, value, instruction.cols, bounds_checked=True
+            )
 
         if isinstance(instruction, IRArrayLength):
             result = self._define_value(instruction.result, state.value_map)
