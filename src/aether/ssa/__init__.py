@@ -19,6 +19,14 @@ from .dto import (
     ssa_module_to_json,
 )
 from .general_builder import GeneralSSABuildError, GeneralSSABuilder
+from .shadow import (
+    PersistentRustSSALoweringClient,
+    SSALoweringAuthorityConfiguration,
+    SSALoweringAuthorityMode,
+    SSAShadowFailure,
+    SSAShadowFailurePolicy,
+    SSAShadowReport,
+)
 from .interpreter import SSAInterpreter
 from .model import (
     SSAArrayCopy,
@@ -113,6 +121,12 @@ from .verifier import SSAVerificationError, SSAVerifier
 __all__ = [
     "GeneralSSABuildError",
     "GeneralSSABuilder",
+    "PersistentRustSSALoweringClient",
+    "SSALoweringAuthorityConfiguration",
+    "SSALoweringAuthorityMode",
+    "SSAShadowFailure",
+    "SSAShadowFailurePolicy",
+    "SSAShadowReport",
     "SSABuildError",
     "SSABuilder",
     "SSACFGBuilder",

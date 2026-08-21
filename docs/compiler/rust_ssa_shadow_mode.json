@@ -1,0 +1,29 @@
+{
+  "authority_config": {
+    "default": "PYTHON_SSA_ONLY",
+    "shadow": "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+    "version": 1
+  },
+  "ci": {"normal_python_tests_preserved": true, "shadow_gate": "rust-ssa-shadow"},
+  "decision": "RUST_SSA_SHADOW_MODE_READY",
+  "failure_semantics": "fail_closed_in_development_and_ci",
+  "qualification": {
+    "adversarial": "PASS",
+    "deep_cfg_python": "PASS",
+    "deep_cfg_rust": "PASS",
+    "historical_corpus": "116/116"
+  },
+  "returned_authority": "python",
+  "rollback": "select PYTHON_SSA_ONLY",
+  "same_input": "one canonical verified Initial IR schema-v1 snapshot per request",
+  "schema_version": 1,
+  "transport": {"framing": "u32_be_length_json", "persistent": true},
+  "performance": {
+    "absolute_gate": false,
+    "canonical_comparison_seconds": 0.17415689699555514,
+    "corpus_python_only_lowering_seconds": 0.3812488810654031,
+    "corpus_rust_shadow_lane_seconds": 1.8352713850108557,
+    "process_startups": 1,
+    "requests": 116
+  }
+}

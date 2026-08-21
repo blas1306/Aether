@@ -192,18 +192,36 @@ class IRBackend:
 class SSAPipeline:
     """Internal TypedProgram/IRModule to verified SSA pipeline."""
 
-    def __init__(self, *, builder: SSABuilderName = DEFAULT_SSA_BUILDER) -> None:
+    def __init__(self, *, builder: SSABuilderName = DEFAULT_SSA_BUILDER,
+                 authority_configuration: object | None = None,
+                 rust_shadow_client: object | None = None) -> None:
         self.builder = builder
+        self.authority_configuration = authority_configuration
+        self.rust_shadow_client = rust_shadow_client
 
     def lower_ir(self, typed_program: TypedProgram) -> IRModule:
         return IRBackend().lower_verified(typed_program)
 
     def build(self, module: IRModule) -> SSAModule:
         from .ssa import GeneralSSABuilder, SSABuilder
+        from .ssa.shadow import (
+            SSALoweringAuthorityConfiguration, SSALoweringAuthorityMode,
+            lower_with_rust_shadow,
+        )
 
         if self.builder == "pattern":
             return SSABuilder().build(module)
         if self.builder == "general":
+            configuration = self.authority_configuration
+            if configuration is None:
+                configuration = SSALoweringAuthorityConfiguration()
+            if not isinstance(configuration, SSALoweringAuthorityConfiguration):
+                raise TypeError("authority_configuration must be an SSALoweringAuthorityConfiguration")
+            if configuration.mode is SSALoweringAuthorityMode.PYTHON_SSA_AUTHORITY_RUST_SHADOW:
+                if self.rust_shadow_client is None:
+                    raise AetherRuntimeError("Rust SSA shadow mode requires an explicit companion client", kind="ssa")
+                authoritative, _report = lower_with_rust_shadow(module, self.rust_shadow_client)  # type: ignore[arg-type]
+                return authoritative  # type: ignore[return-value]
             return GeneralSSABuilder().build(module)
         raise ValueError(f"Unknown SSA builder '{self.builder}'.")
 

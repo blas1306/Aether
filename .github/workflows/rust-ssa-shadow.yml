@@ -1,0 +1,18 @@
+name: rust-ssa-shadow
+on:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  rust-ssa-shadow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pip install -e . pytest
+      - run: cargo test --manifest-path compiler-rs/crates/aether-verifier/Cargo.toml
+      - run: pytest tests/aether/test_rust_ssa_shadow_mode.py
+      - run: python scripts/qualify_rust_ssa_lowering.py
+      - run: python scripts/qualify_rust_ssa_lowering_adversarial.py
+      - run: python scripts/qualify_python_ssa_renamer_deep_cfg.py
