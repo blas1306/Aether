@@ -1,0 +1,2565 @@
+{
+  "audit": "TEST-PERF-3.1-pre-LLVM-IR-SSA-materialization-performance-profile",
+  "cache_boundary": {
+    "cache_hits_repeat_materialization": false,
+    "key": "source contents + canonical path + full optimization profile",
+    "profile_independent_prefix_reused_across_profiles": false,
+    "value": "final optimized and verified SSA",
+    "work_before_lookup": [
+      "none inside optimized_ssa; callers may parse/type-check before requesting it"
+    ]
+  },
+  "methodology": "DETERMINISTIC_STRUCTURE_ONLY_TIMING_IS_LOCAL_SIDECAR",
+  "records": [
+    {
+      "ast_nodes": 25,
+      "base_ssa": {
+        "blocks": 5,
+        "functions": 2,
+        "instructions": 15
+      },
+      "final_ssa": {
+        "blocks": 5,
+        "functions": 2,
+        "instructions": 15
+      },
+      "initial_ir": {
+        "blocks": 5,
+        "functions": 2,
+        "instructions": 26
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 175,
+      "source_characters": 175,
+      "workload": "examples/ir/sumTo.ae"
+    },
+    {
+      "ast_nodes": 25,
+      "base_ssa": {
+        "blocks": 5,
+        "functions": 2,
+        "instructions": 15
+      },
+      "final_ssa": {
+        "blocks": 5,
+        "functions": 2,
+        "instructions": 15
+      },
+      "initial_ir": {
+        "blocks": 5,
+        "functions": 2,
+        "instructions": 26
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 175,
+      "source_characters": 175,
+      "workload": "examples/ir/sumTo.ae"
+    },
+    {
+      "ast_nodes": 25,
+      "base_ssa": {
+        "blocks": 5,
+        "functions": 2,
+        "instructions": 15
+      },
+      "final_ssa": {
+        "blocks": 5,
+        "functions": 2,
+        "instructions": 15
+      },
+      "initial_ir": {
+        "blocks": 5,
+        "functions": 2,
+        "instructions": 26
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 15
+      },
+      "profile": "O2",
+      "source_bytes": 175,
+      "source_characters": 175,
+      "workload": "examples/ir/sumTo.ae"
+    },
+    {
+      "ast_nodes": 27,
+      "base_ssa": {
+        "blocks": 8,
+        "functions": 2,
+        "instructions": 19
+      },
+      "final_ssa": {
+        "blocks": 8,
+        "functions": 2,
+        "instructions": 19
+      },
+      "initial_ir": {
+        "blocks": 8,
+        "functions": 2,
+        "instructions": 32
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 201,
+      "source_characters": 201,
+      "workload": "examples/llvm/gcd_iterative.ae"
+    },
+    {
+      "ast_nodes": 27,
+      "base_ssa": {
+        "blocks": 8,
+        "functions": 2,
+        "instructions": 19
+      },
+      "final_ssa": {
+        "blocks": 8,
+        "functions": 2,
+        "instructions": 19
+      },
+      "initial_ir": {
+        "blocks": 8,
+        "functions": 2,
+        "instructions": 32
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 201,
+      "source_characters": 201,
+      "workload": "examples/llvm/gcd_iterative.ae"
+    },
+    {
+      "ast_nodes": 27,
+      "base_ssa": {
+        "blocks": 8,
+        "functions": 2,
+        "instructions": 19
+      },
+      "final_ssa": {
+        "blocks": 8,
+        "functions": 2,
+        "instructions": 19
+      },
+      "initial_ir": {
+        "blocks": 8,
+        "functions": 2,
+        "instructions": 32
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 15
+      },
+      "profile": "O2",
+      "source_bytes": 201,
+      "source_characters": 201,
+      "workload": "examples/llvm/gcd_iterative.ae"
+    },
+    {
+      "ast_nodes": 65,
+      "base_ssa": {
+        "blocks": 10,
+        "functions": 4,
+        "instructions": 78
+      },
+      "final_ssa": {
+        "blocks": 10,
+        "functions": 4,
+        "instructions": 78
+      },
+      "initial_ir": {
+        "blocks": 10,
+        "functions": 4,
+        "instructions": 115
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 836,
+      "source_characters": 836,
+      "workload": "examples/ControlesALN/1erControl/Ej2/ej2.ae"
+    },
+    {
+      "ast_nodes": 65,
+      "base_ssa": {
+        "blocks": 10,
+        "functions": 4,
+        "instructions": 74
+      },
+      "final_ssa": {
+        "blocks": 10,
+        "functions": 4,
+        "instructions": 74
+      },
+      "initial_ir": {
+        "blocks": 10,
+        "functions": 4,
+        "instructions": 115
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 836,
+      "source_characters": 836,
+      "workload": "examples/ControlesALN/1erControl/Ej2/ej2.ae"
+    },
+    {
+      "ast_nodes": 65,
+      "base_ssa": {
+        "blocks": 10,
+        "functions": 4,
+        "instructions": 74
+      },
+      "final_ssa": {
+        "blocks": 10,
+        "functions": 4,
+        "instructions": 74
+      },
+      "initial_ir": {
+        "blocks": 10,
+        "functions": 4,
+        "instructions": 115
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 15
+      },
+      "profile": "O2",
+      "source_bytes": 836,
+      "source_characters": 836,
+      "workload": "examples/ControlesALN/1erControl/Ej2/ej2.ae"
+    },
+    {
+      "ast_nodes": 276,
+      "base_ssa": {
+        "blocks": 77,
+        "functions": 10,
+        "instructions": 519
+      },
+      "final_ssa": {
+        "blocks": 77,
+        "functions": 10,
+        "instructions": 519
+      },
+      "initial_ir": {
+        "blocks": 77,
+        "functions": 10,
+        "instructions": 817
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 3085,
+      "source_characters": 3085,
+      "workload": "examples/numerical_methods/main.ae"
+    },
+    {
+      "ast_nodes": 276,
+      "base_ssa": {
+        "blocks": 77,
+        "functions": 10,
+        "instructions": 507
+      },
+      "final_ssa": {
+        "blocks": 77,
+        "functions": 10,
+        "instructions": 507
+      },
+      "initial_ir": {
+        "blocks": 77,
+        "functions": 10,
+        "instructions": 817
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 3085,
+      "source_characters": 3085,
+      "workload": "examples/numerical_methods/main.ae"
+    },
+    {
+      "ast_nodes": 276,
+      "base_ssa": {
+        "blocks": 77,
+        "functions": 10,
+        "instructions": 507
+      },
+      "final_ssa": {
+        "blocks": 77,
+        "functions": 10,
+        "instructions": 507
+      },
+      "initial_ir": {
+        "blocks": 77,
+        "functions": 10,
+        "instructions": 817
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 15
+      },
+      "profile": "O2",
+      "source_bytes": 3085,
+      "source_characters": 3085,
+      "workload": "examples/numerical_methods/main.ae"
+    },
+    {
+      "ast_nodes": 41,
+      "base_ssa": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 30
+      },
+      "final_ssa": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 30
+      },
+      "initial_ir": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 52
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 364,
+      "source_characters": 364,
+      "workload": "benchmarks/vector_dot.ae"
+    },
+    {
+      "ast_nodes": 41,
+      "base_ssa": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 30
+      },
+      "final_ssa": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 30
+      },
+      "initial_ir": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 52
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 364,
+      "source_characters": 364,
+      "workload": "benchmarks/vector_dot.ae"
+    },
+    {
+      "ast_nodes": 41,
+      "base_ssa": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 30
+      },
+      "final_ssa": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 30
+      },
+      "initial_ir": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 52
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 27
+      },
+      "profile": "O2",
+      "source_bytes": 364,
+      "source_characters": 364,
+      "workload": "benchmarks/vector_dot.ae"
+    },
+    {
+      "ast_nodes": 51,
+      "base_ssa": {
+        "blocks": 8,
+        "functions": 1,
+        "instructions": 38
+      },
+      "final_ssa": {
+        "blocks": 8,
+        "functions": 1,
+        "instructions": 38
+      },
+      "initial_ir": {
+        "blocks": 8,
+        "functions": 1,
+        "instructions": 70
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 435,
+      "source_characters": 435,
+      "workload": "benchmarks/matrix_mul.ae"
+    },
+    {
+      "ast_nodes": 51,
+      "base_ssa": {
+        "blocks": 8,
+        "functions": 1,
+        "instructions": 38
+      },
+      "final_ssa": {
+        "blocks": 8,
+        "functions": 1,
+        "instructions": 38
+      },
+      "initial_ir": {
+        "blocks": 8,
+        "functions": 1,
+        "instructions": 70
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 435,
+      "source_characters": 435,
+      "workload": "benchmarks/matrix_mul.ae"
+    },
+    {
+      "ast_nodes": 51,
+      "base_ssa": {
+        "blocks": 8,
+        "functions": 1,
+        "instructions": 38
+      },
+      "final_ssa": {
+        "blocks": 8,
+        "functions": 1,
+        "instructions": 38
+      },
+      "initial_ir": {
+        "blocks": 8,
+        "functions": 1,
+        "instructions": 70
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 27
+      },
+      "profile": "O2",
+      "source_bytes": 435,
+      "source_characters": 435,
+      "workload": "benchmarks/matrix_mul.ae"
+    },
+    {
+      "ast_nodes": 24,
+      "base_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 15
+      },
+      "final_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 15
+      },
+      "initial_ir": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 27
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 144,
+      "source_characters": 144,
+      "workload": "examples/llvm/vector_matrix_mul.ae"
+    },
+    {
+      "ast_nodes": 24,
+      "base_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 15
+      },
+      "final_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 15
+      },
+      "initial_ir": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 27
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 144,
+      "source_characters": 144,
+      "workload": "examples/llvm/vector_matrix_mul.ae"
+    },
+    {
+      "ast_nodes": 24,
+      "base_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 15
+      },
+      "final_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 15
+      },
+      "initial_ir": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 27
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 15
+      },
+      "profile": "O2",
+      "source_bytes": 144,
+      "source_characters": 144,
+      "workload": "examples/llvm/vector_matrix_mul.ae"
+    },
+    {
+      "ast_nodes": 19,
+      "base_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 14
+      },
+      "final_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 14
+      },
+      "initial_ir": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 20
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 80,
+      "source_characters": 80,
+      "workload": "examples/llvm/array_sum.ae"
+    },
+    {
+      "ast_nodes": 19,
+      "base_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 14
+      },
+      "final_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 14
+      },
+      "initial_ir": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 20
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 80,
+      "source_characters": 80,
+      "workload": "examples/llvm/array_sum.ae"
+    },
+    {
+      "ast_nodes": 19,
+      "base_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 14
+      },
+      "final_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 14
+      },
+      "initial_ir": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 20
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 27
+      },
+      "profile": "O2",
+      "source_bytes": 80,
+      "source_characters": 80,
+      "workload": "examples/llvm/array_sum.ae"
+    },
+    {
+      "ast_nodes": 17,
+      "base_ssa": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 20
+      },
+      "final_ssa": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 20
+      },
+      "initial_ir": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 31
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 131,
+      "source_characters": 131,
+      "workload": "examples/llvm/list_for_sum.ae"
+    },
+    {
+      "ast_nodes": 17,
+      "base_ssa": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 20
+      },
+      "final_ssa": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 20
+      },
+      "initial_ir": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 31
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 131,
+      "source_characters": 131,
+      "workload": "examples/llvm/list_for_sum.ae"
+    },
+    {
+      "ast_nodes": 17,
+      "base_ssa": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 20
+      },
+      "final_ssa": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 20
+      },
+      "initial_ir": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 31
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 15
+      },
+      "profile": "O2",
+      "source_bytes": 131,
+      "source_characters": 131,
+      "workload": "examples/llvm/list_for_sum.ae"
+    },
+    {
+      "ast_nodes": 38,
+      "base_ssa": {
+        "blocks": 10,
+        "functions": 1,
+        "instructions": 33
+      },
+      "final_ssa": {
+        "blocks": 10,
+        "functions": 1,
+        "instructions": 33
+      },
+      "initial_ir": {
+        "blocks": 10,
+        "functions": 1,
+        "instructions": 48
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 298,
+      "source_characters": 298,
+      "workload": "benchmarks/list_push.ae"
+    },
+    {
+      "ast_nodes": 38,
+      "base_ssa": {
+        "blocks": 10,
+        "functions": 1,
+        "instructions": 33
+      },
+      "final_ssa": {
+        "blocks": 10,
+        "functions": 1,
+        "instructions": 33
+      },
+      "initial_ir": {
+        "blocks": 10,
+        "functions": 1,
+        "instructions": 48
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 298,
+      "source_characters": 298,
+      "workload": "benchmarks/list_push.ae"
+    },
+    {
+      "ast_nodes": 38,
+      "base_ssa": {
+        "blocks": 10,
+        "functions": 1,
+        "instructions": 33
+      },
+      "final_ssa": {
+        "blocks": 10,
+        "functions": 1,
+        "instructions": 33
+      },
+      "initial_ir": {
+        "blocks": 10,
+        "functions": 1,
+        "instructions": 48
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 27
+      },
+      "profile": "O2",
+      "source_bytes": 298,
+      "source_characters": 298,
+      "workload": "benchmarks/list_push.ae"
+    },
+    {
+      "ast_nodes": 27,
+      "base_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 21
+      },
+      "final_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 21
+      },
+      "initial_ir": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 29
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 160,
+      "source_characters": 160,
+      "workload": "examples/llvm/list_sort.ae"
+    },
+    {
+      "ast_nodes": 27,
+      "base_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 21
+      },
+      "final_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 21
+      },
+      "initial_ir": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 29
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 160,
+      "source_characters": 160,
+      "workload": "examples/llvm/list_sort.ae"
+    },
+    {
+      "ast_nodes": 27,
+      "base_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 21
+      },
+      "final_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 21
+      },
+      "initial_ir": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 29
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 27
+      },
+      "profile": "O2",
+      "source_bytes": 160,
+      "source_characters": 160,
+      "workload": "examples/llvm/list_sort.ae"
+    },
+    {
+      "ast_nodes": 168,
+      "base_ssa": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 125
+      },
+      "final_ssa": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 125
+      },
+      "initial_ir": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 178
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 1401,
+      "source_characters": 1401,
+      "workload": "examples/aggregate_collections/particles.ae"
+    },
+    {
+      "ast_nodes": 168,
+      "base_ssa": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 124
+      },
+      "final_ssa": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 124
+      },
+      "initial_ir": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 178
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 1401,
+      "source_characters": 1401,
+      "workload": "examples/aggregate_collections/particles.ae"
+    },
+    {
+      "ast_nodes": 168,
+      "base_ssa": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 124
+      },
+      "final_ssa": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 124
+      },
+      "initial_ir": {
+        "blocks": 5,
+        "functions": 1,
+        "instructions": 178
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 15
+      },
+      "profile": "O2",
+      "source_bytes": 1401,
+      "source_characters": 1401,
+      "workload": "examples/aggregate_collections/particles.ae"
+    },
+    {
+      "ast_nodes": 37,
+      "base_ssa": {
+        "blocks": 2,
+        "functions": 2,
+        "instructions": 32
+      },
+      "final_ssa": {
+        "blocks": 2,
+        "functions": 2,
+        "instructions": 32
+      },
+      "initial_ir": {
+        "blocks": 2,
+        "functions": 2,
+        "instructions": 53
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 310,
+      "source_characters": 310,
+      "workload": "examples/structs/custom_constructor_and_equality.ae"
+    },
+    {
+      "ast_nodes": 37,
+      "base_ssa": {
+        "blocks": 2,
+        "functions": 2,
+        "instructions": 32
+      },
+      "final_ssa": {
+        "blocks": 2,
+        "functions": 2,
+        "instructions": 32
+      },
+      "initial_ir": {
+        "blocks": 2,
+        "functions": 2,
+        "instructions": 53
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 310,
+      "source_characters": 310,
+      "workload": "examples/structs/custom_constructor_and_equality.ae"
+    },
+    {
+      "ast_nodes": 37,
+      "base_ssa": {
+        "blocks": 2,
+        "functions": 2,
+        "instructions": 32
+      },
+      "final_ssa": {
+        "blocks": 2,
+        "functions": 2,
+        "instructions": 32
+      },
+      "initial_ir": {
+        "blocks": 2,
+        "functions": 2,
+        "instructions": 53
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 15
+      },
+      "profile": "O2",
+      "source_bytes": 310,
+      "source_characters": 310,
+      "workload": "examples/structs/custom_constructor_and_equality.ae"
+    },
+    {
+      "ast_nodes": 48,
+      "base_ssa": {
+        "blocks": 10,
+        "functions": 3,
+        "instructions": 55
+      },
+      "final_ssa": {
+        "blocks": 10,
+        "functions": 3,
+        "instructions": 55
+      },
+      "initial_ir": {
+        "blocks": 10,
+        "functions": 3,
+        "instructions": 54
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 592,
+      "source_characters": 592,
+      "workload": "corpus/exceptions/positive/owned_aggregates_arc.ae"
+    },
+    {
+      "ast_nodes": 48,
+      "base_ssa": {
+        "blocks": 10,
+        "functions": 3,
+        "instructions": 55
+      },
+      "final_ssa": {
+        "blocks": 10,
+        "functions": 3,
+        "instructions": 55
+      },
+      "initial_ir": {
+        "blocks": 10,
+        "functions": 3,
+        "instructions": 54
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 592,
+      "source_characters": 592,
+      "workload": "corpus/exceptions/positive/owned_aggregates_arc.ae"
+    },
+    {
+      "ast_nodes": 48,
+      "base_ssa": {
+        "blocks": 10,
+        "functions": 3,
+        "instructions": 55
+      },
+      "final_ssa": {
+        "blocks": 10,
+        "functions": 3,
+        "instructions": 55
+      },
+      "initial_ir": {
+        "blocks": 10,
+        "functions": 3,
+        "instructions": 54
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 15
+      },
+      "profile": "O2",
+      "source_bytes": 592,
+      "source_characters": 592,
+      "workload": "corpus/exceptions/positive/owned_aggregates_arc.ae"
+    },
+    {
+      "ast_nodes": 19,
+      "base_ssa": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 16
+      },
+      "final_ssa": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 16
+      },
+      "initial_ir": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 23
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 235,
+      "source_characters": 235,
+      "workload": "examples/classes/counter_basic.ae"
+    },
+    {
+      "ast_nodes": 19,
+      "base_ssa": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 16
+      },
+      "final_ssa": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 16
+      },
+      "initial_ir": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 23
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 235,
+      "source_characters": 235,
+      "workload": "examples/classes/counter_basic.ae"
+    },
+    {
+      "ast_nodes": 19,
+      "base_ssa": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 16
+      },
+      "final_ssa": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 16
+      },
+      "initial_ir": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 23
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 15
+      },
+      "profile": "O2",
+      "source_bytes": 235,
+      "source_characters": 235,
+      "workload": "examples/classes/counter_basic.ae"
+    },
+    {
+      "ast_nodes": 23,
+      "base_ssa": {
+        "blocks": 4,
+        "functions": 4,
+        "instructions": 18
+      },
+      "final_ssa": {
+        "blocks": 4,
+        "functions": 4,
+        "instructions": 18
+      },
+      "initial_ir": {
+        "blocks": 4,
+        "functions": 4,
+        "instructions": 25
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 305,
+      "source_characters": 305,
+      "workload": "examples/classes/custom_constructor.ae"
+    },
+    {
+      "ast_nodes": 23,
+      "base_ssa": {
+        "blocks": 4,
+        "functions": 4,
+        "instructions": 18
+      },
+      "final_ssa": {
+        "blocks": 4,
+        "functions": 4,
+        "instructions": 18
+      },
+      "initial_ir": {
+        "blocks": 4,
+        "functions": 4,
+        "instructions": 25
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 305,
+      "source_characters": 305,
+      "workload": "examples/classes/custom_constructor.ae"
+    },
+    {
+      "ast_nodes": 23,
+      "base_ssa": {
+        "blocks": 4,
+        "functions": 4,
+        "instructions": 18
+      },
+      "final_ssa": {
+        "blocks": 4,
+        "functions": 4,
+        "instructions": 18
+      },
+      "initial_ir": {
+        "blocks": 4,
+        "functions": 4,
+        "instructions": 25
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 15
+      },
+      "profile": "O2",
+      "source_bytes": 305,
+      "source_characters": 305,
+      "workload": "examples/classes/custom_constructor.ae"
+    },
+    {
+      "ast_nodes": 25,
+      "base_ssa": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 19
+      },
+      "final_ssa": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 19
+      },
+      "initial_ir": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 28
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 374,
+      "source_characters": 374,
+      "workload": "examples/classes/implements_interface.ae"
+    },
+    {
+      "ast_nodes": 25,
+      "base_ssa": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 19
+      },
+      "final_ssa": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 19
+      },
+      "initial_ir": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 28
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 374,
+      "source_characters": 374,
+      "workload": "examples/classes/implements_interface.ae"
+    },
+    {
+      "ast_nodes": 25,
+      "base_ssa": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 19
+      },
+      "final_ssa": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 19
+      },
+      "initial_ir": {
+        "blocks": 3,
+        "functions": 3,
+        "instructions": 28
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 15
+      },
+      "profile": "O2",
+      "source_bytes": 374,
+      "source_characters": 374,
+      "workload": "examples/classes/implements_interface.ae"
+    },
+    {
+      "ast_nodes": 35,
+      "base_ssa": {
+        "blocks": 13,
+        "functions": 4,
+        "instructions": 45
+      },
+      "final_ssa": {
+        "blocks": 13,
+        "functions": 4,
+        "instructions": 45
+      },
+      "initial_ir": {
+        "blocks": 13,
+        "functions": 4,
+        "instructions": 46
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 562,
+      "source_characters": 562,
+      "workload": "corpus/exceptions/positive/method_interface_dispatch.ae"
+    },
+    {
+      "ast_nodes": 35,
+      "base_ssa": {
+        "blocks": 13,
+        "functions": 4,
+        "instructions": 46
+      },
+      "final_ssa": {
+        "blocks": 13,
+        "functions": 4,
+        "instructions": 45
+      },
+      "initial_ir": {
+        "blocks": 13,
+        "functions": 4,
+        "instructions": 46
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 17
+      },
+      "profile": "O1",
+      "source_bytes": 562,
+      "source_characters": 562,
+      "workload": "corpus/exceptions/positive/method_interface_dispatch.ae"
+    },
+    {
+      "ast_nodes": 35,
+      "base_ssa": {
+        "blocks": 13,
+        "functions": 4,
+        "instructions": 46
+      },
+      "final_ssa": {
+        "blocks": 13,
+        "functions": 4,
+        "instructions": 45
+      },
+      "initial_ir": {
+        "blocks": 13,
+        "functions": 4,
+        "instructions": 46
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 27
+      },
+      "profile": "O2",
+      "source_bytes": 562,
+      "source_characters": 562,
+      "workload": "corpus/exceptions/positive/method_interface_dispatch.ae"
+    },
+    {
+      "ast_nodes": 44,
+      "base_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 36
+      },
+      "final_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 36
+      },
+      "initial_ir": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 41
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 370,
+      "source_characters": 364,
+      "workload": "tests/aether/parity_corpus/strings.ae"
+    },
+    {
+      "ast_nodes": 44,
+      "base_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 36
+      },
+      "final_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 36
+      },
+      "initial_ir": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 41
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 370,
+      "source_characters": 364,
+      "workload": "tests/aether/parity_corpus/strings.ae"
+    },
+    {
+      "ast_nodes": 44,
+      "base_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 36
+      },
+      "final_ssa": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 36
+      },
+      "initial_ir": {
+        "blocks": 1,
+        "functions": 1,
+        "instructions": 41
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 15
+      },
+      "profile": "O2",
+      "source_bytes": 370,
+      "source_characters": 364,
+      "workload": "tests/aether/parity_corpus/strings.ae"
+    },
+    {
+      "ast_nodes": 795,
+      "base_ssa": {
+        "blocks": 475,
+        "functions": 26,
+        "instructions": 3028
+      },
+      "final_ssa": {
+        "blocks": 475,
+        "functions": 26,
+        "instructions": 3028
+      },
+      "initial_ir": {
+        "blocks": 475,
+        "functions": 26,
+        "instructions": 4203
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 9273,
+      "source_characters": 9273,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "ast_nodes": 795,
+      "base_ssa": {
+        "blocks": 475,
+        "functions": 26,
+        "instructions": 3016
+      },
+      "final_ssa": {
+        "blocks": 475,
+        "functions": 26,
+        "instructions": 3016
+      },
+      "initial_ir": {
+        "blocks": 475,
+        "functions": 26,
+        "instructions": 4203
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 9273,
+      "source_characters": 9273,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "ast_nodes": 795,
+      "base_ssa": {
+        "blocks": 475,
+        "functions": 26,
+        "instructions": 3016
+      },
+      "final_ssa": {
+        "blocks": 475,
+        "functions": 26,
+        "instructions": 2988
+      },
+      "initial_ir": {
+        "blocks": 475,
+        "functions": 26,
+        "instructions": 4203
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 27
+      },
+      "profile": "O2",
+      "source_bytes": 9273,
+      "source_characters": 9273,
+      "workload": "examples/expense_tracker/Main.ae"
+    },
+    {
+      "ast_nodes": 43,
+      "base_ssa": {
+        "blocks": 11,
+        "functions": 2,
+        "instructions": 32
+      },
+      "final_ssa": {
+        "blocks": 11,
+        "functions": 2,
+        "instructions": 32
+      },
+      "initial_ir": {
+        "blocks": 11,
+        "functions": 2,
+        "instructions": 52
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 413,
+      "source_characters": 413,
+      "workload": "benchmarks/if_else.ae"
+    },
+    {
+      "ast_nodes": 43,
+      "base_ssa": {
+        "blocks": 11,
+        "functions": 2,
+        "instructions": 32
+      },
+      "final_ssa": {
+        "blocks": 11,
+        "functions": 2,
+        "instructions": 32
+      },
+      "initial_ir": {
+        "blocks": 11,
+        "functions": 2,
+        "instructions": 52
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 413,
+      "source_characters": 413,
+      "workload": "benchmarks/if_else.ae"
+    },
+    {
+      "ast_nodes": 43,
+      "base_ssa": {
+        "blocks": 11,
+        "functions": 2,
+        "instructions": 32
+      },
+      "final_ssa": {
+        "blocks": 11,
+        "functions": 2,
+        "instructions": 32
+      },
+      "initial_ir": {
+        "blocks": 11,
+        "functions": 2,
+        "instructions": 52
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 27
+      },
+      "profile": "O2",
+      "source_bytes": 413,
+      "source_characters": 413,
+      "workload": "benchmarks/if_else.ae"
+    },
+    {
+      "ast_nodes": 51,
+      "base_ssa": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 29
+      },
+      "final_ssa": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 29
+      },
+      "initial_ir": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 52
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 364,
+      "source_characters": 364,
+      "workload": "benchmarks/arithmetic.ae"
+    },
+    {
+      "ast_nodes": 51,
+      "base_ssa": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 29
+      },
+      "final_ssa": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 29
+      },
+      "initial_ir": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 52
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 364,
+      "source_characters": 364,
+      "workload": "benchmarks/arithmetic.ae"
+    },
+    {
+      "ast_nodes": 51,
+      "base_ssa": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 29
+      },
+      "final_ssa": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 29
+      },
+      "initial_ir": {
+        "blocks": 7,
+        "functions": 2,
+        "instructions": 52
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 27
+      },
+      "profile": "O2",
+      "source_bytes": 364,
+      "source_characters": 364,
+      "workload": "benchmarks/arithmetic.ae"
+    },
+    {
+      "ast_nodes": 34,
+      "base_ssa": {
+        "blocks": 13,
+        "functions": 3,
+        "instructions": 43
+      },
+      "final_ssa": {
+        "blocks": 13,
+        "functions": 3,
+        "instructions": 43
+      },
+      "initial_ir": {
+        "blocks": 13,
+        "functions": 3,
+        "instructions": 42
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 399,
+      "source_characters": 399,
+      "workload": "corpus/exceptions/positive/function_recursion.ae"
+    },
+    {
+      "ast_nodes": 34,
+      "base_ssa": {
+        "blocks": 13,
+        "functions": 3,
+        "instructions": 43
+      },
+      "final_ssa": {
+        "blocks": 13,
+        "functions": 3,
+        "instructions": 43
+      },
+      "initial_ir": {
+        "blocks": 13,
+        "functions": 3,
+        "instructions": 42
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 399,
+      "source_characters": 399,
+      "workload": "corpus/exceptions/positive/function_recursion.ae"
+    },
+    {
+      "ast_nodes": 34,
+      "base_ssa": {
+        "blocks": 13,
+        "functions": 3,
+        "instructions": 43
+      },
+      "final_ssa": {
+        "blocks": 13,
+        "functions": 3,
+        "instructions": 43
+      },
+      "initial_ir": {
+        "blocks": 13,
+        "functions": 3,
+        "instructions": 42
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 15
+      },
+      "profile": "O2",
+      "source_bytes": 399,
+      "source_characters": 399,
+      "workload": "corpus/exceptions/positive/function_recursion.ae"
+    },
+    {
+      "ast_nodes": 70,
+      "base_ssa": {
+        "blocks": 17,
+        "functions": 2,
+        "instructions": 66
+      },
+      "final_ssa": {
+        "blocks": 17,
+        "functions": 2,
+        "instructions": 66
+      },
+      "initial_ir": {
+        "blocks": 17,
+        "functions": 2,
+        "instructions": 101
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 543,
+      "source_characters": 543,
+      "workload": "examples/LeetCode/twoSum.ae"
+    },
+    {
+      "ast_nodes": 70,
+      "base_ssa": {
+        "blocks": 17,
+        "functions": 2,
+        "instructions": 67
+      },
+      "final_ssa": {
+        "blocks": 17,
+        "functions": 2,
+        "instructions": 66
+      },
+      "initial_ir": {
+        "blocks": 17,
+        "functions": 2,
+        "instructions": 101
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 17
+      },
+      "profile": "O1",
+      "source_bytes": 543,
+      "source_characters": 543,
+      "workload": "examples/LeetCode/twoSum.ae"
+    },
+    {
+      "ast_nodes": 70,
+      "base_ssa": {
+        "blocks": 17,
+        "functions": 2,
+        "instructions": 67
+      },
+      "final_ssa": {
+        "blocks": 17,
+        "functions": 2,
+        "instructions": 66
+      },
+      "initial_ir": {
+        "blocks": 17,
+        "functions": 2,
+        "instructions": 101
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 27
+      },
+      "profile": "O2",
+      "source_bytes": 543,
+      "source_characters": 543,
+      "workload": "examples/LeetCode/twoSum.ae"
+    },
+    {
+      "ast_nodes": 43,
+      "base_ssa": {
+        "blocks": 15,
+        "functions": 4,
+        "instructions": 58
+      },
+      "final_ssa": {
+        "blocks": 15,
+        "functions": 4,
+        "instructions": 58
+      },
+      "initial_ir": {
+        "blocks": 13,
+        "functions": 4,
+        "instructions": 50
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 655,
+      "source_characters": 655,
+      "workload": "corpus/exceptions/positive/constructor_failure.ae"
+    },
+    {
+      "ast_nodes": 43,
+      "base_ssa": {
+        "blocks": 15,
+        "functions": 4,
+        "instructions": 58
+      },
+      "final_ssa": {
+        "blocks": 15,
+        "functions": 4,
+        "instructions": 58
+      },
+      "initial_ir": {
+        "blocks": 13,
+        "functions": 4,
+        "instructions": 50
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 655,
+      "source_characters": 655,
+      "workload": "corpus/exceptions/positive/constructor_failure.ae"
+    },
+    {
+      "ast_nodes": 43,
+      "base_ssa": {
+        "blocks": 15,
+        "functions": 4,
+        "instructions": 58
+      },
+      "final_ssa": {
+        "blocks": 15,
+        "functions": 4,
+        "instructions": 58
+      },
+      "initial_ir": {
+        "blocks": 13,
+        "functions": 4,
+        "instructions": 50
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 15
+      },
+      "profile": "O2",
+      "source_bytes": 655,
+      "source_characters": 655,
+      "workload": "corpus/exceptions/positive/constructor_failure.ae"
+    },
+    {
+      "ast_nodes": 36,
+      "base_ssa": {
+        "blocks": 9,
+        "functions": 1,
+        "instructions": 30
+      },
+      "final_ssa": {
+        "blocks": 9,
+        "functions": 1,
+        "instructions": 30
+      },
+      "initial_ir": {
+        "blocks": 9,
+        "functions": 1,
+        "instructions": 47
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O0": 1,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O0": 1,
+        "ssa_verifier": 3
+      },
+      "profile": "O0",
+      "source_bytes": 318,
+      "source_characters": 318,
+      "workload": "benchmarks/nested_loops.ae"
+    },
+    {
+      "ast_nodes": 36,
+      "base_ssa": {
+        "blocks": 9,
+        "functions": 1,
+        "instructions": 30
+      },
+      "final_ssa": {
+        "blocks": 9,
+        "functions": 1,
+        "instructions": 30
+      },
+      "initial_ir": {
+        "blocks": 9,
+        "functions": 1,
+        "instructions": 47
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O1": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O1": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O1": 1,
+        "ssa_verifier": 10
+      },
+      "profile": "O1",
+      "source_bytes": 318,
+      "source_characters": 318,
+      "workload": "benchmarks/nested_loops.ae"
+    },
+    {
+      "ast_nodes": 36,
+      "base_ssa": {
+        "blocks": 9,
+        "functions": 1,
+        "instructions": 30
+      },
+      "final_ssa": {
+        "blocks": 9,
+        "functions": 1,
+        "instructions": 30
+      },
+      "initial_ir": {
+        "blocks": 9,
+        "functions": 1,
+        "instructions": 47
+      },
+      "operation_counts": {
+        "initial_ir_lowering": 1,
+        "initial_ir_verifier": 2,
+        "ir_optimizer_run_O2": 1,
+        "lifecycle_expansion": 1,
+        "llvm_backend_emit": 1,
+        "optimizer_pipeline_build_O2": 2,
+        "ssa_build": 1,
+        "ssa_optimizer_run_O2": 1,
+        "ssa_verifier": 27
+      },
+      "profile": "O2",
+      "source_bytes": 318,
+      "source_characters": 318,
+      "workload": "benchmarks/nested_loops.ae"
+    }
+  ],
+  "schema_version": 1,
+  "scope": {
+    "manifest_workloads": 30,
+    "profile_records": 78,
+    "supported_workloads": 26
+  },
+  "unsupported": [
+    {
+      "detail": "BackendCapabilityError [backend-capability]:\n  line 13, column 9 [AE-BACKEND-FUNCTION_VALUES] The LLVM/native backend has only partial support for capability 'function-values' (function passed as a value).\n    Hint: This is valid Aether for",
+      "reason": "BackendCapabilityError",
+      "workload": "examples/ControlesALN/1erControl/Ej1/ej1.ae"
+    },
+    {
+      "detail": "BackendCapabilityError [backend-capability]:\n  line 43, column 1 [AE-BACKEND-MODULES] The LLVM/native backend has only partial support for capability 'modules' (builtin 'Plots.grid' has no LLVM/native lowering).\n    Hint: This is valid Aeth",
+      "reason": "BackendCapabilityError",
+      "workload": "examples/nonlinear_systems/newton_system.ae"
+    },
+    {
+      "detail": "BackendCapabilityError at line 22, column 7 [AE-BACKEND-VARIABLES_AND_CONST]:\n  The LLVM/native backend has only partial support for capability 'variables-and-const' (implicit declaration by assignment to 'solNR').\n  Hint: This is valid Aet",
+      "reason": "BackendCapabilityError",
+      "workload": "examples/probandoNR.ae"
+    },
+    {
+      "detail": "BackendCapabilityError [backend-capability]:\n  line 90, column 17 [AE-BACKEND-STRINGS] The LLVM/native backend has only partial support for capability 'strings' (interpolated string).\n    Hint: This is valid Aether for the current AST profi",
+      "reason": "BackendCapabilityError",
+      "workload": "examples/Miller-Rabbin.ae"
+    }
+  ]
+}
