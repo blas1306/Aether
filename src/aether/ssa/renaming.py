@@ -242,7 +242,7 @@ class SSARenamer:
             self._fail(f"Function '{self.function.name}' has no entry block.")
 
         entry = self.function.blocks[0].name
-        self._rename_block(entry)
+        self._rename_blocks(entry)
         self._verify_all_reachable_blocks_visited(entry)
 
         ssa_function = SSAFunction(
@@ -265,43 +265,62 @@ class SSARenamer:
             },
         )
 
-    def _rename_block(self, block_name: str) -> None:
-        if block_name in self._visited:
-            return
-        self._visited.add(block_name)
+    def _rename_blocks(self, entry: str) -> None:
+        """Rename the dominator tree without using the Python call stack.
 
-        block = self._blocks[block_name]
-        pushed_slots: list[str] = []
-        bound_values: list[tuple[str, SSAValue | object]] = []
-        instructions: list[SSAInstruction] = []
+        An exit frame retains the mutations made while entering its block.  It
+        therefore restores slot and value stacks at precisely the point where
+        the former recursive DFS returned from that block's last child.
+        """
+        worklist: list[
+            tuple[
+                str,
+                list[str] | None,
+                list[tuple[str, SSAValue | object]] | None,
+            ]
+        ] = [(entry, None, None)]
 
-        for phi in self._phi_states.get(block_name, ()):
-            self._bind_value(phi.result.name, phi.result, bound_values)
-            self._push_slot(phi.slot_name, phi.result)
-            pushed_slots.append(phi.slot_name)
+        while worklist:
+            block_name, pushed_slots, bound_values = worklist.pop()
+            if pushed_slots is not None and bound_values is not None:
+                for slot_name in reversed(pushed_slots):
+                    self._pop_slot(slot_name)
+                for value_name, previous in reversed(bound_values):
+                    if previous is _MISSING:
+                        self._value_map.pop(value_name, None)
+                    else:
+                        self._value_map[value_name] = previous
+                continue
 
-        for instruction in block.instructions:
-            converted = self._convert_instruction(
-                instruction,
-                pushed_slots,
-                bound_values,
-            )
-            if converted is not None:
-                instructions.append(converted)
+            if block_name in self._visited:
+                continue
+            self._visited.add(block_name)
 
-        self._ssa_instructions[block_name] = instructions
-        self._add_successor_phi_incomings(block_name)
+            block = self._blocks[block_name]
+            entered_slots: list[str] = []
+            entered_values: list[tuple[str, SSAValue | object]] = []
+            instructions: list[SSAInstruction] = []
 
-        for child in self._dominator_children(block_name):
-            self._rename_block(child)
+            for phi in self._phi_states.get(block_name, ()):
+                self._bind_value(phi.result.name, phi.result, entered_values)
+                self._push_slot(phi.slot_name, phi.result)
+                entered_slots.append(phi.slot_name)
 
-        for slot_name in reversed(pushed_slots):
-            self._pop_slot(slot_name)
-        for value_name, previous in reversed(bound_values):
-            if previous is _MISSING:
-                self._value_map.pop(value_name, None)
-            else:
-                self._value_map[value_name] = previous
+            for instruction in block.instructions:
+                converted = self._convert_instruction(
+                    instruction,
+                    entered_slots,
+                    entered_values,
+                )
+                if converted is not None:
+                    instructions.append(converted)
+
+            self._ssa_instructions[block_name] = instructions
+            self._add_successor_phi_incomings(block_name)
+
+            worklist.append((block_name, entered_slots, entered_values))
+            for child in reversed(self._dominator_children(block_name)):
+                worklist.append((child, None, None))
 
     def _convert_instruction(
         self,

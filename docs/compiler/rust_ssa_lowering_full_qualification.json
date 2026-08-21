@@ -45,10 +45,9 @@
         "deterministic": true,
         "lifecycle_parity": true,
         "path": "benchmarks/list_for_sum.ae",
-        "python_schema_reserialization_exact": false,
+        "python_schema_reserialization_exact": true,
         "rust_verifier_and_python_import": true,
-        "ssa_mismatch": "$.functions[0].blocks[4].instructions[0].source_location: NoneType != dict",
-        "ssa_semantic_parity": false
+        "ssa_semantic_parity": true
       },
       {
         "deterministic": true,
@@ -270,28 +269,25 @@
         "deterministic": true,
         "lifecycle_parity": true,
         "path": "examples/Sorts/Main.ae",
-        "python_schema_reserialization_exact": false,
+        "python_schema_reserialization_exact": true,
         "rust_verifier_and_python_import": true,
-        "ssa_mismatch": "$.functions[1].blocks[0].instructions[0].source_location: NoneType != dict",
-        "ssa_semantic_parity": false
+        "ssa_semantic_parity": true
       },
       {
         "deterministic": true,
         "lifecycle_parity": true,
         "path": "examples/Sorts/Sortings.ae",
-        "python_schema_reserialization_exact": false,
+        "python_schema_reserialization_exact": true,
         "rust_verifier_and_python_import": true,
-        "ssa_mismatch": "$.functions[1].blocks[0].instructions[0].source_location: NoneType != dict",
-        "ssa_semantic_parity": false
+        "ssa_semantic_parity": true
       },
       {
         "deterministic": true,
         "lifecycle_parity": true,
         "path": "examples/aggregate_collections/particles.ae",
-        "python_schema_reserialization_exact": false,
+        "python_schema_reserialization_exact": true,
         "rust_verifier_and_python_import": true,
-        "ssa_mismatch": "$.functions[0].blocks[2].instructions[0].source_location: NoneType != dict",
-        "ssa_semantic_parity": false
+        "ssa_semantic_parity": true
       },
       {
         "deterministic": true,
@@ -353,10 +349,9 @@
         "deterministic": true,
         "lifecycle_parity": true,
         "path": "examples/esPrimo2.ae",
-        "python_schema_reserialization_exact": false,
+        "python_schema_reserialization_exact": true,
         "rust_verifier_and_python_import": true,
-        "ssa_mismatch": "$.functions[0].blocks[14].instructions[0].source_location: NoneType != dict",
-        "ssa_semantic_parity": false
+        "ssa_semantic_parity": true
       },
       {
         "deterministic": true,
@@ -370,28 +365,25 @@
         "deterministic": true,
         "lifecycle_parity": true,
         "path": "examples/expense_tracker/Main.ae",
-        "python_schema_reserialization_exact": false,
+        "python_schema_reserialization_exact": true,
         "rust_verifier_and_python_import": true,
-        "ssa_mismatch": "$.functions[11].blocks[4].instructions[0].source_location: NoneType != dict",
-        "ssa_semantic_parity": false
+        "ssa_semantic_parity": true
       },
       {
         "deterministic": true,
         "lifecycle_parity": true,
         "path": "examples/expense_tracker/Persistence.ae",
-        "python_schema_reserialization_exact": false,
+        "python_schema_reserialization_exact": true,
         "rust_verifier_and_python_import": true,
-        "ssa_mismatch": "$.functions[10].blocks[4].instructions[0].source_location: NoneType != dict",
-        "ssa_semantic_parity": false
+        "ssa_semantic_parity": true
       },
       {
         "deterministic": true,
         "lifecycle_parity": true,
         "path": "examples/expense_tracker/Reports.ae",
-        "python_schema_reserialization_exact": false,
+        "python_schema_reserialization_exact": true,
         "rust_verifier_and_python_import": true,
-        "ssa_mismatch": "$.functions[0].blocks[2].instructions[0].source_location: NoneType != dict",
-        "ssa_semantic_parity": false
+        "ssa_semantic_parity": true
       },
       {
         "deterministic": true,
@@ -549,19 +541,17 @@
         "deterministic": true,
         "lifecycle_parity": true,
         "path": "examples/llvm/list_copy.ae",
-        "python_schema_reserialization_exact": false,
+        "python_schema_reserialization_exact": true,
         "rust_verifier_and_python_import": true,
-        "ssa_mismatch": "$.functions[0].blocks[0].instructions[4].source_location: NoneType != dict",
-        "ssa_semantic_parity": false
+        "ssa_semantic_parity": true
       },
       {
         "deterministic": true,
         "lifecycle_parity": true,
         "path": "examples/llvm/list_for_sum.ae",
-        "python_schema_reserialization_exact": false,
+        "python_schema_reserialization_exact": true,
         "rust_verifier_and_python_import": true,
-        "ssa_mismatch": "$.functions[0].blocks[2].instructions[0].source_location: NoneType != dict",
-        "ssa_semantic_parity": false
+        "ssa_semantic_parity": true
       },
       {
         "deterministic": true,
@@ -957,7 +947,7 @@
       }
     ]
   },
-  "decision": "RUST_SSA_LOWERING_BLOCKED",
+  "decision": "RUST_SSA_LOWERING_IMPLEMENTED",
   "evidence_schema_version": 1,
   "lifecycle_differential": {
     "failed": 0,
@@ -969,8 +959,8 @@
   },
   "phase_timing_note": "Blocked qualification records observable lane totals; internal CFG/dominance/liveness/phi/rename phase instrumentation is not claimed.",
   "python_schema_v2_exact_reserialization": {
-    "failed": 10,
-    "passed": 106
+    "failed": 0,
+    "passed": 116
   },
   "scope": {
     "commit_created": false,
@@ -979,13 +969,13 @@
     "rp3_changed": false
   },
   "ssa_semantic_parity": {
-    "failed": 10,
-    "passed": 106
+    "failed": 0,
+    "passed": 116
   },
   "timings_ns": {
-    "lifecycle_python_ns": 1689183888,
-    "lifecycle_rust_lane_ns": 7086484804,
-    "python_lane_ns": 2891895893,
-    "rust_lane_ns": 19819070169
+    "lifecycle_python_ns": 248291940,
+    "lifecycle_rust_lane_ns": 782531071,
+    "python_lane_ns": 355446142,
+    "rust_lane_ns": 2177420273
   }
 }
