@@ -44,6 +44,10 @@ _SSA_SHADOW_PLATFORMS = {
 class SSALoweringAuthorityMode(str, Enum):
     PYTHON_SSA_ONLY = "python_ssa_only"
     PYTHON_SSA_AUTHORITY_RUST_SHADOW = "python_ssa_authority_rust_shadow"
+    # Reserved by RUST-3.5 for the later promotion milestone.  The pipeline
+    # rejects this mode until that milestone installs the authoritative
+    # coordinator; merely selecting it can never return Rust SSA today.
+    RUST_SSA_AUTHORITY_PYTHON_SHADOW = "rust_ssa_authority_python_shadow"
 
 
 @unique
@@ -65,6 +69,11 @@ class SSALoweringAuthorityConfiguration:
             raise TypeError("failure_policy must be an SSAShadowFailurePolicy")
         if self.protocol_version != SSA_SHADOW_PROTOCOL_VERSION:
             raise ValueError("only SSA shadow protocol version 1 is supported")
+        if (
+            self.mode is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
+            and self.failure_policy is not SSAShadowFailurePolicy.FAIL_CLOSED
+        ):
+            raise ValueError("Rust SSA authority requires fail-closed semantics")
 
 
 @dataclass(frozen=True)

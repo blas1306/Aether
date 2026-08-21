@@ -1,0 +1,104 @@
+{
+  "authority": {
+    "production_default": "PYTHON_SSA_ONLY",
+    "returned_ssa": "python",
+    "rust_reaches_optimizer_or_backend": false
+  },
+  "blockers": {},
+  "decision": "RUST_SSA_SHADOW_OPERATIONALLY_QUALIFIED",
+  "evidence_schema_version": 1,
+  "gates": {
+    "SO1": "PASS",
+    "SO10": "PASS",
+    "SO11": "PASS",
+    "SO12": "PASS",
+    "SO2": "PASS",
+    "SO3": "PASS",
+    "SO4": "PASS",
+    "SO5": "PASS",
+    "SO6": "PASS",
+    "SO7": "PASS",
+    "SO8": "PASS",
+    "SO9": "PASS"
+  },
+  "import": {
+    "aggregate_artifact_sha256": "32d0b820d11d87f9e97a499d0ef64d6e9766cb6f115b1fff4d2a089e4737aa4f",
+    "provenance": "rust-ssa-shadow GitHub Actions native-runner aggregate",
+    "source_artifact": "rust-ssa-shadow-operational-qualification/qualification/rust_ssa_shadow_operational_qualification.json"
+  },
+  "milestone": "RUST-3.4",
+  "platforms": {
+    "linux-x86_64": {
+      "artifact": "aether-ssa-shadow-0.1.0-linux-x86_64.tar.gz",
+      "artifact_sha256": "6b6238aab1a75d02dab9af2771de8a9179d3b2f212908daca9080fb94b50afcf",
+      "checks": "11/11 PASS",
+      "clean_install": "PASS",
+      "comparison": "2/2 PASS",
+      "evidence_sha256": "d7b086cfde8b2a8dbc80bdc2e9d04c291ba2d8a47d69513a18b61d8a1bdc8942",
+      "infrastructure_failures": 0,
+      "provenance": "executed-native-runner",
+      "rust_target": "x86_64-unknown-linux-gnu",
+      "semantic_mismatches": 0,
+      "status": "PASS"
+    },
+    "macos-arm64": {
+      "artifact": "aether-ssa-shadow-0.1.0-macos-arm64.tar.gz",
+      "artifact_sha256": "ee153492e0b27310e6f9ec8891775e878c37ef73c800a7b3e1bfa2201e446bf9",
+      "checks": "11/11 PASS",
+      "clean_install": "PASS",
+      "comparison": "2/2 PASS",
+      "evidence_sha256": "3703a4b7dba214ab944819e68dfe7c6bcd44fbc5bba34e6594c5f82a40ee2617",
+      "infrastructure_failures": 0,
+      "provenance": "executed-native-runner",
+      "rust_target": "aarch64-apple-darwin",
+      "semantic_mismatches": 0,
+      "status": "PASS"
+    },
+    "macos-x86_64": {
+      "artifact": "aether-ssa-shadow-0.1.0-macos-x86_64.tar.gz",
+      "artifact_sha256": "93deded86704d446713bfd309582056c2936a4b90eb7724a2eceb70982363af8",
+      "checks": "11/11 PASS",
+      "clean_install": "PASS",
+      "comparison": "2/2 PASS",
+      "evidence_sha256": "eb324885857d31abaf6fcc9e4cc75a689257c2b02a12858797046507b37c33bd",
+      "infrastructure_failures": 0,
+      "provenance": "executed-native-runner",
+      "rust_target": "x86_64-apple-darwin",
+      "semantic_mismatches": 0,
+      "status": "PASS"
+    },
+    "windows-x86_64": {
+      "artifact": "aether-ssa-shadow-0.1.0-windows-x86_64.zip",
+      "artifact_sha256": "cd5458fba4eee8e3fffd95d56c8e30c006bea99cb920efd769bd9bd7b0056baf",
+      "checks": "11/11 PASS",
+      "clean_install": "PASS",
+      "comparison": "2/2 PASS",
+      "evidence_sha256": "3cabfc40899f51aede1f774db18c31ce2b7a9fc0c6bad87a978bbe5bf75a3dfe",
+      "infrastructure_failures": 0,
+      "provenance": "executed-native-runner",
+      "rust_target": "x86_64-pc-windows-msvc",
+      "semantic_mismatches": 0,
+      "status": "PASS"
+    }
+  },
+  "rollback": {
+    "companion_required": false,
+    "mode": "PYTHON_SSA_ONLY",
+    "status": "PASS"
+  },
+  "soak": {
+    "accepted": 132,
+    "infrastructure_failures": 0,
+    "rejected_before_ssa": 29,
+    "semantic_mismatches": 0,
+    "shadow_compared": 132,
+    "total_programs": 161
+  },
+  "transport": {
+    "concurrency_process_startups": 1,
+    "concurrency_requests": 128,
+    "long_session_process_startups": 1,
+    "long_session_requests": 1000,
+    "persistent": "PASS"
+  }
+}

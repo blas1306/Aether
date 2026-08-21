@@ -222,7 +222,14 @@ class SSAPipeline:
                     raise AetherRuntimeError("Rust SSA shadow mode requires an explicit companion client", kind="ssa")
                 authoritative, _report = lower_with_rust_shadow(module, self.rust_shadow_client)  # type: ignore[arg-type]
                 return authoritative  # type: ignore[return-value]
-            return GeneralSSABuilder().build(module)
+            if configuration.mode is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW:
+                raise AetherRuntimeError(
+                    "Rust SSA authority is reserved but not activated by RUST-3.5",
+                    kind="ssa",
+                )
+            if configuration.mode is SSALoweringAuthorityMode.PYTHON_SSA_ONLY:
+                return GeneralSSABuilder().build(module)
+            raise AssertionError("unhandled SSA lowering authority mode")
         raise ValueError(f"Unknown SSA builder '{self.builder}'.")
 
     def verify(self, module: SSAModule) -> SSAModule:

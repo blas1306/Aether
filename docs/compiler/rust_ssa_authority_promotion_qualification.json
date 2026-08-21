@@ -1,0 +1,303 @@
+{
+  "artifact_schema_version": 1,
+  "ci": {
+    "after_promotion": [
+      "Python-only and Python-authority/Rust-shadow rollback lanes remain green",
+      "Rust-authority/Python-shadow required on every official platform",
+      "scheduled soak, long-session, concurrency, packaging, and compatibility gates remain required",
+      "any semantic mismatch or infrastructure failure blocks release"
+    ],
+    "before_promotion": [
+      "all RUST-3.5 gates PASS on the exact promotion revision",
+      "four native platform clean-install reports PASS",
+      "full 132-program shadow soak with zero mismatches",
+      "fail-closed and rollback regression suite PASS"
+    ],
+    "promotion_change": [
+      "activate only RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+      "retain synchronous Python shadow and fail-closed comparison",
+      "prove returned object originates from verified Rust schema-v2 output"
+    ]
+  },
+  "cross_platform": {
+    "linux-x86_64": {
+      "rust_target": "x86_64-unknown-linux-gnu",
+      "status": "PASS"
+    },
+    "macos-arm64": {
+      "rust_target": "aarch64-apple-darwin",
+      "status": "PASS"
+    },
+    "macos-x86_64": {
+      "rust_target": "x86_64-apple-darwin",
+      "status": "PASS"
+    },
+    "windows-x86_64": {
+      "rust_target": "x86_64-pc-windows-msvc",
+      "status": "PASS"
+    }
+  },
+  "decision": "READY_FOR_RUST_SSA_AUTHORITY_SWITCH",
+  "fail_closed_policy": {
+    "canonicalization_failure": "abort compilation; return no SSA",
+    "malformed_response": "abort compilation; return no SSA",
+    "python_shadow_failure": "abort compilation; return no SSA",
+    "rust_startup_failure": "abort compilation; return no SSA",
+    "semantic_mismatch_against_python_shadow": "abort compilation; emit bounded deterministic mismatch evidence; return no SSA",
+    "silent_python_fallback": false,
+    "timeout": "abort compilation; terminate companion; return no SSA",
+    "verification_failure": "abort compilation; return no SSA"
+  },
+  "future_authority_configuration": {
+    "configuration_location": "src/aether/ssa/shadow.py:SSALoweringAuthorityConfiguration",
+    "modes": {
+      "PYTHON_SSA_AUTHORITY_RUST_SHADOW": {
+        "available_now": true,
+        "returned_ssa": "verified Python SSA after a successful Rust comparison",
+        "shadow": "Rust; synchronous and fail closed"
+      },
+      "PYTHON_SSA_ONLY": {
+        "available_now": true,
+        "returned_ssa": "verified Python SSA",
+        "shadow": "none"
+      },
+      "RUST_SSA_AUTHORITY_PYTHON_SHADOW": {
+        "activation": "later authority-switch milestone only",
+        "available_now": false,
+        "returned_ssa": "schema-v2 Rust SSA imported into the Python SSAModule model, after Rust Owned SSA verification, Python boundary verification, and a successful canonical Python-shadow comparison",
+        "shadow": "Python; synchronous, verified, canonicalized, compared, then discarded on match"
+      }
+    },
+    "pipeline_selection_location": "src/aether/pipeline.py:SSAPipeline.build",
+    "production_default": "PYTHON_SSA_ONLY",
+    "rust_authority_activated": false
+  },
+  "gates": [
+    {
+      "evidence": "lowering policy v1; source-location policy v1; aggregate divergence closure",
+      "id": "G01",
+      "name": "all semantic contracts qualified",
+      "status": "PASS"
+    },
+    {
+      "evidence": "lifecycle policy v1 and Rust lifecycle differential 116/116",
+      "id": "G02",
+      "name": "all lifecycle policies qualified",
+      "status": "PASS"
+    },
+    {
+      "evidence": "SSA wire boundary qualification",
+      "id": "G03",
+      "name": "schema-v2 qualified",
+      "status": "PASS"
+    },
+    {
+      "evidence": "Owned SSA model 116/116",
+      "id": "G04",
+      "name": "Rust Owned SSA model qualified",
+      "status": "PASS"
+    },
+    {
+      "evidence": "Owned SSA verifier 116/116",
+      "id": "G05",
+      "name": "Rust Owned SSA verifier qualified",
+      "status": "PASS"
+    },
+    {
+      "evidence": "lifecycle, canonical SSA, verification/import, exact schema-v2, determinism",
+      "id": "G06",
+      "name": "historical corpus 116/116",
+      "status": "PASS"
+    },
+    {
+      "evidence": "RUST-3.2 qualification embedded in SSA-ROBUST-1 evidence",
+      "id": "G07",
+      "name": "adversarial corpus",
+      "status": "PASS"
+    },
+    {
+      "evidence": "Python and Rust deep-CFG qualifications; Rust 5000-block PASS_AND_VERIFY",
+      "id": "G08",
+      "name": "deep CFG regressions",
+      "status": "PASS"
+    },
+    {
+      "evidence": "132/132 compared; zero semantic and infrastructure failures",
+      "id": "G09",
+      "name": "expanded soak zero mismatches",
+      "status": "PASS"
+    },
+    {
+      "evidence": "1000 requests/one process; 128 concurrent requests/one process",
+      "id": "G10",
+      "name": "persistent transport",
+      "status": "PASS"
+    },
+    {
+      "evidence": "clean release artifact on every official native runner",
+      "id": "G11",
+      "name": "clean install",
+      "status": "PASS"
+    },
+    {
+      "evidence": "Linux x86_64, Windows x86_64, macOS arm64, macOS x86_64",
+      "id": "G12",
+      "name": "all four official platforms",
+      "status": "PASS"
+    },
+    {
+      "evidence": "select PYTHON_SSA_AUTHORITY_RUST_SHADOW or PYTHON_SSA_ONLY",
+      "id": "G13",
+      "name": "rollback configuration available",
+      "status": "PASS"
+    },
+    {
+      "evidence": "empty verified module lowered without a Rust client",
+      "id": "G14",
+      "name": "Python authority works independently",
+      "status": "PASS"
+    },
+    {
+      "evidence": "malformed Rust result raises SSAShadowFailure",
+      "id": "G15",
+      "name": "Rust shadow remains fail closed",
+      "status": "PASS"
+    },
+    {
+      "evidence": "reserved Rust-authority mode rejects; current returned SSA is Python",
+      "id": "G16",
+      "name": "no Rust SSA reaches optimizer/backend",
+      "status": "PASS"
+    },
+    {
+      "evidence": "product 0.1.0, protocol 1, Initial IR schema 1, SSA schema 2",
+      "id": "G17",
+      "name": "companion compatibility",
+      "status": "PASS"
+    },
+    {
+      "evidence": "116/116 repeated Rust results plus persistent representative checks",
+      "id": "G18",
+      "name": "deterministic output preserved",
+      "status": "PASS"
+    },
+    {
+      "evidence": "all semantic gates and aggregate closure pass",
+      "id": "G19",
+      "name": "no unresolved semantic blocker",
+      "status": "PASS"
+    },
+    {
+      "evidence": "qualified aggregate has no blockers; all operational gates pass",
+      "id": "G20",
+      "name": "no unresolved operational blocker",
+      "status": "PASS"
+    }
+  ],
+  "milestone": "RUST-3.5",
+  "operational_qualification": {
+    "clean_install": "PASS",
+    "concurrency": "128 requests / 1 process",
+    "long_session": "1000 requests / 1 process",
+    "packaged_discovery": "PASS",
+    "persistent_transport": "PASS",
+    "shadow": "RUST_SSA_SHADOW_OPERATIONALLY_QUALIFIED",
+    "status": "PASS"
+  },
+  "performance": {
+    "deterministic_outputs": true,
+    "expected_rust_authority_python_shadow": {
+      "basis": "the same two lowerings, verification, canonicalization, and comparison execute synchronously; reversing which matched SSA object is returned does not remove a lane",
+      "estimated_over_python_only_ratio": 8.582,
+      "speedup_required": false
+    },
+    "measurement_kind": "observational; no speedup or absolute threshold gate",
+    "observed_shadow_over_python_ratio": 8.582,
+    "process_startups": 1,
+    "python_authority_rust_shadow_representative_median_total_ns": 48752203,
+    "python_only_representative_median_total_ns": 5680457,
+    "requests": 21,
+    "workloads": [
+      {
+        "observed_shadow_over_python_ratio": 8.475,
+        "python_authority_rust_shadow_median_ns": 9251866,
+        "python_only_median_ns": 1091619,
+        "rounds": 7,
+        "workload": "benchmarks/arithmetic.ae"
+      },
+      {
+        "observed_shadow_over_python_ratio": 8.254,
+        "python_authority_rust_shadow_median_ns": 8318583,
+        "python_only_median_ns": 1007882,
+        "rounds": 7,
+        "workload": "benchmarks/nested_loops.ae"
+      },
+      {
+        "observed_shadow_over_python_ratio": 8.708,
+        "python_authority_rust_shadow_median_ns": 31181754,
+        "python_only_median_ns": 3580956,
+        "rounds": 7,
+        "workload": "examples/aggregate_collections/particles.ae"
+      }
+    ]
+  },
+  "rollback": {
+    "code_edits_required_after_promotion": false,
+    "current_default": "PYTHON_SSA_ONLY",
+    "independent": "select PYTHON_SSA_ONLY",
+    "primary": "select PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+    "schema_or_policy_change_required": false
+  },
+  "scope": {
+    "commit_created": false,
+    "comparison_weakened": false,
+    "historical_artifacts_modified": false,
+    "lowering_semantics_changed": false,
+    "policies_changed": false,
+    "production_authority": "python",
+    "production_authority_changed": false,
+    "rust_ssa_reaches_optimizer_or_backend": false,
+    "schemas_changed": false
+  },
+  "semantic_qualification": {
+    "adversarial": "PASS",
+    "aggregate_shadow_divergence": "CLOSED",
+    "canonical_ssa": "116/116",
+    "historical": "116/116",
+    "lifecycle": "116/116",
+    "python_deep_cfg": "PASS",
+    "rust_deep_cfg": "PASS",
+    "rust_owned_ssa_verification": "116/116",
+    "schema_v2": "QUALIFIED",
+    "status": "PASS"
+  },
+  "soak": {
+    "accepted": 132,
+    "infrastructure_failures": 0,
+    "rejected_before_ssa": 29,
+    "semantic_mismatches": 0,
+    "shadow_compared": 132,
+    "total_programs": 161
+  },
+  "source_evidence_sha256": {
+    "aggregate_closure": "0a1737c058962b4f93dc90ce06157bf05f6016a2c0cde2c86b41f027b7430d9a",
+    "companion_packaging": "2b28bbe5089169f64dafa42b7e16edcb081137761f19de9229f71b94e735fd01",
+    "historical_differential": "32914b8797df78b7222fdad961fac225beb41cee159d5160e7be8343aa7cfa4f",
+    "lifecycle_differential": "3c9443d99059ae3db46520af2a8e8ccc2693333a9d6bceafe46f6ea5715132a8",
+    "lifecycle_policy": "97a305ddfaa5a02b219cf64c6d47d46c2b5ff42212513ad13543cff98c91f5c5",
+    "lowering_policy": "951b5f312f0485ba85f8b72495032a3a34edfc547a17ceffc7219fb73a9bce05",
+    "operational_qualification": "ab18ad1354f320e0e3eef9304d74ce541b1755999e5c6f9ed0e2ae54de68857f",
+    "owned_ssa_model": "9b439cbd7c2a509591736d69a4fd4246f39c6eadd8b88e65fe802d145f6b85d9",
+    "owned_ssa_verifier": "7be7e9428a7a7c3d98bf75e1cae8f93a0e6a36a3a4b56bf4e05ad45f2211de53",
+    "performance": "a84ff18f92a06e9e310d7a13d50d463d6f5c14a8354cc1fd2931b0a514580290",
+    "python_deep_cfg_and_adversarial": "3315e801a719dad61fbe3dcbcecc2782c170e857c3f86a95f93baae0fe58c191",
+    "rust_deep_cfg": "65ec6bb44bbbe01bd24c511b1687dde9afd79f80c80516848992132d2e2927ea",
+    "schema_v2": "602e0886fb6546214098df586117f8cbe34a6c3bd29ba54cdc76fa15492837ce",
+    "shadow_mode": "4906342bc7eeb5435b15d50a45eeb24658a551fc56edf2bc97a9b9f85a98feb4",
+    "source_location_policy": "476a79118f87aa0d5d73a11c0c272108ce35a411dccbc795f28e996896807b0c"
+  },
+  "unresolved_blockers": {
+    "operational": [],
+    "semantic": []
+  }
+}
