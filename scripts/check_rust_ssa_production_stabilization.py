@@ -8,6 +8,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
+import subprocess
 from typing import Any
 
 
@@ -31,6 +32,16 @@ REGRESSION_FAMILIES = {
     "aggregate_ownership", "class_interface_ownership",
     "constructor_exceptional_cleanup", "nullable_ownership_and_casts",
     "collection_temporary_ownership", "indirect_calls_and_function_values",
+}
+DISCOVERY_ROOTS = ("examples", "benchmarks", "corpus", "tests", "scrap")
+HISTORICAL_CORPUS_MANIFEST = Path(
+    "scripts/rust_ssa_production_stabilization_historical_corpus.txt"
+)
+REQUIRED_CORPUS_CATEGORIES = {
+    "benchmarks", "numerical_methods", "exceptions", "collections", "structs",
+    "classes", "interfaces", "function_values_indirect_calls", "recursive_programs",
+    "allocation_heavy", "string_heavy", "expense_tracker",
+    "realistic_multi_function_modules",
 }
 
 # Frozen at the exact promoted revision.  These hashes make preservation an
@@ -78,6 +89,51 @@ def _same_revision(value: dict[str, Any], revision: str) -> bool:
 
 def _set(value: object) -> set[object]:
     return set(value) if isinstance(value, list) else set()
+
+
+def _git(*arguments: str) -> bytes:
+    result = subprocess.run(
+        ["git", "-C", str(ROOT), *arguments],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        return b""
+    return result.stdout
+
+
+def _resolved_revision(revision: str) -> str:
+    return _git(
+        "rev-parse", "--verify", "--end-of-options", f"{revision}^{{commit}}"
+    ).decode("ascii", errors="replace").strip()
+
+
+def _tracked_program_paths(revision: str) -> list[str]:
+    resolved = _resolved_revision(revision)
+    if not resolved:
+        return []
+    output = _git(
+        "ls-tree", "-r", "-z", "--name-only", resolved, "--", *DISCOVERY_ROOTS
+    )
+    return sorted(
+        path.decode("utf-8")
+        for path in output.split(b"\0")
+        if path.endswith(b".ae")
+    )
+
+
+def _historical_program_paths() -> set[str]:
+    try:
+        lines = (ROOT / HISTORICAL_CORPUS_MANIFEST).read_text(
+            encoding="utf-8"
+        ).splitlines()
+    except OSError:
+        return set()
+    paths = [line.strip() for line in lines]
+    if paths != sorted(set(paths)) or any(not path.endswith(".ae") for path in paths):
+        return set()
+    return set(paths)
 
 
 def _hashes_match(expected: dict[str, str]) -> tuple[bool, dict[str, str]]:
@@ -203,6 +259,30 @@ def build_record(revision: str, evidence_dir: Path) -> dict[str, Any]:
     programs = corpus.get("programs", []) if isinstance(corpus, dict) else []
     rejected_rows = [row for row in programs if isinstance(row, dict) and row.get("status") == "REJECTED_BEFORE_SSA"]
     accepted_rows = [row for row in programs if isinstance(row, dict) and row.get("status") == "ACCEPTED_BEFORE_SSA"]
+    program_paths = [row.get("path") for row in programs if isinstance(row, dict)]
+    accepted_paths = {
+        row.get("path") for row in accepted_rows if isinstance(row.get("path"), str)
+    }
+    expected_paths = _tracked_program_paths(revision)
+    historical_paths = _historical_program_paths()
+    category_paths = corpus.get("accepted_category_paths", {}) if isinstance(corpus, dict) else {}
+    categories_pass = (
+        isinstance(category_paths, dict)
+        and REQUIRED_CORPUS_CATEGORIES <= set(category_paths)
+        and all(
+            isinstance(paths, list)
+            and bool(paths)
+            and paths == sorted(set(paths))
+            and set(paths) <= accepted_paths
+            for paths in category_paths.values()
+        )
+    )
+    exact_source_set = (
+        bool(expected_paths)
+        and bool(historical_paths)
+        and program_paths == expected_paths
+        and historical_paths <= set(expected_paths)
+    )
     corpus_pass = (
         _same_revision(operational, revision)
         and operational.get("milestone") == "RUST-3.7a"
@@ -211,12 +291,27 @@ def build_record(revision: str, evidence_dir: Path) -> dict[str, Any]:
         and operational.get("authority", {}).get("python_shadow") == "synchronous_mandatory"
         and operational.get("authority", {}).get("automatic_retries") is False
         and isinstance(corpus, dict)
-        and corpus.get("discovered_programs", 0) > 169
+        and corpus.get("discovery_roots") == list(DISCOVERY_ROOTS)
+        and corpus.get("discovery_mechanism") == "git_tree_exact_revision"
+        and corpus.get("discovery_revision") == _resolved_revision(revision)
+        and corpus.get("ignored_and_untracked_excluded") is True
+        and corpus.get("historical_manifest") == HISTORICAL_CORPUS_MANIFEST.as_posix()
+        and corpus.get("historical_discovered") == len(historical_paths)
+        and corpus.get("historical_programs_included") == len(historical_paths)
+        and not corpus.get("missing_historical_programs")
+        and corpus.get("eligible_tracked_programs") == len(expected_paths)
         and corpus.get("discovered_programs") == len(programs)
+        and len(programs) == len(accepted_rows) + len(rejected_rows)
         and corpus.get("accepted_before_ssa") == len(accepted_rows)
         and corpus.get("rejected_before_ssa") == len(rejected_rows)
+        and corpus.get("source_set_gate") == "PASS"
+        and corpus.get("coverage_contract") == "PASS"
+        and not corpus.get("unaccounted_tracked_programs")
+        and not corpus.get("unexpected_programs")
+        and exact_source_set
         and corpus.get("category_gate") == "PASS"
         and not corpus.get("missing_categories")
+        and categories_pass
         and all(row.get("stage") and row.get("reason") for row in rejected_rows)
     )
     repeated = operational.get("repeated_soak", {})
@@ -281,7 +376,7 @@ def build_record(revision: str, evidence_dir: Path) -> dict[str, Any]:
         ("default remains Rust authority/Python shadow", default_frozen),
         ("mandatory synchronous GeneralSSABuilder shadow remains", python_shadow_preserved),
         ("fail-closed comparison and no Rust-only mode remain", fail_closed and no_rust_only),
-        ("broadened corpus is fully accounted and mismatch-free", corpus_pass),
+        ("exact-revision corpus coverage is fully accounted and mismatch-free", corpus_pass),
         ("repeated differential soak is deterministic", repeated_pass),
         ("5000-request one-process mixed session passes", long_pass),
         ("shared-client concurrent callers remain serialized", concurrency_pass),

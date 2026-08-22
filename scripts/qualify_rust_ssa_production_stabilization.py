@@ -14,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from time import perf_counter
 from typing import Any, Callable
 
@@ -34,6 +35,9 @@ from aether.typechecker import TypeChecker  # noqa: E402
 
 DEFAULT_EXECUTABLE = ROOT / "compiler-rs/target/debug/aether-ssa-shadow"
 DISCOVERY_ROOTS = ("examples", "benchmarks", "corpus", "tests", "scrap")
+HISTORICAL_CORPUS_MANIFEST = Path(
+    "scripts/rust_ssa_production_stabilization_historical_corpus.txt"
+)
 MINIMUM_LONG_SESSION_REQUESTS = 5_000
 MINIMUM_REPEATED_ROUNDS = 3
 MINIMUM_CONCURRENT_REQUESTS = 256
@@ -72,17 +76,58 @@ def _bounded(value: object) -> str:
     return text[: MAX_DIAGNOSTIC_CHARACTERS - 3] + "..."
 
 
-def discover_programs() -> list[Path]:
-    """Return every repository source in the stabilization scope, deterministically."""
-    return sorted(
-        {
-            path.resolve()
-            for name in DISCOVERY_ROOTS
-            for path in (ROOT / name).rglob("*.ae")
-            if path.is_file()
-        },
-        key=_relative,
+def _git(*arguments: str) -> bytes:
+    result = subprocess.run(
+        ["git", "-C", str(ROOT), *arguments],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
+    if result.returncode != 0:
+        detail = result.stderr.decode("utf-8", errors="replace").strip()
+        raise RuntimeError(f"Git revision corpus query failed: {detail}")
+    return result.stdout
+
+
+def _resolve_revision(revision: str) -> str:
+    return _git(
+        "rev-parse", "--verify", "--end-of-options", f"{revision}^{{commit}}"
+    ).decode("ascii").strip()
+
+
+def _relative_programs(revision: str) -> tuple[str, list[str]]:
+    resolved = _resolve_revision(revision)
+    output = _git(
+        "ls-tree", "-r", "-z", "--name-only", resolved, "--", *DISCOVERY_ROOTS
+    )
+    paths = sorted(
+        path.decode("utf-8")
+        for path in output.split(b"\0")
+        if path.endswith(b".ae")
+    )
+    return resolved, paths
+
+
+def discover_programs(revision: str = "HEAD") -> list[Path]:
+    """Return only exact-revision Git-tracked sources in stabilization scope."""
+    _resolved, paths = _relative_programs(revision)
+    return [ROOT / path for path in paths]
+
+
+def _historical_programs() -> set[str]:
+    manifest = ROOT / HISTORICAL_CORPUS_MANIFEST
+    paths = [line.strip() for line in manifest.read_text(encoding="utf-8").splitlines()]
+    if paths != sorted(set(paths)) or any(not path.endswith(".ae") for path in paths):
+        raise RuntimeError(f"invalid historical corpus manifest: {manifest}")
+    return set(paths)
+
+
+def _materialize_programs(revision: str, paths: list[str], destination: Path) -> None:
+    """Materialize exact Git blobs so dirty/untracked files cannot affect imports."""
+    for relative in paths:
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(_git("show", f"{revision}:{relative}"))
 
 
 def _categories(path: Path, source: str) -> tuple[str, ...]:
@@ -119,41 +164,48 @@ def _categories(path: Path, source: str) -> tuple[str, ...]:
     return tuple(sorted(categories))
 
 
-def inventory() -> tuple[list[AcceptedProgram], list[dict[str, Any]]]:
+def inventory(revision: str = "HEAD") -> tuple[list[AcceptedProgram], list[dict[str, Any]]]:
     accepted: list[AcceptedProgram] = []
     rows: list[dict[str, Any]] = []
-    for path in discover_programs():
-        relative = _relative(path)
-        try:
-            source = path.read_text(encoding="utf-8")
-        except (OSError, UnicodeError) as exc:
-            rows.append({"path": relative, "status": "REJECTED_BEFORE_SSA", "stage": "source_read", "reason": _bounded(exc)})
-            continue
-        digest = sha256(source.encode()).hexdigest()
-        categories = _categories(path, source)
-        try:
-            parse_source(source)
-        except Exception as exc:
-            rows.append({"path": relative, "source_sha256": digest, "categories": list(categories), "status": "REJECTED_BEFORE_SSA", "stage": "parse", "reason": _bounded(exc), "exception": type(exc).__name__})
-            continue
-        try:
-            typed = prepare_typed_program(source, TypeChecker(source_root=path.parent))
-        except Exception as exc:
-            rows.append({"path": relative, "source_sha256": digest, "categories": list(categories), "status": "REJECTED_BEFORE_SSA", "stage": "typecheck_or_module_resolution", "reason": _bounded(exc), "exception": type(exc).__name__})
-            continue
-        backend = IRBackend()
-        try:
-            initial = backend.lower(typed)
-        except Exception as exc:
-            rows.append({"path": relative, "source_sha256": digest, "categories": list(categories), "status": "REJECTED_BEFORE_SSA", "stage": "initial_ir_lowering", "reason": _bounded(exc), "exception": type(exc).__name__})
-            continue
-        try:
-            backend.verify(initial)
-        except Exception as exc:
-            rows.append({"path": relative, "source_sha256": digest, "categories": list(categories), "status": "REJECTED_BEFORE_SSA", "stage": "initial_ir_verification", "reason": _bounded(exc), "exception": type(exc).__name__})
-            continue
-        accepted.append(AcceptedProgram(path, digest, categories, initial))
-        rows.append({"path": relative, "source_sha256": digest, "categories": list(categories), "status": "ACCEPTED_BEFORE_SSA", "stage": "verified_initial_ir"})
+    resolved, relative_paths = _relative_programs(revision)
+    with tempfile.TemporaryDirectory(prefix="aether-rust-ssa-corpus-") as temporary:
+        materialized_root = Path(temporary)
+        _materialize_programs(resolved, relative_paths, materialized_root)
+        for relative in relative_paths:
+            path = ROOT / relative
+            materialized_path = materialized_root / relative
+            try:
+                source = materialized_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeError) as exc:
+                rows.append({"path": relative, "status": "REJECTED_BEFORE_SSA", "stage": "source_read", "reason": _bounded(exc)})
+                continue
+            digest = sha256(source.encode()).hexdigest()
+            categories = _categories(path, source)
+            try:
+                parse_source(source)
+            except Exception as exc:
+                rows.append({"path": relative, "source_sha256": digest, "categories": list(categories), "status": "REJECTED_BEFORE_SSA", "stage": "parse", "reason": _bounded(exc), "exception": type(exc).__name__})
+                continue
+            try:
+                typed = prepare_typed_program(
+                    source, TypeChecker(source_root=materialized_path.parent)
+                )
+            except Exception as exc:
+                rows.append({"path": relative, "source_sha256": digest, "categories": list(categories), "status": "REJECTED_BEFORE_SSA", "stage": "typecheck_or_module_resolution", "reason": _bounded(exc), "exception": type(exc).__name__})
+                continue
+            backend = IRBackend()
+            try:
+                initial = backend.lower(typed)
+            except Exception as exc:
+                rows.append({"path": relative, "source_sha256": digest, "categories": list(categories), "status": "REJECTED_BEFORE_SSA", "stage": "initial_ir_lowering", "reason": _bounded(exc), "exception": type(exc).__name__})
+                continue
+            try:
+                backend.verify(initial)
+            except Exception as exc:
+                rows.append({"path": relative, "source_sha256": digest, "categories": list(categories), "status": "REJECTED_BEFORE_SSA", "stage": "initial_ir_verification", "reason": _bounded(exc), "exception": type(exc).__name__})
+                continue
+            accepted.append(AcceptedProgram(path, digest, categories, initial))
+            rows.append({"path": relative, "source_sha256": digest, "categories": list(categories), "status": "ACCEPTED_BEFORE_SSA", "stage": "verified_initial_ir"})
     return accepted, rows
 
 
@@ -340,11 +392,22 @@ def generate(
     long_requests: int = MINIMUM_LONG_SESSION_REQUESTS,
     concurrent_requests: int = MINIMUM_CONCURRENT_REQUESTS,
     callers: int = 16,
-    inventory_fn: Callable[[], tuple[list[AcceptedProgram], list[dict[str, Any]]]] = inventory,
+    inventory_fn: Callable[[str], tuple[list[AcceptedProgram], list[dict[str, Any]]]] = inventory,
 ) -> dict[str, Any]:
-    accepted, rows = inventory_fn()
+    resolved_revision, eligible_paths = _relative_programs(revision)
+    accepted, rows = inventory_fn(revision)
     discovered = len(rows)
     rejected = discovered - len(accepted)
+    row_paths = [row.get("path") for row in rows]
+    missing_tracked = sorted(set(eligible_paths) - set(row_paths))
+    unexpected_programs = sorted(set(row_paths) - set(eligible_paths))
+    fully_accounted = (
+        row_paths == eligible_paths
+        and not missing_tracked
+        and not unexpected_programs
+    )
+    historical_programs = _historical_programs()
+    missing_historical = sorted(historical_programs - set(row_paths))
     category_paths: dict[str, list[str]] = {}
     for program in accepted:
         for category in program.categories:
@@ -368,11 +431,11 @@ def generate(
         "allocation_heavy", "string_heavy", "expense_tracker", "realistic_multi_function_modules",
     }
     category_gate = required_categories <= set(category_paths)
+    coverage_contract = fully_accounted and not missing_historical and category_gate
     repeated_expected = len(accepted) * rounds
     passed = (
-        discovered > 169
-        and bool(accepted)
-        and category_gate
+        bool(accepted)
+        and coverage_contract
         and _phase_passed(repeated, repeated_expected)
         and _phase_passed(long_session, long_requests)
         and _phase_passed(concurrency, concurrent_requests)
@@ -391,11 +454,22 @@ def generate(
         },
         "corpus": {
             "discovery_roots": list(DISCOVERY_ROOTS),
-            "historical_discovered": 169,
+            "discovery_mechanism": "git_tree_exact_revision",
+            "discovery_revision": resolved_revision,
+            "ignored_and_untracked_excluded": True,
+            "historical_manifest": HISTORICAL_CORPUS_MANIFEST.as_posix(),
+            "historical_discovered": len(historical_programs),
+            "historical_programs_included": len(historical_programs) - len(missing_historical),
+            "missing_historical_programs": missing_historical,
+            "eligible_tracked_programs": len(eligible_paths),
             "discovered_programs": discovered,
             "accepted_before_ssa": len(accepted),
             "rejected_before_ssa": rejected,
             "compared_per_round": repeated.get("programs_per_round", 0),
+            "source_set_gate": "PASS" if fully_accounted else "BLOCKED",
+            "coverage_contract": "PASS" if coverage_contract else "BLOCKED",
+            "unaccounted_tracked_programs": missing_tracked,
+            "unexpected_programs": unexpected_programs,
             "category_gate": "PASS" if category_gate else "BLOCKED",
             "missing_categories": sorted(required_categories - set(category_paths)),
             "accepted_category_paths": category_paths,

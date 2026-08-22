@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import xml.etree.ElementTree as ET
 
 from aether.ssa.shadow import SSALoweringAuthorityConfiguration, SSALoweringAuthorityMode
@@ -47,15 +48,78 @@ def _phase(requests: int) -> dict[str, object]:
     }
 
 
-def test_inventory_expands_and_accounts_for_every_repository_program() -> None:
+def test_inventory_accounts_for_exact_revision_tracked_programs() -> None:
     producer = _module(PRODUCER, "rust_3_7a_producer")
-    accepted, rows = producer.inventory()
-    assert len(rows) > 169
+    accepted, rows = producer.inventory("HEAD")
+    tracked = [producer._relative(path) for path in producer.discover_programs("HEAD")]
+    assert len(rows) == 169
+    assert [row["path"] for row in rows] == tracked
     assert len(rows) == len(accepted) + sum(row["status"] == "REJECTED_BEFORE_SSA" for row in rows)
     assert [row["path"] for row in rows] == sorted(row["path"] for row in rows)
-    assert any(row["path"] == "scrap/PFmio2.ae" for row in rows)
+    assert all(not row["path"].startswith("scrap/") for row in rows)
     rejected = [row for row in rows if row["status"] == "REJECTED_BEFORE_SSA"]
     assert all(row["stage"] and row["reason"] for row in rejected)
+
+
+def test_untracked_and_ignored_sources_do_not_change_qualification_evidence(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    producer = _module(PRODUCER, "rust_3_7a_producer_reproducible")
+    repository = tmp_path / "repository"
+    tracked_source = (ROOT / "benchmarks/arithmetic.ae").read_text(encoding="utf-8")
+    (repository / "benchmarks").mkdir(parents=True)
+    (repository / "scripts").mkdir()
+    (repository / ".gitignore").write_text("scrap/\n", encoding="utf-8")
+    (repository / "benchmarks/arithmetic.ae").write_text(tracked_source, encoding="utf-8")
+    (repository / producer.HISTORICAL_CORPUS_MANIFEST).write_text(
+        "benchmarks/arithmetic.ae\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    subprocess.run(["git", "-C", str(repository), "add", "."], check=True)
+    subprocess.run(
+        [
+            "git", "-C", str(repository), "-c", "user.name=Qualification Test",
+            "-c", "user.email=qualification@example.invalid", "commit", "-qm", "fixture",
+        ],
+        check=True,
+    )
+    monkeypatch.setattr(producer, "ROOT", repository)
+
+    def serial(programs, _executable, requests, *, expected=None, observe_rss=False):
+        observed = dict(expected or {})
+        for program in programs:
+            observed.setdefault(producer._relative(program.path), program.source_sha256)
+        return _phase(requests), observed
+
+    def concurrent(_programs, _executable, requests, workers, _expected):
+        return {**_phase(requests), "callers": workers, "serialized_transport": True}
+
+    monkeypatch.setattr(producer, "_run_serial", serial)
+    monkeypatch.setattr(producer, "_run_concurrent", concurrent)
+    arguments = {
+        "revision": "HEAD",
+        "executable": repository / "unused-companion",
+        "rounds": 3,
+        "long_requests": 5_000,
+        "concurrent_requests": 256,
+        "callers": 16,
+    }
+    before = producer.generate(**arguments)
+
+    # The qualification is tied to the requested commit, not working-tree blobs.
+    (repository / "benchmarks/arithmetic.ae").write_text(
+        "locally modified and intentionally invalid\n", encoding="utf-8"
+    )
+    (repository / "examples").mkdir()
+    (repository / "examples/local-untracked.ae").write_text(tracked_source, encoding="utf-8")
+    (repository / "scrap").mkdir()
+    (repository / "scrap/local-ignored.ae").write_text(tracked_source, encoding="utf-8")
+    after = producer.generate(**arguments)
+
+    assert before == after
+    assert before["corpus"]["discovered_programs"] == 1
+    assert before["corpus"]["accepted_before_ssa"] + before["corpus"]["rejected_before_ssa"] == 1
+    assert before["corpus"]["programs"] == after["corpus"]["programs"]
 
 
 def test_aggregate_blocks_missing_evidence_and_preserves_authority_contract(tmp_path: Path) -> None:
@@ -81,15 +145,17 @@ def test_aggregate_blocks_missing_evidence_and_preserves_authority_contract(tmp_
 
 def test_exact_revision_complete_evidence_stabilizes(tmp_path: Path) -> None:
     checker = _module(CHECKER, "rust_3_7a_checker_complete")
-    revision = "stabilization-revision"
+    revision = checker._resolved_revision("HEAD")
+    tracked_paths = checker._tracked_program_paths(revision)
+    assert len(tracked_paths) == 169
     programs = [
-        {"path": f"accepted-{index}.ae", "status": "ACCEPTED_BEFORE_SSA", "stage": "verified_initial_ir"}
-        for index in range(141)
+        {"path": path, "status": "ACCEPTED_BEFORE_SSA", "stage": "verified_initial_ir"}
+        for path in tracked_paths[:140]
     ] + [
-        {"path": f"rejected-{index}.ae", "status": "REJECTED_BEFORE_SSA", "stage": "typecheck_or_module_resolution", "reason": "unsupported"}
-        for index in range(35)
+        {"path": path, "status": "REJECTED_BEFORE_SSA", "stage": "typecheck_or_module_resolution", "reason": "unsupported"}
+        for path in tracked_paths[140:]
     ]
-    repeated = {**_phase(423), "rounds": 3, "programs_per_round": 141}
+    repeated = {**_phase(420), "rounds": 3, "programs_per_round": 140}
     concurrency = {**_phase(256), "callers": 16, "serialized_transport": True}
     _write(
         tmp_path / "operational.json",
@@ -103,11 +169,28 @@ def test_exact_revision_complete_evidence_stabilizes(tmp_path: Path) -> None:
                 "automatic_retries": False,
             },
             "corpus": {
-                "discovered_programs": 176,
-                "accepted_before_ssa": 141,
-                "rejected_before_ssa": 35,
+                "discovery_roots": list(checker.DISCOVERY_ROOTS),
+                "discovery_mechanism": "git_tree_exact_revision",
+                "discovery_revision": revision,
+                "ignored_and_untracked_excluded": True,
+                "historical_manifest": checker.HISTORICAL_CORPUS_MANIFEST.as_posix(),
+                "historical_discovered": 169,
+                "historical_programs_included": 169,
+                "missing_historical_programs": [],
+                "eligible_tracked_programs": 169,
+                "discovered_programs": 169,
+                "accepted_before_ssa": 140,
+                "rejected_before_ssa": 29,
+                "source_set_gate": "PASS",
+                "coverage_contract": "PASS",
+                "unaccounted_tracked_programs": [],
+                "unexpected_programs": [],
                 "category_gate": "PASS",
                 "missing_categories": [],
+                "accepted_category_paths": {
+                    category: [tracked_paths[0]]
+                    for category in checker.REQUIRED_CORPUS_CATEGORIES
+                },
                 "programs": programs,
             },
             "repeated_soak": repeated,
