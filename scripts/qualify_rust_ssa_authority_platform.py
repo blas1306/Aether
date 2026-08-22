@@ -24,6 +24,45 @@ PLATFORMS = {
     "macos-arm64": "aarch64-apple-darwin",
     "macos-x86_64": "x86_64-apple-darwin",
 }
+MAX_PROBE_DIAGNOSTIC_CHARACTERS = 4_000
+
+
+def _bounded_probe_output(value: str) -> str:
+    if len(value) <= MAX_PROBE_DIAGNOSTIC_CHARACTERS:
+        return value
+    marker = f"\n...[truncated; original_chars={len(value)}]\n"
+    remaining = MAX_PROBE_DIAGNOSTIC_CHARACTERS - len(marker)
+    head = remaining // 2
+    return value[:head] + marker + value[-(remaining - head) :]
+
+
+def _probe_failure_diagnostics(
+    completed: subprocess.CompletedProcess[str],
+) -> str:
+    return (
+        f"aether-ssa-authority-probe exited with status {completed.returncode}\n"
+        "===== probe stdout =====\n"
+        f"{_bounded_probe_output(completed.stdout)}\n"
+        "===== probe stderr =====\n"
+        f"{_bounded_probe_output(completed.stderr)}"
+    )
+
+
+def _run_probe(
+    arguments: list[str], *, cwd: Path, env: dict[str, str]
+) -> tuple[int, object | None]:
+    completed = subprocess.run(
+        arguments,
+        cwd=cwd,
+        check=False,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+    if completed.returncode != 0:
+        print(_probe_failure_diagnostics(completed), file=sys.stderr)
+        return completed.returncode, None
+    return 0, json.loads(completed.stdout.splitlines()[-1])
 
 
 def main() -> int:
@@ -106,7 +145,7 @@ def main() -> int:
         isolated_environment["PATH"] = str(
             environment / ("Scripts" if sys.platform == "win32" else "bin")
         )
-        completed = subprocess.run(
+        probe_returncode, observation = _run_probe(
             [
                 str(probe),
                 "--clang",
@@ -116,12 +155,11 @@ def main() -> int:
                 *(str(path) for path in isolated_sources),
             ],
             cwd=clean,
-            check=True,
-            text=True,
-            capture_output=True,
             env=isolated_environment,
         )
-        observation = json.loads(completed.stdout.splitlines()[-1])
+        if probe_returncode != 0:
+            return probe_returncode
+        assert observation is not None
 
     evidence = {
         "schema_version": 1,
