@@ -1,0 +1,3297 @@
+{
+  "artifact_schema_version": 1,
+  "blockers": [
+    "STAB-G11",
+    "STAB-G13",
+    "STAB-G14"
+  ],
+  "broadened_corpus": {
+    "accepted_before_ssa": 141,
+    "accepted_category_paths": {
+      "allocation_heavy": [
+        "benchmarks/array_sum.ae",
+        "benchmarks/list_for_sum.ae",
+        "benchmarks/list_push.ae",
+        "benchmarks/matrix_mul.ae",
+        "benchmarks/vector_dot.ae",
+        "corpus/exceptions/positive/constructor_failure.ae",
+        "corpus/exceptions/positive/owned_aggregates_arc.ae",
+        "corpus/exceptions/positive/panic_vs_exception.ae",
+        "examples/LeetCode/twoSum.ae",
+        "examples/Sorts/Main.ae",
+        "examples/Sorts/Sortings.ae",
+        "examples/aggregate_collections/particles.ae",
+        "examples/esPrimo2.ae",
+        "examples/expense_tracker/Ledger.ae",
+        "examples/expense_tracker/Main.ae",
+        "examples/expense_tracker/Persistence.ae",
+        "examples/expense_tracker/Reports.ae",
+        "examples/llvm/array_sort.ae",
+        "examples/llvm/array_sum.ae",
+        "examples/llvm/list_clear.ae",
+        "examples/llvm/list_contains.ae",
+        "examples/llvm/list_copy.ae",
+        "examples/llvm/list_for_sum.ae",
+        "examples/llvm/list_index.ae",
+        "examples/llvm/list_index_of.ae",
+        "examples/llvm/list_insert.ae",
+        "examples/llvm/list_literal.ae",
+        "examples/llvm/list_pop.ae",
+        "examples/llvm/list_pop_alias.ae",
+        "examples/llvm/list_push.ae",
+        "examples/llvm/list_push_alias.ae",
+        "examples/llvm/list_remove_at.ae",
+        "examples/llvm/list_reverse.ae",
+        "examples/llvm/list_set_alias.ae",
+        "examples/llvm/list_sort.ae",
+        "examples/llvm/matrix_add.ae",
+        "examples/llvm/matrix_column_mul.ae",
+        "examples/llvm/matrix_index.ae",
+        "examples/llvm/matrix_literal.ae",
+        "examples/llvm/matrix_matmul.ae",
+        "examples/llvm/matrix_rows_columns.ae",
+        "examples/llvm/matrix_scalar_mul.ae",
+        "examples/llvm/matrix_set.ae",
+        "examples/llvm/matrix_sub.ae",
+        "examples/llvm/outer_product.ae",
+        "examples/llvm/vector_add.ae",
+        "examples/llvm/vector_column_inferred.ae",
+        "examples/llvm/vector_column_literal.ae",
+        "examples/llvm/vector_dot.ae",
+        "examples/llvm/vector_index.ae",
+        "examples/llvm/vector_length.ae",
+        "examples/llvm/vector_literal.ae",
+        "examples/llvm/vector_matrix_mul.ae",
+        "examples/llvm/vector_scalar_mul.ae",
+        "examples/llvm/vector_set.ae",
+        "examples/llvm/vector_sub.ae",
+        "tests/aether/parity_corpus/aggregates.ae",
+        "tests/aether/parity_corpus/arguments.ae",
+        "tests/aether/parity_corpus/files.ae",
+        "tests/aether/parity_corpus/language_core.ae",
+        "tests/aether/parity_corpus/panic.ae",
+        "tests/aether/parity_corpus/panic_list_insert.ae",
+        "tests/aether/parity_corpus/panic_list_pop.ae",
+        "tests/aether/parity_corpus/panic_list_remove.ae",
+        "tests/aether/parity_corpus/scalars.ae",
+        "tests/aether/parity_corpus/strings.ae",
+        "tests/fixtures/o2_proof_coverage/slices.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/aggregate_owned_projection.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/boxed_constructor_receiver.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/owning_is_empty_result.ae"
+      ],
+      "benchmarks": [
+        "benchmarks/arithmetic.ae",
+        "benchmarks/array_sum.ae",
+        "benchmarks/if_else.ae",
+        "benchmarks/list_for_sum.ae",
+        "benchmarks/list_push.ae",
+        "benchmarks/matrix_mul.ae",
+        "benchmarks/nested_loops.ae",
+        "benchmarks/sum_to.ae",
+        "benchmarks/vector_dot.ae",
+        "benchmarks/while_countdown.ae"
+      ],
+      "classes": [
+        "corpus/exceptions/positive/constructor_failure.ae",
+        "corpus/exceptions/positive/indirect_call.ae",
+        "corpus/exceptions/positive/method_interface_dispatch.ae",
+        "corpus/exceptions/positive/multiple_and_root_catches.ae",
+        "examples/classes/const_with_mutable_alias.ae",
+        "examples/classes/counter_basic.ae",
+        "examples/classes/custom_constructor.ae",
+        "examples/classes/implements_interface.ae",
+        "examples/classes/invalid_cases.ae",
+        "examples/classes/private_field_public_methods.ae",
+        "examples/classes/reference_aliasing.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/class_get_owned_result.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/interface_call_temporary.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/interface_lifecycle_default.ae"
+      ],
+      "collections": [
+        "benchmarks/array_sum.ae",
+        "benchmarks/list_for_sum.ae",
+        "benchmarks/list_push.ae",
+        "benchmarks/matrix_mul.ae",
+        "benchmarks/vector_dot.ae",
+        "corpus/exceptions/positive/constructor_failure.ae",
+        "corpus/exceptions/positive/owned_aggregates_arc.ae",
+        "corpus/exceptions/positive/panic_vs_exception.ae",
+        "examples/LeetCode/twoSum.ae",
+        "examples/Sorts/Main.ae",
+        "examples/Sorts/Sortings.ae",
+        "examples/aggregate_collections/particles.ae",
+        "examples/esPrimo2.ae",
+        "examples/expense_tracker/Ledger.ae",
+        "examples/expense_tracker/Main.ae",
+        "examples/expense_tracker/Persistence.ae",
+        "examples/expense_tracker/Reports.ae",
+        "examples/llvm/array_sort.ae",
+        "examples/llvm/array_sum.ae",
+        "examples/llvm/list_clear.ae",
+        "examples/llvm/list_contains.ae",
+        "examples/llvm/list_copy.ae",
+        "examples/llvm/list_for_sum.ae",
+        "examples/llvm/list_index.ae",
+        "examples/llvm/list_index_of.ae",
+        "examples/llvm/list_insert.ae",
+        "examples/llvm/list_literal.ae",
+        "examples/llvm/list_pop.ae",
+        "examples/llvm/list_pop_alias.ae",
+        "examples/llvm/list_push.ae",
+        "examples/llvm/list_push_alias.ae",
+        "examples/llvm/list_remove_at.ae",
+        "examples/llvm/list_reverse.ae",
+        "examples/llvm/list_set_alias.ae",
+        "examples/llvm/list_sort.ae",
+        "examples/llvm/matrix_add.ae",
+        "examples/llvm/matrix_column_mul.ae",
+        "examples/llvm/matrix_index.ae",
+        "examples/llvm/matrix_literal.ae",
+        "examples/llvm/matrix_matmul.ae",
+        "examples/llvm/matrix_rows_columns.ae",
+        "examples/llvm/matrix_scalar_mul.ae",
+        "examples/llvm/matrix_set.ae",
+        "examples/llvm/matrix_sub.ae",
+        "examples/llvm/outer_product.ae",
+        "examples/llvm/vector_add.ae",
+        "examples/llvm/vector_column_inferred.ae",
+        "examples/llvm/vector_column_literal.ae",
+        "examples/llvm/vector_dot.ae",
+        "examples/llvm/vector_index.ae",
+        "examples/llvm/vector_length.ae",
+        "examples/llvm/vector_literal.ae",
+        "examples/llvm/vector_matrix_mul.ae",
+        "examples/llvm/vector_scalar_mul.ae",
+        "examples/llvm/vector_set.ae",
+        "examples/llvm/vector_sub.ae",
+        "tests/aether/parity_corpus/aggregates.ae",
+        "tests/aether/parity_corpus/arguments.ae",
+        "tests/aether/parity_corpus/files.ae",
+        "tests/aether/parity_corpus/language_core.ae",
+        "tests/aether/parity_corpus/panic.ae",
+        "tests/aether/parity_corpus/panic_list_insert.ae",
+        "tests/aether/parity_corpus/panic_list_pop.ae",
+        "tests/aether/parity_corpus/panic_list_remove.ae",
+        "tests/aether/parity_corpus/scalars.ae",
+        "tests/aether/parity_corpus/strings.ae",
+        "tests/fixtures/o2_proof_coverage/slices.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/aggregate_owned_projection.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/boxed_constructor_receiver.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/owning_is_empty_result.ae"
+      ],
+      "exceptions": [
+        "corpus/exceptions/positive/cleanup_during_unwinding.ae",
+        "corpus/exceptions/positive/constructor_failure.ae",
+        "corpus/exceptions/positive/function_recursion.ae",
+        "corpus/exceptions/positive/indirect_call.ae",
+        "corpus/exceptions/positive/method_interface_dispatch.ae",
+        "corpus/exceptions/positive/multiple_and_root_catches.ae",
+        "corpus/exceptions/positive/nested_rethrow_chain.ae",
+        "corpus/exceptions/positive/owned_aggregates_arc.ae",
+        "corpus/exceptions/positive/panic_vs_exception.ae",
+        "corpus/exceptions/positive/root_reporting.ae",
+        "corpus/exceptions/positive/throw_and_typed_catch.ae",
+        "examples/Sorts/IllegalArgumentException.ae",
+        "examples/pruebaException.ae"
+      ],
+      "expense_tracker": [
+        "examples/expense_tracker/Ledger.ae",
+        "examples/expense_tracker/Main.ae",
+        "examples/expense_tracker/Persistence.ae",
+        "examples/expense_tracker/Reports.ae",
+        "examples/expense_tracker/Transaction.ae"
+      ],
+      "function_values_indirect_calls": [
+        "corpus/exceptions/positive/indirect_call.ae",
+        "examples/ControlesALN/1erControl/Ej1/Biseccion.ae",
+        "examples/ControlesALN/1erControl/Ej2/PuntoFijo.ae",
+        "examples/ProbandoNR/probandoNR2.ae",
+        "examples/ProbandoNR/probandoNR3.ae",
+        "examples/numerical_methods/Functions.ae"
+      ],
+      "interfaces": [
+        "corpus/exceptions/positive/cleanup_during_unwinding.ae",
+        "corpus/exceptions/positive/constructor_failure.ae",
+        "corpus/exceptions/positive/function_recursion.ae",
+        "corpus/exceptions/positive/indirect_call.ae",
+        "corpus/exceptions/positive/method_interface_dispatch.ae",
+        "corpus/exceptions/positive/multiple_and_root_catches.ae",
+        "corpus/exceptions/positive/nested_rethrow_chain.ae",
+        "corpus/exceptions/positive/owned_aggregates_arc.ae",
+        "corpus/exceptions/positive/panic_vs_exception.ae",
+        "corpus/exceptions/positive/root_reporting.ae",
+        "corpus/exceptions/positive/throw_and_typed_catch.ae",
+        "examples/Sorts/IllegalArgumentException.ae",
+        "examples/classes/implements_interface.ae",
+        "examples/pruebaException.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/boxed_constructor_receiver.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/interface_call_temporary.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/interface_lifecycle_default.ae"
+      ],
+      "numerical_methods": [
+        "examples/ControlesALN/1erControl/Ej1/Biseccion.ae",
+        "examples/ControlesALN/1erControl/Ej2/PuntoFijo.ae",
+        "examples/numerical_methods/Functions.ae",
+        "examples/numerical_methods/Integration.ae",
+        "examples/numerical_methods/Problems.ae",
+        "examples/numerical_methods/Results.ae",
+        "examples/numerical_methods/Roots.ae",
+        "examples/numerical_methods/main.ae"
+      ],
+      "plotting_independent": [
+        "benchmarks/arithmetic.ae",
+        "benchmarks/array_sum.ae",
+        "benchmarks/if_else.ae",
+        "benchmarks/list_for_sum.ae",
+        "benchmarks/list_push.ae",
+        "benchmarks/matrix_mul.ae",
+        "benchmarks/nested_loops.ae",
+        "benchmarks/sum_to.ae",
+        "benchmarks/vector_dot.ae",
+        "benchmarks/while_countdown.ae",
+        "corpus/exceptions/positive/cleanup_during_unwinding.ae",
+        "corpus/exceptions/positive/constructor_failure.ae",
+        "corpus/exceptions/positive/function_recursion.ae",
+        "corpus/exceptions/positive/indirect_call.ae",
+        "corpus/exceptions/positive/method_interface_dispatch.ae",
+        "corpus/exceptions/positive/multiple_and_root_catches.ae",
+        "corpus/exceptions/positive/nested_rethrow_chain.ae",
+        "corpus/exceptions/positive/owned_aggregates_arc.ae",
+        "corpus/exceptions/positive/panic_vs_exception.ae",
+        "corpus/exceptions/positive/root_reporting.ae",
+        "corpus/exceptions/positive/throw_and_typed_catch.ae",
+        "examples/ControlesALN/1erControl/Ej1/Biseccion.ae",
+        "examples/ControlesALN/1erControl/Ej2/PuntoFijo.ae",
+        "examples/ControlesALN/1erControl/Ej2/ej2.ae",
+        "examples/ControlesALN/2doControl/Ej2/ej2.ae",
+        "examples/FormulaNumerosPrimos.ae",
+        "examples/LeetCode/isPalindrome.ae",
+        "examples/LeetCode/twoSum.ae",
+        "examples/ProbandoNR/probandoNR2.ae",
+        "examples/ProbandoNR/probandoNR3.ae",
+        "examples/Sorts/IllegalArgumentException.ae",
+        "examples/Sorts/Main.ae",
+        "examples/Sorts/Sortings.ae",
+        "examples/aggregate_collections/particles.ae",
+        "examples/classes/const_with_mutable_alias.ae",
+        "examples/classes/counter_basic.ae",
+        "examples/classes/custom_constructor.ae",
+        "examples/classes/implements_interface.ae",
+        "examples/classes/invalid_cases.ae",
+        "examples/classes/private_field_public_methods.ae",
+        "examples/classes/reference_aliasing.ae",
+        "examples/esPrimo2.ae",
+        "examples/expense_tracker/Ledger.ae",
+        "examples/expense_tracker/Main.ae",
+        "examples/expense_tracker/Persistence.ae",
+        "examples/expense_tracker/Reports.ae",
+        "examples/expense_tracker/Transaction.ae",
+        "examples/hello.ae",
+        "examples/ir/constant_fold.ae",
+        "examples/ir/local_const.ae",
+        "examples/ir/sumTo.ae",
+        "examples/llvm/arithmetic.ae",
+        "examples/llvm/array_sort.ae",
+        "examples/llvm/array_sum.ae",
+        "examples/llvm/countdown.ae",
+        "examples/llvm/double_add.ae",
+        "examples/llvm/double_compare.ae",
+        "examples/llvm/double_to_int.ae",
+        "examples/llvm/for_break_continue.ae",
+        "examples/llvm/for_sum.ae",
+        "examples/llvm/gcd_iterative.ae",
+        "examples/llvm/identity_call.ae",
+        "examples/llvm/int_to_double.ae",
+        "examples/llvm/list_clear.ae",
+        "examples/llvm/list_contains.ae",
+        "examples/llvm/list_copy.ae",
+        "examples/llvm/list_for_sum.ae",
+        "examples/llvm/list_index.ae",
+        "examples/llvm/list_index_of.ae",
+        "examples/llvm/list_insert.ae",
+        "examples/llvm/list_literal.ae",
+        "examples/llvm/list_pop.ae",
+        "examples/llvm/list_pop_alias.ae",
+        "examples/llvm/list_push.ae",
+        "examples/llvm/list_push_alias.ae",
+        "examples/llvm/list_remove_at.ae",
+        "examples/llvm/list_reverse.ae",
+        "examples/llvm/list_set_alias.ae",
+        "examples/llvm/list_sort.ae",
+        "examples/llvm/matrix_add.ae",
+        "examples/llvm/matrix_column_mul.ae",
+        "examples/llvm/matrix_index.ae",
+        "examples/llvm/matrix_literal.ae",
+        "examples/llvm/matrix_matmul.ae",
+        "examples/llvm/matrix_rows_columns.ae",
+        "examples/llvm/matrix_scalar_mul.ae",
+        "examples/llvm/matrix_set.ae",
+        "examples/llvm/matrix_sub.ae",
+        "examples/llvm/max.ae",
+        "examples/llvm/outer_product.ae",
+        "examples/llvm/return_5.ae",
+        "examples/llvm/string_choose.ae",
+        "examples/llvm/string_identity.ae",
+        "examples/llvm/sum_to_n.ae",
+        "examples/llvm/vector_add.ae",
+        "examples/llvm/vector_column_inferred.ae",
+        "examples/llvm/vector_column_literal.ae",
+        "examples/llvm/vector_dot.ae",
+        "examples/llvm/vector_index.ae",
+        "examples/llvm/vector_length.ae",
+        "examples/llvm/vector_literal.ae",
+        "examples/llvm/vector_matrix_mul.ae",
+        "examples/llvm/vector_scalar_mul.ae",
+        "examples/llvm/vector_set.ae",
+        "examples/llvm/vector_sub.ae",
+        "examples/nose.ae",
+        "examples/numerical_methods/Functions.ae",
+        "examples/numerical_methods/Integration.ae",
+        "examples/numerical_methods/Problems.ae",
+        "examples/numerical_methods/Results.ae",
+        "examples/numerical_methods/Roots.ae",
+        "examples/numerical_methods/main.ae",
+        "examples/pruebaException.ae",
+        "examples/structs/Geometry.ae",
+        "examples/structs/custom_constructor_and_equality.ae",
+        "examples/structs/main.ae",
+        "scrap/probandoAlgo.ae",
+        "tests/aether/parity_corpus/aggregates.ae",
+        "tests/aether/parity_corpus/arguments.ae",
+        "tests/aether/parity_corpus/files.ae",
+        "tests/aether/parity_corpus/language_core.ae",
+        "tests/aether/parity_corpus/modules/Helper.ae",
+        "tests/aether/parity_corpus/modules/Main.ae",
+        "tests/aether/parity_corpus/panic.ae",
+        "tests/aether/parity_corpus/panic_division_zero.ae",
+        "tests/aether/parity_corpus/panic_integer_overflow.ae",
+        "tests/aether/parity_corpus/panic_list_insert.ae",
+        "tests/aether/parity_corpus/panic_list_pop.ae",
+        "tests/aether/parity_corpus/panic_list_remove.ae",
+        "tests/aether/parity_corpus/panic_split.ae",
+        "tests/aether/parity_corpus/scalars.ae",
+        "tests/aether/parity_corpus/strings.ae",
+        "tests/fixtures/o2_proof_coverage/slices.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/aggregate_owned_projection.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/boxed_constructor_receiver.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/class_get_owned_result.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/interface_call_temporary.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/interface_lifecycle_default.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/nullable_owned_return.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/owning_call_result.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/owning_is_empty_result.ae"
+      ],
+      "realistic_multi_function_modules": [
+        "corpus/exceptions/positive/cleanup_during_unwinding.ae",
+        "corpus/exceptions/positive/function_recursion.ae",
+        "corpus/exceptions/positive/indirect_call.ae",
+        "corpus/exceptions/positive/method_interface_dispatch.ae",
+        "corpus/exceptions/positive/multiple_and_root_catches.ae",
+        "corpus/exceptions/positive/nested_rethrow_chain.ae",
+        "corpus/exceptions/positive/owned_aggregates_arc.ae",
+        "corpus/exceptions/positive/root_reporting.ae",
+        "examples/ProbandoNR/probandoNR2.ae",
+        "examples/ProbandoNR/probandoNR3.ae",
+        "examples/Sorts/Sortings.ae",
+        "examples/classes/custom_constructor.ae",
+        "examples/classes/invalid_cases.ae",
+        "examples/expense_tracker/Main.ae",
+        "examples/expense_tracker/Persistence.ae",
+        "examples/expense_tracker/Reports.ae",
+        "examples/llvm/list_push_alias.ae",
+        "examples/llvm/string_identity.ae",
+        "examples/numerical_methods/Problems.ae",
+        "examples/numerical_methods/Roots.ae",
+        "tests/aether/parity_corpus/language_core.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/interface_call_temporary.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/interface_lifecycle_default.ae"
+      ],
+      "recursive_programs": [
+        "corpus/exceptions/positive/function_recursion.ae"
+      ],
+      "string_heavy": [
+        "corpus/exceptions/positive/cleanup_during_unwinding.ae",
+        "corpus/exceptions/positive/constructor_failure.ae",
+        "corpus/exceptions/positive/function_recursion.ae",
+        "corpus/exceptions/positive/indirect_call.ae",
+        "corpus/exceptions/positive/method_interface_dispatch.ae",
+        "corpus/exceptions/positive/multiple_and_root_catches.ae",
+        "corpus/exceptions/positive/nested_rethrow_chain.ae",
+        "corpus/exceptions/positive/owned_aggregates_arc.ae",
+        "corpus/exceptions/positive/panic_vs_exception.ae",
+        "corpus/exceptions/positive/root_reporting.ae",
+        "corpus/exceptions/positive/throw_and_typed_catch.ae",
+        "examples/Sorts/IllegalArgumentException.ae",
+        "examples/classes/private_field_public_methods.ae",
+        "examples/expense_tracker/Ledger.ae",
+        "examples/expense_tracker/Main.ae",
+        "examples/expense_tracker/Persistence.ae",
+        "examples/expense_tracker/Reports.ae",
+        "examples/expense_tracker/Transaction.ae",
+        "examples/llvm/list_contains.ae",
+        "examples/llvm/string_choose.ae",
+        "examples/llvm/string_identity.ae",
+        "examples/pruebaException.ae",
+        "tests/aether/parity_corpus/aggregates.ae",
+        "tests/aether/parity_corpus/arguments.ae",
+        "tests/aether/parity_corpus/files.ae",
+        "tests/aether/parity_corpus/language_core.ae",
+        "tests/aether/parity_corpus/strings.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/aggregate_owned_projection.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/boxed_constructor_receiver.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/class_get_owned_result.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/nullable_owned_return.ae"
+      ],
+      "structs": [
+        "corpus/exceptions/positive/cleanup_during_unwinding.ae",
+        "corpus/exceptions/positive/constructor_failure.ae",
+        "corpus/exceptions/positive/function_recursion.ae",
+        "corpus/exceptions/positive/method_interface_dispatch.ae",
+        "corpus/exceptions/positive/multiple_and_root_catches.ae",
+        "corpus/exceptions/positive/nested_rethrow_chain.ae",
+        "corpus/exceptions/positive/owned_aggregates_arc.ae",
+        "corpus/exceptions/positive/panic_vs_exception.ae",
+        "corpus/exceptions/positive/root_reporting.ae",
+        "corpus/exceptions/positive/throw_and_typed_catch.ae",
+        "examples/ControlesALN/1erControl/Ej2/PuntoFijo.ae",
+        "examples/ProbandoNR/probandoNR2.ae",
+        "examples/ProbandoNR/probandoNR3.ae",
+        "examples/Sorts/IllegalArgumentException.ae",
+        "examples/aggregate_collections/particles.ae",
+        "examples/expense_tracker/Persistence.ae",
+        "examples/expense_tracker/Reports.ae",
+        "examples/expense_tracker/Transaction.ae",
+        "examples/numerical_methods/Results.ae",
+        "examples/pruebaException.ae",
+        "examples/structs/Geometry.ae",
+        "examples/structs/custom_constructor_and_equality.ae",
+        "tests/aether/parity_corpus/aggregates.ae",
+        "tests/aether/parity_corpus/language_core.ae",
+        "tests/aether/parity_corpus/modules/Helper.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/aggregate_owned_projection.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/boxed_constructor_receiver.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/nullable_owned_return.ae"
+      ],
+      "valid_source_fixture": [
+        "benchmarks/arithmetic.ae",
+        "benchmarks/array_sum.ae",
+        "benchmarks/if_else.ae",
+        "benchmarks/list_for_sum.ae",
+        "benchmarks/list_push.ae",
+        "benchmarks/matrix_mul.ae",
+        "benchmarks/nested_loops.ae",
+        "benchmarks/sum_to.ae",
+        "benchmarks/vector_dot.ae",
+        "benchmarks/while_countdown.ae",
+        "corpus/exceptions/positive/cleanup_during_unwinding.ae",
+        "corpus/exceptions/positive/constructor_failure.ae",
+        "corpus/exceptions/positive/function_recursion.ae",
+        "corpus/exceptions/positive/indirect_call.ae",
+        "corpus/exceptions/positive/method_interface_dispatch.ae",
+        "corpus/exceptions/positive/multiple_and_root_catches.ae",
+        "corpus/exceptions/positive/nested_rethrow_chain.ae",
+        "corpus/exceptions/positive/owned_aggregates_arc.ae",
+        "corpus/exceptions/positive/panic_vs_exception.ae",
+        "corpus/exceptions/positive/root_reporting.ae",
+        "corpus/exceptions/positive/throw_and_typed_catch.ae",
+        "examples/ControlesALN/1erControl/Ej1/Biseccion.ae",
+        "examples/ControlesALN/1erControl/Ej2/PuntoFijo.ae",
+        "examples/ControlesALN/1erControl/Ej2/ej2.ae",
+        "examples/ControlesALN/2doControl/Ej2/ej2.ae",
+        "examples/FormulaNumerosPrimos.ae",
+        "examples/LeetCode/isPalindrome.ae",
+        "examples/LeetCode/twoSum.ae",
+        "examples/ProbandoNR/probandoNR2.ae",
+        "examples/ProbandoNR/probandoNR3.ae",
+        "examples/Sorts/IllegalArgumentException.ae",
+        "examples/Sorts/Main.ae",
+        "examples/Sorts/Sortings.ae",
+        "examples/aggregate_collections/particles.ae",
+        "examples/classes/const_with_mutable_alias.ae",
+        "examples/classes/counter_basic.ae",
+        "examples/classes/custom_constructor.ae",
+        "examples/classes/implements_interface.ae",
+        "examples/classes/invalid_cases.ae",
+        "examples/classes/private_field_public_methods.ae",
+        "examples/classes/reference_aliasing.ae",
+        "examples/esPrimo2.ae",
+        "examples/expense_tracker/Ledger.ae",
+        "examples/expense_tracker/Main.ae",
+        "examples/expense_tracker/Persistence.ae",
+        "examples/expense_tracker/Reports.ae",
+        "examples/expense_tracker/Transaction.ae",
+        "examples/hello.ae",
+        "examples/ir/constant_fold.ae",
+        "examples/ir/local_const.ae",
+        "examples/ir/sumTo.ae",
+        "examples/llvm/arithmetic.ae",
+        "examples/llvm/array_sort.ae",
+        "examples/llvm/array_sum.ae",
+        "examples/llvm/countdown.ae",
+        "examples/llvm/double_add.ae",
+        "examples/llvm/double_compare.ae",
+        "examples/llvm/double_to_int.ae",
+        "examples/llvm/for_break_continue.ae",
+        "examples/llvm/for_sum.ae",
+        "examples/llvm/gcd_iterative.ae",
+        "examples/llvm/identity_call.ae",
+        "examples/llvm/int_to_double.ae",
+        "examples/llvm/list_clear.ae",
+        "examples/llvm/list_contains.ae",
+        "examples/llvm/list_copy.ae",
+        "examples/llvm/list_for_sum.ae",
+        "examples/llvm/list_index.ae",
+        "examples/llvm/list_index_of.ae",
+        "examples/llvm/list_insert.ae",
+        "examples/llvm/list_literal.ae",
+        "examples/llvm/list_pop.ae",
+        "examples/llvm/list_pop_alias.ae",
+        "examples/llvm/list_push.ae",
+        "examples/llvm/list_push_alias.ae",
+        "examples/llvm/list_remove_at.ae",
+        "examples/llvm/list_reverse.ae",
+        "examples/llvm/list_set_alias.ae",
+        "examples/llvm/list_sort.ae",
+        "examples/llvm/matrix_add.ae",
+        "examples/llvm/matrix_column_mul.ae",
+        "examples/llvm/matrix_index.ae",
+        "examples/llvm/matrix_literal.ae",
+        "examples/llvm/matrix_matmul.ae",
+        "examples/llvm/matrix_rows_columns.ae",
+        "examples/llvm/matrix_scalar_mul.ae",
+        "examples/llvm/matrix_set.ae",
+        "examples/llvm/matrix_sub.ae",
+        "examples/llvm/max.ae",
+        "examples/llvm/outer_product.ae",
+        "examples/llvm/return_5.ae",
+        "examples/llvm/string_choose.ae",
+        "examples/llvm/string_identity.ae",
+        "examples/llvm/sum_to_n.ae",
+        "examples/llvm/vector_add.ae",
+        "examples/llvm/vector_column_inferred.ae",
+        "examples/llvm/vector_column_literal.ae",
+        "examples/llvm/vector_dot.ae",
+        "examples/llvm/vector_index.ae",
+        "examples/llvm/vector_length.ae",
+        "examples/llvm/vector_literal.ae",
+        "examples/llvm/vector_matrix_mul.ae",
+        "examples/llvm/vector_scalar_mul.ae",
+        "examples/llvm/vector_set.ae",
+        "examples/llvm/vector_sub.ae",
+        "examples/nose.ae",
+        "examples/numerical_methods/Functions.ae",
+        "examples/numerical_methods/Integration.ae",
+        "examples/numerical_methods/Problems.ae",
+        "examples/numerical_methods/Results.ae",
+        "examples/numerical_methods/Roots.ae",
+        "examples/numerical_methods/main.ae",
+        "examples/pruebaException.ae",
+        "examples/structs/Geometry.ae",
+        "examples/structs/custom_constructor_and_equality.ae",
+        "examples/structs/main.ae",
+        "scrap/probandoAlgo.ae",
+        "tests/aether/parity_corpus/aggregates.ae",
+        "tests/aether/parity_corpus/arguments.ae",
+        "tests/aether/parity_corpus/files.ae",
+        "tests/aether/parity_corpus/language_core.ae",
+        "tests/aether/parity_corpus/modules/Helper.ae",
+        "tests/aether/parity_corpus/modules/Main.ae",
+        "tests/aether/parity_corpus/panic.ae",
+        "tests/aether/parity_corpus/panic_division_zero.ae",
+        "tests/aether/parity_corpus/panic_integer_overflow.ae",
+        "tests/aether/parity_corpus/panic_list_insert.ae",
+        "tests/aether/parity_corpus/panic_list_pop.ae",
+        "tests/aether/parity_corpus/panic_list_remove.ae",
+        "tests/aether/parity_corpus/panic_split.ae",
+        "tests/aether/parity_corpus/scalars.ae",
+        "tests/aether/parity_corpus/strings.ae",
+        "tests/fixtures/o2_proof_coverage/slices.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/aggregate_owned_projection.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/boxed_constructor_receiver.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/class_get_owned_result.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/interface_call_temporary.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/interface_lifecycle_default.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/nullable_owned_return.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/owning_call_result.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/owning_is_empty_result.ae"
+      ]
+    },
+    "category_gate": "PASS",
+    "compared_per_round": 141,
+    "discovered_programs": 176,
+    "discovery_roots": [
+      "examples",
+      "benchmarks",
+      "corpus",
+      "tests",
+      "scrap"
+    ],
+    "historical_discovered": 169,
+    "missing_categories": [],
+    "programs": [
+      {
+        "categories": [
+          "benchmarks",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "benchmarks/arithmetic.ae",
+        "source_sha256": "3d171f5ee4256c057f9c2f6eeb956ec031ed386d0bbfa3a6d46ed4ba4bb30928",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "benchmarks",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "benchmarks/array_sum.ae",
+        "source_sha256": "0a2c67cda7a9b7924a5d6c848c39418766fb84b7b61a0b0f94088beed14d1b6f",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "benchmarks",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "benchmarks/if_else.ae",
+        "source_sha256": "c02a460c53dcd34292efc308b1c8fad4e3be8c3f77fb68792ad0e726b09fd42d",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "benchmarks",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "benchmarks/list_for_sum.ae",
+        "source_sha256": "154649fbcc0f9dcb2f3699cd5dd6496124cef33bea4ca7053cc5c3fbf9f75314",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "benchmarks",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "benchmarks/list_push.ae",
+        "source_sha256": "432dda870fe8d7d8eaaf674a2521e7129f2e0fa6e617a303a689f050d1ebd07f",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "benchmarks",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "benchmarks/matrix_mul.ae",
+        "source_sha256": "72b1f94b369b5622e6d4de9ef71f9b6121ed9bbea18a37709d0f20a511abd0a7",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "benchmarks",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "benchmarks/nested_loops.ae",
+        "source_sha256": "6a2393e7861f0c800a3d14a795fac698fa45f9ec0ac18b1709ec6bc7e4a179fa",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "benchmarks",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "benchmarks/sum_to.ae",
+        "source_sha256": "c17640648a69bdc01ffdfa4847ab79e15a9f6989aec3096b135cad9ecb4cc5eb",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "benchmarks",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "benchmarks/vector_dot.ae",
+        "source_sha256": "6fddfab8cd4eca785e7373abbb726a2e7b92dcd4477cfc94f387a37801bc7119",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "benchmarks",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "benchmarks/while_countdown.ae",
+        "source_sha256": "b18ba3967e0080e62110dc3476d8423b225de1c8d5561427f1a71c02a5c37eb0",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "exceptions",
+          "interfaces",
+          "plotting_independent",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "exception": "AetherTypeError",
+        "path": "corpus/exceptions/negative/duplicate_handlers.ae",
+        "reason": "AetherTypeError at line 8, column 5 [exception]: Duplicate catch for exact type 'DuplicateError'. Hint: the first catch for this type is at line 7, column 5.",
+        "source_sha256": "85a9f9f6e3788e8195a0a10dc2ec53761795502ad879da49a2f1e959074d11ea",
+        "stage": "typecheck_or_module_resolution",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "exceptions",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "AetherTypeError",
+        "path": "corpus/exceptions/negative/illegal_rethrow.ae",
+        "reason": "AetherTypeError at line 2, column 5 [exception]: Bare rethrow is only valid inside an active catch body. Hint: use 'throw error;' to create a new exception event.",
+        "source_sha256": "f3d6e6c9eb5bf5553b7d377dce96bf0c75ffb9982c29fde834dab89e0803a8a6",
+        "stage": "typecheck_or_module_resolution",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "exceptions",
+          "interfaces",
+          "plotting_independent",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "exception": "AetherTypeError",
+        "path": "corpus/exceptions/negative/invalid_catch_ordering.ae",
+        "reason": "AetherTypeError at line 8, column 5 [exception]: Catch for 'OrderedError' is unreachable because Error is already caught. Hint: the Error catch starts at line 7, column 5 and must be last.",
+        "source_sha256": "8cfe545f6055ff32a325fb9905b1a02f56e18dd8f958d864ccfa2a2bb9dd4cc1",
+        "stage": "typecheck_or_module_resolution",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "exceptions",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "AetherTypeError",
+        "path": "corpus/exceptions/negative/invalid_throw.ae",
+        "reason": "AetherTypeError at line 2, column 11 [exception]: Thrown value of type 'int' does not implement Error. Hint: declare a struct or class that implements Error.",
+        "source_sha256": "e0442a2f087ec2ceebdec1ec3110ad1bbcbb741e03f5a894112138ce947f91c5",
+        "stage": "typecheck_or_module_resolution",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "exceptions",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "AetherSyntaxError",
+        "path": "corpus/exceptions/negative/malformed_catch.ae",
+        "reason": "AetherSyntaxError at line 4, column 5: Expected '{' before block. near 'return'.",
+        "source_sha256": "5cea45fc38924c620cb94148ce516e38d644a99808a5a47845549dba543d1c3c",
+        "stage": "parse",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "exceptions",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "AetherSyntaxError",
+        "path": "corpus/exceptions/negative/malformed_throw.ae",
+        "reason": "AetherSyntaxError at line 3, column 1: Expected an expression or ';' after 'throw'. near '}'.",
+        "source_sha256": "e1c14f7a6f8ef8185a624764261cb30a0662891878bb9d6a15d93353cf468978",
+        "stage": "parse",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "exceptions",
+          "plotting_independent",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "exception": "AetherTypeError",
+        "path": "corpus/exceptions/negative/non_error_catch.ae",
+        "reason": "AetherTypeError at line 7, column 5 [exception]: Catch type 'NotAnError' does not implement Error. Hint: catch a concrete Error implementation or Error itself.",
+        "source_sha256": "6cdb43eedb5b3c0158396f05c3f7f720543e494137e57124cb2a9da80ab7ec47",
+        "stage": "typecheck_or_module_resolution",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "classes",
+          "exceptions",
+          "plotting_independent",
+          "string_heavy",
+          "valid_source_fixture"
+        ],
+        "exception": "AetherTypeError",
+        "path": "corpus/exceptions/negative/non_error_throwable.ae",
+        "reason": "AetherTypeError at line 6, column 11 [exception]: Thrown value of type 'NotAnError' does not implement Error. Hint: declare a struct or class that implements Error.",
+        "source_sha256": "0f1d76c83b566974111d52ebed52082af4b6584c70573b78840f55c1c750a8dd",
+        "stage": "typecheck_or_module_resolution",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "exceptions",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "AetherTypeError",
+        "path": "corpus/exceptions/negative/null_throw.ae",
+        "reason": "AetherTypeError at line 2, column 11 [exception]: Cannot throw null or a nullable value. Hint: throw a non-null value whose type implements Error.",
+        "source_sha256": "d46b86ec2efb49c8fae162c0aac91d09eb1e80ad3419b850170d7ea680435a3b",
+        "stage": "typecheck_or_module_resolution",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "exceptions",
+          "interfaces",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "corpus/exceptions/positive/cleanup_during_unwinding.ae",
+        "source_sha256": "edf88bb8b3e09e6d86331d726913e15817a8c87043db9c94e7c9a939932e40a2",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "classes",
+          "collections",
+          "exceptions",
+          "interfaces",
+          "plotting_independent",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "corpus/exceptions/positive/constructor_failure.ae",
+        "source_sha256": "dd545fe59b175c6767f624dec478f7a4eae1a0187d853cd2a6cdc729f3acea3b",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "exceptions",
+          "interfaces",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "recursive_programs",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "corpus/exceptions/positive/function_recursion.ae",
+        "source_sha256": "fdc14a01602dbcbe0ccb70626bcb455f90e50a1066c6e0423fcee2ed2b1bb9e1",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "classes",
+          "exceptions",
+          "function_values_indirect_calls",
+          "interfaces",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "string_heavy",
+          "valid_source_fixture"
+        ],
+        "path": "corpus/exceptions/positive/indirect_call.ae",
+        "source_sha256": "e8bf0d1a5d31929b8ad70153362a6945d2c9d90fdf539b36189fd9c8967ef699",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "classes",
+          "exceptions",
+          "interfaces",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "corpus/exceptions/positive/method_interface_dispatch.ae",
+        "source_sha256": "5c48295672a7ee904919901c3245465495f57fd7e5b99e4258261c690fc0ba76",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "classes",
+          "exceptions",
+          "interfaces",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "corpus/exceptions/positive/multiple_and_root_catches.ae",
+        "source_sha256": "0501cefb6fd7ad3139d78adcf7027aaae12110dfde0e257c4947003d3bb4e7f5",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "exceptions",
+          "interfaces",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "corpus/exceptions/positive/nested_rethrow_chain.ae",
+        "source_sha256": "cd8803ec41f9a9bac3ed8aa5fb2f8086a12bb33258e1c6813c6cfd4adc224cc9",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "exceptions",
+          "interfaces",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "corpus/exceptions/positive/owned_aggregates_arc.ae",
+        "source_sha256": "d759101fed414da5749401a8eb3b196f39e806f13140be1e7054dbaacdb524f3",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "exceptions",
+          "interfaces",
+          "plotting_independent",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "corpus/exceptions/positive/panic_vs_exception.ae",
+        "source_sha256": "620a0376d88e2174e12ba657a8114674509fb5812bda613fc37683ed3fec97ad",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "exceptions",
+          "interfaces",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "corpus/exceptions/positive/root_reporting.ae",
+        "source_sha256": "2f4ec27c088408213ba419a8b36829685b5ec5fec27d8eaea997fd4808cda35f",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "exceptions",
+          "interfaces",
+          "plotting_independent",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "corpus/exceptions/positive/throw_and_typed_catch.ae",
+        "source_sha256": "9336090e4323f2c473e46eab95536bb6ad140e101fffe8bf6053e8ca3ee3c164",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "function_values_indirect_calls",
+          "numerical_methods",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/ControlesALN/1erControl/Ej1/Biseccion.ae",
+        "source_sha256": "99d368a8d57ef5213b963e99696155ccbfc2dd71e3becf57ddb7e202c0f19546",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/ControlesALN/1erControl/Ej1/ej1.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 12, column 1: IR backend does not support identifier 'Plots' outside local scope yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "8b17f516b86dfd4c2f55436379e388e644c1bcbc16b7c491d900e1b9053c9e29",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "function_values_indirect_calls",
+          "numerical_methods",
+          "plotting_independent",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "examples/ControlesALN/1erControl/Ej2/PuntoFijo.ae",
+        "source_sha256": "8f80564cc3b76af78719ba8e5711e60742f33b30d00ae0ebee67c1bbcf5e360d",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/ControlesALN/1erControl/Ej2/ej2.ae",
+        "source_sha256": "78351baccbc26d0a3c7de45d340bfb04562073f00d75500c2ac734440aeec1da",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/ControlesALN/2doControl/Ej1/ej1.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 21, column 1: IR backend does not support identifier 'pl' outside local scope yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "558ea52b68e00f136ca28cc6737b4ac8309fd4f51a3797ba0a37057c394d39cc",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/ControlesALN/2doControl/Ej2/ej2.ae",
+        "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/FormulaNumerosPrimos.ae",
+        "source_sha256": "5efd903be6a3496869a3acbd48ae6388b16f4e08a3b4a0bbb0138506eb1799c0",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/LeetCode/isPalindrome.ae",
+        "source_sha256": "edafdae8966f606c7834075443386952cc3629681868662df5a052ed45c88fb5",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/LeetCode/twoSum.ae",
+        "source_sha256": "1b64daeaa15a92fcd91cf2f37c297084899b9e152472dcf89069ac418137ee28",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "interfaces",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/Miller-Rabbin.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 87, column 18: IR backend does not support InputCall yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "ae09e60515e1149395459bd8048ca9788e761b3e40b3bd08528eee1833e62514",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "function_values_indirect_calls",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "examples/ProbandoNR/probandoNR2.ae",
+        "source_sha256": "6b8ebe5f266786ea0e98947b943c105d105d906edd6bf36059b93fa238c344ff",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "function_values_indirect_calls",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "examples/ProbandoNR/probandoNR3.ae",
+        "source_sha256": "fde24118760f85b08a30a521cb26d59fc5ed2ecd03c6ef0d3270f3bcdeeb0d22",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/SNL.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 16, column 40: IR backend requires known dimensions for Matrix * Vector<Column>. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "dd154145dc2ce3d8c747d3f3c143f0ff05b615988cf9c03f33d3aaa3133626ef",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "exceptions",
+          "interfaces",
+          "plotting_independent",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "examples/Sorts/IllegalArgumentException.ae",
+        "source_sha256": "d93ca12de6cd037ac91cfd9f45d21ce59267293ac2e8cc2774bf5dc697992299",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/Sorts/Main.ae",
+        "source_sha256": "d3d8bf37281b38bb96402f1eec9fddd34ce77dc5df6d9b431d5aa47975597838",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "valid_source_fixture"
+        ],
+        "path": "examples/Sorts/Sortings.ae",
+        "source_sha256": "4b208cb588b35cccad6ddc20f024c877669f131f01561f422b5bfe3009024acc",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "examples/aggregate_collections/particles.ae",
+        "source_sha256": "a1a8d68be207ee5544eb4bff883c7800933afa89c646ca3bc5b1991a175ca971",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "classes",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/classes/const_with_mutable_alias.ae",
+        "source_sha256": "2258356f03dc7e5c82cad59e8d78d040c9eb661e373a5fd2f9ebf435d4e0bb1d",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "classes",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/classes/counter_basic.ae",
+        "source_sha256": "9fcafb8a3b6bd578b560fca9329f690316cf604a8d36816ce7092d8142e2ef12",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "classes",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "valid_source_fixture"
+        ],
+        "path": "examples/classes/custom_constructor.ae",
+        "source_sha256": "d5ff0fef314a93a9261a6f4ac440a125492819aca2d89cc4baa0ba7d493eed6d",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "classes",
+          "interfaces",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/classes/implements_interface.ae",
+        "source_sha256": "b032caa9d75bc8a0e5821f65c2a0321720dbaedf0b19a750f858210d980af4d4",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "classes",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "valid_source_fixture"
+        ],
+        "path": "examples/classes/invalid_cases.ae",
+        "source_sha256": "ff82178edf914e9efb9a272880132f61478128067f2f0fc88363155ccde5ca81",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "classes",
+          "plotting_independent",
+          "string_heavy",
+          "valid_source_fixture"
+        ],
+        "path": "examples/classes/private_field_public_methods.ae",
+        "source_sha256": "750ccfd1ecdfc3be8b9f0d3045da42013b4882622f8937bd316883a7b3aec189",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "classes",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/classes/reference_aliasing.ae",
+        "source_sha256": "62f8fc86b2702d2ba5a8e0a9c3a15ac765d51ee1426a6225d6d7ec13ee0a5ad7",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/esPrimo2.ae",
+        "source_sha256": "ed81dbe91f3712f0ea0a1bdcc1a1c94310cb48c372f1ee3a5b27be8cb7269341",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "expense_tracker",
+          "plotting_independent",
+          "string_heavy",
+          "valid_source_fixture"
+        ],
+        "path": "examples/expense_tracker/Ledger.ae",
+        "source_sha256": "50619cc16e44b34c8f8f40af25e70a1a75f4720216546e067f9c0fd79bec7f07",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "expense_tracker",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "string_heavy",
+          "valid_source_fixture"
+        ],
+        "path": "examples/expense_tracker/Main.ae",
+        "source_sha256": "ba4297c19a6556a3a2212934e92feed2d8302a9dee38b0b9968a0b49c1b04578",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "expense_tracker",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "examples/expense_tracker/Persistence.ae",
+        "source_sha256": "25a1cf5cef91ccd99a276dcb7f69a1c936506049a8f0bb3e5806583e393f60a5",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "expense_tracker",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "examples/expense_tracker/Reports.ae",
+        "source_sha256": "f05d0104fa94f7250ac5001f9f8cc15724dcf2dbfbef579f074121272fe4d38c",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "expense_tracker",
+          "plotting_independent",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "examples/expense_tracker/Transaction.ae",
+        "source_sha256": "6e6a80b8220622cde71e6a7a7258d3a3ec2714c65c02e9498a81758522901943",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/hello.ae",
+        "source_sha256": "de3d20599553d3d7db066c5c6c8892df340cd85d4cfcadeb44b103e143d5a4c0",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/interactive/fibonacci.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 19, column 18: IR backend does not support InputCall yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "30397a06b1421082b4324b9a76da67e1cb227353f300f4e4c698b3e2ffa980bb",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/interactive/primes_interactive.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 48, column 18: IR backend does not support InputCall yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "c4c097e63f442e8fe8fbbde81834e85ee8761c567365eea9ec26c641528c135f",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/interactive/sum_calculator.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 6, column 18: IR backend does not support InputCall yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "4175ed60ff452c5544c89da1f34bbbd2c259dbed6382ef8629ead939b4d0a98f",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/ir/constant_fold.ae",
+        "source_sha256": "fa1e6aded158b0c6059bf159195e62c1dfe1ecb93ebb10c6b8521c98a1bf8bba",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/ir/local_const.ae",
+        "source_sha256": "d18264422f7e9aad46fa97a4d7521f7e451c1a7ab978c722d62698f100c7ec2a",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/ir/sumTo.ae",
+        "source_sha256": "1588c4e8a1dacecb8d144851a421362c35ff370217528f5fdab1cbda080ab194",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "numerical_methods",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/linear_algebra/basic_operations.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 5, column 3: IR backend does not support assignment to 'A' outside local scope yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "9adb74ed96db0487533adb5cdf39bad3c29e521d79e8f545ad45ea8673a67f5b",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "numerical_methods",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/linear_algebra/primes_advanced.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 43, column 22: IR backend does not support identifier 'z' outside local scope yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "037f046ca9ae72b39452c8cbcf1ef9830651c33a2624d55b0b6ae5b347559756",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "numerical_methods",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/linear_algebra/primes_check.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 34, column 3: IR backend does not support assignment to 'm' outside local scope yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "81fa00e8ddbc937c326003adf534980d4985dd76d9f71f2063687b4749f29c07",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "string_heavy",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/lists/list_api.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 15, column 19: IR backend does not support CallExpression (method 'size' on 'list<int>') yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "d03eb100fe5830728364c68f3ad6976cdbf99aaccc04bd926190b1a8c8aeaf26",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/arithmetic.ae",
+        "source_sha256": "5a4e62f906c7ab0336757dfca7297fab2d0fd5cdaf257703984cdbcd8839636c",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/array_sort.ae",
+        "source_sha256": "9d50e8ef24ef1be27d9574149eb038443c256742d41436846b250f34f3d31c89",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/array_sum.ae",
+        "source_sha256": "45bb1f6b471ef7a56e38c6cdcc1112abb07e82d157ca7a125d95f1136050daed",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/countdown.ae",
+        "source_sha256": "2596078aab06e611edcd8cfb769e82acebd85b361fe8f8503f28b4c8859fca5f",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/double_add.ae",
+        "source_sha256": "2819fcf126f88b70baff6d3f5744e203c51380f4961f023523696e5564f697f2",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/double_compare.ae",
+        "source_sha256": "8b24ac46c334ac47726fca99eec105fac56afd1bca7eaf30e5593cf5b030479c",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/double_to_int.ae",
+        "source_sha256": "67630b64e6af052936a1e2e5392cf5d6396a874707bfe5d08c72e870198cdabb",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/for_break_continue.ae",
+        "source_sha256": "f07db717611d2b55fe241394db2aee36c9f5e6c1c7e60e4897afd6d3c1859e24",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/for_sum.ae",
+        "source_sha256": "a2270e91a20e60e2a06040091e8f8f3b49341485923945e903648e3a6f832d12",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/gcd_iterative.ae",
+        "source_sha256": "725e752ea2c4a7fa8dc67c8f82ef03d0154837c73e06887ee607a80b39dca4ad",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/identity_call.ae",
+        "source_sha256": "ad4dd96e8df93e4dfeb0acd11556d0255cd5423d1e8c1fbb2f83f77bdc9e66d3",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/int_to_double.ae",
+        "source_sha256": "cc5b8d395683497b93ea0ff2a5f80bf411c72c8a1b02771d18714086449fc679",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/list_clear.ae",
+        "source_sha256": "cbcc9ed16122552e34df29b291b9b2ca51edad5c456042977b02aff22165ac9c",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "string_heavy",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/list_contains.ae",
+        "source_sha256": "92a2d26081186c14964ca31e71dd93deee927e3b45b8deb31a72af52eee7bc63",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/list_copy.ae",
+        "source_sha256": "48f45edde37f2656a5e6195867001ad967b32ab765d5e292dfa5823095e52a70",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/list_for_sum.ae",
+        "source_sha256": "909ec968f7eaa89a728e1feb629baa929409625f659c67b14da3c412ca903181",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/list_index.ae",
+        "source_sha256": "e0b5541e3222bea3190a61bc5304cc5750f1380cc85970f07e0db5e2eccc5168",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/list_index_of.ae",
+        "source_sha256": "416901e214c0cd84a01649da46bbeeb23c88f024a85d287fd02c87ece266db39",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/list_insert.ae",
+        "source_sha256": "c40babc5e09ba0d684bfea014dce06c75e69dde6ec3cdac778c9ff630ef0ff15",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/list_literal.ae",
+        "source_sha256": "f1923599dc8c4919522e8cb53d20f496bc5ff8e1d1e34040ee0b22969fff8001",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/list_pop.ae",
+        "source_sha256": "3295d73072845bd1c46445fd2d03b0db28693d91353308fab458d25f390a5d32",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/list_pop_alias.ae",
+        "source_sha256": "6c968a77f818444dfd49b9563b60898e1d084c0dc98d9c5e3039fadaaa4cf7a7",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/list_push.ae",
+        "source_sha256": "62200036d3b09e73e8cde3a74e70347877c11bf2a34dfeb00dabf51611147efd",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/list_push_alias.ae",
+        "source_sha256": "3019a5d4b88692300be8f17d4bbf2a2363c8582b8e90242ca3a8cbeda0b63c72",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/list_remove_at.ae",
+        "source_sha256": "d4bbcac091aeb30a3d0e0a3778d2f9e705d38fb71de33bc1463df1d7566a4da6",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/list_reverse.ae",
+        "source_sha256": "77da4734ba3f47c6d90add8c4a27831154acad803a2761b785a97dd5e71720df",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/list_set_alias.ae",
+        "source_sha256": "ed59fc7b8195b6142bef4a02ed62652aa3878a3c7d9c741659e43c653b50cfcb",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/list_sort.ae",
+        "source_sha256": "008eca8f20aea80f93b53dc9a602806885a7d3e05b450d3f3c86e7dae49d403f",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/matrix_add.ae",
+        "source_sha256": "1c56b9653de4e7e6f2c0f23e587aed3864b330db9da390a669dc56d2bfa28e7f",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/matrix_column_mul.ae",
+        "source_sha256": "2bfd758da85b50bc93b2f5a9a6ef4a7d70db19a946f52a68d20b547797dbead4",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/matrix_index.ae",
+        "source_sha256": "c057d5a0ae93352748549ed606345751bab6630f98a5397cad85895b939d78f3",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/matrix_literal.ae",
+        "source_sha256": "1ecda12d350086df772b39c8ee1bd5e9d8d62ba4cd33dc7beb5ddcc0843af5e3",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/matrix_matmul.ae",
+        "source_sha256": "b9e31599fc2141e721210be1484fafb6162f86ce0ac90043b126cb69088036c4",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/matrix_rows_columns.ae",
+        "source_sha256": "1405f5b940d06df2ff67f3ff75ef8c685d5816cc40072ed5fc6876d1e3d11de3",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/matrix_scalar_mul.ae",
+        "source_sha256": "2b0bead0a42981624156d09c37f4bf04bbd506c04d4724a972b1c8f4ffd2951c",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/matrix_set.ae",
+        "source_sha256": "f97fd912074f5f37a97c2c873b07faa8b66993c5741f72095391d66368887731",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/matrix_sub.ae",
+        "source_sha256": "f29f8ba49944082c905d0826d3e8d78e0a45d57357ddffa267d96d7f3209960d",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/max.ae",
+        "source_sha256": "f2a1851d246c78c68079e711026c71d2749d7780f4a6b96d4ba634321bc3ef6c",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/outer_product.ae",
+        "source_sha256": "849268b11f7ab7b74c38c8266a619c0ae1219c7a462d8048435432c91469449a",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/return_5.ae",
+        "source_sha256": "e1a4eb8267e1969f1fb323c56fbba82593a7a397454fd27edfa7e021bb93acd4",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "string_heavy",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/string_choose.ae",
+        "source_sha256": "c19fd03353a9b2bc3f4aaf856cb2decb66aa7b72f0984c8dde1961ff98552396",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "string_heavy",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/string_identity.ae",
+        "source_sha256": "f81f88e825dc911ee07f4b3f887d3cbb3d49426b2aeb7561a62f78c41a1cda41",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/sum_to_n.ae",
+        "source_sha256": "3576bd86eae2f633e872d8226b202dabc765b3a5f729e465b6a876cac26683df",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/vector_add.ae",
+        "source_sha256": "235a1f66eb79a0dcf048cca4a730a63424a49448ad8a4e85b19a21c25f91c6a9",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/vector_column_inferred.ae",
+        "source_sha256": "b31fdeda57b2f85394c49cdae2338095f58f0082b2bf0ed4a64e51af49464c6b",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/vector_column_literal.ae",
+        "source_sha256": "8c7a0afd16bccb429492b9fd4973122ec46615138ca9ea096d520ef9bb6517b3",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/vector_dot.ae",
+        "source_sha256": "9c4df1413335ffb7916df67374dc013b42041e079b1d1250502e1452a8505b67",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/vector_index.ae",
+        "source_sha256": "33e25304e3ed5ad1677f977064a01487af5fb5644778e37c1665df289c21a17a",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/vector_length.ae",
+        "source_sha256": "4a67f84cb174f24dbd35071aaf7125ed578d86831cad3e78ac103fbd34fec315",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/vector_literal.ae",
+        "source_sha256": "e26f3ae210ede2b5e25402a1c8dc2ee5c589bbf3ff662913c9484b47d191fd7a",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/vector_matrix_mul.ae",
+        "source_sha256": "5a866ed537d9acc410ed204c2ea2ae96cea76076d75ad30c9a265af0e105224c",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/vector_scalar_mul.ae",
+        "source_sha256": "bcdf61f140dc179b2c205abcffeae5c93dfa50a4d4ac389482b23e278cc7de47",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/vector_set.ae",
+        "source_sha256": "90a2e0eaf5168e3433f6f6ea179c4f570583773ca596530ad1c12654ad6b4fe0",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/llvm/vector_sub.ae",
+        "source_sha256": "45daf705a440ef3bcad2c749865f9aef0b62d028585217ce217ae68abab5e88f",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "numerical_methods",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/minCuad.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 16, column 15: IR backend does not support identifier 'z' outside local scope yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "17649089c3676f2f7020b59b7283216c0e05c4e4edeaa975bf895ded9631b20f",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "numerical_methods",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/minCuad2.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 17, column 15: IR backend does not support identifier 'z' outside local scope yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "5c6da9b6b30a72d978110c6bb34398b28a0de7a454925988d3b9ce8c45e82279",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/minimos_cuadrados/MinimosCuadrados.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 7, column 8: IR backend does not support assignment to 'yt' outside local scope yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "5460ad461765da8527439534e26ed0443c913905ca504c8010d63bb9cb38f455",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "numerical_methods",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/nonlinear_systems/newton_system.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 34, column 8: IR backend does not support assignment to 'f1' outside local scope yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "308c89b86dce3b6c9b7999a15dd5605ec7eb58530e2ced6b585036eedf4e2305",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/nonlinear_systems/nr2.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 17, column 14: IR backend does not support identifier 'LA' outside local scope yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "18b58084c7600a3342aa844e5b11e96dcb86c45c9cac026d71382dbd2cec1a7c",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/nose.ae",
+        "source_sha256": "7a82fe147bdae21eaec574d5a9a0182477ae174cde41e9a970cf1e68fd057396",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/nose2.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 1, column 16: IR backend does not support InputCall yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "6d7d9fe63b5734952bee933a5d504dbe454eed4295e9f450c04ac5004e64b39a",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "function_values_indirect_calls",
+          "numerical_methods",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/numerical_methods/Functions.ae",
+        "source_sha256": "eb5f2cc06d69c8672e303b7a299ad03e6be218525f1dde3376b7ecf25d57b243",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "numerical_methods",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/numerical_methods/Integration.ae",
+        "source_sha256": "349668a2b2b0b6b70f963160175c51d2c7bc407fbcbce5b47f68d3f773fcd95c",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "numerical_methods",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "valid_source_fixture"
+        ],
+        "path": "examples/numerical_methods/Problems.ae",
+        "source_sha256": "4e839afbfce9465843f42468c4f51c6302248887f6603aba326a5c322e43951c",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "numerical_methods",
+          "plotting_independent",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "examples/numerical_methods/Results.ae",
+        "source_sha256": "4152b7ddc71ff27354ac5d223a2e1919998db598f719c4546070e4796efb5c0b",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "numerical_methods",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "valid_source_fixture"
+        ],
+        "path": "examples/numerical_methods/Roots.ae",
+        "source_sha256": "ee35c91c42152ab2e082dbb3396a0fb0147716487eee1969fc25f0312e052a61",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "numerical_methods",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/numerical_methods/main.ae",
+        "source_sha256": "6e083a768cbeda3ade04c0321f3e6db4c9b3d9ecdfd16786693120e08d40df6d",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/probando.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 6, column 1: IR backend does not support identifier 'pl' outside local scope yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "e0d68478f7d3dede01a14314b2bf4021fc14bd26e40fe34176be76a0f712fb3d",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "examples/probandoNR.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 22, column 7: IR backend does not support assignment to 'solNR' outside local scope yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "f078af5297254e4deed0b8e72e2463b3dcbd2cb030c30ba46e72e931d07ec2d1",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "exceptions",
+          "interfaces",
+          "plotting_independent",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "examples/pruebaException.ae",
+        "source_sha256": "e54564c21dca4f0c3601f3f59a46123c7c7e58f9b76ff5151ef14275d74012b5",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "examples/structs/Geometry.ae",
+        "source_sha256": "89bd79c95b4247936d9b1e766f0a748924521c6218e97a288910bb6f86567b95",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "examples/structs/custom_constructor_and_equality.ae",
+        "source_sha256": "4d211feda8d18599a46a000e2367a56a33e9f1052c9a3bb07d4f6c7d473ed1e2",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "examples/structs/main.ae",
+        "source_sha256": "1448d5c949b21b9be94f9568c692bd81e753de78a91bf7c63948161b6525ee73",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "function_values_indirect_calls",
+          "plotting_independent",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "scrap/PFmio.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 22, column 13: IR backend does not support FunctionDeclaration yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "62d23b42d943a5f0273c3d719f3fde0ece2ff968245cd77b69e10e067653896c",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "function_values_indirect_calls",
+          "plotting_independent",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "scrap/PFmio2.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 22, column 13: IR backend does not support FunctionDeclaration yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "b76cade6bba5ac310137db74a390a911df49d4c20c96a354965fd4c5f3d7867a",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "scrap/algo.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 15, column 35: IR backend does not support identifier 'la' outside local scope yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "366ef6618ada404235be7acfc9d40ec507dbc43d8c8aac205684a4ded584e48a",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "AetherTypeError",
+        "path": "scrap/atan2.ae",
+        "reason": "AetherTypeError at line 3, column 16 [name]: Undefined function 'Math.arctan'. Hint: define the function in this module, import its module, or check the spelling.",
+        "source_sha256": "da9edb691be48bd8f5bf629f89e44aebe95f744d45c5994b885b13ec4030cdc7",
+        "stage": "typecheck_or_module_resolution",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "scrap/esSimetrica.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 2, column 15: IR backend requires known matrix dimensions for .rows. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "cd1749fabf0166046b52f6d8fff8c6b7bc4f21bfe057fcfc1c8feef097ea66b1",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "IRBackendUnsupportedFeatureError",
+        "path": "scrap/ponele.ae",
+        "reason": "IRBackendUnsupportedFeatureError at line 14, column 14: IR backend does not support identifier 'la' outside local scope yet. Hint: Supported IR backend subset: - functions - local variables - int/bool/string literals - arithmetic - comparisons - if/else - while - simple user-defined function calls",
+        "source_sha256": "18afe3d38701da571422ca8cec231291a8b8628d7ca287dc76607bf7cb789e14",
+        "stage": "initial_ir_lowering",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "scrap/probandoAlgo.ae",
+        "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "tests/aether/parity_corpus/aggregates.ae",
+        "source_sha256": "f0999901e653834ebe7870c12ccf173b058dd899ff765c67ad259a6d29565b26",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "string_heavy",
+          "valid_source_fixture"
+        ],
+        "path": "tests/aether/parity_corpus/arguments.ae",
+        "source_sha256": "03f8d13076a1e7910601479844c9c1f9150924440d9b13a88dc3961b08cf792f",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "string_heavy",
+          "valid_source_fixture"
+        ],
+        "path": "tests/aether/parity_corpus/files.ae",
+        "source_sha256": "e8746a461f97a36a13593d769b70b75c418ae02ea12dad5ac1fb93b17bef8d10",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "tests/aether/parity_corpus/language_core.ae",
+        "source_sha256": "19eab065779188d0716ec784ba87154c804ddb78e66088bb809746b0c4ea9bb9",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "tests/aether/parity_corpus/modules/Helper.ae",
+        "source_sha256": "c63050698800b49eb0a8065dcd18f6012244db414f368b58c22cd77ccb5d6a1b",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "tests/aether/parity_corpus/modules/Main.ae",
+        "source_sha256": "bc3dcda7fa505429227bc6504c98798989fd8e72d7ca96436199fb6de97c6d8e",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "tests/aether/parity_corpus/panic.ae",
+        "source_sha256": "ca60f777f9bb7694930bf813899557938f841afe298b40266babce0c92fe19c8",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "tests/aether/parity_corpus/panic_division_zero.ae",
+        "source_sha256": "1fd63ce6359c5b6c3d6ae480d446bc0e3ec3be561dfbfbed30075ce5837f4c27",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "tests/aether/parity_corpus/panic_integer_overflow.ae",
+        "source_sha256": "db0c44e5fb412086363521c68f4a79380a4e157b729b5e299974b45b3797f308",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "tests/aether/parity_corpus/panic_list_insert.ae",
+        "source_sha256": "e8b7c3583a1f64a9ba3db6e037cf9d675d4b4dec3d80a8a93d9063635bb73bf4",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "tests/aether/parity_corpus/panic_list_pop.ae",
+        "source_sha256": "0e2ceab22b880e0b51c14c3982608836bc490c835ce2a5f38e13450b8e794aee",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "tests/aether/parity_corpus/panic_list_remove.ae",
+        "source_sha256": "932f1e6bb5a0f865c1548d690bb7dcd8c431cae94c96a72fe6e1c8fcd183e1a1",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "tests/aether/parity_corpus/panic_split.ae",
+        "source_sha256": "64cb6a9724f3296a49170be071069799494eb2005cfd03c6aedf9533e657b37b",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "tests/aether/parity_corpus/scalars.ae",
+        "source_sha256": "f2cb71670b35bff2e048e4ff821c2c5e9b87b86789b14e8a6b9a2a7a875653b9",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "string_heavy",
+          "valid_source_fixture"
+        ],
+        "path": "tests/aether/parity_corpus/strings.ae",
+        "source_sha256": "f07be91fb92e904f5c62185a1e6176fce35ed9e6ca06a062f00baf8e16dc8e63",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "exception": "AetherTypeError",
+        "path": "tests/fixtures/invalid/list_slice_assignment.ae",
+        "reason": "AetherTypeError at line 2, column 9: Slice assignment is not supported yet.",
+        "source_sha256": "a51478977074abe74447d06bc3a1f2c95526d0d2f6edc0340328040931614ba2",
+        "stage": "typecheck_or_module_resolution",
+        "status": "REJECTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "tests/fixtures/o2_proof_coverage/slices.ae",
+        "source_sha256": "7eaac7e00f146bc0551c0d63b2a34f3c9694b5c30b63a1f83da1acfb8221e9dc",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "tests/fixtures/rust_ssa_promotion_failure/aggregate_owned_projection.ae",
+        "source_sha256": "3d70fc80be5d8f5f53d8f23474001780cc7a9ec260bd169018786252d60e71ca",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "interfaces",
+          "plotting_independent",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "tests/fixtures/rust_ssa_promotion_failure/boxed_constructor_receiver.ae",
+        "source_sha256": "0e3062c109468f898d420b8bc2e5fd3e7c5713b04506ba7e2b8835428472d0ea",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "classes",
+          "plotting_independent",
+          "string_heavy",
+          "valid_source_fixture"
+        ],
+        "path": "tests/fixtures/rust_ssa_promotion_failure/class_get_owned_result.ae",
+        "source_sha256": "ab65c275e9dfea93a68111e6f1892b3cfc0b7d0ad83205a3fbc45ca54e7662e3",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "classes",
+          "interfaces",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "valid_source_fixture"
+        ],
+        "path": "tests/fixtures/rust_ssa_promotion_failure/interface_call_temporary.ae",
+        "source_sha256": "3d03702375cbe8dd6369d4ff08a58c700b96fb06f149c148190a108b3d2c2c63",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "classes",
+          "interfaces",
+          "plotting_independent",
+          "realistic_multi_function_modules",
+          "valid_source_fixture"
+        ],
+        "path": "tests/fixtures/rust_ssa_promotion_failure/interface_lifecycle_default.ae",
+        "source_sha256": "838f0ef3ab58385c0ffd2dd9d9e83c5e93046f7482f35530c23433f5809ef295",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "string_heavy",
+          "structs",
+          "valid_source_fixture"
+        ],
+        "path": "tests/fixtures/rust_ssa_promotion_failure/nullable_owned_return.ae",
+        "source_sha256": "8763a0958dcad1a3dfc4e7ed620de2991aaa1baa7c8839d80f908ebf616c1661",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "tests/fixtures/rust_ssa_promotion_failure/owning_call_result.ae",
+        "source_sha256": "f0ea42f048e8f339dc69fa01e8bd71e4093f73dcccf27fca4468d39be214320d",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      },
+      {
+        "categories": [
+          "allocation_heavy",
+          "collections",
+          "plotting_independent",
+          "valid_source_fixture"
+        ],
+        "path": "tests/fixtures/rust_ssa_promotion_failure/owning_is_empty_result.ae",
+        "source_sha256": "e085a9747ea1ff77b5aaaa5164beeaea7f4e3626254f6e180906d6f957b8030c",
+        "stage": "verified_initial_ir",
+        "status": "ACCEPTED_BEFORE_SSA"
+      }
+    ],
+    "rejected_before_ssa": 35
+  },
+  "concurrency": {
+    "callers": 16,
+    "client_requests": 256,
+    "completed": 256,
+    "deterministic_mismatch_paths": [],
+    "deterministic_output_mismatches": 0,
+    "elapsed_seconds_observational": 6.159839,
+    "failures": [],
+    "infrastructure_failures": 0,
+    "poisoned_client_failures": 0,
+    "process_crashes_or_timeouts": 0,
+    "process_startups": 1,
+    "requested": 256,
+    "semantic_mismatches": 0,
+    "serialized_transport": true,
+    "unclassified_failures": 0
+  },
+  "decision": "RUST_SSA_PRODUCTION_STABILIZATION_BLOCKED",
+  "full_suite": {
+    "artifact_schema_version": 2,
+    "decision": "RUST_SSA_PRODUCTION_STABILIZATION_FULL_SUITE_PASS",
+    "environment": {
+      "machine": "x86_64",
+      "platform": "Linux-7.1.8-1-cachyos-x86_64-with-glibc2.44",
+      "python_executable": "/usr/bin/python3.14",
+      "qualification_executable": {
+        "requested_path": "compiler-rs/target/debug/aether-ssa-shadow",
+        "resolved_path": "/home/blasm/proyectos/Aether/compiler-rs/target/debug/aether-ssa-shadow",
+        "sha256": "75d209cbb48e94646288fa1c00b1ce6eb6f563ec5bbe9d5faafeecb7c1da163f"
+      },
+      "sys_version": "3.14.7 (main, Aug 14 2026, 06:38:32) [GCC 16.2.1 20260810]"
+    },
+    "environmental_failures": 0,
+    "failed": 0,
+    "failures": [],
+    "failures_truncated": false,
+    "infrastructure_failures": 0,
+    "lsan_environmental_classification": {
+      "classified_lsan_ptrace_aborts": 24,
+      "initial_failed": 24,
+      "procedure": "LSAN_OPTIONS=detect_leaks=0"
+    },
+    "milestone": "RUST-3.7a",
+    "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "native_exception_ptrace_compatible": "54/54 PASS",
+    "passed": 4853,
+    "promotion_subset": {
+      "failed": 0,
+      "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+      "passed": 18,
+      "selected": 18
+    },
+    "promotion_subset_rust_authority_failures": 0,
+    "pytest_log": "full_suite_pytest.log",
+    "qualification_revision": "aa0d6bf1d3316b0c425671bac768259d003f25d5",
+    "real_semantic_failures": 0,
+    "reported_failure_count": 0,
+    "semantic_mismatches": 0,
+    "skipped": 4,
+    "summaries": {
+      "native_compatible": "54 passed in 5.32s",
+      "native_initial": "24 failed, 30 passed in 5.52s",
+      "production_default": "4853 passed, 4 skipped, 6 warnings in 201.21s (0:03:21)",
+      "promotion_subset": "18 passed in 1.86s"
+    },
+    "unclassified_test_failures": 0
+  },
+  "gates": [
+    {
+      "evidence": "fresh exact-revision RUST-3.7a evidence",
+      "id": "STAB-G01",
+      "name": "default remains Rust authority/Python shadow",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.7a evidence",
+      "id": "STAB-G02",
+      "name": "mandatory synchronous GeneralSSABuilder shadow remains",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.7a evidence",
+      "id": "STAB-G03",
+      "name": "fail-closed comparison and no Rust-only mode remain",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.7a evidence",
+      "id": "STAB-G04",
+      "name": "broadened corpus is fully accounted and mismatch-free",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.7a evidence",
+      "id": "STAB-G05",
+      "name": "repeated differential soak is deterministic",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.7a evidence",
+      "id": "STAB-G06",
+      "name": "5000-request one-process mixed session passes",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.7a evidence",
+      "id": "STAB-G07",
+      "name": "shared-client concurrent callers remain serialized",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.7a evidence",
+      "id": "STAB-G08",
+      "name": "V2-L01 through V2-L05 remain qualified",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.7a evidence",
+      "id": "STAB-G09",
+      "name": "permanent stabilization regression families pass",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.7a evidence",
+      "id": "STAB-G10",
+      "name": "deep CFG 993, 1000, and 5000 passes",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.7a evidence",
+      "id": "STAB-G11",
+      "name": "optimizer/backend/native representative matrix passes",
+      "status": "BLOCKED"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.7a evidence",
+      "id": "STAB-G12",
+      "name": "full repository suite passes under production default",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.7a evidence",
+      "id": "STAB-G13",
+      "name": "four clean-install official platforms pass",
+      "status": "BLOCKED"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.7a evidence",
+      "id": "STAB-G14",
+      "name": "both rollback modes pass configuration-only",
+      "status": "BLOCKED"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.7a evidence",
+      "id": "STAB-G15",
+      "name": "historical readiness/promotion artifacts are byte-preserved",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.7a evidence",
+      "id": "STAB-G16",
+      "name": "schemas and lowering/lifecycle policies are byte-preserved",
+      "status": "PASS"
+    },
+    {
+      "evidence": "fresh exact-revision RUST-3.7a evidence",
+      "id": "STAB-G17",
+      "name": "CI uploads and aggregates every stabilization result",
+      "status": "PASS"
+    }
+  ],
+  "historical_preservation": {
+    "actual_sha256": {
+      "docs/compiler/RUST_SSA_AUTHORITY_PROMOTION.md": "cc94fb815035c92ef9cfdcb2ed1df57dc7fd8683ef7239a5268be9dac36e4c9d",
+      "docs/compiler/RUST_SSA_AUTHORITY_PROMOTION_V2.md": "a73520b561b3a6bf41d20fa999018c601b44611d5959f6010fee50b861220c5a",
+      "docs/compiler/RUST_SSA_AUTHORITY_REQUALIFICATION.md": "6193d17565e8a723cb0d73d4eb667e09eb52b4d82373769b9d84205e65ce7450",
+      "docs/compiler/RUST_SSA_LOWERING_READINESS.md": "f823e28629e179dcffbc98c8b6b77179669eef613169662395a380775aff80a9",
+      "docs/compiler/RUST_SSA_PROMOTION_FAILURE_ROOT_CAUSE_AUDIT.md": "95771d7be842330356dcd3d653ecfe60303f02b8796069cbc69f55cc3093720f",
+      "docs/compiler/RUST_SSA_PROMOTION_LIFECYCLE_DEFECT_CLOSURE.md": "3509e2795fa2f40a2b7d131915083f86a6b43809eac2e6171c6c639155b77883",
+      "docs/compiler/rust_ssa_authority_promotion.json": "dabc5eb99461e964609d31f13de379539b8c9eab06e091b714bb198288582bbe",
+      "docs/compiler/rust_ssa_authority_promotion_v2.json": "5ce5f2d7b91f258621237435a5f81a260256084904a8e87ef088a5e848a5d30f",
+      "docs/compiler/rust_ssa_authority_requalification.json": "bb124a6a06fd097b3f92d35a94e0e7f247e7a2aea515b485dba88d6061a8c137",
+      "docs/compiler/rust_ssa_lowering_readiness.json": "d0f76e8f108467207705128729305a320edec0febd7d9f49b0d84b59e123c941",
+      "docs/compiler/rust_ssa_promotion_failure_root_cause_audit.json": "e78d625c11a166fe0c8e79d85419233f52d6644f5355b1bd0009e4fe62f12524",
+      "docs/compiler/rust_ssa_promotion_lifecycle_defect_closure.json": "727b229d9a2c39dfc136874ab8546c22ef30e76b3327677981ff92d77fb84b22"
+    },
+    "expected_sha256": {
+      "docs/compiler/RUST_SSA_AUTHORITY_PROMOTION.md": "cc94fb815035c92ef9cfdcb2ed1df57dc7fd8683ef7239a5268be9dac36e4c9d",
+      "docs/compiler/RUST_SSA_AUTHORITY_PROMOTION_V2.md": "a73520b561b3a6bf41d20fa999018c601b44611d5959f6010fee50b861220c5a",
+      "docs/compiler/RUST_SSA_AUTHORITY_REQUALIFICATION.md": "6193d17565e8a723cb0d73d4eb667e09eb52b4d82373769b9d84205e65ce7450",
+      "docs/compiler/RUST_SSA_LOWERING_READINESS.md": "f823e28629e179dcffbc98c8b6b77179669eef613169662395a380775aff80a9",
+      "docs/compiler/RUST_SSA_PROMOTION_FAILURE_ROOT_CAUSE_AUDIT.md": "95771d7be842330356dcd3d653ecfe60303f02b8796069cbc69f55cc3093720f",
+      "docs/compiler/RUST_SSA_PROMOTION_LIFECYCLE_DEFECT_CLOSURE.md": "3509e2795fa2f40a2b7d131915083f86a6b43809eac2e6171c6c639155b77883",
+      "docs/compiler/rust_ssa_authority_promotion.json": "dabc5eb99461e964609d31f13de379539b8c9eab06e091b714bb198288582bbe",
+      "docs/compiler/rust_ssa_authority_promotion_v2.json": "5ce5f2d7b91f258621237435a5f81a260256084904a8e87ef088a5e848a5d30f",
+      "docs/compiler/rust_ssa_authority_requalification.json": "bb124a6a06fd097b3f92d35a94e0e7f247e7a2aea515b485dba88d6061a8c137",
+      "docs/compiler/rust_ssa_lowering_readiness.json": "d0f76e8f108467207705128729305a320edec0febd7d9f49b0d84b59e123c941",
+      "docs/compiler/rust_ssa_promotion_failure_root_cause_audit.json": "e78d625c11a166fe0c8e79d85419233f52d6644f5355b1bd0009e4fe62f12524",
+      "docs/compiler/rust_ssa_promotion_lifecycle_defect_closure.json": "727b229d9a2c39dfc136874ab8546c22ef30e76b3327677981ff92d77fb84b22"
+    },
+    "status": "PASS"
+  },
+  "long_session": {
+    "client_requests": 5000,
+    "completed": 5000,
+    "deterministic_mismatch_paths": [],
+    "deterministic_output_mismatches": 0,
+    "elapsed_seconds_observational": 137.436887,
+    "failures": [],
+    "infrastructure_failures": 0,
+    "poisoned_client_failures": 0,
+    "process_crashes_or_timeouts": 0,
+    "process_startups": 1,
+    "requested": 5000,
+    "rss_assessment": "STABLE",
+    "rss_growth_allowance_bytes": 16777216,
+    "rss_late_growth_bytes": 782336,
+    "rss_samples": [
+      {
+        "request": 1,
+        "rss_bytes": 7225344
+      },
+      {
+        "request": 500,
+        "rss_bytes": 34467840
+      },
+      {
+        "request": 1000,
+        "rss_bytes": 34205696
+      },
+      {
+        "request": 1500,
+        "rss_bytes": 34586624
+      },
+      {
+        "request": 2000,
+        "rss_bytes": 34287616
+      },
+      {
+        "request": 2500,
+        "rss_bytes": 36519936
+      },
+      {
+        "request": 3000,
+        "rss_bytes": 36507648
+      },
+      {
+        "request": 3500,
+        "rss_bytes": 34504704
+      },
+      {
+        "request": 4000,
+        "rss_bytes": 36507648
+      },
+      {
+        "request": 4500,
+        "rss_bytes": 37298176
+      },
+      {
+        "request": 5000,
+        "rss_bytes": 37302272
+      }
+    ],
+    "semantic_mismatches": 0,
+    "unclassified_failures": 0,
+    "workload": "deterministic_round_robin_over_accepted_corpus"
+  },
+  "milestone": "RUST-3.7a",
+  "minimized_reproducers": [
+    "tests/aether/test_rust_ssa_production_stabilization.py"
+  ],
+  "newly_discovered_bugs": [
+    {
+      "classification": "qualification_infrastructure",
+      "id": "STAB-INF-001",
+      "minimized_reproducer": "tests/aether/test_rust_ssa_production_stabilization.py",
+      "status": "FIXED",
+      "summary": "pytest JUnit classname-only cases were reported as uncollected"
+    }
+  ],
+  "optimizer_backend_native": {
+    "representative_categories": [
+      "aggregate",
+      "class_interface",
+      "collections",
+      "constructor_ownership",
+      "exception",
+      "function_value_indirect_call",
+      "numerical",
+      "scalar",
+      "string"
+    ],
+    "status": "BLOCKED"
+  },
+  "performance": {
+    "hotspots_deferred_to": "RUST-3.7b",
+    "measurement_kind": "incidental observations only; no timing gate"
+  },
+  "platforms": {
+    "linux-x86_64": {
+      "rust_target": "x86_64-unknown-linux-gnu",
+      "sha256": "f8e944b358348bd02809d036b2601c8dbbd9c9a17648206db37b32a3df6b0721",
+      "status": "PASS"
+    },
+    "macos-arm64": {
+      "reason": "fresh exact-revision RUST-3.7a native evidence missing or invalid",
+      "rust_target": "aarch64-apple-darwin",
+      "status": "BLOCKED"
+    },
+    "macos-x86_64": {
+      "reason": "fresh exact-revision RUST-3.7a native evidence missing or invalid",
+      "rust_target": "x86_64-apple-darwin",
+      "status": "BLOCKED"
+    },
+    "windows-x86_64": {
+      "reason": "fresh exact-revision RUST-3.7a native evidence missing or invalid",
+      "rust_target": "x86_64-pc-windows-msvc",
+      "status": "BLOCKED"
+    }
+  },
+  "promoted_revision": "aa0d6bf1d3316b0c425671bac768259d003f25d5",
+  "qualification_revision": "aa0d6bf1d3316b0c425671bac768259d003f25d5",
+  "regression_families": {
+    "V2-L01_through_V2-L05": "PASS",
+    "aggregate_ownership": {
+      "failures": 0,
+      "files": [
+        "tests/aether/test_ssa_aggregate_ownership.py"
+      ],
+      "status": "PASS",
+      "tests": 9
+    },
+    "bounds_checked_provenance": {
+      "failures": 0,
+      "files": [
+        "tests/aether/test_ssa_lowering_policy_v1.py",
+        "tests/aether/test_ssa_dto_v2.py"
+      ],
+      "status": "PASS",
+      "tests": 55
+    },
+    "class_interface_ownership": {
+      "failures": 0,
+      "files": [
+        "tests/aether/test_native_class_references.py",
+        "tests/aether/test_native_struct_interface_boxing.py"
+      ],
+      "status": "PASS",
+      "tests": 20
+    },
+    "collection_temporary_ownership": {
+      "failures": 0,
+      "files": [
+        "tests/aether/test_ssa_collection_extraction_borrow.py"
+      ],
+      "status": "PASS",
+      "tests": 5
+    },
+    "constructor_exceptional_cleanup": {
+      "failures": 0,
+      "files": [
+        "tests/aether/test_ssa_exceptions.py"
+      ],
+      "status": "PASS",
+      "tests": 21
+    },
+    "deep_cfg": "PASS",
+    "indirect_calls_and_function_values": {
+      "failures": 0,
+      "files": [
+        "tests/aether/test_typed_callables.py"
+      ],
+      "status": "PASS",
+      "tests": 24
+    },
+    "nullable_ownership_and_casts": {
+      "failures": 0,
+      "files": [
+        "tests/aether/test_nullable_native.py"
+      ],
+      "status": "PASS",
+      "tests": 11
+    },
+    "source_location_preservation": {
+      "failures": 0,
+      "files": [
+        "tests/aether/test_ssa_source_location_lowering_policy_v1.py",
+        "tests/aether/test_ssa_source_location_codec_qualification.py",
+        "tests/aether/test_ssa_dto_v2.py"
+      ],
+      "status": "PASS",
+      "tests": 49
+    }
+  },
+  "repeated_soak": {
+    "client_requests": 423,
+    "completed": 423,
+    "deterministic_mismatch_paths": [],
+    "deterministic_output_mismatches": 0,
+    "elapsed_seconds_observational": 11.391109,
+    "failures": [],
+    "infrastructure_failures": 0,
+    "poisoned_client_failures": 0,
+    "process_crashes_or_timeouts": 0,
+    "process_startups": 1,
+    "programs_per_round": 141,
+    "requested": 423,
+    "rounds": 3,
+    "rss_assessment": "NOT_AVAILABLE_ON_THIS_PLATFORM",
+    "rss_growth_allowance_bytes": null,
+    "rss_late_growth_bytes": null,
+    "rss_samples": [],
+    "semantic_mismatches": 0,
+    "unclassified_failures": 0
+  },
+  "rollback": {
+    "modes": [
+      "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+      "PYTHON_SSA_ONLY"
+    ],
+    "status": "BLOCKED"
+  },
+  "schema_policy_freeze": {
+    "actual_sha256": {
+      "compiler-rs/crates/aether-ir/src/lifecycle.rs": "f9555d976fe9c6113eaf266658d69eaf1b92fef18113abba05cf898353454ff4",
+      "compiler-rs/crates/aether-ir/src/ssa.rs": "03649eaee8f088624d4adec66c42a7c34750e48bb29ec2cbba43433bcbfc5271",
+      "docs/compiler/lifecycle_normalization_policy_v1.json": "52fd602db83fdec1ffb76df2514f3fa3173b68d7e631bb4e50027da107ff61ec",
+      "docs/compiler/ssa_lowering_policy_v1.json": "951b5f312f0485ba85f8b72495032a3a34edfc547a17ceffc7219fb73a9bce05",
+      "src/aether/ir/dto.py": "69ac8e7c711f0eff90cc5eee42c0aca6c14138585baed74de57fb57892d7ef62",
+      "src/aether/ssa/dto.py": "71452fbcb00f4922d61e8241ab02d4f26129eef40097e0f87d034325106c0f66",
+      "src/aether/ssa/lifecycle_normalization_policy.py": "82716fc883d23b173c6f105e2aa565da5183cb28d619eb1fe38a44fbe3d95b10",
+      "src/aether/ssa/lowering_policy.py": "9b9f08f174316a5da635e2a128a0b95aed48e72a0a637a6f29a2c8e7a7adc6f5"
+    },
+    "actual_tree_sha256": {
+      "compiler-rs/crates/aether-ir/src": "ed1a38e9ee99a5b746af55d4c71775321aecd7e6f0fe74d8f7bdbb48ce0f2cd5"
+    },
+    "expected_sha256": {
+      "compiler-rs/crates/aether-ir/src/lifecycle.rs": "f9555d976fe9c6113eaf266658d69eaf1b92fef18113abba05cf898353454ff4",
+      "compiler-rs/crates/aether-ir/src/ssa.rs": "03649eaee8f088624d4adec66c42a7c34750e48bb29ec2cbba43433bcbfc5271",
+      "docs/compiler/lifecycle_normalization_policy_v1.json": "52fd602db83fdec1ffb76df2514f3fa3173b68d7e631bb4e50027da107ff61ec",
+      "docs/compiler/ssa_lowering_policy_v1.json": "951b5f312f0485ba85f8b72495032a3a34edfc547a17ceffc7219fb73a9bce05",
+      "src/aether/ir/dto.py": "69ac8e7c711f0eff90cc5eee42c0aca6c14138585baed74de57fb57892d7ef62",
+      "src/aether/ssa/dto.py": "71452fbcb00f4922d61e8241ab02d4f26129eef40097e0f87d034325106c0f66",
+      "src/aether/ssa/lifecycle_normalization_policy.py": "82716fc883d23b173c6f105e2aa565da5183cb28d619eb1fe38a44fbe3d95b10",
+      "src/aether/ssa/lowering_policy.py": "9b9f08f174316a5da635e2a128a0b95aed48e72a0a637a6f29a2c8e7a7adc6f5"
+    },
+    "expected_tree_sha256": {
+      "compiler-rs/crates/aether-ir/src": "ed1a38e9ee99a5b746af55d4c71775321aecd7e6f0fe74d8f7bdbb48ce0f2cd5"
+    },
+    "status": "PASS"
+  },
+  "scope": {
+    "commit_created": false,
+    "default_changed": false,
+    "historical_artifacts_changed": false,
+    "optimizer_backend_semantics_changed": false,
+    "python_shadow_removed_or_optional": false,
+    "schema_or_policy_changed": false,
+    "silent_fallback_added": false,
+    "transport_parallelized_or_optimized": false
+  },
+  "source_evidence_sha256": {
+    "deep_cfg": "6073fb123913ecff99a94090bd444a8795b2e3bf0ed47859852fbdf4ca12fdfe",
+    "full_suite": "ba008750d42c04b39fc94bad1f17a634ac22f2af9c2b097be1dbbcd63dc23d19",
+    "operational": "892623b844bda0a9e9411cbb65bf8aeb93250ce211decff599029507246dbd62",
+    "promotion_fixtures": "17b3f23ab778216842a5eab9f60c814032c792c7fcaffa333b5832e363981079",
+    "regressions": "35789b7b7c39c35e79f4a215ae55f9776d99aa0952e0c50b9eaf186be9ac4f21"
+  }
+}

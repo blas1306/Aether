@@ -303,6 +303,11 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--executable", type=Path, default=DEFAULT_COMPANION)
     parser.add_argument("--build", action="store_true")
+    parser.add_argument(
+        "--milestone",
+        choices=("RUST-3.6-V2", "RUST-3.7a"),
+        default="RUST-3.6-V2",
+    )
     args = parser.parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     if args.build:
@@ -378,12 +383,20 @@ def main() -> int:
     passed = _qualification_passed(default_run, promotion, native_compatible)
     report = {
         "artifact_schema_version": 2,
-        "milestone": "RUST-3.6-V2",
+        "milestone": args.milestone,
         "qualification_revision": args.revision,
         "decision": (
-            "RUST_SSA_AUTHORITY_REQUALIFICATION_FULL_SUITE_PASS"
+            (
+                "RUST_SSA_PRODUCTION_STABILIZATION_FULL_SUITE_PASS"
+                if args.milestone == "RUST-3.7a"
+                else "RUST_SSA_AUTHORITY_REQUALIFICATION_FULL_SUITE_PASS"
+            )
             if passed
-            else "RUST_SSA_AUTHORITY_REQUALIFICATION_FULL_SUITE_BLOCKED"
+            else (
+                "RUST_SSA_PRODUCTION_STABILIZATION_FULL_SUITE_BLOCKED"
+                if args.milestone == "RUST-3.7a"
+                else "RUST_SSA_AUTHORITY_REQUALIFICATION_FULL_SUITE_BLOCKED"
+            )
         ),
         "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
         "environment": _environment(args.executable),

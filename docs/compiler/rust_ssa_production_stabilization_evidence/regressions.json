@@ -1,0 +1,94 @@
+{
+  "artifact_schema_version": 1,
+  "decision": "RUST_SSA_PRODUCTION_REGRESSIONS_PASS",
+  "families": {
+    "aggregate_ownership": {
+      "failures": 0,
+      "files": [
+        "tests/aether/test_ssa_aggregate_ownership.py"
+      ],
+      "status": "PASS",
+      "tests": 9
+    },
+    "bounds_checked_provenance": {
+      "failures": 0,
+      "files": [
+        "tests/aether/test_ssa_lowering_policy_v1.py",
+        "tests/aether/test_ssa_dto_v2.py"
+      ],
+      "status": "PASS",
+      "tests": 55
+    },
+    "class_interface_ownership": {
+      "failures": 0,
+      "files": [
+        "tests/aether/test_native_class_references.py",
+        "tests/aether/test_native_struct_interface_boxing.py"
+      ],
+      "status": "PASS",
+      "tests": 20
+    },
+    "collection_temporary_ownership": {
+      "failures": 0,
+      "files": [
+        "tests/aether/test_ssa_collection_extraction_borrow.py"
+      ],
+      "status": "PASS",
+      "tests": 5
+    },
+    "constructor_exceptional_cleanup": {
+      "failures": 0,
+      "files": [
+        "tests/aether/test_ssa_exceptions.py"
+      ],
+      "status": "PASS",
+      "tests": 21
+    },
+    "indirect_calls_and_function_values": {
+      "failures": 0,
+      "files": [
+        "tests/aether/test_typed_callables.py"
+      ],
+      "status": "PASS",
+      "tests": 24
+    },
+    "nullable_ownership_and_casts": {
+      "failures": 0,
+      "files": [
+        "tests/aether/test_nullable_native.py"
+      ],
+      "status": "PASS",
+      "tests": 11
+    },
+    "source_location_preservation": {
+      "failures": 0,
+      "files": [
+        "tests/aether/test_ssa_source_location_lowering_policy_v1.py",
+        "tests/aether/test_ssa_source_location_codec_qualification.py",
+        "tests/aether/test_ssa_dto_v2.py"
+      ],
+      "status": "PASS",
+      "tests": 49
+    }
+  },
+  "milestone": "RUST-3.7a",
+  "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+  "passed": 155,
+  "qualification_revision": "aa0d6bf1d3316b0c425671bac768259d003f25d5",
+  "returncode": 0,
+  "selected_files": [
+    "tests/aether/test_native_class_references.py",
+    "tests/aether/test_native_struct_interface_boxing.py",
+    "tests/aether/test_nullable_native.py",
+    "tests/aether/test_ssa_aggregate_ownership.py",
+    "tests/aether/test_ssa_collection_extraction_borrow.py",
+    "tests/aether/test_ssa_dto_v2.py",
+    "tests/aether/test_ssa_exceptions.py",
+    "tests/aether/test_ssa_lowering_policy_v1.py",
+    "tests/aether/test_ssa_source_location_codec_qualification.py",
+    "tests/aether/test_ssa_source_location_lowering_policy_v1.py",
+    "tests/aether/test_typed_callables.py"
+  ],
+  "stderr": "",
+  "stdout": "........................................................................ [ 46%]\n........................................................................ [ 92%]\n...........                                                              [100%]\n155 passed in 2.05s"
+}

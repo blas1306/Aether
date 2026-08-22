@@ -1,0 +1,49 @@
+{
+  "artifact_schema_version": 2,
+  "decision": "RUST_SSA_PRODUCTION_STABILIZATION_FULL_SUITE_PASS",
+  "environment": {
+    "machine": "x86_64",
+    "platform": "Linux-7.1.8-1-cachyos-x86_64-with-glibc2.44",
+    "python_executable": "/usr/bin/python3.14",
+    "qualification_executable": {
+      "requested_path": "compiler-rs/target/debug/aether-ssa-shadow",
+      "resolved_path": "/home/blasm/proyectos/Aether/compiler-rs/target/debug/aether-ssa-shadow",
+      "sha256": "75d209cbb48e94646288fa1c00b1ce6eb6f563ec5bbe9d5faafeecb7c1da163f"
+    },
+    "sys_version": "3.14.7 (main, Aug 14 2026, 06:38:32) [GCC 16.2.1 20260810]"
+  },
+  "environmental_failures": 0,
+  "failed": 0,
+  "failures": [],
+  "failures_truncated": false,
+  "infrastructure_failures": 0,
+  "lsan_environmental_classification": {
+    "classified_lsan_ptrace_aborts": 24,
+    "initial_failed": 24,
+    "procedure": "LSAN_OPTIONS=detect_leaks=0"
+  },
+  "milestone": "RUST-3.7a",
+  "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+  "native_exception_ptrace_compatible": "54/54 PASS",
+  "passed": 4853,
+  "promotion_subset": {
+    "failed": 0,
+    "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "passed": 18,
+    "selected": 18
+  },
+  "promotion_subset_rust_authority_failures": 0,
+  "pytest_log": "full_suite_pytest.log",
+  "qualification_revision": "aa0d6bf1d3316b0c425671bac768259d003f25d5",
+  "real_semantic_failures": 0,
+  "reported_failure_count": 0,
+  "semantic_mismatches": 0,
+  "skipped": 4,
+  "summaries": {
+    "native_compatible": "54 passed in 5.32s",
+    "native_initial": "24 failed, 30 passed in 5.52s",
+    "production_default": "4853 passed, 4 skipped, 6 warnings in 201.21s (0:03:21)",
+    "promotion_subset": "18 passed in 1.86s"
+  },
+  "unclassified_test_failures": 0
+}

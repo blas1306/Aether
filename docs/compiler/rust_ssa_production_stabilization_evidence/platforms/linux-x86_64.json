@@ -1,0 +1,83 @@
+{
+  "artifact": "aether-ssa-shadow-0.1.0-linux-x86_64.tar.gz",
+  "authority": "rust",
+  "checks": {
+    "backend_handoff": "PASS",
+    "mandatory_promotion_fixtures": "PASS",
+    "multiple_requests": "PASS",
+    "native_execution_against_python_authority_baseline": "PASS",
+    "optimizer_handoff": "PASS",
+    "packaged_discovery": "PASS",
+    "path_isolation": "PASS",
+    "production_default": "PASS",
+    "python_shadow_comparison": "PASS",
+    "rollback": "PASS",
+    "rust_authority_repository_default": "PASS",
+    "rust_result_returned": "PASS",
+    "three_mode_matrix": "PASS"
+  },
+  "comparison": {
+    "backend_handoffs": 17,
+    "comparisons": 17,
+    "default_returned_ssa_origin": "rust_schema_v2_import",
+    "fixture_mode_matrix_checks": 17,
+    "infrastructure_failures": 0,
+    "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "modes_exercised": [
+      "PYTHON_SSA_ONLY",
+      "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+      "RUST_SSA_AUTHORITY_PYTHON_SHADOW"
+    ],
+    "native_baseline_comparisons": 9,
+    "optimizer_handoffs": 17,
+    "process_startups": 1,
+    "repository_default": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "requests": 36,
+    "returned_ssa_origins": [
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import",
+      "rust_schema_v2_import"
+    ],
+    "rollback_modes": [
+      "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+      "PYTHON_SSA_ONLY"
+    ],
+    "semantic_mismatches": 0
+  },
+  "execution": "clean_release_artifact_outside_checkout",
+  "mandatory_promotion_fixture_count": 8,
+  "milestone": "RUST-3.7a",
+  "platform": "linux-x86_64",
+  "provenance": "executed-native-runner",
+  "representative_categories": [
+    "scalar",
+    "numerical",
+    "collections",
+    "string",
+    "aggregate",
+    "class_interface",
+    "exception",
+    "constructor_ownership",
+    "function_value_indirect_call"
+  ],
+  "returned_ssa_origin": "rust_schema_v2_import",
+  "revision": "aa0d6bf1d3316b0c425671bac768259d003f25d5",
+  "rust_target": "x86_64-unknown-linux-gnu",
+  "schema_version": 1,
+  "sha256": "2ad89396d637ca287f5d2a42699767141888b9be739dd353f17ba2a3666a835b",
+  "shadow": "python_synchronous"
+}

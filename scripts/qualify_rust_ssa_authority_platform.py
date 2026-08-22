@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Produce native clean-install RUST-3.6-V2 promotion evidence."""
+"""Produce native clean-install Rust SSA authority evidence.
+
+The default invocation remains the frozen RUST-3.6-V2 producer.  RUST-3.7a
+adds a string workload and emits only new stabilization evidence.
+"""
 from __future__ import annotations
 
 import argparse
@@ -103,6 +107,11 @@ def main() -> int:
     parser.add_argument("--executable", type=Path, required=True)
     parser.add_argument("--wheel", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--production-stabilization",
+        action="store_true",
+        help="emit RUST-3.7a evidence with the expanded representative set",
+    )
     args = parser.parse_args()
 
     output = args.output_dir.resolve()
@@ -158,6 +167,10 @@ def main() -> int:
                 ROOT / "corpus/exceptions/positive/indirect_call.ae",
             ),
         ]
+        if args.production_stabilization:
+            representative.insert(
+                3, ("string", ROOT / "examples/llvm/string_choose.ae")
+            )
         selected = [path for _category, path in representative]
         promotion_fixtures = sorted(
             (ROOT / "tests/fixtures/rust_ssa_promotion_failure").glob("*.ae")
@@ -190,7 +203,9 @@ def main() -> int:
 
     evidence = {
         "schema_version": 1,
-        "milestone": "RUST-3.6-V2",
+        "milestone": (
+            "RUST-3.7a" if args.production_stabilization else "RUST-3.6-V2"
+        ),
         "revision": args.revision,
         "platform": args.platform,
         "rust_target": PLATFORMS[args.platform],

@@ -1,0 +1,431 @@
+{
+  "artifact_schema_version": 1,
+  "decision": "RUST_SSA_PROMOTION_FIXTURES_QUALIFIED",
+  "fixtures": [
+    {
+      "checks": {
+        "bounds_aggregate_interface_ownership_metadata": true,
+        "canonical_ssa_parity": true,
+        "constructor_normal_exceptional_lifecycle": true,
+        "exact_python_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "rust_determinism": true,
+        "rust_owned_ssa_verification": true,
+        "same_input_guarantee": true,
+        "schema_v2_import": true,
+        "source_location_preservation": true,
+        "verified_initial_ir": true
+      },
+      "fixture": "tests/fixtures/rust_ssa_promotion_failure/aggregate_owned_projection.ae",
+      "mode_matrix": {
+        "PYTHON_SSA_AUTHORITY_RUST_SHADOW": {
+          "comparison": "match",
+          "expected_returned_ssa_origin": "python_general_ssa_builder",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "python_general_ssa_builder",
+          "status": "PASS"
+        },
+        "PYTHON_SSA_ONLY": {
+          "comparison": "not_compared",
+          "expected_returned_ssa_origin": "python_general_ssa_builder",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "python_general_ssa_builder",
+          "status": "PASS"
+        },
+        "RUST_SSA_AUTHORITY_PYTHON_SHADOW": {
+          "comparison": "match",
+          "expected_returned_ssa_origin": "rust_schema_v2_import",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "rust_schema_v2_import",
+          "status": "PASS"
+        }
+      },
+      "source_sha256": "3d70fc80be5d8f5f53d8f23474001780cc7a9ec260bd169018786252d60e71ca",
+      "status": "PASS"
+    },
+    {
+      "checks": {
+        "bounds_aggregate_interface_ownership_metadata": true,
+        "canonical_ssa_parity": true,
+        "constructor_normal_exceptional_lifecycle": true,
+        "exact_python_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "rust_determinism": true,
+        "rust_owned_ssa_verification": true,
+        "same_input_guarantee": true,
+        "schema_v2_import": true,
+        "source_location_preservation": true,
+        "verified_initial_ir": true
+      },
+      "fixture": "tests/fixtures/rust_ssa_promotion_failure/boxed_constructor_receiver.ae",
+      "mode_matrix": {
+        "PYTHON_SSA_AUTHORITY_RUST_SHADOW": {
+          "comparison": "match",
+          "expected_returned_ssa_origin": "python_general_ssa_builder",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "python_general_ssa_builder",
+          "status": "PASS"
+        },
+        "PYTHON_SSA_ONLY": {
+          "comparison": "not_compared",
+          "expected_returned_ssa_origin": "python_general_ssa_builder",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "python_general_ssa_builder",
+          "status": "PASS"
+        },
+        "RUST_SSA_AUTHORITY_PYTHON_SHADOW": {
+          "comparison": "match",
+          "expected_returned_ssa_origin": "rust_schema_v2_import",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "rust_schema_v2_import",
+          "status": "PASS"
+        }
+      },
+      "source_sha256": "0e3062c109468f898d420b8bc2e5fd3e7c5713b04506ba7e2b8835428472d0ea",
+      "status": "PASS"
+    },
+    {
+      "checks": {
+        "bounds_aggregate_interface_ownership_metadata": true,
+        "canonical_ssa_parity": true,
+        "constructor_normal_exceptional_lifecycle": true,
+        "exact_python_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "rust_determinism": true,
+        "rust_owned_ssa_verification": true,
+        "same_input_guarantee": true,
+        "schema_v2_import": true,
+        "source_location_preservation": true,
+        "verified_initial_ir": true
+      },
+      "fixture": "tests/fixtures/rust_ssa_promotion_failure/class_get_owned_result.ae",
+      "mode_matrix": {
+        "PYTHON_SSA_AUTHORITY_RUST_SHADOW": {
+          "comparison": "match",
+          "expected_returned_ssa_origin": "python_general_ssa_builder",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "python_general_ssa_builder",
+          "status": "PASS"
+        },
+        "PYTHON_SSA_ONLY": {
+          "comparison": "not_compared",
+          "expected_returned_ssa_origin": "python_general_ssa_builder",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "python_general_ssa_builder",
+          "status": "PASS"
+        },
+        "RUST_SSA_AUTHORITY_PYTHON_SHADOW": {
+          "comparison": "match",
+          "expected_returned_ssa_origin": "rust_schema_v2_import",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "rust_schema_v2_import",
+          "status": "PASS"
+        }
+      },
+      "source_sha256": "ab65c275e9dfea93a68111e6f1892b3cfc0b7d0ad83205a3fbc45ca54e7662e3",
+      "status": "PASS"
+    },
+    {
+      "checks": {
+        "bounds_aggregate_interface_ownership_metadata": true,
+        "canonical_ssa_parity": true,
+        "constructor_normal_exceptional_lifecycle": true,
+        "exact_python_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "rust_determinism": true,
+        "rust_owned_ssa_verification": true,
+        "same_input_guarantee": true,
+        "schema_v2_import": true,
+        "source_location_preservation": true,
+        "verified_initial_ir": true
+      },
+      "fixture": "tests/fixtures/rust_ssa_promotion_failure/interface_call_temporary.ae",
+      "mode_matrix": {
+        "PYTHON_SSA_AUTHORITY_RUST_SHADOW": {
+          "comparison": "match",
+          "expected_returned_ssa_origin": "python_general_ssa_builder",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "python_general_ssa_builder",
+          "status": "PASS"
+        },
+        "PYTHON_SSA_ONLY": {
+          "comparison": "not_compared",
+          "expected_returned_ssa_origin": "python_general_ssa_builder",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "python_general_ssa_builder",
+          "status": "PASS"
+        },
+        "RUST_SSA_AUTHORITY_PYTHON_SHADOW": {
+          "comparison": "match",
+          "expected_returned_ssa_origin": "rust_schema_v2_import",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "rust_schema_v2_import",
+          "status": "PASS"
+        }
+      },
+      "source_sha256": "3d03702375cbe8dd6369d4ff08a58c700b96fb06f149c148190a108b3d2c2c63",
+      "status": "PASS"
+    },
+    {
+      "checks": {
+        "bounds_aggregate_interface_ownership_metadata": true,
+        "canonical_ssa_parity": true,
+        "constructor_normal_exceptional_lifecycle": true,
+        "exact_python_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "rust_determinism": true,
+        "rust_owned_ssa_verification": true,
+        "same_input_guarantee": true,
+        "schema_v2_import": true,
+        "source_location_preservation": true,
+        "verified_initial_ir": true
+      },
+      "fixture": "tests/fixtures/rust_ssa_promotion_failure/interface_lifecycle_default.ae",
+      "mode_matrix": {
+        "PYTHON_SSA_AUTHORITY_RUST_SHADOW": {
+          "comparison": "match",
+          "expected_returned_ssa_origin": "python_general_ssa_builder",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "python_general_ssa_builder",
+          "status": "PASS"
+        },
+        "PYTHON_SSA_ONLY": {
+          "comparison": "not_compared",
+          "expected_returned_ssa_origin": "python_general_ssa_builder",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "python_general_ssa_builder",
+          "status": "PASS"
+        },
+        "RUST_SSA_AUTHORITY_PYTHON_SHADOW": {
+          "comparison": "match",
+          "expected_returned_ssa_origin": "rust_schema_v2_import",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "rust_schema_v2_import",
+          "status": "PASS"
+        }
+      },
+      "source_sha256": "838f0ef3ab58385c0ffd2dd9d9e83c5e93046f7482f35530c23433f5809ef295",
+      "status": "PASS"
+    },
+    {
+      "checks": {
+        "bounds_aggregate_interface_ownership_metadata": true,
+        "canonical_ssa_parity": true,
+        "constructor_normal_exceptional_lifecycle": true,
+        "exact_python_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "rust_determinism": true,
+        "rust_owned_ssa_verification": true,
+        "same_input_guarantee": true,
+        "schema_v2_import": true,
+        "source_location_preservation": true,
+        "verified_initial_ir": true
+      },
+      "fixture": "tests/fixtures/rust_ssa_promotion_failure/nullable_owned_return.ae",
+      "mode_matrix": {
+        "PYTHON_SSA_AUTHORITY_RUST_SHADOW": {
+          "comparison": "match",
+          "expected_returned_ssa_origin": "python_general_ssa_builder",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "python_general_ssa_builder",
+          "status": "PASS"
+        },
+        "PYTHON_SSA_ONLY": {
+          "comparison": "not_compared",
+          "expected_returned_ssa_origin": "python_general_ssa_builder",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "python_general_ssa_builder",
+          "status": "PASS"
+        },
+        "RUST_SSA_AUTHORITY_PYTHON_SHADOW": {
+          "comparison": "match",
+          "expected_returned_ssa_origin": "rust_schema_v2_import",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "rust_schema_v2_import",
+          "status": "PASS"
+        }
+      },
+      "source_sha256": "8763a0958dcad1a3dfc4e7ed620de2991aaa1baa7c8839d80f908ebf616c1661",
+      "status": "PASS"
+    },
+    {
+      "checks": {
+        "bounds_aggregate_interface_ownership_metadata": true,
+        "canonical_ssa_parity": true,
+        "constructor_normal_exceptional_lifecycle": true,
+        "exact_python_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "rust_determinism": true,
+        "rust_owned_ssa_verification": true,
+        "same_input_guarantee": true,
+        "schema_v2_import": true,
+        "source_location_preservation": true,
+        "verified_initial_ir": true
+      },
+      "fixture": "tests/fixtures/rust_ssa_promotion_failure/owning_call_result.ae",
+      "mode_matrix": {
+        "PYTHON_SSA_AUTHORITY_RUST_SHADOW": {
+          "comparison": "match",
+          "expected_returned_ssa_origin": "python_general_ssa_builder",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "python_general_ssa_builder",
+          "status": "PASS"
+        },
+        "PYTHON_SSA_ONLY": {
+          "comparison": "not_compared",
+          "expected_returned_ssa_origin": "python_general_ssa_builder",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "python_general_ssa_builder",
+          "status": "PASS"
+        },
+        "RUST_SSA_AUTHORITY_PYTHON_SHADOW": {
+          "comparison": "match",
+          "expected_returned_ssa_origin": "rust_schema_v2_import",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "rust_schema_v2_import",
+          "status": "PASS"
+        }
+      },
+      "source_sha256": "f0ea42f048e8f339dc69fa01e8bd71e4093f73dcccf27fca4468d39be214320d",
+      "status": "PASS"
+    },
+    {
+      "checks": {
+        "bounds_aggregate_interface_ownership_metadata": true,
+        "canonical_ssa_parity": true,
+        "constructor_normal_exceptional_lifecycle": true,
+        "exact_python_reserialization": true,
+        "lifecycle_parity": true,
+        "python_ssa_verification": true,
+        "rust_determinism": true,
+        "rust_owned_ssa_verification": true,
+        "same_input_guarantee": true,
+        "schema_v2_import": true,
+        "source_location_preservation": true,
+        "verified_initial_ir": true
+      },
+      "fixture": "tests/fixtures/rust_ssa_promotion_failure/owning_is_empty_result.ae",
+      "mode_matrix": {
+        "PYTHON_SSA_AUTHORITY_RUST_SHADOW": {
+          "comparison": "match",
+          "expected_returned_ssa_origin": "python_general_ssa_builder",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "python_general_ssa_builder",
+          "status": "PASS"
+        },
+        "PYTHON_SSA_ONLY": {
+          "comparison": "not_compared",
+          "expected_returned_ssa_origin": "python_general_ssa_builder",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "python_general_ssa_builder",
+          "status": "PASS"
+        },
+        "RUST_SSA_AUTHORITY_PYTHON_SHADOW": {
+          "comparison": "match",
+          "expected_returned_ssa_origin": "rust_schema_v2_import",
+          "optimizer_verification": "PASS",
+          "returned_ssa_origin": "rust_schema_v2_import",
+          "status": "PASS"
+        }
+      },
+      "source_sha256": "e085a9747ea1ff77b5aaaa5164beeaea7f4e3626254f6e180906d6f957b8030c",
+      "status": "PASS"
+    }
+  ],
+  "gates": [
+    {
+      "coverage": [
+        "array_length",
+        "list_length",
+        "list_is_empty",
+        "interface_receiver"
+      ],
+      "fixtures": [
+        "tests/fixtures/rust_ssa_promotion_failure/aggregate_owned_projection.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/owning_call_result.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/owning_is_empty_result.ae",
+        "tests/fixtures/rust_ssa_promotion_failure/interface_call_temporary.ae"
+      ],
+      "id": "V2-L01",
+      "name": "owning_temporaries_consumed_by_borrowed_operations",
+      "root_cause": "RC1",
+      "status": "PASS"
+    },
+    {
+      "coverage": [
+        "nullable_cast_ownership",
+        "return_transfer"
+      ],
+      "fixtures": [
+        "tests/fixtures/rust_ssa_promotion_failure/nullable_owned_return.ae"
+      ],
+      "id": "V2-L02",
+      "name": "nullable_owning_return_cast_transfer",
+      "root_cause": "RC2",
+      "status": "PASS"
+    },
+    {
+      "coverage": [
+        "nullable_storage_copy_lifetime",
+        "constructor_argument_cleanup"
+      ],
+      "fixtures": [
+        "tests/fixtures/rust_ssa_promotion_failure/class_get_owned_result.ae"
+      ],
+      "id": "V2-L03",
+      "name": "nullable_constructor_argument_from_storage",
+      "root_cause": "RC3",
+      "status": "PASS"
+    },
+    {
+      "coverage": [
+        "interface_non_defaultability",
+        "move_init_source_reset"
+      ],
+      "fixtures": [
+        "tests/fixtures/rust_ssa_promotion_failure/interface_lifecycle_default.ae"
+      ],
+      "id": "V2-L04",
+      "name": "interface_lifecycle_defaultability_move_init",
+      "root_cause": "RC4",
+      "status": "PASS"
+    },
+    {
+      "coverage": [
+        "normal_receiver_release",
+        "constructor_ownership_metadata"
+      ],
+      "fixtures": [
+        "tests/fixtures/rust_ssa_promotion_failure/boxed_constructor_receiver.ae"
+      ],
+      "id": "V2-L05",
+      "name": "direct_struct_constructor_receiver_release",
+      "root_cause": "RC5",
+      "status": "PASS"
+    }
+  ],
+  "historical_minimized_fixture_count": 7,
+  "mandatory_fixture_count": 8,
+  "manifest_sha256": "b7410224e9bce2a850f69d5744b988caa8974b0668b9babef79cdb0dca442847",
+  "milestone": "RUST-3.6-V2",
+  "qualification_revision": "aa0d6bf1d3316b0c425671bac768259d003f25d5",
+  "repository_default": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+  "scope": {
+    "canonicalizer_changed": false,
+    "lifecycle_policy_changed": false,
+    "lowering_semantics_changed": false,
+    "optimizer_backend_semantics_changed": false,
+    "schemas_changed": false
+  },
+  "transport": {
+    "process_startups": 1,
+    "requests": 32
+  }
+}

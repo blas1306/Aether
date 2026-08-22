@@ -153,6 +153,101 @@ jobs:
             qualification/full_suite.json
             qualification/full_suite_pytest.log
 
+  production-stabilization-operational:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt pytest
+      - run: >-
+          python scripts/qualify_rust_ssa_production_stabilization.py
+          --revision "${{ github.sha }}" --build
+          --output qualification/operational.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-stabilization-operational
+          path: qualification/operational.json
+
+  production-stabilization-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt pytest
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --package aether-verifier --bin aether-ssa-shadow
+      - run: >-
+          python scripts/qualify_rust_ssa_production_regressions.py
+          --revision "${{ github.sha }}"
+          --executable compiler-rs/target/debug/aether-ssa-shadow
+          --output qualification/regressions.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-stabilization-regressions
+          path: qualification/regressions.json
+
+  production-stabilization-full-suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: >-
+          python -m pip install -r requirements.txt pytest
+          'setuptools>=77' 'wheel>=0.45'
+      - run: >-
+          python scripts/qualify_rust_ssa_authority_full_suite.py
+          --revision "${{ github.sha }}" --build --milestone RUST-3.7a
+          --output qualification/full_suite.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-stabilization-full-suite
+          path: |
+            qualification/full_suite.json
+            qualification/full_suite_pytest.log
+
+  production-stabilization-platform:
+    name: rust-stabilization-${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: linux-x86_64, os: ubuntu-latest, executable: compiler-rs/target/release/aether-ssa-shadow}
+          - {platform: windows-x86_64, os: windows-latest, executable: compiler-rs/target/release/aether-ssa-shadow.exe}
+          - {platform: macos-arm64, os: macos-15, executable: compiler-rs/target/release/aether-ssa-shadow}
+          - {platform: macos-x86_64, os: macos-15-intel, executable: compiler-rs/target/release/aether-ssa-shadow}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt pytest build
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --release --locked --package aether-verifier --bin aether-ssa-shadow
+      - run: python -m build --wheel --outdir python-dist
+      - run: >-
+          python scripts/qualify_rust_ssa_authority_platform.py
+          --production-stabilization --revision "${{ github.sha }}"
+          --platform "${{ matrix.platform }}"
+          --executable "${{ matrix.executable }}"
+          --wheel python-dist --output-dir qualification/platforms
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: production-stabilization-platform-${{ matrix.platform }}
+          path: qualification/platforms
+
   performance:
     runs-on: ubuntu-latest
     steps:
@@ -216,6 +311,7 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import json
           import shutil
           evidence = Path("evidence")
           (evidence / "platforms").mkdir(parents=True)
@@ -225,6 +321,11 @@ jobs:
               "full_suite.json", "performance.json",
           }
           for report in Path("imported").rglob("*.json"):
+              value = json.loads(report.read_text(encoding="utf-8"))
+              if report.name.startswith(("linux-", "windows-", "macos-")) and value.get("milestone") != "RUST-3.6-V2":
+                  continue
+              if report.name in names and value.get("milestone") == "RUST-3.7a":
+                  continue
               destination = (
                   evidence / "platforms" / report.name
                   if report.name.startswith(("linux-", "windows-", "macos-"))
@@ -246,3 +347,54 @@ jobs:
           path: |
             evidence
             qualification
+
+  production-stabilization-aggregate:
+    needs:
+      - promotion-fixtures
+      - deep-cfg
+      - production-stabilization-operational
+      - production-stabilization-regressions
+      - production-stabilization-full-suite
+      - production-stabilization-platform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: actions/download-artifact@v4
+        with: {path: imported}
+      - name: Assemble fresh RUST-3.7a evidence
+        shell: python
+        run: |
+          from pathlib import Path
+          import json
+          import shutil
+          evidence = Path("evidence")
+          (evidence / "platforms").mkdir(parents=True)
+          wanted = {
+              "promotion_fixtures.json", "deep_cfg.json", "operational.json",
+              "regressions.json", "full_suite.json",
+          }
+          for report in Path("imported").rglob("*.json"):
+              value = json.loads(report.read_text(encoding="utf-8"))
+              if report.name.startswith(("linux-", "windows-", "macos-")):
+                  if value.get("milestone") == "RUST-3.7a":
+                      shutil.copyfile(report, evidence / "platforms" / report.name)
+              elif report.name in wanted:
+                  if report.name in {"promotion_fixtures.json", "deep_cfg.json"} or value.get("milestone") == "RUST-3.7a":
+                      shutil.copyfile(report, evidence / report.name)
+          assert wanted <= {path.name for path in evidence.glob("*.json")}
+          assert len(list((evidence / "platforms").glob("*.json"))) == 4
+      - name: Require exact-revision production stabilization
+        run: >-
+          python scripts/check_rust_ssa_production_stabilization.py
+          --revision "${{ github.sha }}" --evidence-dir evidence
+          --output qualification/rust_ssa_production_stabilization.json
+          --require-stabilized
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-ssa-production-stabilization
+          path: |
+            evidence
+            qualification/rust_ssa_production_stabilization.json
