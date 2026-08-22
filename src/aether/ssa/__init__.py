@@ -28,8 +28,11 @@ from .shadow import (
     SSAShadowFailurePolicy,
     SSAShadowReport,
     lower_with_rust_authority,
+    diagnostic_lower_with_rust_authority_without_python_shadow,
+    SSAPerformanceProfile,
     production_rust_ssa_lowering_client,
 )
+from .performance import characterize_python_ssa_only
 from .interpreter import SSAInterpreter
 from .model import (
     SSAArrayCopy,
@@ -132,6 +135,9 @@ __all__ = [
     "SSAShadowFailurePolicy",
     "SSAShadowReport",
     "lower_with_rust_authority",
+    "diagnostic_lower_with_rust_authority_without_python_shadow",
+    "SSAPerformanceProfile",
+    "characterize_python_ssa_only",
     "production_rust_ssa_lowering_client",
     "SSABuildError",
     "SSABuilder",

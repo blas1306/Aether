@@ -158,6 +158,42 @@ def test_real_companion_serializes_concurrent_requests(
         assert all(response == responses[0] for response in responses)
 
 
+def test_real_companion_exposes_phase_timings_only_on_diagnostic_switch(
+    rust_ssa_shadow_executable: Path,
+) -> None:
+    payload = json.dumps(
+        __import__("aether.ir.dto", fromlist=["ir_module_to_dto"]).ir_module_to_dto(
+            IRModule()
+        ),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    with PersistentRustSSALoweringClient(rust_ssa_shadow_executable) as ordinary:
+        ordinary_response = ordinary.lower(payload)
+    with PersistentRustSSALoweringClient(
+        rust_ssa_shadow_executable, characterize_performance=True
+    ) as diagnostic:
+        diagnostic_response = diagnostic.lower(payload)
+
+    assert ordinary_response == empty_response()
+    assert "performance" not in ordinary_response
+    performance = diagnostic_response.pop("performance")
+    assert diagnostic_response == ordinary_response
+    assert performance["clock"] == "std::time::Instant"
+    assert performance["unit"] == "nanoseconds"
+    assert set(performance["phases"]) == {
+        "rust_input_parsing",
+        "rust_lifecycle_normalization",
+        "rust_ssa_lowering",
+        "rust_owned_ssa_verification",
+        "rust_schema_v2_materialization",
+        "rust_orchestration_unattributed",
+    }
+    assert sum(performance["phases"].values()) <= performance[
+        "request_compute_total"
+    ]
+
+
 def test_packaged_discovery_has_no_path_or_checkout_fallback(
     tmp_path: Path, rust_ssa_shadow_executable: Path,
 ) -> None:

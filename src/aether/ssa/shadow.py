@@ -93,6 +93,48 @@ class SSAShadowReport:
     python_seconds: float = 0.0
     rust_seconds: float = 0.0
     comparison_seconds: float = 0.0
+    performance: SSAPerformanceProfile | None = None
+
+
+@dataclass(frozen=True)
+class SSAPerformanceProfile:
+    """One observational lowering sample measured with a monotonic clock."""
+
+    mode: str
+    clock: str
+    phases_seconds: Mapping[str, float]
+    measured_component_sum_seconds: float
+    residual_unattributed_seconds: float
+    total_wall_seconds: float
+    rust_phase_detail: str
+
+    def __post_init__(self) -> None:
+        values = tuple(self.phases_seconds.values()) + (
+            self.measured_component_sum_seconds,
+            self.residual_unattributed_seconds,
+            self.total_wall_seconds,
+        )
+        if any(not isinstance(value, (int, float)) or value < 0 for value in values):
+            raise ValueError("SSA performance timings must be non-negative numbers")
+        phase_sum = sum(self.phases_seconds.values())
+        phase_tolerance = max(1e-9, self.measured_component_sum_seconds * 1e-9)
+        if abs(phase_sum - self.measured_component_sum_seconds) > phase_tolerance:
+            raise ValueError("SSA performance measured component sum is inconsistent")
+        accounted = self.measured_component_sum_seconds + self.residual_unattributed_seconds
+        tolerance = max(1e-9, self.total_wall_seconds * 1e-9)
+        if abs(accounted - self.total_wall_seconds) > tolerance:
+            raise ValueError("SSA performance phase totals are inconsistent")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "mode": self.mode,
+            "clock": self.clock,
+            "phases_seconds": dict(self.phases_seconds),
+            "measured_component_sum_seconds": self.measured_component_sum_seconds,
+            "residual_unattributed_seconds": self.residual_unattributed_seconds,
+            "total_wall_seconds": self.total_wall_seconds,
+            "rust_phase_detail": self.rust_phase_detail,
+        }
 
 
 class SSAShadowFailure(RuntimeError):
@@ -112,13 +154,26 @@ class RustSSALoweringClient(Protocol):
 class PersistentRustSSALoweringClient:
     """Synchronized length-framed companion; one process serves many requests."""
 
-    def __init__(self, executable: str | Path, *, timeout_seconds: float = 10.0) -> None:
-        self.command = (str(executable), "--persistent")
+    def __init__(
+        self,
+        executable: str | Path,
+        *,
+        timeout_seconds: float = 10.0,
+        characterize_performance: bool = False,
+    ) -> None:
+        self.command = (
+            (str(executable), "--persistent", "--characterize-performance")
+            if characterize_performance
+            else (str(executable), "--persistent")
+        )
         self.timeout_seconds = timeout_seconds
+        self.characterize_performance = characterize_performance
         self._process: subprocess.Popen[bytes] | None = None
         self._lock = threading.Lock()
         self._starts = 0
         self._requests = 0
+        self._last_startup_seconds = 0.0
+        self._last_response_decode_seconds = 0.0
 
     @property
     def process_start_count(self) -> int: return self._starts
@@ -127,10 +182,20 @@ class PersistentRustSSALoweringClient:
     def request_count(self) -> int: return self._requests
 
     @property
+    def last_startup_seconds(self) -> float:
+        return self._last_startup_seconds
+
+    @property
+    def last_response_decode_seconds(self) -> float:
+        return self._last_response_decode_seconds
+
+    @property
     def process_id(self) -> int | None:
         return self._process.pid if self._process is not None else None
 
     def lower(self, payload: bytes) -> Mapping[str, object]:
+        self._last_startup_seconds = 0.0
+        self._last_response_decode_seconds = 0.0
         with self._lock:
             process = self._start()
             assert process.stdin is not None
@@ -142,6 +207,7 @@ class PersistentRustSSALoweringClient:
             except Exception:
                 self.close()
                 raise
+        decode_started = perf_counter() if self.characterize_performance else 0.0
         try:
             decoded = json.loads(response)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -150,11 +216,14 @@ class PersistentRustSSALoweringClient:
         if not isinstance(decoded, dict):
             self.close()
             raise RuntimeError("malformed Rust SSA response")
+        if self.characterize_performance:
+            self._last_response_decode_seconds = perf_counter() - decode_started
         return decoded
 
     def _start(self) -> subprocess.Popen[bytes]:
         if self._process is not None and self._process.poll() is None:
             return self._process
+        started = perf_counter() if self.characterize_performance else 0.0
         try:
             self._process = subprocess.Popen(self.command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                              stderr=subprocess.PIPE, shell=False)
@@ -176,6 +245,8 @@ class PersistentRustSSALoweringClient:
         if not valid:
             self.close()
             raise RuntimeError("incompatible Rust SSA companion identity")
+        if self.characterize_performance:
+            self._last_startup_seconds = perf_counter() - started
         return self._process
 
     def _read_frame(self, process: subprocess.Popen[bytes]) -> bytes:
@@ -459,29 +530,114 @@ def _difference(left: Any, right: Any, path: str = "$") -> tuple[str, Any, Any] 
     return None
 
 
+def _finish_performance_profile(
+    mode: str,
+    phases: dict[str, float],
+    total_started: float,
+    rust_phase_detail: str,
+) -> SSAPerformanceProfile:
+    total = perf_counter() - total_started
+    measured = sum(phases.values())
+    # Clock reads and Python coordination are intentionally left as residual.
+    # A tiny negative value can arise because the nested Rust clock is rounded
+    # to integer nanoseconds; retain internal consistency without inventing a
+    # negative phase.
+    residual = max(0.0, total - measured)
+    if measured > total:
+        phases["clock_domain_rounding_adjustment"] = max(
+            0.0, phases.get("clock_domain_rounding_adjustment", 0.0) - (measured - total)
+        )
+        measured = sum(phases.values())
+        total = max(total, measured)
+        residual = total - measured
+    return SSAPerformanceProfile(
+        mode=mode,
+        clock="time.perf_counter",
+        phases_seconds=dict(phases),
+        measured_component_sum_seconds=measured,
+        residual_unattributed_seconds=residual,
+        total_wall_seconds=total,
+        rust_phase_detail=rust_phase_detail,
+    )
+
+
+def _rust_phase_timings(
+    response: Mapping[str, object],
+) -> tuple[dict[str, float], float] | None:
+    """Decode optional diagnostic metadata without affecting compilation."""
+    performance = response.get("performance")
+    if not isinstance(performance, dict) or performance.get("unit") != "nanoseconds":
+        return None
+    raw_phases = performance.get("phases")
+    raw_total = performance.get("request_compute_total")
+    if not isinstance(raw_phases, dict) or not isinstance(raw_total, int) or raw_total < 0:
+        return None
+    expected = {
+        "rust_input_parsing",
+        "rust_lifecycle_normalization",
+        "rust_ssa_lowering",
+        "rust_owned_ssa_verification",
+        "rust_schema_v2_materialization",
+        "rust_orchestration_unattributed",
+    }
+    if set(raw_phases) != expected or any(
+        not isinstance(value, int) or value < 0 for value in raw_phases.values()
+    ):
+        return None
+    phases = {name: value / 1_000_000_000 for name, value in raw_phases.items()}
+    total = raw_total / 1_000_000_000
+    if sum(phases.values()) > total + 1e-9:
+        return None
+    return phases, total
+
+
 def _lower_dual_lane(
     module: IRModule,
     client: RustSSALoweringClient,
     *,
     rust_authoritative: bool,
+    characterize_performance: bool = False,
+    execute_python_shadow: bool = True,
 ) -> tuple[object, SSAShadowReport]:
     """Run both qualified lanes and return only the configured authority."""
+    total_started = perf_counter() if characterize_performance else 0.0
+    phases: dict[str, float] = {}
+    started = perf_counter() if characterize_performance else 0.0
     snapshot = ir_module_to_dto(module)
+    if characterize_performance:
+        phases["initial_ir_snapshot_preparation"] = perf_counter() - started
+        started = perf_counter()
     payload = json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()
+    if characterize_performance:
+        phases["rust_transport_serialization"] = perf_counter() - started
 
     python_seconds = 0.0
     rust_seconds = 0.0
+    rust_phase_detail = "disabled"
 
     def run_python() -> object:
         nonlocal python_seconds
         try:
             # Both lanes consume representations derived from these exact
             # bytes.  The frontend and Initial IR lowering never run twice.
+            started = perf_counter() if characterize_performance else 0.0
             python_input = ir_module_from_dto(json.loads(payload))
-            started = perf_counter()
-            value = GeneralSSABuilder().build(python_input)
+            if characterize_performance:
+                phases["python_shadow_input_reconstruction"] = perf_counter() - started
+            lane_started = perf_counter()
+            if characterize_performance:
+                value = GeneralSSABuilder(performance_timings=phases).build(
+                    python_input
+                )
+            else:
+                # Keep the production path byte-for-byte recognizable to the
+                # stabilization source-contract gate.
+                value = GeneralSSABuilder().build(python_input)
+            started = perf_counter() if characterize_performance else 0.0
             SSAVerifier(value).verify()
-            python_seconds = perf_counter() - started
+            if characterize_performance:
+                phases["python_shadow_verification"] = perf_counter() - started
+            python_seconds = perf_counter() - lane_started
             return value
         except Exception as exc:
             role = "shadow" if rust_authoritative else "authority"
@@ -496,7 +652,7 @@ def _lower_dual_lane(
             ) from exc
 
     def run_rust() -> object:
-        nonlocal rust_seconds
+        nonlocal rust_seconds, rust_phase_detail
         try:
             started = perf_counter()
             response = client.lower(payload)
@@ -511,6 +667,28 @@ def _lower_dual_lane(
                     python_seconds=python_seconds,
                 )
             ) from exc
+        if characterize_performance:
+            detailed = _rust_phase_timings(response)
+            if detailed is None:
+                phases["rust_transport_and_compute_combined"] = rust_seconds
+                rust_phase_detail = "combined: companion did not expose diagnostic phase metadata"
+            else:
+                rust_phases, rust_compute_total = detailed
+                phases.update(rust_phases)
+                startup = getattr(client, "last_startup_seconds", 0.0)
+                response_decode = getattr(client, "last_response_decode_seconds", 0.0)
+                startup = startup if isinstance(startup, (int, float)) else 0.0
+                response_decode = response_decode if isinstance(response_decode, (int, float)) else 0.0
+                phases["companion_process_startup"] = max(0.0, startup)
+                phases["response_json_decode"] = max(0.0, response_decode)
+                phases["request_response_transport_and_serialization"] = max(
+                    0.0,
+                    rust_seconds - rust_compute_total - phases["companion_process_startup"]
+                    - phases["response_json_decode"],
+                )
+                rust_phase_detail = (
+                    "separated Rust compute; final response byte serialization and IPC are combined"
+                )
         if response.get("ok") is not True:
             raise SSAShadowFailure(SSAShadowReport("rust_lowering_or_verifier_failure", "rust_lane",
                                                   first_difference=str(response.get("error", "unspecified failure"))[:240],
@@ -519,13 +697,19 @@ def _lower_dual_lane(
             raise SSAShadowFailure(SSAShadowReport("malformed_rust_response", "response_decode",
                                                   python_seconds=python_seconds, rust_seconds=rust_seconds))
         try:
+            started = perf_counter() if characterize_performance else 0.0
             value = ssa_module_from_dto(response["ssa"])
+            if characterize_performance:
+                phases["rust_schema_v2_import"] = perf_counter() - started
         except Exception as exc:
             raise SSAShadowFailure(SSAShadowReport("malformed_rust_response", "schema_v2_import",
                                                   first_difference=str(exc)[:240], python_seconds=python_seconds,
                                                   rust_seconds=rust_seconds)) from exc
         try:
+            started = perf_counter() if characterize_performance else 0.0
             SSAVerifier(value).verify()
+            if characterize_performance:
+                phases["imported_rust_python_verification"] = perf_counter() - started
         except Exception as exc:
             raise SSAShadowFailure(SSAShadowReport("rust_verifier_failure", "ssa_verification",
                                                   first_difference=str(exc)[:240], python_seconds=python_seconds,
@@ -534,11 +718,19 @@ def _lower_dual_lane(
 
     if rust_authoritative:
         rust_ssa = run_rust()
-        python_ssa = run_python()
+        if execute_python_shadow:
+            python_ssa = run_python()
+        else:
+            python_ssa = None
     else:
         python_ssa = run_python()
         rust_ssa = run_rust()
-    if ir_module_to_dto(module) != snapshot:
+
+    started = perf_counter() if characterize_performance else 0.0
+    unchanged = ir_module_to_dto(module) == snapshot
+    if characterize_performance:
+        phases["input_snapshot_integrity_check"] = perf_counter() - started
+    if not unchanged:
         raise SSAShadowFailure(
             SSAShadowReport(
                 "same_input_violation",
@@ -547,18 +739,51 @@ def _lower_dual_lane(
                 rust_seconds=rust_seconds,
             )
         )
+
+    if not execute_python_shadow:
+        performance = _finish_performance_profile(
+            "diagnostic_rust_authority_without_python_shadow",
+            phases,
+            total_started,
+            rust_phase_detail,
+        )
+        return rust_ssa, SSAShadowReport(
+            "diagnostic_rust_only",
+            "diagnostic_only_not_production",
+            rust_seconds=rust_seconds,
+            performance=performance,
+        )
+
+    assert python_ssa is not None
     try:
+        started = perf_counter() if characterize_performance else 0.0
         rust_dto = ssa_module_to_dto(rust_ssa, schema_version=2)
+        if characterize_performance:
+            phases["rust_result_dto_serialization"] = perf_counter() - started
+            started = perf_counter()
         python_dto = ssa_module_to_dto(python_ssa, schema_version=2)
-        started = perf_counter(); python_canonical = canonical_ssa(python_dto); rust_canonical = canonical_ssa(rust_dto)
-        difference = _difference(python_canonical, rust_canonical); compare = perf_counter() - started
+        if characterize_performance:
+            phases["python_result_dto_serialization"] = perf_counter() - started
+        comparison_started = perf_counter()
+        started = comparison_started
+        python_canonical = canonical_ssa(python_dto)
+        if characterize_performance:
+            phases["python_result_canonicalization"] = perf_counter() - started
+            started = perf_counter()
+        rust_canonical = canonical_ssa(rust_dto)
+        if characterize_performance:
+            phases["rust_result_canonicalization"] = perf_counter() - started
+        started = perf_counter()
+        difference = _difference(python_canonical, rust_canonical)
+        if characterize_performance:
+            phases["canonical_comparison"] = perf_counter() - started
+        compare = perf_counter() - comparison_started
     except Exception as exc:
         raise SSAShadowFailure(SSAShadowReport("canonicalization_failure", "canonicalization",
                                               first_difference=str(exc)[:240], python_seconds=python_seconds,
                                               rust_seconds=rust_seconds)) from exc
     if difference:
         path, py, rust = difference
-        import re
         function_match = re.search(r"functions\[(\d+)\]", path)
         block_match = re.search(r"blocks\[(\d+)\]", path)
         function_index = int(function_match.group(1)) if function_match else None
@@ -577,21 +802,65 @@ def _lower_dual_lane(
                                               python_seconds=python_seconds, rust_seconds=rust_seconds,
                                               comparison_seconds=compare))
     authoritative = rust_ssa if rust_authoritative else python_ssa
+    performance = (
+        _finish_performance_profile(
+            "rust_authority_python_shadow" if rust_authoritative else "python_authority_rust_shadow",
+            phases,
+            total_started,
+            rust_phase_detail,
+        )
+        if characterize_performance
+        else None
+    )
     return authoritative, SSAShadowReport("match", "canonical_comparison", python_seconds=python_seconds,
-                                          rust_seconds=rust_seconds, comparison_seconds=compare)
+                                          rust_seconds=rust_seconds, comparison_seconds=compare,
+                                          performance=performance)
 
 
 def lower_with_rust_shadow(
     module: IRModule,
     client: RustSSALoweringClient,
+    *,
+    characterize_performance: bool = False,
 ) -> tuple[object, SSAShadowReport]:
     """Return verified Python SSA after a synchronous verified Rust match."""
-    return _lower_dual_lane(module, client, rust_authoritative=False)
+    return _lower_dual_lane(
+        module,
+        client,
+        rust_authoritative=False,
+        characterize_performance=characterize_performance,
+    )
 
 
 def lower_with_rust_authority(
     module: IRModule,
     client: RustSSALoweringClient,
+    *,
+    characterize_performance: bool = False,
 ) -> tuple[object, SSAShadowReport]:
     """Return imported Rust SSA only after its Python shadow matches."""
-    return _lower_dual_lane(module, client, rust_authoritative=True)
+    return _lower_dual_lane(
+        module,
+        client,
+        rust_authoritative=True,
+        characterize_performance=characterize_performance,
+    )
+
+
+def diagnostic_lower_with_rust_authority_without_python_shadow(
+    module: IRModule,
+    client: RustSSALoweringClient,
+) -> tuple[object, SSAShadowReport]:
+    """Characterize the Rust lane without creating a production authority mode.
+
+    This entry point is intentionally diagnostic and always instrumented.  The
+    production configuration enum cannot select it, so mandatory synchronous
+    Python shadowing and fail-closed behavior remain unchanged.
+    """
+    return _lower_dual_lane(
+        module,
+        client,
+        rust_authoritative=True,
+        characterize_performance=True,
+        execute_python_shadow=False,
+    )

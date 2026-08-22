@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import NoReturn
+from time import perf_counter
+from typing import MutableMapping, NoReturn
 
 from aether.analysis.cfg import CFGBuilder
 from aether.analysis.dominance_frontier import DominanceFrontierAnalysis
@@ -26,16 +27,44 @@ class GeneralSSABuilder:
     comparison and migration diagnostics.
     """
 
+    def __init__(
+        self,
+        *,
+        performance_timings: MutableMapping[str, float] | None = None,
+    ) -> None:
+        """Create a builder with optional observational phase timings.
+
+        The mapping is deliberately caller-owned and opt-in.  When it is not
+        supplied, the production builder executes the original code path
+        without reading the performance clock.
+        """
+        self._performance_timings = performance_timings
+
     def build(self, module: IRModule) -> SSAModule:
         return self.build_module(module)
 
     def build_module(self, module: IRModule) -> SSAModule:
-        module = expand_lifecycle(module)
+        timings = self._performance_timings
+        if timings is None:
+            module = expand_lifecycle(module)
+        else:
+            started = perf_counter()
+            module = expand_lifecycle(module)
+            timings["python_lifecycle_normalization"] = perf_counter() - started
+
+        started = perf_counter() if timings is not None else 0.0
         ssa_module = SSAModule(
             [self._build_function_unverified(function) for function in module.functions],
             list(module.structs),
         )
-        return self._verify_module(ssa_module)
+        if timings is not None:
+            timings["python_ssa_lowering"] = perf_counter() - started
+
+        started = perf_counter() if timings is not None else 0.0
+        verified = self._verify_module(ssa_module)
+        if timings is not None:
+            timings["python_builder_verification"] = perf_counter() - started
+        return verified
 
     def build_function(self, function: IRFunction) -> SSAFunction:
         ssa_function = self._build_function_unverified(function)
