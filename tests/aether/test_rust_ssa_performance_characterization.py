@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 import json
+import sys
 
 import pytest
 
@@ -28,6 +30,7 @@ EMPTY_SSA = {
 ROOT = Path(__file__).resolve().parents[2]
 EVIDENCE = ROOT / "docs/compiler/rust_ssa_authority_performance_characterization.json"
 REPORT = ROOT / "docs/compiler/RUST_SSA_AUTHORITY_PERFORMANCE_CHARACTERIZATION.md"
+SCRIPT = ROOT / "scripts/measure_rust_ssa_authority_performance.py"
 
 
 class CharacterizedClient:
@@ -60,6 +63,66 @@ class CharacterizedClient:
         return self.response
 
 
+def _performance_script_module():
+    spec = importlib.util.spec_from_file_location("rust_ssa_performance", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _run_small_script_measurement(
+    monkeypatch, tmp_path: Path, revision_args: list[str], local_revision: str
+) -> dict[str, object]:
+    script = _performance_script_module()
+
+    class ScriptClient(CharacterizedClient):
+        def __init__(self, *_args, **_kwargs) -> None:
+            super().__init__()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+    executable = tmp_path / "aether-ssa-shadow"
+    executable.touch()
+    output = tmp_path / "performance.json"
+    monkeypatch.setattr(
+        script,
+        "WORKLOADS",
+        (("empty", "empty.ae", "regression fixture"),),
+    )
+    monkeypatch.setattr(script, "_load_module", lambda _path: (IRModule(), "digest"))
+    monkeypatch.setattr(script, "PersistentRustSSALoweringClient", ScriptClient)
+    monkeypatch.setattr(script, "_scaling", lambda *_args: [])
+    monkeypatch.setattr(script, "_revision", lambda: local_revision)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(SCRIPT),
+            *revision_args,
+            "--executable",
+            str(executable),
+            "--output",
+            str(output),
+            "--warmup",
+            "1",
+            "--rounds",
+            "1",
+            "--deep-cfg-rounds",
+            "1",
+            "--deep-cfg-sizes",
+            "2",
+        ],
+    )
+
+    assert script.main() == 0
+    return json.loads(output.read_text(encoding="utf-8"))
+
+
 def _assert_consistent(profile) -> None:
     assert profile.measured_component_sum_seconds == pytest.approx(
         sum(profile.phases_seconds.values())
@@ -68,6 +131,30 @@ def _assert_consistent(profile) -> None:
         profile.measured_component_sum_seconds
         + profile.residual_unattributed_seconds
     )
+
+
+def test_performance_script_accepts_and_records_exact_revision(
+    monkeypatch, tmp_path: Path
+) -> None:
+    supplied_revision = "0123456789abcdef0123456789abcdef01234567"
+    evidence = _run_small_script_measurement(
+        monkeypatch,
+        tmp_path,
+        ["--revision", supplied_revision],
+        "unused-local-revision",
+    )
+
+    assert evidence["qualification_revision"] == supplied_revision
+
+
+def test_performance_script_without_revision_uses_local_head(
+    monkeypatch, tmp_path: Path
+) -> None:
+    evidence = _run_small_script_measurement(
+        monkeypatch, tmp_path, [], "local-head-revision"
+    )
+
+    assert evidence["qualification_revision"] == "local-head-revision"
 
 
 def test_opt_in_instrumentation_is_complete_and_does_not_change_returned_ssa() -> None:

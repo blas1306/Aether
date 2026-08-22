@@ -316,6 +316,7 @@ def _scaling_observations(rows: list[dict[str, object]]) -> dict[str, object]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--revision")
     parser.add_argument("--executable", type=Path, default=DEFAULT_EXECUTABLE)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--warmup", type=int, default=2)
@@ -399,7 +400,9 @@ def main() -> int:
         "artifact_schema_version": 1,
         "milestone": "RUST-3.7b",
         "decision": "RUST_SSA_PERFORMANCE_CHARACTERIZED",
-        "qualification_revision": _revision(),
+        "qualification_revision": (
+            args.revision if args.revision is not None else _revision()
+        ),
         "measurement_kind": "observational; no absolute timing is a semantic gate",
         "environment": {
             "platform": platform.platform(),
