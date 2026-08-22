@@ -34,10 +34,17 @@ class LLVMNumericLocaleABI:
             if parsing:
                 declare(sections, "declare double @_strtod_l(ptr, ptr, ptr)")
             if formatting:
+                # UCRT printf-family entry points are header-inline wrappers,
+                # not DLL exports.  Reproduce the supported _sprintf_s_l
+                # wrapper at LLVM level instead of depending on the legacy
+                # stdio compatibility library.
+                declare(sections, "declare void @llvm.va_start.p0(ptr)")
+                declare(sections, "declare void @llvm.va_end.p0(ptr)")
                 declare(
                     sections,
-                    "declare i32 @_snprintf_l(ptr, i64, ptr, ptr, ...)",
+                    "declare i32 @__stdio_common_vsprintf_s(i64, ptr, i64, ptr, ptr, ptr)",
                 )
+                declare(sections, self._windows_sprintf_s_l_helper())
             return
 
         declare(sections, "declare ptr @newlocale(i32, ptr, ptr)")
@@ -72,6 +79,28 @@ class LLVMNumericLocaleABI:
             f"ptr {locale})"
         )
 
+    @staticmethod
+    def _windows_sprintf_s_l_helper() -> str:
+        """Emit UCRT's header-inline locale-aware secure printf wrapper.
+
+        On Windows x86_64 ``va_list`` is a pointer.  Keeping ``va_start`` and
+        ``va_end`` inside a variadic LLVM function lets LLVM implement the
+        Microsoft calling convention, including floating-point varargs.
+        """
+        return "\n".join(
+            [
+                "define private i32 @aether_sprintf_s_l(ptr %buffer, i64 %buffer_count, ptr %format, ptr %locale, ...) {",
+                "entry:",
+                "  %args = alloca ptr, align 8",
+                "  call void @llvm.va_start.p0(ptr %args)",
+                "  %arglist = load ptr, ptr %args, align 8",
+                "  %result = call i32 @__stdio_common_vsprintf_s(i64 0, ptr %buffer, i64 %buffer_count, ptr %format, ptr %locale, ptr %arglist)",
+                "  call void @llvm.va_end.p0(ptr %args)",
+                "  ret i32 %result",
+                "}",
+            ]
+        )
+
     def format_double(
         self,
         *,
@@ -88,7 +117,7 @@ class LLVMNumericLocaleABI:
             return [
                 (
                     f"{result} = call i32 (ptr, i64, ptr, ptr, ...) "
-                    f"@_snprintf_l(ptr {data}, i64 {size}, ptr {format_}, "
+                    f"@aether_sprintf_s_l(ptr {data}, i64 {size}, ptr {format_}, "
                     f"ptr {locale}, double {value})"
                 ),
                 self.free(locale),

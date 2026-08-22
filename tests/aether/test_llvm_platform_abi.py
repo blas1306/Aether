@@ -60,7 +60,20 @@ def test_windows_print_and_string_conversion_use_ucrt_locale_api() -> None:
 
     assert "declare ptr @_create_locale(i32, ptr)" in llvm
     assert "call ptr @_create_locale(i32 4" in llvm
-    assert "@_snprintf_l" in llvm
+    assert "declare void @llvm.va_start.p0(ptr)" in llvm
+    assert "declare void @llvm.va_end.p0(ptr)" in llvm
+    assert (
+        "declare i32 @__stdio_common_vsprintf_s(i64, ptr, i64, ptr, ptr, ptr)"
+        in llvm
+    )
+    assert (
+        "call i32 @__stdio_common_vsprintf_s(i64 0, ptr %buffer, "
+        "i64 %buffer_count, ptr %format, ptr %locale, ptr %arglist)"
+        in llvm
+    )
+    assert "call i32 (ptr, i64, ptr, ptr, ...) @aether_sprintf_s_l" in llvm
+    assert llvm.count("define private i32 @aether_sprintf_s_l") == 1
+    assert "@_snprintf_l" not in llvm
     assert "@_strtod_l" in llvm
     assert "@_free_locale" in llvm
     assert "@newlocale" not in llvm

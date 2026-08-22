@@ -1431,16 +1431,16 @@
       "kind": "REALISTIC_KERNEL",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 478,
-          "text_bytes": 24953
+          "instruction_lines": 482,
+          "text_bytes": 25200
         },
         "O1": {
-          "instruction_lines": 478,
-          "text_bytes": 24953
+          "instruction_lines": 482,
+          "text_bytes": 25200
         },
         "O2": {
-          "instruction_lines": 478,
-          "text_bytes": 24953
+          "instruction_lines": 482,
+          "text_bytes": 25200
         }
       },
       "loops": 1,
@@ -1754,16 +1754,16 @@
       "kind": "REALISTIC_KERNEL",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 484,
-          "text_bytes": 25188
+          "instruction_lines": 488,
+          "text_bytes": 25435
         },
         "O1": {
-          "instruction_lines": 484,
-          "text_bytes": 25188
+          "instruction_lines": 488,
+          "text_bytes": 25435
         },
         "O2": {
-          "instruction_lines": 484,
-          "text_bytes": 25188
+          "instruction_lines": 488,
+          "text_bytes": 25435
         }
       },
       "loops": 1,
@@ -2107,16 +2107,16 @@
       "kind": "REAL_WORKLOAD",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 579,
-          "text_bytes": 32305
+          "instruction_lines": 583,
+          "text_bytes": 32574
         },
         "O1": {
-          "instruction_lines": 575,
-          "text_bytes": 32189
+          "instruction_lines": 579,
+          "text_bytes": 32458
         },
         "O2": {
-          "instruction_lines": 575,
-          "text_bytes": 32189
+          "instruction_lines": 579,
+          "text_bytes": 32458
         }
       },
       "loops": 1,
@@ -2608,16 +2608,16 @@
       "kind": "REAL_WORKLOAD",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 976,
-          "text_bytes": 59769
+          "instruction_lines": 980,
+          "text_bytes": 60236
         },
         "O1": {
-          "instruction_lines": 962,
-          "text_bytes": 59169
+          "instruction_lines": 966,
+          "text_bytes": 59636
         },
         "O2": {
-          "instruction_lines": 962,
-          "text_bytes": 59169
+          "instruction_lines": 966,
+          "text_bytes": 59636
         }
       },
       "loops": 5,
@@ -3166,16 +3166,16 @@
       "kind": "REALISTIC_KERNEL",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 565,
-          "text_bytes": 30204
+          "instruction_lines": 569,
+          "text_bytes": 30451
         },
         "O1": {
-          "instruction_lines": 565,
-          "text_bytes": 30204
+          "instruction_lines": 569,
+          "text_bytes": 30451
         },
         "O2": {
-          "instruction_lines": 565,
-          "text_bytes": 30204
+          "instruction_lines": 569,
+          "text_bytes": 30451
         }
       },
       "loops": 1,
@@ -3669,16 +3669,16 @@
       "kind": "REALISTIC_KERNEL",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 638,
-          "text_bytes": 35515
+          "instruction_lines": 642,
+          "text_bytes": 35762
         },
         "O1": {
-          "instruction_lines": 638,
-          "text_bytes": 35515
+          "instruction_lines": 642,
+          "text_bytes": 35762
         },
         "O2": {
-          "instruction_lines": 641,
-          "text_bytes": 35644
+          "instruction_lines": 645,
+          "text_bytes": 35891
         }
       },
       "loops": 1,
@@ -4169,16 +4169,16 @@
       "kind": "REALISTIC_KERNEL",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 595,
-          "text_bytes": 32801
+          "instruction_lines": 599,
+          "text_bytes": 33048
         },
         "O1": {
-          "instruction_lines": 595,
-          "text_bytes": 32801
+          "instruction_lines": 599,
+          "text_bytes": 33048
         },
         "O2": {
-          "instruction_lines": 595,
-          "text_bytes": 32801
+          "instruction_lines": 599,
+          "text_bytes": 33048
         }
       },
       "loops": 0,
@@ -4492,16 +4492,16 @@
       "kind": "REALISTIC_KERNEL",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 576,
-          "text_bytes": 30832
+          "instruction_lines": 580,
+          "text_bytes": 31079
         },
         "O1": {
-          "instruction_lines": 576,
-          "text_bytes": 30832
+          "instruction_lines": 580,
+          "text_bytes": 31079
         },
         "O2": {
-          "instruction_lines": 573,
-          "text_bytes": 30626
+          "instruction_lines": 577,
+          "text_bytes": 30873
         }
       },
       "loops": 0,
@@ -4992,16 +4992,16 @@
       "kind": "REALISTIC_KERNEL",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 586,
-          "text_bytes": 31227
+          "instruction_lines": 590,
+          "text_bytes": 31474
         },
         "O1": {
-          "instruction_lines": 586,
-          "text_bytes": 31227
+          "instruction_lines": 590,
+          "text_bytes": 31474
         },
         "O2": {
-          "instruction_lines": 586,
-          "text_bytes": 31227
+          "instruction_lines": 590,
+          "text_bytes": 31474
         }
       },
       "loops": 1,
@@ -5318,16 +5318,16 @@
       "kind": "REALISTIC_KERNEL",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 654,
-          "text_bytes": 35206
+          "instruction_lines": 658,
+          "text_bytes": 35453
         },
         "O1": {
-          "instruction_lines": 654,
-          "text_bytes": 35206
+          "instruction_lines": 658,
+          "text_bytes": 35453
         },
         "O2": {
-          "instruction_lines": 652,
-          "text_bytes": 35072
+          "instruction_lines": 656,
+          "text_bytes": 35319
         }
       },
       "loops": 1,
@@ -5820,16 +5820,16 @@
       "kind": "REALISTIC_KERNEL",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 676,
-          "text_bytes": 35868
+          "instruction_lines": 680,
+          "text_bytes": 36115
         },
         "O1": {
-          "instruction_lines": 676,
-          "text_bytes": 35868
+          "instruction_lines": 680,
+          "text_bytes": 36115
         },
         "O2": {
-          "instruction_lines": 673,
-          "text_bytes": 35667
+          "instruction_lines": 677,
+          "text_bytes": 35914
         }
       },
       "loops": 0,
@@ -6320,16 +6320,16 @@
       "kind": "REALISTIC_KERNEL",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 923,
-          "text_bytes": 52770
+          "instruction_lines": 927,
+          "text_bytes": 53160
         },
         "O1": {
-          "instruction_lines": 922,
-          "text_bytes": 52746
+          "instruction_lines": 926,
+          "text_bytes": 53136
         },
         "O2": {
-          "instruction_lines": 922,
-          "text_bytes": 52746
+          "instruction_lines": 926,
+          "text_bytes": 53136
         }
       },
       "loops": 1,
@@ -6820,16 +6820,16 @@
       "kind": "REALISTIC_KERNEL",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 555,
-          "text_bytes": 30299
+          "instruction_lines": 559,
+          "text_bytes": 30590
         },
         "O1": {
-          "instruction_lines": 555,
-          "text_bytes": 30299
+          "instruction_lines": 559,
+          "text_bytes": 30590
         },
         "O2": {
-          "instruction_lines": 555,
-          "text_bytes": 30299
+          "instruction_lines": 559,
+          "text_bytes": 30590
         }
       },
       "loops": 0,
@@ -7147,16 +7147,16 @@
       "kind": "SYNTHETIC_PROBE",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 1121,
-          "text_bytes": 65470
+          "instruction_lines": 1125,
+          "text_bytes": 65772
         },
         "O1": {
-          "instruction_lines": 1121,
-          "text_bytes": 65470
+          "instruction_lines": 1125,
+          "text_bytes": 65772
         },
         "O2": {
-          "instruction_lines": 1121,
-          "text_bytes": 65470
+          "instruction_lines": 1125,
+          "text_bytes": 65772
         }
       },
       "loops": 0,
@@ -7472,16 +7472,16 @@
       "kind": "REALISTIC_KERNEL",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 603,
-          "text_bytes": 34028
+          "instruction_lines": 607,
+          "text_bytes": 34297
         },
         "O1": {
-          "instruction_lines": 603,
-          "text_bytes": 34028
+          "instruction_lines": 607,
+          "text_bytes": 34297
         },
         "O2": {
-          "instruction_lines": 603,
-          "text_bytes": 34028
+          "instruction_lines": 607,
+          "text_bytes": 34297
         }
       },
       "loops": 0,
@@ -7797,16 +7797,16 @@
       "kind": "REALISTIC_KERNEL",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 605,
-          "text_bytes": 34160
+          "instruction_lines": 609,
+          "text_bytes": 34429
         },
         "O1": {
-          "instruction_lines": 605,
-          "text_bytes": 34160
+          "instruction_lines": 609,
+          "text_bytes": 34429
         },
         "O2": {
-          "instruction_lines": 605,
-          "text_bytes": 34160
+          "instruction_lines": 609,
+          "text_bytes": 34429
         }
       },
       "loops": 0,
@@ -8123,16 +8123,16 @@
       "kind": "REALISTIC_KERNEL",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 619,
-          "text_bytes": 37776
+          "instruction_lines": 623,
+          "text_bytes": 38045
         },
         "O1": {
-          "instruction_lines": 619,
-          "text_bytes": 37776
+          "instruction_lines": 623,
+          "text_bytes": 38045
         },
         "O2": {
-          "instruction_lines": 619,
-          "text_bytes": 37776
+          "instruction_lines": 623,
+          "text_bytes": 38045
         }
       },
       "loops": 0,
@@ -8449,16 +8449,16 @@
       "kind": "SYNTHETIC_PROBE",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 862,
-          "text_bytes": 55683
+          "instruction_lines": 866,
+          "text_bytes": 55985
         },
         "O1": {
-          "instruction_lines": 862,
-          "text_bytes": 55683
+          "instruction_lines": 866,
+          "text_bytes": 55985
         },
         "O2": {
-          "instruction_lines": 862,
-          "text_bytes": 55683
+          "instruction_lines": 866,
+          "text_bytes": 55985
         }
       },
       "loops": 0,
@@ -8772,16 +8772,16 @@
       "kind": "SYNTHETIC_PROBE",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 811,
-          "text_bytes": 46670
+          "instruction_lines": 815,
+          "text_bytes": 46950
         },
         "O1": {
-          "instruction_lines": 808,
-          "text_bytes": 46230
+          "instruction_lines": 812,
+          "text_bytes": 46510
         },
         "O2": {
-          "instruction_lines": 808,
-          "text_bytes": 46230
+          "instruction_lines": 812,
+          "text_bytes": 46510
         }
       },
       "loops": 0,
@@ -9102,16 +9102,16 @@
       "kind": "REAL_WORKLOAD",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 5712,
-          "text_bytes": 391170
+          "instruction_lines": 5716,
+          "text_bytes": 391648
         },
         "O1": {
-          "instruction_lines": 5697,
-          "text_bytes": 390205
+          "instruction_lines": 5701,
+          "text_bytes": 390683
         },
         "O2": {
-          "instruction_lines": 5615,
-          "text_bytes": 385081
+          "instruction_lines": 5619,
+          "text_bytes": 385559
         }
       },
       "loops": 11,
@@ -9606,16 +9606,16 @@
       "kind": "REALISTIC_KERNEL",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 487,
-          "text_bytes": 25263
+          "instruction_lines": 491,
+          "text_bytes": 25510
         },
         "O1": {
-          "instruction_lines": 487,
-          "text_bytes": 25263
+          "instruction_lines": 491,
+          "text_bytes": 25510
         },
         "O2": {
-          "instruction_lines": 487,
-          "text_bytes": 25263
+          "instruction_lines": 491,
+          "text_bytes": 25510
         }
       },
       "loops": 1,
@@ -10108,16 +10108,16 @@
       "kind": "REALISTIC_KERNEL",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 514,
-          "text_bytes": 27075
+          "instruction_lines": 518,
+          "text_bytes": 27322
         },
         "O1": {
-          "instruction_lines": 514,
-          "text_bytes": 27075
+          "instruction_lines": 518,
+          "text_bytes": 27322
         },
         "O2": {
-          "instruction_lines": 514,
-          "text_bytes": 27075
+          "instruction_lines": 518,
+          "text_bytes": 27322
         }
       },
       "loops": 1,
@@ -10609,16 +10609,16 @@
       "kind": "SYNTHETIC_PROBE",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 787,
-          "text_bytes": 47196
+          "instruction_lines": 791,
+          "text_bytes": 47498
         },
         "O1": {
-          "instruction_lines": 787,
-          "text_bytes": 47196
+          "instruction_lines": 791,
+          "text_bytes": 47498
         },
         "O2": {
-          "instruction_lines": 787,
-          "text_bytes": 47196
+          "instruction_lines": 791,
+          "text_bytes": 47498
         }
       },
       "loops": 0,
@@ -10932,16 +10932,16 @@
       "kind": "REALISTIC_KERNEL",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 710,
-          "text_bytes": 39159
+          "instruction_lines": 714,
+          "text_bytes": 39428
         },
         "O1": {
-          "instruction_lines": 710,
-          "text_bytes": 39159
+          "instruction_lines": 714,
+          "text_bytes": 39428
         },
         "O2": {
-          "instruction_lines": 708,
-          "text_bytes": 39026
+          "instruction_lines": 712,
+          "text_bytes": 39295
         }
       },
       "loops": 2,
@@ -11463,16 +11463,16 @@
       "kind": "SYNTHETIC_PROBE",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 973,
-          "text_bytes": 61225
+          "instruction_lines": 977,
+          "text_bytes": 61527
         },
         "O1": {
-          "instruction_lines": 973,
-          "text_bytes": 61225
+          "instruction_lines": 977,
+          "text_bytes": 61527
         },
         "O2": {
-          "instruction_lines": 973,
-          "text_bytes": 61225
+          "instruction_lines": 977,
+          "text_bytes": 61527
         }
       },
       "loops": 0,
@@ -11785,16 +11785,16 @@
       "kind": "SYNTHETIC_PROBE",
       "llvm_stages": {
         "O0": {
-          "instruction_lines": 486,
-          "text_bytes": 25235
+          "instruction_lines": 490,
+          "text_bytes": 25482
         },
         "O1": {
-          "instruction_lines": 486,
-          "text_bytes": 25235
+          "instruction_lines": 490,
+          "text_bytes": 25482
         },
         "O2": {
-          "instruction_lines": 486,
-          "text_bytes": 25235
+          "instruction_lines": 490,
+          "text_bytes": 25482
         }
       },
       "loops": 2,

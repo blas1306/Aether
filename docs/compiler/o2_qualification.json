@@ -116,7 +116,7 @@
   "schema_version": 1,
   "static_baseline": {
     "path": "docs/compiler/o2_measurement_baseline.json",
-    "sha256": "221f8cd92cc348afcdcb2df9ac8d7929b7f0f23788ccbf617df8b297c5abd03d"
+    "sha256": "160ccd59401974c0045e6c71723b5a0a2ab5824bced8b7eae110af87d4278ca7"
   },
   "test_results": {
     "capability_consistency": "PASS",
