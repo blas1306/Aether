@@ -19,7 +19,7 @@ from typing import Any, Mapping, Protocol
 
 from aether.ir.dto import IR_SCHEMA_VERSION
 
-from aether.ir.dto import ir_module_from_dto, ir_module_to_dto
+from aether.ir.dto import ir_module_to_dto
 from aether.ir.model import IRModule
 
 from .dto import ssa_module_from_dto, ssa_module_to_dto
@@ -614,16 +614,18 @@ def _lower_dual_lane(
     python_seconds = 0.0
     rust_seconds = 0.0
     rust_phase_detail = "disabled"
+    rust_comparison_dto: Mapping[str, object] | None = None
 
     def run_python() -> object:
         nonlocal python_seconds
         try:
-            # Both lanes consume representations derived from these exact
-            # bytes.  The frontend and Initial IR lowering never run twice.
-            started = perf_counter() if characterize_performance else 0.0
-            python_input = ir_module_from_dto(json.loads(payload))
-            if characterize_performance:
-                phases["python_shadow_input_reconstruction"] = perf_counter() - started
+            # ``snapshot`` was serialized from this exact verified module for
+            # Rust immediately before either lane ran.  GeneralSSABuilder and
+            # lifecycle expansion are non-mutating, and the fail-closed DTO
+            # equality check below enforces that contract after both lanes.
+            # Reuse therefore avoids a redundant JSON decode/schema import
+            # while keeping both lanes tied to one logical Initial IR value.
+            python_input = module
             lane_started = perf_counter()
             if characterize_performance:
                 value = GeneralSSABuilder(performance_timings=phases).build(
@@ -633,10 +635,9 @@ def _lower_dual_lane(
                 # Keep the production path byte-for-byte recognizable to the
                 # stabilization source-contract gate.
                 value = GeneralSSABuilder().build(python_input)
-            started = perf_counter() if characterize_performance else 0.0
-            SSAVerifier(value).verify()
-            if characterize_performance:
-                phases["python_shadow_verification"] = perf_counter() - started
+            # GeneralSSABuilder returns only after running this same verifier
+            # over ``value``.  Nothing can mutate the SSA between that check
+            # and this return, so a second identical pass was redundant.
             python_seconds = perf_counter() - lane_started
             return value
         except Exception as exc:
@@ -652,7 +653,7 @@ def _lower_dual_lane(
             ) from exc
 
     def run_rust() -> object:
-        nonlocal rust_seconds, rust_phase_detail
+        nonlocal rust_seconds, rust_phase_detail, rust_comparison_dto
         try:
             started = perf_counter()
             response = client.lower(payload)
@@ -693,12 +694,14 @@ def _lower_dual_lane(
             raise SSAShadowFailure(SSAShadowReport("rust_lowering_or_verifier_failure", "rust_lane",
                                                   first_difference=str(response.get("error", "unspecified failure"))[:240],
                                                   python_seconds=python_seconds, rust_seconds=rust_seconds))
-        if not isinstance(response.get("ssa"), dict):
+        response_ssa = response.get("ssa")
+        if not isinstance(response_ssa, dict):
             raise SSAShadowFailure(SSAShadowReport("malformed_rust_response", "response_decode",
                                                   python_seconds=python_seconds, rust_seconds=rust_seconds))
+        rust_comparison_dto = response_ssa
         try:
             started = perf_counter() if characterize_performance else 0.0
-            value = ssa_module_from_dto(response["ssa"])
+            value = ssa_module_from_dto(rust_comparison_dto)
             if characterize_performance:
                 phases["rust_schema_v2_import"] = perf_counter() - started
         except Exception as exc:
@@ -756,11 +759,13 @@ def _lower_dual_lane(
 
     assert python_ssa is not None
     try:
+        # The received schema-v2 DTO has already crossed the strict importer
+        # and independent Python verifier boundaries.  Canonicalization makes
+        # its own deep copy, so reusing it for this compilation cannot mutate
+        # transport state or leak across requests.
+        assert rust_comparison_dto is not None
+        rust_dto = rust_comparison_dto
         started = perf_counter() if characterize_performance else 0.0
-        rust_dto = ssa_module_to_dto(rust_ssa, schema_version=2)
-        if characterize_performance:
-            phases["rust_result_dto_serialization"] = perf_counter() - started
-            started = perf_counter()
         python_dto = ssa_module_to_dto(python_ssa, schema_version=2)
         if characterize_performance:
             phases["python_result_dto_serialization"] = perf_counter() - started

@@ -1,0 +1,178 @@
+{
+  "artifact_schema_version": 1,
+  "milestone": "RUST-3.8a",
+  "decision": "RUST_SSA_REDUNDANT_WORK_OPTIMIZED",
+  "qualification_revision": "ad1bbf4cc59bb4c7ae4432819a105c9c223dbdbf",
+  "qualification_worktree": "uncommitted RUST-3.8a changes on qualification_revision",
+  "baseline": {
+    "source": "RUST-3.7b checked-in characterization",
+    "python_only_median_seconds": 0.162546,
+    "diagnostic_rust_only_median_seconds": 0.304283,
+    "rust_authority_python_shadow_median_seconds": 0.702864,
+    "dual_over_python_ratio": 4.324,
+    "rust_only_over_python_ratio": 1.872
+  },
+  "audit": [
+    {
+      "item": "Initial IR DTO creation",
+      "classification": "REQUIRED_CORRECTNESS_BOUNDARY",
+      "reason": "Creates the single schema-v1 snapshot sent unchanged to Rust and used by the integrity check."
+    },
+    {
+      "item": "Initial IR JSON serialization",
+      "classification": "REQUIRED_CORRECTNESS_BOUNDARY",
+      "reason": "The protocol-compatible Rust transport consumes these exact bytes."
+    },
+    {
+      "item": "Python JSON decode plus Initial IR DTO reconstruction",
+      "classification": "REDUNDANT_PROVEN",
+      "reason": "The snapshot was created immediately from the same verified module; GeneralSSABuilder is non-mutating and the retained post-lowering DTO equality check enforces that contract fail-closed."
+    },
+    {
+      "item": "Rust response JSON decode",
+      "classification": "REQUIRED_CORRECTNESS_BOUNDARY",
+      "reason": "Required to cross the existing persistent JSON protocol."
+    },
+    {
+      "item": "schema-v2 import",
+      "classification": "REQUIRED_CORRECTNESS_BOUNDARY",
+      "reason": "Strictly validates all fields and creates the Rust-origin SSAModule returned to the optimizer/backend."
+    },
+    {
+      "item": "Rust Owned SSA verification",
+      "classification": "REQUIRED_CORRECTNESS_BOUNDARY",
+      "reason": "Independent Rust model verification remains in the companion."
+    },
+    {
+      "item": "Python verification of imported Rust SSA",
+      "classification": "REQUIRED_CORRECTNESS_BOUNDARY",
+      "reason": "Preserves cross-language verification diversity after schema import."
+    },
+    {
+      "item": "GeneralSSABuilder internal verification",
+      "classification": "REQUIRED_CORRECTNESS_BOUNDARY",
+      "reason": "The Python oracle builder returns only verified SSA."
+    },
+    {
+      "item": "Coordinator verification of unchanged GeneralSSABuilder result",
+      "classification": "REDUNDANT_PROVEN",
+      "reason": "It invoked the identical verifier on the identical object with no intervening mutation."
+    },
+    {
+      "item": "Rust SSAModule to schema-v2 DTO for comparison",
+      "classification": "REUSABLE_IMMUTABLE_RESULT",
+      "reason": "The exact received DTO already passed strict import and independent Python verification; canonicalization deep-copies it before rewriting."
+    },
+    {
+      "item": "Python SSAModule to schema-v2 DTO for comparison",
+      "classification": "REQUIRED_CORRECTNESS_BOUNDARY",
+      "reason": "No equivalent Python result DTO exists earlier in this compilation."
+    },
+    {
+      "item": "Canonicalization of both lane DTOs and structural difference",
+      "classification": "REQUIRED_CORRECTNESS_BOUNDARY",
+      "reason": "Preserves alpha-normalized comparison of every schema-v2 semantic field; hashes are not substituted."
+    },
+    {
+      "item": "Initial IR post-lowering integrity serialization",
+      "classification": "REQUIRED_CORRECTNESS_BOUNDARY",
+      "reason": "IRModule containers are structurally mutable, so no equivalent enforceable invariant justifies removing this check."
+    },
+    {
+      "item": "canonical_ssa JSON clone",
+      "classification": "CANNOT_PROVE_REDUNDANT",
+      "reason": "Changing its public Mapping normalization behavior could alter canonicalizer semantics."
+    },
+    {
+      "item": "SSAPipeline generic final verifier",
+      "classification": "CANNOT_PROVE_REDUNDANT",
+      "reason": "It is a shared post-build boundary outside the measured authority coordinator and covers other builders/modes."
+    },
+    {
+      "item": "Dominator and dominance-frontier work",
+      "classification": "CANNOT_PROVE_REDUNDANT",
+      "reason": "Algorithm changes are explicitly outside RUST-3.8a."
+    }
+  ],
+  "optimized_items": [
+    "Reuse the original verified Initial IR object for the synchronous Python shadow.",
+    "Trust GeneralSSABuilder's internal verifier result instead of repeating the same verifier on the same object.",
+    "Reuse the received schema-v2 Rust DTO for canonical comparison after strict import and independent Python verification."
+  ],
+  "performance": {
+    "methodology": {
+      "workloads": 8,
+      "warmup_rounds": 2,
+      "measured_rounds": 7,
+      "ordering": "rotated lane order per round",
+      "clock": "time.perf_counter and Rust Instant",
+      "same_release_companion": true,
+      "before_output": "/tmp/rust_ssa_3_8a_before.json",
+      "after_output": "/tmp/rust_ssa_3_8a_after.json",
+      "reproduction_command": ".venv/bin/python scripts/measure_rust_ssa_authority_performance.py --executable compiler-rs/target/release/aether-ssa-shadow --warmup 2 --rounds 7 --deep-cfg-rounds 3 --deep-cfg-sizes 2 --output <output.json>"
+    },
+    "same_machine_before": {
+      "python_only": {"min_seconds": 0.15842816200165544, "median_seconds": 0.159863435983425, "max_seconds": 0.1901244009786751},
+      "diagnostic_rust_only": {"min_seconds": 0.2936737289855955, "median_seconds": 0.29557425901293755, "max_seconds": 0.34626865497557446},
+      "rust_authority_python_shadow": {"min_seconds": 0.6467508019995876, "median_seconds": 0.6869942409830401, "max_seconds": 0.7056573050067527},
+      "dual_over_python_ratio": 4.297381929500559,
+      "rust_only_over_python_ratio": 1.8489172160892584
+    },
+    "same_machine_after": {
+      "python_only": {"min_seconds": 0.1580818220245419, "median_seconds": 0.17821357402135618, "max_seconds": 0.1846736290026456},
+      "diagnostic_rust_only": {"min_seconds": 0.29757248001988046, "median_seconds": 0.3143243050435558, "max_seconds": 0.34208630400826223},
+      "rust_authority_python_shadow": {"min_seconds": 0.49843721197976265, "median_seconds": 0.5048715580342105, "max_seconds": 0.5219191190262791},
+      "dual_over_python_ratio": 2.8329579315530102,
+      "rust_only_over_python_ratio": 1.7637506389153546
+    },
+    "targeted_phase_deltas": {
+      "python_shadow_input_reconstruction": {"before_median_seconds": 0.06128259097749833, "after_median_seconds": 0, "execution_after": "eliminated"},
+      "python_shadow_verification": {"before_median_seconds": 0.03972729200904723, "after_median_seconds": 0, "execution_after": "eliminated"},
+      "rust_result_dto_serialization": {"before_median_seconds": 0.03248663499834947, "after_median_seconds": 0, "execution_after": "eliminated"}
+    },
+    "dual_median_delta_seconds": -0.1821226829488296,
+    "dual_median_speedup_percent": 26.510074187554324,
+    "noise_assessment": "The after dual-lane maximum (0.521919 s) is below the before minimum (0.646751 s); observed ranges do not overlap. Python-only and Rust-only controls became slower, so they do not explain the dual-lane reduction."
+  },
+  "remaining_bottlenecks_after": [
+    {"phase": "rust_ssa_lowering", "median_seconds": 0.086637212},
+    {"phase": "rust_schema_v2_import", "median_seconds": 0.06266347698692698},
+    {"phase": "python_lifecycle_normalization", "median_seconds": 0.04307453602086753},
+    {"phase": "imported_rust_python_verification", "median_seconds": 0.04209078900748864},
+    {"phase": "python_builder_verification", "median_seconds": 0.03936547499324661}
+  ],
+  "correctness": {
+    "focused_regressions": "18/18 PASS",
+    "rust_ssa_test_family": "70/70 PASS",
+    "historical": "116/116 PASS",
+    "stabilization_exact_accounting": "PASS",
+    "stabilization_programs": {"eligible": 169, "discovered": 169, "accepted": 140, "rejected_before_ssa": 29},
+    "stabilization_soak": {"repeated": "420/420 PASS", "persistent": "5000/5000 PASS", "concurrent": "256/256 PASS"},
+    "v2_l01_l05": "PASS",
+    "deep_cfg_993_1000_5000": "PASS",
+    "full_suite": "4865 passed, 4 skipped, 0 failed — PASS",
+    "semantic_mismatches": 0,
+    "infrastructure_failures": 0
+  },
+  "platforms": {
+    "linux-x86_64": "PASS (implementation, measurements and semantic gates executed locally)",
+    "windows-x86_64": "PENDING official CI",
+    "macos-arm64": "PENDING official CI",
+    "macos-x86_64": "PENDING official CI"
+  },
+  "invariants": {
+    "authority": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "python_shadow": "mandatory_synchronous",
+    "failure_policy": "FAIL_CLOSED",
+    "silent_fallback": false,
+    "schemas": {"initial_ir": 1, "ssa": 2, "protocol": 1},
+    "lifecycle_policy_changed": false,
+    "lowering_policy_changed": false,
+    "canonicalizer_changed": false,
+    "rust_algorithm_changed": false,
+    "python_algorithm_changed": false,
+    "dominator_algorithm_changed": false
+  },
+  "recommended_next_milestone": "Profile schema-v2 import allocation and consider compilation-local canonicalization representation reuse without changing schema or dominator algorithms.",
+  "commit_created": false
+}

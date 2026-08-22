@@ -25,6 +25,12 @@ class GeneralSSABuilder:
     This builder is the default SSA construction path. The older pattern-based
     ``SSABuilder`` remains available as an explicit compatibility fallback for
     comparison and migration diagnostics.
+
+    A verified ``IRModule`` is read-only input. Lifecycle expansion either
+    returns a freshly allocated module or an already-expanded module that every
+    subsequent analysis only reads; CFG construction, dominance, phi placement
+    and renaming allocate their own result state. Consequently ``build`` never
+    mutates the supplied Initial IR graph.
     """
 
     def __init__(

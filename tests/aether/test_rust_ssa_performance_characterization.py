@@ -94,15 +94,17 @@ def test_opt_in_instrumentation_is_complete_and_does_not_change_returned_ssa() -
         "response_json_decode",
         "rust_schema_v2_import",
         "imported_rust_python_verification",
-        "python_shadow_input_reconstruction",
         "python_lifecycle_normalization",
         "python_ssa_lowering",
         "python_builder_verification",
-        "python_shadow_verification",
+        "python_result_dto_serialization",
         "rust_result_canonicalization",
         "python_result_canonicalization",
         "canonical_comparison",
     } <= set(profile.phases_seconds)
+    assert "python_shadow_input_reconstruction" not in profile.phases_seconds
+    assert "python_shadow_verification" not in profile.phases_seconds
+    assert "rust_result_dto_serialization" not in profile.phases_seconds
     _assert_consistent(profile)
 
 
