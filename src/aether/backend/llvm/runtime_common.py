@@ -137,14 +137,14 @@ def aggregate_print_helper(prefix: str, element_type: object, *, matrix: bool) -
         print_element = "\n".join(
             [
                 "  %boolean = select i1 %element, ptr @.aether.io.true, ptr @.aether.io.false",
-                "  %boolean_stream = load ptr, ptr @stdout",
+                "  %boolean_stream = call ptr @aether_stdout_stream()",
                 "  %element_result = call i32 @fputs(ptr %boolean, ptr %boolean_stream)",
             ]
         )
     else:
         print_element = "\n".join(
             [
-                "  %quote_stream = load ptr, ptr @stdout",
+                "  %quote_stream = call ptr @aether_stdout_stream()",
                 f"  %quote_open = call i32 @fputs(ptr @.aether.{prefix}.quote, ptr %quote_stream)",
                 "  call void @aether_string_print_escaped(ptr %element)",
                 f"  %quote_close = call i32 @fputs(ptr @.aether.{prefix}.quote, ptr %quote_stream)",
@@ -157,7 +157,7 @@ def aggregate_print_helper(prefix: str, element_type: object, *, matrix: bool) -
             length_setup,
             "  %data_field = getelementptr %AetherArray, ptr %value, i32 0, i32 1",
             "  %data = load ptr, ptr %data_field",
-            "  %stream = load ptr, ptr @stdout",
+            "  %stream = call ptr @aether_stdout_stream()",
             f"  %open_result = call i32 @fputs(ptr @.aether.{prefix}.open, ptr %stream)",
             "  br label %loop",
             "loop:",

@@ -21,6 +21,18 @@ from aether.ssa.shadow import (
 from aether.typechecker import TypeChecker
 
 
+MAX_CLANG_DIAGNOSTIC_CHARACTERS = 4_000
+
+
+def _bounded_diagnostic(value: str) -> str:
+    if len(value) <= MAX_CLANG_DIAGNOSTIC_CHARACTERS:
+        return value
+    marker = f"\n...[truncated; original_chars={len(value)}]\n"
+    remaining = MAX_CLANG_DIAGNOSTIC_CHARACTERS - len(marker)
+    head = remaining // 2
+    return value[:head] + marker + value[-(remaining - head) :]
+
+
 def _compile_and_run(
     clang: Path, llvm: str, directory: Path, stem: str
 ) -> tuple[int, str, str]:
@@ -40,8 +52,13 @@ def _compile_and_run(
         text=True,
     )
     if built.returncode != 0:
+        stderr = _bounded_diagnostic(built.stderr)
+        stdout = _bounded_diagnostic(built.stdout)
         raise RuntimeError(
-            f"clang rejected representative LLVM: {built.stderr[:500]}"
+            "clang rejected representative LLVM "
+            f"(exit status {built.returncode})\n"
+            f"===== clang stderr =====\n{stderr}\n"
+            f"===== clang stdout =====\n{stdout}"
         )
     completed = subprocess.run(
         [str(executable)], capture_output=True, text=True, timeout=30

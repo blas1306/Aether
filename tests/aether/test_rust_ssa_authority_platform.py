@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
+
+import pytest
+
+from aether.ssa import authority_probe
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -95,3 +100,59 @@ def test_probe_failure_remains_a_qualification_failure(
     assert qualification_returncode == 7
     assert qualification_returncode != 0
     assert observation is None
+
+
+def test_clean_probe_environment_keeps_host_toolchain_path_but_not_python_paths(
+    tmp_path: Path,
+) -> None:
+    platform = _platform_module()
+    environment = tmp_path / "clean-venv"
+    checkout = tmp_path / "checkout"
+    toolchain = tmp_path / "toolchain-bin"
+    host_path = os.pathsep.join(
+        (str(checkout / "bin"), str(toolchain))
+    )
+    platform.ROOT = checkout
+
+    isolated = platform._clean_probe_environment(
+        environment,
+        host_environment={
+            "PATH": host_path,
+            "PYTHONPATH": str(tmp_path / "checkout" / "src"),
+            "PYTHONHOME": str(tmp_path / "checkout-python"),
+            "LIB": "host-sdk-libraries",
+        },
+    )
+
+    path_entries = isolated["PATH"].split(os.pathsep)
+    expected_scripts = environment / ("Scripts" if sys.platform == "win32" else "bin")
+    assert path_entries == [str(expected_scripts), str(toolchain)]
+    assert "PYTHONPATH" not in isolated
+    assert "PYTHONHOME" not in isolated
+    assert isolated["LIB"] == "host-sdk-libraries"
+
+
+def test_native_compile_failure_keeps_both_ends_of_clang_diagnostics(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    limit = authority_probe.MAX_CLANG_DIAGNOSTIC_CHARACTERS
+    stderr = "linker-start\n" + "e" * (limit * 2) + "\nlinker-end"
+    stdout = "driver-start\n" + "o" * (limit * 2) + "\ndriver-end"
+
+    def fail(*_args, **_kwargs):
+        return subprocess.CompletedProcess(
+            ["clang"], 1120, stdout=stdout, stderr=stderr
+        )
+
+    monkeypatch.setattr(authority_probe.subprocess, "run", fail)
+    with pytest.raises(RuntimeError) as raised:
+        authority_probe._compile_and_run(
+            tmp_path / "clang", "define i32 @main() { ret i32 0 }", tmp_path, "sample"
+        )
+
+    diagnostic = str(raised.value)
+    assert "exit status 1120" in diagnostic
+    assert "linker-start" in diagnostic and "linker-end" in diagnostic
+    assert "driver-start" in diagnostic and "driver-end" in diagnostic
+    assert diagnostic.count("...[truncated; original_chars=") == 2
+    assert len(diagnostic) < 2 * limit + 300

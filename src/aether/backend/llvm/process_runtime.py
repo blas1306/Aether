@@ -18,7 +18,6 @@ class LLVMProcessRuntime:
 
         LLVMRuntimeCommon.declare(sections, "declare i64 @strlen(ptr)")
         LLVMRuntimeCommon.declare(sections, "declare i32 @fprintf(ptr, ptr, ...)")
-        LLVMRuntimeCommon.declare(sections, "@stderr = external global ptr")
         diagnostic = (
             "Aether startup error: process argument %lld is not valid UTF-8.\n"
         )
@@ -64,7 +63,7 @@ class LLVMProcessRuntime:
                 "  %next = add i64 %index, 1",
                 "  br label %validate",
                 "invalid:",
-                "  %stream = load ptr, ptr @stderr",
+                "  %stream = call ptr @aether_stderr_stream()",
                 (
                     f"  %format = getelementptr [{diagnostic_size} x i8], "
                     "ptr @.aether.process.invalid_utf8, i64 0, i64 0"

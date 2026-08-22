@@ -126,6 +126,7 @@ from .runtime_common import LLVMRuntimeCommon, aggregate_helper_suffix
 from .scalar_math_runtime import LLVMScalarMathRuntime
 from .vector_runtime import LLVMVectorRuntime
 from .string_runtime import LLVMStringRuntime
+from .stdio_runtime import LLVMStdioRuntime
 from .class_runtime import class_new_helper, class_object_type, class_runtime_sections
 from .process_runtime import LLVMProcessRuntime
 from .text_file_runtime import LLVMTextFileRuntime
@@ -656,6 +657,14 @@ class LLVMPrinter:
             common_runtime.declare(runtime, "declare double @pow(double, double)")
         LLVMIntegerRuntime(frozenset(self._checked_int_operators)).append(runtime, common_runtime)
         LLVMScalarMathRuntime(frozenset(self._scalar_math_calls)).append(runtime, common_runtime)
+        LLVMStdioRuntime(
+            stdout=self._uses_print or self._uses_string_runtime,
+            stderr=(
+                self._uses_exceptions
+                or self._uses_process_context
+                or self._uses_process_arguments
+            ),
+        ).append(runtime)
         LLVMRuntimeIO(enabled=self._uses_print).append(runtime)
         LLVMStringRuntime(
             enabled=self._uses_string_runtime,
@@ -3425,7 +3434,7 @@ class LLVMPrinter:
             stream = self._synthetic_temp("print.bool.stream")
             lines = [
                 f"{selected} = select i1 {value}, ptr @.aether.io.true, ptr @.aether.io.false",
-                f"{stream} = load ptr, ptr @stdout",
+                f"{stream} = call ptr @aether_stdout_stream()",
                 f"{call_result} = call i32 @fputs(ptr {selected}, ptr {stream})",
             ]
             if instruction.newline:
@@ -3483,7 +3492,7 @@ class LLVMPrinter:
             stream = self._synthetic_temp("struct.print.stream")
             lines.extend([
                 f"{selected} = select i1 {value}, ptr @.aether.io.true, ptr @.aether.io.false",
-                f"{stream} = load ptr, ptr @stdout",
+                f"{stream} = call ptr @aether_stdout_stream()",
                 f"{result} = call i32 @fputs(ptr {selected}, ptr {stream})",
             ])
             return
@@ -3577,7 +3586,7 @@ class LLVMPrinter:
         elif isinstance(element_type, BoolType):
             print_lines = [
                 "  %text = select i1 %value, ptr @.aether.io.true, ptr @.aether.io.false",
-                "  %stream = load ptr, ptr @stdout",
+                "  %stream = call ptr @aether_stdout_stream()",
                 "  %printed = call i32 @fputs(ptr %text, ptr %stream)",
             ]
         elif isinstance(element_type, EnumType):

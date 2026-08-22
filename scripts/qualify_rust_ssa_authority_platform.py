@@ -48,6 +48,37 @@ def _probe_failure_diagnostics(
     )
 
 
+def _clean_probe_environment(
+    environment: Path, *, host_environment: dict[str, str] | None = None
+) -> dict[str, str]:
+    """Isolate Python/package discovery while retaining the native toolchain.
+
+    Clang is invoked by absolute path, but it still discovers its linker and
+    platform SDK tools through the host PATH and related host environment.
+    Keeping the venv first preserves installed console-script selection; the
+    probe and Rust companion themselves are resolved by absolute installation
+    paths and never through PATH.
+    """
+    isolated = dict(os.environ if host_environment is None else host_environment)
+    isolated.pop("PYTHONPATH", None)
+    isolated.pop("PYTHONHOME", None)
+    scripts = environment / ("Scripts" if sys.platform == "win32" else "bin")
+    host_path = isolated.get("PATH", os.defpath)
+    checkout = ROOT.resolve()
+    toolchain_entries = []
+    for entry in host_path.split(os.pathsep):
+        if not entry:
+            continue
+        try:
+            checkout_local = Path(entry).resolve().is_relative_to(checkout)
+        except OSError:
+            checkout_local = False
+        if not checkout_local:
+            toolchain_entries.append(entry)
+    isolated["PATH"] = os.pathsep.join((str(scripts), *toolchain_entries))
+    return isolated
+
+
 def _run_probe(
     arguments: list[str], *, cwd: Path, env: dict[str, str]
 ) -> tuple[int, object | None]:
@@ -140,11 +171,7 @@ def main() -> int:
             shutil.copyfile(source, destination)
             isolated_sources.append(destination)
 
-        isolated_environment = os.environ.copy()
-        isolated_environment.pop("PYTHONPATH", None)
-        isolated_environment["PATH"] = str(
-            environment / ("Scripts" if sys.platform == "win32" else "bin")
-        )
+        isolated_environment = _clean_probe_environment(environment)
         probe_returncode, observation = _run_probe(
             [
                 str(probe),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .numeric_locale import LLVMNumericLocaleABI
 from .runtime_common import LLVMRuntimeCommon
 
 
@@ -10,6 +11,7 @@ class LLVMRuntimeIO:
     """Declarations and fixed format strings used by scalar print operations."""
 
     enabled: bool
+    platform: str | None = None
 
     def append(self, sections: list[str]) -> None:
         if not self.enabled:
@@ -19,12 +21,9 @@ class LLVMRuntimeIO:
         LLVMRuntimeCommon.declare(sections, "declare i32 @putchar(i32)")
         LLVMRuntimeCommon.declare(sections, "declare i32 @fputs(ptr, ptr)")
         LLVMRuntimeCommon.declare(sections, "declare i64 @fwrite(ptr, i64, i64, ptr)")
-        LLVMRuntimeCommon.declare(sections, "declare i32 @snprintf(ptr, i64, ptr, ...)")
-        LLVMRuntimeCommon.declare(sections, "declare ptr @newlocale(i32, ptr, ptr)")
-        LLVMRuntimeCommon.declare(sections, "declare ptr @uselocale(ptr)")
-        LLVMRuntimeCommon.declare(sections, "declare void @freelocale(ptr)")
+        locale = LLVMNumericLocaleABI(self.platform)
+        locale.append_declarations(sections, formatting=True)
         LLVMRuntimeCommon.declare(sections, "declare void @exit(i32) noreturn")
-        LLVMRuntimeCommon.declare(sections, "@stdout = external global ptr")
         sections.extend(
             [
                 '@.aether.io.int = private unnamed_addr constant [3 x i8] c"%d\\00"',
@@ -39,12 +38,21 @@ class LLVMRuntimeIO:
                 '@.aether.io.locale.error = private unnamed_addr constant [51 x i8] c"Aether panic: public double formatting unavailable\\00"',
                 '@.aether.io.true = private unnamed_addr constant [5 x i8] c"true\\00"',
                 '@.aether.io.false = private unnamed_addr constant [6 x i8] c"false\\00"',
-                self._double_print_helper(),
+                self._double_print_helper(locale),
             ]
         )
 
     @staticmethod
-    def _double_print_helper() -> str:
+    def _double_print_helper(locale: LLVMNumericLocaleABI) -> str:
+        create_locale = locale.create("%locale", "%locale_name")
+        format_double = locale.format_double(
+            result="%written32",
+            data="%data",
+            size=64,
+            format_="@.aether.io.double",
+            value="%value",
+            locale="%locale",
+        )
         return "\n".join(
             [
                 "define private void @aether_print_double(double %value, i1 %newline) {",
@@ -66,21 +74,18 @@ class LLVMRuntimeIO:
                 "  br label %special_write",
                 "special_write:",
                 "  %special_text = phi ptr [ @.aether.io.double.nan, %nan ], [ %inf_text, %infinity ]",
-                "  %special_stream = load ptr, ptr @stdout",
+                "  %special_stream = call ptr @aether_stdout_stream()",
                 "  %special_result = call i32 @fputs(ptr %special_text, ptr %special_stream)",
                 "  br label %finish",
                 "finite:",
                 "  %locale_name = getelementptr [2 x i8], ptr @.aether.io.locale.c, i64 0, i64 0",
-                "  %locale = call ptr @newlocale(i32 2, ptr %locale_name, ptr null)",
+                f"  {create_locale}",
                 "  %locale_failed = icmp eq ptr %locale, null",
                 "  br i1 %locale_failed, label %panic, label %format",
                 "format:",
-                "  %previous = call ptr @uselocale(ptr %locale)",
                 "  %buffer = alloca [64 x i8], align 1",
                 "  %data = getelementptr [64 x i8], ptr %buffer, i64 0, i64 0",
-                "  %written32 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr %data, i64 64, ptr @.aether.io.double, double %value)",
-                "  %ignored = call ptr @uselocale(ptr %previous)",
-                "  call void @freelocale(ptr %locale)",
+                *(f"  {line}" for line in format_double),
                 "  %written = sext i32 %written32 to i64",
                 "  br label %scan",
                 "scan:",
@@ -102,7 +107,7 @@ class LLVMRuntimeIO:
                 "  %next = add i64 %index, 1",
                 "  br label %scan",
                 "write:",
-                "  %stream = load ptr, ptr @stdout",
+                "  %stream = call ptr @aether_stdout_stream()",
                 "  %write_result = call i64 @fwrite(ptr %data, i64 1, i64 %written, ptr %stream)",
                 "  br i1 %needs_suffix, label %suffix, label %finish",
                 "suffix:",

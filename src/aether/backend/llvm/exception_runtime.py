@@ -30,7 +30,6 @@ class LLVMExceptionRuntime:
         declare(sections, "declare i64 @fwrite(ptr, i64, i64, ptr)")
         declare(sections, "declare i32 @fputs(ptr, ptr)")
         declare(sections, "declare void @exit(i32) noreturn")
-        declare(sections, "@stderr = external global ptr")
         if self.strategy is ExceptionLoweringStrategy.LLVM_EH_PROTOTYPE:
             declare(sections, "declare ptr @__cxa_allocate_exception(i64)")
             declare(sections, "declare void @__cxa_throw(ptr, ptr, ptr) noreturn")
@@ -88,7 +87,7 @@ class LLVMExceptionRuntime:
             [
                 "define private void @__ae_exception_panic_v1() noreturn {",
                 "entry:",
-                "  %stream = load ptr, ptr @stderr",
+                "  %stream = call ptr @aether_stderr_stream()",
                 "  %ignored = call i32 @fputs(ptr @.ae.exception.invariant, ptr %stream)",
                 "  call void @exit(i32 1)",
                 "  unreachable",
@@ -308,7 +307,7 @@ class LLVMExceptionRuntime:
                 "  %text = call ptr %thunk(ptr %carrier) nounwind",
                 "  br label %report",
                 "report:",
-                "  %stream = load ptr, ptr @stderr",
+                "  %stream = call ptr @aether_stderr_stream()",
                 "  %prefix_ok32 = call i32 @fputs(ptr @.ae.exception.prefix, ptr %stream)",
                 "  %name_ok32 = call i32 @fputs(ptr %name, ptr %stream)",
                 "  %separator_ok32 = call i32 @fputs(ptr @.ae.exception.separator, ptr %stream)",
@@ -329,7 +328,7 @@ class LLVMExceptionRuntime:
                 "  br i1 %report_bad, label %reporting_failure, label %finish",
                 "reporting_failure:",
                 "  call void @__ae_exception_destroy_v1(ptr %event)",
-                "  %failure_stream = load ptr, ptr @stderr",
+                "  %failure_stream = call ptr @aether_stderr_stream()",
                 "  %ignored = call i32 @fputs(ptr @.ae.exception.reporting, ptr %failure_stream)",
                 "  call void @exit(i32 1)",
                 "  unreachable",
@@ -373,7 +372,7 @@ class LLVMExceptionRuntime:
                 "  %text = call ptr %thunk(ptr %carrier) nounwind",
                 "  br label %report",
                 "report:",
-                "  %stream = load ptr, ptr @stderr",
+                "  %stream = call ptr @aether_stderr_stream()",
                 "  %prefix_ok32 = call i32 @fputs(ptr @.ae.exception.prefix, ptr %stream)",
                 "  %name_ok32 = call i32 @fputs(ptr %name, ptr %stream)",
                 "  %separator_ok32 = call i32 @fputs(ptr @.ae.exception.separator, ptr %stream)",
@@ -394,7 +393,7 @@ class LLVMExceptionRuntime:
                 "  br i1 %report_bad, label %reporting_failure, label %finish",
                 "reporting_failure:",
                 "  call void @__ae_exception_destroy_v1(ptr %event)",
-                "  %failure_stream = load ptr, ptr @stderr",
+                "  %failure_stream = call ptr @aether_stderr_stream()",
                 "  %ignored = call i32 @fputs(ptr @.ae.exception.reporting, ptr %failure_stream)",
                 "  call void @exit(i32 1)",
                 "  unreachable",

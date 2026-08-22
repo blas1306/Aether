@@ -4,6 +4,7 @@ from io import StringIO
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -253,7 +254,10 @@ def test_parsing_survives_optimizers_and_real_clang(profile: str, tmp_path: Path
     llvm = LLVMBackend().emit(optimized_ssa)
     assert "call %struct.IntParseResult @aether_parse_int" in llvm
     assert "call %struct.DoubleParseResult @aether_parse_double" in llvm
-    assert "@strtod_l" in llvm and "@newlocale" in llvm
+    if sys.platform == "win32":
+        assert "@_strtod_l" in llvm and "@_create_locale" in llvm
+    else:
+        assert "@strtod_l" in llvm and "@newlocale" in llvm
     parse_int = llvm.split("define private %struct.IntParseResult @aether_parse_int", 1)[1].split("\n}", 1)[0]
     parse_double = llvm.split("define private %struct.DoubleParseResult @aether_parse_double", 1)[1].split("\n}", 1)[0]
     assert "@strlen" not in parse_int
@@ -280,8 +284,13 @@ def test_native_runtime_is_length_aware_and_uses_explicit_c_locale() -> None:
     assert "call i64 @aether_string_byte_length" in llvm
     assert "@aether_string_data" in llvm
     assert '@.aether.locale.c' in llvm
-    assert "call ptr @newlocale(i32 2" in llvm
-    assert "call double @strtod_l" in llvm
+    if sys.platform == "win32":
+        assert "call ptr @_create_locale(i32 4" in llvm
+        assert "call double @_strtod_l" in llvm
+    else:
+        numeric_mask = 16 if sys.platform == "darwin" else 2
+        assert f"call ptr @newlocale(i32 {numeric_mask}" in llvm
+        assert "call double @strtod_l" in llvm
     parse_int = llvm.split("define private %struct.IntParseResult @aether_parse_int", 1)[1].split("\n}", 1)[0]
     parse_double = llvm.split("define private %struct.DoubleParseResult @aether_parse_double", 1)[1].split("\n}", 1)[0]
     assert "@strlen" not in parse_int

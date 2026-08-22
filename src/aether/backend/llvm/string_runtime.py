@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .numeric_locale import LLVMNumericLocaleABI
 from .runtime_common import LLVMRuntimeCommon
 
 
@@ -17,6 +18,7 @@ class LLVMStringRuntime:
     parsing: bool = False
     splitting: bool = False
     codec: bool = False
+    platform: str | None = None
 
     HEADER_SIZE = 24
     IMMORTAL = 1
@@ -36,7 +38,6 @@ class LLVMStringRuntime:
         declare(sections, "declare i64 @fwrite(ptr, i64, i64, ptr)")
         declare(sections, "declare void @llvm.memcpy.p0.p0.i64(ptr, ptr, i64, i1 immarg)")
         declare(sections, "declare { i64, i1 } @llvm.uadd.with.overflow.i64(i64, i64)")
-        declare(sections, "@stdout = external global ptr")
 
         sections.extend(
             [
@@ -60,12 +61,11 @@ class LLVMStringRuntime:
         if self.splitting:
             sections.append(self._split())
         if self.parsing or self.codec:
-            declare(sections, "declare ptr @newlocale(i32, ptr, ptr)")
-            declare(sections, "declare void @freelocale(ptr)")
-            if self.parsing:
-                declare(sections, "declare double @strtod_l(ptr, ptr, ptr)")
+            locale = LLVMNumericLocaleABI(self.platform)
+            locale.append_declarations(
+                sections, parsing=self.parsing, formatting=self.codec
+            )
             if self.codec:
-                declare(sections, "declare ptr @uselocale(ptr)")
                 declare(sections, "declare i32 @snprintf(ptr, i64, ptr, ...)")
             sections.extend(
                 [
@@ -73,12 +73,21 @@ class LLVMStringRuntime:
                 ]
             )
         if self.parsing:
-            sections.extend([self._parse_int(), self._parse_double()])
+            sections.extend([self._parse_int(), self._parse_double(locale)])
         if self.codec:
-            sections.append(self._codec_helpers())
+            sections.append(self._codec_helpers(locale))
 
     @staticmethod
-    def _codec_helpers() -> str:
+    def _codec_helpers(locale: LLVMNumericLocaleABI) -> str:
+        create_locale = locale.create("%locale", "%locale_name")
+        format_double = locale.format_double(
+            result="%written32",
+            data="%data",
+            size=64,
+            format_="%format",
+            value="%value",
+            locale="%locale",
+        )
         return "\n\n".join([
             '\n'.join([
                 '@.aether.text.range = private unnamed_addr constant [48 x i8] c"Aether panic: invalid internal text codec range\\00"',
@@ -161,17 +170,14 @@ class LLVMStringRuntime:
                 "  br i1 %nonfinite, label %panic, label %prepare",
                 "prepare:",
                 "  %locale_name = getelementptr [2 x i8], ptr @.aether.locale.c, i64 0, i64 0",
-                "  %locale = call ptr @newlocale(i32 2, ptr %locale_name, ptr null)",
+                f"  {create_locale}",
                 "  %locale_failed = icmp eq ptr %locale, null",
                 "  br i1 %locale_failed, label %panic, label %format_value",
                 "format_value:",
-                "  %previous = call ptr @uselocale(ptr %locale)",
                 "  %buffer = alloca [64 x i8], align 1",
                 "  %data = getelementptr [64 x i8], ptr %buffer, i64 0, i64 0",
                 "  %format = getelementptr [6 x i8], ptr @.aether.text.double.format, i64 0, i64 0",
-                "  %written32 = call i32 (ptr, i64, ptr, ...) @snprintf(ptr %data, i64 64, ptr %format, double %value)",
-                "  %ignored = call ptr @uselocale(ptr %previous)",
-                "  call void @freelocale(ptr %locale)",
+                *(f"  {line}" for line in format_double),
                 "  %written = sext i32 %written32 to i64",
                 "  %result = call ptr @aether_string_from_utf8(ptr %data, i64 %written)",
                 "  ret ptr %result",
@@ -328,7 +334,10 @@ class LLVMStringRuntime:
         ])
 
     @staticmethod
-    def _parse_double() -> str:
+    def _parse_double(locale: LLVMNumericLocaleABI) -> str:
+        create_locale = locale.create("%locale", "%locale_name")
+        parse_double = locale.parse_double("%parsed", "%data", "%locale")
+        free_locale = locale.free("%locale")
         return "\n".join([
             "define private %struct.DoubleParseResult @aether_parse_double(ptr %value) {",
             "entry:",
@@ -408,15 +417,15 @@ class LLVMStringRuntime:
             "  br i1 %grammar_ok, label %convert, label %return_invalid",
             "convert:",
             "  %locale_name = getelementptr [2 x i8], ptr @.aether.locale.c, i64 0, i64 0",
-            "  %locale = call ptr @newlocale(i32 2, ptr %locale_name, ptr null)",
+            f"  {create_locale}",
             "  %locale_failed = icmp eq ptr %locale, null",
             "  br i1 %locale_failed, label %locale_panic, label %convert_number",
             "locale_panic:",
             "  call void @aether_string_locale_panic()",
             "  unreachable",
             "convert_number:",
-            "  %parsed = call double @strtod_l(ptr %data, ptr null, ptr %locale)",
-            "  call void @freelocale(ptr %locale)",
+            f"  {parse_double}",
+            f"  {free_locale}",
             "  %positive_inf = fcmp oeq double %parsed, 0x7FF0000000000000",
             "  %negative_inf = fcmp oeq double %parsed, 0xFFF0000000000000",
             "  %overflow = or i1 %positive_inf, %negative_inf",
@@ -944,7 +953,7 @@ class LLVMStringRuntime:
             "  br i1 %empty, label %done, label %write",
             "write:",
             "  %data = call ptr @aether_string_data(ptr %value)",
-            "  %stream = load ptr, ptr @stdout",
+            "  %stream = call ptr @aether_stdout_stream()",
             "  %written = call i64 @fwrite(ptr %data, i64 1, i64 %length, ptr %stream)",
             "  br label %done",
             "done:",
@@ -959,7 +968,7 @@ class LLVMStringRuntime:
             "entry:",
             "  %length = call i64 @aether_string_byte_length(ptr %value)",
             "  %data = call ptr @aether_string_data(ptr %value)",
-            "  %stream = load ptr, ptr @stdout",
+            "  %stream = call ptr @aether_stdout_stream()",
             "  br label %loop",
             "loop:",
             "  %index = phi i64 [ 0, %entry ], [ %next, %advance ]",
