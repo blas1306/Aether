@@ -149,7 +149,11 @@ def _characterization_performance_evidence(
         and value["artifact_schema_version"] == 1
         and isinstance(value.get("milestone"), str)
         and bool(value["milestone"])
-        and value.get("decision") == "RUST_SSA_PERFORMANCE_CHARACTERIZED"
+        and value.get("decision")
+        in {
+            "RUST_SSA_PERFORMANCE_CHARACTERIZED",
+            "RUST_SSA_POST_3_8A_PERFORMANCE_CHARACTERIZED",
+        }
         and value.get("measurement_kind")
         == "observational; no absolute timing is a semantic gate"
         and isinstance(methodology, dict)

@@ -114,6 +114,16 @@ def test_pv2_g15_accepts_current_characterization_artifact() -> None:
     )
 
 
+def test_pv2_g15_accepts_post_3_8a_characterization_artifact() -> None:
+    checker = _checker_module()
+    revision = "post-3-8a-revision"
+    evidence = _characterization_performance(revision)
+    evidence["milestone"] = "RUST-3.8b"
+    evidence["decision"] = "RUST_SSA_POST_3_8A_PERFORMANCE_CHARACTERIZED"
+
+    assert checker._performance_evidence_present(evidence, revision) is True
+
+
 def test_pv2_g15_blocks_characterization_for_wrong_revision() -> None:
     checker = _checker_module()
 
