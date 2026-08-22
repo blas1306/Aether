@@ -74,7 +74,7 @@ def test_requalification_is_evidence_only_and_blocks_missing_platforms(tmp_path:
     assert report["repository_default"] == "PYTHON_SSA_AUTHORITY_RUST_SHADOW"
 
 
-def test_exact_revision_complete_evidence_can_reach_v2_ready(tmp_path: Path) -> None:
+def test_pre_promotion_checker_cannot_requalify_after_default_switch(tmp_path: Path) -> None:
     revision = "exact-revision"
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     fixture_paths = sorted(
@@ -211,19 +211,20 @@ def test_exact_revision_complete_evidence_can_reach_v2_ready(tmp_path: Path) -> 
             },
         )
     report = _checker_module().build_record(revision, tmp_path)
-    assert report["decision"] == "READY_FOR_RUST_SSA_AUTHORITY_SWITCH_V2"
-    assert all(row["status"] == "PASS" for row in report["expanded_gates"])
+    assert report["decision"] == "RUST_SSA_AUTHORITY_REQUALIFICATION_BLOCKED"
+    assert report["repository_default"] == "PYTHON_SSA_AUTHORITY_RUST_SHADOW"
+    assert any(row["status"] == "BLOCKED" for row in report["expanded_gates"])
 
 
 def test_safe_default_and_ci_directly_require_new_qualification_gates() -> None:
     assert (
         SSALoweringAuthorityConfiguration().mode
-        is SSALoweringAuthorityMode.PYTHON_SSA_AUTHORITY_RUST_SHADOW
+        is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
     )
     workflow = (ROOT / ".github/workflows/rust-ssa-shadow.yml").read_text(
         encoding="utf-8"
     )
     assert "qualify_rust_ssa_authority_promotion_fixtures.py" in workflow
     assert "qualify_rust_ssa_authority_deep_cfg.py" in workflow
-    assert "check_rust_ssa_authority_requalification.py" in workflow
-    assert "--require-ready" in workflow
+    assert "check_rust_ssa_authority_promotion_v2.py" in workflow
+    assert "--require-promoted" in workflow

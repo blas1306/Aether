@@ -189,7 +189,7 @@ def test_failed_main_writes_diagnostics_and_remains_blocked(
     ]
     assert report["reported_failure_count"] == 2
     assert report["failures_truncated"] is False
-    assert report["summaries"]["safe_default"] == (
+    assert report["summaries"]["production_default"] == (
         "4824 passed, 2 failed, 5 skipped"
     )
     assert report["pytest_log"] == "full_suite_pytest.log"

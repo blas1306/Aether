@@ -1,4 +1,4 @@
-name: rust-ssa-authority-requalification
+name: rust-ssa-authority-promotion-v2
 on:
   pull_request:
   workflow_dispatch:
@@ -130,7 +130,7 @@ jobs:
             qualification/soak.json
             qualification/operational.json
 
-  full-suite-safe-default:
+  full-suite-rust-default:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -148,7 +148,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: full-suite-safe-default
+          name: full-suite-rust-default
           path: |
             qualification/full_suite.json
             qualification/full_suite_pytest.log
@@ -201,7 +201,7 @@ jobs:
       - adversarial
       - deep-cfg
       - authority-soak
-      - full-suite-safe-default
+      - full-suite-rust-default
       - performance
       - python-authority-rust-shadow
       - python-only
@@ -233,16 +233,16 @@ jobs:
               shutil.copyfile(report, destination)
           assert names <= {path.name for path in evidence.glob("*.json")}
           assert len(list((evidence / "platforms").glob("*.json"))) == 4
-      - name: Require exact-revision RUST-3.5b readiness
+      - name: Require exact-revision RUST-3.6-V2 promotion
         run: >-
-          python scripts/check_rust_ssa_authority_requalification.py
+          python scripts/check_rust_ssa_authority_promotion_v2.py
           --revision "${{ github.sha }}" --evidence-dir evidence
-          --output qualification/rust_ssa_authority_requalification.json
-          --require-ready
+          --output qualification/rust_ssa_authority_promotion_v2.json
+          --require-promoted
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: rust-ssa-authority-requalification
+          name: rust-ssa-authority-promotion-v2
           path: |
             evidence
             qualification

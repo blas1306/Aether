@@ -23,7 +23,7 @@ def main() -> int:
     # classification harness while changing only which matched object returns.
     qualification.lower_with_rust_shadow = lower_with_rust_authority
     report = qualification.generate()
-    report["milestone"] = "RUST-3.5b" if args.revision else "RUST-3.6"
+    report["milestone"] = "RUST-3.6-V2" if args.revision else "RUST-3.6"
     if args.revision:
         report["qualification_revision"] = args.revision
     report.pop("gates", None)
@@ -36,7 +36,7 @@ def main() -> int:
         else "RUST_SSA_AUTHORITY_SOAK_FAILED"
     )
     report["authority"] = {
-        "repository_default": "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+        "repository_default": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
         "qualification_mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
         "returned_ssa": "rust_schema_v2_import",
         "python_shadow": "synchronous_mandatory",

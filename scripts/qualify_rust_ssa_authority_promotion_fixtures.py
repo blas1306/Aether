@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Qualify the permanent RUST-3.5b lifecycle promotion fixtures."""
+"""Qualify the permanent RUST-3.6-V2 lifecycle promotion fixtures."""
 
 from __future__ import annotations
 
@@ -248,14 +248,14 @@ def generate(
     passed = all(gate["status"] == "PASS" for gate in gates)
     return {
         "artifact_schema_version": 1,
-        "milestone": "RUST-3.5b",
+        "milestone": "RUST-3.6-V2",
         "qualification_revision": revision,
         "decision": (
             "RUST_SSA_PROMOTION_FIXTURES_QUALIFIED"
             if passed
             else "RUST_SSA_PROMOTION_FIXTURES_BLOCKED"
         ),
-        "repository_default": "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+        "repository_default": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
         "mandatory_fixture_count": len(fixtures),
         "historical_minimized_fixture_count": manifest[
             "historical_minimized_fixture_count"

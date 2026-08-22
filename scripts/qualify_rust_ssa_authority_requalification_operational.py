@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate RUST-3.5b fail-closed, transport, rollback, packaging, and CI gates."""
+"""Validate RUST-3.6-V2 fail-closed, transport, rollback, packaging, and CI gates."""
 
 from __future__ import annotations
 
@@ -69,24 +69,24 @@ def main() -> int:
     concurrency = soak.get("concurrency", {})
 
     matching = _Client()
-    safe = SSAPipeline(rust_shadow_client=matching)
-    safe_ssa = safe.run(IRModule()).ssa_module
+    production_default = SSAPipeline(rust_shadow_client=matching)
+    default_ssa = production_default.run(IRModule()).ssa_module
     python_only = SSAPipeline(
         authority_configuration=SSALoweringAuthorityConfiguration(
             SSALoweringAuthorityMode.PYTHON_SSA_ONLY
         )
     ).run(IRModule()).ssa_module
-    rust_authority_client = _Client()
-    rust_authority = SSAPipeline(
+    python_authority_client = _Client()
+    python_authority = SSAPipeline(
         authority_configuration=SSALoweringAuthorityConfiguration(
-            SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
+            SSALoweringAuthorityMode.PYTHON_SSA_AUTHORITY_RUST_SHADOW
         ),
-        rust_shadow_client=rust_authority_client,
+        rust_shadow_client=python_authority_client,
     )
-    rust_authority.run(IRModule())
+    python_authority_ssa = python_authority.run(IRModule()).ssa_module
     same_input = (
-        len(matching.payloads) == len(rust_authority_client.payloads) == 1
-        and matching.payloads[0] == rust_authority_client.payloads[0]
+        len(matching.payloads) == len(python_authority_client.payloads) == 1
+        and matching.payloads[0] == python_authority_client.payloads[0]
     )
     mismatch = _Client(
         {
@@ -122,8 +122,8 @@ def main() -> int:
             "historical-116",
             "adversarial",
             "deep-cfg",
-            "full-suite-safe-default",
-            "require-ready",
+            "full-suite-rust-default",
+            "require-promoted",
         )
     )
     transport = {
@@ -149,8 +149,10 @@ def main() -> int:
             f"{concurrency.get('process_startups')} process"
         ),
     }
-    rollback_equal = ssa_module_to_dto(safe_ssa, schema_version=2) == ssa_module_to_dto(
-        python_only, schema_version=2
+    rollback_equal = (
+        ssa_module_to_dto(default_ssa, schema_version=2)
+        == ssa_module_to_dto(python_authority_ssa, schema_version=2)
+        == ssa_module_to_dto(python_only, schema_version=2)
     )
     passed = (
         soak.get("qualification_revision") == args.revision
@@ -164,14 +166,14 @@ def main() -> int:
             "128 requests / 1 process",
         }
         and rollback_equal
-        and safe.last_returned_ssa_origin == "python_general_ssa_builder"
-        and rust_authority.last_returned_ssa_origin == "rust_schema_v2_import"
+        and production_default.last_returned_ssa_origin == "rust_schema_v2_import"
+        and python_authority.last_returned_ssa_origin == "python_general_ssa_builder"
         and packaging_ok
         and ci_ok
     )
     report = {
         "artifact_schema_version": 1,
-        "milestone": "RUST-3.5b",
+        "milestone": "RUST-3.6-V2",
         "qualification_revision": args.revision,
         "decision": (
             "RUST_SSA_AUTHORITY_REQUALIFICATION_OPERATIONAL_PASS"
@@ -187,8 +189,8 @@ def main() -> int:
             ],
         },
         "authority_probe": {
-            "safe_default_origin": safe.last_returned_ssa_origin,
-            "explicit_rust_origin": rust_authority.last_returned_ssa_origin,
+            "production_default_origin": production_default.last_returned_ssa_origin,
+            "python_authority_rollback_origin": python_authority.last_returned_ssa_origin,
         },
         "packaging_and_discovery": "PASS" if packaging_ok else "BLOCKED",
         "ci_integration": "PASS" if ci_ok else "BLOCKED",

@@ -1,0 +1,339 @@
+{
+  "adversarial": {
+    "decision": "RUST_SSA_LOWERING_ADVERSARIAL_QUALIFIED",
+    "negative_case_count": 7,
+    "positive_case_count": 21
+  },
+  "artifact_schema_version": 1,
+  "blockers": [
+    "PV2-G14"
+  ],
+  "clean_install": "BLOCKED",
+  "decision": "RUST_SSA_AUTHORITY_PROMOTION_V2_FAILED",
+  "deep_cfg": {
+    "cargo_workspace": {
+      "status": "PASS",
+      "summary": "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+    },
+    "decision": "RUST_SSA_AUTHORITY_DEEP_CFG_PASS",
+    "stress": {
+      "1000": {
+        "canonical_ssa_parity": true,
+        "lowered_blocks": 1000,
+        "python": "PASS",
+        "python_elapsed_ns": 363460266,
+        "rust": "PASS",
+        "rust_elapsed_ns": 1423072398,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_exact_reserialization": true
+      },
+      "5000": {
+        "canonical_ssa_parity": true,
+        "lowered_blocks": 5000,
+        "python": "PASS",
+        "python_elapsed_ns": 10031249027,
+        "rust": "PASS",
+        "rust_elapsed_ns": 37281728639,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_exact_reserialization": true
+      },
+      "993": {
+        "canonical_ssa_parity": true,
+        "lowered_blocks": 993,
+        "python": "PASS",
+        "python_elapsed_ns": 340623228,
+        "rust": "PASS",
+        "rust_elapsed_ns": 1436375354,
+        "rust_owned_ssa_verification": true,
+        "schema_v2_exact_reserialization": true
+      }
+    }
+  },
+  "failure_policy": "fail_closed_no_silent_fallback",
+  "full_suite": {
+    "decision": "RUST_SSA_AUTHORITY_REQUALIFICATION_FULL_SUITE_PASS",
+    "environmental_failures": 0,
+    "failed": 0,
+    "infrastructure_failures": 0,
+    "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "native_exception_ptrace_compatible": "54/54 PASS",
+    "passed": 4839,
+    "promotion_subset": {
+      "failed": 0,
+      "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+      "passed": 18,
+      "selected": 18
+    },
+    "semantic_mismatches": 0,
+    "skipped": 4,
+    "summaries": {
+      "native_compatible": "54 passed in 5.25s",
+      "native_initial": "24 failed, 30 passed in 5.56s",
+      "production_default": "4839 passed, 4 skipped, 6 warnings in 199.73s (0:03:19)",
+      "promotion_subset": "18 passed in 1.83s"
+    },
+    "unclassified_test_failures": 0
+  },
+  "gates": [
+    {
+      "evidence": "exact promotion revision evidence",
+      "id": "PV2-G01",
+      "name": "repository default is Rust authority/Python shadow",
+      "status": "PASS"
+    },
+    {
+      "evidence": "exact promotion revision evidence",
+      "id": "PV2-G02",
+      "name": "returned object is wired from Rust schema-v2 import",
+      "status": "PASS"
+    },
+    {
+      "evidence": "exact promotion revision evidence",
+      "id": "PV2-G03",
+      "name": "Python GeneralSSABuilder remains mandatory",
+      "status": "PASS"
+    },
+    {
+      "evidence": "exact promotion revision evidence",
+      "id": "PV2-G04",
+      "name": "all authority failures remain fail closed",
+      "status": "PASS"
+    },
+    {
+      "evidence": "exact promotion revision evidence",
+      "id": "PV2-G05",
+      "name": "both configuration-only rollback modes remain",
+      "status": "PASS"
+    },
+    {
+      "evidence": "exact promotion revision evidence",
+      "id": "PV2-G06",
+      "name": "historical qualification evidence is preserved",
+      "status": "PASS"
+    },
+    {
+      "evidence": "exact promotion revision evidence",
+      "id": "PV2-G07",
+      "name": "V2-L01 through V2-L05 pass after promotion",
+      "status": "PASS"
+    },
+    {
+      "evidence": "exact promotion revision evidence",
+      "id": "PV2-G08",
+      "name": "historical corpus is 116/116 after promotion",
+      "status": "PASS"
+    },
+    {
+      "evidence": "exact promotion revision evidence",
+      "id": "PV2-G09",
+      "name": "expanded soak is 140/140 with zero failures",
+      "status": "PASS"
+    },
+    {
+      "evidence": "exact promotion revision evidence",
+      "id": "PV2-G10",
+      "name": "adversarial corpus is 21/21 positive and 7/7 negative",
+      "status": "PASS"
+    },
+    {
+      "evidence": "exact promotion revision evidence",
+      "id": "PV2-G11",
+      "name": "deep CFG 993, 1000, and 5000 pass",
+      "status": "PASS"
+    },
+    {
+      "evidence": "exact promotion revision evidence",
+      "id": "PV2-G12",
+      "name": "full suite passes under the new default",
+      "status": "PASS"
+    },
+    {
+      "evidence": "exact promotion revision evidence",
+      "id": "PV2-G13",
+      "name": "transport, same-input, fail-closed, and rollback pass",
+      "status": "PASS"
+    },
+    {
+      "evidence": "exact promotion revision evidence",
+      "id": "PV2-G14",
+      "name": "clean install and four native platforms pass",
+      "status": "BLOCKED"
+    },
+    {
+      "evidence": "exact promotion revision evidence",
+      "id": "PV2-G15",
+      "name": "fresh observational performance evidence exists",
+      "status": "PASS"
+    },
+    {
+      "evidence": "exact promotion revision evidence",
+      "id": "PV2-G16",
+      "name": "CI requires default and both rollback configurations",
+      "status": "PASS"
+    }
+  ],
+  "historical": {
+    "accepted": 116,
+    "checks": {
+      "canonical_ssa_parity": {
+        "failed": 0,
+        "passed": 116
+      },
+      "determinism": {
+        "failed": 0,
+        "passed": 116
+      },
+      "exact_reserialization": {
+        "failed": 0,
+        "passed": 116
+      },
+      "lifecycle_parity": {
+        "failed": 0,
+        "passed": 116
+      },
+      "python_ssa_verification": {
+        "failed": 0,
+        "passed": 116
+      },
+      "returned_ssa_is_rust": {
+        "failed": 0,
+        "passed": 116
+      },
+      "rust_owned_ssa_verification": {
+        "failed": 0,
+        "passed": 116
+      },
+      "schema_v2_import": {
+        "failed": 0,
+        "passed": 116
+      }
+    },
+    "decision": "RUST_SSA_AUTHORITY_HISTORICAL_PASS",
+    "expected": 116
+  },
+  "milestone": "RUST-3.6-V2",
+  "new_default": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+  "old_default": "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+  "operational": {
+    "authority_probe": {
+      "production_default_origin": "rust_schema_v2_import",
+      "python_authority_rollback_origin": "python_general_ssa_builder"
+    },
+    "ci_integration": "PASS",
+    "decision": "RUST_SSA_AUTHORITY_REQUALIFICATION_OPERATIONAL_PASS",
+    "packaging_and_discovery": "PASS",
+    "rollback": {
+      "configuration_only": true,
+      "modes": [
+        "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+        "PYTHON_SSA_ONLY"
+      ]
+    },
+    "transport": {
+      "concurrency": "128 requests / 1 process",
+      "fail_closed_infrastructure": "PASS",
+      "fail_closed_semantic_mismatch": "PASS",
+      "long_session": "1000 requests / 1 process",
+      "persistent": "PASS",
+      "same_input": "PASS"
+    }
+  },
+  "performance": {
+    "measurement_kind": "observational; no timing assertion or absolute gate",
+    "observed_authority_over_python_ratio": 11.181,
+    "process_startups": 1,
+    "requests": 28,
+    "workloads": [
+      {
+        "observed_authority_over_python_ratio": 8.757,
+        "python_only_median_ns": 1191878,
+        "rounds": 7,
+        "rust_authority_python_shadow_median_ns": 10437750,
+        "workload": "benchmarks/arithmetic.ae"
+      },
+      {
+        "observed_authority_over_python_ratio": 9.723,
+        "python_only_median_ns": 17204318,
+        "rounds": 7,
+        "rust_authority_python_shadow_median_ns": 167270735,
+        "workload": "examples/numerical_methods/main.ae"
+      },
+      {
+        "observed_authority_over_python_ratio": 11.461,
+        "python_only_median_ns": 113898741,
+        "rounds": 7,
+        "rust_authority_python_shadow_median_ns": 1305450257,
+        "workload": "examples/expense_tracker/Main.ae"
+      },
+      {
+        "observed_authority_over_python_ratio": 8.21,
+        "python_only_median_ns": 1348781,
+        "rounds": 7,
+        "rust_authority_python_shadow_median_ns": 11073899,
+        "workload": "corpus/exceptions/positive/indirect_call.ae"
+      }
+    ]
+  },
+  "platforms": {
+    "linux-x86_64": {
+      "rust_target": "x86_64-unknown-linux-gnu",
+      "sha256": "7cbb6e16e2f662f11f80dfdc655fb131248b315dddde00fae65b163e14cfac81",
+      "status": "PASS"
+    },
+    "macos-arm64": {
+      "reason": "fresh exact-promotion-revision native evidence missing or invalid",
+      "rust_target": "aarch64-apple-darwin",
+      "status": "BLOCKED"
+    },
+    "macos-x86_64": {
+      "reason": "fresh exact-promotion-revision native evidence missing or invalid",
+      "rust_target": "x86_64-apple-darwin",
+      "status": "BLOCKED"
+    },
+    "windows-x86_64": {
+      "reason": "fresh exact-promotion-revision native evidence missing or invalid",
+      "rust_target": "x86_64-pc-windows-msvc",
+      "status": "BLOCKED"
+    }
+  },
+  "promotion_revision": "5ced223b0eaf77ef3e77e9b595f355a6ec18da42-worktree-rust-3.6-v2",
+  "python_shadow": "mandatory_synchronous_verified_and_discarded_only_after_match",
+  "qualified_base_revision": "5ced223b0eaf77ef3e77e9b595f355a6ec18da42",
+  "returned_origin": {
+    "identity_test_required": true,
+    "optimizer_backend_handoff": "BLOCKED",
+    "value": "rust_schema_v2_import"
+  },
+  "rollback_modes": [
+    "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+    "PYTHON_SSA_ONLY"
+  ],
+  "scope": {
+    "commit_created": false,
+    "historical_artifacts_modified": false,
+    "lifecycle_or_ssa_semantics_changed": false,
+    "optimizer_or_backend_semantics_changed": false,
+    "policies_changed": false,
+    "python_general_ssa_builder_preserved": true,
+    "schemas_changed": false,
+    "silent_fallback": false
+  },
+  "soak": {
+    "decision": "RUST_SSA_AUTHORITY_SOAK_PASS",
+    "result": {
+      "accepted": 140,
+      "infrastructure_failures": 0,
+      "rejected_before_ssa": 29,
+      "semantic_mismatches": 0,
+      "shadow_compared": 140,
+      "total_programs": 169
+    }
+  },
+  "v2_lifecycle_recurrence": {
+    "V2-L01": "PASS",
+    "V2-L02": "PASS",
+    "V2-L03": "PASS",
+    "V2-L04": "PASS",
+    "V2-L05": "PASS"
+  }
+}

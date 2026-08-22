@@ -75,7 +75,7 @@ def main() -> int:
     authority_total = sum(row["rust_authority_python_shadow_median_ns"] for row in rows)
     report = {
         "schema_version": 1,
-        "milestone": "RUST-3.5b" if args.revision else "RUST-3.6",
+        "milestone": "RUST-3.6-V2" if args.revision else "RUST-3.6",
         **({"qualification_revision": args.revision} if args.revision else {}),
         "measurement_kind": "observational; no timing assertion or absolute gate",
         "workloads": rows,

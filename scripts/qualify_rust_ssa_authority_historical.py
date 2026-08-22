@@ -85,7 +85,7 @@ def main() -> int:
     passed = len(rows) == expected and all(counts[name] == expected for name in counts)
     report = {
         "evidence_schema_version": 1,
-        "milestone": "RUST-3.5b" if args.revision else "RUST-3.6",
+        "milestone": "RUST-3.6-V2" if args.revision else "RUST-3.6",
         **({"qualification_revision": args.revision} if args.revision else {}),
         "decision": "RUST_SSA_AUTHORITY_HISTORICAL_PASS" if passed else "RUST_SSA_AUTHORITY_HISTORICAL_FAILED",
         "expected": expected,

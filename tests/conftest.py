@@ -85,8 +85,8 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         "--rust-ssa-shadow-qualification-executable",
         default=None,
         help=(
-            "Explicit test-only Rust SSA shadow companion for safe-default "
-            "repository requalification."
+            "Explicit test-only Rust SSA shadow companion for the Python-"
+            "authority rollback lane."
         ),
     )
 
@@ -158,7 +158,7 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     )
     if authority_executable is not None and shadow_executable is not None:
         raise pytest.UsageError(
-            "Rust SSA authority and safe-default shadow qualification are "
+            "Rust SSA authority and Python-authority shadow qualification are "
             "mutually exclusive"
         )
     executable = authority_executable or shadow_executable

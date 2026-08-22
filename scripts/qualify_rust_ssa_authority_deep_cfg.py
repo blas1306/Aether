@@ -100,7 +100,7 @@ def main() -> int:
     )
     report = {
         "artifact_schema_version": 1,
-        "milestone": "RUST-3.5b",
+        "milestone": "RUST-3.6-V2",
         "qualification_revision": args.revision,
         "decision": (
             "RUST_SSA_AUTHORITY_DEEP_CFG_PASS"

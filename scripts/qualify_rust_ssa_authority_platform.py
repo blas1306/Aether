@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Produce native clean-install RUST-3.5b requalification evidence."""
+"""Produce native clean-install RUST-3.6-V2 promotion evidence."""
 from __future__ import annotations
 
 import argparse
@@ -44,6 +44,9 @@ def main() -> int:
             raise RuntimeError("exactly one Python wheel is required")
         wheel = wheels[0]
     artifact = package(args.executable, output / "package", args.platform)
+    clang = shutil.which("clang")
+    if clang is None:
+        raise RuntimeError("clang is required for representative native execution")
 
     with tempfile.TemporaryDirectory(prefix="aether-ssa-authority-clean-") as raw:
         clean = Path(raw)
@@ -62,19 +65,35 @@ def main() -> int:
 
         samples = clean / "samples"
         samples.mkdir()
-        selected = [
-            ROOT / "benchmarks/arithmetic.ae",
-            ROOT / "benchmarks/matrix_mul.ae",
-            ROOT / "examples/aggregate_collections/particles.ae",
-            ROOT / "corpus/exceptions/positive/owned_aggregates_arc.ae",
-            ROOT / "corpus/exceptions/positive/indirect_call.ae",
-            ROOT / "benchmarks/list_push.ae",
+        representative = [
+            ("scalar", ROOT / "benchmarks/arithmetic.ae"),
+            ("numerical", ROOT / "benchmarks/matrix_mul.ae"),
+            ("collections", ROOT / "benchmarks/list_push.ae"),
+            ("aggregate", ROOT / "examples/aggregate_collections/particles.ae"),
+            (
+                "class_interface",
+                ROOT / "corpus/exceptions/positive/method_interface_dispatch.ae",
+            ),
+            (
+                "exception",
+                ROOT / "corpus/exceptions/positive/owned_aggregates_arc.ae",
+            ),
+            (
+                "constructor_ownership",
+                ROOT
+                / "tests/fixtures/rust_ssa_promotion_failure/boxed_constructor_receiver.ae",
+            ),
+            (
+                "function_value_indirect_call",
+                ROOT / "corpus/exceptions/positive/indirect_call.ae",
+            ),
         ]
+        selected = [path for _category, path in representative]
         promotion_fixtures = sorted(
             (ROOT / "tests/fixtures/rust_ssa_promotion_failure").glob("*.ae")
         )
         if len(promotion_fixtures) != 8:
-            raise RuntimeError("RUST-3.5b requires exactly eight promotion fixtures")
+            raise RuntimeError("RUST-3.6-V2 requires exactly eight promotion fixtures")
         selected.extend(promotion_fixtures)
         isolated_sources = []
         for index, source in enumerate(selected):
@@ -88,7 +107,14 @@ def main() -> int:
             environment / ("Scripts" if sys.platform == "win32" else "bin")
         )
         completed = subprocess.run(
-            [str(probe), *(str(path) for path in isolated_sources)],
+            [
+                str(probe),
+                "--clang",
+                str(Path(clang).resolve()),
+                "--native-count",
+                str(len(representative)),
+                *(str(path) for path in isolated_sources),
+            ],
             cwd=clean,
             check=True,
             text=True,
@@ -99,13 +125,16 @@ def main() -> int:
 
     evidence = {
         "schema_version": 1,
-        "milestone": "RUST-3.5b",
+        "milestone": "RUST-3.6-V2",
         "revision": args.revision,
         "platform": args.platform,
         "rust_target": PLATFORMS[args.platform],
         "authority": "rust",
         "shadow": "python_synchronous",
         "returned_ssa_origin": "rust_schema_v2_import",
+        "representative_categories": [
+            category for category, _path in representative
+        ],
         "execution": "clean_release_artifact_outside_checkout",
         "artifact": artifact.name,
         "sha256": sha256(artifact.read_bytes()).hexdigest(),
@@ -117,9 +146,10 @@ def main() -> int:
             "rust_result_returned": "PASS",
             "optimizer_handoff": "PASS",
             "backend_handoff": "PASS",
+            "native_execution_against_python_authority_baseline": "PASS",
             "mandatory_promotion_fixtures": "PASS",
             "three_mode_matrix": "PASS",
-            "safe_repository_default": "PASS",
+            "rust_authority_repository_default": "PASS",
             "rollback": "PASS",
             "path_isolation": "PASS",
         },

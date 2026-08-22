@@ -53,12 +53,13 @@ Python 3.11 plus NumPy, SciPy, SymPy and Matplotlib.
 Python↔Rust differential tests, a shadow coordinator, content-identified
 platform packaging, operational CI, soak tooling and an explicit fail-closed
 Rust-authority canary exist. Initial IR verification remains Rust authority at
-**RP3**. The failed RUST-3.6 SSA promotion was rolled back to the RP2
-`PYTHON_SSA_AUTHORITY_RUST_SHADOW` default: Python's `GeneralSSABuilder`
-returns the production SSA only after the required synchronous Rust comparison
-succeeds. `RUST_SSA_AUTHORITY_PYTHON_SHADOW` remains explicitly selectable for
-qualification, but is not the repository default. The historical
-`RUST_SSA_AUTHORITY_PROMOTION_FAILED` evidence is preserved.
+**RP3**. RUST-3.6-V2 promotes `RUST_SSA_AUTHORITY_PYTHON_SHADOW` to the
+repository default: the schema-v2 object imported from Rust reaches the
+optimizer/backend only after the mandatory synchronous Python
+`GeneralSSABuilder` comparison succeeds. The configuration-only rollback modes
+`PYTHON_SSA_AUTHORITY_RUST_SHADOW` and `PYTHON_SSA_ONLY` remain available. The
+historical failed RUST-3.6 promotion and later requalification evidence remain
+preserved.
 
 ### C, C++, and Aether
 

@@ -60,9 +60,9 @@ class SSAShadowFailurePolicy(str, Enum):
 
 @dataclass(frozen=True)
 class SSALoweringAuthorityConfiguration:
-    # RUST-3.6a safe default after the failed authority promotion.  Rust
-    # authority remains an explicit, fail-closed qualification selection.
-    mode: SSALoweringAuthorityMode = SSALoweringAuthorityMode.PYTHON_SSA_AUTHORITY_RUST_SHADOW
+    # RUST-3.6-V2 production default. Rust returns the authoritative schema-v2
+    # import only after the mandatory synchronous Python shadow matches.
+    mode: SSALoweringAuthorityMode = SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
     failure_policy: SSAShadowFailurePolicy = SSAShadowFailurePolicy.FAIL_CLOSED
     protocol_version: int = SSA_SHADOW_PROTOCOL_VERSION
 

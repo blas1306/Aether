@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the safe-default suite and the original promotion subset under Rust authority."""
+"""Run the full suite under the Rust-authority production default."""
 
 from __future__ import annotations
 
@@ -311,18 +311,18 @@ def main() -> int:
             raise RuntimeError("cargo is required")
         _build_required_rust_artifacts(cargo)
 
-    safe_shadow_option = (
-        f"--rust-ssa-shadow-qualification-executable={args.executable.resolve()}"
+    default_authority_option = (
+        f"--rust-ssa-authority-qualification-executable={args.executable.resolve()}"
     )
     pytest_log = args.output.with_name(f"{args.output.stem}_pytest.log")
     with tempfile.TemporaryDirectory(prefix="aether-full-suite-") as temporary:
         junit_report = Path(temporary) / "full_suite_pytest.xml"
-        safe = _run(
-            [safe_shadow_option],
+        default_run = _run(
+            [default_authority_option],
             lsan_compatible=True,
             junit_report=junit_report,
         )
-        _write_pytest_log(pytest_log, safe)
+        _write_pytest_log(pytest_log, default_run)
         try:
             failures, reported_failure_count = _parse_junit_failures(junit_report)
         except (OSError, ET.ParseError) as error:
@@ -331,10 +331,10 @@ def main() -> int:
             junit_error = f"pytest JUnit report unavailable: {type(error).__name__}"
         else:
             junit_error = ""
-    if safe.returncode != 0 and not failures:
+    if default_run.returncode != 0 and not failures:
         failures = [
             _fallback_failure(
-                safe,
+                default_run,
                 junit_error or "pytest failed without a reported test failure",
             )
         ]
@@ -344,11 +344,11 @@ def main() -> int:
         0, reported_failure_count - len(failures)
     )
     native_initial = _run(
-        [safe_shadow_option, "tests/aether/test_native_exceptions.py"],
+        [default_authority_option, "tests/aether/test_native_exceptions.py"],
         lsan_compatible=False,
     )
     native_compatible = _run(
-        [safe_shadow_option, "tests/aether/test_native_exceptions.py"],
+        [default_authority_option, "tests/aether/test_native_exceptions.py"],
         lsan_compatible=True,
     )
     audit = json.loads(
@@ -375,23 +375,23 @@ def main() -> int:
         else 0
     )
     native_compatible_passed = _count(native_compatible, "passed")
-    passed = _qualification_passed(safe, promotion, native_compatible)
+    passed = _qualification_passed(default_run, promotion, native_compatible)
     report = {
         "artifact_schema_version": 2,
-        "milestone": "RUST-3.5c",
+        "milestone": "RUST-3.6-V2",
         "qualification_revision": args.revision,
         "decision": (
             "RUST_SSA_AUTHORITY_REQUALIFICATION_FULL_SUITE_PASS"
             if passed
             else "RUST_SSA_AUTHORITY_REQUALIFICATION_FULL_SUITE_BLOCKED"
         ),
-        "mode": "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+        "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
         "environment": _environment(args.executable),
-        "passed": _count(safe, "passed"),
-        "failed": _count(safe, "failed"),
-        "skipped": _count(safe, "skipped"),
+        "passed": _count(default_run, "passed"),
+        "failed": _count(default_run, "failed"),
+        "skipped": _count(default_run, "skipped"),
         **failure_classification,
-        # Compatibility alias retained for the RUST-3.5b aggregate reader.
+        # Compatibility alias retained for historical aggregate readers.
         "real_semantic_failures": failure_classification["semantic_mismatches"],
         "failures": failures,
         "reported_failure_count": reported_failure_count,
@@ -413,7 +413,7 @@ def main() -> int:
             "54/54 PASS" if native_compatible_passed == 54 else "BLOCKED"
         ),
         "summaries": {
-            "safe_default": safe.stdout.strip().splitlines()[-1] if safe.stdout.strip() else "",
+            "production_default": default_run.stdout.strip().splitlines()[-1] if default_run.stdout.strip() else "",
             "promotion_subset": promotion.stdout.strip().splitlines()[-1] if promotion.stdout.strip() else "",
             "native_initial": native_initial.stdout.strip().splitlines()[-1] if native_initial.stdout.strip() else "",
             "native_compatible": native_compatible.stdout.strip().splitlines()[-1] if native_compatible.stdout.strip() else "",

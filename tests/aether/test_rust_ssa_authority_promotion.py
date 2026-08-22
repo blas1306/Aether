@@ -82,7 +82,7 @@ def test_final_decision_refuses_to_reuse_pre_promotion_platform_evidence() -> No
     assert len(report["unresolved_blockers"]["semantic"]) == 4
 
 
-def test_failed_promotion_restores_python_authority_rust_shadow_default() -> None:
+def test_v2_promotes_rust_authority_and_preserves_fail_closed_modes() -> None:
     assert {mode.name for mode in SSALoweringAuthorityMode} == {
         "PYTHON_SSA_ONLY",
         "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
@@ -90,7 +90,7 @@ def test_failed_promotion_restores_python_authority_rust_shadow_default() -> Non
     }
     assert (
         SSALoweringAuthorityConfiguration().mode
-        is SSALoweringAuthorityMode.PYTHON_SSA_AUTHORITY_RUST_SHADOW
+        is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
     )
     client = _ExplodingClient()
     with pytest.raises(shadow_module.SSAShadowFailure) as caught:
@@ -104,22 +104,31 @@ def test_failed_promotion_restores_python_authority_rust_shadow_default() -> Non
         )
 
 
-def test_safe_default_returns_python_ssa_and_still_rejects_rust_mismatch(
+def test_production_default_returns_rust_ssa_and_still_rejects_mismatch(
     monkeypatch,
 ) -> None:
+    imported = []
     python_results = []
+    original_import = shadow_module.ssa_module_from_dto
     original_build = shadow_module.GeneralSSABuilder.build
+
+    def capture_import(dto):
+        value = original_import(dto)
+        imported.append(value)
+        return value
 
     def capture_python(self, module):
         value = original_build(self, module)
         python_results.append(value)
         return value
 
+    monkeypatch.setattr(shadow_module, "ssa_module_from_dto", capture_import)
     monkeypatch.setattr(shadow_module.GeneralSSABuilder, "build", capture_python)
     matching = SSAPipeline(rust_shadow_client=_EmptyMatchClient())
     returned = matching.run(IRModule()).ssa_module
-    assert returned is python_results[0]
-    assert matching.last_returned_ssa_origin == "python_general_ssa_builder"
+    assert returned is imported[0]
+    assert returned is not python_results[0]
+    assert matching.last_returned_ssa_origin == "rust_schema_v2_import"
 
     mismatched = _ResponseClient(
         {
@@ -157,9 +166,6 @@ def test_pipeline_returns_the_imported_rust_object_not_python_shadow(monkeypatch
     monkeypatch.setattr(shadow_module, "ssa_module_from_dto", capture_import)
     monkeypatch.setattr(shadow_module.GeneralSSABuilder, "build", capture_python)
     pipeline = SSAPipeline(
-        authority_configuration=SSALoweringAuthorityConfiguration(
-            SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
-        ),
         rust_shadow_client=_EmptyMatchClient(),
     )
     result = pipeline.run(IRModule()).ssa_module
