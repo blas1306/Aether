@@ -1,0 +1,279 @@
+{
+  "artifact_schema_version": 1,
+  "milestone": "RUST-3.9a",
+  "decision": "RUST_SSA_TRANSPORT_REPRESENTATION_OPTIMIZED",
+  "baseline_revision": "14902424f91b0a8cd622a12be114484d541a0705",
+  "qualification_tree": "RUST-3.9a uncommitted changes on baseline_revision",
+  "scope": {
+    "authority": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "python_shadow": "mandatory_synchronous",
+    "failure_policy": "FAIL_CLOSED",
+    "initial_ir_schema": 1,
+    "ssa_schema": 2,
+    "protocol": 1,
+    "protocol_replaced": false,
+    "schema_import_bypassed": false,
+    "verification_removed": false,
+    "lowering_or_dominator_algorithm_changed": false,
+    "packaging_or_discovery_changed": false
+  },
+  "representation_flow": [
+    {
+      "source": "IRModule",
+      "destination": "Python schema-v1 dict/list snapshot",
+      "allocation": true,
+      "full_traversal": true,
+      "json": "none",
+      "copy": "deep representational copy",
+      "normalization": "DTO representation only",
+      "ownership_reason": "stable request and post-lane integrity reference",
+      "subsequent_traversal": "request encode and integrity equality"
+    },
+    {
+      "source": "schema-v1 snapshot",
+      "destination": "request bytes",
+      "allocation": true,
+      "full_traversal": true,
+      "json": "encode",
+      "copy": "new byte buffer",
+      "normalization": "none",
+      "ownership_reason": "protocol-v1 frame payload",
+      "subsequent_traversal": "framed write and Rust decode"
+    },
+    {
+      "source": "request bytes",
+      "destination": "Rust IRModuleDTO",
+      "allocation": true,
+      "full_traversal": true,
+      "json": "decode",
+      "copy": "owned strings and collections",
+      "normalization": "none",
+      "ownership_reason": "companion-owned typed input",
+      "subsequent_traversal": "lifecycle normalization"
+    },
+    {
+      "source": "Rust IRModuleDTO",
+      "destination": "normalized Initial IR",
+      "allocation": true,
+      "full_traversal": true,
+      "json": "none",
+      "copy": "new normalized representation",
+      "normalization": "lifecycle semantic normalization",
+      "ownership_reason": "semantic lowering input",
+      "subsequent_traversal": "SSA lowering"
+    },
+    {
+      "source": "normalized Initial IR",
+      "destination": "OwnedSsaModule",
+      "allocation": true,
+      "full_traversal": true,
+      "json": "none",
+      "copy": "new SSA graph",
+      "normalization": "SSA construction",
+      "ownership_reason": "Rust authoritative model",
+      "subsequent_traversal": "Rust verifier and schema-v2 materializer"
+    },
+    {
+      "source": "OwnedSsaModule",
+      "destination": "typed SSAModuleV2DTO",
+      "allocation": true,
+      "full_traversal": true,
+      "json": "none",
+      "copy": "typed wire DTO",
+      "normalization": "wire materialization",
+      "ownership_reason": "schema-v2 response",
+      "subsequent_traversal": "direct JSON serialization"
+    },
+    {
+      "source": "typed success response",
+      "destination": "response bytes",
+      "allocation": true,
+      "full_traversal": true,
+      "json": "encode",
+      "copy": "new byte buffer; no intermediate serde_json::Value",
+      "normalization": "none",
+      "ownership_reason": "protocol-v1 response frame",
+      "subsequent_traversal": "Python JSON decode"
+    },
+    {
+      "source": "response bytes",
+      "destination": "Python response dict/list tree",
+      "allocation": true,
+      "full_traversal": true,
+      "json": "decode",
+      "copy": "new Python primitives and collections",
+      "normalization": "none",
+      "ownership_reason": "strict importer input",
+      "subsequent_traversal": "schema-v2 import and canonicalization"
+    },
+    {
+      "source": "Python schema-v2 tree",
+      "destination": "Python SSAModule",
+      "allocation": true,
+      "full_traversal": true,
+      "json": "none",
+      "copy": "new nominal/type/object graph",
+      "normalization": "strict validation and reconstruction",
+      "ownership_reason": "authoritative returned SSA",
+      "subsequent_traversal": "Python verifier and compiler pipeline"
+    },
+    {
+      "source": "received Rust schema-v2 tree",
+      "destination": "canonical Rust comparison tree",
+      "allocation": true,
+      "full_traversal": true,
+      "json": "none after optimization",
+      "copy": "fused detached clone and alpha rewrite",
+      "normalization": "alpha names and phi incoming order",
+      "ownership_reason": "response immutability and request isolation",
+      "subsequent_traversal": "canonical equality/difference"
+    },
+    {
+      "source": "Python shadow SSAModule",
+      "destination": "canonical Python comparison tree",
+      "allocation": "one DTO allocation; no canonical copy allocation",
+      "full_traversal": true,
+      "json": "none",
+      "copy": "schema-v2 DTO only",
+      "normalization": "in-place alpha names and phi incoming order",
+      "ownership_reason": "fresh unshared compilation-local DTO",
+      "subsequent_traversal": "canonical equality/difference"
+    }
+  ],
+  "candidate_audit": [
+    {"candidate": "Initial IR transport serialization", "classification": "PROTOCOL_INTERNAL_OPTIMIZATION", "outcome": "removed key sorting only"},
+    {"candidate": "JSON request construction", "classification": "PROVEN_REDUNDANT_TRAVERSAL", "outcome": "sorting traversal removed"},
+    {"candidate": "companion request parsing", "classification": "SAFETY_BOUNDARY_DO_NOT_TOUCH", "outcome": "unchanged typed decode"},
+    {"candidate": "response schema-v2 materialization", "classification": "PROVEN_REDUNDANT_REPRESENTATION", "outcome": "serde_json::Value intermediary removed"},
+    {"candidate": "response transport", "classification": "PROTOCOL_INTERNAL_OPTIMIZATION", "outcome": "typed response serialized directly in protocol-v1"},
+    {"candidate": "Python JSON decoding", "classification": "PROTOCOL_INTERNAL_OPTIMIZATION", "outcome": "audited and retained"},
+    {"candidate": "response DTO/object construction", "classification": "SAFETY_BOUNDARY_DO_NOT_TOUCH", "outcome": "strict import retained"},
+    {"candidate": "schema-v2 importer input", "classification": "SAFE_IMMUTABLE_REUSE", "outcome": "validated source mapping reused only for comparison"},
+    {"candidate": "Rust DTO canonical comparison form", "classification": "PROVEN_REDUNDANT_REPRESENTATION", "outcome": "JSON copy replaced by fused clone/rewrite"},
+    {"candidate": "Python-shadow DTO canonical comparison form", "classification": "SAFE_IMMUTABLE_REUSE", "outcome": "fresh DTO canonicalized in place"},
+    {"candidate": "schema-v2 import validation", "classification": "SAFETY_BOUNDARY_DO_NOT_TOUCH", "outcome": "unchanged"},
+    {"candidate": "Initial IR integrity check", "classification": "SAFETY_BOUNDARY_DO_NOT_TOUCH", "outcome": "unchanged"},
+    {"candidate": "lowering and dominators", "classification": "SEMANTIC_BOUNDARY_DO_NOT_TOUCH", "outcome": "out of scope"}
+  ],
+  "implemented_optimizations": [
+    "fused canonical clone and alpha rewrite for the received Rust DTO",
+    "in-place canonicalization of the fresh Python shadow DTO",
+    "direct typed Rust schema-v2 response serialization",
+    "removed semantically irrelevant request-object key sorting"
+  ],
+  "rejected_optimizations": [
+    "bypass or partial trust of schema-v2 import",
+    "removal or caching of any verifier/integrity check",
+    "asymmetric comparison encoders without a separate equivalence proof",
+    "mutable state sharing or cross-compilation caches",
+    "replacement of JSON or protocol-v1 framing",
+    "lifecycle, lowering, dominator, optimizer, or backend changes"
+  ],
+  "measurement": {
+    "kind": "observational; phase-level effects support attribution",
+    "environment": "same local Linux x86_64 machine and release configuration",
+    "warmups": 2,
+    "measured_rounds": 15,
+    "ordering": "rotated modes per round",
+    "workloads": "unchanged RUST-3.8b eight-workload representative manifest",
+    "modes": {
+      "python_ssa_only": {
+        "before": {"median_seconds": 0.15740952601481695, "min_seconds": 0.15548233197478112, "max_seconds": 0.18244123898330145, "samples": 15},
+        "after": {"median_seconds": 0.15921312099089846, "min_seconds": 0.15830048601492308, "max_seconds": 0.18618697302008513, "samples": 15}
+      },
+      "diagnostic_rust_only": {
+        "before": {"median_seconds": 0.29583614600414876, "min_seconds": 0.29088273701199796, "max_seconds": 0.33715815300820395, "samples": 15},
+        "after": {"median_seconds": 0.2813702720159199, "min_seconds": 0.27797629199631047, "max_seconds": 0.3221920120122377, "samples": 15}
+      },
+      "rust_authority_python_shadow": {
+        "before": {
+          "median_seconds": 0.5016009329992812,
+          "min_seconds": 0.4946074749750551,
+          "max_seconds": 0.5548101599997608,
+          "samples": 15,
+          "round_total_samples_seconds": [0.541241330007324, 0.5393874860019423, 0.5326733520050766, 0.5548101599997608, 0.5442068379925331, 0.5470389559777686, 0.5475161429785658, 0.49955682398285717, 0.5016009329992812, 0.4946074749750551, 0.5004961280210409, 0.49595530595979653, 0.5008674550190335, 0.4992878000193741, 0.4972492180095287]
+        },
+        "after": {
+          "median_seconds": 0.5006335390062304,
+          "min_seconds": 0.4655199239932699,
+          "max_seconds": 0.5137706599925878,
+          "samples": 15,
+          "round_total_samples_seconds": [0.4713302229793044, 0.4655199239932699, 0.5049334939976688, 0.5064878370321821, 0.5103529490006622, 0.4999385860282928, 0.47907670502900146, 0.46603809799125884, 0.5116216679889476, 0.5055244069808396, 0.5098500070162117, 0.5006335390062304, 0.47110683903156314, 0.46876759198494256, 0.5137706599925878]
+        },
+        "median_reduction_seconds": 0.0009673939930507913,
+        "median_reduction_percent": 0.1928612821123402
+      }
+    },
+    "ratios": {
+      "dual_over_python_before": 3.1865983317430584,
+      "dual_over_python_after": 3.1444238759370187,
+      "rust_over_python_before": 1.8794043378054623,
+      "rust_over_python_after": 1.7672555519592172
+    },
+    "affected_phase_medians": {
+      "rust_transport_serialization": {"before_seconds": 0.009292832037317567, "after_seconds": 0.006752373985364102, "percent_change": -27.337823838326724},
+      "rust_schema_v2_materialization": {"before_seconds": 0.003144946, "after_seconds": 0.000799834, "percent_change": -74.56763963514794},
+      "request_response_transport_and_serialization": {"before_seconds": 0.01542918799058975, "after_seconds": 0.005305687018532019, "percent_change": -65.6126620417876},
+      "python_result_canonicalization": {"before_seconds": 0.01932181698794011, "after_seconds": 0.00745657499646768, "percent_change": -61.40852073528193},
+      "rust_result_canonicalization": {"before_seconds": 0.020415496022906154, "after_seconds": 0.0158373570011463, "percent_change": -22.424823852544108},
+      "python_result_dto_serialization": {"before_seconds": 0.030353794994880445, "after_seconds": 0.030450794991338626, "percent_change": 0.3195646424921206},
+      "rust_schema_v2_import": {"before_seconds": 0.06055937701603398, "after_seconds": 0.06204747602168936, "percent_change": 2.4572561327065756}
+    },
+    "category_percentages": {
+      "transport_import": {"before": 23.210155872114516, "after": 22.078854153660437, "percentage_point_delta": -1.131301718454079},
+      "comparison": {"before": 17.569803061483857, "after": 16.067275606003548, "percentage_point_delta": -1.5025274554803083},
+      "safety_verification": {"before": 22.374743158756615, "after": 22.46193956697857, "percentage_point_delta": 0.08719640822195629},
+      "intrinsic_rust_work": {"before": 19.596125667260207, "after": 20.608702130699534, "percentage_point_delta": 1.012576463439327},
+      "python_shadow_work": {"before": 17.139688550917402, "after": 18.667199696804897, "percentage_point_delta": 1.5275111458874946},
+      "orchestration": {"before": 0.10948368946740239, "after": 0.11602884585301888, "percentage_point_delta": 0.0065451563856164935}
+    },
+    "new_bottlenecks": {
+      "largest_phase": {"name": "rust_ssa_lowering", "median_seconds": 0.085931545, "percent_of_dual_median": 17.16456016322362},
+      "second_phase": {"name": "rust_schema_v2_import", "median_seconds": 0.06204747602168936, "percent_of_dual_median": 12.39379130388569},
+      "largest_category": {"name": "safety_verification", "percent": 22.46193956697857}
+    }
+  },
+  "correctness": {
+    "new_rust_3_9a_regressions": "8/8 PASS",
+    "rust_3_8a_and_rust_3_8b_regressions": "7/7 PASS",
+    "authority_shadow_and_fail_closed_regressions": "9/9 PASS",
+    "historical_corpus": "116/116 PASS",
+    "promotion_lifecycle_fixtures": "PASS",
+    "production_stabilization_regressions": "PASS",
+    "deep_cfg_993_1000_5000": "PASS",
+    "cargo_test_workspace_locked": "PASS",
+    "full_python_suite": "4860 PASS, 4 skipped; 24 sandbox-only LSan/ptrace failures rerun as part of test_native_exceptions.py outside ptrace: 54/54 PASS",
+    "linux_clean_install": "PASS",
+    "cargo_fmt_check": "PASS",
+    "git_diff_check": "PASS",
+    "mutation_and_isolation": {
+      "initial_ir_after_snapshot": "PASS/fails closed on mutation",
+      "python_shadow_result": "PASS",
+      "imported_rust_result": "PASS",
+      "consecutive_compilations": "PASS",
+      "failed_then_successful": "PASS",
+      "concurrent_callers_32": "PASS",
+      "persistent_session_500": "PASS",
+      "persistent_concurrent_requests_64": "PASS",
+      "nested_nominal_data": "PASS"
+    }
+  },
+  "required_answers": {
+    "redundant_transitions": "typed schema-v2 to serde_json::Value to bytes; DTO to JSON to DTO solely for canonical copy",
+    "eliminated_traversals_or_copies": "two JSON deep-copy round trips, fused Rust clone/rewrite, and request key sorting",
+    "unavoidable_json": "request encode/Rust decode and response encode/Python decode",
+    "schema_v2_import_change": "implementation unchanged; +1.488 ms median observed noise",
+    "python_shadow_serialization_change": "implementation unchanged; +0.097 ms; following canonicalization -11.865 ms",
+    "new_dual_over_python_ratio": 3.1444238759370187,
+    "new_largest_phase": "rust_ssa_lowering",
+    "new_largest_category": "safety_verification",
+    "more_representation_work": "not the best low-risk next target",
+    "recommended_next_milestone": "d. Rust SSA/dominators"
+  },
+  "limitations": [
+    "wall-clock measurements are load and machine dependent",
+    "schema-v2 import and Python DTO serialization were intentionally not optimized",
+    "final response serialization and IPC remain combined in one Python-observed phase",
+    "Windows and macOS release qualification remains for official CI"
+  ]
+}

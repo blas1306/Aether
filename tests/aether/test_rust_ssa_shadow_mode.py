@@ -59,7 +59,7 @@ def test_shadow_returns_python_authority_and_uses_one_exact_snapshot() -> None:
     client = StubClient(empty_response())
     expected_snapshot = json.dumps(
         __import__("aether.ir.dto", fromlist=["ir_module_to_dto"]).ir_module_to_dto(module),
-        sort_keys=True, separators=(",", ":"),
+        separators=(",", ":"),
     ).encode()
     result, report = lower_with_rust_shadow(module, client)
     assert report.classification == "match"

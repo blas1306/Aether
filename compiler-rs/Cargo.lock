@@ -29,6 +29,7 @@ name = "aether-verifier"
 version = "0.1.0"
 dependencies = [
  "aether-ir",
+ "serde",
  "serde_json",
 ]
 

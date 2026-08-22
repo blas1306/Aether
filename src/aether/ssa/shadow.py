@@ -487,31 +487,94 @@ def discover_packaged_rust_ssa_shadow(
 
 def canonical_ssa(dto: Mapping[str, object]) -> dict[str, object]:
     """Qualified alpha-normalization retaining every schema-v2 semantic field."""
-    result = json.loads(json.dumps(dto))
-    for function in result["functions"]:
-        names: dict[str, str] = {}
-        def bind(value: Any) -> None:
-            if isinstance(value, dict) and value.get("tag") in {"value", "parameter"}:
-                names.setdefault(value["name"], f"v{len(names)}")
-        for parameter in function["parameters"]: bind(parameter)
-        for block in function["blocks"]:
-            for instruction in block["instructions"]:
-                keys = (("event",) if instruction["kind"] == "catch_entry" else
-                        ("result", "exception") if instruction["kind"] in {"invoke", "invoke_indirect", "invoke_interface"}
-                        else ("result",))
-                for key in keys: bind(instruction.get(key))
-        def rewrite(value: Any) -> None:
-            if isinstance(value, dict):
-                if value.get("tag") in {"value", "parameter"} and value.get("name") in names:
-                    value["name"] = names[value["name"]]
-                for child in value.values(): rewrite(child)
-            elif isinstance(value, list):
-                for child in value: rewrite(child)
-        rewrite(function)
-        for block in function["blocks"]:
-            for instruction in block["instructions"]:
-                if instruction["kind"] == "phi": instruction["incoming"].sort(key=lambda item: item["block"])
+    result: dict[str, object] = {}
+    for key, value in dto.items():
+        if key != "functions":
+            result[key] = _canonical_clone(value, {})
+            continue
+        functions = []
+        for function in value:
+            names = _canonical_names(function)
+            copied = _canonical_clone(function, names)
+            _sort_canonical_phi_incoming(copied)
+            functions.append(copied)
+        result[key] = functions
     return result
+
+
+def _canonical_names(function: Mapping[str, object]) -> dict[str, str]:
+    names: dict[str, str] = {}
+
+    def bind(value: Any) -> None:
+        if isinstance(value, dict) and value.get("tag") in {"value", "parameter"}:
+            names.setdefault(value["name"], f"v{len(names)}")
+
+    for parameter in function["parameters"]:
+        bind(parameter)
+    for block in function["blocks"]:
+        for instruction in block["instructions"]:
+            keys = (
+                ("event",)
+                if instruction["kind"] == "catch_entry"
+                else ("result", "exception")
+                if instruction["kind"]
+                in {"invoke", "invoke_indirect", "invoke_interface"}
+                else ("result",)
+            )
+            for key in keys:
+                bind(instruction.get(key))
+    return names
+
+
+def _canonical_clone(value: Any, names: Mapping[str, str]) -> Any:
+    """Clone one JSON-compatible tree while applying its alpha renaming."""
+    if isinstance(value, dict):
+        renamed = value.get("tag") in {"value", "parameter"} and value.get(
+            "name"
+        ) in names
+        return {
+            key: (
+                names[child]
+                if renamed and key == "name"
+                else _canonical_clone(child, names)
+            )
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        return [_canonical_clone(child, names) for child in value]
+    if isinstance(value, tuple):
+        return [_canonical_clone(child, names) for child in value]
+    return value
+
+
+def _sort_canonical_phi_incoming(function: Mapping[str, object]) -> None:
+    for block in function["blocks"]:
+        for instruction in block["instructions"]:
+            if instruction["kind"] == "phi":
+                instruction["incoming"].sort(key=lambda item: item["block"])
+
+
+def _rewrite_canonical_names(value: Any, names: Mapping[str, str]) -> None:
+    if isinstance(value, dict):
+        if (
+            value.get("tag") in {"value", "parameter"}
+            and value.get("name") in names
+        ):
+            value["name"] = names[value["name"]]
+        for child in value.values():
+            _rewrite_canonical_names(child, names)
+    elif isinstance(value, list):
+        for child in value:
+            _rewrite_canonical_names(child, names)
+
+
+def _canonicalize_owned_ssa(dto: dict[str, object]) -> dict[str, object]:
+    """Canonicalize a newly-created, compilation-local DTO in place."""
+    for function in dto["functions"]:
+        names = _canonical_names(function)
+        _rewrite_canonical_names(function, names)
+        _sort_canonical_phi_incoming(function)
+    return dto
 
 
 def _difference(left: Any, right: Any, path: str = "$") -> tuple[str, Any, Any] | None:
@@ -607,7 +670,7 @@ def _lower_dual_lane(
     if characterize_performance:
         phases["initial_ir_snapshot_preparation"] = perf_counter() - started
         started = perf_counter()
-    payload = json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()
+    payload = json.dumps(snapshot, separators=(",", ":")).encode()
     if characterize_performance:
         phases["rust_transport_serialization"] = perf_counter() - started
 
@@ -771,7 +834,10 @@ def _lower_dual_lane(
             phases["python_result_dto_serialization"] = perf_counter() - started
         comparison_started = perf_counter()
         started = comparison_started
-        python_canonical = canonical_ssa(python_dto)
+        # ``python_dto`` was just allocated for this comparison and is not
+        # observable elsewhere.  Canonicalizing it in place avoids an entire
+        # JSON encode/decode copy without sharing mutable state.
+        python_canonical = _canonicalize_owned_ssa(python_dto)
         if characterize_performance:
             phases["python_result_canonicalization"] = perf_counter() - started
             started = perf_counter()
