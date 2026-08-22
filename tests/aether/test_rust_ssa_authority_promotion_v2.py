@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import importlib.util
 import json
 from pathlib import Path
@@ -21,6 +22,142 @@ def _checker_module():
 def _write(path: Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value), encoding="utf-8")
+
+
+def _characterization_performance(revision: str) -> dict[str, object]:
+    metadata = {
+        "id": "representative",
+        "path": "benchmarks/arithmetic.ae",
+        "category": "tiny/scalar",
+        "source_sha256": "a" * 64,
+        "input_shape": {"functions": 2, "blocks": 7, "instructions": 52},
+    }
+    sample_modes = {
+        "python_ssa_only": "python_ssa_only",
+        "diagnostic_rust_only": "diagnostic_rust_authority_without_python_shadow",
+        "rust_authority_python_shadow": "rust_authority_python_shadow",
+    }
+    samples = {
+        mode: [
+            {
+                "mode": recorded_mode,
+                "clock": "time.perf_counter",
+                "phases_seconds": {"measured_phase": 0.25},
+                "measured_component_sum_seconds": 0.25,
+                "residual_unattributed_seconds": 0.05,
+                "total_wall_seconds": 0.30,
+                "rust_phase_detail": "observational test fixture",
+            }
+        ]
+        for mode, recorded_mode in sample_modes.items()
+    }
+    summaries = {
+        mode: {
+            "samples": 1,
+            "median_seconds": 0.30,
+            "min_seconds": 0.30,
+            "max_seconds": 0.30,
+        }
+        for mode in sample_modes
+    }
+    return {
+        "artifact_schema_version": 1,
+        "milestone": "RUST-3.7b",
+        "decision": "RUST_SSA_PERFORMANCE_CHARACTERIZED",
+        "qualification_revision": revision,
+        "measurement_kind": "observational; no absolute timing is a semantic gate",
+        "methodology": {
+            "clock": "monotonic perf_counter / Rust Instant",
+            "warmup_rounds_per_workload": 1,
+            "measured_rounds_per_workload": 1,
+            "statistics": ["median", "min", "max"],
+            "production_timing_default": "disabled",
+            "diagnostic_rust_only_is_authority_mode": False,
+        },
+        "workload_manifest": [metadata],
+        "workloads": [
+            {
+                **metadata,
+                "canonical_ssa_sha256": "b" * 64,
+                "samples": samples,
+                "summary": summaries,
+            }
+        ],
+        "aggregates": {
+            mode: {"representative_suite": summary}
+            for mode, summary in summaries.items()
+        },
+    }
+
+
+def test_pv2_g15_accepts_historical_observational_artifact() -> None:
+    checker = _checker_module()
+    revision = "promotion-revision"
+    evidence = {
+        "qualification_revision": revision,
+        "measurement_kind": "observational; no timing assertion or absolute gate",
+        "workloads": [{"name": "representative"}],
+    }
+
+    assert checker._performance_evidence_present(evidence, revision) is True
+
+
+def test_pv2_g15_accepts_current_characterization_artifact() -> None:
+    checker = _checker_module()
+    revision = "promotion-revision"
+
+    assert (
+        checker._performance_evidence_present(
+            _characterization_performance(revision), revision
+        )
+        is True
+    )
+
+
+def test_pv2_g15_blocks_characterization_for_wrong_revision() -> None:
+    checker = _checker_module()
+
+    assert (
+        checker._performance_evidence_present(
+            _characterization_performance("different-revision"),
+            "promotion-revision",
+        )
+        is False
+    )
+
+
+def test_pv2_g15_blocks_missing_or_empty_characterization_samples() -> None:
+    checker = _checker_module()
+    revision = "promotion-revision"
+    missing = _characterization_performance(revision)
+    del missing["workloads"][0]["samples"]["python_ssa_only"]
+    empty = _characterization_performance(revision)
+    empty["workloads"][0]["samples"]["rust_authority_python_shadow"] = []
+
+    assert checker._performance_evidence_present(missing, revision) is False
+    assert checker._performance_evidence_present(empty, revision) is False
+
+
+def test_pv2_g15_blocks_malformed_characterization_timings() -> None:
+    checker = _checker_module()
+    revision = "promotion-revision"
+    evidence = _characterization_performance(revision)
+    evidence["workloads"][0]["samples"]["diagnostic_rust_only"][0][
+        "total_wall_seconds"
+    ] = 99.0
+
+    assert checker._performance_evidence_present(evidence, revision) is False
+
+
+def test_pv2_g15_blocks_timings_without_workload_corpus_evidence() -> None:
+    checker = _checker_module()
+    revision = "promotion-revision"
+    evidence = deepcopy(_characterization_performance(revision))
+    evidence["workload_manifest"] = []
+    evidence["workloads"] = []
+
+    assert evidence["aggregates"]
+    assert checker._performance_evidence_present(evidence, revision) is False
 
 
 def test_promotion_v2_blocks_absent_or_pre_promotion_platform_evidence(

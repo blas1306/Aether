@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from hashlib import sha256
 import json
+import math
 from pathlib import Path
 import re
 from typing import Any
@@ -20,6 +21,11 @@ PLATFORMS = {
     "windows-x86_64": "x86_64-pc-windows-msvc",
     "macos-arm64": "aarch64-apple-darwin",
     "macos-x86_64": "x86_64-apple-darwin",
+}
+CHARACTERIZATION_MODES = {
+    "python_ssa_only": "python_ssa_only",
+    "diagnostic_rust_only": "diagnostic_rust_authority_without_python_shadow",
+    "rust_authority_python_shadow": "rust_authority_python_shadow",
 }
 
 
@@ -43,6 +49,182 @@ def _same_revision(value: dict[str, Any], revision: str) -> bool:
 
 def _as_set(value: object) -> set[object]:
     return set(value) if isinstance(value, list) else set()
+
+
+def _positive_int(value: object) -> bool:
+    return type(value) is int and value > 0
+
+
+def _timing(value: object) -> bool:
+    return (
+        type(value) in {int, float}
+        and math.isfinite(value)
+        and value >= 0
+    )
+
+
+def _timing_summary(value: object, samples: int) -> bool:
+    if not isinstance(value, dict):
+        return False
+    minimum = value.get("min_seconds")
+    median = value.get("median_seconds")
+    maximum = value.get("max_seconds")
+    return (
+        _positive_int(value.get("samples"))
+        and value["samples"] == samples
+        and all(_timing(item) for item in (minimum, median, maximum))
+        and minimum <= median <= maximum
+    )
+
+
+def _timing_sample(value: object, mode: str) -> bool:
+    if not isinstance(value, dict):
+        return False
+    phases = value.get("phases_seconds")
+    component_sum = value.get("measured_component_sum_seconds")
+    residual = value.get("residual_unattributed_seconds")
+    total = value.get("total_wall_seconds")
+    if not (
+        value.get("mode") == CHARACTERIZATION_MODES[mode]
+        and isinstance(value.get("clock"), str)
+        and bool(value["clock"])
+        and isinstance(value.get("rust_phase_detail"), str)
+        and bool(value["rust_phase_detail"])
+        and isinstance(phases, dict)
+        and bool(phases)
+        and all(
+            isinstance(phase, str) and bool(phase) and _timing(seconds)
+            for phase, seconds in phases.items()
+        )
+        and all(_timing(item) for item in (component_sum, residual, total))
+    ):
+        return False
+    phase_tolerance = max(1e-9, component_sum * 1e-9)
+    total_tolerance = max(1e-9, total * 1e-9)
+    return (
+        abs(sum(phases.values()) - component_sum) <= phase_tolerance
+        and abs(component_sum + residual - total) <= total_tolerance
+    )
+
+
+def _workload_metadata(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    input_shape = value.get("input_shape")
+    return (
+        all(
+            isinstance(value.get(key), str) and bool(value[key])
+            for key in ("id", "path", "category")
+        )
+        and isinstance(value.get("source_sha256"), str)
+        and re.fullmatch(r"[0-9a-f]{64}", value["source_sha256"]) is not None
+        and isinstance(input_shape, dict)
+        and all(
+            type(input_shape.get(key)) is int and input_shape[key] >= 0
+            for key in ("functions", "blocks", "instructions")
+        )
+    )
+
+
+def _historical_performance_evidence(value: dict[str, Any], revision: str) -> bool:
+    return (
+        _same_revision(value, revision)
+        and value.get("measurement_kind")
+        == "observational; no timing assertion or absolute gate"
+        and isinstance(value.get("workloads"), list)
+        and bool(value["workloads"])
+    )
+
+
+def _characterization_performance_evidence(
+    value: dict[str, Any], revision: str
+) -> bool:
+    methodology = value.get("methodology")
+    manifest = value.get("workload_manifest")
+    workloads = value.get("workloads")
+    aggregates = value.get("aggregates")
+    if not (
+        _same_revision(value, revision)
+        and type(value.get("artifact_schema_version")) is int
+        and value["artifact_schema_version"] == 1
+        and isinstance(value.get("milestone"), str)
+        and bool(value["milestone"])
+        and value.get("decision") == "RUST_SSA_PERFORMANCE_CHARACTERIZED"
+        and value.get("measurement_kind")
+        == "observational; no absolute timing is a semantic gate"
+        and isinstance(methodology, dict)
+        and isinstance(methodology.get("clock"), str)
+        and bool(methodology["clock"])
+        and _positive_int(methodology.get("warmup_rounds_per_workload"))
+        and _positive_int(methodology.get("measured_rounds_per_workload"))
+        and methodology.get("statistics") == ["median", "min", "max"]
+        and methodology.get("production_timing_default") == "disabled"
+        and methodology.get("diagnostic_rust_only_is_authority_mode") is False
+        and isinstance(manifest, list)
+        and bool(manifest)
+        and isinstance(workloads, list)
+        and bool(workloads)
+        and len(manifest) == len(workloads)
+        and isinstance(aggregates, dict)
+    ):
+        return False
+
+    rounds = methodology["measured_rounds_per_workload"]
+    manifest_by_id: dict[str, dict[str, Any]] = {}
+    for row in manifest:
+        if not _workload_metadata(row) or row["id"] in manifest_by_id:
+            return False
+        manifest_by_id[row["id"]] = row
+
+    workload_ids: set[str] = set()
+    metadata_keys = ("id", "path", "category", "source_sha256", "input_shape")
+    for workload in workloads:
+        if not _workload_metadata(workload):
+            return False
+        identifier = workload["id"]
+        if identifier in workload_ids or identifier not in manifest_by_id:
+            return False
+        workload_ids.add(identifier)
+        if any(
+            workload[key] != manifest_by_id[identifier].get(key)
+            for key in metadata_keys
+        ):
+            return False
+        if not (
+            isinstance(workload.get("canonical_ssa_sha256"), str)
+            and re.fullmatch(r"[0-9a-f]{64}", workload["canonical_ssa_sha256"])
+            is not None
+        ):
+            return False
+        samples = workload.get("samples")
+        summaries = workload.get("summary")
+        if not isinstance(samples, dict) or not isinstance(summaries, dict):
+            return False
+        for mode in CHARACTERIZATION_MODES:
+            mode_samples = samples.get(mode)
+            if not (
+                isinstance(mode_samples, list)
+                and len(mode_samples) == rounds
+                and all(_timing_sample(sample, mode) for sample in mode_samples)
+                and _timing_summary(summaries.get(mode), rounds)
+            ):
+                return False
+    if workload_ids != set(manifest_by_id):
+        return False
+
+    return all(
+        isinstance(aggregates.get(mode), dict)
+        and _timing_summary(
+            aggregates[mode].get("representative_suite"), rounds
+        )
+        for mode in CHARACTERIZATION_MODES
+    )
+
+
+def _performance_evidence_present(value: dict[str, Any], revision: str) -> bool:
+    return _historical_performance_evidence(
+        value, revision
+    ) or _characterization_performance_evidence(value, revision)
 
 
 def _gate(identifier: str, name: str, passed: bool, evidence: str) -> dict[str, str]:
@@ -279,13 +461,7 @@ def build_record(revision: str, evidence_dir: Path) -> dict[str, Any]:
         and authority_probe.get("python_authority_rollback_origin")
         == "python_general_ssa_builder"
     )
-    performance_present = (
-        _same_revision(performance, revision)
-        and performance.get("measurement_kind")
-        == "observational; no timing assertion or absolute gate"
-        and isinstance(performance.get("workloads"), list)
-        and bool(performance["workloads"])
-    )
+    performance_present = _performance_evidence_present(performance, revision)
 
     checks = [
         ("repository default is Rust authority/Python shadow", rust_default),
