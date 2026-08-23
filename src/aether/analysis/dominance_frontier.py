@@ -13,6 +13,10 @@ class DominanceFrontierResult:
     def frontier(self, block_name: str) -> set[str]:
         return set(self._frontiers[block_name])
 
+    def frontier_view(self, block_name: str) -> frozenset[str]:
+        """Return an immutable view for hot internal consumers."""
+        return self._frontiers[block_name]
+
 
 class DominanceFrontierAnalysis:
     """Compute function-local dominance frontiers for a block-level CFG."""
@@ -29,12 +33,13 @@ class DominanceFrontierAnalysis:
         if not block_names:
             return DominanceFrontierResult({})
 
-        entry = block_names[0]
-        reachable = self._reachable(entry, block_set)
         predecessors = self._predecessors(block_set)
 
         for block_name in block_names:
-            if block_name not in reachable or len(predecessors[block_name]) < 2:
+            if (
+                not self._dominators.is_reachable(block_name)
+                or len(predecessors[block_name]) < 2
+            ):
                 continue
 
             stop = self._dominators.immediate_dominator(block_name)
@@ -42,7 +47,7 @@ class DominanceFrontierAnalysis:
                 continue
 
             for predecessor in predecessors[block_name]:
-                if predecessor not in reachable:
+                if not self._dominators.is_reachable(predecessor):
                     continue
 
                 runner: str | None = predecessor
@@ -63,19 +68,3 @@ class DominanceFrontierAnalysis:
             if edge.source in block_set and edge.target in block_set:
                 predecessors[edge.target].add(edge.source)
         return predecessors
-
-    def _reachable(self, entry: str, block_set: set[str]) -> set[str]:
-        successors = {block_name: set() for block_name in block_set}
-        for edge in self._cfg.edges:
-            if edge.source in block_set and edge.target in block_set:
-                successors[edge.source].add(edge.target)
-
-        reachable: set[str] = set()
-        worklist = [entry]
-        while worklist:
-            block_name = worklist.pop()
-            if block_name in reachable:
-                continue
-            reachable.add(block_name)
-            worklist.extend(successors[block_name] - reachable)
-        return reachable

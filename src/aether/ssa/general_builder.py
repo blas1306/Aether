@@ -37,28 +37,40 @@ class GeneralSSABuilder:
         self,
         *,
         performance_timings: MutableMapping[str, float] | None = None,
+        phase_timings: MutableMapping[str, float] | None = None,
     ) -> None:
         """Create a builder with optional observational phase timings.
 
-        The mapping is deliberately caller-owned and opt-in.  When it is not
-        supplied, the production builder executes the original code path
-        without reading the performance clock.
+        Both mappings are caller-owned and opt-in. ``performance_timings``
+        preserves the stable coarse production characterization fields;
+        ``phase_timings`` exposes the RUST-3.11 lowering decomposition. When
+        neither is supplied, the production builder does not read the clock.
         """
         self._performance_timings = performance_timings
+        self._phase_timings = phase_timings
 
     def build(self, module: IRModule) -> SSAModule:
         return self.build_module(module)
 
     def build_module(self, module: IRModule) -> SSAModule:
         timings = self._performance_timings
+        observe_lifecycle = timings is not None or self._phase_timings is not None
+        lifecycle_started = perf_counter() if observe_lifecycle else 0.0
         if timings is None:
             module = expand_lifecycle(module)
         else:
-            started = perf_counter()
             module = expand_lifecycle(module)
-            timings["python_lifecycle_normalization"] = perf_counter() - started
+            timings["python_lifecycle_normalization"] = (
+                perf_counter() - lifecycle_started
+            )
+        if self._phase_timings is not None:
+            self._record_phase(
+                "python_lifecycle_normalization",
+                perf_counter() - lifecycle_started,
+            )
 
-        started = perf_counter() if timings is not None else 0.0
+        observe_lowering = timings is not None or self._phase_timings is not None
+        started = perf_counter() if observe_lowering else 0.0
         ssa_module = SSAModule(
             [self._build_function_unverified(function) for function in module.functions],
             list(module.structs),
@@ -66,32 +78,44 @@ class GeneralSSABuilder:
         if timings is not None:
             timings["python_ssa_lowering"] = perf_counter() - started
 
-        started = perf_counter() if timings is not None else 0.0
+        observe_verification = timings is not None or self._phase_timings is not None
+        started = perf_counter() if observe_verification else 0.0
         verified = self._verify_module(ssa_module)
         if timings is not None:
             timings["python_builder_verification"] = perf_counter() - started
+        if self._phase_timings is not None:
+            self._record_phase("python_builder_verification", perf_counter() - started)
         return verified
 
     def build_function(self, function: IRFunction) -> SSAFunction:
         ssa_function = self._build_function_unverified(function)
+        started = perf_counter() if self._phase_timings is not None else 0.0
         module = self._verify_module(SSAModule([ssa_function]))
+        self._record_phase_since("python_builder_verification", started)
         return module.functions[0]
 
     def _build_function_unverified(self, function: IRFunction) -> SSAFunction:
+        started = perf_counter() if self._phase_timings is not None else 0.0
         try:
             cfg = CFGBuilder().build(function)
         except Exception as error:
             self._fail(function.name, "CFG construction", error)
+        self._record_phase_since("python_cfg_construction", started)
 
         try:
-            dominators = DominatorAnalysis(cfg).compute()
+            dominators = DominatorAnalysis(
+                cfg,
+                performance_timings=self._phase_timings,
+            ).compute()
         except Exception as error:
             self._fail(function.name, "dominator analysis", error)
 
+        started = perf_counter() if self._phase_timings is not None else 0.0
         try:
             dominance_frontier = DominanceFrontierAnalysis(cfg, dominators).compute()
         except Exception as error:
             self._fail(function.name, "dominance-frontier analysis", error)
+        self._record_phase_since("python_dominance_frontiers", started)
 
         try:
             phi_placement = PhiPlacement(
@@ -99,12 +123,19 @@ class GeneralSSABuilder:
                 cfg,
                 dominators,
                 dominance_frontier,
+                self._phase_timings,
             ).place()
         except Exception as error:
             self._fail(function.name, "phi placement", error)
 
         try:
-            return SSARenamer(function, cfg, dominators, phi_placement).rename().function
+            return SSARenamer(
+                function,
+                cfg,
+                dominators,
+                phi_placement,
+                performance_timings=self._phase_timings,
+            ).rename().function
         except SSARenameError as error:
             self._fail(function.name, "SSA renaming", error)
 
@@ -120,3 +151,13 @@ class GeneralSSABuilder:
             f"General SSA build failed for function '{function_name}' "
             f"during {stage}: {error}"
         ) from error
+
+    def _record_phase(self, phase: str, elapsed: float) -> None:
+        if self._phase_timings is not None:
+            self._phase_timings[phase] = (
+                self._phase_timings.get(phase, 0.0) + elapsed
+            )
+
+    def _record_phase_since(self, phase: str, started: float) -> None:
+        if self._phase_timings is not None:
+            self._record_phase(phase, perf_counter() - started)

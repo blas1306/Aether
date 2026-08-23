@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+from time import perf_counter
+from typing import MutableMapping
 
 from aether.analysis.cfg import CFG
 from aether.analysis.dominance_frontier import DominanceFrontierResult
@@ -21,11 +23,19 @@ class PhiPlacement:
     cfg: CFG
     dominators: DominatorResult
     dominance_frontier: DominanceFrontierResult
+    performance_timings: MutableMapping[str, float] | None = None
 
     def place(self) -> dict[str, set[str]]:
+        started = perf_counter() if self.performance_timings is not None else 0.0
         definition_blocks = self._definition_blocks()
+        self._record("python_definition_collection", started)
+        started = perf_counter() if self.performance_timings is not None else 0.0
         live_in = self._live_in_slots()
+        self._record("python_liveness", started)
+        started = perf_counter() if self.performance_timings is not None else 0.0
         initialized_in = self._initialized_in_slots()
+        self._record("python_definite_initialization", started)
+        started = perf_counter() if self.performance_timings is not None else 0.0
         placements: dict[str, set[str]] = {}
 
         for slot_name, initial_blocks in definition_blocks.items():
@@ -36,7 +46,7 @@ class PhiPlacement:
             while worklist:
                 block_name = worklist.popleft()
 
-                for frontier_block in self.dominance_frontier.frontier(block_name):
+                for frontier_block in self.dominance_frontier.frontier_view(block_name):
                     if frontier_block in placed_blocks:
                         continue
                     if (
@@ -54,7 +64,16 @@ class PhiPlacement:
             if placed_blocks:
                 placements[slot_name] = placed_blocks
 
+        self._record("python_phi_placement", started)
         return placements
+
+    def _record(self, phase: str, started: float) -> None:
+        if self.performance_timings is not None:
+            self.performance_timings[phase] = (
+                self.performance_timings.get(phase, 0.0)
+                + perf_counter()
+                - started
+            )
 
     def _definition_blocks(self) -> dict[str, set[str]]:
         cfg_blocks = {node.name for node in self.cfg.nodes}

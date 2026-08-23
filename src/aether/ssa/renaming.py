@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import NoReturn
+from time import perf_counter
+from typing import MutableMapping, NoReturn
 
 from aether.analysis.cfg import CFG
 from aether.analysis.dominators import DominatorResult
@@ -213,11 +214,14 @@ class SSARenamer:
         cfg: CFG,
         dominators: DominatorResult,
         phi_placement: dict[str, set[str]],
+        *,
+        performance_timings: MutableMapping[str, float] | None = None,
     ) -> None:
         self.function = function
         self.cfg = cfg
         self.dominators = dominators
         self.phi_placement = phi_placement
+        self._performance_timings = performance_timings
 
         self._blocks = {block.name: block for block in function.blocks}
         self._block_order = {
@@ -233,6 +237,7 @@ class SSARenamer:
         self._visited: set[str] = set()
 
     def rename(self) -> SSARenameResult:
+        started = perf_counter() if self._performance_timings is not None else 0.0
         self._validate_cfg()
         self._slot_types = self._collect_slot_types()
         self._initialize_parameters()
@@ -245,6 +250,8 @@ class SSARenamer:
         self._rename_blocks(entry)
         self._verify_all_reachable_blocks_visited(entry)
 
+        before_assembly = perf_counter() if self._performance_timings is not None else 0.0
+        self._record("python_renaming", before_assembly - started)
         ssa_function = SSAFunction(
             self.function.name,
             [
@@ -256,6 +263,7 @@ class SSARenamer:
             entry,
             self.function.may_throw,
         )
+        self._record_since("python_result_assembly", before_assembly)
         return SSARenameResult(
             ssa_function,
             {
@@ -1112,7 +1120,7 @@ class SSARenamer:
         return successors
 
     def _dominator_children(self, block_name: str) -> list[str]:
-        children = self.dominators.dominator_tree_children(block_name)
+        children = self.dominators.dominator_tree_children_view(block_name)
         return sorted(children, key=self._block_index)
 
     def _block_index(self, block_name: str) -> int:
@@ -1162,3 +1170,13 @@ class SSARenamer:
     @staticmethod
     def _fail(message: str) -> NoReturn:
         raise SSARenameError(message)
+
+    def _record(self, phase: str, elapsed: float) -> None:
+        if self._performance_timings is not None:
+            self._performance_timings[phase] = (
+                self._performance_timings.get(phase, 0.0) + elapsed
+            )
+
+    def _record_since(self, phase: str, started: float) -> None:
+        if self._performance_timings is not None:
+            self._record(phase, perf_counter() - started)
