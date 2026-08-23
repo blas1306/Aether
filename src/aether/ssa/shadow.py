@@ -108,6 +108,7 @@ class SSAPerformanceProfile:
     total_wall_seconds: float
     rust_phase_detail: str
     rust_ssa_lowering_phases_seconds: Mapping[str, float]
+    python_ssa_lowering_phases_seconds: Mapping[str, float]
 
     def __post_init__(self) -> None:
         values = tuple(self.phases_seconds.values()) + (
@@ -137,6 +138,9 @@ class SSAPerformanceProfile:
             "rust_phase_detail": self.rust_phase_detail,
             "rust_ssa_lowering_phases_seconds": dict(
                 self.rust_ssa_lowering_phases_seconds
+            ),
+            "python_ssa_lowering_phases_seconds": dict(
+                self.python_ssa_lowering_phases_seconds
             ),
         }
 
@@ -603,6 +607,7 @@ def _finish_performance_profile(
     total_started: float,
     rust_phase_detail: str,
     rust_ssa_lowering_phases: Mapping[str, float] | None = None,
+    python_ssa_lowering_phases: Mapping[str, float] | None = None,
 ) -> SSAPerformanceProfile:
     total = perf_counter() - total_started
     measured = sum(phases.values())
@@ -627,6 +632,9 @@ def _finish_performance_profile(
         total_wall_seconds=total,
         rust_phase_detail=rust_phase_detail,
         rust_ssa_lowering_phases_seconds=dict(rust_ssa_lowering_phases or {}),
+        python_ssa_lowering_phases_seconds=dict(
+            python_ssa_lowering_phases or {}
+        ),
     )
 
 
@@ -720,6 +728,7 @@ def _lower_dual_lane(
     rust_seconds = 0.0
     rust_phase_detail = "disabled"
     rust_ssa_lowering_phases: dict[str, float] = {}
+    python_ssa_lowering_phases: dict[str, float] = {}
     rust_comparison_dto: Mapping[str, object] | None = None
 
     def run_python() -> object:
@@ -734,9 +743,10 @@ def _lower_dual_lane(
             python_input = module
             lane_started = perf_counter()
             if characterize_performance:
-                value = GeneralSSABuilder(performance_timings=phases).build(
-                    python_input
-                )
+                value = GeneralSSABuilder(
+                    performance_timings=phases,
+                    phase_timings=python_ssa_lowering_phases,
+                ).build(python_input)
             else:
                 # Keep the production path byte-for-byte recognizable to the
                 # stabilization source-contract gate.
@@ -857,6 +867,7 @@ def _lower_dual_lane(
             total_started,
             rust_phase_detail,
             rust_ssa_lowering_phases,
+            python_ssa_lowering_phases,
         )
         return rust_ssa, SSAShadowReport(
             "diagnostic_rust_only",
@@ -925,6 +936,7 @@ def _lower_dual_lane(
             total_started,
             rust_phase_detail,
             rust_ssa_lowering_phases,
+            python_ssa_lowering_phases,
         )
         if characterize_performance
         else None

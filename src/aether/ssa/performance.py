@@ -22,7 +22,11 @@ def characterize_python_ssa_only(
     """
     total_started = perf_counter()
     phases: dict[str, float] = {}
-    value = GeneralSSABuilder(performance_timings=phases).build(module)
+    lowering_phases: dict[str, float] = {}
+    value = GeneralSSABuilder(
+        performance_timings=phases,
+        phase_timings=lowering_phases,
+    ).build(module)
     started = perf_counter()
     SSAVerifier(value).verify()
     phases["python_authority_pipeline_verification"] = perf_counter() - started
@@ -41,4 +45,5 @@ def characterize_python_ssa_only(
         total_wall_seconds=total,
         rust_phase_detail="not_applicable",
         rust_ssa_lowering_phases_seconds={},
+        python_ssa_lowering_phases_seconds=lowering_phases,
     )
