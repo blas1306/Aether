@@ -5,6 +5,16 @@
 //! solver is retained below only as a test oracle.
 
 use std::collections::BTreeSet;
+use std::time::Instant;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct DominancePhaseTimings {
+    pub(crate) cfg_construction_ns: u64,
+    pub(crate) reachability_and_rpo_ns: u64,
+    pub(crate) chk_idom_ns: u64,
+    pub(crate) dominator_tree_ns: u64,
+    pub(crate) dominance_frontier_ns: u64,
+}
 
 #[derive(Debug)]
 pub(crate) struct DominanceInfo {
@@ -90,6 +100,123 @@ impl DominanceInfo {
                     runner = parent;
                 }
             }
+        }
+
+        Self {
+            reachable,
+            predecessors,
+            #[cfg(test)]
+            idom,
+            children,
+            frontiers,
+        }
+    }
+
+    pub(crate) fn compute_characterized(
+        successors: &[Vec<usize>],
+        entry: usize,
+        timings: &mut DominancePhaseTimings,
+    ) -> Self {
+        Self::compute_instrumented(successors, entry, Some(timings))
+    }
+
+    fn compute_instrumented(
+        successors: &[Vec<usize>],
+        entry: usize,
+        mut timings: Option<&mut DominancePhaseTimings>,
+    ) -> Self {
+        let block_count = successors.len();
+        debug_assert!(entry < block_count);
+
+        let started = timings.as_ref().map(|_| Instant::now());
+        let (reachable, reverse_postorder) = reverse_postorder(successors, entry);
+        if let (Some(started), Some(timings)) = (started, timings.as_deref_mut()) {
+            timings.reachability_and_rpo_ns += started.elapsed().as_nanos() as u64;
+        }
+        let started = timings.as_ref().map(|_| Instant::now());
+        let mut predecessors = vec![Vec::new(); block_count];
+        for (block, targets) in successors.iter().enumerate() {
+            if !reachable[block] {
+                continue;
+            }
+            for &target in targets {
+                if reachable[target] {
+                    predecessors[target].push(block);
+                }
+            }
+        }
+        if let (Some(started), Some(timings)) = (started, timings.as_deref_mut()) {
+            timings.cfg_construction_ns += started.elapsed().as_nanos() as u64;
+        }
+
+        let started = timings.as_ref().map(|_| Instant::now());
+        let mut rpo_number = vec![usize::MAX; block_count];
+        for (number, &block) in reverse_postorder.iter().enumerate() {
+            rpo_number[block] = number;
+        }
+
+        // `Some(entry)` is the standard temporary root sentinel.  It is
+        // removed before exposing the result so entry retains no idom.
+        let mut idom = vec![None; block_count];
+        idom[entry] = Some(entry);
+        loop {
+            let mut changed = false;
+            for &block in reverse_postorder.iter().skip(1) {
+                let mut known_predecessors = predecessors[block]
+                    .iter()
+                    .copied()
+                    .filter(|&predecessor| idom[predecessor].is_some());
+                let Some(mut next_idom) = known_predecessors.next() else {
+                    continue;
+                };
+                for predecessor in known_predecessors {
+                    next_idom = intersect(predecessor, next_idom, &idom, &rpo_number);
+                }
+                if idom[block] != Some(next_idom) {
+                    idom[block] = Some(next_idom);
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        idom[entry] = None;
+        if let (Some(started), Some(timings)) = (started, timings.as_deref_mut()) {
+            timings.chk_idom_ns += started.elapsed().as_nanos() as u64;
+        }
+
+        // Source block index order is the frozen dominator-child order.
+        let started = timings.as_ref().map(|_| Instant::now());
+        let mut children = vec![Vec::new(); block_count];
+        for (block, parent) in idom.iter().copied().enumerate() {
+            if let Some(parent) = parent {
+                children[parent].push(block);
+            }
+        }
+        if let (Some(started), Some(timings)) = (started, timings.as_deref_mut()) {
+            timings.dominator_tree_ns += started.elapsed().as_nanos() as u64;
+        }
+
+        let started = timings.as_ref().map(|_| Instant::now());
+        let mut frontiers = vec![BTreeSet::new(); block_count];
+        for block in 0..block_count {
+            if !reachable[block] || predecessors[block].len() < 2 {
+                continue;
+            }
+            for &predecessor in &predecessors[block] {
+                let mut runner = predecessor;
+                while Some(runner) != idom[block] {
+                    frontiers[runner].insert(block);
+                    let Some(parent) = idom[runner] else {
+                        break;
+                    };
+                    runner = parent;
+                }
+            }
+        }
+        if let (Some(started), Some(timings)) = (started, timings.as_deref_mut()) {
+            timings.dominance_frontier_ns += started.elapsed().as_nanos() as u64;
         }
 
         Self {

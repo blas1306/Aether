@@ -1,7 +1,7 @@
 //! Behavioral coverage for lowering policy v1.
 
-use aether_ir::lower_normalized_ir_to_ssa_v1;
 use aether_ir::wire::IRModuleDTO;
+use aether_ir::{characterize_lower_normalized_ir_to_ssa_v1, lower_normalized_ir_to_ssa_v1};
 use serde_json::{Value, json};
 
 fn typed(tag: &str, name: &str, ty: Value) -> Value {
@@ -89,6 +89,30 @@ fn lowering_places_and_renames_a_merge_phi_deterministically() {
     assert_eq!(join[0]["result"]["name"], "answer");
     assert_eq!(join[0]["incoming"].as_array().unwrap().len(), 2);
     assert_eq!(join[1]["value"]["name"], "answer");
+}
+
+#[test]
+fn diagnostic_characterization_preserves_exact_lowering_result() {
+    let module: IRModuleDTO = serde_json::from_value(json!({
+        "schema_version":1, "structs":[], "functions":[{
+            "name":"diagnostic", "parameters":[], "return_type":{"tag":"void"},
+            "may_throw":false, "blocks":[
+                {"name":"entry","instructions":[{"kind":"jump","target":"exit"}]},
+                {"name":"exit","instructions":[{"kind":"return","value":null,"transferred_storage":null}]}
+            ]
+        }]
+    }))
+    .unwrap();
+    let ordinary = lower_normalized_ir_to_ssa_v1(&module).expect("ordinary lowering");
+    let (characterized, timings) =
+        characterize_lower_normalized_ir_to_ssa_v1(&module).expect("characterized lowering");
+
+    assert_eq!(characterized, ordinary);
+    assert!(timings.measured_ns() > 0);
+    assert!(timings.cfg_construction_ns > 0);
+    assert!(timings.reachability_and_rpo_ns > 0);
+    assert!(timings.chk_idom_ns > 0);
+    assert!(timings.renaming_ns > 0);
 }
 
 #[test]

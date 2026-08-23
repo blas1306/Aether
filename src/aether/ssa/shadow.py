@@ -107,6 +107,7 @@ class SSAPerformanceProfile:
     residual_unattributed_seconds: float
     total_wall_seconds: float
     rust_phase_detail: str
+    rust_ssa_lowering_phases_seconds: Mapping[str, float]
 
     def __post_init__(self) -> None:
         values = tuple(self.phases_seconds.values()) + (
@@ -134,6 +135,9 @@ class SSAPerformanceProfile:
             "residual_unattributed_seconds": self.residual_unattributed_seconds,
             "total_wall_seconds": self.total_wall_seconds,
             "rust_phase_detail": self.rust_phase_detail,
+            "rust_ssa_lowering_phases_seconds": dict(
+                self.rust_ssa_lowering_phases_seconds
+            ),
         }
 
 
@@ -598,6 +602,7 @@ def _finish_performance_profile(
     phases: dict[str, float],
     total_started: float,
     rust_phase_detail: str,
+    rust_ssa_lowering_phases: Mapping[str, float] | None = None,
 ) -> SSAPerformanceProfile:
     total = perf_counter() - total_started
     measured = sum(phases.values())
@@ -621,19 +626,25 @@ def _finish_performance_profile(
         residual_unattributed_seconds=residual,
         total_wall_seconds=total,
         rust_phase_detail=rust_phase_detail,
+        rust_ssa_lowering_phases_seconds=dict(rust_ssa_lowering_phases or {}),
     )
 
 
 def _rust_phase_timings(
     response: Mapping[str, object],
-) -> tuple[dict[str, float], float] | None:
+) -> tuple[dict[str, float], dict[str, float], float] | None:
     """Decode optional diagnostic metadata without affecting compilation."""
     performance = response.get("performance")
     if not isinstance(performance, dict) or performance.get("unit") != "nanoseconds":
         return None
     raw_phases = performance.get("phases")
+    raw_lowering_phases = performance.get("ssa_lowering_phases")
     raw_total = performance.get("request_compute_total")
-    if not isinstance(raw_phases, dict) or not isinstance(raw_total, int) or raw_total < 0:
+    if (
+        not isinstance(raw_phases, dict)
+        or not isinstance(raw_total, int)
+        or raw_total < 0
+    ):
         return None
     expected = {
         "rust_input_parsing",
@@ -647,11 +658,42 @@ def _rust_phase_timings(
         not isinstance(value, int) or value < 0 for value in raw_phases.values()
     ):
         return None
+    expected_lowering = {
+        "cfg_construction",
+        "reachability_and_rpo",
+        "chk_idom",
+        "dominator_tree",
+        "dominance_frontier",
+        "liveness",
+        "definite_initialization",
+        "phi_placement",
+        "renaming",
+        "remaining_lowering",
+    }
+    if raw_lowering_phases is not None and (
+        not isinstance(raw_lowering_phases, dict)
+        or set(raw_lowering_phases) != expected_lowering
+        or any(
+            not isinstance(value, int) or value < 0
+            for value in raw_lowering_phases.values()
+        )
+    ):
+        return None
     phases = {name: value / 1_000_000_000 for name, value in raw_phases.items()}
+    lowering_phases = (
+        {
+            name: value / 1_000_000_000
+            for name, value in raw_lowering_phases.items()
+        }
+        if isinstance(raw_lowering_phases, dict)
+        else {}
+    )
     total = raw_total / 1_000_000_000
     if sum(phases.values()) > total + 1e-9:
         return None
-    return phases, total
+    if sum(lowering_phases.values()) > phases["rust_ssa_lowering"] + 1e-9:
+        return None
+    return phases, lowering_phases, total
 
 
 def _lower_dual_lane(
@@ -677,6 +719,7 @@ def _lower_dual_lane(
     python_seconds = 0.0
     rust_seconds = 0.0
     rust_phase_detail = "disabled"
+    rust_ssa_lowering_phases: dict[str, float] = {}
     rust_comparison_dto: Mapping[str, object] | None = None
 
     def run_python() -> object:
@@ -717,6 +760,7 @@ def _lower_dual_lane(
 
     def run_rust() -> object:
         nonlocal rust_seconds, rust_phase_detail, rust_comparison_dto
+        nonlocal rust_ssa_lowering_phases
         try:
             started = perf_counter()
             response = client.lower(payload)
@@ -737,7 +781,7 @@ def _lower_dual_lane(
                 phases["rust_transport_and_compute_combined"] = rust_seconds
                 rust_phase_detail = "combined: companion did not expose diagnostic phase metadata"
             else:
-                rust_phases, rust_compute_total = detailed
+                rust_phases, rust_ssa_lowering_phases, rust_compute_total = detailed
                 phases.update(rust_phases)
                 startup = getattr(client, "last_startup_seconds", 0.0)
                 response_decode = getattr(client, "last_response_decode_seconds", 0.0)
@@ -812,6 +856,7 @@ def _lower_dual_lane(
             phases,
             total_started,
             rust_phase_detail,
+            rust_ssa_lowering_phases,
         )
         return rust_ssa, SSAShadowReport(
             "diagnostic_rust_only",
@@ -879,6 +924,7 @@ def _lower_dual_lane(
             phases,
             total_started,
             rust_phase_detail,
+            rust_ssa_lowering_phases,
         )
         if characterize_performance
         else None

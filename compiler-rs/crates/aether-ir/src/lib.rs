@@ -33,7 +33,10 @@ pub use json::{IRModuleJsonImportError, import_module_json, parse_strict_json_va
 pub use lifecycle::{
     LifecycleNormalizationError, lower_verified_ir_to_ssa_v1, normalize_lifecycle_v1,
 };
-pub use lowering::{SsaLoweringError, lower_normalized_ir_to_ssa_v1};
+pub use lowering::{
+    SsaLoweringError, SsaLoweringPhaseTimings, characterize_lower_normalized_ir_to_ssa_v1,
+    lower_normalized_ir_to_ssa_v1,
+};
 pub use module::IRModule;
 pub use source::IRSourceLocation;
 pub use ssa::{

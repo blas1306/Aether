@@ -40,5 +40,5 @@ def characterize_python_ssa_only(
         residual_unattributed_seconds=residual,
         total_wall_seconds=total,
         rust_phase_detail="not_applicable",
+        rust_ssa_lowering_phases_seconds={},
     )
-

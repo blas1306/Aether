@@ -6,7 +6,7 @@ use std::time::Instant;
 
 use aether_ir::wire::IRModuleDTO;
 use aether_ir::{
-    lower_normalized_ir_to_ssa_v1, lower_verified_ir_to_ssa_v1, normalize_lifecycle_v1,
+    characterize_lower_normalized_ir_to_ssa_v1, lower_verified_ir_to_ssa_v1, normalize_lifecycle_v1,
 };
 use aether_verifier::verify_owned_ssa;
 use serde::Serialize;
@@ -38,6 +38,7 @@ struct PerformanceResponse {
     clock: &'static str,
     unit: &'static str,
     phases: PerformancePhases,
+    ssa_lowering_phases: SsaLoweringPerformancePhases,
     request_compute_total: u64,
 }
 
@@ -49,6 +50,20 @@ struct PerformancePhases {
     rust_owned_ssa_verification: u64,
     rust_schema_v2_materialization: u64,
     rust_orchestration_unattributed: u64,
+}
+
+#[derive(Serialize)]
+struct SsaLoweringPerformancePhases {
+    cfg_construction: u64,
+    reachability_and_rpo: u64,
+    chk_idom: u64,
+    dominator_tree: u64,
+    dominance_frontier: u64,
+    liveness: u64,
+    definite_initialization: u64,
+    phi_placement: u64,
+    renaming: u64,
+    remaining_lowering: u64,
 }
 
 fn write_frame(out: &mut impl Write, value: &impl Serialize) -> Result<(), Box<dyn Error>> {
@@ -117,8 +132,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             let lifecycle_normalization_ns = started.elapsed().as_nanos() as u64;
 
             let started = Instant::now();
-            let owned = lower_normalized_ir_to_ssa_v1(&normalized)?;
+            let (owned, mut lowering_phases) =
+                characterize_lower_normalized_ir_to_ssa_v1(&normalized)?;
             let ssa_lowering_ns = started.elapsed().as_nanos() as u64;
+            lowering_phases.remaining_lowering_ns +=
+                ssa_lowering_ns.saturating_sub(lowering_phases.measured_ns());
 
             let started = Instant::now();
             verify_owned_ssa(&owned)?;
@@ -147,6 +165,18 @@ fn main() -> Result<(), Box<dyn Error>> {
                         rust_owned_ssa_verification: owned_ssa_verification_ns,
                         rust_schema_v2_materialization: schema_v2_materialization_ns,
                         rust_orchestration_unattributed: total_ns.saturating_sub(measured_ns),
+                    },
+                    ssa_lowering_phases: SsaLoweringPerformancePhases {
+                        cfg_construction: lowering_phases.cfg_construction_ns,
+                        reachability_and_rpo: lowering_phases.reachability_and_rpo_ns,
+                        chk_idom: lowering_phases.chk_idom_ns,
+                        dominator_tree: lowering_phases.dominator_tree_ns,
+                        dominance_frontier: lowering_phases.dominance_frontier_ns,
+                        liveness: lowering_phases.liveness_ns,
+                        definite_initialization: lowering_phases.definite_initialization_ns,
+                        phi_placement: lowering_phases.phi_placement_ns,
+                        renaming: lowering_phases.renaming_ns,
+                        remaining_lowering: lowering_phases.remaining_lowering_ns,
                     },
                     request_compute_total: total_ns,
                 }),

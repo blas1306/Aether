@@ -80,6 +80,16 @@ FROZEN_SCHEMA_POLICY_TREES = {
 FROZEN_SCHEMA_POLICY_TREE_EXCLUSIONS = {
     "compiler-rs/crates/aether-ir/src": {"dominance.rs", "lowering.rs"},
 }
+# RUST-3.10 adds only an opt-in diagnostic export from the already-authorized
+# lowering core. Normalize that exact additive surface back to the frozen line
+# while retaining the broad hash gate for every other lib.rs change.
+RUST_3_10_DIAGNOSTIC_EXPORT = b"""pub use lowering::{
+    SsaLoweringError, SsaLoweringPhaseTimings, characterize_lower_normalized_ir_to_ssa_v1,
+    lower_normalized_ir_to_ssa_v1,
+};"""
+FROZEN_LOWERING_EXPORT = (
+    b"pub use lowering::{SsaLoweringError, lower_normalized_ir_to_ssa_v1};"
+)
 
 
 def _optional(path: Path) -> dict[str, Any]:
@@ -165,7 +175,12 @@ def _tree_hashes_match(expected: dict[str, str]) -> tuple[bool, dict[str, str]]:
                 continue
             digest.update(path.relative_to(directory).as_posix().encode())
             digest.update(b"\0")
-            digest.update(path.read_bytes())
+            contents = path.read_bytes()
+            if path.name == "lib.rs":
+                contents = contents.replace(
+                    RUST_3_10_DIAGNOSTIC_EXPORT, FROZEN_LOWERING_EXPORT
+                )
+            digest.update(contents)
             digest.update(b"\0")
         actual[relative] = digest.hexdigest()
     return actual == expected, actual

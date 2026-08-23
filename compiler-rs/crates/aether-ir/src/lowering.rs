@@ -10,6 +10,7 @@ mod dominance;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::error::Error;
 use std::fmt;
+use std::time::Instant;
 
 use serde_json::Value;
 
@@ -18,7 +19,52 @@ use crate::wire::{
     IRFunctionDTO, IRInstructionDTO, IRModuleDTO, NullableDTO, SSA_SCHEMA_VERSION_V2,
     SSABasicBlockV2DTO, SSAFunctionV2DTO, SSAInstructionV2DTO, SSAModuleV2DTO,
 };
-use dominance::DominanceInfo;
+use dominance::{DominanceInfo, DominancePhaseTimings};
+
+/// Additive, diagnostic-only decomposition of Rust SSA lowering.
+///
+/// The ordinary production entry point does not construct or update this
+/// value. Reachability and reverse postorder are reported together because the
+/// qualified implementation computes both in one interleaved traversal.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SsaLoweringPhaseTimings {
+    /// Block-name maps, successor/predecessor edges, and named CFG materialization.
+    pub cfg_construction_ns: u64,
+    /// Combined entry reachability and reverse-postorder traversal.
+    pub reachability_and_rpo_ns: u64,
+    /// Cooper-Harvey-Kennedy immediate-dominator computation.
+    pub chk_idom_ns: u64,
+    /// Immediate-dominator child-tree construction.
+    pub dominator_tree_ns: u64,
+    /// Dominance-frontier construction.
+    pub dominance_frontier_ns: u64,
+    /// Backward live-in data flow used to prune phis.
+    pub liveness_ns: u64,
+    /// Forward definite-initialization data flow.
+    pub definite_initialization_ns: u64,
+    /// Slot discovery and iterated-frontier phi placement.
+    pub phi_placement_ns: u64,
+    /// Phi/result naming and dominator-tree rename traversal.
+    pub renaming_ns: u64,
+    /// Validation, result assembly, owned import, and diagnostic overhead.
+    pub remaining_lowering_ns: u64,
+}
+
+impl SsaLoweringPhaseTimings {
+    /// Return the additive total represented by all diagnostic phases.
+    pub fn measured_ns(&self) -> u64 {
+        self.cfg_construction_ns
+            + self.reachability_and_rpo_ns
+            + self.chk_idom_ns
+            + self.dominator_tree_ns
+            + self.dominance_frontier_ns
+            + self.liveness_ns
+            + self.definite_initialization_ns
+            + self.phi_placement_ns
+            + self.renaming_ns
+            + self.remaining_lowering_ns
+    }
+}
 
 /// A deterministic, stage-qualified lowering failure.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,6 +114,33 @@ pub fn lower_normalized_ir_to_ssa_v1(
     let dto = lower_to_dto(module)?;
     OwnedSsaModule::from_schema_v2(&dto)
         .map_err(|error| SsaLoweringError::module(format!("owned SSA construction: {error}")))
+}
+
+/// Run the qualified lowering algorithm with opt-in diagnostic timing.
+///
+/// This is intentionally a separate entry point so ordinary companion mode
+/// retains its original lowering call and response shape.
+pub fn characterize_lower_normalized_ir_to_ssa_v1(
+    module: &IRModuleDTO,
+) -> Result<(OwnedSsaModule, SsaLoweringPhaseTimings), SsaLoweringError> {
+    let total_started = Instant::now();
+    let mut timings = SsaLoweringPhaseTimings::default();
+    let functions = module
+        .functions
+        .iter()
+        .map(|function| lower_function_characterized(function, &mut timings))
+        .collect::<Result<Vec<_>, _>>()?;
+    let dto = SSAModuleV2DTO {
+        schema_version: SSA_SCHEMA_VERSION_V2,
+        representation: "aether_ssa".into(),
+        functions,
+        structs: module.structs.clone(),
+    };
+    let owned = OwnedSsaModule::from_schema_v2(&dto)
+        .map_err(|error| SsaLoweringError::module(format!("owned SSA construction: {error}")))?;
+    let total_ns = total_started.elapsed().as_nanos() as u64;
+    timings.remaining_lowering_ns = total_ns.saturating_sub(timings.measured_ns());
+    Ok((owned, timings))
 }
 
 fn lower_to_dto(module: &IRModuleDTO) -> Result<SSAModuleV2DTO, SsaLoweringError> {
@@ -147,6 +220,45 @@ fn lower_function(function: &IRFunctionDTO) -> Result<SSAFunctionV2DTO, SsaLower
     lowerer.finish()
 }
 
+fn lower_function_characterized(
+    function: &IRFunctionDTO,
+    timings: &mut SsaLoweringPhaseTimings,
+) -> Result<SSAFunctionV2DTO, SsaLoweringError> {
+    if function.blocks.is_empty() {
+        return Err(SsaLoweringError::function(
+            &function.name,
+            "function has no entry block",
+        ));
+    }
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            if matches!(
+                instruction,
+                IRInstructionDTO::InitDefault { .. }
+                    | IRInstructionDTO::CopyInit { .. }
+                    | IRInstructionDTO::MoveInit { .. }
+                    | IRInstructionDTO::Assign { .. }
+                    | IRInstructionDTO::Destroy { .. }
+                    | IRInstructionDTO::Relocate { .. }
+            ) {
+                return Err(SsaLoweringError::function(
+                    &function.name,
+                    "lifecycle normalization must run before SSA construction",
+                ));
+            }
+        }
+    }
+
+    let mut lowerer = FunctionLowerer::new_characterized(function, timings)?;
+    lowerer.place_phis_characterized(timings)?;
+    let started = Instant::now();
+    lowerer.initialize()?;
+    let entry = function.blocks[0].name.clone();
+    lowerer.rename_blocks(&entry)?;
+    timings.renaming_ns += started.elapsed().as_nanos() as u64;
+    lowerer.finish()
+}
+
 impl<'a> FunctionLowerer<'a> {
     fn new(function: &'a IRFunctionDTO) -> Result<Self, SsaLoweringError> {
         let mut block_index = BTreeMap::new();
@@ -181,6 +293,60 @@ impl<'a> FunctionLowerer<'a> {
             children,
             frontier,
         } = compute_named_dominance(function, &block_index, &successors);
+        Ok(Self {
+            function,
+            block_index,
+            successors,
+            predecessors,
+            reachable,
+            children,
+            frontier,
+            phis: BTreeMap::new(),
+            stacks: BTreeMap::new(),
+            bindings: BTreeMap::new(),
+            definitions: BTreeSet::new(),
+            output: BTreeMap::new(),
+        })
+    }
+
+    fn new_characterized(
+        function: &'a IRFunctionDTO,
+        timings: &mut SsaLoweringPhaseTimings,
+    ) -> Result<Self, SsaLoweringError> {
+        let started = Instant::now();
+        let mut block_index = BTreeMap::new();
+        for (index, block) in function.blocks.iter().enumerate() {
+            if block_index.insert(block.name.clone(), index).is_some() {
+                return Err(SsaLoweringError::function(
+                    &function.name,
+                    format!("duplicate block '{}'", block.name),
+                ));
+            }
+        }
+        let mut successors = BTreeMap::new();
+        for block in &function.blocks {
+            let next = block
+                .instructions
+                .last()
+                .map(successors_of)
+                .unwrap_or_default();
+            for target in &next {
+                if !block_index.contains_key(target) {
+                    return Err(SsaLoweringError::function(
+                        &function.name,
+                        format!("block '{}' targets unknown block '{target}'", block.name),
+                    ));
+                }
+            }
+            successors.insert(block.name.clone(), next);
+        }
+        timings.cfg_construction_ns += started.elapsed().as_nanos() as u64;
+        let NamedDominance {
+            reachable,
+            predecessors,
+            children,
+            frontier,
+        } = compute_named_dominance_characterized(function, &block_index, &successors, timings);
         Ok(Self {
             function,
             block_index,
@@ -317,6 +483,108 @@ impl<'a> FunctionLowerer<'a> {
         for phis in self.phis.values_mut() {
             phis.sort_by(|a, b| a.slot.cmp(&b.slot));
         }
+        Ok(())
+    }
+
+    fn place_phis_characterized(
+        &mut self,
+        timings: &mut SsaLoweringPhaseTimings,
+    ) -> Result<(), SsaLoweringError> {
+        let phi_preparation_started = Instant::now();
+        let mut definitions: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut slot_values: BTreeMap<String, Value> = BTreeMap::new();
+        let mut uses = BTreeMap::new();
+        let mut defs = BTreeMap::new();
+        for block in self
+            .function
+            .blocks
+            .iter()
+            .filter(|b| self.reachable.contains(&b.name))
+        {
+            let mut block_uses = BTreeSet::new();
+            let mut block_defs = BTreeSet::new();
+            for instruction in &block.instructions {
+                match serde_json::to_value(instruction).map_err(|e| self.fail(e.to_string()))? {
+                    Value::Object(object)
+                        if object.get("kind").and_then(Value::as_str) == Some("load") =>
+                    {
+                        let slot = object.get("slot").expect("load slot");
+                        let name = value_name(slot).expect("slot name").to_owned();
+                        if !block_defs.contains(&name) {
+                            block_uses.insert(name.clone());
+                        }
+                        slot_values
+                            .entry(name)
+                            .or_insert_with(|| as_ssa_value(slot.clone()));
+                    }
+                    Value::Object(object)
+                        if object.get("kind").and_then(Value::as_str) == Some("store") =>
+                    {
+                        let slot = object.get("slot").expect("store slot");
+                        let name = value_name(slot).expect("slot name").to_owned();
+                        block_defs.insert(name.clone());
+                        definitions
+                            .entry(name.clone())
+                            .or_default()
+                            .insert(block.name.clone());
+                        slot_values
+                            .entry(name)
+                            .or_insert_with(|| as_ssa_value(slot.clone()));
+                    }
+                    _ => {}
+                }
+            }
+            uses.insert(block.name.clone(), block_uses);
+            defs.insert(block.name.clone(), block_defs);
+        }
+        timings.phi_placement_ns += phi_preparation_started.elapsed().as_nanos() as u64;
+
+        let started = Instant::now();
+        let live_in = dataflow_live_in(
+            self.function,
+            &self.successors,
+            &self.reachable,
+            &uses,
+            &defs,
+        );
+        timings.liveness_ns += started.elapsed().as_nanos() as u64;
+
+        let started = Instant::now();
+        let initialized_in =
+            dataflow_initialized_in(self.function, &self.predecessors, &self.reachable, &defs);
+        timings.definite_initialization_ns += started.elapsed().as_nanos() as u64;
+
+        let started = Instant::now();
+        for (slot, initial) in definitions {
+            let mut placed = BTreeSet::new();
+            let mut seen = initial.clone();
+            let mut work: VecDeque<String> = initial.into_iter().collect();
+            while let Some(block) = work.pop_front() {
+                for target in &self.frontier[&block] {
+                    if placed.contains(target)
+                        || (!live_in[target].contains(&slot)
+                            && !initialized_in[target].contains(&slot))
+                    {
+                        continue;
+                    }
+                    placed.insert(target.clone());
+                    if seen.insert(target.clone()) {
+                        work.push_back(target.clone());
+                    }
+                }
+            }
+            for block in placed {
+                self.phis.entry(block).or_default().push(PhiState {
+                    slot: slot.clone(),
+                    result: slot_values[&slot].clone(),
+                    incoming: Vec::new(),
+                });
+            }
+        }
+        for phis in self.phis.values_mut() {
+            phis.sort_by(|a, b| a.slot.cmp(&b.slot));
+        }
+        timings.phi_placement_ns += started.elapsed().as_nanos() as u64;
         Ok(())
     }
 
@@ -650,6 +918,95 @@ fn compute_named_dominance(
             )
         })
         .collect();
+    NamedDominance {
+        reachable,
+        predecessors,
+        children,
+        frontier,
+    }
+}
+
+fn compute_named_dominance_characterized(
+    function: &IRFunctionDTO,
+    block_index: &BTreeMap<String, usize>,
+    successors: &BTreeMap<String, Vec<String>>,
+    timings: &mut SsaLoweringPhaseTimings,
+) -> NamedDominance {
+    let started = Instant::now();
+    let successor_indices = function
+        .blocks
+        .iter()
+        .map(|block| {
+            successors[&block.name]
+                .iter()
+                .map(|target| block_index[target])
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    timings.cfg_construction_ns += started.elapsed().as_nanos() as u64;
+
+    let mut dominance_timings = DominancePhaseTimings::default();
+    let dominance =
+        DominanceInfo::compute_characterized(&successor_indices, 0, &mut dominance_timings);
+    timings.cfg_construction_ns += dominance_timings.cfg_construction_ns;
+    timings.reachability_and_rpo_ns += dominance_timings.reachability_and_rpo_ns;
+    timings.chk_idom_ns += dominance_timings.chk_idom_ns;
+    timings.dominator_tree_ns += dominance_timings.dominator_tree_ns;
+    timings.dominance_frontier_ns += dominance_timings.dominance_frontier_ns;
+
+    let started = Instant::now();
+    let reachable = function
+        .blocks
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| dominance.reachable[*index])
+        .map(|(_, block)| block.name.clone())
+        .collect::<BTreeSet<_>>();
+    let predecessors = function
+        .blocks
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| dominance.reachable[*index])
+        .map(|(index, block)| {
+            (
+                block.name.clone(),
+                dominance.predecessors[index]
+                    .iter()
+                    .map(|&predecessor| function.blocks[predecessor].name.clone())
+                    .collect(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut children: BTreeMap<String, Vec<String>> =
+        reachable.iter().map(|b| (b.clone(), Vec::new())).collect();
+    for (parent, child_indices) in dominance.children.iter().enumerate() {
+        if dominance.reachable[parent] {
+            children
+                .get_mut(&function.blocks[parent].name)
+                .expect("idom")
+                .extend(
+                    child_indices
+                        .iter()
+                        .map(|&child| function.blocks[child].name.clone()),
+                );
+        }
+    }
+    let frontier = function
+        .blocks
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| dominance.reachable[*index])
+        .map(|(index, block)| {
+            (
+                block.name.clone(),
+                dominance.frontiers[index]
+                    .iter()
+                    .map(|&target| function.blocks[target].name.clone())
+                    .collect(),
+            )
+        })
+        .collect();
+    timings.cfg_construction_ns += started.elapsed().as_nanos() as u64;
     NamedDominance {
         reachable,
         predecessors,
