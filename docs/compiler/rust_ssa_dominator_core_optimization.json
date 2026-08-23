@@ -1,0 +1,185 @@
+{
+  "artifact_schema_version": 1,
+  "milestone": "RUST-3.9b",
+  "decision": "RUST_SSA_DOMINATOR_CORE_OPTIMIZED",
+  "baseline_revision": "173383a4cab02a4239e2716574716176e1e3d337",
+  "algorithm": {
+    "selected": "Cooper-Harvey-Kennedy immediate-dominator iteration",
+    "production_structural_memory": "O(V+E)",
+    "deterministic_order": "iterative DFS reverse postorder using frozen successor order; children use source block index order; frontiers are ordered sets",
+    "irreducible_cfgs": "supported and differentially qualified",
+    "unreachable_blocks": "excluded from entry-rooted dominance, idom, tree, and frontier",
+    "full_dominator_sets_in_production": false
+  },
+  "invariants": {
+    "authority": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "python_shadow": "mandatory_synchronous",
+    "failure_policy": "FAIL_CLOSED",
+    "schemas": {
+      "initial_ir": 1,
+      "ssa": 2
+    },
+    "semantic_policy_changed": false,
+    "verifier_changed": false,
+    "python_ssa_changed": false
+  },
+  "qualification": {
+    "comparisons": [
+      "reachable",
+      "dominance_relation",
+      "idom",
+      "tree",
+      "frontier"
+    ],
+    "adversarial_cfg_families": {
+      "status": "PASS",
+      "families": 16,
+      "coverage": [
+        "single block",
+        "chain",
+        "diamond and nested diamonds",
+        "loops and nested loops",
+        "multiple exits and backedges",
+        "irreducible",
+        "fan-out/fan-in",
+        "repeated merges",
+        "mixed exceptional-edge shape",
+        "unreachable isolated/cycle/predecessor",
+        "entry backedge",
+        "duplicate edges"
+      ]
+    },
+    "seeded_cfgs": {
+      "cases": 400,
+      "seeds": 5,
+      "status": "PASS"
+    },
+    "deep_cfg": {
+      "993": "PASS",
+      "1000": "PASS",
+      "5000": "PASS",
+      "10000": "PASS"
+    },
+    "phi_placement": {
+      "status": "PASS",
+      "focused_rust_tests": [
+        "deterministic merge phi",
+        "loop-carried phi with exact predecessor/value labels",
+        "dead slot liveness pruning",
+        "unreachable definition exclusion"
+      ],
+      "adversarial_suite": "21 positive and 7 negative cases, three repetitions",
+      "existing_suite_coverage": [
+        "nested diamonds",
+        "multiple simultaneous phis",
+        "loop phis",
+        "liveness and definite initialization",
+        "exception CFGs"
+      ]
+    },
+    "ssa_parity": {
+      "status": "PASS",
+      "historical": "116/116",
+      "production_regressions": "155 passed across all eight frozen families",
+      "adversarial": "21/21 positive plus 7/7 fail-closed negative cases",
+      "deep_10000": "exact canonical Python/Rust match; 10000 output blocks"
+    },
+    "determinism": {
+      "status": "PASS",
+      "dominance": "exact repeated idom/tree/frontier results",
+      "ssa": "exact repeated schema-v2 output"
+    },
+    "cargo_workspace_locked": "PASS",
+    "full_python_suite": {
+      "status": "PASS",
+      "passed": 4886,
+      "skipped": 4,
+      "warnings": 6,
+      "environment": "LSAN_OPTIONS=detect_leaks=0 (repository qualification convention under ptrace)"
+    },
+    "platform_local": "Linux x86_64",
+    "official_ci_matrix": "pending normal Linux/Windows/macOS matrix"
+  },
+  "performance": {
+    "methodology": {
+      "build": "release, thin LTO",
+      "dominator_microbenchmark": "two warmups and seven measured rounds; min/median/max",
+      "ssa_scaling": "one warmup and three measured rounds on the same machine/configuration",
+      "measurement_kind": "observational; correctness gates are timing-independent"
+    },
+    "optimized_dominator_ns": {
+      "100": {
+        "min": 6372,
+        "median": 6512,
+        "max": 6633
+      },
+      "1000": {
+        "min": 68137,
+        "median": 69129,
+        "max": 76824
+      },
+      "5000": {
+        "min": 306623,
+        "median": 326039,
+        "max": 642210
+      },
+      "10000": {
+        "min": 620329,
+        "median": 626380,
+        "max": 633914
+      },
+      "25000": {
+        "min": 1546989,
+        "median": 1580582,
+        "max": 2090555
+      }
+    },
+    "reference_dominator_ns": {
+      "100": 298427,
+      "1000": 31322829,
+      "larger_sizes": "not executed because the full-set allocation is the removed memory pathology"
+    },
+    "baseline_rust_ssa_lowering_seconds": {
+      "1000": 0.237081083,
+      "5000": 7.002413132
+    },
+    "optimized_rust_ssa_lowering_seconds": {
+      "100_median": 0.00138684,
+      "1000_median": 0.015434631,
+      "5000_median": 0.098207586,
+      "10000": {
+        "single_qualification": 0.226166865
+      }
+    },
+    "size_ratio_1000_to_5000": 5.0,
+    "baseline_ratio_1000_to_5000": 29.535942064175572,
+    "optimized_ratio_1000_to_5000": 6.363,
+    "rust_ssa_lowering_speedup": {
+      "1000": 15.36,
+      "5000": 71.30
+    },
+    "optimized_dominator_ratio_1000_to_5000": 4.717,
+    "memory": {
+      "reference_deep_chain_relationships": {
+        "1000": 500500,
+        "5000": 12502500,
+        "10000": 50005000
+      },
+      "optimized": "one temporary idom parent per reachable block plus reachability, RPO, predecessor, child, and frontier adjacency",
+      "rss": "not collected; structural cardinality establishes removal of full dominance sets without an intrusive allocator"
+    },
+    "remaining_bottlenecks": [
+      "mandatory Python GeneralSSABuilder shadow retains its full-set dominator implementation",
+      "Python verification and schema-v2 import dominate dual-lane deep-CFG time",
+      "Rust liveness/definite-initialization and verifier remain separate future profiling candidates"
+    ]
+  },
+  "rollback": {
+    "reference_location": "compiler-rs/crates/aether-ir/src/dominance.rs test module",
+    "reference_compiled_in_production": false,
+    "production_algorithm_switch": false,
+    "user_facing_option": false,
+    "removal_criteria": "retain while useful as a small/medium differential oracle"
+  },
+  "next_recommended_milestone": "Profile the remaining Rust data-flow/verifier phases separately; do not optimize the mandatory Python shadow under RUST-3.9b."
+}

@@ -4,6 +4,9 @@
 //! deliberately does not consult SSA constructor defaults: the eight collection
 //! access instructions synthesize `bounds_checked = true` here.
 
+#[path = "dominance.rs"]
+mod dominance;
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::error::Error;
 use std::fmt;
@@ -15,6 +18,7 @@ use crate::wire::{
     IRFunctionDTO, IRInstructionDTO, IRModuleDTO, NullableDTO, SSA_SCHEMA_VERSION_V2,
     SSABasicBlockV2DTO, SSAFunctionV2DTO, SSAInstructionV2DTO, SSAModuleV2DTO,
 };
+use dominance::DominanceInfo;
 
 /// A deterministic, stage-qualified lowering failure.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -87,14 +91,21 @@ struct PhiState {
     incoming: Vec<Value>,
 }
 
+struct NamedDominance {
+    reachable: BTreeSet<String>,
+    predecessors: BTreeMap<String, Vec<String>>,
+    children: BTreeMap<String, Vec<String>>,
+    frontier: BTreeMap<String, BTreeSet<String>>,
+}
+
 struct FunctionLowerer<'a> {
     function: &'a IRFunctionDTO,
     block_index: BTreeMap<String, usize>,
     successors: BTreeMap<String, Vec<String>>,
     predecessors: BTreeMap<String, Vec<String>>,
     reachable: BTreeSet<String>,
-    idom: BTreeMap<String, Option<String>>,
     children: BTreeMap<String, Vec<String>>,
+    frontier: BTreeMap<String, BTreeSet<String>>,
     phis: BTreeMap<String, Vec<PhiState>>,
     stacks: BTreeMap<String, Vec<Value>>,
     bindings: BTreeMap<String, Value>,
@@ -164,69 +175,20 @@ impl<'a> FunctionLowerer<'a> {
             }
             successors.insert(block.name.clone(), next);
         }
-        let entry = function.blocks[0].name.clone();
-        let mut reachable = BTreeSet::new();
-        let mut queue = VecDeque::from([entry.clone()]);
-        while let Some(block) = queue.pop_front() {
-            if reachable.insert(block.clone()) {
-                queue.extend(successors[&block].iter().cloned());
-            }
-        }
-        let mut predecessors: BTreeMap<String, Vec<String>> =
-            reachable.iter().map(|b| (b.clone(), Vec::new())).collect();
-        for block in function
-            .blocks
-            .iter()
-            .filter(|b| reachable.contains(&b.name))
-        {
-            for target in &successors[&block.name] {
-                if reachable.contains(target) {
-                    predecessors
-                        .get_mut(target)
-                        .expect("reachable target")
-                        .push(block.name.clone());
-                }
-            }
-        }
-        let dominators = compute_dominators(function, &predecessors, &reachable);
-        let mut idom = BTreeMap::new();
-        for block in function
-            .blocks
-            .iter()
-            .filter(|b| reachable.contains(&b.name))
-        {
-            if block.name == entry {
-                idom.insert(block.name.clone(), None);
-                continue;
-            }
-            let strict = dominators[&block.name].iter().filter(|d| *d != &block.name);
-            let chosen = strict
-                .max_by_key(|d| (dominators[*d].len(), block_index[*d]))
-                .cloned();
-            idom.insert(block.name.clone(), chosen);
-        }
-        let mut children: BTreeMap<String, Vec<String>> =
-            reachable.iter().map(|b| (b.clone(), Vec::new())).collect();
-        for block in function
-            .blocks
-            .iter()
-            .filter(|b| reachable.contains(&b.name))
-        {
-            if let Some(parent) = &idom[&block.name] {
-                children
-                    .get_mut(parent)
-                    .expect("idom")
-                    .push(block.name.clone());
-            }
-        }
+        let NamedDominance {
+            reachable,
+            predecessors,
+            children,
+            frontier,
+        } = compute_named_dominance(function, &block_index, &successors);
         Ok(Self {
             function,
             block_index,
             successors,
             predecessors,
             reachable,
-            idom,
             children,
+            frontier,
             phis: BTreeMap::new(),
             stacks: BTreeMap::new(),
             bindings: BTreeMap::new(),
@@ -326,18 +288,12 @@ impl<'a> FunctionLowerer<'a> {
         );
         let initialized_in =
             dataflow_initialized_in(self.function, &self.predecessors, &self.reachable, &defs);
-        let frontier = dominance_frontiers(
-            self.function,
-            &self.predecessors,
-            &self.idom,
-            &self.reachable,
-        );
         for (slot, initial) in definitions {
             let mut placed = BTreeSet::new();
             let mut seen = initial.clone();
             let mut work: VecDeque<String> = initial.into_iter().collect();
             while let Some(block) = work.pop_front() {
-                for target in &frontier[&block] {
+                for target in &self.frontier[&block] {
                     if placed.contains(target)
                         || (!live_in[target].contains(&slot)
                             && !initialized_in[target].contains(&slot))
@@ -627,6 +583,81 @@ impl<'a> FunctionLowerer<'a> {
     }
 }
 
+fn compute_named_dominance(
+    function: &IRFunctionDTO,
+    block_index: &BTreeMap<String, usize>,
+    successors: &BTreeMap<String, Vec<String>>,
+) -> NamedDominance {
+    let successor_indices = function
+        .blocks
+        .iter()
+        .map(|block| {
+            successors[&block.name]
+                .iter()
+                .map(|target| block_index[target])
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let dominance = DominanceInfo::compute(&successor_indices, 0);
+    let reachable = function
+        .blocks
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| dominance.reachable[*index])
+        .map(|(_, block)| block.name.clone())
+        .collect::<BTreeSet<_>>();
+    let predecessors = function
+        .blocks
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| dominance.reachable[*index])
+        .map(|(index, block)| {
+            (
+                block.name.clone(),
+                dominance.predecessors[index]
+                    .iter()
+                    .map(|&predecessor| function.blocks[predecessor].name.clone())
+                    .collect(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut children: BTreeMap<String, Vec<String>> =
+        reachable.iter().map(|b| (b.clone(), Vec::new())).collect();
+    for (parent, child_indices) in dominance.children.iter().enumerate() {
+        if dominance.reachable[parent] {
+            children
+                .get_mut(&function.blocks[parent].name)
+                .expect("idom")
+                .extend(
+                    child_indices
+                        .iter()
+                        .map(|&child| function.blocks[child].name.clone()),
+                );
+        }
+    }
+    let frontier = function
+        .blocks
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| dominance.reachable[*index])
+        .map(|(index, block)| {
+            (
+                block.name.clone(),
+                dominance.frontiers[index]
+                    .iter()
+                    .map(|&target| function.blocks[target].name.clone())
+                    .collect(),
+            )
+        })
+        .collect();
+    NamedDominance {
+        reachable,
+        predecessors,
+        children,
+        frontier,
+    }
+}
+
 fn successors_of(instruction: &IRInstructionDTO) -> Vec<String> {
     match instruction {
         IRInstructionDTO::Jump { target } => vec![target.clone()],
@@ -664,84 +695,6 @@ fn successors_of(instruction: &IRInstructionDTO) -> Vec<String> {
         } => target.iter().cloned().collect(),
         _ => Vec::new(),
     }
-}
-
-fn compute_dominators(
-    function: &IRFunctionDTO,
-    predecessors: &BTreeMap<String, Vec<String>>,
-    reachable: &BTreeSet<String>,
-) -> BTreeMap<String, BTreeSet<String>> {
-    let entry = &function.blocks[0].name;
-    let mut result = BTreeMap::new();
-    for block in function
-        .blocks
-        .iter()
-        .filter(|b| reachable.contains(&b.name))
-    {
-        result.insert(
-            block.name.clone(),
-            if &block.name == entry {
-                BTreeSet::from([block.name.clone()])
-            } else {
-                reachable.clone()
-            },
-        );
-    }
-    loop {
-        let mut changed = false;
-        for block in function
-            .blocks
-            .iter()
-            .filter(|b| reachable.contains(&b.name) && &b.name != entry)
-        {
-            let mut next = reachable.clone();
-            for predecessor in &predecessors[&block.name] {
-                next = next.intersection(&result[predecessor]).cloned().collect();
-            }
-            next.insert(block.name.clone());
-            if next != result[&block.name] {
-                result.insert(block.name.clone(), next);
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-    result
-}
-
-fn dominance_frontiers(
-    function: &IRFunctionDTO,
-    predecessors: &BTreeMap<String, Vec<String>>,
-    idom: &BTreeMap<String, Option<String>>,
-    reachable: &BTreeSet<String>,
-) -> BTreeMap<String, BTreeSet<String>> {
-    let mut result: BTreeMap<String, BTreeSet<String>> = reachable
-        .iter()
-        .map(|b| (b.clone(), BTreeSet::new()))
-        .collect();
-    for block in function
-        .blocks
-        .iter()
-        .filter(|b| reachable.contains(&b.name))
-    {
-        if predecessors[&block.name].len() < 2 {
-            continue;
-        }
-        for predecessor in &predecessors[&block.name] {
-            let mut runner = predecessor.clone();
-            while Some(&runner) != idom[&block.name].as_ref() {
-                result
-                    .get_mut(&runner)
-                    .expect("frontier runner")
-                    .insert(block.name.clone());
-                let Some(parent) = &idom[&runner] else { break };
-                runner = parent.clone();
-            }
-        }
-    }
-    result
 }
 
 fn dataflow_live_in(

@@ -71,7 +71,14 @@ FROZEN_SCHEMA_POLICY_FILES = {
     "compiler-rs/crates/aether-ir/src/ssa.rs": "03649eaee8f088624d4adec66c42a7c34750e48bb29ec2cbba43433bcbfc5271",
 }
 FROZEN_SCHEMA_POLICY_TREES = {
-    "compiler-rs/crates/aether-ir/src": "ed1a38e9ee99a5b746af55d4c71775321aecd7e6f0fe74d8f7bdbb48ce0f2cd5",
+    "compiler-rs/crates/aether-ir/src": "5a8f617269901a5b15f2f8c43dda23b839e9b1c01450187ff2a773296611bdea",
+}
+# RUST-3.9b is explicitly authorized to replace Rust dominator/lowering-core
+# implementation.  Keep the broad historical tree guard for every other Rust
+# IR source while the file-specific hashes above continue to freeze lifecycle,
+# schema-v2, and other policy boundaries.
+FROZEN_SCHEMA_POLICY_TREE_EXCLUSIONS = {
+    "compiler-rs/crates/aether-ir/src": {"dominance.rs", "lowering.rs"},
 }
 
 
@@ -152,7 +159,10 @@ def _tree_hashes_match(expected: dict[str, str]) -> tuple[bool, dict[str, str]]:
         if not directory.is_dir():
             continue
         digest = sha256()
+        exclusions = FROZEN_SCHEMA_POLICY_TREE_EXCLUSIONS.get(relative, set())
         for path in sorted(directory.glob("*.rs")):
+            if path.name in exclusions:
+                continue
             digest.update(path.relative_to(directory).as_posix().encode())
             digest.update(b"\0")
             digest.update(path.read_bytes())

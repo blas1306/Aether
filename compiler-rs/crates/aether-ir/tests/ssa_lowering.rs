@@ -101,3 +101,93 @@ fn lifecycle_input_fails_closed_instead_of_partially_lowering() {
         .to_string();
     assert!(error.contains("lifecycle normalization must run"));
 }
+
+#[test]
+fn loop_carried_phi_has_exact_predecessor_labels_and_is_deterministic() {
+    let module: IRModuleDTO = serde_json::from_value(json!({
+        "schema_version":1, "structs":[], "functions":[{
+            "name":"loop_phi", "parameters":[{"tag":"parameter","name":"again","type":{"tag":"bool"}}],
+            "return_type":{"tag":"int"}, "may_throw":false,
+            "blocks":[
+                {"name":"entry","instructions":[
+                    {"kind":"const","result":{"tag":"value","name":"zero","type":{"tag":"int"}},"value":{"tag":"int","value":0}},
+                    {"kind":"store","slot":{"tag":"value","name":"s","type":{"tag":"int"}},"value":{"tag":"value","name":"zero","type":{"tag":"int"}}},
+                    {"kind":"jump","target":"header"}]},
+                {"name":"header","instructions":[
+                    {"kind":"load","result":{"tag":"value","name":"current","type":{"tag":"int"}},"slot":{"tag":"value","name":"s","type":{"tag":"int"}}},
+                    {"kind":"branch","condition":{"tag":"parameter","name":"again","type":{"tag":"bool"}},"true_target":"body","false_target":"exit"}]},
+                {"name":"body","instructions":[
+                    {"kind":"const","result":{"tag":"value","name":"next","type":{"tag":"int"}},"value":{"tag":"int","value":1}},
+                    {"kind":"store","slot":{"tag":"value","name":"s","type":{"tag":"int"}},"value":{"tag":"value","name":"next","type":{"tag":"int"}}},
+                    {"kind":"jump","target":"header"}]},
+                {"name":"exit","instructions":[
+                    {"kind":"load","result":{"tag":"value","name":"answer","type":{"tag":"int"}},"slot":{"tag":"value","name":"s","type":{"tag":"int"}}},
+                    {"kind":"return","value":{"tag":"value","name":"answer","type":{"tag":"int"}},"transferred_storage":null}]}
+            ]
+        }]
+    })).unwrap();
+    let first = lower_normalized_ir_to_ssa_v1(&module)
+        .unwrap()
+        .to_schema_v2();
+    let second = lower_normalized_ir_to_ssa_v1(&module)
+        .unwrap()
+        .to_schema_v2();
+    assert_eq!(first, second);
+    let value = serde_json::to_value(first).unwrap();
+    let header = value["functions"][0]["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|block| block["name"] == "header")
+        .unwrap();
+    let phi = &header["instructions"][0];
+    assert_eq!(phi["kind"], "phi");
+    assert_eq!(phi["result"]["name"], "current");
+    let incoming = phi["incoming"].as_array().unwrap();
+    assert_eq!(incoming.len(), 2);
+    assert_eq!(incoming[0]["block"], "entry");
+    assert_eq!(incoming[0]["value"]["name"], "zero");
+    assert_eq!(incoming[1]["block"], "body");
+    assert_eq!(incoming[1]["value"]["name"], "next");
+}
+
+#[test]
+fn dead_slot_and_unreachable_definition_do_not_place_reachable_phis() {
+    let module: IRModuleDTO = serde_json::from_value(json!({
+        "schema_version":1, "structs":[], "functions":[{
+            "name":"pruned", "parameters":[{"tag":"parameter","name":"c","type":{"tag":"bool"}}],
+            "return_type":{"tag":"void"}, "may_throw":false,
+            "blocks":[
+                {"name":"entry","instructions":[{"kind":"branch","condition":{"tag":"parameter","name":"c","type":{"tag":"bool"}},"true_target":"left","false_target":"right"}]},
+                {"name":"dead","instructions":[
+                    {"kind":"const","result":{"tag":"value","name":"dead_value","type":{"tag":"int"}},"value":{"tag":"int","value":9}},
+                    {"kind":"store","slot":{"tag":"value","name":"s","type":{"tag":"int"}},"value":{"tag":"value","name":"dead_value","type":{"tag":"int"}}},
+                    {"kind":"jump","target":"join"}]},
+                {"name":"left","instructions":[
+                    {"kind":"const","result":{"tag":"value","name":"one","type":{"tag":"int"}},"value":{"tag":"int","value":1}},
+                    {"kind":"store","slot":{"tag":"value","name":"unused","type":{"tag":"int"}},"value":{"tag":"value","name":"one","type":{"tag":"int"}}},
+                    {"kind":"jump","target":"join"}]},
+                {"name":"right","instructions":[
+                    {"kind":"const","result":{"tag":"value","name":"two","type":{"tag":"int"}},"value":{"tag":"int","value":2}},
+                    {"kind":"jump","target":"join"}]},
+                {"name":"join","instructions":[{"kind":"return","value":null,"transferred_storage":null}]}
+            ]
+        }]
+    })).unwrap();
+    let value = serde_json::to_value(
+        lower_normalized_ir_to_ssa_v1(&module)
+            .unwrap()
+            .to_schema_v2(),
+    )
+    .unwrap();
+    let blocks = value["functions"][0]["blocks"].as_array().unwrap();
+    assert!(blocks.iter().all(|block| block["name"] != "dead"));
+    let join = blocks.iter().find(|block| block["name"] == "join").unwrap();
+    assert!(
+        join["instructions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|instruction| instruction["kind"] != "phi")
+    );
+}
