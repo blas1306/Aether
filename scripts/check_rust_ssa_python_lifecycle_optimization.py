@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from hashlib import sha256
 import inspect
 import json
 import math
@@ -15,6 +16,14 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_EVIDENCE = ROOT / "docs/compiler/rust_ssa_python_lifecycle_optimization.json"
 DEFAULT_REPORT = ROOT / "docs/compiler/RUST_SSA_PYTHON_LIFECYCLE_OPTIMIZATION.md"
 BASELINE_REVISION = "b5987ef192f3a68a92bb5149787513939dcfcd16"
+REFERENCE_FIXTURE = (
+    ROOT
+    / "tests/fixtures/rust_3_13"
+    / f"lifecycle_{BASELINE_REVISION}.py"
+)
+REFERENCE_FIXTURE_SHA256 = (
+    "8b142a0e81145084a5017b38444e7c76fb619ec5c874791166f00dcf42037ada"
+)
 METRICS = {
     "lifecycle_normalization",
     "python_only_total",
@@ -115,6 +124,11 @@ def build_record(
     function_source = source.split("    def _expand_function", 1)[1].split(
         "    def _repair_constructor_invocation_ownership", 1
     )[0]
+    reference_payload = REFERENCE_FIXTURE.read_bytes()
+    reference_source = reference_payload.decode("utf-8")
+    reference_function_source = reference_source.split(
+        "    def _expand_function", 1
+    )[1].split("    def _repair_constructor_invocation_ownership", 1)[0]
     report = report_path.read_text(encoding="utf-8")
 
     ordinary_rounds = methodology.get("ordinary_rounds", 0)
@@ -124,6 +138,19 @@ def build_record(
         "milestone_decision_baseline": evidence.get("milestone") == "RUST-3.13"
         and evidence.get("decision") == "RUST_SSA_PYTHON_LIFECYCLE_OPTIMIZED"
         and evidence.get("baseline_revision") == BASELINE_REVISION,
+        "reference_fixture_integrity": sha256(reference_payload).hexdigest()
+        == REFERENCE_FIXTURE_SHA256,
+        "reference_preoptimization_operand_scans": (
+            "self._used_values.update(self._instruction_operands(instruction))"
+            in reference_function_source
+            and reference_function_source.count(
+                "_instruction_operand_occurrences(instruction)"
+            )
+            == 2
+            and "def _instruction_operands(" in reference_source
+            and "return set(LifecycleExpander._instruction_operand_occurrences(instruction))"
+            in reference_source
+        ),
         "worktree_identity": isinstance(evidence.get("implementation_revision"), str)
         and len(evidence.get("implementation_revision", "")) == 40
         and isinstance(evidence.get("worktree_identity"), list),

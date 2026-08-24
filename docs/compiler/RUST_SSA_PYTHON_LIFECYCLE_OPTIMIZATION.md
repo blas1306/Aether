@@ -71,12 +71,15 @@ Rust remains authoritative. The Python shadow remains mandatory, synchronous, fa
 
 The RUST-3.13 checker validates raw samples and summaries, comparable before/after methodology, exact baseline, audit categories, adversarial coverage, invocation independence, source structure, mandatory shadow/verifiers, fail-closed behavior, frozen invariants, and the absence of hardware speed gates. The focused milestone tests additionally load the exact baseline normalizer and compare representative normalized IR and invalid diagnostics.
 
+The qualification reference is the checked-in exact blob from baseline `b5987ef192f3a68a92bb5149787513939dcfcd16`, frozen at `tests/fixtures/rust_3_13/lifecycle_b5987ef192f3a68a92bb5149787513939dcfcd16.py` with SHA-256 `8b142a0e81145084a5017b38444e7c76fb619ec5c874791166f00dcf42037ada`. Ordinary qualification verifies that digest and never reads Git history. Maintainers who have the historical object can additionally run `python scripts/measure_rust_ssa_python_lifecycle_optimization.py --verify-reference-fixture` to compare the fixture byte-for-byte with the original blob.
+
 Changed files:
 
 - `src/aether/ir/lifecycle.py`
 - `scripts/measure_rust_ssa_python_lifecycle_optimization.py`
 - `scripts/check_rust_ssa_python_lifecycle_optimization.py`
 - `tests/aether/test_rust_ssa_python_lifecycle_optimization.py`
+- `tests/fixtures/rust_3_13/lifecycle_b5987ef192f3a68a92bb5149787513939dcfcd16.py`
 - `docs/compiler/rust_ssa_python_lifecycle_optimization.json`
 - `docs/compiler/RUST_SSA_PYTHON_LIFECYCLE_OPTIMIZATION.md`
 

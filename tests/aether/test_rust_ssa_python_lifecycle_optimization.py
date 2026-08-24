@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from hashlib import sha256
 import importlib.util
+import inspect
 import json
 from pathlib import Path
 
@@ -87,6 +89,76 @@ def test_operand_occurrences_are_discovered_once_per_instruction() -> None:
 
     assert expander.operand_walks == 2
     assert ir_module_to_dto(optimized) == ir_module_to_dto(expand_lifecycle(module))
+
+
+def test_reference_normalizer_does_not_require_git_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = _module("rust_3_13_measure_no_history", MEASURER)
+
+    def unavailable(*_args, **_kwargs):
+        raise AssertionError("ordinary qualification must not execute a subprocess")
+
+    monkeypatch.setattr(runner.subprocess, "check_output", unavailable)
+    module = _valid_module("no_history", StringType())
+
+    assert ir_module_to_dto(runner._reference_normalizer()(module)) == ir_module_to_dto(
+        expand_lifecycle(module)
+    )
+
+
+def test_frozen_reference_hash_is_exact_and_deterministic() -> None:
+    runner = _module("rust_3_13_measure_fixture_hash", MEASURER)
+    payload = runner.REFERENCE_FIXTURE.read_bytes()
+
+    assert runner.BASELINE_REVISION == "b5987ef192f3a68a92bb5149787513939dcfcd16"
+    assert runner.REFERENCE_FIXTURE_SHA256 == (
+        "8b142a0e81145084a5017b38444e7c76fb619ec5c874791166f00dcf42037ada"
+    )
+    assert sha256(payload).hexdigest() == runner.REFERENCE_FIXTURE_SHA256
+    assert runner._reference_fixture_source().encode("utf-8") == payload
+
+
+def test_history_maintenance_check_accepts_match_and_rejects_changes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runner = _module("rust_3_13_measure_history_check", MEASURER)
+    payload = runner.REFERENCE_FIXTURE.read_bytes()
+
+    def matching_history(command, *, cwd):
+        assert command == [
+            "git",
+            "show",
+            f"{runner.BASELINE_REVISION}:src/aether/ir/lifecycle.py",
+        ]
+        assert cwd == ROOT
+        return payload
+
+    monkeypatch.setattr(runner.subprocess, "check_output", matching_history)
+    assert runner._verify_reference_fixture_against_history() == (
+        runner.REFERENCE_FIXTURE_SHA256
+    )
+
+    altered = tmp_path / "altered_reference.py"
+    altered.write_bytes(payload + b"# altered\n")
+    with pytest.raises(RuntimeError, match="reference fixture SHA-256 mismatch"):
+        runner._verify_reference_fixture_against_history(altered)
+
+    monkeypatch.setattr(
+        runner.subprocess,
+        "check_output",
+        lambda *_args, **_kwargs: payload + b"# altered history\n",
+    )
+    with pytest.raises(RuntimeError, match="differs from"):
+        runner._verify_reference_fixture_against_history()
+
+
+def test_before_measurement_route_is_the_frozen_preoptimization_reference() -> None:
+    runner = _module("rust_3_13_measure_route", MEASURER)
+
+    assert "reference = _reference_normalizer()" in inspect.getsource(runner.measure)
+    assert 'implementations = {"before": reference, "after": expand_lifecycle}' in (
+        inspect.getsource(runner._measure_module)
+    )
 
 
 def test_exact_baseline_and_optimized_normalized_ir_match_representative_corpus() -> None:

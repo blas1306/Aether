@@ -39,6 +39,14 @@ from qualify_rust_ssa_lowering_adversarial import linear  # noqa: E402
 
 MILESTONE = "RUST-3.13"
 BASELINE_REVISION = "b5987ef192f3a68a92bb5149787513939dcfcd16"
+REFERENCE_FIXTURE = (
+    ROOT
+    / "tests/fixtures/rust_3_13"
+    / f"lifecycle_{BASELINE_REVISION}.py"
+)
+REFERENCE_FIXTURE_SHA256 = (
+    "8b142a0e81145084a5017b38444e7c76fb619ec5c874791166f00dcf42037ada"
+)
 DEFAULT_EXECUTABLE = ROOT / "compiler-rs/target/release/aether-ssa-shadow"
 DEFAULT_OUTPUT = ROOT / "docs/compiler/rust_ssa_python_lifecycle_optimization.json"
 WORKLOADS = base.WORKLOADS
@@ -56,21 +64,48 @@ def _revision() -> str:
     ).strip()
 
 
-def _reference_normalizer() -> Callable[[object], object]:
-    """Load the exact baseline file as a qualification-only reference path."""
+def _reference_fixture_source(
+    fixture: Path = REFERENCE_FIXTURE,
+) -> str:
+    """Read the frozen baseline only after verifying its historical digest."""
 
-    source = subprocess.check_output(
-        [
-            "git",
-            "show",
-            f"{BASELINE_REVISION}:src/aether/ir/lifecycle.py",
-        ],
+    payload = fixture.read_bytes()
+    actual_sha256 = sha256(payload).hexdigest()
+    if actual_sha256 != REFERENCE_FIXTURE_SHA256:
+        raise RuntimeError(
+            "RUST-3.13 reference fixture SHA-256 mismatch: "
+            f"expected {REFERENCE_FIXTURE_SHA256}, got {actual_sha256}"
+        )
+    return payload.decode("utf-8")
+
+
+def _verify_reference_fixture_against_history(
+    fixture: Path = REFERENCE_FIXTURE,
+) -> str:
+    """Maintenance-only check against Git history when the object is present."""
+
+    payload = _reference_fixture_source(fixture).encode("utf-8")
+    historical = subprocess.check_output(
+        ["git", "show", f"{BASELINE_REVISION}:src/aether/ir/lifecycle.py"],
         cwd=ROOT,
-        text=True,
     )
+    if payload != historical:
+        raise RuntimeError(
+            "RUST-3.13 reference fixture differs from "
+            f"{BASELINE_REVISION}:src/aether/ir/lifecycle.py"
+        )
+    return REFERENCE_FIXTURE_SHA256
+
+
+def _reference_normalizer(
+    fixture: Path = REFERENCE_FIXTURE,
+) -> Callable[[object], object]:
+    """Load the frozen exact baseline as a qualification-only reference path."""
+
+    source = _reference_fixture_source(fixture)
     name = "aether.ir._rust_3_13_reference_lifecycle"
     module = types.ModuleType(name)
-    module.__file__ = f"git:{BASELINE_REVISION}:src/aether/ir/lifecycle.py"
+    module.__file__ = str(fixture)
     module.__package__ = "aether.ir"
     sys.modules[name] = module
     exec(compile(source, module.__file__, "exec"), module.__dict__)
@@ -358,7 +393,10 @@ def measure(args: argparse.Namespace) -> dict[str, object]:
             "clock": "time.perf_counter",
             "same_process_interleaved_before_after": True,
             "garbage_collection": "full collection before each separately timed route; collection is outside timings",
-            "reference": f"exact git blob {BASELINE_REVISION}:src/aether/ir/lifecycle.py",
+            "reference": (
+                f"frozen exact blob {BASELINE_REVISION}:src/aether/ir/lifecycle.py "
+                f"sha256={REFERENCE_FIXTURE_SHA256}"
+            ),
             "warmups": args.warmups,
             "ordinary_rounds": args.rounds,
             "deep_rounds": args.deep_rounds,
@@ -426,7 +464,19 @@ def main() -> int:
     parser.add_argument("--deep-rounds", type=int, default=3)
     parser.add_argument("--deep-sizes", type=int, nargs="+", default=[100, 1000, 5000, 10000])
     parser.add_argument("--timeout", type=float, default=600.0)
+    parser.add_argument(
+        "--verify-reference-fixture",
+        action="store_true",
+        help="compare the frozen fixture with the historical Git blob",
+    )
     args = parser.parse_args()
+    if args.verify_reference_fixture:
+        digest = _verify_reference_fixture_against_history()
+        print(
+            "RUST-3.13 reference fixture verified: "
+            f"revision={BASELINE_REVISION} sha256={digest}"
+        )
+        return 0
     if args.warmups < 1 or args.rounds < 3 or args.deep_rounds < 3:
         parser.error("qualification requires >=1 warmup and >=3 measured rounds")
     evidence = measure(args)
