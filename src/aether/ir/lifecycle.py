@@ -285,12 +285,17 @@ class LifecycleExpander:
         self._owned_values = set()
         self._used_values = set()
         self._remaining_uses = Counter()
+        # Operand discovery reflects over every instruction field.  Keep its
+        # immutable result for this function so the census and ordered rewrite
+        # consume the same occurrences without rescanning the instruction.
+        operand_occurrences: list[list[tuple[IRValue, ...]]] = []
         for block in function.blocks:
+            block_occurrences: list[tuple[IRValue, ...]] = []
             for instruction in block.instructions:
-                self._used_values.update(self._instruction_operands(instruction))
-                self._remaining_uses.update(
-                    self._instruction_operand_occurrences(instruction)
-                )
+                occurrences = self._instruction_operand_occurrences(instruction)
+                block_occurrences.append(occurrences)
+                self._used_values.update(occurrences)
+                self._remaining_uses.update(occurrences)
                 if isinstance(instruction, (IRCall, IRCallIndirect, IRInterfaceCall)) and instruction.result is not None:
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
@@ -327,6 +332,7 @@ class LifecycleExpander:
                 elif isinstance(instruction, IRClassGet):
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
+            operand_occurrences.append(block_occurrences)
         self._used_names = {parameter.name for parameter in function.parameters}
 
         def record_names(value: object) -> None:
@@ -343,13 +349,13 @@ class LifecycleExpander:
         numeric_names = [int(name) for name in self._used_names if name.isdigit()]
         self._next = max(numeric_names, default=-1) + 1
         blocks = []
-        for block in function.blocks:
+        for block, block_occurrences in zip(function.blocks, operand_occurrences):
             instructions: list[IRInstruction] = []
-            for instruction in block.instructions:
+            for instruction, occurrences in zip(
+                block.instructions, block_occurrences
+            ):
                 instructions.extend(self._expand_instruction(instruction))
-                self._remaining_uses.subtract(
-                    self._instruction_operand_occurrences(instruction)
-                )
+                self._remaining_uses.subtract(occurrences)
             blocks.append(IRBasicBlock(block.name, self._fold_trivial_return_transfer(instructions)))
         expanded = IRFunction(
             function.name,
@@ -955,10 +961,6 @@ class LifecycleExpander:
             self._owned_values.remove(result)
             emitted.append(IRCall("__aether_release", (result,), None, "__aether_release"))
         return emitted
-
-    @staticmethod
-    def _instruction_operands(instruction: IRInstruction) -> set[IRValue]:
-        return set(LifecycleExpander._instruction_operand_occurrences(instruction))
 
     @staticmethod
     def _instruction_operand_occurrences(
