@@ -79,17 +79,19 @@ def main() -> int:
             "an absolute clang executable is required for native comparisons"
         )
 
-    if (
-        SSALoweringAuthorityConfiguration().mode
-        is not SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
-    ):
-        raise RuntimeError("repository default is not Rust-authority/Python-shadow mode")
+    selected_mode = SSALoweringAuthorityConfiguration().mode
+    if selected_mode not in {
+        SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED,
+        SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW,
+    }:
+        raise RuntimeError("clean-install probe requires a Rust-authority mode")
 
     client = production_rust_ssa_lowering_client()
     origins: list[str] = []
     fixture_mode_matrices = 0
     llvm_modules = 0
     native_comparisons = 0
+    shadow_independent_traces = 0
     with tempfile.TemporaryDirectory(prefix="aether-ssa-native-") as raw_native:
         native_directory = Path(raw_native)
         for index, path in enumerate(args.source):
@@ -104,6 +106,24 @@ def main() -> int:
                 raise RuntimeError(
                     "SSA returned to the optimizer did not originate from Rust"
                 )
+            if selected_mode is (
+                SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED
+            ):
+                trace = pipeline.last_authority_report
+                if not (
+                    getattr(trace, "refinement_verification_executed", False)
+                    and getattr(trace, "final_generic_verification_executed", False)
+                    and not getattr(trace, "python_ssa_lowering_executed", True)
+                    and not getattr(
+                        trace,
+                        "canonical_rust_python_comparison_executed",
+                        True,
+                    )
+                ):
+                    raise RuntimeError(
+                        "clean-install default did not prove shadow independence"
+                    )
+                shadow_independent_traces += 1
             optimized = SSAOptimizerPipeline(verify_after_each=True).run(
                 compile_result.ssa_module
             )
@@ -178,7 +198,7 @@ def main() -> int:
     ):
         raise RuntimeError("SSA rollback configurations diverged")
     result = {
-        "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+        "mode": selected_mode.name,
         "comparisons": len(origins),
         "returned_ssa_origins": origins,
         "optimizer_handoffs": len(origins),
@@ -193,9 +213,28 @@ def main() -> int:
             "PYTHON_SSA_ONLY",
             "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
             "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+            *(
+                ["RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED"]
+                if selected_mode
+                is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED
+                else []
+            ),
         ],
-        "repository_default": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+        "repository_default": selected_mode.name,
         "default_returned_ssa_origin": "rust_schema_v2_import",
+        "shadow_independent_traces": shadow_independent_traces,
+        "python_shadow_executions_in_default": (
+            0
+            if selected_mode
+            is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED
+            else len(origins)
+        ),
+        "canonical_comparisons_in_default": (
+            0
+            if selected_mode
+            is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED
+            else len(origins)
+        ),
         "semantic_mismatches": 0,
         "infrastructure_failures": 0,
         "process_startups": client.process_start_count,

@@ -140,13 +140,17 @@ def test_run_order_has_no_mode_or_request_state(order) -> None:
     assert len(client.payloads) == 2
 
 
-def test_qualification_cannot_be_selected_as_an_authority_mode() -> None:
+def test_rust_4_4_qualification_api_is_preserved_after_production_promotion() -> None:
     assert {mode.value for mode in SSALoweringAuthorityMode} == {
         "python_ssa_only",
         "python_ssa_authority_rust_shadow",
         "rust_ssa_authority_python_shadow",
+        "rust_ssa_authority_refinement_verified",
     }
-    assert all("independent" not in mode.value for mode in SSALoweringAuthorityMode)
+    assert all(
+        mode.value != "qualification_only_shadow_independent"
+        for mode in SSALoweringAuthorityMode
+    )
 
 
 @pytest.mark.parametrize(

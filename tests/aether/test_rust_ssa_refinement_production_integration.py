@@ -223,6 +223,7 @@ def test_refinement_runs_only_when_rust_is_authoritative(
 ) -> None:
     calls = 0
     original = shadow.verify_ssa_refinement
+    import aether.ssa.shadow_independent as shadow_independent
 
     def capture(initial, ssa):
         nonlocal calls
@@ -230,12 +231,22 @@ def test_refinement_runs_only_when_rust_is_authoritative(
         return original(initial, ssa)
 
     monkeypatch.setattr(shadow, "verify_ssa_refinement", capture)
+    monkeypatch.setattr(shadow_independent, "verify_ssa_refinement", capture)
     module = IRModule()
     response = _response(module)
 
     rust_authority = SSAPipeline(rust_shadow_client=StaticClient(response))
     rust_authority.run(module)
     assert calls == 1
+
+    differential = SSAPipeline(
+        authority_configuration=SSALoweringAuthorityConfiguration(
+            SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
+        ),
+        rust_shadow_client=StaticClient(response),
+    )
+    differential.run(module)
+    assert calls == 2
 
     python_authority = SSAPipeline(
         authority_configuration=SSALoweringAuthorityConfiguration(
@@ -250,7 +261,7 @@ def test_refinement_runs_only_when_rust_is_authoritative(
         )
     )
     python_only.run(module)
-    assert calls == 1
+    assert calls == 2
 
 
 def test_ordinary_return_shape_and_protocol_are_unchanged() -> None:

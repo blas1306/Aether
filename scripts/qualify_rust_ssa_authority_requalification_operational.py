@@ -82,7 +82,12 @@ def _failure_observation(
 
     with patch.object(GeneralSSABuilder, "build", build_python_shadow):
         try:
-            SSAPipeline(rust_shadow_client=client).run(IRModule())
+            SSAPipeline(
+                authority_configuration=SSALoweringAuthorityConfiguration(
+                    SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
+                ),
+                rust_shadow_client=client,
+            ).run(IRModule())
         except SSAShadowFailure as exc:
             return {
                 "rejected": True,
@@ -151,7 +156,12 @@ def main() -> int:
     concurrency = soak.get("concurrency", {})
 
     matching = _Client()
-    production_default = SSAPipeline(rust_shadow_client=matching)
+    production_default = SSAPipeline(
+        authority_configuration=SSALoweringAuthorityConfiguration(
+            SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
+        ),
+        rust_shadow_client=matching,
+    )
     default_ssa = production_default.run(IRModule()).ssa_module
     python_only = SSAPipeline(
         authority_configuration=SSALoweringAuthorityConfiguration(

@@ -131,7 +131,7 @@ def test_aggregate_blocks_missing_evidence_and_preserves_authority_contract(tmp_
     assert report["decision"] == "RUST_SSA_PRODUCTION_STABILIZATION_BLOCKED"
     assert report["historical_preservation"]["status"] == "PASS"
     assert report["schema_policy_freeze"]["status"] == "PASS"
-    assert SSALoweringAuthorityConfiguration().mode is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
+    assert SSALoweringAuthorityConfiguration().mode is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED
     # Pytest 9 may omit ``file`` and expose only a dotted classname in JUnit.
     # This minimized regression prevents all passing families being misreported
     # as uncollected, which was found during the first stabilization run.
@@ -255,7 +255,11 @@ def test_exact_revision_complete_evidence_stabilizes(tmp_path: Path) -> None:
                     "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
                     "repository_default": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
                     "default_returned_ssa_origin": "rust_schema_v2_import",
-                    "modes_exercised": [mode.name for mode in SSALoweringAuthorityMode],
+                    "modes_exercised": [
+                        "PYTHON_SSA_ONLY",
+                        "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
+                        "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+                    ],
                     "returned_ssa_origins": ["rust_schema_v2_import"],
                     "fixture_mode_matrix_checks": 17,
                     "native_baseline_comparisons": 9,

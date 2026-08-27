@@ -39,6 +39,7 @@ _SSA_SHADOW_BASENAME = "aether-ssa-shadow"
 RUST_SSA_QUALIFICATION_EXECUTABLE_ENV = (
     "AETHER_INTERNAL_RUST_SSA_QUALIFICATION_EXECUTABLE"
 )
+SSA_AUTHORITY_MODE_ENV = "AETHER_SSA_AUTHORITY_MODE"
 
 _SSA_SHADOW_PLATFORMS = {
     "linux-x86_64": "x86_64-unknown-linux-gnu",
@@ -53,6 +54,9 @@ class SSALoweringAuthorityMode(str, Enum):
     PYTHON_SSA_ONLY = "python_ssa_only"
     PYTHON_SSA_AUTHORITY_RUST_SHADOW = "python_ssa_authority_rust_shadow"
     RUST_SSA_AUTHORITY_PYTHON_SHADOW = "rust_ssa_authority_python_shadow"
+    RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED = (
+        "rust_ssa_authority_refinement_verified"
+    )
 
 
 @unique
@@ -61,11 +65,32 @@ class SSAShadowFailurePolicy(str, Enum):
     OBSERVE = "observe"
 
 
+def resolve_ssa_lowering_authority_mode(
+    environment: Mapping[str, str] | None = None,
+) -> SSALoweringAuthorityMode:
+    """Resolve the one production policy override, failing closed on errors."""
+    values = os.environ if environment is None else environment
+    raw = values.get(SSA_AUTHORITY_MODE_ENV)
+    if raw is None:
+        return SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED
+    try:
+        return SSALoweringAuthorityMode(raw)
+    except ValueError:
+        supported = ", ".join(mode.value for mode in SSALoweringAuthorityMode)
+        raise ValueError(
+            f"invalid {SSA_AUTHORITY_MODE_ENV}={raw!r}; expected one of: "
+            f"{supported}"
+        ) from None
+
+
 @dataclass(frozen=True)
 class SSALoweringAuthorityConfiguration:
-    # RUST-3.6-V2 production default. Rust returns the authoritative schema-v2
-    # import only after the mandatory synchronous Python shadow matches.
-    mode: SSALoweringAuthorityMode = SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
+    # RUST-4.5 production default. Rust returns the authoritative schema-v2
+    # import only after mandatory imported, refinement, and final verification.
+    # An explicit environment override is resolved in this one location.
+    mode: SSALoweringAuthorityMode = field(
+        default_factory=resolve_ssa_lowering_authority_mode
+    )
     failure_policy: SSAShadowFailurePolicy = SSAShadowFailurePolicy.FAIL_CLOSED
     protocol_version: int = SSA_SHADOW_PROTOCOL_VERSION
 
@@ -77,7 +102,11 @@ class SSALoweringAuthorityConfiguration:
         if self.protocol_version != SSA_SHADOW_PROTOCOL_VERSION:
             raise ValueError("only SSA shadow protocol version 1 is supported")
         if (
-            self.mode is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
+            self.mode
+            in {
+                SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW,
+                SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED,
+            }
             and self.failure_policy is not SSAShadowFailurePolicy.FAIL_CLOSED
         ):
             raise ValueError("Rust SSA authority requires fail-closed semantics")

@@ -224,7 +224,7 @@ def test_diagnostic_rust_only_is_not_an_authority_mode_and_skips_python(monkeypa
     }
     assert (
         SSALoweringAuthorityConfiguration().mode
-        is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
+        is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED
     )
 
 

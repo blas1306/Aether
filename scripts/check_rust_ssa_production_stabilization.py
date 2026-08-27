@@ -265,10 +265,21 @@ def build_record(revision: str, evidence_dir: Path) -> dict[str, Any]:
 
     shadow_source = (ROOT / "src/aether/ssa/shadow.py").read_text(encoding="utf-8")
     workflow = (ROOT / ".github/workflows/rust-ssa-shadow.yml").read_text(encoding="utf-8")
-    default_frozen = re.search(
+    historical_default = re.search(
         r"mode:\s*SSALoweringAuthorityMode\s*=\s*SSALoweringAuthorityMode\.RUST_SSA_AUTHORITY_PYTHON_SHADOW",
         shadow_source,
     ) is not None
+    rust_4_5_policy_aware_default = all(
+        token in shadow_source
+        for token in (
+            "RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED",
+            "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+            'SSA_AUTHORITY_MODE_ENV = "AETHER_SSA_AUTHORITY_MODE"',
+        )
+    )
+    default_contract_preserved_or_superseded = (
+        historical_default or rust_4_5_policy_aware_default
+    )
     python_shadow_preserved = "GeneralSSABuilder().build(python_input)" in shadow_source
     fail_closed = (
         "Rust SSA authority requires fail-closed semantics" in shadow_source
@@ -398,7 +409,11 @@ def build_record(revision: str, evidence_dir: Path) -> dict[str, Any]:
     )
 
     checks = [
-        ("default remains Rust authority/Python shadow", default_frozen),
+        (
+            "historical differential default remains selectable or is "
+            "superseded by the policy-aware RUST-4.5 default",
+            default_contract_preserved_or_superseded,
+        ),
         ("mandatory synchronous GeneralSSABuilder shadow remains", python_shadow_preserved),
         ("fail-closed comparison and no Rust-only mode remain", fail_closed and no_rust_only),
         ("exact-revision corpus coverage is fully accounted and mismatch-free", corpus_pass),

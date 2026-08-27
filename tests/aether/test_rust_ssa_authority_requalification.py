@@ -219,7 +219,7 @@ def test_pre_promotion_checker_cannot_requalify_after_default_switch(tmp_path: P
 def test_safe_default_and_ci_directly_require_new_qualification_gates() -> None:
     assert (
         SSALoweringAuthorityConfiguration().mode
-        is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
+        is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED
     )
     workflow = (ROOT / ".github/workflows/rust-ssa-shadow.yml").read_text(
         encoding="utf-8"

@@ -1,9 +1,9 @@
-"""Qualification-only, shadow-independent Rust SSA acceptance.
+"""Shadow-independent, refinement-verified Rust SSA acceptance.
 
 This module deliberately does not import the Python SSA builder, its CFG or
 dominance machinery, phi placement, renaming, or the Rust/Python canonical
-comparison.  It is a non-production qualification boundary: the ordinary
-authority configuration cannot select it.
+comparison.  The production policy and its qualification API share this one
+fail-closed implementation so their ordering cannot drift.
 """
 
 from __future__ import annotations
@@ -95,7 +95,7 @@ class ShadowIndependentQualificationTrace:
         }
 
 
-class ShadowIndependentQualificationFailure(RuntimeError):
+class ShadowIndependentRustAuthorityFailure(RuntimeError):
     """Fail-closed rejection with the trace completed before the failure."""
 
     def __init__(self, trace: ShadowIndependentQualificationTrace, detail: str):
@@ -121,7 +121,8 @@ class _QualificationHooks:
 
 
 class _TraceRecorder:
-    def __init__(self) -> None:
+    def __init__(self, mode: str) -> None:
+        self.mode = mode
         self.completed: list[str] = []
         self.counts = {stage: 0 for stage in SHADOW_INDEPENDENT_STAGE_MANIFEST}
         self.seconds: dict[str, float] = {}
@@ -147,7 +148,7 @@ class _TraceRecorder:
     ) -> ShadowIndependentQualificationTrace:
         return ShadowIndependentQualificationTrace(
             qualification_revision=SHADOW_INDEPENDENT_QUALIFICATION_REVISION,
-            mode="qualification_only_shadow_independent",
+            mode=self.mode,
             accepted=accepted,
             completed_stages=tuple(self.completed),
             failed_stage=failed_stage,
@@ -182,21 +183,16 @@ def _raise_failure(
     ) from exception
 
 
-def qualify_shadow_independent_rust_ssa(
+def _lower_shadow_independent_rust_ssa(
     module: IRModule,
     client: RustSSAQualificationClient,
     *,
+    mode: str,
     _hooks: _QualificationHooks | None = None,
 ) -> tuple[SSAModule, ShadowIndependentQualificationTrace]:
-    """Accept Rust SSA without executing or consuming a Python SSA result.
+    """Accept Rust SSA without executing or consuming a Python SSA result."""
 
-    This API is intentionally absent from ``SSALoweringAuthorityMode`` and
-    from pipeline configuration.  Callers must import and invoke it directly;
-    it is qualification infrastructure, not an alternative production mode.
-    Every verifier boundary is fail-closed and there is no fallback authority.
-    """
-
-    recorder = _TraceRecorder()
+    recorder = _TraceRecorder(mode)
     hooks = _hooks or _QualificationHooks()
 
     try:
@@ -336,3 +332,35 @@ def qualify_shadow_independent_rust_ssa(
 
     recorder.run("accept", lambda: None)
     return imported, recorder.trace(accepted=True)
+
+
+def lower_with_shadow_independent_rust_authority(
+    module: IRModule,
+    client: RustSSAQualificationClient,
+) -> tuple[SSAModule, ShadowIndependentQualificationTrace]:
+    """Execute the RUST-4.5 production ordering with no Python fallback."""
+    return _lower_shadow_independent_rust_ssa(
+        module,
+        client,
+        mode="rust_ssa_authority_refinement_verified",
+    )
+
+
+def qualify_shadow_independent_rust_ssa(
+    module: IRModule,
+    client: RustSSAQualificationClient,
+    *,
+    _hooks: _QualificationHooks | None = None,
+) -> tuple[SSAModule, ShadowIndependentQualificationTrace]:
+    """Run the preserved RUST-4.4 qualification entry point."""
+    return _lower_shadow_independent_rust_ssa(
+        module,
+        client,
+        mode="qualification_only_shadow_independent",
+        _hooks=_hooks,
+    )
+
+
+# Backward-compatible RUST-4.4 name.  The implementation now also serves the
+# production mode, so the primary class name no longer implies test-only use.
+ShadowIndependentQualificationFailure = ShadowIndependentRustAuthorityFailure

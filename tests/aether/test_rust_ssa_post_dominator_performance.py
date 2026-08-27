@@ -102,7 +102,7 @@ def test_ordinary_companion_response_shape_and_persistent_session() -> None:
         assert client.request_count == 2
 
 
-def test_no_new_authority_mode_or_production_optimization() -> None:
+def test_rust_4_5_adds_only_policy_mode_not_production_optimization() -> None:
     evidence = json.loads(EVIDENCE.read_text(encoding="utf-8"))
     from aether.ssa.shadow import SSALoweringAuthorityMode
 
@@ -110,6 +110,7 @@ def test_no_new_authority_mode_or_production_optimization() -> None:
         "PYTHON_SSA_ONLY",
         "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
         "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+        "RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED",
     }
     assert evidence["production_invariants"]["production_optimization_implemented"] is False
     assert evidence["production_invariants"]["ordinary_characterization_fields"] is False

@@ -16,6 +16,7 @@ from aether.ssa.shadow import (
     SSALoweringAuthorityMode,
     SSAShadowFailurePolicy,
 )
+from aether.ssa.shadow_independent import ShadowIndependentRustAuthorityFailure
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -87,15 +88,18 @@ def test_v2_promotes_rust_authority_and_preserves_fail_closed_modes() -> None:
         "PYTHON_SSA_ONLY",
         "PYTHON_SSA_AUTHORITY_RUST_SHADOW",
         "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+        "RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED",
     }
     assert (
         SSALoweringAuthorityConfiguration().mode
-        is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
+        is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED
     )
     client = _ExplodingClient()
-    with pytest.raises(shadow_module.SSAShadowFailure) as caught:
+    with pytest.raises(ShadowIndependentRustAuthorityFailure) as caught:
         SSAPipeline(rust_shadow_client=client).run(IRModule())
-    assert caught.value.report.classification == "rust_infrastructure_failure"
+    assert caught.value.trace.failure_classification == (
+        "rust_lowering_or_verifier_failure"
+    )
     assert client.request_count == 1
     with pytest.raises(ValueError, match="requires fail-closed"):
         SSALoweringAuthorityConfiguration(
@@ -104,7 +108,7 @@ def test_v2_promotes_rust_authority_and_preserves_fail_closed_modes() -> None:
         )
 
 
-def test_production_default_returns_rust_ssa_and_still_rejects_mismatch(
+def test_differential_mode_returns_rust_ssa_and_still_rejects_mismatch(
     monkeypatch,
 ) -> None:
     imported = []
@@ -124,7 +128,13 @@ def test_production_default_returns_rust_ssa_and_still_rejects_mismatch(
 
     monkeypatch.setattr(shadow_module, "ssa_module_from_dto", capture_import)
     monkeypatch.setattr(shadow_module.GeneralSSABuilder, "build", capture_python)
-    matching = SSAPipeline(rust_shadow_client=_EmptyMatchClient())
+    differential = SSALoweringAuthorityConfiguration(
+        SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
+    )
+    matching = SSAPipeline(
+        authority_configuration=differential,
+        rust_shadow_client=_EmptyMatchClient(),
+    )
     returned = matching.run(IRModule()).ssa_module
     assert returned is imported[0]
     assert returned is not python_results[0]
@@ -142,7 +152,10 @@ def test_production_default_returns_rust_ssa_and_still_rejects_mismatch(
         }
     )
     with pytest.raises(shadow_module.SSAShadowFailure) as caught:
-        SSAPipeline(rust_shadow_client=mismatched).run(IRModule())
+        SSAPipeline(
+            authority_configuration=differential,
+            rust_shadow_client=mismatched,
+        ).run(IRModule())
     assert caught.value.report.classification == "refinement_verifier_failure"
     assert mismatched.request_count == 1
 
@@ -166,6 +179,9 @@ def test_pipeline_returns_the_imported_rust_object_not_python_shadow(monkeypatch
     monkeypatch.setattr(shadow_module, "ssa_module_from_dto", capture_import)
     monkeypatch.setattr(shadow_module.GeneralSSABuilder, "build", capture_python)
     pipeline = SSAPipeline(
+        authority_configuration=SSALoweringAuthorityConfiguration(
+            SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
+        ),
         rust_shadow_client=_EmptyMatchClient(),
     )
     result = pipeline.run(IRModule()).ssa_module

@@ -328,11 +328,22 @@ def build_record(revision: str, evidence_dir: Path) -> dict[str, Any]:
     workflow = (ROOT / ".github/workflows/rust-ssa-shadow.yml").read_text(
         encoding="utf-8"
     )
-    rust_default = re.search(
+    historical_rust_default = re.search(
         r"mode:\s*SSALoweringAuthorityMode\s*=\s*"
         r"SSALoweringAuthorityMode\.RUST_SSA_AUTHORITY_PYTHON_SHADOW",
         shadow_source,
     ) is not None
+    rust_4_5_policy_aware_default = all(
+        token in shadow_source
+        for token in (
+            "RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED",
+            "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+            'SSA_AUTHORITY_MODE_ENV = "AETHER_SSA_AUTHORITY_MODE"',
+        )
+    )
+    rust_default_preserved_or_superseded = (
+        historical_rust_default or rust_4_5_policy_aware_default
+    )
     return_origin_wired = all(
         token in pipeline_source
         for token in (
@@ -468,7 +479,11 @@ def build_record(revision: str, evidence_dir: Path) -> dict[str, Any]:
     performance_present = _performance_evidence_present(performance, revision)
 
     checks = [
-        ("repository default is Rust authority/Python shadow", rust_default),
+        (
+            "historical Rust/Python default remains selectable or is "
+            "superseded by the policy-aware RUST-4.5 default",
+            rust_default_preserved_or_superseded,
+        ),
         ("returned object is wired from Rust schema-v2 import", return_origin_wired),
         ("Python GeneralSSABuilder remains mandatory", python_preserved),
         ("all authority failures remain fail closed", fail_closed),

@@ -20,6 +20,7 @@ import venv
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 from package_rust_ssa_shadow import package  # noqa: E402
+from aether.ssa.shadow import SSA_AUTHORITY_MODE_ENV  # noqa: E402
 
 
 PLATFORMS = {
@@ -112,6 +113,11 @@ def main() -> int:
         action="store_true",
         help="emit RUST-3.7a evidence with the expanded representative set",
     )
+    parser.add_argument(
+        "--shadow-independent-promotion",
+        action="store_true",
+        help="emit RUST-4.5 clean-install default and native evidence",
+    )
     args = parser.parse_args()
 
     output = args.output_dir.resolve()
@@ -185,6 +191,13 @@ def main() -> int:
             isolated_sources.append(destination)
 
         isolated_environment = _clean_probe_environment(environment)
+        isolated_environment.pop(SSA_AUTHORITY_MODE_ENV, None)
+        if not args.shadow_independent_promotion:
+            # Historical RUST-3.6/3.7 producers retain their exact explicit
+            # differential policy after the RUST-4.5 repository default move.
+            isolated_environment[SSA_AUTHORITY_MODE_ENV] = (
+                "rust_ssa_authority_python_shadow"
+            )
         probe_returncode, observation = _run_probe(
             [
                 str(probe),
@@ -204,13 +217,22 @@ def main() -> int:
     evidence = {
         "schema_version": 1,
         "milestone": (
-            "RUST-3.7a" if args.production_stabilization else "RUST-3.6-V2"
+            "RUST-4.5"
+            if args.shadow_independent_promotion
+            else "RUST-3.7a"
+            if args.production_stabilization
+            else "RUST-3.6-V2"
         ),
+        "status": "PASS",
         "revision": args.revision,
         "platform": args.platform,
         "rust_target": PLATFORMS[args.platform],
         "authority": "rust",
-        "shadow": "python_synchronous",
+        "shadow": (
+            "not_executed_by_default"
+            if args.shadow_independent_promotion
+            else "python_synchronous"
+        ),
         "returned_ssa_origin": "rust_schema_v2_import",
         "representative_categories": [
             category for category, _path in representative
@@ -222,18 +244,26 @@ def main() -> int:
             "packaged_discovery": "PASS",
             "production_default": "PASS",
             "multiple_requests": "PASS",
+            "python_shadow_policy": "PASS",
             "python_shadow_comparison": "PASS",
             "rust_result_returned": "PASS",
             "optimizer_handoff": "PASS",
             "backend_handoff": "PASS",
             "native_execution_against_python_authority_baseline": "PASS",
             "mandatory_promotion_fixtures": "PASS",
+            "preserved_mode_matrix": "PASS",
             "three_mode_matrix": "PASS",
             "rust_authority_repository_default": "PASS",
             "rollback": "PASS",
             "path_isolation": "PASS",
         },
         "comparison": observation,
+        "native": {
+            "status": "PASS",
+            "comparisons": observation.get("native_baseline_comparisons", 0),
+            "optimizer_handoffs": observation.get("optimizer_handoffs", 0),
+            "backend_handoffs": observation.get("backend_handoffs", 0),
+        },
         "mandatory_promotion_fixture_count": len(promotion_fixtures),
         "provenance": "executed-native-runner",
     }

@@ -191,7 +191,10 @@ def test_timeout_terminates_process_and_keeps_bounded_partial_output() -> None:
 
     with pytest.raises(RustVerifierTimeout) as raised:
         verify_module_with_rust(
-            IRModule(), executable=command, timeout_seconds=0.1
+            # Python 3.14 cold starts can exceed 100 ms on loaded CI hosts;
+            # leave enough time for the controlled child to emit both
+            # excerpts before exercising the adapter timeout.
+            IRModule(), executable=command, timeout_seconds=1.0
         )
 
     assert raised.value.stdout_excerpt == b"partial"

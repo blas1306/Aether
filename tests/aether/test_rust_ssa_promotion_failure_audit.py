@@ -35,7 +35,7 @@ def test_failure_audit_accounts_for_every_historical_symptom() -> None:
 def test_failed_promotion_history_is_preserved_after_v2_default_switch() -> None:
     assert (
         SSALoweringAuthorityConfiguration().mode
-        is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
+        is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED
     )
     assert (
         SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW

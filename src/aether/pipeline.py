@@ -212,6 +212,9 @@ class SSAPipeline:
             lower_with_rust_authority,
             lower_with_rust_shadow,
         )
+        from .ssa.shadow_independent import (
+            lower_with_shadow_independent_rust_authority,
+        )
 
         if self.builder == "pattern":
             self.last_returned_ssa_origin = "python_pattern_builder"
@@ -242,6 +245,18 @@ class SSAPipeline:
                 self.last_authority_report = report
                 self.last_returned_ssa_origin = "rust_schema_v2_import"
                 return authoritative  # type: ignore[return-value]
+            if configuration.mode is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED:
+                client = (
+                    self.rust_shadow_client
+                    if self.rust_shadow_client is not None
+                    else default_rust_ssa_lowering_client()
+                )
+                authoritative, trace = lower_with_shadow_independent_rust_authority(
+                    module, client  # type: ignore[arg-type]
+                )
+                self.last_authority_report = trace
+                self.last_returned_ssa_origin = "rust_schema_v2_import"
+                return authoritative
             if configuration.mode is SSALoweringAuthorityMode.PYTHON_SSA_ONLY:
                 self.last_returned_ssa_origin = "python_general_ssa_builder"
                 return GeneralSSABuilder().build(module)

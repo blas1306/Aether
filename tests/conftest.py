@@ -184,9 +184,11 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         ) -> None:
             if builder == "general" and authority_configuration is None:
                 authority_configuration = SSALoweringAuthorityConfiguration(
-                    SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
-                    if authority_executable is not None
-                    else SSALoweringAuthorityMode.PYTHON_SSA_AUTHORITY_RUST_SHADOW
+                    (
+                        SSALoweringAuthorityConfiguration().mode
+                        if authority_executable is not None
+                        else SSALoweringAuthorityMode.PYTHON_SSA_AUTHORITY_RUST_SHADOW
+                    )
                 )
             if builder == "general" and rust_shadow_client is None:
                 rust_shadow_client = client
