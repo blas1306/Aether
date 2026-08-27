@@ -44,6 +44,10 @@ Historical RUST-3.x evidence files are preserved. The active RUST-3.7 checker no
 
 Python SSA remains in the repository for differential CI, qualification, explicit safety mode, and rollback authority. This evidence is not a formal proof of Rust correctness. No commit was created.
 
+## Historical closure attempt
+
+The first formal closure attempt, using GitHub Actions run `33110365185`, remains historically blocked. Its differential job inherited the explicit authority override while probing the production default, so its internally blocked artifact cannot be used for promotion. RUST-4.5A isolates the qualification environments; a new run on one exact revision is required before any new closure.
+
 ## CI follow-up: run 33104958944
 
 The four cross-platform clean-install jobs and the mandatory differential job passed. The production-default full-suite job's two failures were setup defects: it did not build the release `aether-ir-verifier`, and its no-build-isolation wheel test lacked `setuptools.build_meta` because the job did not explicitly provision current setuptools and wheel packages. The job now provisions `setuptools>=77` and `wheel>=0.45` and builds the locked release verifier before running the unfiltered suite.

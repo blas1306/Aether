@@ -1,0 +1,553 @@
+{
+  "artifact_schema_version": 1,
+  "milestone": "RUST-4.5",
+  "closure_name": "RUST-4.5 — SHADOW-INDEPENDENT PRODUCTION PROMOTION CLOSURE",
+  "closure_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+  "source_run_id": 33110365185,
+  "source_run_url": "https://github.com/blas1306/Aether/actions/runs/33110365185",
+  "source_run_event": "workflow_dispatch",
+  "source_run_status": "completed",
+  "source_run_conclusion": "success",
+  "source_run_created_at": "2026-08-27T19:50:17Z",
+  "source_run_updated_at": "2026-08-27T19:56:44Z",
+  "prior_decision": "RUST_SSA_SHADOW_INDEPENDENT_PRODUCTION_PROMOTION_PENDING_CI",
+  "final_decision": "RUST_SSA_SHADOW_INDEPENDENT_PRODUCTION_PROMOTION_CLOSURE_BLOCKED",
+  "exact_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+  "promotion_eligibility": {
+    "eligible": false,
+    "checks": {
+      "four_clean_installs": true,
+      "default_no_python_shadow": true,
+      "differential_mode_functional": true,
+      "differential_artifact_qualified": false,
+      "historical_mutation_deep_cfg": true,
+      "authority_soak": true,
+      "rollback_modes": true,
+      "full_default_suite": true,
+      "stabilization": true,
+      "aggregate_exact_revision": true,
+      "required_jobs_green": true,
+      "required_artifacts_exact_revision": true,
+      "no_relevant_skips": true
+    },
+    "blockers": [
+      "The official rust-4.5-differential-shadow/differential.json recomputed RUST_SSA_SHADOW_INDEPENDENT_PRODUCTION_PROMOTION_BLOCKED.",
+      "That artifact recorded focused_policy_tests status FAIL, returncode 1, six failed tests, and artifact_observed_new_default RUST_SSA_AUTHORITY_PYTHON_SHADOW.",
+      "The differential job remained green because the qualification command did not require a promoted decision; its official log printed the blocked decision before uploading the artifact."
+    ]
+  },
+  "default_mode": {
+    "mode": "RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED",
+    "job": "rust-4.5-production-default-no-python-shadow",
+    "job_conclusion": "success",
+    "job_environment_override": false,
+    "python_shadow_executed": false,
+    "canonical_comparison_executed": false,
+    "imported_ssa_verification_executed": true,
+    "independent_refinement_verification_executed": true,
+    "final_generic_verification_executed": true,
+    "focused_policy_tests": {
+      "passed": 42,
+      "failed": 0
+    },
+    "full_repository_suite": {
+      "passed": 5020,
+      "failed": 0,
+      "skipped": 12,
+      "warnings": 1,
+      "summary": "5020 passed, 12 skipped, 1 warning in 241.23s"
+    },
+    "production_ordering": [
+      "initial_ir_verification",
+      "lifecycle_normalization",
+      "rust_ssa_lowering_and_verification",
+      "schema_v2_import",
+      "imported_ssa_verification",
+      "same_input_integrity_before_refinement",
+      "independent_refinement_verification",
+      "same_input_integrity_after_refinement",
+      "final_generic_verification",
+      "accept"
+    ]
+  },
+  "differential_mode": {
+    "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "environment_override": "AETHER_SSA_AUTHORITY_MODE=rust_ssa_authority_python_shadow",
+    "job": "rust-4.5-ci-differential-rust-refinement-python-shadow",
+    "job_conclusion": "success",
+    "python_general_ssa_builder_executed": true,
+    "canonical_comparison_executed": true,
+    "canonical_mismatch_fail_closed": true,
+    "refinement_failure_fail_closed": true,
+    "focused_differential_tests": {
+      "passed": 2,
+      "failed": 0,
+      "deselected": 19
+    },
+    "historical_adversarial_mutation_deep_cfg_completed": true,
+    "artifact_decision": "RUST_SSA_SHADOW_INDEPENDENT_PRODUCTION_PROMOTION_BLOCKED",
+    "artifact_observed_new_default": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "artifact_focused_policy_tests": {
+      "status": "FAIL",
+      "returncode": 1,
+      "passed": 36,
+      "failed": 6
+    }
+  },
+  "rollback_modes": {
+    "rust_authority_python_differential_shadow": "PASS",
+    "python_authority_rust_shadow": "PASS",
+    "python_only": "PASS"
+  },
+  "platform_matrix": [
+    {
+      "platform": "linux-x86_64",
+      "revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "status": "PASS",
+      "default_mode": "RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED",
+      "shadow": "not_executed_by_default",
+      "python_shadow_executions_in_default": 0,
+      "canonical_comparisons_in_default": 0
+    },
+    {
+      "platform": "windows-x86_64",
+      "revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "status": "PASS",
+      "default_mode": "RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED",
+      "shadow": "not_executed_by_default",
+      "python_shadow_executions_in_default": 0,
+      "canonical_comparisons_in_default": 0
+    },
+    {
+      "platform": "macos-x86_64",
+      "revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "status": "PASS",
+      "default_mode": "RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED",
+      "shadow": "not_executed_by_default",
+      "python_shadow_executions_in_default": 0,
+      "canonical_comparisons_in_default": 0
+    },
+    {
+      "platform": "macos-arm64",
+      "revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "status": "PASS",
+      "default_mode": "RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED",
+      "shadow": "not_executed_by_default",
+      "python_shadow_executions_in_default": 0,
+      "canonical_comparisons_in_default": 0
+    }
+  ],
+  "required_job_results": {
+    "promotion-fixtures": "success",
+    "authority-soak": "success",
+    "rust-4.4-shadow-independent-windows-x86_64": "success",
+    "rust-4-4-full-local-qualification": "success",
+    "rust-4.4-shadow-independent-linux-x86_64": "success",
+    "python-only": "success",
+    "rust-4.5-ci-differential-rust-refinement-python-shadow": "success",
+    "production-stabilization-full-suite": "success",
+    "rust-4.5-shadow-independent-clean-install-linux-x86_64": "success",
+    "rust-authority-macos-x86_64": "success",
+    "rust-4.5-shadow-independent-clean-install-windows-x86_64": "success",
+    "historical-116": "success",
+    "adversarial": "success",
+    "deep-cfg": "success",
+    "rust-4.4-shadow-independent-macos-arm64": "success",
+    "rust-4.5-shadow-independent-clean-install-macos-x86_64": "success",
+    "rust-authority-linux-x86_64": "success",
+    "rust-authority-windows-x86_64": "success",
+    "rust-authority-macos-arm64": "success",
+    "production-stabilization-operational": "success",
+    "rust-4.5-production-default-no-python-shadow": "success",
+    "full-suite-rust-default": "success",
+    "performance": "success",
+    "rust-4.4-shadow-independent-macos-x86_64": "success",
+    "rust-stabilization-macos-x86_64": "success",
+    "rust-4.5-shadow-independent-clean-install-macos-arm64": "success",
+    "rust-stabilization-windows-x86_64": "success",
+    "rust-stabilization-linux-x86_64": "success",
+    "production-stabilization-regressions": "success",
+    "python-authority-rust-shadow": "success",
+    "rust-stabilization-macos-arm64": "success",
+    "production-stabilization-aggregate": "success",
+    "aggregate": "success"
+  },
+  "relevant_skipped_jobs": [],
+  "artifact_manifest": [
+    {
+      "artifact_name": "rust-ssa-authority-promotion-v2",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "four-platform aggregate",
+      "artifact_conclusion": "success",
+      "decision_or_status": "RUST_SSA_AUTHORITY_PROMOTED_V2",
+      "artifact_zip_sha256": "22365b183b5f765bca68b493ddde6b21190e53d5b13c209cd39f75ca9b7a89c6",
+      "gate": "aggregate exact-revision authority",
+      "files": [{"path": "qualification/rust_ssa_authority_promotion_v2.json", "sha256": "7aeb08f5854e615f5d8283d68daebdad98b4e74c8d7c7b33a8645e0584338301"}]
+    },
+    {
+      "artifact_name": "rust-ssa-production-stabilization",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "four-platform aggregate",
+      "artifact_conclusion": "success",
+      "decision_or_status": "RUST_SSA_PRODUCTION_STABILIZED",
+      "artifact_zip_sha256": "e5b76d97b278f2e524e4bbf7e064b1e849f451f3989bf0bb7bb250f098ffdefa",
+      "gate": "production stabilization aggregate",
+      "files": [{"path": "qualification/rust_ssa_production_stabilization.json", "sha256": "66971ae3ac7c670dd341adcd9bbe4a72267cd21228ec9d120c275a04cde14e0c"}]
+    },
+    {
+      "artifact_name": "platform-linux-x86_64",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "linux-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "PASS",
+      "artifact_zip_sha256": "a5507ae8821f925076f025b181a49b3275904d27f9092e09c2d3a65b84e25658",
+      "gate": "platform authority",
+      "files": [{"path": "linux-x86_64.json", "sha256": "c3def563d4e357c1bac11053dcd770f8caa475169b265d1b057353b5cd93e72d"}]
+    },
+    {
+      "artifact_name": "platform-windows-x86_64",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "windows-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "PASS",
+      "artifact_zip_sha256": "35ec263fc9fecbecf7f7f7b3868e5aea7ef0e26dae8c6bfb03d9ff5ce133203f",
+      "gate": "platform authority",
+      "files": [{"path": "windows-x86_64.json", "sha256": "0f737de8e953d699221142f97dc8bd70717c483c45421f6921bb7c32f53be635"}]
+    },
+    {
+      "artifact_name": "platform-macos-x86_64",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "macos-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "PASS",
+      "artifact_zip_sha256": "007d9783839430243198b1cffd13b941347aa2335704174ffdcaebeb5f8f947b",
+      "gate": "platform authority",
+      "files": [{"path": "macos-x86_64.json", "sha256": "66e3795853861e6bddaf069466684aa48b5cd9b30fc93bb05d60aa2f7ca9d5fc"}]
+    },
+    {
+      "artifact_name": "platform-macos-arm64",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "macos-arm64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "PASS",
+      "artifact_zip_sha256": "cc54c9c237622999406d583e3d32f96089cabb9a66e3a9c33188eb8735f825c8",
+      "gate": "platform authority",
+      "files": [{"path": "macos-arm64.json", "sha256": "7e70cd525e8167728ac4f76b2bf8764dc0d88b6496da9d64e19da05994e695db"}]
+    },
+    {
+      "artifact_name": "rust-4.5-differential-shadow",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "linux-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "RUST_SSA_SHADOW_INDEPENDENT_PRODUCTION_PROMOTION_BLOCKED",
+      "artifact_zip_sha256": "7c154735213a7a432129f379b936b98a854ace6dc3f93f927118a1cd949fee8a",
+      "gate": "mandatory differential and RUST-4.5 closure eligibility",
+      "files": [
+        {"path": "differential.json", "sha256": "672312402262e282e51cbc2f89700468b2bb92d19be8b066e7387f007f86a220"},
+        {"path": "differential.md", "sha256": "823a1a3806f25fc4837263409debf1edc258bff4301f9c7c6ea7545d82484af9"}
+      ]
+    },
+    {
+      "artifact_name": "rust-4.5-clean-install-linux-x86_64",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "linux-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "PASS",
+      "artifact_zip_sha256": "3784c17642fcb962b8a085cd98f664db72185788395f850804e537193484ab5a",
+      "gate": "RUST-4.5 clean install",
+      "files": [{"path": "linux-x86_64.json", "sha256": "984e982ac171ffe0802ad66e18a76b03190cc593c6a877c63cec671b9d1ef45c"}]
+    },
+    {
+      "artifact_name": "rust-4.5-clean-install-windows-x86_64",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "windows-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "PASS",
+      "artifact_zip_sha256": "ae3bc15bf6b876ae1bae56f5037287689643c684ed6d1919a5b44474d3336069",
+      "gate": "RUST-4.5 clean install",
+      "files": [{"path": "windows-x86_64.json", "sha256": "5b7535b01ef4a75b509b98008bfa4c88ef5a15978bd18cac8d05a912de7277bd"}]
+    },
+    {
+      "artifact_name": "rust-4.5-clean-install-macos-x86_64",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "macos-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "PASS",
+      "artifact_zip_sha256": "d0ffd120602544f625a63ae0db138ce89adecd2c28fd03fe8d3ac83a43f3f172",
+      "gate": "RUST-4.5 clean install",
+      "files": [{"path": "macos-x86_64.json", "sha256": "3614d421f12286ba5c6ac42153af7fbc6953bd0874259bdefe77d6a89ccd2f74"}]
+    },
+    {
+      "artifact_name": "rust-4.5-clean-install-macos-arm64",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "macos-arm64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "PASS",
+      "artifact_zip_sha256": "35110695708edf72a40da9634f26aded9d1ac801864a6b9bdd5b039dc6110f05",
+      "gate": "RUST-4.5 clean install",
+      "files": [{"path": "macos-arm64.json", "sha256": "8398d42756bf31208990b48398216babe7868c392edb08613034aa64a0369bd3"}]
+    },
+    {
+      "artifact_name": "promotion-fixtures",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "linux-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "RUST_SSA_PROMOTION_FIXTURES_QUALIFIED",
+      "artifact_zip_sha256": "de0351a8465319761f65e4bb196f048f1e83224bf83609177a16842b9ed6dc78",
+      "gate": "promotion fixtures",
+      "files": [{"path": "promotion_fixtures.json", "sha256": "6d42c59934c1bf0bd6e678aa3f781e554a3d4591e3df53215bc1700878d71862"}]
+    },
+    {
+      "artifact_name": "historical-116",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "linux-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "RUST_SSA_AUTHORITY_HISTORICAL_PASS",
+      "artifact_zip_sha256": "180688c067088ea86bd08b0d2c0d97d1105914fb537f43d2806eca14d2e8df88",
+      "gate": "historical 116/116",
+      "files": [{"path": "historical.json", "sha256": "a24366f73ba141672a4e15624a5fb031df86b4930e6ad217214d0cc24240f34e"}]
+    },
+    {
+      "artifact_name": "adversarial",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "linux-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "RUST_SSA_LOWERING_ADVERSARIAL_QUALIFIED",
+      "artifact_zip_sha256": "926601770b3aa212a3aada6ed36c0eb78318e203144cb1494b065edc57f79bec",
+      "gate": "adversarial qualification",
+      "files": [{"path": "adversarial.json", "sha256": "6a0ad3ec05bf15eeb1ffb99ef1cb75c32f0f3b8a6062760661962936aba93472"}]
+    },
+    {
+      "artifact_name": "deep-cfg",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "linux-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "RUST_SSA_AUTHORITY_DEEP_CFG_PASS",
+      "artifact_zip_sha256": "6d4376ba0cbdbd73af0587b295bf491db89c541d25c8ee8c650342444f58ae5e",
+      "gate": "deep CFG",
+      "files": [{"path": "deep_cfg.json", "sha256": "a2d5523dda2880543ec793d8a090e60a8b5a5b43aa5d1b5ca295fe13b4aaf978"}]
+    },
+    {
+      "artifact_name": "authority-soak",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "linux-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "RUST_SSA_AUTHORITY_SOAK_PASS",
+      "artifact_zip_sha256": "2c3afb450657cb0f16ad14668391c45ad1e834c6691b035986f34bd9e20be407",
+      "gate": "authority soak and operational compatibility",
+      "files": [
+        {"path": "soak.json", "sha256": "29af8cc5271f93eb796403145eaa14872bc28f5fa39f0c7bc208d67a2ead49ca"},
+        {"path": "operational.json", "sha256": "7272138c3d88e1e957ac75c1c604ae570d766bc16d6efdb786d36be734854a5a"}
+      ]
+    },
+    {
+      "artifact_name": "full-suite-rust-default",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "linux-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "RUST_SSA_AUTHORITY_REQUALIFICATION_FULL_SUITE_PASS",
+      "artifact_zip_sha256": "224d39791c0b7d08284a18008458cf9739617ca2b66b47612451f283fdad6829",
+      "gate": "historical differential full suite",
+      "files": [
+        {"path": "full_suite.json", "sha256": "5826d838f687a4b66b1b1d8c15142d7af71a3172f79d8d26cf6de0523c550f9d"},
+        {"path": "full_suite_pytest.log", "sha256": "c080d1a6c3e1d355303f658a378ae0594351f307359a5436e1332a37bea97143"}
+      ]
+    },
+    {
+      "artifact_name": "production-stabilization-operational",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "linux-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "RUST_SSA_PRODUCTION_STABILIZATION_OPERATIONAL_PASS",
+      "artifact_zip_sha256": "6b71af9f87005331081d053de0abf23c4cab6e0e8d989cb60c9ae702212120c0",
+      "gate": "production stabilization operational",
+      "files": [{"path": "operational.json", "sha256": "954f24d5aae181383635bf2c4da3532ff2a8cbaf29a641ad5185345c25770759"}]
+    },
+    {
+      "artifact_name": "production-stabilization-regressions",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "linux-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "RUST_SSA_PRODUCTION_REGRESSIONS_PASS",
+      "artifact_zip_sha256": "fb5b9fed5d2ec859cb163da4425d7f2b5003acf3582b76f9ab403666d11a57c4",
+      "gate": "production stabilization regressions",
+      "files": [{"path": "regressions.json", "sha256": "7197ae9f94010db61cf5192d947cb61a103305197ca3f6d0dd1bd9489a93c957"}]
+    },
+    {
+      "artifact_name": "production-stabilization-full-suite",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "linux-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "RUST_SSA_PRODUCTION_STABILIZATION_FULL_SUITE_PASS",
+      "artifact_zip_sha256": "07d9655ffd55c0c738e8559e4484df6400e76f8b01e905f031e7de97a2bb21a2",
+      "gate": "production stabilization full suite",
+      "files": [
+        {"path": "full_suite.json", "sha256": "d44ba2823034bc5858dd8359489ab244e824848ce1b5af6e55703923dde2f3b4"},
+        {"path": "full_suite_pytest.log", "sha256": "7dfede6fcd721db084553cbc8dfb954596631aa51cf96392a21836981d961219"}
+      ]
+    },
+    {
+      "artifact_name": "production-stabilization-platform-linux-x86_64",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "linux-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "PASS",
+      "artifact_zip_sha256": "cb573ff2daff137caee3ef451ce928d4b6692f05f921f09d080dde1c01253887",
+      "gate": "stabilization platform",
+      "files": [{"path": "linux-x86_64.json", "sha256": "51f12c791cfd671768d5615b4f7ef04a8550f493f5b61dd77c2f74a315c2d0a1"}]
+    },
+    {
+      "artifact_name": "production-stabilization-platform-windows-x86_64",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "windows-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "PASS",
+      "artifact_zip_sha256": "7e825c1da536f5ff0a6d6926a6c506c60f5b20fa7b111499fc61011ef8e782fa",
+      "gate": "stabilization platform",
+      "files": [{"path": "windows-x86_64.json", "sha256": "c98fdbcfe3f6aa2c09a3c8d2827866e5e82a4d901c2f040f97e2757eb0946f01"}]
+    },
+    {
+      "artifact_name": "production-stabilization-platform-macos-x86_64",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "macos-x86_64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "PASS",
+      "artifact_zip_sha256": "8719f6aed21ccc25a603d89213a6c234274e97f32198faba928202f5e68b9210",
+      "gate": "stabilization platform",
+      "files": [{"path": "macos-x86_64.json", "sha256": "ce654e16ecc6f0346c958975752dc115e6e6d9cea36ac24aac2a1ed7a791cf83"}]
+    },
+    {
+      "artifact_name": "production-stabilization-platform-macos-arm64",
+      "source_run_id": 33110365185,
+      "source_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+      "platform": "macos-arm64",
+      "artifact_conclusion": "success",
+      "decision_or_status": "PASS",
+      "artifact_zip_sha256": "184ababd8cdd1a67377dec8b1526ad25490c4bf251338ed16c3fb30d199a0f2b",
+      "gate": "stabilization platform",
+      "files": [{"path": "macos-arm64.json", "sha256": "a8d379876856582b987379250f127b0917d8fea6cca0667ab31dc70bc6c7a0ab"}]
+    }
+  ],
+  "artifact_hashes": {
+    "manifest_algorithm": "SHA-256",
+    "artifact_zip_hash_source": "GitHub Actions artifact digest",
+    "content_hash_source": "downloaded official artifact files",
+    "manifest_entries": 24
+  },
+  "historical_result": {
+    "decision": "RUST_SSA_AUTHORITY_HISTORICAL_PASS",
+    "passed": 116,
+    "failed": 0,
+    "denominator": 116
+  },
+  "mutation_result": {
+    "total": 58,
+    "unique_ids": 58,
+    "rejected_by_both": 58,
+    "production_shadow_dependencies": 0,
+    "invalid_accepted_by_both": 0
+  },
+  "deep_cfg_result": {
+    "status": "PASS",
+    "blocks": [993, 1000, 5000, 10000],
+    "production_accepts": true,
+    "qualification_accepts": true,
+    "authoritative_ssa_equal": true
+  },
+  "full_suite_result": {
+    "production_default_job": {
+      "mode": "RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED",
+      "passed": 5020,
+      "failed": 0,
+      "skipped": 12
+    },
+    "historical_differential_artifact": {
+      "mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+      "decision": "RUST_SSA_AUTHORITY_REQUALIFICATION_FULL_SUITE_PASS",
+      "passed": 5020,
+      "failed": 0,
+      "skipped": 12
+    }
+  },
+  "soak_result": {
+    "status": "PASS",
+    "differential_requests_passed": 64,
+    "differential_requests": 64,
+    "authority_soak_decision": "RUST_SSA_AUTHORITY_SOAK_PASS",
+    "total_programs": 169,
+    "accepted": 140,
+    "rejected_before_ssa": 29,
+    "semantic_mismatches": 0,
+    "infrastructure_failures": 0
+  },
+  "stabilization_result": {
+    "decision": "RUST_SSA_PRODUCTION_STABILIZED",
+    "qualification_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+    "blockers": [],
+    "all_17_gates_passed": true,
+    "regression_tests_passed": 155,
+    "full_suite_passed": 5020,
+    "platforms": ["linux-x86_64", "windows-x86_64", "macos-x86_64", "macos-arm64"]
+  },
+  "aggregate_result": {
+    "qualification_revision": "b7362b06ead8da36d3ad3a97351fd5813c258590",
+    "authority_decision": "RUST_SSA_AUTHORITY_PROMOTED_V2",
+    "stabilization_decision": "RUST_SSA_PRODUCTION_STABILIZED",
+    "rust_4_5_differential_artifact_decision": "RUST_SSA_SHADOW_INDEPENDENT_PRODUCTION_PROMOTION_BLOCKED",
+    "status": "BLOCKED_FOR_RUST_4_5_CLOSURE"
+  },
+  "production_policy_declaration": {
+    "default": "Rust SSA authority + imported SSA verification + independent refinement verification + final generic SSA verification",
+    "python_shadow_default": false,
+    "differential_mode": "AETHER_SSA_AUTHORITY_MODE=rust_ssa_authority_python_shadow",
+    "automatic_python_fallback": false,
+    "protocol_version": 1,
+    "ssa_schema_version": 2,
+    "optimizer_backend_handoff": "exact verified Rust-origin schema-v2 import"
+  },
+  "trust_statement": {
+    "formal_universal_correctness_proved": false,
+    "claims": [
+      "The shadow-independent default passed the official production-default job and four exact-platform clean installs.",
+      "Independent refinement covered the qualified known semantic classes, including 116 historical programs, 58 mutations, adversarial inputs, and deep CFGs.",
+      "The explicit differential lane retained Python GeneralSSABuilder, canonical comparison, and fail-closed mismatch behavior.",
+      "Python remains a differential oracle and rollback implementation.",
+      "The official differential artifact contradicted promotion eligibility, so this record does not promote RUST-4.5."
+    ]
+  },
+  "historical_transition": [
+    "mandatory Python shadow during migration",
+    "independent verifier",
+    "refinement integration",
+    "shadow redundancy qualification",
+    "shadow-independent qualification",
+    "production promotion closure attempt blocked by official differential artifact"
+  ],
+  "production_code_changed": false,
+  "python_ssa_retained": true,
+  "differential_ci_retained": true,
+  "commit_created": false
+}

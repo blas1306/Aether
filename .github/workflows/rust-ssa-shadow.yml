@@ -36,8 +36,6 @@ jobs:
   rust-4-5-mandatory-differential-shadow:
     name: rust-4.5-ci-differential-rust-refinement-python-shadow
     runs-on: ubuntu-latest
-    env:
-      AETHER_SSA_AUTHORITY_MODE: rust_ssa_authority_python_shadow
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -48,6 +46,8 @@ jobs:
       - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --package aether-verifier --bin aether-ssa-shadow
       - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --example verify_owned_ssa_v2
       - name: Mandatory Python builder and canonical mismatch fail-closed proof
+        env:
+          AETHER_SSA_AUTHORITY_MODE: rust_ssa_authority_python_shadow
         run: >-
           python -m pytest -q
           tests/aether/test_rust_ssa_shadow_independent_production_promotion.py
@@ -58,8 +58,13 @@ jobs:
           --revision "${{ github.sha }}"
           --companion compiler-rs/target/debug/aether-ssa-shadow
           --rust-verifier compiler-rs/target/debug/examples/verify_owned_ssa_v2
+          --qualification-scope differential
           --output qualification/rust45/differential.json
           --report qualification/rust45/differential.md
+      - name: Differential qualification decision gate
+        run: >-
+          python scripts/check_rust_ssa_differential_qualification.py
+          --evidence qualification/rust45/differential.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

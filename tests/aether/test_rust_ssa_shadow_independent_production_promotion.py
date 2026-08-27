@@ -287,6 +287,31 @@ def test_differential_canonical_mismatch_remains_fail_closed(
     assert caught.value.report.phase == "canonical_comparison"
 
 
+def test_differential_refinement_failure_remains_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reject(*_args, **_kwargs):
+        raise RuntimeError("injected differential refinement rejection")
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("Python shadow ran after refinement rejection")
+
+    monkeypatch.setattr("aether.ssa.shadow.verify_ssa_refinement", reject)
+    monkeypatch.setattr(GeneralSSABuilder, "build", forbidden)
+    configuration = SSALoweringAuthorityConfiguration(
+        SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
+    )
+
+    with pytest.raises(SSAShadowFailure) as caught:
+        SSAPipeline(
+            authority_configuration=configuration,
+            rust_shadow_client=StaticClient(),
+        ).run(IRModule())
+
+    assert caught.value.report.classification == "refinement_verifier_failure"
+    assert caught.value.report.phase == "refinement_verification"
+
+
 @pytest.mark.parametrize(
     "mode",
     [

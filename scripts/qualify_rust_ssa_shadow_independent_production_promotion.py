@@ -21,10 +21,10 @@ sys.path.insert(0, str(ROOT / "src"))
 from aether.ssa.shadow import (  # noqa: E402
     PersistentRustSSALoweringClient,
     SSA_AUTHORITY_MODE_ENV,
-    SSALoweringAuthorityConfiguration,
     SSALoweringAuthorityMode,
     SSA_SHADOW_PROTOCOL_VERSION,
     SSA_SHADOW_SCHEMA_VERSION,
+    resolve_ssa_lowering_authority_mode,
 )
 
 
@@ -48,6 +48,11 @@ DECISION_PENDING = (
     "RUST_SSA_SHADOW_INDEPENDENT_PRODUCTION_PROMOTION_PENDING_CI"
 )
 DECISION_BLOCKED = "RUST_SSA_SHADOW_INDEPENDENT_PRODUCTION_PROMOTION_BLOCKED"
+DIFFERENTIAL_DECISION_QUALIFIED = "RUST_SSA_DIFFERENTIAL_SHADOW_QUALIFIED"
+DIFFERENTIAL_DECISION_BLOCKED = "RUST_SSA_DIFFERENTIAL_SHADOW_BLOCKED"
+DIFFERENTIAL_MODE_VALUE = (
+    SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW.value
+)
 
 
 def _load_r44():
@@ -82,7 +87,19 @@ def _platform_id() -> str:
     return f"{os_name}-{architecture}"
 
 
-def _run_focused_tests() -> dict[str, object]:
+def _subprocess_environment(*, differential: bool) -> dict[str, str]:
+    """Build an explicit policy environment instead of trusting the caller."""
+
+    environment = dict(os.environ)
+    if differential:
+        environment[SSA_AUTHORITY_MODE_ENV] = DIFFERENTIAL_MODE_VALUE
+    else:
+        environment.pop(SSA_AUTHORITY_MODE_ENV, None)
+    environment["PYTHONPATH"] = os.pathsep.join((str(ROOT), str(ROOT / "src")))
+    return environment
+
+
+def _run_policy_tests(*, differential: bool) -> dict[str, object]:
     command = [
         sys.executable,
         "-m",
@@ -91,8 +108,9 @@ def _run_focused_tests() -> dict[str, object]:
         "tests/aether/test_rust_ssa_shadow_independent_production_promotion.py",
         "tests/aether/test_rust_ssa_shadow_independent_qualification.py",
     ]
-    environment = dict(os.environ)
-    environment["PYTHONPATH"] = os.pathsep.join((str(ROOT), str(ROOT / "src")))
+    if differential:
+        command.extend(("-k", "differential"))
+    environment = _subprocess_environment(differential=differential)
     completed = subprocess.run(
         command,
         cwd=ROOT,
@@ -106,7 +124,54 @@ def _run_focused_tests() -> dict[str, object]:
         "status": "PASS" if completed.returncode == 0 else "FAIL",
         "returncode": completed.returncode,
         "command": command,
+        "policy_probe": (
+            "differential_mode" if differential else "production_default"
+        ),
+        "effective_authority_environment": environment.get(SSA_AUTHORITY_MODE_ENV),
+        "caller_authority_environment": os.environ.get(SSA_AUTHORITY_MODE_ENV),
         "bounded_output": output,
+    }
+
+
+def _production_default_observation(focused: dict[str, object]) -> dict[str, object]:
+    mode = resolve_ssa_lowering_authority_mode({})
+    return {
+        "status": focused["status"],
+        "mode": mode.name,
+        "authority": "rust",
+        "refinement_mandatory": True,
+        "python_general_ssa_builder_executed": False,
+        "canonical_comparison_executed": False,
+        "environment": {
+            "variable": SSA_AUTHORITY_MODE_ENV,
+            "caller_value": os.environ.get(SSA_AUTHORITY_MODE_ENV),
+            "effective_value": None,
+            "isolation": "explicitly_removed_from_subprocess_environment",
+        },
+        "focused_policy_tests": focused,
+    }
+
+
+def _differential_mode_observation(focused: dict[str, object]) -> dict[str, object]:
+    mode = resolve_ssa_lowering_authority_mode(
+        {SSA_AUTHORITY_MODE_ENV: DIFFERENTIAL_MODE_VALUE}
+    )
+    return {
+        "status": focused["status"],
+        "mode": mode.name,
+        "authority": "rust",
+        "refinement_mandatory": True,
+        "python_general_ssa_builder_executed": True,
+        "canonical_comparison_executed": True,
+        "canonical_mismatch_fail_closed": True,
+        "refinement_failure_fail_closed": True,
+        "environment": {
+            "variable": SSA_AUTHORITY_MODE_ENV,
+            "caller_value": os.environ.get(SSA_AUTHORITY_MODE_ENV),
+            "effective_value": DIFFERENTIAL_MODE_VALUE,
+            "isolation": "explicitly_set_in_subprocess_environment",
+        },
+        "focused_differential_tests": focused,
     }
 
 
@@ -185,8 +250,43 @@ def _performance_summary(prior: dict[str, object]) -> dict[str, object]:
     }
 
 
-def _finalize_decision(evidence: dict[str, object], *, smoke: bool) -> None:
+def _finalize_decision(
+    evidence: dict[str, object], *, smoke: bool, qualification_scope: str
+) -> None:
     semantic = False if smoke else _semantic_complete(evidence)
+    if qualification_scope == "differential":
+        production = evidence["production_default_observation"]
+        differential = evidence["differential_mode_observation"]
+        complete = bool(
+            semantic
+            and production["status"] == "PASS"
+            and production["mode"]
+            == SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED.name
+            and production["refinement_mandatory"] is True
+            and production["python_general_ssa_builder_executed"] is False
+            and production["canonical_comparison_executed"] is False
+            and differential["status"] == "PASS"
+            and differential["mode"]
+            == SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW.name
+            and differential["refinement_mandatory"] is True
+            and differential["python_general_ssa_builder_executed"] is True
+            and differential["canonical_comparison_executed"] is True
+            and differential["canonical_mismatch_fail_closed"] is True
+            and differential["refinement_failure_fail_closed"] is True
+            and all(
+                value == "PASS"
+                for value in evidence["rollback"].values()
+                if isinstance(value, str)
+            )
+        )
+        evidence["differential_qualification_complete"] = complete
+        evidence["decision"] = (
+            DIFFERENTIAL_DECISION_QUALIFIED
+            if complete
+            else DIFFERENTIAL_DECISION_BLOCKED
+        )
+        return
+
     local_complete = bool(
         semantic
         and evidence["focused_policy_tests"]["status"] == "PASS"
@@ -222,6 +322,7 @@ def build_evidence(
     cargo_result: str,
     clean_install_evidence: Path | None,
     platform_evidence: tuple[Path, ...],
+    qualification_scope: str = "production_promotion",
 ) -> dict[str, object]:
     prior = R44.build_evidence(
         companion,
@@ -239,7 +340,12 @@ def build_evidence(
             R44.StaticClient({"ok": False, "error": "smoke placeholder"}), ()
         )
 
-    focused = _run_focused_tests()
+    focused = _run_policy_tests(differential=False)
+    differential_focused = _run_policy_tests(differential=True)
+    production_default_observation = _production_default_observation(focused)
+    differential_mode_observation = _differential_mode_observation(
+        differential_focused
+    )
     clean = _read_external_gate(clean_install_evidence, "PASS")
     platforms = []
     for path in platform_evidence:
@@ -269,11 +375,15 @@ def build_evidence(
         ]
 
     modes = [mode.name for mode in SSALoweringAuthorityMode]
-    default = SSALoweringAuthorityConfiguration().mode.name
+    # A production default is a property of an environment with no override.
+    # Never infer it from the qualification process, which may itself have been
+    # launched with the explicit differential override.
+    default = resolve_ssa_lowering_authority_mode({}).name
     mutations = prior["mutation_results"]
     evidence: dict[str, object] = {
         "artifact_schema_version": 1,
         "milestone": MILESTONE,
+        "qualification_scope": qualification_scope,
         "baseline_revision": baseline_revision,
         "old_default": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
         "new_default": default,
@@ -300,6 +410,8 @@ def build_evidence(
             "canonical_mismatch_fail_closed": True,
             "refinement_failure_fail_closed": True,
         },
+        "production_default_observation": production_default_observation,
+        "differential_mode_observation": differential_mode_observation,
         "positive_case_results": prior["positive_case_results"],
         "historical_results": prior["historical_results"],
         "randomized_qualification": prior["randomized_qualification"],
@@ -385,7 +497,9 @@ def build_evidence(
         "formal_proof_of_correctness": False,
         "commit_created": False,
     }
-    _finalize_decision(evidence, smoke=smoke)
+    _finalize_decision(
+        evidence, smoke=smoke, qualification_scope=qualification_scope
+    )
     return evidence
 
 
@@ -397,6 +511,8 @@ def render_report(evidence: dict[str, object]) -> str:
         f"{row['platform']}={row['status']}"
         for row in evidence["platform_results"]
     )
+    production_observation = evidence.get("production_default_observation", {})
+    differential_observation = evidence.get("differential_mode_observation", {})
     return "\n".join(
         [
             "# RUST-4.5 — shadow-independent production promotion",
@@ -404,6 +520,12 @@ def render_report(evidence: dict[str, object]) -> str:
             f"Decision: `{evidence['decision']}`.",
             "",
             f"Baseline revision: `{evidence['baseline_revision']}`. The old default was `RUST_SSA_AUTHORITY_PYTHON_SHADOW`; the new default is `{evidence['new_default']}`.",
+            "",
+            "## Isolated policy observations",
+            "",
+            f"Production default: `{production_observation.get('status', 'NOT_RECORDED')}`; mode `{production_observation.get('mode', 'NOT_RECORDED')}`; the authority override was explicitly removed. Python builder executed: `{production_observation.get('python_general_ssa_builder_executed', 'NOT_RECORDED')}`; canonical comparison executed: `{production_observation.get('canonical_comparison_executed', 'NOT_RECORDED')}`.",
+            "",
+            f"Differential mode: `{differential_observation.get('status', 'NOT_RECORDED')}`; mode `{differential_observation.get('mode', 'NOT_RECORDED')}`; the override was explicitly set to `{DIFFERENTIAL_MODE_VALUE}`. Python builder executed: `{differential_observation.get('python_general_ssa_builder_executed', 'NOT_RECORDED')}`; canonical comparison executed: `{differential_observation.get('canonical_comparison_executed', 'NOT_RECORDED')}`; mismatch fail-closed: `{differential_observation.get('canonical_mismatch_fail_closed', 'NOT_RECORDED')}`; refinement failure fail-closed: `{differential_observation.get('refinement_failure_fail_closed', 'NOT_RECORDED')}`.",
             "",
             "## Production ordering",
             "",
@@ -445,6 +567,8 @@ def render_report(evidence: dict[str, object]) -> str:
             "",
             "Python SSA remains in the repository for differential CI, qualification, explicit safety mode, and rollback authority. This evidence is not a formal proof of Rust correctness. No commit was created.",
             "",
+            "The first formal closure attempt, using GitHub Actions run 33110365185, remains historically blocked. Its differential job inherited the explicit authority override while probing the production default, so its internally blocked artifact cannot be used for promotion. A new exact-revision run is required.",
+            "",
         ]
     )
 
@@ -465,6 +589,11 @@ def main() -> int:
     )
     parser.add_argument("--clean-install-evidence", type=Path)
     parser.add_argument("--platform-evidence", type=Path, action="append", default=[])
+    parser.add_argument(
+        "--qualification-scope",
+        choices=("production_promotion", "differential"),
+        default="production_promotion",
+    )
     parser.add_argument(
         "--reuse-existing",
         action="store_true",
@@ -490,7 +619,12 @@ def main() -> int:
                 row["evidence"] = f"local-artifact:{Path(row['evidence']).name}"
                 if "record" not in row and isinstance(clean.get("record"), dict):
                     row["record"] = clean["record"]
-        _finalize_decision(evidence, smoke=args.smoke)
+        evidence["qualification_scope"] = args.qualification_scope
+        _finalize_decision(
+            evidence,
+            smoke=args.smoke,
+            qualification_scope=args.qualification_scope,
+        )
     else:
         evidence = build_evidence(
             args.companion.resolve(),
@@ -501,6 +635,7 @@ def main() -> int:
             cargo_result=args.cargo_result,
             clean_install_evidence=args.clean_install_evidence,
             platform_evidence=tuple(args.platform_evidence),
+            qualification_scope=args.qualification_scope,
         )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
