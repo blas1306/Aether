@@ -23,9 +23,11 @@ def characterize_python_ssa_only(
     total_started = perf_counter()
     phases: dict[str, float] = {}
     lowering_phases: dict[str, float] = {}
+    lifecycle_phases: dict[str, float] = {}
     value = GeneralSSABuilder(
         performance_timings=phases,
         phase_timings=lowering_phases,
+        lifecycle_timings=lifecycle_phases,
     ).build(module)
     started = perf_counter()
     SSAVerifier(value).verify()
@@ -46,4 +48,5 @@ def characterize_python_ssa_only(
         rust_phase_detail="not_applicable",
         rust_ssa_lowering_phases_seconds={},
         python_ssa_lowering_phases_seconds=lowering_phases,
+        python_lifecycle_phases_seconds=lifecycle_phases,
     )

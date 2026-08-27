@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass, replace
+from time import perf_counter
+from typing import MutableMapping
 
 from .model import (
     IRAssign,
@@ -268,9 +270,15 @@ class LifecycleTypeRegistry:
 class LifecycleExpander:
     """Expand verified lifecycle IR immediately before SSA construction."""
 
-    def __init__(self, module: IRModule) -> None:
+    def __init__(
+        self,
+        module: IRModule,
+        *,
+        performance_timings: MutableMapping[str, float] | None = None,
+    ) -> None:
         self.module = module
         self.registry = LifecycleTypeRegistry(module.structs)
+        self._performance_timings = performance_timings
         self._next = 0
         self._used_names: set[str] = set()
         self._owned_values: set[IRValue] = set()
@@ -278,8 +286,22 @@ class LifecycleExpander:
         self._remaining_uses: Counter[IRValue] = Counter()
 
     def expand(self) -> IRModule:
+        started = perf_counter() if self._performance_timings is not None else 0.0
+        prior_measured = (
+            sum(self._performance_timings.values())
+            if self._performance_timings is not None
+            else 0.0
+        )
         functions = [self._expand_function(function) for function in self.module.functions]
-        return IRModule(functions, list(self.module.structs))
+        module = IRModule(functions, list(self.module.structs))
+        if self._performance_timings is not None:
+            elapsed = perf_counter() - started
+            measured = sum(self._performance_timings.values()) - prior_measured
+            self._performance_timings["lifecycle_residual"] = (
+                self._performance_timings.get("lifecycle_residual", 0.0)
+                + max(0.0, elapsed - measured)
+            )
+        return module
 
     def _expand_function(self, function: IRFunction) -> IRFunction:
         self._owned_values = set()
@@ -292,10 +314,15 @@ class LifecycleExpander:
         for block in function.blocks:
             block_occurrences: list[tuple[IRValue, ...]] = []
             for instruction in block.instructions:
+                started = self._phase_started()
                 occurrences = self._instruction_operand_occurrences(instruction)
+                self._record_phase_since("lifecycle_operand_discovery", started)
                 block_occurrences.append(occurrences)
+                started = self._phase_started()
                 self._used_values.update(occurrences)
                 self._remaining_uses.update(occurrences)
+                self._record_phase_since("lifecycle_operand_census", started)
+                started = self._phase_started()
                 if isinstance(instruction, (IRCall, IRCallIndirect, IRInterfaceCall)) and instruction.result is not None:
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
@@ -332,7 +359,9 @@ class LifecycleExpander:
                 elif isinstance(instruction, IRClassGet):
                     if self.registry.traits(instruction.result.type).needs_destroy:
                         self._owned_values.add(instruction.result)
+                self._record_phase_since("lifecycle_owned_value_census", started)
             operand_occurrences.append(block_occurrences)
+        started = self._phase_started()
         self._used_names = {parameter.name for parameter in function.parameters}
 
         def record_names(value: object) -> None:
@@ -348,15 +377,30 @@ class LifecycleExpander:
                     record_names(value)
         numeric_names = [int(name) for name in self._used_names if name.isdigit()]
         self._next = max(numeric_names, default=-1) + 1
+        self._record_phase_since("lifecycle_name_census", started)
         blocks = []
         for block, block_occurrences in zip(function.blocks, operand_occurrences):
             instructions: list[IRInstruction] = []
             for instruction, occurrences in zip(
                 block.instructions, block_occurrences
             ):
+                started = self._phase_started()
                 instructions.extend(self._expand_instruction(instruction))
+                self._record_phase_since("lifecycle_rewrite", started)
+                started = self._phase_started()
                 self._remaining_uses.subtract(occurrences)
-            blocks.append(IRBasicBlock(block.name, self._fold_trivial_return_transfer(instructions)))
+                self._record_phase_since(
+                    "lifecycle_remaining_use_accounting", started
+                )
+            started = self._phase_started()
+            instructions = self._fold_trivial_return_transfer(instructions)
+            self._record_phase_since(
+                "lifecycle_return_transfer_folding", started
+            )
+            started = self._phase_started()
+            blocks.append(IRBasicBlock(block.name, instructions))
+            self._record_phase_since("lifecycle_reconstruction", started)
+        started = self._phase_started()
         expanded = IRFunction(
             function.name,
             list(function.parameters),
@@ -364,7 +408,20 @@ class LifecycleExpander:
             blocks,
             function.may_throw,
         )
-        return self._repair_constructor_invocation_ownership(expanded)
+        expanded = self._repair_constructor_invocation_ownership(expanded)
+        self._record_phase_since("lifecycle_reconstruction", started)
+        return expanded
+
+    def _phase_started(self) -> float:
+        return perf_counter() if self._performance_timings is not None else 0.0
+
+    def _record_phase_since(self, phase: str, started: float) -> None:
+        if self._performance_timings is not None:
+            self._performance_timings[phase] = (
+                self._performance_timings.get(phase, 0.0)
+                + perf_counter()
+                - started
+            )
 
     def _repair_constructor_invocation_ownership(
         self,
@@ -1061,7 +1118,11 @@ class LifecycleExpander:
         return False
 
 
-def expand_lifecycle(module: IRModule) -> IRModule:
+def expand_lifecycle(
+    module: IRModule,
+    *,
+    performance_timings: MutableMapping[str, float] | None = None,
+) -> IRModule:
     # Compiler pipelines may receive an already-expanded module (for example
     # IR optimization followed by SSA construction).  Internal ARC calls are
     # emitted only by this pass; seeing one makes expansion idempotent and
@@ -1079,5 +1140,33 @@ def expand_lifecycle(module: IRModule) -> IRModule:
         for block in function.blocks
         for instruction in block.instructions
     ):
+        if performance_timings is not None:
+            for phase in (
+                "lifecycle_operand_discovery",
+                "lifecycle_operand_census",
+                "lifecycle_owned_value_census",
+                "lifecycle_name_census",
+                "lifecycle_rewrite",
+                "lifecycle_remaining_use_accounting",
+                "lifecycle_return_transfer_folding",
+                "lifecycle_reconstruction",
+                "lifecycle_residual",
+            ):
+                performance_timings.setdefault(phase, 0.0)
         return module
-    return LifecycleExpander(module).expand()
+    expander = LifecycleExpander(module, performance_timings=performance_timings)
+    result = expander.expand()
+    if performance_timings is not None:
+        for phase in (
+            "lifecycle_operand_discovery",
+            "lifecycle_operand_census",
+            "lifecycle_owned_value_census",
+            "lifecycle_name_census",
+            "lifecycle_rewrite",
+            "lifecycle_remaining_use_accounting",
+            "lifecycle_return_transfer_folding",
+            "lifecycle_reconstruction",
+            "lifecycle_residual",
+        ):
+            performance_timings.setdefault(phase, 0.0)
+    return result

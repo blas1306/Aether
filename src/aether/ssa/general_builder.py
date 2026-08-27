@@ -38,6 +38,7 @@ class GeneralSSABuilder:
         *,
         performance_timings: MutableMapping[str, float] | None = None,
         phase_timings: MutableMapping[str, float] | None = None,
+        lifecycle_timings: MutableMapping[str, float] | None = None,
     ) -> None:
         """Create a builder with optional observational phase timings.
 
@@ -48,6 +49,8 @@ class GeneralSSABuilder:
         """
         self._performance_timings = performance_timings
         self._phase_timings = phase_timings
+        if lifecycle_timings is not None:
+            self._lifecycle_timings = lifecycle_timings
 
     def build(self, module: IRModule) -> SSAModule:
         return self.build_module(module)
@@ -57,9 +60,15 @@ class GeneralSSABuilder:
         observe_lifecycle = timings is not None or self._phase_timings is not None
         lifecycle_started = perf_counter() if observe_lifecycle else 0.0
         if timings is None:
-            module = expand_lifecycle(module)
+            module = expand_lifecycle(
+                module,
+                performance_timings=getattr(self, "_lifecycle_timings", None),
+            )
         else:
-            module = expand_lifecycle(module)
+            module = expand_lifecycle(
+                module,
+                performance_timings=getattr(self, "_lifecycle_timings", None),
+            )
             timings["python_lifecycle_normalization"] = (
                 perf_counter() - lifecycle_started
             )

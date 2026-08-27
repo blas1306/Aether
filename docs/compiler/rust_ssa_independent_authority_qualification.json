@@ -1,0 +1,828 @@
+{
+  "artifact_schema_version": 1,
+  "baseline": {
+    "authority": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+    "campaign_fixture_rust_python_canonical_match": true,
+    "fail_closed": true,
+    "historical_corpus": "116/116",
+    "maximum_unproven_low_risk_upside_percent": 1.5,
+    "python_shadow": "MANDATORY_SYNCHRONOUS_INDEPENDENT"
+  },
+  "baseline_milestone": "RUST-3.15",
+  "baseline_revision": "7500d66a0d830542d2436b22356e0c34698f076f",
+  "common_mode_failures": [
+    "Rust producer and Rust verifier share owned SSA codecs, operand inventories and rule interpretations",
+    "Python importer and imported verifier share Python SSA dataclasses and type reconstruction",
+    "both lanes consume the same potentially malformed Initial IR after the common integrity verifier",
+    "both boundary verifiers assume schema-v2 expresses every required semantic field",
+    "canonical alpha-normalization intentionally hides identifier spelling and phi incoming ordering differences"
+  ],
+  "decision": "RUST_SSA_INDEPENDENT_AUTHORITY_REQUIRES_VERIFIER_HARDENING",
+  "future_architecture": {
+    "flow": [
+      "Initial IR integrity verifier",
+      "Rust SSA authority",
+      "independent structural/semantic translation verifier",
+      "optimizer/backend"
+    ],
+    "promotion_allowed_by_rust_4_0": false,
+    "python_shadow_future_roles_only_after_new_milestone": [
+      "CI",
+      "debug qualification",
+      "sampled production diagnostics",
+      "explicit rollback mode"
+    ]
+  },
+  "historical_mismatch_audit": [
+    {
+      "cause": "missing last-use release for owning expression temporary",
+      "currently_possible": "regression possible; covered by fixtures and lifecycle policy tests",
+      "detected_by": [
+        "CANONICAL_COMPARISON"
+      ],
+      "id": "RC1",
+      "would_escape_without_shadow_at_discovery": true
+    },
+    {
+      "cause": "extra retain during nullable-owned return transfer",
+      "currently_possible": "regression possible; covered by fixture",
+      "detected_by": [
+        "CANONICAL_COMPARISON"
+      ],
+      "id": "RC2",
+      "would_escape_without_shadow_at_discovery": true
+    },
+    {
+      "cause": "missing nullable class argument copy lifetime",
+      "currently_possible": "regression possible; covered by fixture",
+      "detected_by": [
+        "CANONICAL_COMPARISON"
+      ],
+      "id": "RC3",
+      "would_escape_without_shadow_at_discovery": true
+    },
+    {
+      "cause": "missing lifecycle default for interface",
+      "currently_possible": "closed by lifecycle capability support and regression fixture",
+      "detected_by": [
+        "RUST_LANE_FAILURE"
+      ],
+      "id": "RC4",
+      "would_escape_without_shadow_at_discovery": false
+    },
+    {
+      "cause": "missing normal release of owning constructor receiver",
+      "currently_possible": "specific defect closed; class remains material because Rust verifier shared the defect",
+      "detected_by": [
+        "PYTHON_IMPORTED_SSA_VERIFIER"
+      ],
+      "id": "RC5",
+      "would_escape_without_shadow_at_discovery": true
+    },
+    {
+      "cause": "LeakSanitizer under ptrace",
+      "currently_possible": "environmental, not an SSA mismatch",
+      "detected_by": [
+        "OTHER"
+      ],
+      "id": "RC6",
+      "would_escape_without_shadow_at_discovery": false
+    }
+  ],
+  "independent_oracle_analysis": {
+    "correctness_evidence": "invariant verification is independent only where it derives a property without reconstructing the producer algorithm; exact translation remains differential",
+    "implementation_diversity": "Rust and Python builders, dominators, phi placement and verifiers are separate implementations",
+    "python_shadow_unique_guarantee": "per-compilation equality to an independently reconstructed SSA, including exact side effects, lifecycle sequence, phi placement and reachable/unreachable output"
+  },
+  "milestone": "RUST-4.0",
+  "mutation_campaign": [
+    {
+      "applicable_to_fixture": true,
+      "detected_by": [
+        "CANONICAL_COMPARISON",
+        "PYTHON_SHADOW_ONLY"
+      ],
+      "mutation": "missing_phi",
+      "note": "controlled mutation of a copy of the Rust schema-v2 result",
+      "property": "semantic_preservation",
+      "python_shadow_only": true,
+      "rust_verifier_executed": true
+    },
+    {
+      "applicable_to_fixture": true,
+      "detected_by": [
+        "CANONICAL_COMPARISON",
+        "PYTHON_SHADOW_ONLY"
+      ],
+      "mutation": "extra_phi",
+      "note": "controlled mutation of a copy of the Rust schema-v2 result",
+      "property": "semantic_preservation",
+      "python_shadow_only": true,
+      "rust_verifier_executed": true
+    },
+    {
+      "applicable_to_fixture": true,
+      "detected_by": [
+        "CANONICAL_COMPARISON",
+        "PYTHON_SHADOW_ONLY"
+      ],
+      "mutation": "incorrect_phi_incoming",
+      "note": "controlled mutation of a copy of the Rust schema-v2 result",
+      "property": "semantic_preservation",
+      "python_shadow_only": true,
+      "rust_verifier_executed": true
+    },
+    {
+      "applicable_to_fixture": true,
+      "detected_by": [
+        "PYTHON_IMPORTED_SSA_VERIFIER",
+        "RUST_VERIFIER",
+        "CANONICAL_COMPARISON"
+      ],
+      "mutation": "incorrect_predecessor",
+      "note": "controlled mutation of a copy of the Rust schema-v2 result",
+      "property": "structural",
+      "python_shadow_only": false,
+      "rust_verifier_executed": true
+    },
+    {
+      "applicable_to_fixture": true,
+      "detected_by": [
+        "PYTHON_IMPORTED_SSA_VERIFIER",
+        "CANONICAL_COMPARISON"
+      ],
+      "mutation": "duplicate_definition",
+      "note": "controlled mutation of a copy of the Rust schema-v2 result",
+      "property": "ssa_namespace",
+      "python_shadow_only": false,
+      "rust_verifier_executed": true
+    },
+    {
+      "applicable_to_fixture": true,
+      "detected_by": [
+        "PYTHON_IMPORTED_SSA_VERIFIER",
+        "CANONICAL_COMPARISON"
+      ],
+      "mutation": "use_before_definition",
+      "note": "controlled mutation of a copy of the Rust schema-v2 result",
+      "property": "ssa_namespace",
+      "python_shadow_only": false,
+      "rust_verifier_executed": true
+    },
+    {
+      "applicable_to_fixture": true,
+      "detected_by": [
+        "PYTHON_IMPORTED_SSA_VERIFIER",
+        "CANONICAL_COMPARISON"
+      ],
+      "mutation": "definition_not_dominating_use",
+      "note": "controlled mutation of a copy of the Rust schema-v2 result",
+      "property": "dominance",
+      "python_shadow_only": false,
+      "rust_verifier_executed": true
+    },
+    {
+      "applicable_to_fixture": true,
+      "detected_by": [
+        "PYTHON_IMPORTED_SSA_VERIFIER",
+        "CANONICAL_COMPARISON"
+      ],
+      "mutation": "phi_incoming_not_dominating_edge",
+      "note": "controlled mutation of a copy of the Rust schema-v2 result",
+      "property": "dominance",
+      "python_shadow_only": false,
+      "rust_verifier_executed": true
+    },
+    {
+      "applicable_to_fixture": true,
+      "detected_by": [
+        "PYTHON_IMPORTED_SSA_VERIFIER",
+        "CANONICAL_COMPARISON"
+      ],
+      "mutation": "incorrect_type",
+      "note": "controlled mutation of a copy of the Rust schema-v2 result",
+      "property": "typing",
+      "python_shadow_only": false,
+      "rust_verifier_executed": true
+    },
+    {
+      "applicable_to_fixture": true,
+      "detected_by": [
+        "CANONICAL_COMPARISON",
+        "PYTHON_SHADOW_ONLY"
+      ],
+      "mutation": "incorrect_value_rename",
+      "note": "controlled mutation of a copy of the Rust schema-v2 result",
+      "property": "semantic_preservation",
+      "python_shadow_only": true,
+      "rust_verifier_executed": true
+    },
+    {
+      "applicable_to_fixture": true,
+      "detected_by": [
+        "PYTHON_IMPORTED_SSA_VERIFIER",
+        "CANONICAL_COMPARISON"
+      ],
+      "mutation": "incorrect_block_target",
+      "note": "controlled mutation of a copy of the Rust schema-v2 result",
+      "property": "semantic_preservation",
+      "python_shadow_only": false,
+      "rust_verifier_executed": true
+    },
+    {
+      "applicable_to_fixture": true,
+      "detected_by": [
+        "CANONICAL_COMPARISON",
+        "PYTHON_SHADOW_ONLY"
+      ],
+      "mutation": "unreachable_block_incorrectly_preserved",
+      "note": "controlled mutation of a copy of the Rust schema-v2 result",
+      "property": "semantic_preservation",
+      "python_shadow_only": true,
+      "rust_verifier_executed": true
+    },
+    {
+      "applicable_to_fixture": true,
+      "detected_by": [
+        "CANONICAL_COMPARISON",
+        "PYTHON_SHADOW_ONLY"
+      ],
+      "mutation": "missing_instruction",
+      "note": "controlled mutation of a copy of the Rust schema-v2 result",
+      "property": "semantic_preservation",
+      "python_shadow_only": true,
+      "rust_verifier_executed": true
+    },
+    {
+      "applicable_to_fixture": true,
+      "detected_by": [
+        "CANONICAL_COMPARISON",
+        "PYTHON_SHADOW_ONLY"
+      ],
+      "mutation": "duplicated_instruction",
+      "note": "controlled mutation of a copy of the Rust schema-v2 result",
+      "property": "semantic_preservation",
+      "python_shadow_only": true,
+      "rust_verifier_executed": true
+    },
+    {
+      "applicable_to_fixture": true,
+      "detected_by": [
+        "CANONICAL_COMPARISON",
+        "PYTHON_SHADOW_ONLY"
+      ],
+      "mutation": "incorrect_return_value",
+      "note": "controlled mutation of a copy of the Rust schema-v2 result",
+      "property": "semantic_preservation",
+      "python_shadow_only": true,
+      "rust_verifier_executed": true
+    },
+    {
+      "applicable_to_fixture": false,
+      "detected_by": [
+        "OTHER"
+      ],
+      "mutation": "ownership_lifecycle_corruption",
+      "note": "not synthesized for the scalar fixture; historical RC1-RC5 supply the concrete lifecycle mutations and detections",
+      "property": "lifecycle",
+      "python_shadow_only": false,
+      "rust_verifier_executed": true
+    }
+  ],
+  "production_invariants": {
+    "authority_changed": false,
+    "fail_closed_changed": false,
+    "lifecycle_changed": false,
+    "optimizer_backend_changed": false,
+    "production_changed": false,
+    "rollback_modes_changed": false,
+    "schemas_changed": false,
+    "shadow_remains_mandatory": true,
+    "ssa_algorithms_changed": false,
+    "verifier_semantics_changed": false
+  },
+  "property_matrix": [
+    {
+      "basis": "structural CFG validity is independent; equality to Initial IR is shadow-only",
+      "classification": "DIFFERENTIALLY_VERIFIED_ONLY",
+      "common_mode_bug": "both builders can implement the same specification error; canonicalization can hide only qualified alpha/order differences",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "the Python builder uses the same SSA principles but a separate implementation",
+      "producer_verifier_shared_implementation": "no",
+      "producer_verifier_shared_representation": "comparison meets at canonical schema-v2",
+      "property": "CFG preservation",
+      "python_shadow_independence": "material: it reconstructs the expected property from Initial IR",
+      "verifiers": [
+        "canonical comparison to Python shadow"
+      ],
+      "without_python_shadow": "no per-compilation exactness guarantee; this property can escape"
+    },
+    {
+      "basis": "Rust and Python compute reachability; preserving intended reachable code remains differential",
+      "classification": "REDUNDANTLY_VERIFIED",
+      "common_mode_bug": "shared schema/type assumptions can admit the same malformed meaning",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "no for the independent Python derivation",
+      "producer_verifier_shared_implementation": "partial for Rust-side checks; no for Python verifier/comparison",
+      "producer_verifier_shared_representation": "Python verifies an imported schema-v2-derived model",
+      "property": "reachability",
+      "python_shadow_independence": "real independent invariant derivation, but not exact-translation proof",
+      "verifiers": [
+        "Rust-side verifier",
+        "Python imported-SSA verifier"
+      ],
+      "without_python_shadow": "the independent imported verifier can remain, but loses differential context"
+    },
+    {
+      "basis": "derived independently from terminators by both verifiers",
+      "classification": "INDEPENDENTLY_VERIFIED",
+      "common_mode_bug": "shared schema/type assumptions can admit the same malformed meaning",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "no for the independent Python derivation",
+      "producer_verifier_shared_implementation": "no",
+      "producer_verifier_shared_representation": "Python verifies an imported schema-v2-derived model",
+      "property": "predecessor/successor consistency",
+      "python_shadow_independence": "real independent invariant derivation, but not exact-translation proof",
+      "verifiers": [
+        "Python imported-SSA verifier"
+      ],
+      "without_python_shadow": "the independent imported verifier can remain, but loses differential context"
+    },
+    {
+      "basis": "Python imported verifier independently derives dominance; the current Rust schema-v2 verifier does not",
+      "classification": "INDEPENDENTLY_VERIFIED",
+      "common_mode_bug": "shared schema/type assumptions can admit the same malformed meaning",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "no for the independent Python derivation",
+      "producer_verifier_shared_implementation": "no",
+      "producer_verifier_shared_representation": "Python verifies an imported schema-v2-derived model",
+      "property": "dominance",
+      "python_shadow_independence": "real independent invariant derivation, but not exact-translation proof",
+      "verifiers": [
+        "Python imported-SSA verifier"
+      ],
+      "without_python_shadow": "the independent imported verifier can remain, but loses differential context"
+    },
+    {
+      "basis": "construction detail is compared in randomized/deep tests but absent from output",
+      "classification": "TEST_ONLY",
+      "common_mode_bug": "test corpus can omit the same failure class",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "qualification algorithms vary",
+      "producer_verifier_shared_implementation": "no",
+      "producer_verifier_shared_representation": "tests compare schema-v2/canonical output",
+      "property": "immediate dominators",
+      "python_shadow_independence": "none at runtime; evidence exists only in qualification",
+      "verifiers": [
+        "historical/adversarial/randomized/deep qualification"
+      ],
+      "without_python_shadow": "only regression evidence remains"
+    },
+    {
+      "basis": "construction detail; correctness is observed through phi output",
+      "classification": "TEST_ONLY",
+      "common_mode_bug": "test corpus can omit the same failure class",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "qualification algorithms vary",
+      "producer_verifier_shared_implementation": "no",
+      "producer_verifier_shared_representation": "tests compare schema-v2/canonical output",
+      "property": "dominance frontiers",
+      "python_shadow_independence": "none at runtime; evidence exists only in qualification",
+      "verifiers": [
+        "historical/adversarial/randomized/deep qualification"
+      ],
+      "without_python_shadow": "only regression evidence remains"
+    },
+    {
+      "basis": "verifiers validate phi well-formedness, not minimal/required placement from Initial IR",
+      "classification": "DIFFERENTIALLY_VERIFIED_ONLY",
+      "common_mode_bug": "both builders can implement the same specification error; canonicalization can hide only qualified alpha/order differences",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "the Python builder uses the same SSA principles but a separate implementation",
+      "producer_verifier_shared_implementation": "no",
+      "producer_verifier_shared_representation": "comparison meets at canonical schema-v2",
+      "property": "phi placement",
+      "python_shadow_independence": "material: it reconstructs the expected property from Initial IR",
+      "verifiers": [
+        "canonical comparison to Python shadow"
+      ],
+      "without_python_shadow": "no per-compilation exactness guarantee; this property can escape"
+    },
+    {
+      "basis": "both imported verifiers require exact CFG predecessor sets",
+      "classification": "INDEPENDENTLY_VERIFIED",
+      "common_mode_bug": "shared schema/type assumptions can admit the same malformed meaning",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "no for the independent Python derivation",
+      "producer_verifier_shared_implementation": "no",
+      "producer_verifier_shared_representation": "Python verifies an imported schema-v2-derived model",
+      "property": "exact phi predecessor labels",
+      "python_shadow_independence": "real independent invariant derivation, but not exact-translation proof",
+      "verifiers": [
+        "Python imported-SSA verifier"
+      ],
+      "without_python_shadow": "the independent imported verifier can remain, but loses differential context"
+    },
+    {
+      "basis": "Python imported verifier rejects duplicates independently of the producer",
+      "classification": "INDEPENDENTLY_VERIFIED",
+      "common_mode_bug": "shared schema/type assumptions can admit the same malformed meaning",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "no for the independent Python derivation",
+      "producer_verifier_shared_implementation": "no",
+      "producer_verifier_shared_representation": "Python verifies an imported schema-v2-derived model",
+      "property": "SSA single definition",
+      "python_shadow_independence": "real independent invariant derivation, but not exact-translation proof",
+      "verifiers": [
+        "Python imported-SSA verifier"
+      ],
+      "without_python_shadow": "the independent imported verifier can remain, but loses differential context"
+    },
+    {
+      "basis": "Python imported dominance verifier derives the rule from received SSA",
+      "classification": "INDEPENDENTLY_VERIFIED",
+      "common_mode_bug": "shared schema/type assumptions can admit the same malformed meaning",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "no for the independent Python derivation",
+      "producer_verifier_shared_implementation": "no",
+      "producer_verifier_shared_representation": "Python verifies an imported schema-v2-derived model",
+      "property": "use dominated by definition",
+      "python_shadow_independence": "real independent invariant derivation, but not exact-translation proof",
+      "verifiers": [
+        "Python imported-SSA verifier"
+      ],
+      "without_python_shadow": "the independent imported verifier can remain, but loses differential context"
+    },
+    {
+      "basis": "Python imported verifier applies an edge-sensitive availability rule",
+      "classification": "INDEPENDENTLY_VERIFIED",
+      "common_mode_bug": "shared schema/type assumptions can admit the same malformed meaning",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "no for the independent Python derivation",
+      "producer_verifier_shared_implementation": "no",
+      "producer_verifier_shared_representation": "Python verifies an imported schema-v2-derived model",
+      "property": "phi incoming dominance",
+      "python_shadow_independence": "real independent invariant derivation, but not exact-translation proof",
+      "verifiers": [
+        "Python imported-SSA verifier"
+      ],
+      "without_python_shadow": "the independent imported verifier can remain, but loses differential context"
+    },
+    {
+      "basis": "internal consistency is independent; equality to Initial IR types is differential",
+      "classification": "DIFFERENTIALLY_VERIFIED_ONLY",
+      "common_mode_bug": "both builders can implement the same specification error; canonicalization can hide only qualified alpha/order differences",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "the Python builder uses the same SSA principles but a separate implementation",
+      "producer_verifier_shared_implementation": "no",
+      "producer_verifier_shared_representation": "comparison meets at canonical schema-v2",
+      "property": "type preservation",
+      "python_shadow_independence": "material: it reconstructs the expected property from Initial IR",
+      "verifiers": [
+        "canonical comparison to Python shadow"
+      ],
+      "without_python_shadow": "no per-compilation exactness guarantee; this property can escape"
+    },
+    {
+      "basis": "well-formed parameters can still be omitted/reordered/changed",
+      "classification": "DIFFERENTIALLY_VERIFIED_ONLY",
+      "common_mode_bug": "both builders can implement the same specification error; canonicalization can hide only qualified alpha/order differences",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "the Python builder uses the same SSA principles but a separate implementation",
+      "producer_verifier_shared_implementation": "no",
+      "producer_verifier_shared_representation": "comparison meets at canonical schema-v2",
+      "property": "parameter preservation",
+      "python_shadow_independence": "material: it reconstructs the expected property from Initial IR",
+      "verifiers": [
+        "canonical comparison to Python shadow"
+      ],
+      "without_python_shadow": "no per-compilation exactness guarantee; this property can escape"
+    },
+    {
+      "basis": "canonical comparison retains block/instruction order; tests cover repeatability",
+      "classification": "DIFFERENTIALLY_VERIFIED_ONLY",
+      "common_mode_bug": "both builders can implement the same specification error; canonicalization can hide only qualified alpha/order differences",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "the Python builder uses the same SSA principles but a separate implementation",
+      "producer_verifier_shared_implementation": "no",
+      "producer_verifier_shared_representation": "comparison meets at canonical schema-v2",
+      "property": "block ordering/determinism",
+      "python_shadow_independence": "material: it reconstructs the expected property from Initial IR",
+      "verifiers": [
+        "canonical comparison to Python shadow"
+      ],
+      "without_python_shadow": "no per-compilation exactness guarantee; this property can escape"
+    },
+    {
+      "basis": "valid unreachable output is accepted by invariant verifiers",
+      "classification": "SHADOW_ONLY",
+      "common_mode_bug": "both builders can implement the same specification error; canonicalization can hide only qualified alpha/order differences",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "the Python builder uses the same SSA principles but a separate implementation",
+      "producer_verifier_shared_implementation": "no",
+      "producer_verifier_shared_representation": "comparison meets at canonical schema-v2",
+      "property": "unreachable block handling",
+      "python_shadow_independence": "material: it reconstructs the expected property from Initial IR",
+      "verifiers": [
+        "Python shadow canonical comparison"
+      ],
+      "without_python_shadow": "no per-compilation exactness guarantee; this property can escape"
+    },
+    {
+      "basis": "the layers cover overlapping but non-identical rules; exact lifecycle policy sequence remains differential",
+      "classification": "INDEPENDENTLY_VERIFIED",
+      "common_mode_bug": "shared schema/type assumptions can admit the same malformed meaning",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "no for the independent Python derivation",
+      "producer_verifier_shared_implementation": "no",
+      "producer_verifier_shared_representation": "Python verifies an imported schema-v2-derived model",
+      "property": "lifecycle/ownership invariants",
+      "python_shadow_independence": "real independent invariant derivation, but not exact-translation proof",
+      "verifiers": [
+        "Python imported-SSA verifier"
+      ],
+      "without_python_shadow": "the independent imported verifier can remain, but loses differential context"
+    },
+    {
+      "basis": "Rust owned codec, serde and strict Python importer",
+      "classification": "REDUNDANTLY_VERIFIED",
+      "common_mode_bug": "shared schema/type assumptions can admit the same malformed meaning",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "no for the independent Python derivation",
+      "producer_verifier_shared_implementation": "partial for Rust-side checks; no for Python verifier/comparison",
+      "producer_verifier_shared_representation": "Python verifies an imported schema-v2-derived model",
+      "property": "schema-v2 integrity",
+      "python_shadow_independence": "real independent invariant derivation, but not exact-translation proof",
+      "verifiers": [
+        "Rust-side verifier",
+        "Python imported-SSA verifier"
+      ],
+      "without_python_shadow": "the independent imported verifier can remain, but loses differential context"
+    },
+    {
+      "basis": "alpha-equivalence comparison intentionally hides only qualified names/incoming order",
+      "classification": "DIFFERENTIALLY_VERIFIED_ONLY",
+      "common_mode_bug": "both builders can implement the same specification error; canonicalization can hide only qualified alpha/order differences",
+      "producer": "Rust SSA lowerer",
+      "producer_verifier_shared_algorithm": "the Python builder uses the same SSA principles but a separate implementation",
+      "producer_verifier_shared_implementation": "no",
+      "producer_verifier_shared_representation": "comparison meets at canonical schema-v2",
+      "property": "canonical deterministic output",
+      "python_shadow_independence": "material: it reconstructs the expected property from Initial IR",
+      "verifiers": [
+        "canonical comparison to Python shadow"
+      ],
+      "without_python_shadow": "no per-compilation exactness guarantee; this property can escape"
+    }
+  ],
+  "qualification": {
+    "adversarial": "PASS",
+    "authority_shadow_fail_closed_contracts": "PASS",
+    "cargo_fmt_check": "PASS",
+    "cargo_test_workspace_locked": "PASS",
+    "deep_cfg": "PASS",
+    "full_python_suite": "PASS",
+    "git_diff_check": "PASS",
+    "historical_116_of_116": "PASS",
+    "mutation_campaign": "PASS",
+    "production_regressions": "PASS",
+    "rust_3_8a_through_3_15_contracts": "PASS",
+    "rust_4_0_checker": "PASS"
+  },
+  "qualification_notes": {
+    "adversarial": "fresh /tmp evidence passed; the older checked-in adversarial artifact is stale and was not modified",
+    "full_python_suite": "unmodified environment reproduced only the 24 historical RC6 ptrace/LeakSanitizer native failures plus the then-pending new checker; with LSAN_OPTIONS=detect_leaks=0 the Rust-authority full suite passed 4941 with 4 skipped, and the finalized RUST-4.0 tests passed 6/6",
+    "workspace_preservation": "pre-existing user changes were not modified or reverted"
+  },
+  "required_verifier_hardening": [
+    "Initial-IR-to-SSA semantic refinement verifier or independently specified translation validator",
+    "slot def/use plus iterated-dominance-frontier phi necessity verifier",
+    "explicit reachability preservation contract against Initial IR",
+    "cross-representation provenance/refinement checks"
+  ],
+  "shadow_dependency_analysis": {
+    "answer": true,
+    "conclusion": "yes; well-formed semantic-preservation errors are outside invariant-verifier completeness",
+    "concrete_cases": [
+      "missing_phi",
+      "extra_phi",
+      "incorrect_phi_incoming",
+      "incorrect_value_rename",
+      "unreachable_block_incorrectly_preserved",
+      "missing_instruction",
+      "duplicated_instruction",
+      "incorrect_return_value"
+    ],
+    "question": "Can Rust produce incorrect SSA that passes independent verifiers and schema validation but is detected only by Python shadow?"
+  },
+  "shadow_only_mutations": [
+    "missing_phi",
+    "extra_phi",
+    "incorrect_phi_incoming",
+    "incorrect_value_rename",
+    "unreachable_block_incorrectly_preserved",
+    "missing_instruction",
+    "duplicated_instruction",
+    "incorrect_return_value"
+  ],
+  "shadow_only_properties": [
+    {
+      "guarantee": "exact required phi placement and selected incoming values",
+      "replacement": "Initial-IR slot def/use plus iterated-dominance-frontier translation validator"
+    },
+    {
+      "guarantee": "exact instruction and side-effect sequence preservation",
+      "replacement": "cross-representation semantic refinement and effect-order verifier"
+    },
+    {
+      "guarantee": "returned value and value provenance preserve Initial IR meaning",
+      "replacement": "value provenance/refinement certificates checked independently"
+    },
+    {
+      "guarantee": "qualified reachable/unreachable block policy",
+      "replacement": "explicit cross-IR reachability preservation verifier"
+    },
+    {
+      "guarantee": "exact lifecycle retain/release policy sequence",
+      "replacement": "independent ownership transfer/lifetime translation verifier"
+    }
+  ],
+  "trust_inventory": [
+    {
+      "common_mode_risk": "producer; no independence from itself",
+      "layer": "rust_ssa_implementation",
+      "producer_and_verifier_share_implementation": true,
+      "properties": "produces CFG/SSA, dominators, frontiers, phi placement, renaming and deterministic ordering",
+      "share_algorithm": true,
+      "share_representation": true,
+      "without_python_shadow": "incorrect SSA may reach later layers"
+    },
+    {
+      "common_mode_risk": "material implementation diversity and differential oracle",
+      "layer": "python_shadow_implementation",
+      "producer_and_verifier_share_implementation": false,
+      "properties": "reconstructs the complete expected SSA from the same Initial IR",
+      "share_algorithm": false,
+      "share_representation": false,
+      "without_python_shadow": "exact transformation and lifecycle equivalence lose their current oracle"
+    },
+    {
+      "common_mode_risk": "independent expected value, shared comparison representation",
+      "layer": "canonical_comparison",
+      "producer_and_verifier_share_implementation": false,
+      "properties": "checks alpha-normalized schema-v2 equality including instructions, CFG and metadata",
+      "share_algorithm": true,
+      "share_representation": true,
+      "without_python_shadow": "all structurally-valid wrong-output mutations can escape"
+    },
+    {
+      "common_mode_risk": "independent implementation/algorithms but same Python SSA representation",
+      "layer": "imported_rust_ssa_verifier",
+      "producer_and_verifier_share_implementation": false,
+      "properties": "checks imported structure, types, CFG, SSA, dominance and lifecycle",
+      "share_algorithm": false,
+      "share_representation": true,
+      "without_python_shadow": "malformed SSA is still checked by Rust verifier and importer; semantic equivalence is not"
+    },
+    {
+      "common_mode_risk": "self-verifies the oracle output",
+      "layer": "python_builder_verifier",
+      "producer_and_verifier_share_implementation": true,
+      "properties": "checks the Python-produced SSA before comparison",
+      "share_algorithm": true,
+      "share_representation": true,
+      "without_python_shadow": "no effect if Python builder is absent"
+    },
+    {
+      "common_mode_risk": "independent prerequisite, not an SSA oracle",
+      "layer": "initial_ir_integrity_verifier",
+      "producer_and_verifier_share_implementation": false,
+      "properties": "checks the pre-SSA module and freezes a same-input snapshot",
+      "share_algorithm": false,
+      "share_representation": false,
+      "without_python_shadow": "malformed input remains fail-closed but transformation correctness is not proven"
+    },
+    {
+      "common_mode_risk": "independent rules; historical RC5 proved useful diversity",
+      "layer": "lifecycle_verifier",
+      "producer_and_verifier_share_implementation": false,
+      "properties": "checks local ARC/ownership invariants in imported SSA",
+      "share_algorithm": false,
+      "share_representation": true,
+      "without_python_shadow": "structurally valid but policy-wrong retain/release sequences may escape"
+    },
+    {
+      "common_mode_risk": "independent decoder sharing schema assumptions",
+      "layer": "schema_v2_importer",
+      "producer_and_verifier_share_implementation": false,
+      "properties": "strict fields, tags, types, targets and lossless reconstruction",
+      "share_algorithm": false,
+      "share_representation": true,
+      "without_python_shadow": "well-formed semantic corruption is accepted"
+    },
+    {
+      "common_mode_risk": "common-mode with Rust producer and owned representation",
+      "layer": "rust_side_verification",
+      "producer_and_verifier_share_implementation": true,
+      "properties": "checks owned/schema structure, CFG shape, exact phi labels, exceptional edges and event ownership; it does not run the Initial-IR SSA namespace/dominance verifier over schema-v2",
+      "share_algorithm": true,
+      "share_representation": true,
+      "without_python_shadow": "remains, but cannot alone establish producer correctness"
+    },
+    {
+      "common_mode_risk": "test evidence independent of runtime",
+      "layer": "historical_corpus",
+      "producer_and_verifier_share_implementation": false,
+      "properties": "116/116 established checks and former failure reproducers",
+      "share_algorithm": false,
+      "share_representation": false,
+      "without_python_shadow": "regressions outside corpus can escape"
+    },
+    {
+      "common_mode_risk": "test-only independent inputs",
+      "layer": "adversarial_corpus",
+      "producer_and_verifier_share_implementation": false,
+      "properties": "irreducible, exceptional, aggregate, lifecycle and malformed cases",
+      "share_algorithm": false,
+      "share_representation": false,
+      "without_python_shadow": "no per-compilation guarantee"
+    },
+    {
+      "common_mode_risk": "high diversity but still differential/test-only",
+      "layer": "randomized_differential_cfg",
+      "producer_and_verifier_share_implementation": false,
+      "properties": "compares implementations over generated CFGs",
+      "share_algorithm": false,
+      "share_representation": false,
+      "without_python_shadow": "no per-compilation guarantee"
+    },
+    {
+      "common_mode_risk": "test-only scale evidence",
+      "layer": "deep_cfg_qualification",
+      "producer_and_verifier_share_implementation": false,
+      "properties": "100/1000/5000/10000 block stack-safety and determinism",
+      "share_algorithm": false,
+      "share_representation": false,
+      "without_python_shadow": "no per-compilation guarantee"
+    },
+    {
+      "common_mode_risk": "operational evidence",
+      "layer": "platform_qualification",
+      "producer_and_verifier_share_implementation": false,
+      "properties": "companion packaging and supported-platform behavior",
+      "share_algorithm": false,
+      "share_representation": false,
+      "without_python_shadow": "platform regressions lose an oracle signal"
+    },
+    {
+      "common_mode_risk": "operational differential evidence",
+      "layer": "operational_soak",
+      "producer_and_verifier_share_implementation": false,
+      "properties": "repeated real-suite match/failure telemetry",
+      "share_algorithm": false,
+      "share_representation": false,
+      "without_python_shadow": "future drift is no longer observed synchronously"
+    },
+    {
+      "common_mode_risk": "recovery, not correctness evidence",
+      "layer": "rollback_modes",
+      "producer_and_verifier_share_implementation": false,
+      "properties": "restores Python authority or Python-only behavior",
+      "share_algorithm": false,
+      "share_representation": false,
+      "without_python_shadow": "rollback remains available but detection signal is weaker"
+    }
+  ],
+  "verifier_completeness_gaps": [
+    {
+      "gap": "no independent proof that Rust preserves the complete instruction/lifecycle sequence of Initial IR",
+      "replacement": "Initial-IR-to-SSA semantic refinement verifier or independently specified translation validator",
+      "severity": "CRITICAL"
+    },
+    {
+      "gap": "no independent required/minimal phi-placement oracle",
+      "replacement": "slot def/use plus iterated-dominance-frontier phi necessity verifier",
+      "severity": "CRITICAL"
+    },
+    {
+      "gap": "valid unreachable-block retention/removal policy is not checked",
+      "replacement": "explicit reachability preservation contract against Initial IR",
+      "severity": "IMPORTANT"
+    },
+    {
+      "gap": "parameter, block and side-effect sequence preservation is only differential",
+      "replacement": "cross-representation provenance/refinement checks",
+      "severity": "IMPORTANT"
+    },
+    {
+      "gap": "Rust producer and Rust verifier share owned representations and helper assumptions",
+      "replacement": "keep Python imported verifier in the future independent boundary",
+      "severity": "DEFENSE_IN_DEPTH"
+    },
+    {
+      "gap": "canonical alpha-normalization hides qualified identifier spelling and phi incoming order",
+      "replacement": "retain deterministic raw-output tests; no runtime semantic gate required",
+      "severity": "NON_SEMANTIC"
+    }
+  ]
+}

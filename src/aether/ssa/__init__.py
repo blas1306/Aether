@@ -122,6 +122,11 @@ from .model import (
 from .phi_placement import PhiPlacement
 from .printer import SSAPrinter, print_ssa
 from .renaming import SSARenameError, SSARenameResult, SSARenamer
+from .refinement_verifier import (
+    SSARefinementVerificationError,
+    SSARefinementVerifier,
+    verify_ssa_refinement,
+)
 from .verifier import SSAVerificationError, SSAVerifier
 
 __all__ = [
@@ -220,6 +225,9 @@ __all__ = [
     "SSARenameError",
     "SSARenameResult",
     "SSARenamer",
+    "SSARefinementVerificationError",
+    "SSARefinementVerifier",
+    "verify_ssa_refinement",
     "SSAReturn",
     "SSAThrow",
     "SSAUnaryOp",

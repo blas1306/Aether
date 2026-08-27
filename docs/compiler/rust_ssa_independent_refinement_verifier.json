@@ -1,0 +1,650 @@
+{
+  "architecture": [
+    "lifecycle-normalized Initial IR",
+    "Rust SSA schema-v2 imported SSA",
+    "opt-in independent refinement verifier"
+  ],
+  "artifact_schema_version": 1,
+  "baseline_revision": "7500d66a0d830542d2436b22356e0c34698f076f",
+  "commit_created": false,
+  "decision": "RUST_SSA_INDEPENDENT_REFINEMENT_VERIFIER_QUALIFIED",
+  "effectful_instruction_coverage": [
+    "direct calls and invokes",
+    "indirect calls and invokes",
+    "interface calls and invokes",
+    "prints",
+    "class/list/array/vector/matrix mutations",
+    "exception pack/catch/destroy/transfer",
+    "lifecycle retain/release calls after normalization",
+    "IRStore is the only memory store promoted away by this IR"
+  ],
+  "false_positive_qualification": {
+    "coverage": [
+      "functions",
+      "diamonds",
+      "loops, nested loops and loop-carried values",
+      "irreducible CFG",
+      "unreachable code",
+      "multiple stores",
+      "zero/one/multiple phi",
+      "lifecycle-heavy aggregate/list program"
+    ],
+    "deep_cfg": [
+      {
+        "blocks": 100,
+        "status": "PASS",
+        "verifier_seconds": 0.0018861099997593556
+      },
+      {
+        "blocks": 1000,
+        "status": "PASS",
+        "verifier_seconds": 0.00878733799982001
+      },
+      {
+        "blocks": 5000,
+        "status": "PASS",
+        "verifier_seconds": 0.04423002900148276
+      },
+      {
+        "blocks": 10000,
+        "status": "PASS",
+        "verifier_seconds": 0.09236125999814249
+      }
+    ],
+    "false_positive_count": 0,
+    "ordinary_cases": 40,
+    "ordinary_python_build_seconds": 0.012985495999600971,
+    "ordinary_verifier_seconds": 0.004434882001078222,
+    "seeded_randomized_cfgs": 32,
+    "status": "PASS"
+  },
+  "formal_transformations": [
+    {
+      "relation": "SSA blocks equal the independently reachable Initial IR blocks; reachable blocks cannot disappear and unreachable blocks cannot remain",
+      "transformation": "unreachable-block elimination"
+    },
+    {
+      "relation": "every IRLoad/IRStore disappears and every load-backed use equals the independently computed reaching slot value",
+      "transformation": "promoted load/store elimination"
+    },
+    {
+      "relation": "every reachable non-IRLoad/IRStore instruction occurs exactly once with the corresponding SSA opcode and equal semantic fields",
+      "transformation": "non-promoted instruction preservation"
+    },
+    {
+      "relation": "each phi has exact CFG predecessors and admits a distinct promoted slot whose predecessor reaching values equal its incoming provenance",
+      "transformation": "phi creation"
+    },
+    {
+      "relation": "spelling is irrelevant for preserved results; every operand resolves to the same Initial IR origin set",
+      "transformation": "SSA renaming"
+    },
+    {
+      "relation": "entry, reachable block sequence and all successor targets are preserved",
+      "transformation": "reachable CFG preservation"
+    },
+    {
+      "relation": "branch, jump, invoke, throw/rethrow/propagate and return opcode/targets/operands correspond exactly",
+      "transformation": "terminator preservation"
+    },
+    {
+      "relation": "literal payload and result type are equal",
+      "transformation": "constant preservation"
+    },
+    {
+      "relation": "direct, indirect and interface callee/slot, arguments, result type, builtin and exceptional targets are equal",
+      "transformation": "call preservation"
+    },
+    {
+      "relation": "all non-slot instructions retain exact block-local relative order, so calls, prints, mutations and lifecycle calls cannot disappear, duplicate or reorder",
+      "transformation": "side-effect preservation"
+    },
+    {
+      "relation": "each SSAReturn operand has exactly the provenance of its corresponding IRReturn after slot promotion",
+      "transformation": "return preservation"
+    },
+    {
+      "relation": "function, parameter, result, phi, slot and operand types remain equal",
+      "transformation": "type preservation"
+    },
+    {
+      "relation": "parameter count, order, names and types are exact; their uses retain parameter-index provenance",
+      "transformation": "parameter preservation"
+    },
+    {
+      "relation": "the verifier consumes the exact normalized producer input and rejects remaining lifecycle pseudo-instructions or transferred_storage",
+      "transformation": "lifecycle-normalized assumption"
+    }
+  ],
+  "historical_qualification": {
+    "denominator": 116,
+    "expected": 116,
+    "failed": 0,
+    "failures": [],
+    "passed": 116,
+    "status": "PASS"
+  },
+  "independence_audit": {
+    "classification": "STRONG",
+    "common_mode_failures": [
+      "Initial IR and SSA model fields can omit the same semantic fact",
+      "the formal lowering contract itself can be wrong",
+      "both sides trust IRType equality",
+      "lifecycle normalization must supply the exact producer input",
+      "the existing schema importer precedes verification"
+    ],
+    "consumes_producer_intermediates": false,
+    "independent_algorithm": "forward fixed-point reaching-value dataflow over Initial IR slots; SSA phi provenance is a separate union fixed point",
+    "producer_algorithms_not_imported": [
+      "CFGBuilder",
+      "DominatorAnalysis",
+      "DominanceFrontierAnalysis",
+      "PhiPlacement",
+      "SSARenamer",
+      "GeneralSSABuilder"
+    ],
+    "same_bug_assessment": "a shared model/schema or incorrectly specified lowering relation can affect both; producer dominance/frontier/renaming bugs do not share code or algorithm with the verifier",
+    "shared_algorithms": [],
+    "shared_code": [
+      "immutable Initial IR/SSA dataclasses and type equality",
+      "public schema-v2 importer before the verifier boundary"
+    ],
+    "shared_structures": [
+      "public IRFunction/IRBasicBlock and SSAFunction/SSABasicBlock models"
+    ]
+  },
+  "instruction_classification": {
+    "PRESERVED": "every reachable non-load/store Initial IR instruction",
+    "PROMOTED_AWAY": "IRLoad and IRStore only",
+    "STRUCTURALLY_TRANSFORMED": "invoke/throw edge argument materialization and bounds_checked=true",
+    "SYNTHESIZED_PHI": "one-to-one justified joins of promoted slot reaching values"
+  },
+  "milestone": "RUST-4.1",
+  "mutation_campaign": [
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "missing_phi",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.0"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "extra_phi",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.0"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "incorrect_phi_incoming",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.0"
+    },
+    {
+      "detected_by": [
+        "EXISTING_SSA_VERIFIER",
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW",
+        "OTHER"
+      ],
+      "fixture": "branch",
+      "mutation": "incorrect_predecessor",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.0"
+    },
+    {
+      "detected_by": [
+        "EXISTING_SSA_VERIFIER",
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "duplicate_definition",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.0"
+    },
+    {
+      "detected_by": [
+        "EXISTING_SSA_VERIFIER",
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "use_before_definition",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.0"
+    },
+    {
+      "detected_by": [
+        "EXISTING_SSA_VERIFIER",
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "definition_not_dominating_use",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.0"
+    },
+    {
+      "detected_by": [
+        "EXISTING_SSA_VERIFIER",
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "phi_incoming_not_dominating_edge",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.0"
+    },
+    {
+      "detected_by": [
+        "EXISTING_SSA_VERIFIER",
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "incorrect_type",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.0"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "incorrect_value_rename",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.0"
+    },
+    {
+      "detected_by": [
+        "EXISTING_SSA_VERIFIER",
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "incorrect_block_target",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.0"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "unreachable_block_incorrectly_preserved",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.0"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "missing_instruction",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.0"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "duplicated_instruction",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.0"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "incorrect_return_value",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.0"
+    },
+    {
+      "detected_by": [
+        "OTHER"
+      ],
+      "fixture": "branch",
+      "mutation": "ownership_lifecycle_corruption",
+      "python_shadow_only": false,
+      "semantic": false,
+      "source": "RUST-4.0"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "wrong_phi_incoming_value",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    },
+    {
+      "detected_by": [
+        "EXISTING_SSA_VERIFIER",
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW",
+        "OTHER"
+      ],
+      "fixture": "branch",
+      "mutation": "wrong_phi_predecessor",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "duplicate_phi",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "missing_preserved_instruction",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "duplicated_preserved_instruction",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "effects",
+      "mutation": "reordered_side_effecting_instructions",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "wrong_constant",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "effects",
+      "mutation": "wrong_call_target",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "effects",
+      "mutation": "wrong_call_argument",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    },
+    {
+      "detected_by": [
+        "EXISTING_SSA_VERIFIER",
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "wrong_branch_target",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "wrong_return",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "effects",
+      "mutation": "wrong_parameter",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    },
+    {
+      "detected_by": [
+        "EXISTING_SSA_VERIFIER",
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "wrong_type",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    },
+    {
+      "detected_by": [
+        "EXISTING_SSA_VERIFIER",
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW",
+        "OTHER"
+      ],
+      "fixture": "branch",
+      "mutation": "missing_reachable_block",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "retained_unreachable_block",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    },
+    {
+      "detected_by": [
+        "EXISTING_SSA_VERIFIER",
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW",
+        "OTHER"
+      ],
+      "fixture": "branch",
+      "mutation": "duplicated_block",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "incorrect_promoted_value",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    },
+    {
+      "detected_by": [
+        "REFINEMENT_VERIFIER",
+        "PYTHON_SHADOW"
+      ],
+      "fixture": "branch",
+      "mutation": "incorrect_rename_structurally_valid",
+      "python_shadow_only": false,
+      "semantic": true,
+      "source": "RUST-4.1"
+    }
+  ],
+  "negative_qualification": {
+    "basis": "the verifier is opt-in and cannot convert any pre-SSA, importer, existing-verifier, authority, shadow or fail-closed rejection into success",
+    "status": "PASS"
+  },
+  "new_semantic_shadow_only": [],
+  "performance": {
+    "deep_cfg": [
+      {
+        "blocks": 100,
+        "status": "PASS",
+        "verifier_seconds": 0.0018861099997593556
+      },
+      {
+        "blocks": 1000,
+        "status": "PASS",
+        "verifier_seconds": 0.00878733799982001
+      },
+      {
+        "blocks": 5000,
+        "status": "PASS",
+        "verifier_seconds": 0.04423002900148276
+      },
+      {
+        "blocks": 10000,
+        "status": "PASS",
+        "verifier_seconds": 0.09236125999814249
+      }
+    ],
+    "ordinary": {
+      "cases": 40,
+      "python_build_seconds": 0.012985495999600971,
+      "verifier_seconds": 0.004434882001078222
+    },
+    "peak_memory": "not measured; observational and optional for RUST-4.1",
+    "scaling": "observed separately in deep_cfg rows",
+    "thresholds_enforced": false
+  },
+  "production_invariants": {
+    "authority_changed": false,
+    "fail_closed_changed": false,
+    "optimizer_backend_changed": false,
+    "production_changed": false,
+    "python_shadow_remains_mandatory": true,
+    "python_ssa_algorithm_changed": false,
+    "refinement_verifier_mode": "QUALIFICATION_TEST_EXPLICIT_OPT_IN_ONLY",
+    "rollback_modes_changed": false,
+    "rust_ssa_algorithm_changed": false,
+    "schemas_or_protocol_changed": false
+  },
+  "qualification": {
+    "adversarial": "PASS",
+    "cargo_fmt_check": "PASS",
+    "cargo_test_workspace_locked": "PASS",
+    "deep_cfg": "PASS",
+    "expanded_mutation_campaign": "PASS",
+    "false_positive_qualification": "PASS",
+    "full_python_suite": "PASS_4956_SKIPPED_4",
+    "git_diff_check": "PASS",
+    "historical_116_of_116": "PASS",
+    "historical_exact_revision_artifacts": "STALE_AS_EXPECTED_NOT_REWRITTEN",
+    "production_regressions_and_authority_contracts": "PASS_173_OF_173",
+    "randomized_seeded_cfg": "PASS",
+    "rust_4_0_campaign_reused": "PASS",
+    "rust_4_0_checker": "PASS",
+    "rust_4_1_checker": "PASS"
+  },
+  "qualification_notes": {
+    "full_python_suite": "LSAN_OPTIONS=detect_leaks=0: 4956 passed, 4 skipped, 6 plotting warnings",
+    "historical_exact_revision_artifacts": "RUST-3.x aggregate checkers bind evidence hashes to older qualification revisions; current HEAD/worktree intentionally makes byte-for-byte --check stale. Their current regression/authority/fail-closed tests passed and no historical artifact was regenerated.",
+    "targeted_contracts": "173 passed across SSA, dominance, exceptions, RUST-4.0, authority promotion and production stabilization tests"
+  },
+  "refinement_properties": [
+    "exact reachable block set/order and entry",
+    "exact reachable edges and terminators",
+    "exact once-only preserved instruction correspondence",
+    "constant, call, target, type and side-effect order preservation",
+    "all load/store traffic promoted away",
+    "slot reaching-value justification for every phi",
+    "value provenance for parameters, preserved results and phis",
+    "return operand provenance equality"
+  ],
+  "rust_4_0_shadow_only": {
+    "after": [],
+    "after_count": 0,
+    "before": [
+      "missing_phi",
+      "extra_phi",
+      "incorrect_phi_incoming",
+      "incorrect_value_rename",
+      "unreachable_block_incorrectly_preserved",
+      "missing_instruction",
+      "duplicated_instruction",
+      "incorrect_return_value"
+    ],
+    "before_count": 8
+  }
+}

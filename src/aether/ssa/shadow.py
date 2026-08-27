@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, unique
 import atexit
 import json
@@ -109,6 +109,7 @@ class SSAPerformanceProfile:
     rust_phase_detail: str
     rust_ssa_lowering_phases_seconds: Mapping[str, float]
     python_ssa_lowering_phases_seconds: Mapping[str, float]
+    python_lifecycle_phases_seconds: Mapping[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         values = tuple(self.phases_seconds.values()) + (
@@ -141,6 +142,9 @@ class SSAPerformanceProfile:
             ),
             "python_ssa_lowering_phases_seconds": dict(
                 self.python_ssa_lowering_phases_seconds
+            ),
+            "python_lifecycle_phases_seconds": dict(
+                self.python_lifecycle_phases_seconds
             ),
         }
 
@@ -608,6 +612,7 @@ def _finish_performance_profile(
     rust_phase_detail: str,
     rust_ssa_lowering_phases: Mapping[str, float] | None = None,
     python_ssa_lowering_phases: Mapping[str, float] | None = None,
+    python_lifecycle_phases: Mapping[str, float] | None = None,
 ) -> SSAPerformanceProfile:
     total = perf_counter() - total_started
     measured = sum(phases.values())
@@ -635,6 +640,7 @@ def _finish_performance_profile(
         python_ssa_lowering_phases_seconds=dict(
             python_ssa_lowering_phases or {}
         ),
+        python_lifecycle_phases_seconds=dict(python_lifecycle_phases or {}),
     )
 
 
@@ -729,6 +735,7 @@ def _lower_dual_lane(
     rust_phase_detail = "disabled"
     rust_ssa_lowering_phases: dict[str, float] = {}
     python_ssa_lowering_phases: dict[str, float] = {}
+    python_lifecycle_phases: dict[str, float] = {}
     rust_comparison_dto: Mapping[str, object] | None = None
 
     def run_python() -> object:
@@ -746,6 +753,7 @@ def _lower_dual_lane(
                 value = GeneralSSABuilder(
                     performance_timings=phases,
                     phase_timings=python_ssa_lowering_phases,
+                    lifecycle_timings=python_lifecycle_phases,
                 ).build(python_input)
             else:
                 # Keep the production path byte-for-byte recognizable to the
@@ -868,6 +876,7 @@ def _lower_dual_lane(
             rust_phase_detail,
             rust_ssa_lowering_phases,
             python_ssa_lowering_phases,
+            python_lifecycle_phases,
         )
         return rust_ssa, SSAShadowReport(
             "diagnostic_rust_only",
@@ -937,6 +946,7 @@ def _lower_dual_lane(
             rust_phase_detail,
             rust_ssa_lowering_phases,
             python_ssa_lowering_phases,
+            python_lifecycle_phases,
         )
         if characterize_performance
         else None
