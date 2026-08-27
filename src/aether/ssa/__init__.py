@@ -32,6 +32,13 @@ from .shadow import (
     SSAPerformanceProfile,
     production_rust_ssa_lowering_client,
 )
+from .shadow_independent import (
+    SHADOW_INDEPENDENT_QUALIFICATION_REVISION,
+    SHADOW_INDEPENDENT_STAGE_MANIFEST,
+    ShadowIndependentQualificationFailure,
+    ShadowIndependentQualificationTrace,
+    qualify_shadow_independent_rust_ssa,
+)
 from .performance import characterize_python_ssa_only
 from .interpreter import SSAInterpreter
 from .model import (
@@ -144,6 +151,11 @@ __all__ = [
     "SSAPerformanceProfile",
     "characterize_python_ssa_only",
     "production_rust_ssa_lowering_client",
+    "SHADOW_INDEPENDENT_QUALIFICATION_REVISION",
+    "SHADOW_INDEPENDENT_STAGE_MANIFEST",
+    "ShadowIndependentQualificationFailure",
+    "ShadowIndependentQualificationTrace",
+    "qualify_shadow_independent_rust_ssa",
     "SSABuildError",
     "SSABuilder",
     "SSACFGBuilder",
