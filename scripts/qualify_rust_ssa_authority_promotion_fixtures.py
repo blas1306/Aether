@@ -28,6 +28,10 @@ from aether.ssa.shadow import (  # noqa: E402
     SSALoweringAuthorityMode,
     canonical_ssa,
 )
+from aether.ssa.shadow_independent import (  # noqa: E402
+    SHADOW_INDEPENDENT_STAGE_MANIFEST,
+    ShadowIndependentQualificationTrace,
+)
 from aether.typechecker import TypeChecker  # noqa: E402
 
 
@@ -45,6 +49,9 @@ EXPECTED_ORIGINS = {
         "python_general_ssa_builder"
     ),
     SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW: (
+        "rust_schema_v2_import"
+    ),
+    SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED: (
         "rust_schema_v2_import"
     ),
 }
@@ -67,6 +74,11 @@ SEMANTIC_METADATA_FIELDS = frozenset(
 
 
 def _load_manifest() -> dict[str, Any]:
+    if set(EXPECTED_ORIGINS) != set(SSALoweringAuthorityMode):
+        raise ValueError(
+            "promotion fixture returned-origin contract must cover every "
+            "SSA authority mode"
+        )
     value = json.loads(MANIFEST.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise ValueError("promotion fixture manifest must be an object")
@@ -112,23 +124,90 @@ def _mode_result(
     )
     result = pipeline.run(ir_module_from_dto(initial_dto))
     SSAOptimizerPipeline(verify_after_each=True).run(result.ssa_module)
-    compared = mode is not SSALoweringAuthorityMode.PYTHON_SSA_ONLY
-    classification = (
-        getattr(pipeline.last_authority_report, "classification", None)
-        if compared
-        else "not_compared"
-    )
     expected_origin = EXPECTED_ORIGINS[mode]
+    report = pipeline.last_authority_report
+    if mode is SSALoweringAuthorityMode.PYTHON_SSA_ONLY:
+        comparison = "not_compared"
+        qualification = "not_compared"
+        qualification_checks = {
+            "authority_report_absent": report is None,
+        }
+    elif mode is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED:
+        comparison = "not_compared"
+        qualification = "independent_refinement_verified"
+        expected_counts = {
+            stage: 1 for stage in SHADOW_INDEPENDENT_STAGE_MANIFEST
+        }
+        qualification_checks = {
+            "trace_type": isinstance(
+                report, ShadowIndependentQualificationTrace
+            ),
+            "accepted": getattr(report, "accepted", False) is True,
+            "mode": getattr(report, "mode", None) == mode.value,
+            "complete_ordering": (
+                getattr(report, "completed_stages", None)
+                == SHADOW_INDEPENDENT_STAGE_MANIFEST
+            ),
+            "each_stage_executed_once": (
+                getattr(report, "stage_execution_counts", None)
+                == expected_counts
+            ),
+            "no_failed_stage": getattr(report, "failed_stage", None) is None,
+            "no_failure_classification": (
+                getattr(report, "failure_classification", None) is None
+            ),
+            "rust_lowering_executed": (
+                getattr(report, "rust_ssa_lowering_executed", False) is True
+            ),
+            "rust_verification_succeeded": (
+                getattr(report, "rust_side_verification_succeeded", False)
+                is True
+            ),
+            "refinement_verification_executed": (
+                getattr(report, "refinement_verification_executed", False)
+                is True
+            ),
+            "final_verification_executed": (
+                getattr(report, "final_generic_verification_executed", False)
+                is True
+            ),
+            "python_builder_not_instantiated": (
+                getattr(
+                    report,
+                    "python_general_ssa_builder_instantiated",
+                    True,
+                )
+                is False
+            ),
+            "python_lowering_not_executed": (
+                getattr(report, "python_ssa_lowering_executed", True) is False
+            ),
+            "canonical_comparison_not_executed": (
+                getattr(
+                    report,
+                    "canonical_rust_python_comparison_executed",
+                    True,
+                )
+                is False
+            ),
+        }
+    else:
+        comparison = getattr(report, "classification", None)
+        qualification = comparison
+        qualification_checks = {
+            "canonical_comparison_matched": qualification == "match",
+        }
+    passed = (
+        pipeline.last_returned_ssa_origin == expected_origin
+        and all(qualification_checks.values())
+    )
     return {
-        "status": (
-            "PASS"
-            if pipeline.last_returned_ssa_origin == expected_origin
-            and (not compared or classification == "match")
-            else "FAIL"
-        ),
+        "status": "PASS" if passed else "FAIL",
         "returned_ssa_origin": pipeline.last_returned_ssa_origin,
         "expected_returned_ssa_origin": expected_origin,
-        "comparison": classification,
+        "comparison": comparison,
+        "qualification": qualification,
+        "qualification_checks": qualification_checks,
         "optimizer_verification": "PASS",
     }
 

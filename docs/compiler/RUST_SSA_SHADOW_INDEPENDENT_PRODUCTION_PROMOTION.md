@@ -43,3 +43,9 @@ Compatibility remains protocol-v1 and schema-v2 with unchanged response shape. C
 Historical RUST-3.x evidence files are preserved. The active RUST-3.7 checker now narrowly recognizes that its differential default was superseded while still requiring the old mode to remain selectable. RUST-4.4 tooling and evidence are unchanged. Both RUST-4.4A properties remain fail-closed: refinement catches semantic corruption in every Rust-authority route, and canonical mismatch still rejects the explicit differential route.
 
 Python SSA remains in the repository for differential CI, qualification, explicit safety mode, and rollback authority. This evidence is not a formal proof of Rust correctness. No commit was created.
+
+## CI follow-up: run 33104958944
+
+The four cross-platform clean-install jobs and the mandatory differential job passed. The production-default full-suite job's two failures were setup defects: it did not build the release `aether-ir-verifier`, and its no-build-isolation wheel test lacked `setuptools.build_meta` because the job did not explicitly provision current setuptools and wheel packages. The job now provisions `setuptools>=77` and `wheel>=0.45` and builds the locked release verifier before running the unfiltered suite.
+
+The permanent promotion-fixture qualification now exercises all four authority modes. Every `RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED` row must return `rust_schema_v2_import`, complete every shadow-independent stage exactly once, execute Rust-side, independent-refinement, and final generic verification, and prove that the Python SSA builder, Python lowering, and canonical Rust/Python comparison did not execute. Local follow-up qualification passed all eight fixtures; the complete production-default repository suite passed with 5028 passed, 4 skipped, and no failures. The promotion decision remains pending until a clean exact-revision workflow rerun records these repaired gates.

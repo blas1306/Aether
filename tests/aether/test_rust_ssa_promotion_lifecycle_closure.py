@@ -17,6 +17,10 @@ from aether.ssa.shadow import (
     SSALoweringAuthorityConfiguration,
     SSALoweringAuthorityMode,
 )
+from aether.ssa.shadow_independent import (
+    SHADOW_INDEPENDENT_STAGE_MANIFEST,
+    ShadowIndependentQualificationTrace,
+)
 from aether.typechecker import TypeChecker
 
 
@@ -98,7 +102,11 @@ def test_classified_lifecycle_reproducers_match_at_boundary_b_and_in_all_modes(
         SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW: (
             "rust_schema_v2_import"
         ),
+        SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED: (
+            "rust_schema_v2_import"
+        ),
     }
+    assert set(expected_origins) == set(SSALoweringAuthorityMode)
     for mode, expected_origin in expected_origins.items():
         pipeline = SSAPipeline(
             authority_configuration=SSALoweringAuthorityConfiguration(mode),
@@ -107,7 +115,21 @@ def test_classified_lifecycle_reproducers_match_at_boundary_b_and_in_all_modes(
         result = pipeline.run(initial)
         SSAOptimizerPipeline(verify_after_each=True).run(result.ssa_module)
         assert pipeline.last_returned_ssa_origin == expected_origin
-        if mode is not SSALoweringAuthorityMode.PYTHON_SSA_ONLY:
+        if mode is SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_REFINEMENT_VERIFIED:
+            trace = pipeline.last_authority_report
+            assert isinstance(trace, ShadowIndependentQualificationTrace)
+            assert trace.accepted is True
+            assert trace.mode == mode.value
+            assert trace.completed_stages == SHADOW_INDEPENDENT_STAGE_MANIFEST
+            assert trace.stage_execution_counts == {
+                stage: 1 for stage in SHADOW_INDEPENDENT_STAGE_MANIFEST
+            }
+            assert trace.refinement_verification_executed is True
+            assert trace.final_generic_verification_executed is True
+            assert trace.python_general_ssa_builder_instantiated is False
+            assert trace.python_ssa_lowering_executed is False
+            assert trace.canonical_rust_python_comparison_executed is False
+        elif mode is not SSALoweringAuthorityMode.PYTHON_SSA_ONLY:
             assert pipeline.last_authority_report.classification == "match"
 
 

@@ -17,8 +17,11 @@ jobs:
         with: {python-version: "3.13"}
       - uses: dtolnay/rust-toolchain@stable
         with: {toolchain: "1.85"}
-      - run: python -m pip install -r requirements.txt pytest
+      - run: >-
+          python -m pip install -r requirements.txt pytest
+          'setuptools>=77' 'wheel>=0.45'
       - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --package aether-verifier --bin aether-ssa-shadow
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --release --locked --package aether-ir-verifier
       - name: New production-default policy, ordering, provenance, and rollback
         run: >-
           python -m pytest -q
