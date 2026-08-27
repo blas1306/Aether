@@ -280,6 +280,8 @@ def test_exact_revision_complete_evidence_promotes_v2(tmp_path: Path) -> None:
     _write(
         tmp_path / "operational.json",
         {
+            "milestone": "RUST-4.4A_OPERATIONAL_REQUALIFICATION_COMPATIBILITY",
+            "historical_contract": "RUST-3.6-V2",
             "qualification_revision": revision,
             "decision": "RUST_SSA_AUTHORITY_REQUALIFICATION_OPERATIONAL_PASS",
             "transport": {

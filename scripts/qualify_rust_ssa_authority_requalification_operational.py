@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate RUST-3.6-V2 fail-closed, transport, rollback, packaging, and CI gates."""
+"""Requalify the RUST-3.6-V2 operational contract after RUST-4.4."""
 
 from __future__ import annotations
 
@@ -7,14 +7,19 @@ import argparse
 import json
 from pathlib import Path
 import sys
+from typing import Callable
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from aether.ir.model import IRModule  # noqa: E402
+from aether.ir.model import IRModule, IRStructDefinition  # noqa: E402
 from aether.pipeline import SSAPipeline  # noqa: E402
 from aether.ssa.dto import ssa_module_to_dto  # noqa: E402
+from aether.ssa.general_builder import GeneralSSABuilder  # noqa: E402
+from aether.ssa.model import SSAModule  # noqa: E402
+from aether.ssa.verifier import SSAVerifier  # noqa: E402
 from aether.ssa.shadow import (  # noqa: E402
     SSALoweringAuthorityConfiguration,
     SSALoweringAuthorityMode,
@@ -49,12 +54,89 @@ class _Client:
         }
 
 
-def _failure_classification(client: _Client) -> str | None:
-    try:
-        SSAPipeline(rust_shadow_client=client).run(IRModule())
-    except SSAShadowFailure as exc:
-        return exc.report.classification
-    return None
+def _failure_observation(
+    client: _Client,
+    *,
+    python_shadow_mutator: Callable[[SSAModule], None] | None = None,
+) -> dict[str, object]:
+    """Observe a production authority failure without changing its policy.
+
+    The optional mutator is qualification-only fault injection around the
+    mandatory Python builder.  It lets this historical gate exercise the
+    canonical comparison independently now that refinement intercepts its
+    original Rust-response corruption.
+    """
+
+    python_shadow_calls = 0
+    original_build = GeneralSSABuilder.build
+
+    def build_python_shadow(
+        builder: GeneralSSABuilder, module: IRModule
+    ) -> SSAModule:
+        nonlocal python_shadow_calls
+        python_shadow_calls += 1
+        value = original_build(builder, module)
+        if python_shadow_mutator is not None:
+            python_shadow_mutator(value)
+        return value
+
+    with patch.object(GeneralSSABuilder, "build", build_python_shadow):
+        try:
+            SSAPipeline(rust_shadow_client=client).run(IRModule())
+        except SSAShadowFailure as exc:
+            return {
+                "rejected": True,
+                "classification": exc.report.classification,
+                "phase": exc.report.phase,
+                "python_shadow_reached": python_shadow_calls == 1,
+                "rust_requests": client.request_count,
+            }
+    return {
+        "rejected": False,
+        "classification": None,
+        "phase": None,
+        "python_shadow_reached": python_shadow_calls == 1,
+        "rust_requests": client.request_count,
+    }
+
+
+def _historical_semantic_corruption_client() -> _Client:
+    return _Client(
+        {
+            "ok": True,
+            "ssa": {
+                "schema_version": 2,
+                "representation": "aether_ssa",
+                "functions": [],
+                "structs": [{"name": "Mismatch", "fields": []}],
+            },
+        }
+    )
+
+
+def _inject_python_shadow_canonical_mismatch(value: SSAModule) -> None:
+    # The builder has already produced and verified a valid SSA module.  This
+    # qualification-only mutation models a divergent shadow artifact that is
+    # still structurally valid, so the production canonical boundary itself
+    # must reject it.  No hook or alternate policy is installed in production.
+    value.structs.append(IRStructDefinition("CanonicalMismatch", ()))
+    SSAVerifier(value).verify()
+
+
+def _matches_failure(
+    observation: dict[str, object],
+    *,
+    classification: str,
+    phase: str,
+    python_shadow_reached: bool,
+) -> bool:
+    return observation == {
+        "rejected": True,
+        "classification": classification,
+        "phase": phase,
+        "python_shadow_reached": python_shadow_reached,
+        "rust_requests": 1,
+    }
 
 
 def main() -> int:
@@ -88,21 +170,36 @@ def main() -> int:
         len(matching.payloads) == len(python_authority_client.payloads) == 1
         and matching.payloads[0] == python_authority_client.payloads[0]
     )
-    mismatch = _Client(
-        {
-            "ok": True,
-            "ssa": {
-                "schema_version": 2,
-                "representation": "aether_ssa",
-                "functions": [],
-                "structs": [{"name": "Mismatch", "fields": []}],
-            },
-        }
+    historical_mismatch = _historical_semantic_corruption_client()
+    historical_observation = _failure_observation(historical_mismatch)
+    historical_corruption_applied = (
+        historical_mismatch.response["ssa"]["structs"]
+        == [{"name": "Mismatch", "fields": []}]
     )
-    semantic_fail_closed = _failure_classification(mismatch) == "semantic_mismatch"
-    infrastructure_fail_closed = (
-        _failure_classification(_Client(error=RuntimeError("controlled")))
-        == "rust_infrastructure_failure"
+    historical_fail_closed = historical_corruption_applied and _matches_failure(
+        historical_observation,
+        classification="refinement_verifier_failure",
+        phase="refinement_verification",
+        python_shadow_reached=False,
+    )
+    canonical_observation = _failure_observation(
+        _Client(),
+        python_shadow_mutator=_inject_python_shadow_canonical_mismatch,
+    )
+    canonical_fail_closed = _matches_failure(
+        canonical_observation,
+        classification="semantic_mismatch",
+        phase="canonical_comparison",
+        python_shadow_reached=True,
+    )
+    infrastructure_observation = _failure_observation(
+        _Client(error=RuntimeError("controlled"))
+    )
+    infrastructure_fail_closed = _matches_failure(
+        infrastructure_observation,
+        classification="rust_infrastructure_failure",
+        phase="transport",
+        python_shadow_reached=False,
     )
     workflow = (ROOT / ".github/workflows/rust-ssa-shadow.yml").read_text(
         encoding="utf-8"
@@ -135,7 +232,9 @@ def main() -> int:
         ),
         "same_input": "PASS" if same_input else "BLOCKED",
         "fail_closed_semantic_mismatch": (
-            "PASS" if semantic_fail_closed else "BLOCKED"
+            "PASS"
+            if historical_fail_closed and canonical_fail_closed
+            else "BLOCKED"
         ),
         "fail_closed_infrastructure": (
             "PASS" if infrastructure_fail_closed else "BLOCKED"
@@ -173,7 +272,8 @@ def main() -> int:
     )
     report = {
         "artifact_schema_version": 1,
-        "milestone": "RUST-3.6-V2",
+        "milestone": "RUST-4.4A_OPERATIONAL_REQUALIFICATION_COMPATIBILITY",
+        "historical_contract": "RUST-3.6-V2",
         "qualification_revision": args.revision,
         "decision": (
             "RUST_SSA_AUTHORITY_REQUALIFICATION_OPERATIONAL_PASS"
@@ -181,6 +281,30 @@ def main() -> int:
             else "RUST_SSA_AUTHORITY_REQUALIFICATION_OPERATIONAL_BLOCKED"
         ),
         "transport": transport,
+        "fail_closed_probes": {
+            "historical_semantic_corruption": {
+                "injection": "unexpected_struct_definition",
+                "injection_applied": historical_corruption_applied,
+                "expected_classification": "refinement_verifier_failure",
+                "expected_phase": "refinement_verification",
+                **historical_observation,
+                "status": "PASS" if historical_fail_closed else "BLOCKED",
+            },
+            "canonical_rust_python_mismatch": {
+                "injection": "qualification_only_verified_python_shadow_divergence",
+                "expected_classification": "semantic_mismatch",
+                "expected_phase": "canonical_comparison",
+                **canonical_observation,
+                "status": "PASS" if canonical_fail_closed else "BLOCKED",
+            },
+            "infrastructure_failure": {
+                "injection": "controlled_transport_exception",
+                "expected_classification": "rust_infrastructure_failure",
+                "expected_phase": "transport",
+                **infrastructure_observation,
+                "status": "PASS" if infrastructure_fail_closed else "BLOCKED",
+            },
+        },
         "rollback": {
             "configuration_only": rollback_equal,
             "modes": [
