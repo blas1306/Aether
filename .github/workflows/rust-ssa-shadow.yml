@@ -32,6 +32,10 @@ jobs:
           tests/aether/test_rust_ssa_independent_refinement_verifier.py
       - name: RUST-4.2 checked evidence gate
         run: python scripts/check_rust_ssa_refinement_production_integration.py
+      - name: RUST-4.3 shadow redundancy qualification contracts
+        run: python -m pytest -q tests/aether/test_rust_ssa_shadow_redundancy_qualification.py
+      - name: RUST-4.3 checked evidence gate
+        run: python scripts/check_rust_ssa_shadow_redundancy.py
       - run: python -m build --wheel --outdir python-dist
       - name: Clean-install, promotion-fixtures, three-mode, handoff, rollback
         run: >-

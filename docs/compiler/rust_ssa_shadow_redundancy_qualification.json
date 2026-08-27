@@ -1,0 +1,4043 @@
+{
+  "ACCEPTED_BY_ALL_semantic_mutation_count": 0,
+  "ACCEPTED_BY_ALL_semantic_mutation_ids": [],
+  "SHADOW_ONLY_AFTER_REFINEMENT_count": 0,
+  "SHADOW_ONLY_AFTER_REFINEMENT_ids": [],
+  "artifact_schema_version": 1,
+  "baseline_revision": "07a372da7f9b80dbc079b2f27c43d091b256f0b8",
+  "classification_totals": {
+    "EXISTING_VERIFIER_AND_SHADOW": 23,
+    "REFINEMENT_AND_SHADOW": 35
+  },
+  "decision": "PYTHON_SSA_SHADOW_NO_UNIQUE_COVERAGE_DEMONSTRATED",
+  "deep_cfg_results": [
+    {
+      "blocks": 100,
+      "error": null,
+      "seconds": 0.003922054005670361,
+      "status": "PASS"
+    },
+    {
+      "blocks": 1000,
+      "error": null,
+      "seconds": 0.0406660410008044,
+      "status": "PASS"
+    },
+    {
+      "blocks": 5000,
+      "error": null,
+      "seconds": 0.24103175900381757,
+      "status": "PASS"
+    },
+    {
+      "blocks": 10000,
+      "error": null,
+      "seconds": 0.5273116390017094,
+      "status": "PASS"
+    }
+  ],
+  "environmental_limitations": [
+    "Local qualification is Linux x86_64; non-local platform results are not invented.",
+    "An unmodified full-suite run reproduced the 24 known test_native_exceptions.py LeakSanitizer startup aborts under ptrace. The repository-qualified LSAN_OPTIONS=detect_leaks=0 rerun passed 4982 with 4 skipped; this is an environment workaround, not sanitizer leak evidence.",
+    "The standalone Rust verifier models companion verification for post-lowering mutations; integrity checks are invariant because the offline campaign never mutates Initial IR."
+  ],
+  "historical_results": {
+    "real_corpus_116": {
+      "denominator": 116,
+      "expected": 116,
+      "failed": 0,
+      "failures": [],
+      "passed": 116,
+      "status": "PASS"
+    },
+    "rust_4_0_mutations_replayed": 15,
+    "rust_4_1_evidence_preserved": true,
+    "rust_4_2_qualification_status": "RUST_SSA_REFINEMENT_PRODUCTION_INTEGRATION_QUALIFIED"
+  },
+  "independence_assessment": {
+    "algorithm": "independent Initial-IR CFG reachability plus fixed-point reaching-value and phi-provenance reasoning",
+    "audited_file": "src/aether/ssa/refinement_verifier.py",
+    "classification": "IMPLEMENTATION_INDEPENDENT",
+    "consumes_rust_producer_intermediates": false,
+    "forbidden_import_or_oracle_hits": [],
+    "shared_boundary_only": [
+      "public Initial IR model",
+      "public imported SSA model",
+      "IR type equality"
+    ],
+    "status": "PASS",
+    "uses_python_shadow_as_oracle": false
+  },
+  "instruction_inventory": {
+    "all_instruction_families": [
+      "IRArrayCopy",
+      "IRArrayGet",
+      "IRArrayLength",
+      "IRArrayNew",
+      "IRArraySet",
+      "IRArraySlice",
+      "IRAssign",
+      "IRBinaryOp",
+      "IRBranch",
+      "IRCall",
+      "IRCallIndirect",
+      "IRCast",
+      "IRCatchEntry",
+      "IRClassGet",
+      "IRClassNew",
+      "IRClassSet",
+      "IRCompareOp",
+      "IRConst",
+      "IRCopyInit",
+      "IRDestroy",
+      "IRExceptionDestroy",
+      "IRExceptionMatch",
+      "IRExceptionPayload",
+      "IRFunctionRef",
+      "IRInitDefault",
+      "IRInterfaceCall",
+      "IRInterfaceConstruct",
+      "IRInvoke",
+      "IRInvokeIndirect",
+      "IRInvokeInterface",
+      "IRJump",
+      "IRListClear",
+      "IRListContains",
+      "IRListCopy",
+      "IRListGet",
+      "IRListIndexOf",
+      "IRListInsert",
+      "IRListIsEmpty",
+      "IRListLength",
+      "IRListNew",
+      "IRListPop",
+      "IRListPush",
+      "IRListRemoveAt",
+      "IRListReverse",
+      "IRListSet",
+      "IRListSlice",
+      "IRLoad",
+      "IRMatrixAdd",
+      "IRMatrixColumns",
+      "IRMatrixGet",
+      "IRMatrixMatMul",
+      "IRMatrixNew",
+      "IRMatrixRows",
+      "IRMatrixScale",
+      "IRMatrixSet",
+      "IRMatrixSub",
+      "IRMatrixVectorMul",
+      "IRMethodResultNew",
+      "IRMethodResultReceiver",
+      "IRMethodResultValue",
+      "IRMoveInit",
+      "IROuterProduct",
+      "IRPackException",
+      "IRPrint",
+      "IRPropagate",
+      "IRRelocate",
+      "IRRethrow",
+      "IRReturn",
+      "IRSequenceSort",
+      "IRStore",
+      "IRStructGet",
+      "IRStructNew",
+      "IRStructSet",
+      "IRThrow",
+      "IRUnaryOp",
+      "IRVectorAdd",
+      "IRVectorDot",
+      "IRVectorGet",
+      "IRVectorLength",
+      "IRVectorMatrixMul",
+      "IRVectorNew",
+      "IRVectorScale",
+      "IRVectorSet",
+      "IRVectorSub"
+    ],
+    "campaign_strategy": "exact preserved-instruction correspondence is mutation-tested with direct calls, print, lifecycle-normalized call/list/struct operations and historical exception/lifecycle regressions; the same generic refinement rule covers every inventory member",
+    "derivation": "runtime introspection of concrete IRInstruction subclasses in aether.ir.model",
+    "effectful_or_effect_relevant_families": [
+      "IRArrayCopy",
+      "IRArrayNew",
+      "IRArraySet",
+      "IRAssign",
+      "IRCall",
+      "IRCallIndirect",
+      "IRClassNew",
+      "IRClassSet",
+      "IRCopyInit",
+      "IRDestroy",
+      "IRExceptionDestroy",
+      "IRInitDefault",
+      "IRInterfaceCall",
+      "IRInvoke",
+      "IRInvokeIndirect",
+      "IRInvokeInterface",
+      "IRListClear",
+      "IRListCopy",
+      "IRListInsert",
+      "IRListNew",
+      "IRListPop",
+      "IRListPush",
+      "IRListRemoveAt",
+      "IRListSet",
+      "IRMatrixNew",
+      "IRMatrixSet",
+      "IRMethodResultNew",
+      "IRMoveInit",
+      "IRPrint",
+      "IRPropagate",
+      "IRRelocate",
+      "IRRethrow",
+      "IRSequenceSort",
+      "IRStructNew",
+      "IRStructSet",
+      "IRThrow",
+      "IRVectorNew",
+      "IRVectorSet"
+    ]
+  },
+  "milestone": "RUST-4.3",
+  "mutation_campaign_manifest": [
+    {
+      "correlated": false,
+      "family": "phi",
+      "mutation_id": "R43-HIST-001",
+      "semantic_intent": "historical missing phi corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "phi",
+      "mutation_id": "R43-HIST-002",
+      "semantic_intent": "historical extra phi corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "phi",
+      "mutation_id": "R43-HIST-003",
+      "semantic_intent": "historical incorrect phi incoming corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "phi",
+      "mutation_id": "R43-HIST-004",
+      "semantic_intent": "historical incorrect predecessor corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "value_provenance",
+      "mutation_id": "R43-HIST-005",
+      "semantic_intent": "historical duplicate definition corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "instruction_preservation",
+      "mutation_id": "R43-HIST-006",
+      "semantic_intent": "historical use before definition corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "value_provenance",
+      "mutation_id": "R43-HIST-007",
+      "semantic_intent": "historical definition not dominating use corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "phi",
+      "mutation_id": "R43-HIST-008",
+      "semantic_intent": "historical phi incoming not dominating edge corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "value_provenance",
+      "mutation_id": "R43-HIST-009",
+      "semantic_intent": "historical incorrect type corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "slot_promotion",
+      "mutation_id": "R43-HIST-010",
+      "semantic_intent": "historical incorrect value rename corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "cfg_reachability",
+      "mutation_id": "R43-HIST-011",
+      "semantic_intent": "historical incorrect block target corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "cfg_reachability",
+      "mutation_id": "R43-HIST-012",
+      "semantic_intent": "historical unreachable block incorrectly preserved corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "instruction_preservation",
+      "mutation_id": "R43-HIST-013",
+      "semantic_intent": "historical missing instruction corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "instruction_preservation",
+      "mutation_id": "R43-HIST-014",
+      "semantic_intent": "historical duplicated instruction corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "return_termination",
+      "mutation_id": "R43-HIST-015",
+      "semantic_intent": "historical incorrect return value corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "cfg_reachability",
+      "mutation_id": "R43-CFG-001",
+      "semantic_intent": "swap conditional successors",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "cfg_reachability",
+      "mutation_id": "R43-CFG-002",
+      "semantic_intent": "redirect a jump while retaining a valid target",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "cfg_reachability",
+      "mutation_id": "R43-CFG-003",
+      "semantic_intent": "alter loop backedge",
+      "source": "RUST-4.3",
+      "source_fixture": "loop"
+    },
+    {
+      "correlated": true,
+      "family": "cfg_reachability",
+      "mutation_id": "R43-CFG-004",
+      "semantic_intent": "bypass a block and repair phi labels",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": true,
+      "family": "cfg_reachability",
+      "mutation_id": "R43-CFG-005",
+      "semantic_intent": "remove a reachable block and redirect its edge",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "cfg_reachability",
+      "mutation_id": "R43-CFG-006",
+      "semantic_intent": "make an Initial-IR-unreachable block reachable",
+      "source": "RUST-4.3",
+      "source_fixture": "unreachable"
+    },
+    {
+      "correlated": false,
+      "family": "phi",
+      "mutation_id": "R43-PHI-001",
+      "semantic_intent": "remove one phi incoming edge",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "phi",
+      "mutation_id": "R43-PHI-002",
+      "semantic_intent": "add a superficially plausible incoming edge",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "phi",
+      "mutation_id": "R43-PHI-003",
+      "semantic_intent": "duplicate an incoming predecessor",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "phi",
+      "mutation_id": "R43-PHI-004",
+      "semantic_intent": "swap same-typed incoming values",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "phi",
+      "mutation_id": "R43-PHI-005",
+      "semantic_intent": "replace the initial loop value",
+      "source": "RUST-4.3",
+      "source_fixture": "loop"
+    },
+    {
+      "correlated": false,
+      "family": "phi",
+      "mutation_id": "R43-PHI-006",
+      "semantic_intent": "replace the loop-carried reaching definition",
+      "source": "RUST-4.3",
+      "source_fixture": "loop"
+    },
+    {
+      "correlated": true,
+      "family": "phi",
+      "mutation_id": "R43-PHI-007",
+      "semantic_intent": "corrupt interacting phis consistently",
+      "source": "RUST-4.3",
+      "source_fixture": "multiple_phi"
+    },
+    {
+      "correlated": false,
+      "family": "value_provenance",
+      "mutation_id": "R43-VAL-001",
+      "semantic_intent": "substitute a same-typed parameter",
+      "source": "RUST-4.3",
+      "source_fixture": "effects"
+    },
+    {
+      "correlated": true,
+      "family": "value_provenance",
+      "mutation_id": "R43-VAL-002",
+      "semantic_intent": "alias distinct phi results and downstream use",
+      "source": "RUST-4.3",
+      "source_fixture": "multiple_phi"
+    },
+    {
+      "correlated": false,
+      "family": "instruction_preservation",
+      "mutation_id": "R43-INS-001",
+      "semantic_intent": "alter comparison predicate",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "instruction_preservation",
+      "mutation_id": "R43-INS-002",
+      "semantic_intent": "swap arithmetic/comparison operands",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "effects",
+      "mutation_id": "R43-EFF-001",
+      "semantic_intent": "remove a direct call effect",
+      "source": "RUST-4.3",
+      "source_fixture": "effects"
+    },
+    {
+      "correlated": false,
+      "family": "effects",
+      "mutation_id": "R43-EFF-002",
+      "semantic_intent": "duplicate a direct call effect",
+      "source": "RUST-4.3",
+      "source_fixture": "effects"
+    },
+    {
+      "correlated": false,
+      "family": "effects",
+      "mutation_id": "R43-EFF-003",
+      "semantic_intent": "move a call across another effect",
+      "source": "RUST-4.3",
+      "source_fixture": "effects"
+    },
+    {
+      "correlated": false,
+      "family": "effects",
+      "mutation_id": "R43-EFF-004",
+      "semantic_intent": "alter print effect metadata",
+      "source": "RUST-4.3",
+      "source_fixture": "effects"
+    },
+    {
+      "correlated": false,
+      "family": "effects",
+      "mutation_id": "R43-EFF-005",
+      "semantic_intent": "remove a lifecycle-normalized effect",
+      "source": "RUST-4.3",
+      "source_fixture": "lifecycle"
+    },
+    {
+      "correlated": false,
+      "family": "effects",
+      "mutation_id": "R43-EFF-006",
+      "semantic_intent": "duplicate a lifecycle-normalized call",
+      "source": "RUST-4.3",
+      "source_fixture": "lifecycle"
+    },
+    {
+      "correlated": false,
+      "family": "effects",
+      "mutation_id": "R43-EFF-007",
+      "semantic_intent": "change a lifecycle-normalized callee",
+      "source": "RUST-4.3",
+      "source_fixture": "lifecycle"
+    },
+    {
+      "correlated": false,
+      "family": "return_termination",
+      "mutation_id": "R43-RET-001",
+      "semantic_intent": "return the wrong same-typed parameter",
+      "source": "RUST-4.3",
+      "source_fixture": "effects"
+    },
+    {
+      "correlated": true,
+      "family": "return_termination",
+      "mutation_id": "R43-RET-002",
+      "semantic_intent": "return a constant instead of the promoted result",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": true,
+      "family": "return_termination",
+      "mutation_id": "R43-RET-003",
+      "semantic_intent": "replace the branch condition with a constant",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": true,
+      "family": "return_termination",
+      "mutation_id": "R43-RET-004",
+      "semantic_intent": "return prematurely from the entry block",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": true,
+      "family": "slot_promotion",
+      "mutation_id": "R43-SLOT-001",
+      "semantic_intent": "change a stored definition while propagating its SSA result",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond"
+    },
+    {
+      "correlated": false,
+      "family": "effects",
+      "mutation_id": "R43-EXC-001",
+      "semantic_intent": "change an exception match type",
+      "source": "RUST-4.3",
+      "source_fixture": "exception_indirect"
+    },
+    {
+      "correlated": false,
+      "family": "effects",
+      "mutation_id": "R43-EXC-002",
+      "semantic_intent": "remove exception-event destruction",
+      "source": "RUST-4.3",
+      "source_fixture": "exception_indirect"
+    },
+    {
+      "correlated": false,
+      "family": "cfg_reachability",
+      "mutation_id": "R43-EXC-003",
+      "semantic_intent": "alias indirect-invoke normal and exceptional edges",
+      "source": "RUST-4.3",
+      "source_fixture": "exception_indirect"
+    },
+    {
+      "correlated": false,
+      "family": "effects",
+      "mutation_id": "R43-EXC-004",
+      "semantic_intent": "change interface receiver ownership metadata",
+      "source": "RUST-4.3",
+      "source_fixture": "exception_interface"
+    },
+    {
+      "correlated": false,
+      "family": "return_termination",
+      "mutation_id": "R43-EXC-005",
+      "semantic_intent": "replace rethrow with propagation",
+      "source": "RUST-4.3",
+      "source_fixture": "exception_cleanup"
+    },
+    {
+      "correlated": false,
+      "family": "effects",
+      "mutation_id": "R43-EXC-006",
+      "semantic_intent": "change an exceptional direct callee",
+      "source": "RUST-4.3",
+      "source_fixture": "exception_cleanup"
+    },
+    {
+      "correlated": false,
+      "family": "generated_randomized",
+      "mutation_id": "R43-RND-43001",
+      "semantic_intent": "deterministically alter one same-typed generated constant",
+      "source": "RUST-4.3",
+      "source_fixture": "seed:43001:diamond"
+    },
+    {
+      "correlated": false,
+      "family": "generated_randomized",
+      "mutation_id": "R43-RND-43019",
+      "semantic_intent": "deterministically alter one same-typed generated constant",
+      "source": "RUST-4.3",
+      "source_fixture": "seed:43019:diamond"
+    },
+    {
+      "correlated": false,
+      "family": "generated_randomized",
+      "mutation_id": "R43-RND-43037",
+      "semantic_intent": "deterministically alter one same-typed generated constant",
+      "source": "RUST-4.3",
+      "source_fixture": "seed:43037:diamond"
+    },
+    {
+      "correlated": false,
+      "family": "generated_randomized",
+      "mutation_id": "R43-RND-43051",
+      "semantic_intent": "deterministically alter one same-typed generated constant",
+      "source": "RUST-4.3",
+      "source_fixture": "seed:43051:diamond"
+    },
+    {
+      "correlated": false,
+      "family": "generated_randomized",
+      "mutation_id": "R43-RND-43063",
+      "semantic_intent": "deterministically alter one same-typed generated constant",
+      "source": "RUST-4.3",
+      "source_fixture": "seed:43063:diamond"
+    },
+    {
+      "correlated": false,
+      "family": "generated_randomized",
+      "mutation_id": "R43-RND-43067",
+      "semantic_intent": "deterministically alter one same-typed generated constant",
+      "source": "RUST-4.3",
+      "source_fixture": "seed:43067:diamond"
+    },
+    {
+      "correlated": false,
+      "family": "generated_randomized",
+      "mutation_id": "R43-RND-43093",
+      "semantic_intent": "deterministically alter one same-typed generated constant",
+      "source": "RUST-4.3",
+      "source_fixture": "seed:43093:diamond"
+    },
+    {
+      "correlated": false,
+      "family": "generated_randomized",
+      "mutation_id": "R43-RND-43103",
+      "semantic_intent": "deterministically alter one same-typed generated constant",
+      "source": "RUST-4.3",
+      "source_fixture": "seed:43103:diamond"
+    }
+  ],
+  "mutation_family_totals": {
+    "cfg_reachability": {
+      "EXISTING_VERIFIER_AND_SHADOW": 7,
+      "REFINEMENT_AND_SHADOW": 2,
+      "applicable": 9,
+      "attempted": 9
+    },
+    "effects": {
+      "EXISTING_VERIFIER_AND_SHADOW": 5,
+      "REFINEMENT_AND_SHADOW": 6,
+      "applicable": 11,
+      "attempted": 11
+    },
+    "generated_randomized": {
+      "REFINEMENT_AND_SHADOW": 8,
+      "applicable": 8,
+      "attempted": 8
+    },
+    "instruction_preservation": {
+      "EXISTING_VERIFIER_AND_SHADOW": 1,
+      "REFINEMENT_AND_SHADOW": 4,
+      "applicable": 5,
+      "attempted": 5
+    },
+    "phi": {
+      "EXISTING_VERIFIER_AND_SHADOW": 7,
+      "REFINEMENT_AND_SHADOW": 5,
+      "applicable": 12,
+      "attempted": 12
+    },
+    "return_termination": {
+      "REFINEMENT_AND_SHADOW": 6,
+      "applicable": 6,
+      "attempted": 6
+    },
+    "slot_promotion": {
+      "REFINEMENT_AND_SHADOW": 2,
+      "applicable": 2,
+      "attempted": 2
+    },
+    "value_provenance": {
+      "EXISTING_VERIFIER_AND_SHADOW": 3,
+      "REFINEMENT_AND_SHADOW": 2,
+      "applicable": 5,
+      "attempted": 5
+    }
+  },
+  "observational_timings": {
+    "deep_cfg": [
+      {
+        "blocks": 100,
+        "seconds": 0.003922054005670361
+      },
+      {
+        "blocks": 1000,
+        "seconds": 0.0406660410008044
+      },
+      {
+        "blocks": 5000,
+        "seconds": 0.24103175900381757
+      },
+      {
+        "blocks": 10000,
+        "seconds": 0.5273116390017094
+      }
+    ],
+    "mutation_total_seconds": 0.19325821198435733,
+    "threshold_enforced": false
+  },
+  "per_mutation_results": [
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "phi",
+      "first_failure_category": "SSARefinementVerificationError: function 'choose': block 'merge' instruction 1 field 'value' changed value provenance",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-HIST-001",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.003637932000856381,
+      "semantic_intent": "historical missing phi corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'merge' instruction 1 field 'value' changed value provenance",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "phi",
+      "first_failure_category": "SSARefinementVerificationError: function 'choose': block 'merge' has duplicate or ambiguous extra phis",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-HIST-002",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0033132429962279275,
+      "semantic_intent": "historical extra phi corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'merge' has duplicate or ambiguous extra phis",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "phi",
+      "first_failure_category": "SSARefinementVerificationError: function 'choose': phi '4' in block 'merge' is not justified by any promoted slot",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-HIST-003",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.002105801999277901,
+      "semantic_intent": "historical incorrect phi incoming corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': phi '4' in block 'merge' is not justified by any promoted slot",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "phi",
+      "first_failure_category": "Error: SSAWireVerificationError { function_name: \"choose\", block_name: Some(\"merge\"), detail: \"phi must have exactly one incoming value per predecessor\" }",
+      "first_rejection_layer": "rust_companion_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-HIST-004",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0017021270032273605,
+      "semantic_intent": "historical incorrect predecessor corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Error: SSAWireVerificationError { function_name: \"choose\", block_name: Some(\"merge\"), detail: \"phi must have exactly one incoming value per predecessor\" }",
+          "layer": "rust_companion_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Duplicate incoming block 'else' for phi '%4'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': phi '4' in block 'merge' does not have exactly one incoming per predecessor",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Duplicate incoming block 'else' for phi '%4'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "value_provenance",
+      "first_failure_category": "SSAVerificationError: Duplicate value '%2' in function 'choose'",
+      "first_rejection_layer": "imported_ssa_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-HIST-005",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.002189790000556968,
+      "semantic_intent": "historical duplicate definition corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Duplicate value '%2' in function 'choose'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'else' preserved instruction count changed: expected 2, got 3",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Duplicate value '%2' in function 'choose'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "instruction_preservation",
+      "first_failure_category": "SSAVerificationError: SSA value '%0' is used before its definition in block 'entry'",
+      "first_rejection_layer": "imported_ssa_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-HIST-006",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.003257899996242486,
+      "semantic_intent": "historical use before definition corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"aggregate_shape\":null},{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSAVerificationError: SSA value '%0' is used before its definition in block 'entry'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'entry' instruction 0 changed opcode from IRConst to SSACompareOp",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: SSA value '%0' is used before its definition in block 'entry'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "value_provenance",
+      "first_failure_category": "SSAVerificationError: SSA value '%2' used in block 'merge' is not dominated by its definition in block 'then'",
+      "first_rejection_layer": "imported_ssa_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-HIST-007",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0020025590056320652,
+      "semantic_intent": "historical definition not dominating use corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSAVerificationError: SSA value '%2' used in block 'merge' is not dominated by its definition in block 'then'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'merge' instruction 1 field 'value' changed value provenance",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: SSA value '%2' used in block 'merge' is not dominated by its definition in block 'then'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "phi",
+      "first_failure_category": "SSAVerificationError: Phi '%4' in block 'merge' uses value '%3' for predecessor 'then', but that value is not available at the end of the predecessor; its definition is in block 'else'",
+      "first_rejection_layer": "imported_ssa_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-HIST-008",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.002849024000170175,
+      "semantic_intent": "historical phi incoming not dominating edge corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Phi '%4' in block 'merge' uses value '%3' for predecessor 'then', but that value is not available at the end of the predecessor; its definition is in block 'else'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': phi '4' in block 'merge' is not justified by any promoted slot",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Phi '%4' in block 'merge' uses value '%3' for predecessor 'then', but that value is not available at the end of the predecessor; its definition is in block 'else'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "value_provenance",
+      "first_failure_category": "SSAVerificationError: Value '%2' type mismatch: expected int, got bool",
+      "first_rejection_layer": "imported_ssa_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-HIST-009",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0023424160026479512,
+      "semantic_intent": "historical incorrect type corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Value '%2' type mismatch: expected int, got bool",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': phi '4' in block 'merge' is not justified by any promoted slot",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Value '%2' type mismatch: expected int, got bool",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "slot_promotion",
+      "first_failure_category": "SSARefinementVerificationError: function 'choose': block 'merge' instruction 1 field 'value' changed value provenance",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-HIST-010",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.002741614000115078,
+      "semantic_intent": "historical incorrect value rename corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'merge' instruction 1 field 'value' changed value provenance",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "cfg_reachability",
+      "first_failure_category": "SSAVerificationError: Branch in function 'choose' has duplicate target 'else'",
+      "first_rejection_layer": "imported_ssa_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-HIST-011",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0028757740001310594,
+      "semantic_intent": "historical incorrect block target corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Branch in function 'choose' has duplicate target 'else'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'entry' instruction 2 field 'true_target' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Branch in function 'choose' has duplicate target 'else'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "cfg_reachability",
+      "first_failure_category": "SSARefinementVerificationError: function 'choose': reachable block sequence changed: expected ['entry', 'then', 'else', 'merge'], got ['entry', 'then', 'else', 'merge', 'qualification.unreachable']",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-HIST-012",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0026352139975642785,
+      "semantic_intent": "historical unreachable block incorrectly preserved corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': reachable block sequence changed: expected ['entry', 'then', 'else', 'merge'], got ['entry', 'then', 'else', 'merge', 'qualification.unreachable']",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "instruction_preservation",
+      "first_failure_category": "SSARefinementVerificationError: function 'choose': block 'entry' instruction 1 changed opcode from IRCompareOp to SSAConst",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-HIST-013",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.002754036999249365,
+      "semantic_intent": "historical missing instruction corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"qualification.true\",\"type\":{\"tag\":\"bool\"}},\"value\":{\"tag\":\"bool\",\"value\":true}},{\"kind\":\"branch\",\"condition\":{\"tag\":\"value\",\"",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'entry' instruction 1 changed opcode from IRCompareOp to SSAConst",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "instruction_preservation",
+      "first_failure_category": "SSARefinementVerificationError: function 'choose': block 'then' preserved instruction count changed: expected 2, got 3",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-HIST-014",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.00316428500082111,
+      "semantic_intent": "historical duplicated instruction corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'then' preserved instruction count changed: expected 2, got 3",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "return_termination",
+      "first_failure_category": "SSARefinementVerificationError: function 'choose': block 'merge' instruction 1 field 'value' changed value provenance",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-HIST-015",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0029566459998022765,
+      "semantic_intent": "historical incorrect return value corruption",
+      "source": "RUST-4.0/RUST-4.1 regression",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'merge' instruction 1 field 'value' changed value provenance",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "cfg_reachability",
+      "first_failure_category": "SSARefinementVerificationError: function 'choose': block 'entry' instruction 2 field 'true_target' changed",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-CFG-001",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.002183609001804143,
+      "semantic_intent": "swap conditional successors",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'entry' instruction 2 field 'true_target' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "cfg_reachability",
+      "first_failure_category": "Error: SSAWireVerificationError { function_name: \"choose\", block_name: Some(\"merge\"), detail: \"phi must have exactly one incoming value per predecessor\" }",
+      "first_rejection_layer": "rust_companion_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-CFG-002",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.002456469999742694,
+      "semantic_intent": "redirect a jump while retaining a valid target",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Error: SSAWireVerificationError { function_name: \"choose\", block_name: Some(\"merge\"), detail: \"phi must have exactly one incoming value per predecessor\" }",
+          "layer": "rust_companion_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Phi incoming block 'then' is not a predecessor of block 'merge'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'then' instruction 2 field 'target' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Phi incoming block 'then' is not a predecessor of block 'merge'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "cfg_reachability",
+      "first_failure_category": "Error: SSAWireVerificationError { function_name: \"loop_carried\", block_name: Some(\"header\"), detail: \"phi must have exactly one incoming value per predecessor\" }",
+      "first_rejection_layer": "rust_companion_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-CFG-003",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0023851160003687255,
+      "semantic_intent": "alter loop backedge",
+      "source": "RUST-4.3",
+      "source_fixture": "loop",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Error: SSAWireVerificationError { function_name: \"loop_carried\", block_name: Some(\"header\"), detail: \"phi must have exactly one incoming value per predecessor\" }",
+          "layer": "rust_companion_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Phi incoming block 'body' is not a predecessor of block 'header'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'loop_carried': block 'body' instruction 3 field 'target' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Phi incoming block 'body' is not a predecessor of block 'header'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": true,
+      "family": "cfg_reachability",
+      "first_failure_category": "Error: SSAWireVerificationError { function_name: \"choose\", block_name: Some(\"merge\"), detail: \"phi must have exactly one incoming value per predecessor\" }",
+      "first_rejection_layer": "rust_companion_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-CFG-004",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.002870374999474734,
+      "semantic_intent": "bypass a block and repair phi labels",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Error: SSAWireVerificationError { function_name: \"choose\", block_name: Some(\"merge\"), detail: \"phi must have exactly one incoming value per predecessor\" }",
+          "layer": "rust_companion_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Phi '%4' in block 'merge' is missing an incoming value for predecessor 'then'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': phi '4' in block 'merge' does not have exactly one incoming per predecessor",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Phi '%4' in block 'merge' is missing an incoming value for predecessor 'then'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": true,
+      "family": "cfg_reachability",
+      "first_failure_category": "Error: OwnedSsaCodecError { path: \"functions[0].blocks[2].instructions[0].incoming[0]\", message: \"predecessor does not name a function block\" }",
+      "first_rejection_layer": "rust_companion_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-CFG-005",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0017140300042228773,
+      "semantic_intent": "remove a reachable block and redirect its edge",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Error: OwnedSsaCodecError { path: \"functions[0].blocks[2].instructions[0].incoming[0]\", message: \"predecessor does not name a function block\" }",
+          "layer": "rust_companion_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Branch in function 'choose' has duplicate target 'else'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': reachable block sequence changed: expected ['entry', 'then', 'else', 'merge'], got ['entry', 'else', 'merge']",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Branch in function 'choose' has duplicate target 'else'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "cfg_reachability",
+      "first_failure_category": "Error: SSAWireVerificationError { function_name: \"unreachable\", block_name: Some(\"entry\"), detail: \"edge targets unknown block 'dead'\" }",
+      "first_rejection_layer": "rust_companion_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-CFG-006",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0010178259981330484,
+      "semantic_intent": "make an Initial-IR-unreachable block reachable",
+      "source": "RUST-4.3",
+      "source_fixture": "unreachable",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Error: SSAWireVerificationError { function_name: \"unreachable\", block_name: Some(\"entry\"), detail: \"edge targets unknown block 'dead'\" }",
+          "layer": "rust_companion_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Unknown jump target 'dead' in function 'unreachable'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'unreachable': block 'entry' instruction 0 field 'target' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Unknown jump target 'dead' in function 'unreachable'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "phi",
+      "first_failure_category": "Error: SSAWireVerificationError { function_name: \"choose\", block_name: Some(\"merge\"), detail: \"phi must have exactly one incoming value per predecessor\" }",
+      "first_rejection_layer": "rust_companion_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-PHI-001",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.002886594993469771,
+      "semantic_intent": "remove one phi incoming edge",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Error: SSAWireVerificationError { function_name: \"choose\", block_name: Some(\"merge\"), detail: \"phi must have exactly one incoming value per predecessor\" }",
+          "layer": "rust_companion_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Phi '%4' in block 'merge' is missing an incoming value for predecessor 'else'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': phi '4' in block 'merge' does not have exactly one incoming per predecessor",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Phi '%4' in block 'merge' is missing an incoming value for predecessor 'else'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "phi",
+      "first_failure_category": "Error: SSAWireVerificationError { function_name: \"choose\", block_name: Some(\"merge\"), detail: \"phi must have exactly one incoming value per predecessor\" }",
+      "first_rejection_layer": "rust_companion_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-PHI-002",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.00194416000158526,
+      "semantic_intent": "add a superficially plausible incoming edge",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Error: SSAWireVerificationError { function_name: \"choose\", block_name: Some(\"merge\"), detail: \"phi must have exactly one incoming value per predecessor\" }",
+          "layer": "rust_companion_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Phi incoming block 'entry' is not a predecessor of block 'merge'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': phi '4' in block 'merge' does not have exactly one incoming per predecessor",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Phi incoming block 'entry' is not a predecessor of block 'merge'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "phi",
+      "first_failure_category": "Error: SSAWireVerificationError { function_name: \"choose\", block_name: Some(\"merge\"), detail: \"phi must have exactly one incoming value per predecessor\" }",
+      "first_rejection_layer": "rust_companion_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-PHI-003",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0029552839987445623,
+      "semantic_intent": "duplicate an incoming predecessor",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Error: SSAWireVerificationError { function_name: \"choose\", block_name: Some(\"merge\"), detail: \"phi must have exactly one incoming value per predecessor\" }",
+          "layer": "rust_companion_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Duplicate incoming block 'then' for phi '%4'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': phi '4' in block 'merge' does not have exactly one incoming per predecessor",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Duplicate incoming block 'then' for phi '%4'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "phi",
+      "first_failure_category": "SSAVerificationError: Phi '%4' in block 'merge' uses value '%3' for predecessor 'then', but that value is not available at the end of the predecessor; its definition is in block 'else'",
+      "first_rejection_layer": "imported_ssa_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-PHI-004",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.005044244993769098,
+      "semantic_intent": "swap same-typed incoming values",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Phi '%4' in block 'merge' uses value '%3' for predecessor 'then', but that value is not available at the end of the predecessor; its definition is in block 'else'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': phi '4' in block 'merge' is not justified by any promoted slot",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Phi '%4' in block 'merge' uses value '%3' for predecessor 'then', but that value is not available at the end of the predecessor; its definition is in block 'else'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "phi",
+      "first_failure_category": "SSAVerificationError: Phi '%header.slot.phi' in block 'header' uses value '%updated' for predecessor 'entry', but that value is not available at the end of the predecessor; its definition is in block 'body'",
+      "first_rejection_layer": "imported_ssa_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-PHI-005",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0038013569937902503,
+      "semantic_intent": "replace the initial loop value",
+      "source": "RUST-4.3",
+      "source_fixture": "loop",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"loop_carried\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},{\"tag\":\"parameter\",\"name\":\"condition\",\"type\":{\"tag\":\"bool\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"jump\",\"target\":\"header\"}]},{\"name\":\"header\",\"instructions\":[{\"kind\":\"phi\",\"result\":{\"tag\":\"value\",\"name\":\"header.slot.phi\",\"type\":{\"tag\":\"int\"}},\"incoming\":[{\"block\":\"entry\",\"value\":{\"tag\":\"value\",\"name\"",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Phi '%header.slot.phi' in block 'header' uses value '%updated' for predecessor 'entry', but that value is not available at the end of the predecessor; its definition is in block 'body'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'loop_carried': phi 'header.slot.phi' in block 'header' is not justified by any promoted slot",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Phi '%header.slot.phi' in block 'header' uses value '%updated' for predecessor 'entry', but that value is not available at the end of the predecessor; its definition is in block 'body'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "phi",
+      "first_failure_category": "SSARefinementVerificationError: function 'loop_carried': phi 'header.slot.phi' in block 'header' is not justified by any promoted slot",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-PHI-006",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.002750911000475753,
+      "semantic_intent": "replace the loop-carried reaching definition",
+      "source": "RUST-4.3",
+      "source_fixture": "loop",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"loop_carried\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},{\"tag\":\"parameter\",\"name\":\"condition\",\"type\":{\"tag\":\"bool\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"jump\",\"target\":\"header\"}]},{\"name\":\"header\",\"instructions\":[{\"kind\":\"phi\",\"result\":{\"tag\":\"value\",\"name\":\"header.slot.phi\",\"type\":{\"tag\":\"int\"}},\"incoming\":[{\"block\":\"entry\",\"value\":{\"tag\":\"parameter\",\"n",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'loop_carried': phi 'header.slot.phi' in block 'header' is not justified by any promoted slot",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": true,
+      "family": "phi",
+      "first_failure_category": "SSARefinementVerificationError: function 'multiple_phi': block 'merge' instruction 2 field 'value' changed value provenance",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-PHI-007",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0036208599995006807,
+      "semantic_intent": "corrupt interacting phis consistently",
+      "source": "RUST-4.3",
+      "source_fixture": "multiple_phi",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"multiple_phi\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"condition\",\"type\":{\"tag\":\"bool\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"branch\",\"condition\":{\"tag\":\"parameter\",\"name\":\"condition\",\"type\":{\"tag\":\"bool\"}},\"true_target\":\"left\",\"false_target\":\"right\"}]},{\"name\":\"left\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"left.first\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"in",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'multiple_phi': block 'merge' instruction 2 field 'value' changed value provenance",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "value_provenance",
+      "first_failure_category": "SSARefinementVerificationError: function 'effects': block 'entry' instruction 0 field 'arguments[0]' changed value provenance",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-VAL-001",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0025562869996065274,
+      "semantic_intent": "substitute a same-typed parameter",
+      "source": "RUST-4.3",
+      "source_fixture": "effects",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"effects\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"left\",\"type\":{\"tag\":\"int\"}},{\"tag\":\"parameter\",\"name\":\"right\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"call\",\"function\":\"first_effect\",\"arguments\":[{\"tag\":\"parameter\",\"name\":\"right\",\"type\":{\"tag\":\"int\"}}],\"result\":null,\"builtin\":null,\"source_location\":null},{\"kind\":\"call\",\"function\":\"second_effect\",\"arguments\":[{\"ta",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'effects': block 'entry' instruction 0 field 'arguments[0]' changed value provenance",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": true,
+      "family": "value_provenance",
+      "first_failure_category": "SSARefinementVerificationError: function 'multiple_phi': block 'merge' instruction 3 field 'value' changed value provenance",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-VAL-002",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0032675080001354218,
+      "semantic_intent": "alias distinct phi results and downstream use",
+      "source": "RUST-4.3",
+      "source_fixture": "multiple_phi",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"multiple_phi\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"condition\",\"type\":{\"tag\":\"bool\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"branch\",\"condition\":{\"tag\":\"parameter\",\"name\":\"condition\",\"type\":{\"tag\":\"bool\"}},\"true_target\":\"left\",\"false_target\":\"right\"}]},{\"name\":\"left\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"left.first\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"in",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'multiple_phi': block 'merge' instruction 3 field 'value' changed value provenance",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "instruction_preservation",
+      "first_failure_category": "SSARefinementVerificationError: function 'choose': block 'entry' instruction 1 field 'operator' changed",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-INS-001",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0021394559953478165,
+      "semantic_intent": "alter comparison predicate",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"lt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'entry' instruction 1 field 'operator' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "instruction_preservation",
+      "first_failure_category": "SSARefinementVerificationError: function 'choose': block 'entry' instruction 1 field 'left' changed value provenance",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-INS-002",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.002333538999664597,
+      "semantic_intent": "swap arithmetic/comparison operands",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":\"paramet",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'entry' instruction 1 field 'left' changed value provenance",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "effects",
+      "first_failure_category": "SSARefinementVerificationError: function 'effects': block 'entry' preserved instruction count changed: expected 4, got 3",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-EFF-001",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0018994970014318824,
+      "semantic_intent": "remove a direct call effect",
+      "source": "RUST-4.3",
+      "source_fixture": "effects",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"effects\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"left\",\"type\":{\"tag\":\"int\"}},{\"tag\":\"parameter\",\"name\":\"right\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"call\",\"function\":\"second_effect\",\"arguments\":[{\"tag\":\"parameter\",\"name\":\"right\",\"type\":{\"tag\":\"int\"}}],\"result\":null,\"builtin\":null,\"source_location\":null},{\"kind\":\"print\",\"value\":{\"tag\":\"parameter\",\"name\":\"left\",\"",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'effects': block 'entry' preserved instruction count changed: expected 4, got 3",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "effects",
+      "first_failure_category": "SSARefinementVerificationError: function 'effects': block 'entry' preserved instruction count changed: expected 4, got 5",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-EFF-002",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0032533319972571917,
+      "semantic_intent": "duplicate a direct call effect",
+      "source": "RUST-4.3",
+      "source_fixture": "effects",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"effects\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"left\",\"type\":{\"tag\":\"int\"}},{\"tag\":\"parameter\",\"name\":\"right\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"call\",\"function\":\"first_effect\",\"arguments\":[{\"tag\":\"parameter\",\"name\":\"left\",\"type\":{\"tag\":\"int\"}}],\"result\":null,\"builtin\":null,\"source_location\":null},{\"kind\":\"call\",\"function\":\"first_effect\",\"arguments\":[{\"tag\"",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'effects': block 'entry' preserved instruction count changed: expected 4, got 5",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "effects",
+      "first_failure_category": "SSARefinementVerificationError: function 'effects': block 'entry' instruction 0 changed opcode from IRCall to SSAPrint",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-EFF-003",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.00237621899577789,
+      "semantic_intent": "move a call across another effect",
+      "source": "RUST-4.3",
+      "source_fixture": "effects",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"effects\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"left\",\"type\":{\"tag\":\"int\"}},{\"tag\":\"parameter\",\"name\":\"right\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"print\",\"value\":{\"tag\":\"parameter\",\"name\":\"left\",\"type\":{\"tag\":\"int\"}},\"newline\":true,\"aggregate_shape\":null},{\"kind\":\"call\",\"function\":\"second_effect\",\"arguments\":[{\"tag\":\"parameter\",\"name\":\"right\",\"type\":{\"tag\":\"i",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'effects': block 'entry' instruction 0 changed opcode from IRCall to SSAPrint",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "effects",
+      "first_failure_category": "SSARefinementVerificationError: function 'effects': block 'entry' instruction 2 field 'newline' changed",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-EFF-004",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.003180834995873738,
+      "semantic_intent": "alter print effect metadata",
+      "source": "RUST-4.3",
+      "source_fixture": "effects",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"effects\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"left\",\"type\":{\"tag\":\"int\"}},{\"tag\":\"parameter\",\"name\":\"right\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"call\",\"function\":\"first_effect\",\"arguments\":[{\"tag\":\"parameter\",\"name\":\"left\",\"type\":{\"tag\":\"int\"}}],\"result\":null,\"builtin\":null,\"source_location\":null},{\"kind\":\"call\",\"function\":\"second_effect\",\"arguments\":[{\"tag",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'effects': block 'entry' instruction 2 field 'newline' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "effects",
+      "first_failure_category": "SSARefinementVerificationError: function 'main': block 'entry' preserved instruction count changed: expected 16, got 15",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-EFF-005",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0037541290002991445,
+      "semantic_intent": "remove a lifecycle-normalized effect",
+      "source": "RUST-4.3",
+      "source_fixture": "lifecycle",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"main\",\"parameters\":[],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"string\"}},\"value\":{\"tag\":\"string\",\"value\":\"owned\"}},{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":1}},{\"kind\":\"struct_new\",\"result\":{\"tag\":\"value\",\"name\":\"2\",\"type\":{\"tag\":\"struct\",\"name\":\"Item\"}},\"fields\":[{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'main': block 'entry' preserved instruction count changed: expected 16, got 15",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "effects",
+      "first_failure_category": "SSARefinementVerificationError: function 'main': block 'entry' preserved instruction count changed: expected 16, got 17",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-EFF-006",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0041416050007683225,
+      "semantic_intent": "duplicate a lifecycle-normalized call",
+      "source": "RUST-4.3",
+      "source_fixture": "lifecycle",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"main\",\"parameters\":[],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"string\"}},\"value\":{\"tag\":\"string\",\"value\":\"owned\"}},{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":1}},{\"kind\":\"call\",\"function\":\"__aether_retain\",\"arguments\":[{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"string\"}}],\"re",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'main': block 'entry' preserved instruction count changed: expected 16, got 17",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "effects",
+      "first_failure_category": "SSAVerificationError: Lifecycle builtin call must retain its canonical semantic name",
+      "first_rejection_layer": "imported_ssa_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-EFF-007",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.004262881993781775,
+      "semantic_intent": "change a lifecycle-normalized callee",
+      "source": "RUST-4.3",
+      "source_fixture": "lifecycle",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"main\",\"parameters\":[],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"string\"}},\"value\":{\"tag\":\"string\",\"value\":\"owned\"}},{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":1}},{\"kind\":\"call\",\"function\":\"qualification_wrong_lifecycle_callee\",\"arguments\":[{\"tag\":\"value\",\"name\":\"0\",\"type\":{",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Lifecycle builtin call must retain its canonical semantic name",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'main': block 'entry' instruction 2 field 'function' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Lifecycle builtin call must retain its canonical semantic name",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "return_termination",
+      "first_failure_category": "SSARefinementVerificationError: function 'effects': block 'entry' instruction 3 field 'value' changed value provenance",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-RET-001",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0028190380035084672,
+      "semantic_intent": "return the wrong same-typed parameter",
+      "source": "RUST-4.3",
+      "source_fixture": "effects",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"effects\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"left\",\"type\":{\"tag\":\"int\"}},{\"tag\":\"parameter\",\"name\":\"right\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"call\",\"function\":\"first_effect\",\"arguments\":[{\"tag\":\"parameter\",\"name\":\"left\",\"type\":{\"tag\":\"int\"}}],\"result\":null,\"builtin\":null,\"source_location\":null},{\"kind\":\"call\",\"function\":\"second_effect\",\"arguments\":[{\"tag",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'effects': block 'entry' instruction 3 field 'value' changed value provenance",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": true,
+      "family": "return_termination",
+      "first_failure_category": "SSARefinementVerificationError: function 'choose': block 'merge' preserved instruction count changed: expected 1, got 2",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-RET-002",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.002647406996402424,
+      "semantic_intent": "return a constant instead of the promoted result",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'merge' preserved instruction count changed: expected 1, got 2",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": true,
+      "family": "return_termination",
+      "first_failure_category": "SSARefinementVerificationError: function 'choose': block 'entry' preserved instruction count changed: expected 3, got 4",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-RET-003",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0024373129999730736,
+      "semantic_intent": "replace the branch condition with a constant",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'entry' preserved instruction count changed: expected 3, got 4",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": true,
+      "family": "return_termination",
+      "first_failure_category": "SSARefinementVerificationError: function 'choose': block 'entry' instruction 2 changed opcode from IRBranch to SSAReturn",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-RET-004",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0027297319975332357,
+      "semantic_intent": "return prematurely from the entry block",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'entry' instruction 2 changed opcode from IRBranch to SSAReturn",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": true,
+      "family": "slot_promotion",
+      "first_failure_category": "SSARefinementVerificationError: function 'choose': block 'then' instruction 0 field 'value' changed",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-SLOT-001",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.003607614002248738,
+      "semantic_intent": "change a stored definition while propagating its SSA result",
+      "source": "RUST-4.3",
+      "source_fixture": "diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"choose\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":0}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"1\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}},\"right\":{\"tag\":",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'choose': block 'then' instruction 0 field 'value' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "effects",
+      "first_failure_category": "SSAVerificationError: exception_match catch_all must be true exactly for Error",
+      "first_rejection_layer": "imported_ssa_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-EXC-001",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.006954581003810745,
+      "semantic_intent": "change an exception match type",
+      "source": "RUST-4.3",
+      "source_fixture": "exception_indirect",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"IndirectError.message\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"this\",\"type\":{\"tag\":\"class_ref\",\"name\":\"IndirectError\"}}],\"return_type\":{\"tag\":\"string\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"class_get\",\"result\":{\"tag\":\"value\",\"name\":\"0\",\"type\":{\"tag\":\"string\"}},\"object\":{\"tag\":\"parameter\",\"name\":\"this\",\"type\":{\"tag\":\"class_ref\",\"name\":\"IndirectError\"}},\"field_index\":0,\"field_name\":\"text\"},{\"kind\":\"call\",\"functio",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSAVerificationError: exception_match catch_all must be true exactly for Error",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'main': block 'catch.dispatch0.0' instruction 1 field 'catch_type' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: exception_match catch_all must be true exactly for Error",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "effects",
+      "first_failure_category": "Error: SSAWireVerificationError { function_name: \"main\", block_name: Some(\"catch.merge0\"), detail: \"incompatible exception-event ownership merge\" }",
+      "first_rejection_layer": "rust_companion_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-EXC-002",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.00697309600218432,
+      "semantic_intent": "remove exception-event destruction",
+      "source": "RUST-4.3",
+      "source_fixture": "exception_indirect",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Error: SSAWireVerificationError { function_name: \"main\", block_name: Some(\"catch.merge0\"), detail: \"incompatible exception-event ownership merge\" }",
+          "layer": "rust_companion_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Incompatible exception-event ownership merge at block 'catch.merge0'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'main': block 'catch.body0.0' preserved instruction count changed: expected 8, got 7",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Incompatible exception-event ownership merge at block 'catch.merge0'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "cfg_reachability",
+      "first_failure_category": "Error: SSAWireVerificationError { function_name: \"apply\", block_name: Some(\"entry\"), detail: \"normal edge cannot target a catch_entry block\" }",
+      "first_rejection_layer": "rust_companion_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-EXC-003",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.00524326699814992,
+      "semantic_intent": "alias indirect-invoke normal and exceptional edges",
+      "source": "RUST-4.3",
+      "source_fixture": "exception_indirect",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Error: SSAWireVerificationError { function_name: \"apply\", block_name: Some(\"entry\"), detail: \"normal edge cannot target a catch_entry block\" }",
+          "layer": "rust_companion_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Invoke normal and exceptional successors must be distinct",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'apply': block 'entry' instruction 0 field 'normal_target' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Invoke normal and exceptional successors must be distinct",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "effects",
+      "first_failure_category": "SSAVerificationError: Interface invoke has invalid erased slot metadata",
+      "first_rejection_layer": "imported_ssa_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-EXC-004",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.008590243996877689,
+      "semantic_intent": "change interface receiver ownership metadata",
+      "source": "RUST-4.3",
+      "source_fixture": "exception_interface",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"ServiceError.message\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"this\",\"type\":{\"tag\":\"struct\",\"name\":\"ServiceError\"}}],\"return_type\":{\"tag\":\"method_result\",\"receiver\":{\"tag\":\"struct\",\"name\":\"ServiceError\"},\"value\":{\"tag\":\"string\"}},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"call\",\"function\":\"__aether_retain\",\"arguments\":[{\"tag\":\"parameter\",\"name\":\"this\",\"type\":{\"tag\":\"struct\",\"name\":\"ServiceError\"}}],\"result\":null,\"bui",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Interface invoke has invalid erased slot metadata",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'dispatch': block 'entry' instruction 0 field 'slot' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Interface invoke has invalid erased slot metadata",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "return_termination",
+      "first_failure_category": "SSARefinementVerificationError: function 'fail': block 'catch.body0.0' instruction 15 changed opcode from IRRethrow to SSAPropagate",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-EXC-005",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.010245443001622334,
+      "semantic_intent": "replace rethrow with propagation",
+      "source": "RUST-4.3",
+      "source_fixture": "exception_cleanup",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"CleanupError.message\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"this\",\"type\":{\"tag\":\"struct\",\"name\":\"CleanupError\"}}],\"return_type\":{\"tag\":\"method_result\",\"receiver\":{\"tag\":\"struct\",\"name\":\"CleanupError\"},\"value\":{\"tag\":\"string\"}},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"call\",\"function\":\"__aether_retain\",\"arguments\":[{\"tag\":\"parameter\",\"name\":\"this\",\"type\":{\"tag\":\"struct\",\"name\":\"CleanupError\"}}],\"result\":null,\"bui",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'fail': block 'catch.body0.0' instruction 15 changed opcode from IRRethrow to SSAPropagate",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "EXISTING_VERIFIER_AND_SHADOW",
+      "correlated": false,
+      "family": "effects",
+      "first_failure_category": "SSAVerificationError: Invoke of undefined function 'qualification_wrong_exception_callee'",
+      "first_rejection_layer": "imported_ssa_verification",
+      "mutation_error": null,
+      "mutation_id": "R43-EXC-006",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.00893199400161393,
+      "semantic_intent": "change an exceptional direct callee",
+      "source": "RUST-4.3",
+      "source_fixture": "exception_cleanup",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"CleanupError.message\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"this\",\"type\":{\"tag\":\"struct\",\"name\":\"CleanupError\"}}],\"return_type\":{\"tag\":\"method_result\",\"receiver\":{\"tag\":\"struct\",\"name\":\"CleanupError\"},\"value\":{\"tag\":\"string\"}},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"call\",\"function\":\"__aether_retain\",\"arguments\":[{\"tag\":\"parameter\",\"name\":\"this\",\"type\":{\"tag\":\"struct\",\"name\":\"CleanupError\"}}],\"result\":null,\"bui",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Invoke of undefined function 'qualification_wrong_exception_callee'",
+          "layer": "imported_ssa_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'fail': block 'entry' instruction 3 field 'function' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "SSAVerificationError: Invoke of undefined function 'qualification_wrong_exception_callee'",
+          "layer": "final_generic_verification",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "generated_randomized",
+      "first_failure_category": "SSARefinementVerificationError: function 'seeded_43001': block 'entry' instruction 0 field 'value' changed",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-RND-43001",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.002378272998612374,
+      "semantic_intent": "deterministically alter one same-typed generated constant",
+      "source": "RUST-4.3",
+      "source_fixture": "seed:43001:diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"seeded_43001\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"zero\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":30}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"condition\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'seeded_43001': block 'entry' instruction 0 field 'value' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "generated_randomized",
+      "first_failure_category": "SSARefinementVerificationError: function 'seeded_43019': block 'entry' instruction 0 field 'value' changed",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-RND-43019",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.002751211002760101,
+      "semantic_intent": "deterministically alter one same-typed generated constant",
+      "source": "RUST-4.3",
+      "source_fixture": "seed:43019:diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"seeded_43019\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"zero\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":93}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"condition\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'seeded_43019': block 'entry' instruction 0 field 'value' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "generated_randomized",
+      "first_failure_category": "SSARefinementVerificationError: function 'seeded_43037': block 'entry' instruction 0 field 'value' changed",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-RND-43037",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.002832974001648836,
+      "semantic_intent": "deterministically alter one same-typed generated constant",
+      "source": "RUST-4.3",
+      "source_fixture": "seed:43037:diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"seeded_43037\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"zero\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":16}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"condition\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'seeded_43037': block 'entry' instruction 0 field 'value' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "generated_randomized",
+      "first_failure_category": "SSARefinementVerificationError: function 'seeded_43051': block 'entry' instruction 0 field 'value' changed",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-RND-43051",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.002768985003058333,
+      "semantic_intent": "deterministically alter one same-typed generated constant",
+      "source": "RUST-4.3",
+      "source_fixture": "seed:43051:diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"seeded_43051\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"zero\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":15}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"condition\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'seeded_43051': block 'entry' instruction 0 field 'value' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "generated_randomized",
+      "first_failure_category": "SSARefinementVerificationError: function 'seeded_43063': block 'entry' instruction 0 field 'value' changed",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-RND-43063",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0032067339998320676,
+      "semantic_intent": "deterministically alter one same-typed generated constant",
+      "source": "RUST-4.3",
+      "source_fixture": "seed:43063:diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"seeded_43063\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"zero\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":-19}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"condition\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'seeded_43063': block 'entry' instruction 0 field 'value' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "generated_randomized",
+      "first_failure_category": "SSARefinementVerificationError: function 'seeded_43067': block 'entry' instruction 0 field 'value' changed",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-RND-43067",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.003501266000967007,
+      "semantic_intent": "deterministically alter one same-typed generated constant",
+      "source": "RUST-4.3",
+      "source_fixture": "seed:43067:diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"seeded_43067\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"zero\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":-106}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"condition\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"in",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'seeded_43067': block 'entry' instruction 0 field 'value' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "generated_randomized",
+      "first_failure_category": "SSARefinementVerificationError: function 'seeded_43093': block 'entry' instruction 0 field 'value' changed",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-RND-43093",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.0027239300034125336,
+      "semantic_intent": "deterministically alter one same-typed generated constant",
+      "source": "RUST-4.3",
+      "source_fixture": "seed:43093:diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"seeded_43093\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"zero\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":41}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"condition\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'seeded_43093': block 'entry' instruction 0 field 'value' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    },
+    {
+      "accepted_without_shadow": false,
+      "applicable": true,
+      "classification": "REFINEMENT_AND_SHADOW",
+      "correlated": false,
+      "family": "generated_randomized",
+      "first_failure_category": "SSARefinementVerificationError: function 'seeded_43103': block 'entry' instruction 0 field 'value' changed",
+      "first_rejection_layer": "independent_refinement",
+      "mutation_error": null,
+      "mutation_id": "R43-RND-43103",
+      "python_shadow_rejected": true,
+      "refinement_rejected": true,
+      "seconds": 0.002590620002592914,
+      "semantic_intent": "deterministically alter one same-typed generated constant",
+      "source": "RUST-4.3",
+      "source_fixture": "seed:43103:diamond",
+      "validation_layers": [
+        {
+          "diagnostic": null,
+          "layer": "schema_import",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "{\"schema_version\":2,\"representation\":\"aether_ssa\",\"functions\":[{\"name\":\"seeded_43103\",\"parameters\":[{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"}}],\"return_type\":{\"tag\":\"int\"},\"blocks\":[{\"name\":\"entry\",\"instructions\":[{\"kind\":\"const\",\"result\":{\"tag\":\"value\",\"name\":\"zero\",\"type\":{\"tag\":\"int\"}},\"value\":{\"tag\":\"int\",\"value\":45}},{\"kind\":\"compare_op\",\"result\":{\"tag\":\"value\",\"name\":\"condition\",\"type\":{\"tag\":\"bool\"}},\"operator\":\"gt\",\"left\":{\"tag\":\"parameter\",\"name\":\"input\",\"type\":{\"tag\":\"int\"",
+          "layer": "rust_companion_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": null,
+          "layer": "imported_ssa_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "Initial IR snapshot is immutable in the offline campaign",
+          "layer": "same_input_integrity",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "SSARefinementVerificationError: function 'seeded_43103': block 'entry' instruction 0 field 'value' changed",
+          "layer": "independent_refinement",
+          "status": "REJECT"
+        },
+        {
+          "diagnostic": null,
+          "layer": "final_generic_verification",
+          "status": "PASS"
+        },
+        {
+          "diagnostic": "canonical SSA mismatch",
+          "layer": "python_shadow_canonical_comparison",
+          "status": "REJECT"
+        }
+      ]
+    }
+  ],
+  "positive_controls": {
+    "attempted": 13,
+    "passed": 13,
+    "results": [
+      {
+        "canonical_equivalent": true,
+        "control_id": "alpha_rename_diamond",
+        "error": null,
+        "fixture": "diamond",
+        "justification": "schema-v2 value names are non-semantic and canonical_ssa alpha-normalizes them",
+        "non_shadow_accepted": true
+      },
+      {
+        "canonical_equivalent": true,
+        "control_id": "alpha_rename_effects",
+        "error": null,
+        "fixture": "effects",
+        "justification": "schema-v2 value names are non-semantic and canonical_ssa alpha-normalizes them",
+        "non_shadow_accepted": true
+      },
+      {
+        "canonical_equivalent": true,
+        "control_id": "alpha_rename_loop",
+        "error": null,
+        "fixture": "loop",
+        "justification": "schema-v2 value names are non-semantic and canonical_ssa alpha-normalizes them",
+        "non_shadow_accepted": true
+      },
+      {
+        "canonical_equivalent": true,
+        "control_id": "alpha_rename_nested_loop",
+        "error": null,
+        "fixture": "nested_loop",
+        "justification": "schema-v2 value names are non-semantic and canonical_ssa alpha-normalizes them",
+        "non_shadow_accepted": true
+      },
+      {
+        "canonical_equivalent": true,
+        "control_id": "alpha_rename_irreducible",
+        "error": null,
+        "fixture": "irreducible",
+        "justification": "schema-v2 value names are non-semantic and canonical_ssa alpha-normalizes them",
+        "non_shadow_accepted": true
+      },
+      {
+        "canonical_equivalent": true,
+        "control_id": "alpha_rename_unreachable",
+        "error": null,
+        "fixture": "unreachable",
+        "justification": "schema-v2 value names are non-semantic and canonical_ssa alpha-normalizes them",
+        "non_shadow_accepted": true
+      },
+      {
+        "canonical_equivalent": true,
+        "control_id": "alpha_rename_multiple_phi",
+        "error": null,
+        "fixture": "multiple_phi",
+        "justification": "schema-v2 value names are non-semantic and canonical_ssa alpha-normalizes them",
+        "non_shadow_accepted": true
+      },
+      {
+        "canonical_equivalent": true,
+        "control_id": "alpha_rename_lifecycle",
+        "error": null,
+        "fixture": "lifecycle",
+        "justification": "schema-v2 value names are non-semantic and canonical_ssa alpha-normalizes them",
+        "non_shadow_accepted": true
+      },
+      {
+        "canonical_equivalent": true,
+        "control_id": "alpha_rename_exception_indirect",
+        "error": null,
+        "fixture": "exception_indirect",
+        "justification": "schema-v2 value names are non-semantic and canonical_ssa alpha-normalizes them",
+        "non_shadow_accepted": true
+      },
+      {
+        "canonical_equivalent": true,
+        "control_id": "alpha_rename_exception_interface",
+        "error": null,
+        "fixture": "exception_interface",
+        "justification": "schema-v2 value names are non-semantic and canonical_ssa alpha-normalizes them",
+        "non_shadow_accepted": true
+      },
+      {
+        "canonical_equivalent": true,
+        "control_id": "alpha_rename_exception_cleanup",
+        "error": null,
+        "fixture": "exception_cleanup",
+        "justification": "schema-v2 value names are non-semantic and canonical_ssa alpha-normalizes them",
+        "non_shadow_accepted": true
+      },
+      {
+        "canonical_equivalent": true,
+        "control_id": "alpha_rename_wide_phi",
+        "error": null,
+        "fixture": "wide_phi",
+        "justification": "schema-v2 value names are non-semantic and canonical_ssa alpha-normalizes them",
+        "non_shadow_accepted": true
+      },
+      {
+        "canonical_equivalent": true,
+        "control_id": "alpha_rename_multiple_exit",
+        "error": null,
+        "fixture": "multiple_exit",
+        "justification": "schema-v2 value names are non-semantic and canonical_ssa alpha-normalizes them",
+        "non_shadow_accepted": true
+      }
+    ]
+  },
+  "production_changes": [],
+  "production_mode": "RUST_SSA_AUTHORITY_PYTHON_SHADOW",
+  "production_policy_unchanged": true,
+  "qualification_revision": 1,
+  "randomized_campaign": {
+    "bounded": true,
+    "cfg_shapes": [
+      "diamond_merge",
+      "loop_backedge_phi"
+    ],
+    "mutations_attempted": 8,
+    "programs": 8,
+    "reproducible": true,
+    "seeds": [
+      43001,
+      43019,
+      43037,
+      43051,
+      43063,
+      43067,
+      43093,
+      43103
+    ]
+  },
+  "randomized_seeds": [
+    43001,
+    43019,
+    43037,
+    43051,
+    43063,
+    43067,
+    43093,
+    43103
+  ],
+  "raw_results_recomputable": true,
+  "recommendation": "Retain the mandatory Python shadow; absence of a shadow-only finding is evidence toward redundancy, never proof or removal authorization.",
+  "regression_gate_results": {
+    "cargo_fmt_all_check": "PASS",
+    "cargo_test_workspace_locked": "PASS",
+    "full_python_suite": "PASS_4982_SKIPPED_4_LSAN_PTRACE_PROCEDURE",
+    "git_diff_check": "PASS",
+    "historical_116": "PASS",
+    "rust_4_0": "PASS",
+    "rust_4_1": "PASS",
+    "rust_4_2": "PASS",
+    "rust_4_3_focused": "PASS_5"
+  },
+  "validation_layer_attribution": {
+    "classification_totals": {
+      "EXISTING_VERIFIER_AND_SHADOW": 23,
+      "REFINEMENT_AND_SHADOW": 35
+    },
+    "ordered_layers": [
+      "schema_import",
+      "rust_companion_verification",
+      "imported_ssa_verification",
+      "same_input_integrity",
+      "independent_refinement",
+      "final_generic_verification",
+      "python_shadow_canonical_comparison"
+    ]
+  }
+}
