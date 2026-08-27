@@ -54,8 +54,8 @@ class SSARefinementVerificationError(ValueError):
 class SSARefinementVerifier:
     """Verify a lifecycle-normalized Initial IR module against produced SSA.
 
-    This API is deliberately opt-in.  No production lowering path invokes it
-    in RUST-4.1.
+    RUST-4.2 invokes this independent boundary for authoritative Rust SSA.
+    The public API remains useful for qualification and focused diagnostics.
     """
 
     def __init__(self, initial: IRModule, ssa: SSAModule) -> None:
@@ -603,6 +603,6 @@ class _FunctionRefinementVerifier:
 
 
 def verify_ssa_refinement(initial: IRModule, ssa: SSAModule) -> SSAModule:
-    """Convenience opt-in entry point."""
+    """Verify that ``ssa`` is a justified refinement of normalized ``initial``."""
 
     return SSARefinementVerifier(initial, ssa).verify()

@@ -1,0 +1,406 @@
+{
+  "artifact_schema_version": 1,
+  "baseline_revision": "7a864686ec2698467f092a42efbe7982aede2018",
+  "commit_created": false,
+  "decision": "RUST_SSA_REFINEMENT_PRODUCTION_INTEGRATION_QUALIFIED",
+  "failure_class": {
+    "classification": "refinement_verifier_failure",
+    "phase": "refinement_verification",
+    "policy": "fail_closed"
+  },
+  "false_positives": 0,
+  "gates": {
+    "adversarial_random_deep": "PASS",
+    "cargo_fmt_check": "PASS",
+    "cargo_test_workspace_locked": "PASS",
+    "full_python_suite": "PASS_4976_SKIPPED_4",
+    "git_diff_check": "PASS",
+    "historical_116": "PASS",
+    "operational_soak_persistent_concurrency": "PASS",
+    "production_failure_injection": "PASS",
+    "rust_4_0_mutation_contracts": "PASS",
+    "rust_4_1_verifier_contracts": "PASS",
+    "rust_4_2_checker": "PASS"
+  },
+  "historical_evidence": "RUST-3.x and RUST-4.0/4.1 artifacts preserved without rewriting",
+  "historical_qualification": {
+    "denominator": 116,
+    "expected": 116,
+    "failed": 0,
+    "failures": [],
+    "passed": 116,
+    "status": "PASS"
+  },
+  "integration_point": "src/aether/ssa/shadow.py::_lower_dual_lane, Rust-authoritative branch after schema-v2 import/existing verification and before run_python",
+  "milestone": "RUST-4.2",
+  "mutation_campaign": [
+    {
+      "first_failure": "refinement_verifier_failure",
+      "fixture": "branch",
+      "mutation": "missing_phi",
+      "phase": "refinement_verification",
+      "python_shadow_would_detect": true,
+      "refinement_failed_before_python": true,
+      "seconds": 0.005827337998198345
+    },
+    {
+      "first_failure": "refinement_verifier_failure",
+      "fixture": "branch",
+      "mutation": "extra_phi",
+      "phase": "refinement_verification",
+      "python_shadow_would_detect": true,
+      "refinement_failed_before_python": true,
+      "seconds": 0.003883489000145346
+    },
+    {
+      "first_failure": "refinement_verifier_failure",
+      "fixture": "branch",
+      "mutation": "wrong_phi_incoming_value",
+      "phase": "refinement_verification",
+      "python_shadow_would_detect": true,
+      "refinement_failed_before_python": true,
+      "seconds": 0.00286537300053169
+    },
+    {
+      "first_failure": "refinement_verifier_failure",
+      "fixture": "branch",
+      "mutation": "wrong_return",
+      "phase": "refinement_verification",
+      "python_shadow_would_detect": true,
+      "refinement_failed_before_python": true,
+      "seconds": 0.0032148669997695833
+    },
+    {
+      "first_failure": "refinement_verifier_failure",
+      "fixture": "branch",
+      "mutation": "missing_preserved_instruction",
+      "phase": "refinement_verification",
+      "python_shadow_would_detect": true,
+      "refinement_failed_before_python": true,
+      "seconds": 0.0029653509991476312
+    },
+    {
+      "first_failure": "refinement_verifier_failure",
+      "fixture": "branch",
+      "mutation": "duplicated_preserved_instruction",
+      "phase": "refinement_verification",
+      "python_shadow_would_detect": true,
+      "refinement_failed_before_python": true,
+      "seconds": 0.002942478000477422
+    },
+    {
+      "first_failure": "refinement_verifier_failure",
+      "fixture": "branch",
+      "mutation": "retained_unreachable_block",
+      "phase": "refinement_verification",
+      "python_shadow_would_detect": true,
+      "refinement_failed_before_python": true,
+      "seconds": 0.003160274998663226
+    },
+    {
+      "first_failure": "refinement_verifier_failure",
+      "fixture": "branch",
+      "mutation": "wrong_branch_target",
+      "phase": "refinement_verification",
+      "python_shadow_would_detect": true,
+      "refinement_failed_before_python": true,
+      "seconds": 0.003003101999638602
+    },
+    {
+      "first_failure": "refinement_verifier_failure",
+      "fixture": "effects",
+      "mutation": "wrong_call_target",
+      "phase": "refinement_verification",
+      "python_shadow_would_detect": true,
+      "refinement_failed_before_python": true,
+      "seconds": 0.003119359000265831
+    },
+    {
+      "first_failure": "refinement_verifier_failure",
+      "fixture": "effects",
+      "mutation": "wrong_call_argument",
+      "phase": "refinement_verification",
+      "python_shadow_would_detect": true,
+      "refinement_failed_before_python": true,
+      "seconds": 0.002682821999769658
+    },
+    {
+      "first_failure": "refinement_verifier_failure",
+      "fixture": "branch",
+      "mutation": "incorrect_promoted_value",
+      "phase": "refinement_verification",
+      "python_shadow_would_detect": true,
+      "refinement_failed_before_python": true,
+      "seconds": 0.0038122360019769985
+    }
+  ],
+  "operational_qualification": {
+    "clean_process": "PASS",
+    "concurrent_compilations": 16,
+    "deterministic_failures": 0,
+    "infrastructure_failures": 0,
+    "persistent_process_starts": 1,
+    "persistent_requests": 219,
+    "reused_process": "PASS",
+    "refinement_failures_on_valid_inputs": 0,
+    "sequences": [
+      "A->B",
+      "B->A",
+      "A->A"
+    ],
+    "shadow_mismatches": 0,
+    "soak_compilations": 24,
+    "state_leakage": 0,
+    "status": "PASS",
+    "valid_invalid_valid": [
+      [
+        "valid",
+        "PASS"
+      ],
+      [
+        "invalid",
+        "REJECT"
+      ],
+      [
+        "valid",
+        "PASS"
+      ]
+    ]
+  },
+  "performance": {
+    "memory": "not measured; optional when practical",
+    "methodology": "alternating pre-RUST-4.2 diagnostic and integrated dual-lane runs in one persistent characterized companion",
+    "samples_per_mode": 3,
+    "status": "PASS",
+    "threshold_enforced": false,
+    "workloads": [
+      {
+        "after_seconds": {
+          "max": 0.0028937069982930552,
+          "median": 0.0024558570003136992,
+          "min": 0.0019016699989151675
+        },
+        "before_seconds": {
+          "max": 0.0038986780018603895,
+          "median": 0.002488238002115395,
+          "min": 0.0017728689999785274
+        },
+        "dual_lane_total_seconds": {
+          "max": 0.0028937069982930552,
+          "median": 0.0024558570003136992,
+          "min": 0.0019016699989151675
+        },
+        "refinement_seconds": {
+          "max": 0.0002683420025277883,
+          "median": 0.00025390500013600104,
+          "min": 0.00013699599730898626
+        },
+        "refinement_share_of_after": 0.10338753441408374,
+        "workload": "ordinary"
+      },
+      {
+        "after_seconds": {
+          "max": 0.01298475599833182,
+          "median": 0.012328627999522723,
+          "min": 0.011350517001119442
+        },
+        "before_seconds": {
+          "max": 0.011892331000126433,
+          "median": 0.011194225000508595,
+          "min": 0.010421507999126334
+        },
+        "dual_lane_total_seconds": {
+          "max": 0.01298475599833182,
+          "median": 0.012328627999522723,
+          "min": 0.011350517001119442
+        },
+        "refinement_seconds": {
+          "max": 0.0012723420004476793,
+          "median": 0.0008330400014529005,
+          "min": 0.0008311060009873472
+        },
+        "refinement_share_of_after": 0.0675695626054375,
+        "workload": "deep_100"
+      },
+      {
+        "after_seconds": {
+          "max": 0.11137760799829266,
+          "median": 0.11061495000103605,
+          "min": 0.10998931900030584
+        },
+        "before_seconds": {
+          "max": 0.13077260299905902,
+          "median": 0.12519626499852166,
+          "min": 0.10296064200156252
+        },
+        "dual_lane_total_seconds": {
+          "max": 0.11137760799829266,
+          "median": 0.11061495000103605,
+          "min": 0.10998931900030584
+        },
+        "refinement_seconds": {
+          "max": 0.008750039000005927,
+          "median": 0.008460327000648249,
+          "min": 0.008434657996986061
+        },
+        "refinement_share_of_after": 0.07648448062914649,
+        "workload": "deep_1000"
+      },
+      {
+        "after_seconds": {
+          "max": 0.6451461059987196,
+          "median": 0.63969704000192,
+          "min": 0.6316236720012967
+        },
+        "before_seconds": {
+          "max": 0.604037912999047,
+          "median": 0.5917203429999063,
+          "min": 0.5573552610003389
+        },
+        "dual_lane_total_seconds": {
+          "max": 0.6451461059987196,
+          "median": 0.63969704000192,
+          "min": 0.6316236720012967
+        },
+        "refinement_seconds": {
+          "max": 0.07509819700135267,
+          "median": 0.04566767700089258,
+          "min": 0.0449853889986116
+        },
+        "refinement_share_of_after": 0.07138953933686408,
+        "workload": "deep_5000"
+      },
+      {
+        "after_seconds": {
+          "max": 1.3867792189994361,
+          "median": 1.3813586240030418,
+          "min": 1.3809308279996912
+        },
+        "before_seconds": {
+          "max": 1.2850131160012097,
+          "median": 1.265456721001101,
+          "min": 1.248894628999551
+        },
+        "dual_lane_total_seconds": {
+          "max": 1.3867792189994361,
+          "median": 1.3813586240030418,
+          "min": 1.3809308279996912
+        },
+        "refinement_seconds": {
+          "max": 0.13902060100008384,
+          "median": 0.09326650200091535,
+          "min": 0.0925695240002824
+        },
+        "refinement_share_of_after": 0.06751794963326625,
+        "workload": "deep_10000"
+      }
+    ]
+  },
+  "platform_status": {
+    "ci_matrix": [
+      "linux-x86_64",
+      "windows-x86_64",
+      "macos-x86_64",
+      "macos-arm64"
+    ],
+    "local": "linux-x86_64 PASS",
+    "non_local_results": "CI prepared; no local result invented"
+  },
+  "positive_qualification": {
+    "adversarial_cases": 7,
+    "deep_cfg": [
+      {
+        "blocks": 993,
+        "error": null,
+        "seconds": 0.11230780500045512,
+        "status": "PASS"
+      },
+      {
+        "blocks": 1000,
+        "error": null,
+        "seconds": 0.12180139599877293,
+        "status": "PASS"
+      },
+      {
+        "blocks": 5000,
+        "error": null,
+        "seconds": 0.627277810999658,
+        "status": "PASS"
+      },
+      {
+        "blocks": 10000,
+        "error": null,
+        "seconds": 1.3578390749971732,
+        "status": "PASS"
+      }
+    ],
+    "failures": [],
+    "infrastructure_failures": 0,
+    "ordinary_cases": 39,
+    "randomized_cfgs": 32,
+    "refinement_failures": 0,
+    "shadow_mismatches": 0,
+    "status": "PASS"
+  },
+  "production_invariants": {
+    "canonical_comparison": "mandatory_fail_closed",
+    "ordinary_response_shape_changed": false,
+    "protocol_changed": false,
+    "python_shadow": "mandatory_synchronous_independent_fail_closed",
+    "rust_authority": true,
+    "schema_changed": false
+  },
+  "production_ordering": [
+    "Initial IR integrity verification (IRBackend before SSA coordination)",
+    "single lifecycle normalization and normalized-input snapshot",
+    "Rust SSA lowering and companion-owned SSA verification (companion retains idempotent normalization defense)",
+    "schema-v2 import",
+    "existing imported SSA verification",
+    "same-input integrity checkpoint",
+    "independent refinement verification",
+    "same-input integrity checkpoint",
+    "mandatory synchronous Python shadow over the same normalized object",
+    "final same-input integrity checkpoint",
+    "canonical comparison",
+    "final generic SSAPipeline verification"
+  ],
+  "response_compatibility": {
+    "SSAShadowReport_fields": "unchanged",
+    "companion_protocol_identity": "unchanged_v1",
+    "ordinary_ssa_schema_v2": "unchanged",
+    "status": "PASS"
+  },
+  "rollback_modes": {
+    "python_authority_rust_shadow": "unchanged_no_refinement",
+    "python_only": "unchanged_no_refinement",
+    "rust_authority_python_shadow": "refinement_mandatory",
+    "status": "PASS"
+  },
+  "rust_4_0_shadow_only_covered": [
+    "missing_phi",
+    "extra_phi",
+    "incorrect_phi_incoming",
+    "incorrect_return_value",
+    "missing_instruction",
+    "duplicated_instruction",
+    "unreachable_block_incorrectly_preserved",
+    "incorrect_value_rename"
+  ],
+  "same_input_guarantee": {
+    "integrity_checkpoints": [
+      "before_refinement_verification",
+      "before_python_shadow",
+      "input_snapshot"
+    ],
+    "normalized_object_reused_by_refinement_and_python": true,
+    "regressions": [
+      "mutation between Rust and refinement",
+      "mutation between refinement and Python",
+      "stale snapshot",
+      "reconstructed-but-different IR",
+      "cross-compilation state leakage"
+    ],
+    "rust_payload_serialized_once_from_normalized_snapshot": true,
+    "status": "PASS"
+  }
+}

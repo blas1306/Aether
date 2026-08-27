@@ -143,7 +143,7 @@ def test_production_default_returns_rust_ssa_and_still_rejects_mismatch(
     )
     with pytest.raises(shadow_module.SSAShadowFailure) as caught:
         SSAPipeline(rust_shadow_client=mismatched).run(IRModule())
-    assert caught.value.report.classification == "semantic_mismatch"
+    assert caught.value.report.classification == "refinement_verifier_failure"
     assert mismatched.request_count == 1
 
 
@@ -209,7 +209,7 @@ def test_python_shadow_runs_after_rust_and_cannot_be_skipped_or_substituted(monk
                     },
                 }
             ),
-            "semantic_mismatch",
+            "refinement_verifier_failure",
         ),
     ],
 )

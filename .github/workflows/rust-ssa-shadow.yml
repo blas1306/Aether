@@ -25,6 +25,13 @@ jobs:
         with: {toolchain: "1.85"}
       - run: python -m pip install -r requirements.txt pytest build
       - run: cargo build --manifest-path compiler-rs/Cargo.toml --release --locked --package aether-verifier --bin aether-ssa-shadow
+      - name: RUST-4.2 refinement production integration contracts
+        run: >-
+          python -m pytest -q
+          tests/aether/test_rust_ssa_refinement_production_integration.py
+          tests/aether/test_rust_ssa_independent_refinement_verifier.py
+      - name: RUST-4.2 checked evidence gate
+        run: python scripts/check_rust_ssa_refinement_production_integration.py
       - run: python -m build --wheel --outdir python-dist
       - name: Clean-install, promotion-fixtures, three-mode, handoff, rollback
         run: >-

@@ -15,15 +15,18 @@ import sys
 import threading
 from hashlib import sha256
 from time import perf_counter
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 from aether.ir.dto import IR_SCHEMA_VERSION
 
 from aether.ir.dto import ir_module_to_dto
+from aether.ir.lifecycle import expand_lifecycle
 from aether.ir.model import IRModule
 
 from .dto import ssa_module_from_dto, ssa_module_to_dto
 from .general_builder import GeneralSSABuilder
+from .model import SSAModule
+from .refinement_verifier import verify_ssa_refinement
 from .verifier import SSAVerifier
 
 
@@ -717,16 +720,29 @@ def _lower_dual_lane(
     rust_authoritative: bool,
     characterize_performance: bool = False,
     execute_python_shadow: bool = True,
+    execute_refinement_verifier: bool = True,
+    test_only_post_verification_mutator: (
+        Callable[[SSAModule], SSAModule | None] | None
+    ) = None,
 ) -> tuple[object, SSAShadowReport]:
     """Run both qualified lanes and return only the configured authority."""
     total_started = perf_counter() if characterize_performance else 0.0
     phases: dict[str, float] = {}
     started = perf_counter() if characterize_performance else 0.0
-    snapshot = ir_module_to_dto(module)
+    source_snapshot = ir_module_to_dto(module)
+    snapshot = source_snapshot
+    if rust_authoritative:
+        normalized_module = expand_lifecycle(module)
+        normalized_snapshot = ir_module_to_dto(normalized_module)
+    else:
+        # Preserve the Python-authority/Rust-shadow rollback lane exactly: its
+        # two builders retain their pre-RUST-4.2 lifecycle responsibilities.
+        normalized_module = module
+        normalized_snapshot = source_snapshot
     if characterize_performance:
         phases["initial_ir_snapshot_preparation"] = perf_counter() - started
         started = perf_counter()
-    payload = json.dumps(snapshot, separators=(",", ":")).encode()
+    payload = json.dumps(normalized_snapshot, separators=(",", ":")).encode()
     if characterize_performance:
         phases["rust_transport_serialization"] = perf_counter() - started
 
@@ -741,13 +757,14 @@ def _lower_dual_lane(
     def run_python() -> object:
         nonlocal python_seconds
         try:
-            # ``snapshot`` was serialized from this exact verified module for
-            # Rust immediately before either lane ran.  GeneralSSABuilder and
-            # lifecycle expansion are non-mutating, and the fail-closed DTO
-            # equality check below enforces that contract after both lanes.
-            # Reuse therefore avoids a redundant JSON decode/schema import
-            # while keeping both lanes tied to one logical Initial IR value.
-            python_input = module
+            # Rust lowering, refinement verification, and this shadow all
+            # consume the same lifecycle-normalized logical Initial IR.  The
+            # Rust transport necessarily receives its schema-v1 serialization;
+            # Python reuses the already allocated object without rebuilding it.
+            if rust_authoritative:
+                python_input = normalized_module
+            else:
+                python_input = module
             lane_started = perf_counter()
             if characterize_performance:
                 value = GeneralSSABuilder(
@@ -775,6 +792,30 @@ def _lower_dual_lane(
                     rust_seconds=rust_seconds,
                 )
             ) from exc
+
+    def verify_input_integrity(phase: str) -> None:
+        started = perf_counter() if characterize_performance else 0.0
+        unchanged = ir_module_to_dto(module) == snapshot
+        source_unchanged = unchanged
+        normalized_unchanged = (
+            ir_module_to_dto(normalized_module) == normalized_snapshot
+        )
+        if characterize_performance:
+            metric = (
+                "input_snapshot_integrity_check"
+                if phase == "input_snapshot"
+                else f"input_integrity_{phase}"
+            )
+            phases[metric] = perf_counter() - started
+        if not source_unchanged or not normalized_unchanged:
+            raise SSAShadowFailure(
+                SSAShadowReport(
+                    "same_input_violation",
+                    phase,
+                    python_seconds=python_seconds,
+                    rust_seconds=rust_seconds,
+                )
+            )
 
     def run_rust() -> object:
         nonlocal rust_seconds, rust_phase_detail, rust_comparison_dto
@@ -842,10 +883,35 @@ def _lower_dual_lane(
             raise SSAShadowFailure(SSAShadowReport("rust_verifier_failure", "ssa_verification",
                                                   first_difference=str(exc)[:240], python_seconds=python_seconds,
                                                   rust_seconds=rust_seconds)) from exc
+        if test_only_post_verification_mutator is not None:
+            # Deliberately private plumbing for qualification fault injection.
+            # Production callers never install a mutator, and no global state
+            # is used, so concurrent/repeated compilations cannot leak it.
+            replacement = test_only_post_verification_mutator(value)
+            if replacement is not None:
+                value = replacement
         return value
 
     if rust_authoritative:
         rust_ssa = run_rust()
+        verify_input_integrity("before_refinement_verification")
+        if execute_refinement_verifier:
+            try:
+                started = perf_counter() if characterize_performance else 0.0
+                verify_ssa_refinement(normalized_module, rust_ssa)
+                if characterize_performance:
+                    phases["refinement_verification"] = perf_counter() - started
+            except Exception as exc:
+                raise SSAShadowFailure(
+                    SSAShadowReport(
+                        "refinement_verifier_failure",
+                        "refinement_verification",
+                        first_difference=str(exc)[:240],
+                        python_seconds=python_seconds,
+                        rust_seconds=rust_seconds,
+                    )
+                ) from exc
+        verify_input_integrity("before_python_shadow")
         if execute_python_shadow:
             python_ssa = run_python()
         else:
@@ -854,19 +920,7 @@ def _lower_dual_lane(
         python_ssa = run_python()
         rust_ssa = run_rust()
 
-    started = perf_counter() if characterize_performance else 0.0
-    unchanged = ir_module_to_dto(module) == snapshot
-    if characterize_performance:
-        phases["input_snapshot_integrity_check"] = perf_counter() - started
-    if not unchanged:
-        raise SSAShadowFailure(
-            SSAShadowReport(
-                "same_input_violation",
-                "input_snapshot",
-                python_seconds=python_seconds,
-                rust_seconds=rust_seconds,
-            )
-        )
+    verify_input_integrity("input_snapshot")
 
     if not execute_python_shadow:
         performance = _finish_performance_profile(
@@ -1002,4 +1056,32 @@ def diagnostic_lower_with_rust_authority_without_python_shadow(
         rust_authoritative=True,
         characterize_performance=True,
         execute_python_shadow=False,
+    )
+
+
+def diagnostic_lower_with_rust_authority_without_refinement(
+    module: IRModule,
+    client: RustSSALoweringClient,
+) -> tuple[object, SSAShadowReport]:
+    """Measure the pre-RUST-4.2 dual lane; never selectable as production mode."""
+    return _lower_dual_lane(
+        module,
+        client,
+        rust_authoritative=True,
+        characterize_performance=True,
+        execute_refinement_verifier=False,
+    )
+
+
+def diagnostic_inject_post_rust_verification_corruption(
+    module: IRModule,
+    client: RustSSALoweringClient,
+    mutator: Callable[[SSAModule], SSAModule | None],
+) -> tuple[object, SSAShadowReport]:
+    """Inject a qualification-only fault immediately before refinement."""
+    return _lower_dual_lane(
+        module,
+        client,
+        rust_authoritative=True,
+        test_only_post_verification_mutator=mutator,
     )
