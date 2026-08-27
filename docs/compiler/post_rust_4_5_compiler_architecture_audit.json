@@ -1,0 +1,164 @@
+{
+  "schema_version": 1,
+  "audit": "post-RUST-4.5 compiler architecture",
+  "date": "2026-08-27",
+  "status": "AUDIT_COMPLETE_NO_PRODUCTION_CHANGE",
+  "scope": "analysis_and_planning_only",
+  "evidence_labels": ["observed", "inferred", "recommended"],
+  "executive_summary": {
+    "observed_python_stage_families": 18,
+    "observed_total_stage_families": 21,
+    "approximate_python_stage_share_percent": 86,
+    "qualification_note": "Stage count describes execution ownership, not time or LOC.",
+    "rust_authoritative_component": "Initial IR schema-v1 to owned SSA schema-v2 lowering and Rust-side owned SSA verification",
+    "largest_small_cold_cost": "Python package/CLI import graph",
+    "largest_small_warm_cost": "external clang/link",
+    "largest_large_warm_cost": "repeated Python verification, refinement, and representation materialization",
+    "principal_architectural_debt": "The production driver has no single compiler-core boundary: it repeats Python verifiers around a JSON/subprocess Rust island, while the declared Rust Initial IR authority is not wired into ordinary IRBackend construction.",
+    "recommended_next_milestone": "CORE-1.0_IN_PROCESS_COMPILER_CORE_BOUNDARY"
+  },
+  "authority_discrepancies": [
+    {
+      "component": "initial_ir_verification",
+      "declared": "Rust authority with Python shadow",
+      "observed_normal_wiring": "Python IRVerifier only",
+      "evidence": [
+        "docs/architecture/implementation_language_ownership.json",
+        "src/aether/pipeline.py:IRBackend.verify",
+        "src/aether/backend/llvm/build.py:LLVMBuilder.emit_llvm"
+      ]
+    },
+    {
+      "component": "ssa_construction_and_verification",
+      "declared": "ownership registry still says Python/RP2",
+      "observed_normal_wiring": "Rust SSA authority under rust_ssa_authority_refinement_verified; GeneralSSABuilder absent",
+      "evidence": [
+        "src/aether/ssa/shadow.py:resolve_ssa_lowering_authority_mode",
+        "src/aether/ssa/shadow_independent.py:_lower_shadow_independent_rust_ssa",
+        "docs/compiler/RUST_SSA_SHADOW_INDEPENDENT_PRODUCTION_PROMOTION_CLOSURE_6274CD20.md"
+      ]
+    }
+  ],
+  "production_pipeline": [
+    {"id": 1, "stage": "CLI and source load", "language": "python", "authority": "python", "entrypoint": "aether.cli:main / _main_build / _read_source", "input": "argv + path", "output": "UTF-8 source string", "normal": true, "process": "python parent", "serialization": null, "dependencies": ["argparse", "filesystem"]},
+    {"id": 2, "stage": "lexing", "language": "python", "authority": "python", "entrypoint": "aether.lexer:lex / Lexer.scan_tokens", "input": "source string", "output": "list[Token]", "normal": true, "process": "in-process", "serialization": null, "dependencies": []},
+    {"id": 3, "stage": "parsing and AST construction", "language": "python", "authority": "python", "entrypoint": "aether.parser:Parser.parse", "input": "list[Token]", "output": "ast.Program", "normal": true, "process": "in-process", "serialization": null, "dependencies": []},
+    {"id": 4, "stage": "semantic analysis, imports, names, types, calls, conversions and constants", "language": "python", "authority": "python", "entrypoint": "aether.typechecker:TypeChecker.check", "input": "ast.Program + source root", "output": "mutated checker semantic tables + accepted AST", "normal": true, "process": "in-process", "serialization": null, "dependencies": ["filesystem for imported .ae modules", "stdlib registry"]},
+    {"id": 5, "stage": "checked multi-module graph", "language": "python", "authority": "python", "entrypoint": "aether.modules:build_checked_program", "input": "root AST + TypeChecker module cache", "output": "CheckedProgram with ModuleId/SymbolId", "normal": true, "process": "in-process", "serialization": null, "dependencies": []},
+    {"id": 6, "stage": "entry-point normalization", "language": "python", "authority": "python", "entrypoint": "aether.entry_point:normalize_entry_point", "input": "checked root AST", "output": "AST with explicit main", "normal": true, "process": "in-process", "serialization": null, "dependencies": []},
+    {"id": 7, "stage": "native capability validation", "language": "python", "authority": "python", "entrypoint": "aether.capabilities:validate_backend_capabilities", "input": "TypedProgram", "output": "accept or BackendCapabilityError", "normal": true, "process": "in-process", "serialization": null, "dependencies": []},
+    {"id": 8, "stage": "module combination and Initial IR construction", "language": "python", "authority": "python", "entrypoint": "IRLowerer.lower_checked_program", "input": "CheckedProgram", "output": "Python IRModule", "normal": true, "process": "in-process", "serialization": null, "dependencies": ["combined-module name mangling"]},
+    {"id": 9, "stage": "Initial IR verification", "language": "python", "authority": "python in observed normal wiring; registry says rust", "entrypoint": "IRBackend.verify -> IRVerifier.verify", "input": "Python IRModule", "output": "same verified object", "normal": true, "process": "in-process", "serialization": null, "dependencies": [], "observed_calls_per_o0_build": 3},
+    {"id": 10, "stage": "lifecycle normalization", "language": "python", "authority": "python in observed normal wiring", "entrypoint": "shadow_independent.expand_lifecycle", "input": "verified Python IRModule", "output": "normalized Python IRModule", "normal": true, "process": "in-process", "serialization": null, "dependencies": []},
+    {"id": 11, "stage": "schema-v1 materialization and request encoding", "language": "python", "authority": "boundary adapter", "entrypoint": "ir_module_to_dto + json.dumps", "input": "normalized Python IRModule", "output": "schema-v1 JSON bytes", "normal": true, "process": "in-process", "serialization": "IR schema v1 JSON", "dependencies": ["json"], "observed_ir_dto_materializations_per_o0_build": 6},
+    {"id": 12, "stage": "Rust companion import, lifecycle check/no-op, SSA lowering and owned verification", "language": "rust", "authority": "rust", "entrypoint": "aether-ssa-shadow --persistent", "input": "length-framed schema-v1 JSON", "output": "length-framed schema-v2 JSON", "normal": true, "process": "persistent subprocess per Python process", "serialization": "protocol v1 + IR schema v1 + SSA schema v2", "dependencies": ["serde_json", "aether-ir", "aether-verifier"]},
+    {"id": 13, "stage": "schema-v2 SSA import", "language": "python", "authority": "boundary adapter", "entrypoint": "ssa_module_from_dto", "input": "schema-v2 object", "output": "Python SSAModule", "normal": true, "process": "in-process", "serialization": "SSA schema v2", "dependencies": []},
+    {"id": 14, "stage": "SSA and refinement verification", "language": "python", "authority": "mandatory acceptance layer after Rust", "entrypoint": "SSAVerifier.verify + verify_ssa_refinement", "input": "normalized Initial IR + imported SSAModule", "output": "accepted SSAModule", "normal": true, "process": "in-process", "serialization": null, "dependencies": [], "observed_generic_ssa_verifier_calls_per_o0_build": 5},
+    {"id": 15, "stage": "IR optimization", "language": "python", "authority": "python", "entrypoint": "build_optimizer_pipeline", "input": "IRModule", "output": "IRModule", "normal": false, "condition": "O1/O2 only", "process": "in-process", "serialization": null, "dependencies": []},
+    {"id": 16, "stage": "SSA optimization", "language": "python", "authority": "python", "entrypoint": "build_ssa_optimizer_pipeline", "input": "SSAModule", "output": "SSAModule", "normal": true, "condition": "O0 has no transformation passes but still verifies input; O1/O2 run passes", "process": "in-process", "serialization": null, "dependencies": []},
+    {"id": 17, "stage": "native boundary and final SSA verification", "language": "python", "authority": "python", "entrypoint": "LLVMBackend.emit", "input": "SSAModule", "output": "accepted backend input", "normal": true, "process": "in-process", "serialization": null, "dependencies": []},
+    {"id": 18, "stage": "LLVM/native lowering and embedded runtime emission", "language": "python", "authority": "python", "entrypoint": "LLVMPrinter.print_module", "input": "SSAModule", "output": "textual LLVM IR", "normal": true, "process": "in-process", "serialization": "textual .ll", "dependencies": ["platform libc/OS ABI declarations"]},
+    {"id": 19, "stage": "toolchain and linker invocation", "language": "python orchestration + external toolchain", "authority": "clang for native artifact acceptance", "entrypoint": "LLVMBuilder._run_clang", "input": ".ll file", "output": "native executable", "normal": true, "process": "external clang subprocess", "serialization": "temporary .ll file", "dependencies": ["clang", "system linker", "libm when required"]},
+    {"id": 20, "stage": "native execution", "language": "native executable", "authority": "generated program", "entrypoint": "LLVMRunner._run_executable", "input": "executable + argv", "output": "exit code/stdout/stderr", "normal": true, "condition": "default run command; absent from build command", "process": "child process", "serialization": "OS process ABI", "dependencies": ["libc", "OS"]},
+    {"id": 21, "stage": "runtime interaction", "language": "generated LLVM plus C-compatible external ABI", "authority": "Python emitter defines code; target libc/OS executes it", "entrypoint": "backend/llvm/*_runtime.py emitted helpers", "input": "native calls", "output": "runtime behavior", "normal": true, "condition": "feature dependent helpers", "process": "native process", "serialization": "C ABI", "dependencies": ["libc", "libm", "POSIX/UCRT/Darwin APIs"]}
+  ],
+  "critical_path_classes": {
+    "A_mandatory_production": ["pipeline ids 1-14", "pipeline ids 16-19", "id 20 for run"],
+    "B_optional_feature_or_profile": ["multi-module recursion", "O1/O2 IR and SSA passes", "feature-specific runtime helpers", "System.args and text-file platform branches"],
+    "C_diagnostic_development": ["--tokens", "--ast", "--emit-ir", "--emit-cfg", "--emit-ssa", "--emit-llvm", "bench", "AST/IR backends", "LLVMGenerationProfiler"],
+    "D_qualification_test": ["Rust Initial IR authority canary/pipeline", "Rust/Python SSA differential mode", "platform qualification", "performance characterization"],
+    "E_rollback_reference": ["GeneralSSABuilder", "pattern SSABuilder", "python_ssa_only", "python_ssa_authority_rust_shadow", "rust_ssa_authority_python_shadow"],
+    "F_dead_legacy": ["No compiler implementation was proven unreachable; aether-python is an explicit empty future seam, not production code."]
+  },
+  "timing": {
+    "evidence": "observed",
+    "script": "scripts/audit_post_rust_4_5_pipeline.py",
+    "environment": {"platform": "Linux x86_64", "python": "3.14.7", "clang": "22.1.8", "rust_companion": "release", "profile": "O0"},
+    "method": {"warmups": 2, "measured_rounds": 7, "statistic": "median", "dispersion": "MAD plus min/max", "warm_process": "one Python process and one persistent companion", "cold_process": "fresh Python, Rust companion and clang"},
+    "startup_seconds": {
+      "bare_python": {"median": 0.012668, "mad": 0.000753},
+      "import_aether_cli": {"median": 0.447171, "mad": 0.007246},
+      "incremental_import_graph_over_bare": 0.434503
+    },
+    "workloads": [
+      {"path": "examples/hello.ae", "coverage": ["tiny"], "source_bytes": 32, "warm_total_median": 0.041880, "warm_mad": 0.000408, "cold_total_median": 0.530055, "cold_mad": 0.004195},
+      {"path": "examples/ir/sumTo.ae", "coverage": ["small", "function", "control-flow", "numeric"], "source_bytes": 175, "warm_total_median": 0.046987, "warm_mad": 0.000252, "cold_total_median": 0.539091, "cold_mad": 0.006535},
+      {"path": "tests/aether/parity_corpus/strings.ae", "coverage": ["strings"], "source_bytes": 370, "warm_total_median": 0.053949, "warm_mad": 0.000940, "cold_total_median": 0.550793, "cold_mad": 0.003588},
+      {"path": "examples/aggregate_collections/particles.ae", "coverage": ["collections", "structs"], "source_bytes": 1401, "warm_total_median": 0.086937, "warm_mad": 0.001414, "cold_total_median": 0.591472, "cold_mad": 0.008867},
+      {"path": "examples/Sorts/Main.ae", "coverage": ["multi-module", "collections", "exceptions"], "source_bytes": 398, "warm_total_median": 0.096801, "warm_mad": 0.000311, "cold_total_median": 0.588135, "cold_mad": 0.003486},
+      {"path": "examples/numerical_methods/main.ae", "coverage": ["multi-module", "numeric", "functions"], "source_bytes": 3085, "warm_total_median": 0.253213, "warm_mad": 0.002390, "cold_total_median": 0.749044, "cold_mad": 0.007461},
+      {"path": "examples/expense_tracker/Main.ae", "coverage": ["large", "multi-module", "strings", "collections", "classes", "control-flow"], "source_bytes": 9273, "warm_total_median": 1.199108, "warm_mad": 0.006894, "cold_total_median": 1.694923, "cold_mad": 0.004735}
+    ],
+    "warm_campaign_sum_of_workload_medians_seconds": 1.778876,
+    "warm_campaign_stage_seconds": {
+      "external_clang_link": 0.300590,
+      "python_ssa_verification_5_calls_per_build": 0.227411,
+      "python_initial_ir_verification_3_calls_per_build": 0.180506,
+      "python_ir_schema_v1_materialization_and_integrity": 0.164502,
+      "python_refinement_verification": 0.156110,
+      "python_semantic_typecheck_module_loading": 0.150071,
+      "python_llvm_text_emission": 0.098495,
+      "python_schema_v2_import": 0.069134,
+      "python_initial_ir_construction": 0.066430,
+      "python_lifecycle_normalization": 0.040092,
+      "python_root_parser_ast": 0.010740,
+      "python_root_lexer": 0.007423,
+      "python_other_named": 0.003761,
+      "rust_companion_request_including_transport": 0.130928,
+      "unattributed_python_orchestration_and_json": 0.172684
+    },
+    "warm_campaign_shares_percent": {"named_python_excluding_clang": 66.03, "external_clang": 16.90, "rust_request_including_transport": 7.36, "residual": 9.71},
+    "large_workload_observation": {"path": "examples/expense_tracker/Main.ae", "python_dominates": true, "rust_request_median_seconds": 0.107191, "rust_internal_compute_median_seconds": 0.094646, "largest_python_components": ["SSA verification", "Initial IR verification", "refinement verification", "IR DTO materialization"]}
+  },
+  "python_inventory": [
+    {"component": "driver_and_pipeline", "approx_loc": 1430, "files": ["src/aether/cli.py", "src/aether/pipeline.py"], "production": true, "representation": "all", "mutable_global_state": "SSA clients live below this layer", "api": "public CLI plus internal pipeline", "coupling": "high fan-out", "plausible_language": "Rust core; high-level project tooling may later be Aether"},
+    {"component": "syntax_frontend", "approx_loc": 2473, "files": ["lexer.py", "tokens.py", "parser.py", "ast.py"], "production": true, "representation": "Token and AST", "mutable_global_state": false, "api": "internal, also consumed by language service/formatter", "coupling": "AST and IDE/LSP", "plausible_language": "Rust Stage0; optional Aether parser later"},
+    {"component": "semantics_names_types_capabilities", "approx_loc": 9137, "files": ["typechecker.py", "modules.py", "symbols.py", "scope.py", "types.py", "entry_point.py", "capabilities.py"], "production": true, "representation": "semantic tables and CheckedProgram", "mutable_global_state": "per-TypeChecker mutable tables", "api": "internal semantic queries", "coupling": "AST, stdlib, imports, IR lowerer, LSP", "plausible_language": "Rust"},
+    {"component": "initial_ir_construction_model_and_dto", "approx_loc": 9987, "files": ["ir/lowering.py", "ir/module_lowering.py", "ir/model.py", "ir/types.py", "ir/dto.py"], "production": true, "representation": "owns Python Initial IR and schema v1", "mutable_global_state": false, "api": "internal plus versioned DTO", "coupling": "typed AST, SSA boundary", "plausible_language": "Rust, but migrate with semantic block or stable typed input"},
+    {"component": "python_initial_ir_verifier", "approx_loc": 3964, "files": ["ir/verifier.py"], "production": true, "representation": "Python IRModule", "mutable_global_state": false, "api": "internal/oracle", "coupling": "IR and lifecycle", "plausible_language": "already implemented in Rust; reconcile wiring, do not remigrate"},
+    {"component": "python_lifecycle", "approx_loc": 1172, "files": ["ir/lifecycle.py"], "production": true, "representation": "Python IRModule", "mutable_global_state": false, "api": "internal/oracle", "coupling": "IR ownership and SSA", "plausible_language": "already implemented in Rust; promote coherently"},
+    {"component": "ssa_acceptance_bridge_and_verifiers", "approx_loc": 7010, "files": ["ssa/shadow.py", "ssa/shadow_independent.py", "ssa/model.py", "ssa/dto.py", "ssa/verifier.py", "ssa/refinement_verifier.py"], "production": true, "representation": "Python SSAModule plus schemas", "mutable_global_state": "process-global persistent companion clients and qualification-client cache", "api": "internal/versioned boundary", "coupling": "Initial IR, Rust protocol, optimizer/backend", "plausible_language": "Rust core plus thin generated/binding adapter"},
+    {"component": "python_ssa_reference_builders", "approx_loc": 3001, "files": ["ssa/builder.py", "ssa/general_builder.py", "ssa/cfg.py", "ssa/phi_placement.py", "ssa/renaming.py"], "production": false, "reference_only": true, "representation": "Python Initial IR to Python SSA", "mutable_global_state": false, "api": "rollback/differential", "coupling": "IR and SSA", "plausible_language": "remain Python oracle until retirement criteria"},
+    {"component": "ir_and_ssa_optimizers", "approx_loc": 4006, "files": ["ir/optimizer", "ssa/optimizer"], "production": "O0 verifier only; transformations O1/O2", "representation": "Python IR/SSA", "mutable_global_state": false, "api": "internal", "coupling": "IR/SSA/verifiers", "plausible_language": "Rust"},
+    {"component": "llvm_backend_runtime_and_toolchain", "approx_loc": 12437, "files": ["backend/llvm"], "production": true, "representation": "Python SSA to textual LLVM", "mutable_global_state": "per-emission printer state", "api": "internal builder", "coupling": "SSA, ABI, platform, clang", "plausible_language": "Rust with stable C ABI runtime; C++ only behind LLVM if justified"},
+    {"component": "ast_runtime_reference", "approx_loc": 4643, "files": ["interpreter.py", "session.py", "runner.py", "language_service.py", "source_formatter.py"], "production": false, "reference_only": true, "representation": "AST/runtime values", "mutable_global_state": "per-session state", "api": "public AST mode/REPL/tooling", "coupling": "AST, TypeChecker, plotting/numerics", "plausible_language": "Python tooling/reference; selected tools may self-host"},
+    {"component": "lsp_and_editor_tooling", "approx_loc": 3909, "files": ["src/aether_lsp", "src/autocomplete_engine.py", "src/document_symbols.py", "src/command_catalog.py", "src/plot_backend.py"], "production": false, "reference_only": false, "representation": "source/AST/LSP records", "mutable_global_state": "server and plot state", "api": "public tooling", "coupling": "frontend and IDE", "plausible_language": "Python remains reasonable until incremental Rust semantic API exists"}
+  ],
+  "candidate_scale": "1 low, 5 high; for complexity, risk and fan-out a high score is a cost",
+  "candidate_matrix": [
+    {"candidate": "in_process_compiler_core_boundary", "criticality": 5, "performance": 4, "leverage": 5, "remove_python": 2, "isolation": 5, "representation_stability": 5, "complexity": 3, "semantic_risk": 3, "test_coverage": 5, "oracle": 5, "cross_platform_risk": 4, "fan_out": 4, "self_hosting": 1, "maintenance": 5, "rank": 1},
+    {"candidate": "remaining_ssa_and_refinement_acceptance", "criticality": 5, "performance": 5, "leverage": 5, "remove_python": 4, "isolation": 4, "representation_stability": 4, "complexity": 4, "semantic_risk": 5, "test_coverage": 5, "oracle": 5, "cross_platform_risk": 3, "fan_out": 4, "self_hosting": 1, "maintenance": 5, "rank": 2},
+    {"candidate": "lifecycle_normalization", "criticality": 5, "performance": 3, "leverage": 4, "remove_python": 2, "isolation": 5, "representation_stability": 5, "complexity": 2, "semantic_risk": 5, "test_coverage": 5, "oracle": 5, "cross_platform_risk": 3, "fan_out": 3, "self_hosting": 1, "maintenance": 4, "rank": 3},
+    {"candidate": "optimizer", "criticality": 3, "performance": 5, "leverage": 4, "remove_python": 3, "isolation": 4, "representation_stability": 4, "complexity": 5, "semantic_risk": 5, "test_coverage": 5, "oracle": 4, "cross_platform_risk": 3, "fan_out": 4, "self_hosting": 1, "maintenance": 5, "rank": 4},
+    {"candidate": "llvm_native_backend_orchestration", "criticality": 5, "performance": 4, "leverage": 5, "remove_python": 4, "isolation": 4, "representation_stability": 3, "complexity": 5, "semantic_risk": 5, "test_coverage": 5, "oracle": 4, "cross_platform_risk": 5, "fan_out": 5, "self_hosting": 1, "maintenance": 5, "rank": 5},
+    {"candidate": "initial_ir_construction", "criticality": 5, "performance": 3, "leverage": 5, "remove_python": 3, "isolation": 3, "representation_stability": 3, "complexity": 5, "semantic_risk": 5, "test_coverage": 5, "oracle": 4, "cross_platform_risk": 3, "fan_out": 5, "self_hosting": 2, "maintenance": 5, "rank": 6},
+    {"candidate": "semantic_type_checker", "criticality": 5, "performance": 3, "leverage": 5, "remove_python": 4, "isolation": 2, "representation_stability": 2, "complexity": 5, "semantic_risk": 5, "test_coverage": 4, "oracle": 2, "cross_platform_risk": 3, "fan_out": 5, "self_hosting": 1, "maintenance": 5, "rank": 7},
+    {"candidate": "name_symbol_resolution", "criticality": 5, "performance": 2, "leverage": 4, "remove_python": 3, "isolation": 2, "representation_stability": 2, "complexity": 4, "semantic_risk": 5, "test_coverage": 4, "oracle": 2, "cross_platform_risk": 2, "fan_out": 5, "self_hosting": 2, "maintenance": 4, "rank": 8},
+    {"candidate": "parser", "criticality": 5, "performance": 1, "leverage": 3, "remove_python": 2, "isolation": 4, "representation_stability": 4, "complexity": 4, "semantic_risk": 4, "test_coverage": 5, "oracle": 5, "cross_platform_risk": 2, "fan_out": 4, "self_hosting": 5, "maintenance": 3, "rank": 9},
+    {"candidate": "lexer", "criticality": 5, "performance": 1, "leverage": 2, "remove_python": 1, "isolation": 5, "representation_stability": 5, "complexity": 2, "semantic_risk": 3, "test_coverage": 5, "oracle": 5, "cross_platform_risk": 2, "fan_out": 2, "self_hosting": 5, "maintenance": 2, "rank": 10},
+    {"candidate": "whole_compiler_driver", "criticality": 5, "performance": 2, "leverage": 5, "remove_python": 5, "isolation": 1, "representation_stability": 2, "complexity": 5, "semantic_risk": 4, "test_coverage": 4, "oracle": 3, "cross_platform_risk": 5, "fan_out": 5, "self_hosting": 2, "maintenance": 5, "rank": 11}
+  ],
+  "recommended_roadmap": [
+    {"stage": 1, "name": "CORE-1.0_IN_PROCESS_COMPILER_CORE_BOUNDARY", "kind": "preparatory integration", "objective": "Make aether-python a real in-process binding over one Rust core service and reproduce the current schema/protocol result without changing language semantics or authority policy.", "exit_criteria": ["byte/semantic parity with protocol-v1/schema-v1->v2 companion", "one imported Initial IR per request", "cross-platform wheels", "subprocess rollback", "no Python oracle in default request"], "rollback": "select existing packaged companion", "oracle": "current companion plus Python differential modes"},
+    {"stage": 2, "name": "CORE-1.1_AUTHORITY_AND_ACCEPTANCE_CONSOLIDATION", "kind": "promotion", "objective": "Reconcile Initial IR authority wiring, run Rust lifecycle on unnormalized IR, remove redundant Python verifier calls from the normal path, and preserve Python verifiers/refinement as explicit qualification/rollback until an independent Rust refinement gate exists.", "exit_criteria": ["normal trace invokes declared Rust Initial IR authority", "one intentional acceptance verification per invariant family", "no Python lifecycle in normal path", "differential parity and rollback qualified"], "rollback": "configuration switch to prior Python acceptance path", "oracle": "Python IR verifier, lifecycle, SSA verifier and refinement verifier"},
+    {"stage": 3, "name": "CORE-2.0_OWNED_MIDDLE_AND_NATIVE_BACKEND", "kind": "coherent migration block", "objective": "Move optimizer and LLVM/native backend beside the owned Rust IR/SSA core; define the runtime C ABI before extracting runtime helpers.", "exit_criteria": ["O0/O1/O2 parity", "LLVM/native differential corpus", "cross-platform packaging", "stable runtime ABI decision"], "rollback": "Python optimizer/backend selectable during qualification", "oracle": "Python optimizers, LLVM emitter, clang acceptance and behavioral differential tests"}
+  ],
+  "not_worth_migrating_yet": [
+    "Lexer alone: less than 0.5% of the measured warm campaign and creates a new token boundary.",
+    "Parser alone: less than 1% and would duplicate AST/schema work before semantics move.",
+    "GeneralSSABuilder: it is no longer on the default path and is more valuable as an independent oracle/rollback.",
+    "Initial IR verifier as a new implementation: Rust already has it; the problem is production wiring and duplicated policy.",
+    "Whole driver in one step: representation ownership is still split and the fan-out is maximal.",
+    "C++ compiler core: no repository dependency justifies it.",
+    "C runtime rewrite before a stable ABI audit: current runtime is emitted LLVM and no checked-in C runtime exists.",
+    "LSP/editor tooling: it would force premature incremental frontend APIs and does not affect native compiler critical path.",
+    "Python release, benchmark and qualification tooling: Python remains appropriate there."
+  ],
+  "validation": {
+    "production_files_modified": false,
+    "production_tests_modified": false,
+    "workflow_files_modified": false,
+    "commit_created": false,
+    "multiplatform_qualification_run": false
+  }
+}
