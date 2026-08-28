@@ -677,7 +677,15 @@ def sessions_lane(args: argparse.Namespace, extension: ModuleType) -> dict[str, 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--section", choices=("semantic", "production", "sessions"), required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--section", choices=("semantic", "production", "sessions"))
+    mode.add_argument(
+        "--production-only",
+        action="store_const",
+        const="production",
+        dest="section",
+        help="Run only the CORE-1.0A production-preservation lane.",
+    )
     parser.add_argument("--companion", type=Path, default=DEFAULT_COMPANION)
     parser.add_argument("--extension", type=Path, default=DEFAULT_EXTENSION)
     parser.add_argument("--output", type=Path, required=True)

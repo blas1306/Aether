@@ -241,6 +241,7 @@ def test_required_artifacts_and_dedicated_workflow_exist() -> None:
         "docs/compiler/CORE_PKG_1_NATIVE_COMPILER_CORE_DISTRIBUTION.md",
         "docs/compiler/core_pkg_1_native_compiler_core_distribution.json",
         "scripts/qualify_core_pkg_1_native_distribution.py",
+        "scripts/project_core_pkg_1_binding_guard.py",
         "scripts/check_core_pkg_1_native_distribution.py",
         ".github/workflows/core-native-packaging.yml",
     ):

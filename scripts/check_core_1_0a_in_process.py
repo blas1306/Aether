@@ -12,8 +12,27 @@ import re
 
 QUALIFIED = "CORE_IN_PROCESS_BOUNDARY_QUALIFIED"
 BLOCKED = "CORE_IN_PROCESS_BOUNDARY_QUALIFICATION_BLOCKED"
+PRODUCTION_GUARD_QUALIFIED = "CORE_IN_PROCESS_PRODUCTION_GUARD_QUALIFIED"
+PRODUCTION_GUARD_BLOCKED = "CORE_IN_PROCESS_PRODUCTION_GUARD_BLOCKED"
 PLATFORMS = {"linux-x86_64", "windows-x86_64", "macos-x86_64", "macos-arm64"}
 PYTHON_MINORS = {"3.11", "3.12", "3.13", "3.14"}
+PRODUCTION_REGRESSION_GATES = {
+    "differential_python_shadow",
+    "lifecycle",
+    "persistent_companion",
+    "protocol_v1",
+    "rollback_modes",
+    "rust_4_5_default_policy",
+    "rust_ssa_output",
+    "structured_failure_and_locations",
+    "verification_and_refinement",
+}
+SHARED_CORE_GUARDS = {
+    "companion_calls_compiler_core",
+    "core_not_coupled_to_pyo3",
+    "in_process_not_in_default_selector",
+    "pyo3_calls_compiler_core",
+}
 INITIAL_FAILURE_CATEGORIES = {
     "malformed Initial IR",
     "invalid CFG",
@@ -53,6 +72,81 @@ def _one(kind: str, artifacts: list[tuple[Path, dict[str, object]]], errors: lis
 
 def _all_true(value: object) -> bool:
     return isinstance(value, dict) and bool(value) and all(item is True for item in value.values())
+
+
+def check_production(evidence_path: Path) -> tuple[dict[str, object], list[str]]:
+    """Validate one CORE-1.0A production-preservation artifact only.
+
+    This deliberately does not claim closure of the semantic, session, packaging,
+    platform, or Python lanes required by the full CORE-1.0A checker.
+    """
+
+    errors: list[str] = []
+    production = _load(evidence_path, errors)
+    if production is None:
+        production = {}
+
+    _require(production.get("artifact_schema_version") == 1, "production evidence schema is not version 1", errors)
+    _require(production.get("kind") == "core_1_0a_production", "production evidence kind is not core_1_0a_production", errors)
+    _require(production.get("milestone") == "CORE-1.0A", "production evidence milestone is not CORE-1.0A", errors)
+    _require(production.get("status") == "PASS", "production preservation lane did not pass", errors)
+    revision = str(production.get("exact_revision", ""))
+    run_id = str(production.get("ci_run_id", ""))
+    _require(re.fullmatch(r"[0-9a-f]{40}", revision) is not None, "production evidence must identify one exact revision", errors)
+    _require(run_id not in {"", "None"}, "production evidence must identify its local or CI run", errors)
+    _require(production.get("worktree_clean") is True, "production evidence must come from a clean exact revision", errors)
+    _require(production.get("qualification_only") is True, "CORE-1.0A evidence must retain qualification-only identity", errors)
+    _require(production.get("production_default_changed") is False, "production default changed", errors)
+    _require(production.get("companion_remains_production_and_rollback") is True, "companion is no longer production and rollback", errors)
+    _require(production.get("automatic_fallback") is False, "automatic fallback appeared", errors)
+
+    gates = production.get("production_regression_gates")
+    _require(
+        isinstance(gates, dict)
+        and set(gates) == PRODUCTION_REGRESSION_GATES
+        and all(gates.get(name) is True for name in PRODUCTION_REGRESSION_GATES),
+        "one or more affected RUST-4.5 production gates failed",
+        errors,
+    )
+    guards = production.get("shared_core_guards")
+    _require(
+        isinstance(guards, dict)
+        and set(guards) == SHARED_CORE_GUARDS
+        and all(guards.get(name) is True for name in SHARED_CORE_GUARDS),
+        "shared CompilerCore adapter guard failed",
+        errors,
+    )
+    default = production.get("default_companion")
+    _require(
+        isinstance(default, dict)
+        and default.get("identity_and_protocol_v1") == "PASS"
+        and default.get("response_shape_preserved") is True
+        and default.get("persistent_process_starts") == 1
+        and default.get("repeated_result_equal") is True,
+        "protocol-v1/persistent companion behavior changed",
+        errors,
+    )
+
+    decision = PRODUCTION_GUARD_QUALIFIED if not errors else PRODUCTION_GUARD_BLOCKED
+    report = {
+        "artifact_schema_version": 1,
+        "kind": "core_1_0a_production_check",
+        "milestone": "CORE-1.0A",
+        "decision": decision,
+        "exact_revision": production.get("exact_revision"),
+        "ci_run_id": production.get("ci_run_id"),
+        "source_evidence": {
+            "path": evidence_path.name,
+            "sha256": sha256(evidence_path.read_bytes()).hexdigest() if evidence_path.is_file() else None,
+            "kind": production.get("kind"),
+            "milestone": production.get("milestone"),
+        },
+        "production_default_changed": production.get("production_default_changed"),
+        "companion_remains_production_and_rollback": production.get("companion_remains_production_and_rollback"),
+        "automatic_fallback": production.get("automatic_fallback"),
+        "errors": errors,
+    }
+    return report, errors
 
 
 def check(evidence_dir: Path) -> tuple[dict[str, object], list[str]]:
@@ -222,11 +316,16 @@ def check(evidence_dir: Path) -> tuple[dict[str, object], list[str]]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--evidence-dir", type=Path, required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--evidence-dir", type=Path)
+    source.add_argument("--production-evidence", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--require-qualified", action="store_true")
     args = parser.parse_args()
-    aggregate, errors = check(args.evidence_dir)
+    if args.production_evidence is not None:
+        aggregate, errors = check_production(args.production_evidence)
+    else:
+        aggregate, errors = check(args.evidence_dir)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(aggregate, indent=2, sort_keys=True) + "\n")
     print(aggregate["decision"])
