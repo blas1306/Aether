@@ -145,9 +145,56 @@ def check(evidence_dir: Path) -> tuple[dict[str, object], list[str]]:
     for row in platform_rows + compatibility_rows:
         wheel = row.get("wheel")
         clean = row.get("clean_environment")
+        build = row.get("build_environment")
+        candidates = row.get("wheel_candidates")
+        python = row.get("python")
         _require(row.get("status") == "PASS" and row.get("companion_remains_usable") is True, f"packaging row failed: {row.get('platform')} {row.get('python')}", errors)
-        _require(isinstance(wheel, dict) and re.fullmatch(r"[0-9a-f]{64}", str(wheel.get("sha256", ""))) is not None and bool(wheel.get("tag")), "wheel tag/hash missing", errors)
-        _require(isinstance(clean, dict) and clean.get("install_requires_rust") is False and clean.get("cargo_on_install_path") is False, "clean wheel install must not require Rust", errors)
+        _require(
+            isinstance(wheel, dict)
+            and wheel.get("distribution") == "aether-core-qualification"
+            and re.fullmatch(r"[0-9a-f]{64}", str(wheel.get("sha256", ""))) is not None
+            and bool(wheel.get("tag"))
+            and bool(wheel.get("python_tags"))
+            and bool(wheel.get("abi_tags"))
+            and bool(wheel.get("platform_tags"))
+            and bool(wheel.get("selected_reason")),
+            "binding wheel identity, tags, selection reason, or hash missing",
+            errors,
+        )
+        _require(
+            isinstance(candidates, list)
+            and sum(
+                item.get("eligible") is True
+                for item in candidates
+                if isinstance(item, dict)
+            )
+            == 1,
+            "wheel selection evidence must contain exactly one eligible candidate",
+            errors,
+        )
+        _require(
+            isinstance(python, dict) and bool(python.get("sys_version")),
+            "packaging evidence must record sys.version",
+            errors,
+        )
+        _require(
+            isinstance(build, dict)
+            and build.get("cargo_available") is True
+            and build.get("rustc_available") is True
+            and build.get("wheel_prebuilt") is True,
+            "wheel build environment must explicitly provide Rust and Cargo",
+            errors,
+        )
+        _require(
+            isinstance(clean, dict)
+            and clean.get("install_requires_rust") is False
+            and clean.get("cargo_on_install_path") is False
+            and clean.get("rustc_on_install_path") is False
+            and clean.get("pip_only_binary") is True
+            and clean.get("original_path_preserved") is True,
+            "clean wheel consumer must preserve PATH and not expose Rust/Cargo",
+            errors,
+        )
 
     manifest = [
         {"path": path.relative_to(evidence_dir).as_posix(), "sha256": sha256(path.read_bytes()).hexdigest(), "kind": value.get("kind")}

@@ -112,6 +112,35 @@ valida el rango actualmente relevante sin multiplicar plataforma × minor.
 5. compatibilidad Python;
 6. decisión aggregate fail-closed.
 
+### Incidente del run 33143156047
+
+El run oficial `33143156047` sobre
+`2401ab8d56c13d7837aab245735105764e65ade0` permanece fallido e inmutable. No
+se reemplazó su evidencia ni se generaron artefactos PASS históricos. Sus tres
+lanes profundas fallaron porque `maturin develop` exige un virtualenv explícito;
+el workflow ahora construye un wheel en `native-dist` y lo instala por nombre de
+distribución mediante `pip --find-links`, igual que un consumidor del wheel.
+
+En el job CPython 3.11 los dos nombres exactos presentes en `python-dist` eran:
+
+- `aether_language-1.0.0rc4-py3-none-any.whl`, artefacto versionado del proyecto
+  Python raíz ya presente después del checkout;
+- `aether_core_qualification-0.1.0-cp311-cp311-manylinux_2_34_x86_64.whl`,
+  binding CORE-1.0A recién producido por Maturin.
+
+El qualifier ya no presupone que el directorio contiene un solo wheel. Exige
+exactamente un candidato cuyo nombre de distribución tanto en el filename como
+en `METADATA` sea `aether-core-qualification`, cuya versión y tags del filename
+coincidan con `METADATA`/`WHEEL`, y cuyos tags Python, ABI y plataforma sean
+compatibles con `packaging.tags.sys_tags()` del intérprete en ejecución. Cero
+candidatos o más de uno cierran con error. La evidencia registra `sys.version`,
+todos los filenames candidatos, el wheel seleccionado, sus tags y la razón de
+selección.
+
+No se observó una tercera causa raíz. La decisión local continúa siendo
+`CORE_IN_PROCESS_BOUNDARY_QUALIFICATION_BLOCKED`; el aggregate permanece
+fail-closed y el boundary in-process continúa siendo sólo de qualification.
+
 ## Alcance y trust
 
 CORE-1.0A no implementa CORE-1.1, no cambia semántica, no elimina el companion,

@@ -19,7 +19,8 @@ jobs:
         with: {toolchain: "1.85"}
       - run: python -m pip install -r requirements.txt pytest 'maturin>=1.9.4,<2'
       - run: cargo build --manifest-path compiler-rs/Cargo.toml --release --locked --package aether-verifier --bin aether-ssa-shadow
-      - run: python -m maturin develop --release --locked --manifest-path compiler-rs/crates/aether-python/Cargo.toml
+      - run: python -m maturin build --release --locked --manifest-path compiler-rs/crates/aether-python/Cargo.toml --out native-dist
+      - run: python -m pip install --no-index --no-deps --find-links native-dist aether-core-qualification
       - name: Historical 116, failures/refinement, deep CFG, performance
         shell: bash
         run: |
@@ -46,7 +47,8 @@ jobs:
         with: {toolchain: "1.85"}
       - run: python -m pip install -r requirements.txt pytest 'maturin>=1.9.4,<2'
       - run: cargo build --manifest-path compiler-rs/Cargo.toml --release --locked --package aether-verifier --bin aether-ssa-shadow
-      - run: python -m maturin develop --release --locked --manifest-path compiler-rs/crates/aether-python/Cargo.toml
+      - run: python -m maturin build --release --locked --manifest-path compiler-rs/crates/aether-python/Cargo.toml --out native-dist
+      - run: python -m pip install --no-index --no-deps --find-links native-dist aether-core-qualification
       - name: Protocol, lifecycle, refinement, default, differential and rollback
         shell: bash
         run: |
@@ -73,7 +75,8 @@ jobs:
         with: {toolchain: "1.85"}
       - run: python -m pip install -r requirements.txt pytest 'maturin>=1.9.4,<2'
       - run: cargo build --manifest-path compiler-rs/Cargo.toml --release --locked --package aether-verifier --bin aether-ssa-shadow
-      - run: python -m maturin develop --release --locked --manifest-path compiler-rs/crates/aether-python/Cargo.toml
+      - run: python -m maturin build --release --locked --manifest-path compiler-rs/crates/aether-python/Cargo.toml --out native-dist
+      - run: python -m pip install --no-index --no-deps --find-links native-dist aether-core-qualification
       - name: Handles, interleaving, failures, GIL, cleanup and 500-session soak
         shell: bash
         run: |
@@ -107,7 +110,7 @@ jobs:
         with: {python-version: "3.13"}
       - uses: dtolnay/rust-toolchain@stable
         with: {toolchain: "1.85"}
-      - run: python -m pip install 'maturin>=1.9.4,<2'
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'packaging>=24,<27'
       - run: cargo build --manifest-path compiler-rs/Cargo.toml --release --locked --package aether-verifier --bin aether-ssa-shadow
       - run: python -m maturin build --release --locked --manifest-path compiler-rs/crates/aether-python/Cargo.toml --out python-dist
       - name: Clean install without Rust on install PATH
@@ -139,7 +142,7 @@ jobs:
         with: {python-version: "${{ matrix.python }}"}
       - uses: dtolnay/rust-toolchain@stable
         with: {toolchain: "1.85"}
-      - run: python -m pip install 'maturin>=1.9.4,<2'
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'packaging>=24,<27'
       - run: cargo build --manifest-path compiler-rs/Cargo.toml --release --locked --package aether-verifier --bin aether-ssa-shadow
       - run: python -m maturin build --release --locked --manifest-path compiler-rs/crates/aether-python/Cargo.toml --out python-dist
       - run: >-
