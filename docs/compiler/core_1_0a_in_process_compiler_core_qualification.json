@@ -1,0 +1,52 @@
+{
+  "artifact_manifest": [
+    {
+      "kind": "core_1_0a_packaging",
+      "path": "platform-linux-x86_64.json",
+      "sha256": "55e2cf8e0da07419cee8b7875445a705622bb248d1c88c3cbd8ced33ef93d16b"
+    },
+    {
+      "kind": "core_1_0a_production",
+      "path": "production.json",
+      "sha256": "aadeaf1cb80b6e528d752a915f7a92e223c90fb18094fa566fe739ddc84ccfa0"
+    },
+    {
+      "kind": "core_1_0a_semantic",
+      "path": "semantic.json",
+      "sha256": "88fa4f57ba4a554b3460fdf0e068dc587705666ef7773c6da219145495a63d4f"
+    },
+    {
+      "kind": "core_1_0a_sessions",
+      "path": "sessions.json",
+      "sha256": "80a4c24bf9fb0e94fa750a7de321b6f0da439025c2dcd027bc2dd4487580a981"
+    }
+  ],
+  "artifact_schema_version": 1,
+  "ci_run_id": "LOCAL_PRE_CI",
+  "companion_remains_production_and_rollback": true,
+  "decision": "CORE_IN_PROCESS_BOUNDARY_QUALIFICATION_BLOCKED",
+  "errors": [
+    "all qualifying evidence must come from one non-local CI run",
+    "all qualifying evidence must come from a clean exact revision",
+    "clean-install platform matrix is incomplete",
+    "CPython 3.11-3.14 compatibility matrix is incomplete"
+  ],
+  "exact_revision": "c90b71e5f989c4ccf83b7cca66f0e27ad00d3d7d",
+  "in_process_is_production_default": false,
+  "kind": "core_1_0a_aggregate",
+  "milestone": "CORE-1.0A",
+  "production_default_changed": false,
+  "required_platforms": [
+    "linux-x86_64",
+    "macos-arm64",
+    "macos-x86_64",
+    "windows-x86_64"
+  ],
+  "required_python_minors": [
+    "3.11",
+    "3.12",
+    "3.13",
+    "3.14"
+  ],
+  "trust_statement": "Qualification is blocked; no universal or operational correctness claim is made."
+}

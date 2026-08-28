@@ -1,0 +1,3944 @@
+{
+  "artifact_schema_version": 1,
+  "automatic_fallback": false,
+  "ci_run_id": "LOCAL_PRE_CI",
+  "companion_remains_production_and_rollback": true,
+  "deep_cfg": [
+    {
+      "acceptance_parity": true,
+      "case_id": "deep_cfg_993",
+      "companion_accepts": true,
+      "companion_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "in_process_accepts": true,
+      "in_process_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "passed": true,
+      "refinement_outcome_parity": true,
+      "same_input_bytes": true,
+      "schema_v2_exact": true,
+      "semantic_canonical_equal": true,
+      "source_locations_equal": true,
+      "verification_outcome_parity": true
+    },
+    {
+      "acceptance_parity": true,
+      "case_id": "deep_cfg_1000",
+      "companion_accepts": true,
+      "companion_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "in_process_accepts": true,
+      "in_process_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "passed": true,
+      "refinement_outcome_parity": true,
+      "same_input_bytes": true,
+      "schema_v2_exact": true,
+      "semantic_canonical_equal": true,
+      "source_locations_equal": true,
+      "verification_outcome_parity": true
+    },
+    {
+      "acceptance_parity": true,
+      "case_id": "deep_cfg_5000",
+      "companion_accepts": true,
+      "companion_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "in_process_accepts": true,
+      "in_process_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "passed": true,
+      "refinement_outcome_parity": true,
+      "same_input_bytes": true,
+      "schema_v2_exact": true,
+      "semantic_canonical_equal": true,
+      "source_locations_equal": true,
+      "verification_outcome_parity": true
+    },
+    {
+      "acceptance_parity": true,
+      "case_id": "deep_cfg_10000",
+      "companion_accepts": true,
+      "companion_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "in_process_accepts": true,
+      "in_process_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "passed": true,
+      "refinement_outcome_parity": true,
+      "same_input_bytes": true,
+      "schema_v2_exact": true,
+      "semantic_canonical_equal": true,
+      "source_locations_equal": true,
+      "verification_outcome_parity": true
+    }
+  ],
+  "diagnostic_fields": [
+    "kind",
+    "category",
+    "phase",
+    "code",
+    "function",
+    "block",
+    "source_location"
+  ],
+  "divergence_taxonomy": [
+    "semantic divergence",
+    "diagnostic divergence",
+    "transport-only divergence",
+    "expected transport-specific failure"
+  ],
+  "exact_revision": "c90b71e5f989c4ccf83b7cca66f0e27ad00d3d7d",
+  "failure_campaign": [
+    {
+      "acceptance_parity": true,
+      "campaign_category": "malformed Initial IR",
+      "case_id": "malformed_initial_ir_json",
+      "companion_accepts": false,
+      "companion_error": "EOF while parsing an object at line 1 column 1",
+      "divergence": null,
+      "error_classification_parity": true,
+      "error_text_parity": true,
+      "in_process_accepts": false,
+      "in_process_error": "EOF while parsing an object at line 1 column 1",
+      "in_process_error_detail": {
+        "block": null,
+        "category": "input_schema",
+        "code": "CORE-BIND-INPUT-001",
+        "function": null,
+        "kind": "binding",
+        "phase": "initial_ir_import",
+        "source_location": null
+      },
+      "machine_diagnostic_parity": true,
+      "passed": true,
+      "same_input_bytes": true,
+      "source_location_parity": true
+    },
+    {
+      "acceptance_parity": true,
+      "campaign_category": "malformed protocol/binding inputs",
+      "case_id": "non_object_binding_input",
+      "companion_accepts": false,
+      "companion_error": "invalid length 0, expected struct IRModuleDTO with 3 elements at line 1 column 2",
+      "divergence": null,
+      "error_classification_parity": true,
+      "error_text_parity": true,
+      "in_process_accepts": false,
+      "in_process_error": "invalid length 0, expected struct IRModuleDTO with 3 elements at line 1 column 2",
+      "in_process_error_detail": {
+        "block": null,
+        "category": "input_schema",
+        "code": "CORE-BIND-INPUT-001",
+        "function": null,
+        "kind": "binding",
+        "phase": "initial_ir_import",
+        "source_location": null
+      },
+      "machine_diagnostic_parity": true,
+      "passed": true,
+      "same_input_bytes": true,
+      "source_location_parity": true
+    },
+    {
+      "acceptance_parity": true,
+      "campaign_category": "malformed protocol/binding inputs",
+      "case_id": "unsupported_schema",
+      "companion_accepts": false,
+      "companion_error": "unsupported IR DTO schema version 999; expected 1 at line 1 column 592",
+      "divergence": null,
+      "error_classification_parity": true,
+      "error_text_parity": true,
+      "in_process_accepts": false,
+      "in_process_error": "unsupported IR DTO schema version 999; expected 1 at line 1 column 592",
+      "in_process_error_detail": {
+        "block": null,
+        "category": "input_schema",
+        "code": "CORE-BIND-INPUT-001",
+        "function": null,
+        "kind": "binding",
+        "phase": "initial_ir_import",
+        "source_location": null
+      },
+      "machine_diagnostic_parity": true,
+      "passed": true,
+      "same_input_bytes": true,
+      "source_location_parity": true
+    },
+    {
+      "acceptance_parity": true,
+      "campaign_category": "malformed Initial IR",
+      "case_id": "unknown_root_field",
+      "companion_accepts": false,
+      "companion_error": "unknown field `unexpected`, expected one of `schema_version`, `functions`, `structs` at line 1 column 616",
+      "divergence": null,
+      "error_classification_parity": true,
+      "error_text_parity": true,
+      "in_process_accepts": false,
+      "in_process_error": "unknown field `unexpected`, expected one of `schema_version`, `functions`, `structs` at line 1 column 616",
+      "in_process_error_detail": {
+        "block": null,
+        "category": "input_schema",
+        "code": "CORE-BIND-INPUT-001",
+        "function": null,
+        "kind": "binding",
+        "phase": "initial_ir_import",
+        "source_location": null
+      },
+      "machine_diagnostic_parity": true,
+      "passed": true,
+      "same_input_bytes": true,
+      "source_location_parity": true
+    },
+    {
+      "acceptance_parity": true,
+      "campaign_category": "invalid CFG",
+      "case_id": "invalid_cfg_target",
+      "companion_accepts": false,
+      "companion_error": "SSA construction failed: SSA lowering failed in function 'straight_2_1_False': block 'entry' targets unknown block 'missing'",
+      "divergence": null,
+      "error_classification_parity": true,
+      "error_text_parity": true,
+      "in_process_accepts": false,
+      "in_process_error": "SSA construction failed: SSA lowering failed in function 'straight_2_1_False': block 'entry' targets unknown block 'missing'",
+      "in_process_error_detail": {
+        "block": null,
+        "category": "ssa_construction",
+        "code": "CORE-SSA-001",
+        "function": null,
+        "kind": "compiler",
+        "phase": "ssa_lowering",
+        "source_location": null
+      },
+      "machine_diagnostic_parity": true,
+      "passed": true,
+      "same_input_bytes": true,
+      "source_location_parity": true
+    },
+    {
+      "acceptance_parity": true,
+      "campaign_category": "invalid CFG",
+      "case_id": "duplicate_function",
+      "companion_accepts": false,
+      "companion_error": "SSA verification failed in function 'straight_2_1_False': duplicate function 'straight_2_1_False'",
+      "divergence": null,
+      "error_classification_parity": true,
+      "error_text_parity": true,
+      "in_process_accepts": false,
+      "in_process_error": "SSA verification failed in function 'straight_2_1_False': duplicate function 'straight_2_1_False'",
+      "in_process_error_detail": {
+        "block": null,
+        "category": "owned_ssa_verification",
+        "code": "CORE-SSA-VERIFY-001",
+        "function": "straight_2_1_False",
+        "kind": "internal",
+        "phase": "ssa_verification",
+        "source_location": null
+      },
+      "machine_diagnostic_parity": true,
+      "passed": true,
+      "same_input_bytes": true,
+      "source_location_parity": true
+    },
+    {
+      "acceptance_parity": true,
+      "campaign_category": "wrong return/value flow",
+      "case_id": "wrong_return_flow",
+      "companion_accepts": true,
+      "companion_downstream_outcome": {
+        "error_type": "SSAVerificationError",
+        "message": "Return type mismatch: expected int, got void",
+        "outcome": "REJECT",
+        "phase": "ssa_verification"
+      },
+      "divergence": null,
+      "in_process_accepts": true,
+      "in_process_downstream_outcome": {
+        "error_type": "SSAVerificationError",
+        "message": "Return type mismatch: expected int, got void",
+        "outcome": "REJECT",
+        "phase": "ssa_verification"
+      },
+      "passed": true,
+      "refinement_outcome_parity": true,
+      "same_input_bytes": true,
+      "schema_v2_exact": true,
+      "semantic_canonical_equal": true,
+      "source_locations_equal": true,
+      "verification_outcome_parity": true
+    },
+    {
+      "acceptance_parity": true,
+      "campaign_category": "lifecycle errors",
+      "case_id": "uninitialized_lifecycle_storage",
+      "companion_accepts": true,
+      "companion_downstream_outcome": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'straight_2_1_False': block 'entry' preserved instruction count changed: expected 4, got 3",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "divergence": null,
+      "in_process_accepts": true,
+      "in_process_downstream_outcome": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'straight_2_1_False': block 'entry' preserved instruction count changed: expected 4, got 3",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "passed": true,
+      "refinement_outcome_parity": true,
+      "same_input_bytes": true,
+      "schema_v2_exact": true,
+      "semantic_canonical_equal": true,
+      "source_locations_equal": true,
+      "verification_outcome_parity": true
+    }
+  ],
+  "historical": {
+    "denominator": 116,
+    "expected": 116,
+    "failed": 0,
+    "passed": 116,
+    "results": [
+      {
+        "acceptance_parity": true,
+        "case_id": "benchmarks/arithmetic.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "benchmarks/array_sum.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "benchmarks/if_else.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "benchmarks/list_for_sum.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "benchmarks/list_push.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "benchmarks/matrix_mul.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "benchmarks/nested_loops.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "benchmarks/sum_to.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "benchmarks/vector_dot.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "benchmarks/while_countdown.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "corpus/exceptions/positive/cleanup_during_unwinding.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "corpus/exceptions/positive/constructor_failure.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "corpus/exceptions/positive/function_recursion.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "corpus/exceptions/positive/indirect_call.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "corpus/exceptions/positive/method_interface_dispatch.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "corpus/exceptions/positive/multiple_and_root_catches.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "corpus/exceptions/positive/nested_rethrow_chain.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "corpus/exceptions/positive/owned_aggregates_arc.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "corpus/exceptions/positive/panic_vs_exception.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "corpus/exceptions/positive/root_reporting.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "corpus/exceptions/positive/throw_and_typed_catch.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/ControlesALN/1erControl/Ej1/Biseccion.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/ControlesALN/1erControl/Ej2/PuntoFijo.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/ControlesALN/1erControl/Ej2/ej2.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/ControlesALN/2doControl/Ej2/ej2.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/FormulaNumerosPrimos.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/LeetCode/isPalindrome.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/LeetCode/twoSum.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/ProbandoNR/probandoNR2.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/ProbandoNR/probandoNR3.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/Sorts/IllegalArgumentException.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/Sorts/Main.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/Sorts/Sortings.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/aggregate_collections/particles.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/classes/const_with_mutable_alias.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/classes/counter_basic.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/classes/custom_constructor.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/classes/implements_interface.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/classes/invalid_cases.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/classes/private_field_public_methods.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/classes/reference_aliasing.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/esPrimo2.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/expense_tracker/Ledger.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/expense_tracker/Main.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/expense_tracker/Persistence.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/expense_tracker/Reports.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/expense_tracker/Transaction.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/hello.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/ir/constant_fold.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/ir/local_const.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/ir/sumTo.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/arithmetic.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/array_sort.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/array_sum.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/countdown.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/double_add.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/double_compare.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/double_to_int.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/for_break_continue.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/for_sum.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/gcd_iterative.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/identity_call.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/int_to_double.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/list_clear.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/list_contains.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/list_copy.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/list_for_sum.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/list_index.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/list_index_of.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/list_insert.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/list_literal.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/list_pop.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/list_pop_alias.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/list_push.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/list_push_alias.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/list_remove_at.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/list_reverse.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/list_set_alias.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/list_sort.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/matrix_add.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/matrix_column_mul.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/matrix_index.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/matrix_literal.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/matrix_matmul.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/matrix_rows_columns.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/matrix_scalar_mul.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/matrix_set.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/matrix_sub.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/max.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/outer_product.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/return_5.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/string_choose.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/string_identity.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/sum_to_n.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/vector_add.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/vector_column_inferred.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/vector_column_literal.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/vector_dot.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/vector_index.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/vector_length.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/vector_literal.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/vector_matrix_mul.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/vector_scalar_mul.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/vector_set.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/llvm/vector_sub.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/nose.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/numerical_methods/Functions.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/numerical_methods/Integration.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/numerical_methods/Problems.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/numerical_methods/Results.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/numerical_methods/Roots.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/numerical_methods/main.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/pruebaException.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/structs/Geometry.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/structs/custom_constructor_and_equality.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      },
+      {
+        "acceptance_parity": true,
+        "case_id": "examples/structs/main.ae",
+        "companion_accepts": true,
+        "companion_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "in_process_accepts": true,
+        "in_process_downstream_outcome": {
+          "error_type": "",
+          "message": "",
+          "outcome": "ACCEPT",
+          "phase": "complete"
+        },
+        "passed": true,
+        "refinement_outcome_parity": true,
+        "same_input_bytes": true,
+        "schema_v2_exact": true,
+        "semantic_canonical_equal": true,
+        "source_locations_equal": true,
+        "verification_outcome_parity": true
+      }
+    ],
+    "status": "PASS"
+  },
+  "imported_ssa_and_refinement_campaign": [
+    {
+      "case_id": "missing_phi",
+      "category": "invalid phi",
+      "companion": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'choose': block 'merge' instruction 1 field 'value' changed value provenance",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "divergence": null,
+      "in_process": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'choose': block 'merge' instruction 1 field 'value' changed value provenance",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "passed": true
+    },
+    {
+      "case_id": "extra_phi",
+      "category": "invalid phi",
+      "companion": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'choose': block 'merge' has duplicate or ambiguous extra phis",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "divergence": null,
+      "in_process": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'choose': block 'merge' has duplicate or ambiguous extra phis",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "passed": true
+    },
+    {
+      "case_id": "wrong_phi_incoming_value",
+      "category": "invalid phi",
+      "companion": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'choose': phi '4' in block 'merge' is not justified by any promoted slot",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "divergence": null,
+      "in_process": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'choose': phi '4' in block 'merge' is not justified by any promoted slot",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "passed": true
+    },
+    {
+      "case_id": "wrong_phi_predecessor",
+      "category": "invalid phi",
+      "companion": {
+        "error_type": "SSAVerificationError",
+        "message": "Duplicate incoming block 'else' for phi '%4'",
+        "outcome": "REJECT",
+        "phase": "ssa_verification"
+      },
+      "divergence": null,
+      "in_process": {
+        "error_type": "SSAVerificationError",
+        "message": "Duplicate incoming block 'else' for phi '%4'",
+        "outcome": "REJECT",
+        "phase": "ssa_verification"
+      },
+      "passed": true
+    },
+    {
+      "case_id": "missing_preserved_instruction",
+      "category": "refinement failures",
+      "companion": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'choose': block 'entry' instruction 1 changed opcode from IRCompareOp to SSAConst",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "divergence": null,
+      "in_process": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'choose': block 'entry' instruction 1 changed opcode from IRCompareOp to SSAConst",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "passed": true
+    },
+    {
+      "case_id": "wrong_call_target",
+      "category": "refinement failures",
+      "companion": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'effects': block 'entry' instruction 0 field 'function' changed",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "divergence": null,
+      "in_process": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'effects': block 'entry' instruction 0 field 'function' changed",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "passed": true
+    },
+    {
+      "case_id": "wrong_call_argument",
+      "category": "refinement failures",
+      "companion": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'effects': block 'entry' instruction 1 field 'arguments[0]' changed value provenance",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "divergence": null,
+      "in_process": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'effects': block 'entry' instruction 1 field 'arguments[0]' changed value provenance",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "passed": true
+    },
+    {
+      "case_id": "wrong_branch_target",
+      "category": "refinement failures",
+      "companion": {
+        "error_type": "SSAVerificationError",
+        "message": "Branch in function 'choose' has duplicate target 'else'",
+        "outcome": "REJECT",
+        "phase": "ssa_verification"
+      },
+      "divergence": null,
+      "in_process": {
+        "error_type": "SSAVerificationError",
+        "message": "Branch in function 'choose' has duplicate target 'else'",
+        "outcome": "REJECT",
+        "phase": "ssa_verification"
+      },
+      "passed": true
+    },
+    {
+      "case_id": "wrong_return",
+      "category": "refinement failures",
+      "companion": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'choose': block 'merge' instruction 1 field 'value' changed value provenance",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "divergence": null,
+      "in_process": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'choose': block 'merge' instruction 1 field 'value' changed value provenance",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "passed": true
+    },
+    {
+      "case_id": "wrong_type",
+      "category": "refinement failures",
+      "companion": {
+        "error_type": "SSAVerificationError",
+        "message": "Value '%2' type mismatch: expected int, got bool",
+        "outcome": "REJECT",
+        "phase": "ssa_verification"
+      },
+      "divergence": null,
+      "in_process": {
+        "error_type": "SSAVerificationError",
+        "message": "Value '%2' type mismatch: expected int, got bool",
+        "outcome": "REJECT",
+        "phase": "ssa_verification"
+      },
+      "passed": true
+    },
+    {
+      "case_id": "duplicated_block",
+      "category": "refinement failures",
+      "companion": {
+        "error_type": "SSAVerificationError",
+        "message": "Duplicate value '%2' in function 'choose'",
+        "outcome": "REJECT",
+        "phase": "ssa_verification"
+      },
+      "divergence": null,
+      "in_process": {
+        "error_type": "SSAVerificationError",
+        "message": "Duplicate value '%2' in function 'choose'",
+        "outcome": "REJECT",
+        "phase": "ssa_verification"
+      },
+      "passed": true
+    },
+    {
+      "case_id": "incorrect_promoted_value",
+      "category": "refinement failures",
+      "companion": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'choose': block 'merge' instruction 1 field 'value' changed value provenance",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "divergence": null,
+      "in_process": {
+        "error_type": "SSARefinementVerificationError",
+        "message": "function 'choose': block 'merge' instruction 1 field 'value' changed value provenance",
+        "outcome": "REJECT",
+        "phase": "refinement_verification"
+      },
+      "passed": true
+    },
+    {
+      "case_id": "malformed_imported_ssa",
+      "category": "imported SSA failures",
+      "companion": {
+        "error_type": "SSADTOError",
+        "message": "SSA instruction.kind must be a string",
+        "outcome": "REJECT",
+        "phase": "imported_ssa"
+      },
+      "divergence": null,
+      "in_process": {
+        "error_type": "SSADTOError",
+        "message": "SSA instruction.kind must be a string",
+        "outcome": "REJECT",
+        "phase": "imported_ssa"
+      },
+      "passed": true
+    }
+  ],
+  "kind": "core_1_0a_semantic",
+  "milestone": "CORE-1.0A",
+  "ordinary": [
+    {
+      "acceptance_parity": true,
+      "case_id": "examples/hello.ae",
+      "companion_accepts": true,
+      "companion_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "in_process_accepts": true,
+      "in_process_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "passed": true,
+      "refinement_outcome_parity": true,
+      "same_input_bytes": true,
+      "schema_v2_exact": true,
+      "semantic_canonical_equal": true,
+      "source_locations_equal": true,
+      "verification_outcome_parity": true
+    },
+    {
+      "acceptance_parity": true,
+      "case_id": "tests/aether/parity_corpus/strings.ae",
+      "companion_accepts": true,
+      "companion_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "in_process_accepts": true,
+      "in_process_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "passed": true,
+      "refinement_outcome_parity": true,
+      "same_input_bytes": true,
+      "schema_v2_exact": true,
+      "semantic_canonical_equal": true,
+      "source_locations_equal": true,
+      "verification_outcome_parity": true
+    },
+    {
+      "acceptance_parity": true,
+      "case_id": "examples/aggregate_collections/particles.ae",
+      "companion_accepts": true,
+      "companion_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "in_process_accepts": true,
+      "in_process_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "passed": true,
+      "refinement_outcome_parity": true,
+      "same_input_bytes": true,
+      "schema_v2_exact": true,
+      "semantic_canonical_equal": true,
+      "source_locations_equal": true,
+      "verification_outcome_parity": true
+    },
+    {
+      "acceptance_parity": true,
+      "case_id": "examples/Sorts/Main.ae",
+      "companion_accepts": true,
+      "companion_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "in_process_accepts": true,
+      "in_process_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "passed": true,
+      "refinement_outcome_parity": true,
+      "same_input_bytes": true,
+      "schema_v2_exact": true,
+      "semantic_canonical_equal": true,
+      "source_locations_equal": true,
+      "verification_outcome_parity": true
+    },
+    {
+      "acceptance_parity": true,
+      "case_id": "tests/fixtures/rust_ssa_promotion_failure/owning_call_result.ae",
+      "companion_accepts": true,
+      "companion_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "in_process_accepts": true,
+      "in_process_downstream_outcome": {
+        "error_type": "",
+        "message": "",
+        "outcome": "ACCEPT",
+        "phase": "complete"
+      },
+      "passed": true,
+      "refinement_outcome_parity": true,
+      "same_input_bytes": true,
+      "schema_v2_exact": true,
+      "semantic_canonical_equal": true,
+      "source_locations_equal": true,
+      "verification_outcome_parity": true
+    }
+  ],
+  "performance": {
+    "conversion_definitions": {
+      "conversion": "schema-v1 decode/input conversion",
+      "ipc_transport": "companion residual framing/pipe/scheduling; zero for in-process",
+      "result_conversion": "schema-v2 materialization and Python JSON decode",
+      "rust_core": "lifecycle normalization, SSA lowering, owned SSA verification",
+      "total_boundary": "wall time for the qualified boundary"
+    },
+    "correction_gate": false,
+    "dispersion": "median absolute deviation plus min/max",
+    "rounds": 5,
+    "warmups": 2,
+    "workloads": {
+      "deep_cfg": {
+        "in_process": {
+          "conversion": {
+            "mad_seconds": 0.00021662499784724787,
+            "max_seconds": 0.01637565800047014,
+            "median_seconds": 0.015868479998971452,
+            "min_seconds": 0.015434707998792874,
+            "samples": 5
+          },
+          "ipc_transport": {
+            "mad_seconds": 0.0,
+            "max_seconds": 0.0,
+            "median_seconds": 0.0,
+            "min_seconds": 0.0,
+            "samples": 5
+          },
+          "result_conversion": {
+            "mad_seconds": 0.0026243770007567946,
+            "max_seconds": 0.025580859000911005,
+            "median_seconds": 0.01619041199955973,
+            "min_seconds": 0.013017419001698727,
+            "samples": 5
+          },
+          "rust_core": {
+            "mad_seconds": 0.0029384040008153534,
+            "max_seconds": 0.18065522500000952,
+            "median_seconds": 0.1439120989998628,
+            "min_seconds": 0.14097369499904744,
+            "samples": 5
+          },
+          "total_boundary": {
+            "mad_seconds": 0.004348581000158447,
+            "max_seconds": 0.221684930000265,
+            "median_seconds": 0.1747898619996704,
+            "min_seconds": 0.17044128099951195,
+            "samples": 5
+          }
+        },
+        "payload_count": 1,
+        "persistent_companion": {
+          "conversion": {
+            "mad_seconds": 0.0002946009999999985,
+            "max_seconds": 0.01411417,
+            "median_seconds": 0.011525019,
+            "min_seconds": 0.011230418,
+            "samples": 5
+          },
+          "ipc_transport": {
+            "mad_seconds": 0.0006325529995497015,
+            "max_seconds": 0.0127916459994111,
+            "median_seconds": 0.011093621999766629,
+            "min_seconds": 0.01019576399995123,
+            "samples": 5
+          },
+          "result_conversion": {
+            "mad_seconds": 0.0018038229995376211,
+            "max_seconds": 0.018232890999665487,
+            "median_seconds": 0.012869301999625847,
+            "min_seconds": 0.010373777001127604,
+            "samples": 5
+          },
+          "rust_core": {
+            "mad_seconds": 0.0016139779999999881,
+            "max_seconds": 0.16148905,
+            "median_seconds": 0.143379973,
+            "min_seconds": 0.141765995,
+            "samples": 5
+          },
+          "total_boundary": {
+            "mad_seconds": 0.006116706001193961,
+            "max_seconds": 0.1987693440005387,
+            "median_seconds": 0.1830394669996167,
+            "min_seconds": 0.17545054699985485,
+            "samples": 5
+          }
+        }
+      },
+      "historical_batch": {
+        "in_process": {
+          "conversion": {
+            "mad_seconds": 0.000489907002702239,
+            "max_seconds": 0.027761936995375436,
+            "median_seconds": 0.026766127994051203,
+            "min_seconds": 0.026276220991348964,
+            "samples": 5
+          },
+          "ipc_transport": {
+            "mad_seconds": 0.0,
+            "max_seconds": 0.0,
+            "median_seconds": 0.0,
+            "min_seconds": 0.0,
+            "samples": 5
+          },
+          "result_conversion": {
+            "mad_seconds": 0.0004675759992096573,
+            "max_seconds": 0.031736949991682195,
+            "median_seconds": 0.029640628996276064,
+            "min_seconds": 0.029173052997066407,
+            "samples": 5
+          },
+          "rust_core": {
+            "mad_seconds": 0.0012399970164551632,
+            "max_seconds": 0.21975438699701044,
+            "median_seconds": 0.21663770298982854,
+            "min_seconds": 0.21286317199155746,
+            "samples": 5
+          },
+          "total_boundary": {
+            "mad_seconds": 0.0006638029972236836,
+            "max_seconds": 0.27901875699353695,
+            "median_seconds": 0.2738135269974009,
+            "min_seconds": 0.26849497299917857,
+            "samples": 5
+          }
+        },
+        "payload_count": 116,
+        "persistent_companion": {
+          "conversion": {
+            "mad_seconds": 0.000551334000000004,
+            "max_seconds": 0.02482431700000001,
+            "median_seconds": 0.023898874000000007,
+            "min_seconds": 0.022298478999999993,
+            "samples": 5
+          },
+          "ipc_transport": {
+            "mad_seconds": 0.0008802609847154245,
+            "max_seconds": 0.02685851399855564,
+            "median_seconds": 0.02501179298906149,
+            "min_seconds": 0.024131532004346066,
+            "samples": 5
+          },
+          "result_conversion": {
+            "mad_seconds": 0.0005040029937698788,
+            "max_seconds": 0.02796850100479882,
+            "median_seconds": 0.02685905600249778,
+            "min_seconds": 0.026303785004835614,
+            "samples": 5
+          },
+          "rust_core": {
+            "mad_seconds": 0.00036182000000004044,
+            "max_seconds": 0.22196518699999998,
+            "median_seconds": 0.22160336699999994,
+            "min_seconds": 0.21887819400000008,
+            "samples": 5
+          },
+          "total_boundary": {
+            "mad_seconds": 0.0005697980286640814,
+            "max_seconds": 0.29875629800335446,
+            "median_seconds": 0.2972479780091817,
+            "min_seconds": 0.29317712200463575,
+            "samples": 5
+          }
+        }
+      },
+      "ordinary": {
+        "in_process": {
+          "conversion": {
+            "mad_seconds": 4.147999788983725e-06,
+            "max_seconds": 3.990500044892542e-05,
+            "median_seconds": 1.5980000171111897e-05,
+            "min_seconds": 1.1641001037787646e-05,
+            "samples": 5
+          },
+          "ipc_transport": {
+            "mad_seconds": 0.0,
+            "max_seconds": 0.0,
+            "median_seconds": 0.0,
+            "min_seconds": 0.0,
+            "samples": 5
+          },
+          "result_conversion": {
+            "mad_seconds": 2.905999281210825e-06,
+            "max_seconds": 2.9114999051671475e-05,
+            "median_seconds": 2.620899977046065e-05,
+            "min_seconds": 1.616000008652918e-05,
+            "samples": 5
+          },
+          "rust_core": {
+            "mad_seconds": 1.133199839387089e-05,
+            "max_seconds": 0.00011802100016211625,
+            "median_seconds": 7.318699863390066e-05,
+            "min_seconds": 5.842000064149033e-05,
+            "samples": 5
+          },
+          "total_boundary": {
+            "mad_seconds": 1.168200105894357e-05,
+            "max_seconds": 0.00018947399985336233,
+            "median_seconds": 0.00010901399946305901,
+            "min_seconds": 8.801399962976575e-05,
+            "samples": 5
+          }
+        },
+        "payload_count": 1,
+        "persistent_companion": {
+          "conversion": {
+            "mad_seconds": 7.304e-06,
+            "max_seconds": 2.5999e-05,
+            "median_seconds": 1.8695e-05,
+            "min_seconds": 9.838e-06,
+            "samples": 5
+          },
+          "ipc_transport": {
+            "mad_seconds": 1.6850998698853898e-05,
+            "max_seconds": 0.00015188399968744443,
+            "median_seconds": 7.003099955911563e-05,
+            "min_seconds": 5.3180000860261734e-05,
+            "samples": 5
+          },
+          "result_conversion": {
+            "mad_seconds": 3.0470013539996013e-06,
+            "max_seconds": 3.172999998258334e-05,
+            "median_seconds": 2.2131999833344483e-05,
+            "min_seconds": 1.7593001038402317e-05,
+            "samples": 5
+          },
+          "rust_core": {
+            "mad_seconds": 3.3533000000000006e-05,
+            "max_seconds": 0.000137106,
+            "median_seconds": 0.000103573,
+            "min_seconds": 5.4832999999999995e-05,
+            "samples": 5
+          },
+          "total_boundary": {
+            "mad_seconds": 2.6489999072509818e-05,
+            "max_seconds": 0.0002858139996533282,
+            "median_seconds": 0.00022195500059751794,
+            "min_seconds": 0.0001380079993396066,
+            "samples": 5
+          }
+        }
+      },
+      "repository_real": {
+        "in_process": {
+          "conversion": {
+            "mad_seconds": 6.60639998386614e-05,
+            "max_seconds": 0.0005476339993037982,
+            "median_seconds": 0.0004815699994651368,
+            "min_seconds": 0.0003268510008638259,
+            "samples": 5
+          },
+          "ipc_transport": {
+            "mad_seconds": 0.0,
+            "max_seconds": 0.0,
+            "median_seconds": 0.0,
+            "min_seconds": 0.0,
+            "samples": 5
+          },
+          "result_conversion": {
+            "mad_seconds": 1.3705999663216062e-05,
+            "max_seconds": 0.00035881999974662904,
+            "median_seconds": 0.0003150890006509144,
+            "min_seconds": 0.0002945610012830002,
+            "samples": 5
+          },
+          "rust_core": {
+            "mad_seconds": 1.2612999853445217e-05,
+            "max_seconds": 0.0016185659987968393,
+            "median_seconds": 0.001595712999915122,
+            "min_seconds": 0.0015770490008435445,
+            "samples": 5
+          },
+          "total_boundary": {
+            "mad_seconds": 6.763000783394091e-06,
+            "max_seconds": 0.0024311460001626983,
+            "median_seconds": 0.0024243829993793042,
+            "min_seconds": 0.002263012000184972,
+            "samples": 5
+          }
+        },
+        "payload_count": 1,
+        "persistent_companion": {
+          "conversion": {
+            "mad_seconds": 2.023999999999993e-06,
+            "max_seconds": 0.000639456,
+            "median_seconds": 0.000586637,
+            "min_seconds": 0.000570276,
+            "samples": 5
+          },
+          "ipc_transport": {
+            "mad_seconds": 2.8995001071400756e-05,
+            "max_seconds": 0.00032969700008731416,
+            "median_seconds": 0.0003007019990159134,
+            "min_seconds": 0.00023006900168962138,
+            "samples": 5
+          },
+          "result_conversion": {
+            "mad_seconds": 2.877399820563946e-05,
+            "max_seconds": 0.00045420899903724437,
+            "median_seconds": 0.0004254350008316049,
+            "min_seconds": 0.00024100099958288392,
+            "samples": 5
+          },
+          "rust_core": {
+            "mad_seconds": 0.00016944599999999996,
+            "max_seconds": 0.002041457,
+            "median_seconds": 0.001872011,
+            "min_seconds": 0.001666236,
+            "samples": 5
+          },
+          "total_boundary": {
+            "mad_seconds": 5.328099905455019e-05,
+            "max_seconds": 0.003236762000597082,
+            "median_seconds": 0.0031006480003270553,
+            "min_seconds": 0.0029813239998475183,
+            "samples": 5
+          }
+        }
+      }
+    }
+  },
+  "platform": "linux-x86_64",
+  "production_default_changed": false,
+  "python": {
+    "implementation": "CPython",
+    "version": "3.14.7"
+  },
+  "qualification_only": true,
+  "rust_target": "x86_64-unknown-linux-gnu",
+  "status": "PASS",
+  "transport": {
+    "companion_process_starts": 1,
+    "companion_requests": 135,
+    "in_process_process_starts": 0,
+    "in_process_requests": 135,
+    "same_input_contract": "identical lifecycle-normalized schema-v1 bytes"
+  },
+  "worktree_clean": false
+}

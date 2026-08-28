@@ -18,6 +18,7 @@
 mod borrow_error;
 mod cfg;
 mod combined_verifier;
+mod compiler_core;
 mod dominance_error;
 mod dominance_verifier;
 mod error;
@@ -37,6 +38,10 @@ pub use borrow_error::{BorrowRule, BorrowRuleError};
 pub use combined_verifier::{
     VerificationContext, VerificationError, VerificationErrorCategory, VerificationFailure,
     VerificationPhase, VerificationResult, verify_module,
+};
+pub use compiler_core::{
+    CompilationSession, CompilerCore, CompilerError, CompilerErrorKind, CompilerPhase,
+    SourceLocation,
 };
 pub use dominance_error::{
     BlockDominanceError, DominanceRuleError, DominanceUseLocation, FunctionDominanceError,

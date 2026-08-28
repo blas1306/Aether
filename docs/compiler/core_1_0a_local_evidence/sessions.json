@@ -1,0 +1,78 @@
+{
+  "artifact_schema_version": 1,
+  "automatic_fallback": false,
+  "ci_run_id": "LOCAL_PRE_CI",
+  "companion_remains_production_and_rollback": true,
+  "concurrency": {
+    "cleanup_under_concurrency": "PASS",
+    "concurrent_failures": 8,
+    "gil_ticker_progress_during_rust": 4701307,
+    "independent_sessions": 4,
+    "same_session_calls": 8,
+    "same_session_contract": "serialized by Mutex<CompilationSession>; idempotent lowering"
+  },
+  "exact_revision": "c90b71e5f989c4ccf83b7cca66f0e27ad00d3d7d",
+  "failure_reuse": [
+    {
+      "block": null,
+      "category": "ssa_construction",
+      "code": "CORE-SSA-001",
+      "function": null,
+      "kind": "compiler",
+      "message": "SSA construction failed: SSA lowering failed in function 'straight_2_1_False': block 'entry' targets unknown block 'missing'",
+      "phase": "ssa_lowering",
+      "source_location": null
+    },
+    {
+      "block": null,
+      "category": "ssa_construction",
+      "code": "CORE-SSA-001",
+      "function": null,
+      "kind": "compiler",
+      "message": "SSA construction failed: SSA lowering failed in function 'straight_2_1_False': block 'entry' targets unknown block 'missing'",
+      "phase": "ssa_lowering",
+      "source_location": null
+    }
+  ],
+  "kind": "core_1_0a_sessions",
+  "lifetime_model": "Python owns the PyO3 object directly; Rust RAII destruction has no numeric registry handle, so stale/double-free handle states are not representable through the API.",
+  "memory": {
+    "iterations": 500,
+    "lsan": "NOT_RUN; no ptrace/sandbox result is represented as leak evidence",
+    "python_traced_growth_bytes": 0,
+    "python_traced_peak_bytes": 969,
+    "rss_after_bytes": 152920064,
+    "rss_before_bytes": 152920064,
+    "rss_growth_bytes": 0,
+    "rss_method": "linux /proc/self/status VmRSS",
+    "unbounded_growth_observed": false
+  },
+  "milestone": "CORE-1.0A",
+  "platform": "linux-x86_64",
+  "production_default_changed": false,
+  "python": {
+    "implementation": "CPython",
+    "version": "3.14.7"
+  },
+  "qualification_only": true,
+  "rust_target": "x86_64-unknown-linux-gnu",
+  "rust_traits": {
+    "CompilationSession": "Send + Sync (compile-time Rust test)",
+    "CompilerCore": "Send + Sync (compile-time Rust test)",
+    "python_session": "Mutex<CompilationSession>; parallel across independent sessions, serialized within one session",
+    "unsafe": false
+  },
+  "session_and_handle_gates": {
+    "concurrent_failures": true,
+    "create_destroy_soak": true,
+    "create_repeated_use": true,
+    "exception_then_reuse": true,
+    "gil_released": true,
+    "independent_session_isolation": true,
+    "multiple_simultaneous_and_interleaved": true,
+    "no_raw_or_stale_handle_api": true,
+    "same_session_serialized": true
+  },
+  "status": "PASS",
+  "worktree_clean": false
+}

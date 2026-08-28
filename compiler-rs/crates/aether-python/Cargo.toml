@@ -7,5 +7,15 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[lib]
+name = "_aether_core"
+crate-type = ["cdylib", "rlib"]
+
 [lints]
 workspace = true
+
+[dependencies]
+aether-ir = { path = "../aether-ir" }
+aether-verifier = { path = "../aether-verifier" }
+pyo3 = "0.29.2"
+serde_json = "1"

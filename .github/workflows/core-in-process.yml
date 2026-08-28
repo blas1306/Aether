@@ -1,0 +1,186 @@
+name: core-1.0a-in-process-qualification
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  semantic-parity:
+    name: semantic-historical-failures-deep
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt pytest 'maturin>=1.9.4,<2'
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --release --locked --package aether-verifier --bin aether-ssa-shadow
+      - run: python -m maturin develop --release --locked --manifest-path compiler-rs/crates/aether-python/Cargo.toml
+      - name: Historical 116, failures/refinement, deep CFG, performance
+        shell: bash
+        run: |
+          extension_path="$(python -c 'import _aether_core; print(_aether_core.__file__)')"
+          python scripts/qualify_core_1_0a_in_process.py \
+            --section semantic \
+            --revision "${{ github.sha }}" \
+            --ci-run-id "${{ github.run_id }}" \
+            --companion compiler-rs/target/release/aether-ssa-shadow \
+            --extension "$extension_path" \
+            --output qualification/core-1.0a/semantic.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: core-1.0a-semantic, path: qualification/core-1.0a/semantic.json}
+
+  production-companion-regression:
+    name: affected-rust-4.5-production-gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt pytest 'maturin>=1.9.4,<2'
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --release --locked --package aether-verifier --bin aether-ssa-shadow
+      - run: python -m maturin develop --release --locked --manifest-path compiler-rs/crates/aether-python/Cargo.toml
+      - name: Protocol, lifecycle, refinement, default, differential and rollback
+        shell: bash
+        run: |
+          extension_path="$(python -c 'import _aether_core; print(_aether_core.__file__)')"
+          python scripts/qualify_core_1_0a_in_process.py \
+            --section production \
+            --revision "${{ github.sha }}" \
+            --ci-run-id "${{ github.run_id }}" \
+            --companion compiler-rs/target/release/aether-ssa-shadow \
+            --extension "$extension_path" \
+            --output qualification/core-1.0a/production.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: core-1.0a-production, path: qualification/core-1.0a/production.json}
+
+  session-concurrency-soak:
+    name: rust-owned-sessions-gil-memory
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt pytest 'maturin>=1.9.4,<2'
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --release --locked --package aether-verifier --bin aether-ssa-shadow
+      - run: python -m maturin develop --release --locked --manifest-path compiler-rs/crates/aether-python/Cargo.toml
+      - name: Handles, interleaving, failures, GIL, cleanup and 500-session soak
+        shell: bash
+        run: |
+          extension_path="$(python -c 'import _aether_core; print(_aether_core.__file__)')"
+          python scripts/qualify_core_1_0a_in_process.py \
+            --section sessions \
+            --revision "${{ github.sha }}" \
+            --ci-run-id "${{ github.run_id }}" \
+            --companion compiler-rs/target/release/aether-ssa-shadow \
+            --extension "$extension_path" \
+            --soak 500 \
+            --output qualification/core-1.0a/sessions.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: core-1.0a-sessions, path: qualification/core-1.0a/sessions.json}
+
+  clean-install-platform:
+    name: clean-install-${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: linux-x86_64, os: ubuntu-latest, companion: compiler-rs/target/release/aether-ssa-shadow}
+          - {platform: windows-x86_64, os: windows-latest, companion: compiler-rs/target/release/aether-ssa-shadow.exe}
+          - {platform: macos-x86_64, os: macos-15-intel, companion: compiler-rs/target/release/aether-ssa-shadow}
+          - {platform: macos-arm64, os: macos-15, companion: compiler-rs/target/release/aether-ssa-shadow}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2'
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --release --locked --package aether-verifier --bin aether-ssa-shadow
+      - run: python -m maturin build --release --locked --manifest-path compiler-rs/crates/aether-python/Cargo.toml --out python-dist
+      - name: Clean install without Rust on install PATH
+        run: >-
+          python scripts/qualify_core_1_0a_packaging.py
+          --wheel-dir python-dist
+          --companion "${{ matrix.companion }}"
+          --platform "${{ matrix.platform }}"
+          --matrix-role platform
+          --revision "${{ github.sha }}"
+          --ci-run-id "${{ github.run_id }}"
+          --output "qualification/core-1.0a/platform-${{ matrix.platform }}.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-1.0a-platform-${{ matrix.platform }}
+          path: qualification/core-1.0a/platform-${{ matrix.platform }}.json
+
+  python-compatibility:
+    name: cpython-${{ matrix.python }}-linux-x86_64
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "${{ matrix.python }}"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2'
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --release --locked --package aether-verifier --bin aether-ssa-shadow
+      - run: python -m maturin build --release --locked --manifest-path compiler-rs/crates/aether-python/Cargo.toml --out python-dist
+      - run: >-
+          python scripts/qualify_core_1_0a_packaging.py
+          --wheel-dir python-dist
+          --companion compiler-rs/target/release/aether-ssa-shadow
+          --platform linux-x86_64
+          --matrix-role python_compatibility
+          --revision "${{ github.sha }}"
+          --ci-run-id "${{ github.run_id }}"
+          --output "qualification/core-1.0a/python-${{ matrix.python }}.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-1.0a-python-${{ matrix.python }}
+          path: qualification/core-1.0a/python-${{ matrix.python }}.json
+
+  aggregate-qualification:
+    name: aggregate-fail-closed-decision
+    if: always()
+    needs:
+      - semantic-parity
+      - production-companion-regression
+      - session-concurrency-soak
+      - clean-install-platform
+      - python-compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: mkdir -p qualification/core-1.0a/evidence
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with: {pattern: core-1.0a-*, path: qualification/core-1.0a/evidence, merge-multiple: true}
+      - name: Mandatory aggregate decision
+        run: >-
+          python scripts/check_core_1_0a_in_process.py
+          --evidence-dir qualification/core-1.0a/evidence
+          --output qualification/core-1.0a/aggregate.json
+          --require-qualified
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-1.0a-aggregate
+          path: qualification/core-1.0a/aggregate.json

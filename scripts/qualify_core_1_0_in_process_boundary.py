@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from aether.ir.dto import ir_module_to_dto  # noqa: E402
+from aether.ir.dto import ir_module_from_dto  # noqa: E402
 from aether.ir.lifecycle import expand_lifecycle  # noqa: E402
 from aether.pipeline import IRBackend, prepare_typed_program  # noqa: E402
 from aether.ssa.dto import ssa_module_from_dto  # noqa: E402
@@ -33,6 +34,7 @@ from aether.ssa.shadow import (  # noqa: E402
     canonical_ssa,
 )
 from aether.ssa.verifier import SSAVerifier  # noqa: E402
+from aether.ssa.refinement_verifier import SSARefinementVerifier  # noqa: E402
 from aether.typechecker import TypeChecker  # noqa: E402
 from qualify_rust_ssa_lowering_adversarial import linear  # noqa: E402
 
@@ -76,6 +78,7 @@ def compare_payload(
     in_process: InProcessRustSSALoweringClient,
     *,
     expected_error_kind: str | None = None,
+    expected_rejection: bool = False,
 ) -> dict[str, object]:
     companion_response = companion.lower(payload)
     in_process_response = in_process.lower(payload)
@@ -92,17 +95,26 @@ def compare_payload(
         companion_error = str(companion_response.get("error", ""))
         in_process_error = str(in_process_response.get("error", ""))
         detail = in_process.last_error_detail
-        classification_parity = (
-            isinstance(detail, dict)
-            and detail.get("kind") == expected_error_kind
-            if expected_error_kind is not None
-            else companion_ok == in_process_ok
+        companion_detail = companion_response.get("diagnostic")
+        normalized_detail = json.loads(json.dumps(detail))
+        diagnostic_parity = companion_detail == normalized_detail
+        classification_parity = diagnostic_parity and (
+            detail.get("kind") == expected_error_kind
+            if expected_error_kind is not None and isinstance(detail, dict)
+            else True
+        )
+        source_location_parity = (
+            isinstance(companion_detail, dict)
+            and isinstance(normalized_detail, dict)
+            and companion_detail.get("source_location")
+            == normalized_detail.get("source_location")
         )
         row.update(
             {
                 "error_text_parity": companion_error == in_process_error,
                 "error_classification_parity": classification_parity,
-                "source_location_parity": companion_error == in_process_error,
+                "machine_diagnostic_parity": diagnostic_parity,
+                "source_location_parity": source_location_parity,
                 "companion_error": companion_error[:500],
                 "in_process_error": in_process_error[:500],
                 "in_process_error_detail": detail,
@@ -110,6 +122,7 @@ def compare_payload(
                     companion_ok == in_process_ok
                     and companion_error == in_process_error
                     and classification_parity
+                    and source_location_parity
                 ),
             }
         )
@@ -120,10 +133,46 @@ def compare_payload(
     if not isinstance(companion_dto, dict) or not isinstance(in_process_dto, dict):
         row.update({"passed": False, "malformed_success": True})
         return row
-    companion_ssa = ssa_module_from_dto(companion_dto)
-    in_process_ssa = ssa_module_from_dto(in_process_dto)
-    SSAVerifier(companion_ssa).verify()
-    SSAVerifier(in_process_ssa).verify()
+    initial = ir_module_from_dto(json.loads(payload))
+
+    def downstream(dto: dict[str, object]) -> dict[str, str]:
+        try:
+            ssa = ssa_module_from_dto(dto)
+        except Exception as error:
+            return {
+                "outcome": "REJECT",
+                "phase": "imported_ssa",
+                "error_type": type(error).__name__,
+                "message": str(error),
+            }
+        try:
+            SSAVerifier(ssa).verify()
+        except Exception as error:
+            return {
+                "outcome": "REJECT",
+                "phase": "ssa_verification",
+                "error_type": type(error).__name__,
+                "message": str(error),
+            }
+        try:
+            SSARefinementVerifier(initial, ssa).verify()
+        except Exception as error:
+            return {
+                "outcome": "REJECT",
+                "phase": "refinement_verification",
+                "error_type": type(error).__name__,
+                "message": str(error),
+            }
+        return {
+            "outcome": "ACCEPT",
+            "phase": "complete",
+            "error_type": "",
+            "message": "",
+        }
+
+    companion_outcome = downstream(companion_dto)
+    in_process_outcome = downstream(in_process_dto)
+    outcome_parity = companion_outcome == in_process_outcome
     exact = companion_dto == in_process_dto
     canonical = canonical_ssa(companion_dto) == canonical_ssa(in_process_dto)
     row.update(
@@ -131,9 +180,20 @@ def compare_payload(
             "schema_v2_exact": exact,
             "semantic_canonical_equal": canonical,
             "source_locations_equal": exact,
-            "companion_python_verification": "PASS",
-            "in_process_python_verification": "PASS",
-            "passed": exact and canonical,
+            "companion_downstream_outcome": companion_outcome,
+            "in_process_downstream_outcome": in_process_outcome,
+            "verification_outcome_parity": outcome_parity,
+            "refinement_outcome_parity": outcome_parity,
+            "passed": (
+                exact
+                and canonical
+                and outcome_parity
+                and (
+                    companion_outcome["outcome"] == "REJECT"
+                    if expected_rejection
+                    else companion_outcome["outcome"] == "ACCEPT"
+                )
+            ),
         }
     )
     return row

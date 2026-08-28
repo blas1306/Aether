@@ -5,10 +5,8 @@ use std::io::{self, Read, Write};
 use std::time::Instant;
 
 use aether_ir::wire::IRModuleDTO;
-use aether_ir::{
-    characterize_lower_normalized_ir_to_ssa_v1, lower_verified_ir_to_ssa_v1, normalize_lifecycle_v1,
-};
-use aether_verifier::verify_owned_ssa;
+use aether_ir::{characterize_lower_normalized_ir_to_ssa_v1, normalize_lifecycle_v1};
+use aether_verifier::{CompilerCore, CompilerError, verify_owned_ssa};
 use serde::Serialize;
 use serde_json::json;
 
@@ -24,6 +22,8 @@ struct SuccessResponse {
 struct FailureResponse {
     ok: bool,
     error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    diagnostic: Option<serde_json::Value>,
 }
 
 #[derive(Serialize)]
@@ -79,11 +79,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     if arguments.first().map(String::as_str) != Some("--persistent") {
         return Err("aether-ssa-shadow requires --persistent".into());
     }
-    let characterize_performance = match arguments.get(1).map(String::as_str) {
-        None => false,
-        Some("--characterize-performance") if arguments.len() == 2 => true,
-        _ => return Err("unsupported aether-ssa-shadow argument".into()),
-    };
+    let (characterize_performance, qualification_structured_errors) =
+        match arguments.get(1).map(String::as_str) {
+            None => (false, false),
+            Some("--characterize-performance") if arguments.len() == 2 => (true, false),
+            Some("--qualification-structured-errors") if arguments.len() == 2 => (false, true),
+            _ => return Err("unsupported aether-ssa-shadow argument".into()),
+        };
     let mut input = io::stdin().lock();
     let mut output = io::stdout().lock();
     write_frame(
@@ -109,11 +111,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         let mut body = vec![0; length];
         input.read_exact(&mut body)?;
-        let response = (|| -> Result<SuccessResponse, Box<dyn Error>> {
+        let response = (|| -> Result<SuccessResponse, RequestFailure> {
             if !characterize_performance {
-                let initial: IRModuleDTO = serde_json::from_slice(&body)?;
-                let owned = lower_verified_ir_to_ssa_v1(&initial, 1, 1)?;
-                verify_owned_ssa(&owned)?;
+                let initial: IRModuleDTO =
+                    serde_json::from_slice(&body).map_err(RequestFailure::Input)?;
+                let owned = CompilerCore
+                    .lower_verified_ssa(initial)
+                    .map_err(RequestFailure::Core)?;
                 return Ok(SuccessResponse {
                     ok: true,
                     ssa: owned.to_schema_v2(),
@@ -124,22 +128,26 @@ fn main() -> Result<(), Box<dyn Error>> {
             let request_started = Instant::now();
 
             let started = Instant::now();
-            let initial: IRModuleDTO = serde_json::from_slice(&body)?;
+            let initial: IRModuleDTO =
+                serde_json::from_slice(&body).map_err(RequestFailure::Input)?;
             let input_parsing_ns = started.elapsed().as_nanos() as u64;
 
             let started = Instant::now();
-            let normalized = normalize_lifecycle_v1(&initial, 1)?;
+            let normalized = normalize_lifecycle_v1(&initial, 1)
+                .map_err(|error| RequestFailure::Instrumented(error.to_string()))?;
             let lifecycle_normalization_ns = started.elapsed().as_nanos() as u64;
 
             let started = Instant::now();
             let (owned, mut lowering_phases) =
-                characterize_lower_normalized_ir_to_ssa_v1(&normalized)?;
+                characterize_lower_normalized_ir_to_ssa_v1(&normalized)
+                    .map_err(|error| RequestFailure::Instrumented(error.to_string()))?;
             let ssa_lowering_ns = started.elapsed().as_nanos() as u64;
             lowering_phases.remaining_lowering_ns +=
                 ssa_lowering_ns.saturating_sub(lowering_phases.measured_ns());
 
             let started = Instant::now();
-            verify_owned_ssa(&owned)?;
+            verify_owned_ssa(&owned)
+                .map_err(|error| RequestFailure::Instrumented(error.to_string()))?;
             let owned_ssa_verification_ns = started.elapsed().as_nanos() as u64;
 
             let started = Instant::now();
@@ -187,8 +195,59 @@ fn main() -> Result<(), Box<dyn Error>> {
             Response::Failure(FailureResponse {
                 ok: false,
                 error: error.to_string(),
+                diagnostic: qualification_structured_errors.then(|| error.diagnostic()),
             })
         });
         write_frame(&mut output, &response)?;
+    }
+}
+
+enum RequestFailure {
+    Input(serde_json::Error),
+    Core(CompilerError),
+    Instrumented(String),
+}
+
+impl RequestFailure {
+    fn diagnostic(&self) -> serde_json::Value {
+        match self {
+            Self::Input(_) => json!({
+                "kind": "binding",
+                "category": "input_schema",
+                "phase": "initial_ir_import",
+                "code": "CORE-BIND-INPUT-001",
+                "function": null,
+                "block": null,
+                "source_location": null,
+            }),
+            Self::Core(error) => {
+                let mut value =
+                    serde_json::to_value(error).expect("CompilerError serialization is infallible");
+                value
+                    .as_object_mut()
+                    .expect("CompilerError serializes as an object")
+                    .remove("message");
+                value
+            }
+            Self::Instrumented(_) => json!({
+                "kind": "internal",
+                "category": "instrumented_companion",
+                "phase": "performance_characterization",
+                "code": "CORE-COMPANION-INSTRUMENTED-001",
+                "function": null,
+                "block": null,
+                "source_location": null,
+            }),
+        }
+    }
+}
+
+impl std::fmt::Display for RequestFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Input(error) => error.fmt(formatter),
+            Self::Core(error) => error.fmt(formatter),
+            Self::Instrumented(message) => formatter.write_str(message),
+        }
     }
 }

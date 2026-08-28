@@ -54,7 +54,11 @@ class InProcessRustSSALoweringClient:
                 "block": getattr(error, "block", None),
                 "source_location": getattr(error, "source_location", None),
             }
-            return {"ok": False, "error": str(error)}
+            return {
+                "ok": False,
+                "error": str(error),
+                "diagnostic": dict(self.last_error_detail),
+            }
         if not isinstance(ssa, dict):
             raise RuntimeError("in-process core returned a non-object schema-v2 value")
         return {"ok": True, "ssa": ssa}

@@ -1,0 +1,77 @@
+{
+  "artifact_schema_version": 1,
+  "automatic_fallback": false,
+  "ci_run_id": "LOCAL_PRE_CI",
+  "companion_remains_production_and_rollback": true,
+  "default_companion": {
+    "identity_and_protocol_v1": "PASS",
+    "persistent_process_starts": 1,
+    "repeated_result_equal": true,
+    "requests": 3,
+    "response_shape_preserved": true
+  },
+  "exact_revision": "c90b71e5f989c4ccf83b7cca66f0e27ad00d3d7d",
+  "kind": "core_1_0a_production",
+  "milestone": "CORE-1.0A",
+  "platform": "linux-x86_64",
+  "production_default_changed": false,
+  "production_regression_gates": {
+    "differential_python_shadow": true,
+    "lifecycle": true,
+    "persistent_companion": true,
+    "protocol_v1": true,
+    "rollback_modes": true,
+    "rust_4_5_default_policy": true,
+    "rust_ssa_output": true,
+    "structured_failure_and_locations": true,
+    "verification_and_refinement": true
+  },
+  "python": {
+    "implementation": "CPython",
+    "version": "3.14.7"
+  },
+  "qualification_only": true,
+  "qualification_only_structured_error_extension": {
+    "diagnostic": {
+      "block": null,
+      "category": "input_schema",
+      "code": "CORE-BIND-INPUT-001",
+      "function": null,
+      "kind": "binding",
+      "phase": "initial_ir_import",
+      "source_location": null
+    },
+    "error": "EOF while parsing an object at line 1 column 1",
+    "ok": false
+  },
+  "rust_target": "x86_64-unknown-linux-gnu",
+  "selected_rust_4_5_gates": {
+    "focused_pytest": {
+      "command": [
+        "/home/blasm/proyectos/Aether/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "tests/aether/test_rust_ssa_shadow_independent_production_promotion.py",
+        "tests/aether/test_rust_ssa_shadow_independent_qualification.py",
+        "tests/aether/test_rust_ssa_refinement_production_integration.py",
+        "tests/aether/test_rust_ssa_authority_promotion.py",
+        "tests/aether/test_rust_ssa_shadow_mode.py",
+        "-k",
+        "production or differential or rollback or python_only or refinement"
+      ],
+      "output_tail": "...................................................                      [100%]\n51 passed, 34 deselected in 0.85s\n",
+      "returncode": 0,
+      "status": "PASS"
+    },
+    "justification": "CompilerCore refactored ordinary companion lowering/verification and error propagation; authority selection, differential comparison, lifecycle/refinement integration, persistent protocol, and rollback are therefore the affected surfaces. Packaging release assembly and unrelated optimizer/backend gates are not semantically reachable from this refactor."
+  },
+  "shared_core_guards": {
+    "companion_calls_compiler_core": true,
+    "core_not_coupled_to_pyo3": true,
+    "in_process_not_in_default_selector": true,
+    "pyo3_calls_compiler_core": true
+  },
+  "status": "PASS",
+  "worktree_clean": false
+}

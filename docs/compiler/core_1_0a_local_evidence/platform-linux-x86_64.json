@@ -1,0 +1,67 @@
+{
+  "artifact_schema_version": 1,
+  "ci_run_id": "LOCAL_PRE_CI",
+  "clean_environment": {
+    "cargo_on_install_path": false,
+    "install_output_tail": "Processing /tmp/aether-core-1-0a-wheel/aether_core_qualification-0.1.0-cp314-cp314-manylinux_2_34_x86_64.whl\nInstalling collected packages: aether-core-qualification\nSuccessfully installed aether-core-qualification-0.1.0\nWARNING: The directory '/home/blasm/.cache/pip' or its parent directory is not owned or is not writable by the current user. The cache has been disabled. Check the permissions and owner of that directory. If executing pip with sudo, you should use sudo's -H flag.\n",
+    "install_requires_rust": false,
+    "install_returncode": 0,
+    "pip_no_deps": true,
+    "pip_no_index": true
+  },
+  "companion": {
+    "filename": "aether-ssa-shadow",
+    "sha256": "a40f176547ff633d589b1fa11f03d2224a91d617008cfffe0aca57ec981a6b49"
+  },
+  "companion_remains_usable": true,
+  "exact_revision": "c90b71e5f989c4ccf83b7cca66f0e27ad00d3d7d",
+  "kind": "core_1_0a_packaging",
+  "matrix_role": "platform",
+  "milestone": "CORE-1.0A",
+  "platform": "linux-x86_64",
+  "probe": {
+    "companion_default_failure_shape": [
+      "error",
+      "ok"
+    ],
+    "companion_protocol_v1": {
+      "input_schema_version": 1,
+      "output_schema_version": 2,
+      "product": "aether-ssa-shadow",
+      "product_version": "0.1.0",
+      "protocol_version": 1
+    },
+    "companion_repeated_use": "PASS",
+    "extension_module": "/tmp/aether-core-1-0a-cnnxyotz/venv/lib/python3.14/site-packages/_aether_core/__init__.py",
+    "ordinary_lowering": "PASS",
+    "python_implementation": "CPython",
+    "python_version": "3.14.7",
+    "qualification_only": true,
+    "repeated_session_use": "PASS",
+    "status": "PASS",
+    "structured_failure": {
+      "block": null,
+      "category": "input_schema",
+      "code": "CORE-BIND-INPUT-001",
+      "function": null,
+      "kind": "binding",
+      "phase": "initial_ir_import",
+      "source_location": null
+    }
+  },
+  "probe_output_tail": "",
+  "probe_returncode": 0,
+  "production_default_changed": false,
+  "python": {
+    "implementation": "CPython",
+    "version": "3.14.7"
+  },
+  "rust_target": "x86_64-unknown-linux-gnu",
+  "status": "PASS",
+  "wheel": {
+    "filename": "aether_core_qualification-0.1.0-cp314-cp314-manylinux_2_34_x86_64.whl",
+    "sha256": "776ee4ee89eb73e1d1f4d0bf6c71d30ab513ce65bba806de0236bffd00dbcbef",
+    "tag": "cp314-cp314-manylinux_2_34_x86_64"
+  },
+  "worktree_clean": false
+}

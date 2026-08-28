@@ -65,10 +65,16 @@ def test_instrumentation_is_exclusive_to_explicit_companion_mode() -> None:
         "let request_started = Instant::now();", 1
     )
 
-    assert "lower_verified_ir_to_ssa_v1(&initial, 1, 1)?" in production_branch
+    assert "lower_verified_ssa(initial)" in production_branch
     assert "performance: None" in production_branch
     assert "characterize_lower_normalized_ir_to_ssa_v1" in diagnostic_branch
     assert "ssa_lowering_phases" in diagnostic_branch
+
+    compiler_core = (
+        ROOT / "compiler-rs/crates/aether-verifier/src/compiler_core.rs"
+    ).read_text(encoding="utf-8")
+    assert "lower_verified_ir_to_ssa_v1(&self.initial_ir, 1, 1)" in compiler_core
+    assert "verify_owned_ssa(&ssa)" in compiler_core
 
     dominance = (
         ROOT / "compiler-rs/crates/aether-ir/src/dominance.rs"

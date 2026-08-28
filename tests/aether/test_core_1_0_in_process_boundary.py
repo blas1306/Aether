@@ -58,7 +58,19 @@ def test_adapter_preserves_structured_binding_error() -> None:
     module = extension()
     module.CompilerCore = RejectingCore
     client = InProcessRustSSALoweringClient(module)
-    assert client.lower(b"not-json") == {"ok": False, "error": "bad input"}
+    assert client.lower(b"not-json") == {
+        "ok": False,
+        "error": "bad input",
+        "diagnostic": {
+            "kind": "binding",
+            "category": "input_schema",
+            "phase": "initial_ir_import",
+            "code": "CORE-BIND-INPUT-001",
+            "function": None,
+            "block": None,
+            "source_location": ("broken.ae", 2, 4),
+        },
+    }
     assert client.last_error_detail == {
         "kind": "binding",
         "category": "input_schema",

@@ -231,4 +231,12 @@ mod tests {
         assert_eq!(error.code, "CORE-SSA-001");
         assert!(error.message.contains("function has no entry block"));
     }
+
+    #[test]
+    fn core_and_owned_session_are_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+
+        assert_send_sync::<CompilerCore>();
+        assert_send_sync::<CompilationSession>();
+    }
 }

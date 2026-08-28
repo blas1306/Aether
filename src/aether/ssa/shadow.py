@@ -204,14 +204,25 @@ class PersistentRustSSALoweringClient:
         *,
         timeout_seconds: float = 10.0,
         characterize_performance: bool = False,
+        qualification_structured_errors: bool = False,
     ) -> None:
-        self.command = (
-            (str(executable), "--persistent", "--characterize-performance")
+        if characterize_performance and qualification_structured_errors:
+            raise ValueError("performance and structured-error modes are exclusive")
+        option = (
+            "--characterize-performance"
             if characterize_performance
+            else "--qualification-structured-errors"
+            if qualification_structured_errors
+            else None
+        )
+        self.command = (
+            (str(executable), "--persistent", option)
+            if option is not None
             else (str(executable), "--persistent")
         )
         self.timeout_seconds = timeout_seconds
         self.characterize_performance = characterize_performance
+        self.qualification_structured_errors = qualification_structured_errors
         self._process: subprocess.Popen[bytes] | None = None
         self._lock = threading.Lock()
         self._starts = 0
