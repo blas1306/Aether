@@ -1,0 +1,454 @@
+{
+  "artifact_manifest": [
+    {
+      "artifact_id": 9675384624,
+      "artifact_name": "core-1.0a-aggregate",
+      "digest_verified": true,
+      "downloaded_archive_sha256": "deb02f28243450a3c9840d7aefa7b71bad45c28fcacc1ad274ce4d9a0a556e2a",
+      "downloaded_file": "core-1.0a-aggregate/aggregate.json",
+      "exact_revision": "6f6851dfd353bb716eeffc05a701b6bc4dab5132",
+      "file_sha256": "8e70eb181f9b5adc4749cb1fd2baf68ad21a386f7ff5956762bb0a6fc868bf8f",
+      "github_artifact_digest_sha256": "deb02f28243450a3c9840d7aefa7b71bad45c28fcacc1ad274ce4d9a0a556e2a",
+      "source_job": "aggregate-fail-closed-decision",
+      "source_job_id": 98763793041,
+      "validation_result": "PASS"
+    },
+    {
+      "artifact_id": 9675359820,
+      "artifact_name": "core-1.0a-semantic",
+      "digest_verified": true,
+      "downloaded_archive_sha256": "0fc17e385cae5ebe5f2ec04b0526a1a100d9e63373421fddc0103bf8eb09807a",
+      "downloaded_file": "core-1.0a-semantic/semantic.json",
+      "exact_revision": "6f6851dfd353bb716eeffc05a701b6bc4dab5132",
+      "file_sha256": "b3df2c0448f66d73db5fa6b0209234893ce9593a81832e5eabd4000c415f1d99",
+      "github_artifact_digest_sha256": "0fc17e385cae5ebe5f2ec04b0526a1a100d9e63373421fddc0103bf8eb09807a",
+      "source_job": "semantic-historical-failures-deep",
+      "source_job_id": 98763185488,
+      "validation_result": "PASS"
+    },
+    {
+      "artifact_id": 9675353087,
+      "artifact_name": "core-1.0a-sessions",
+      "digest_verified": true,
+      "downloaded_archive_sha256": "b16d9c62281d6a98825c3dd7bf29c328be9f80cde8bfb70ef76d45fdd4d89a7e",
+      "downloaded_file": "core-1.0a-sessions/sessions.json",
+      "exact_revision": "6f6851dfd353bb716eeffc05a701b6bc4dab5132",
+      "file_sha256": "40c7754c0e7f31d059a5c0086f7c8fc3421d5bc7c1268dfcc1190bebbd54a2cd",
+      "github_artifact_digest_sha256": "b16d9c62281d6a98825c3dd7bf29c328be9f80cde8bfb70ef76d45fdd4d89a7e",
+      "source_job": "rust-owned-sessions-gil-memory",
+      "source_job_id": 98763185574,
+      "validation_result": "PASS"
+    },
+    {
+      "artifact_id": 9675352005,
+      "artifact_name": "core-1.0a-production",
+      "digest_verified": true,
+      "downloaded_archive_sha256": "a3ece814208e1db56689d3504380f56582c2aa546372fb871669bf1d2f2a9c3d",
+      "downloaded_file": "core-1.0a-production/production.json",
+      "exact_revision": "6f6851dfd353bb716eeffc05a701b6bc4dab5132",
+      "file_sha256": "dad6da4546fb161e41ad86fbc98cbb8cd68d721c08fd5071d4297813006294a3",
+      "github_artifact_digest_sha256": "a3ece814208e1db56689d3504380f56582c2aa546372fb871669bf1d2f2a9c3d",
+      "source_job": "affected-rust-4.5-production-gates",
+      "source_job_id": 98763185664,
+      "validation_result": "PASS"
+    },
+    {
+      "artifact_id": 9675347463,
+      "artifact_name": "core-1.0a-platform-linux-x86_64",
+      "digest_verified": true,
+      "downloaded_archive_sha256": "0abf8da9847ac6db3180b6e8a398d733b8064c760b43a495e63c2f47fcd705a3",
+      "downloaded_file": "core-1.0a-platform-linux-x86_64/platform-linux-x86_64.json",
+      "exact_revision": "6f6851dfd353bb716eeffc05a701b6bc4dab5132",
+      "file_sha256": "d94e64834ba21e052196758b5006dea1317f7378a00cc4b7c89730d57e8e8db1",
+      "github_artifact_digest_sha256": "0abf8da9847ac6db3180b6e8a398d733b8064c760b43a495e63c2f47fcd705a3",
+      "source_job": "clean-install-linux-x86_64",
+      "source_job_id": 98763185667,
+      "validation_result": "PASS"
+    },
+    {
+      "artifact_id": 9675376754,
+      "artifact_name": "core-1.0a-platform-windows-x86_64",
+      "digest_verified": true,
+      "downloaded_archive_sha256": "4eba779837a9750c9f194beb63571c8a1c9dd19b485a9638a8ac66888348c670",
+      "downloaded_file": "core-1.0a-platform-windows-x86_64/platform-windows-x86_64.json",
+      "exact_revision": "6f6851dfd353bb716eeffc05a701b6bc4dab5132",
+      "file_sha256": "4ed805165e7fee5cbbe17a1a0d20f06400a4d8c841b8b0a5109c92aa3f80e4d7",
+      "github_artifact_digest_sha256": "4eba779837a9750c9f194beb63571c8a1c9dd19b485a9638a8ac66888348c670",
+      "source_job": "clean-install-windows-x86_64",
+      "source_job_id": 98763185605,
+      "validation_result": "PASS"
+    },
+    {
+      "artifact_id": 9675381309,
+      "artifact_name": "core-1.0a-platform-macos-x86_64",
+      "digest_verified": true,
+      "downloaded_archive_sha256": "98e4ce8e03dc228cc3a0d7b4dfddd723cf0e257b8b153d36f8fac89450635b96",
+      "downloaded_file": "core-1.0a-platform-macos-x86_64/platform-macos-x86_64.json",
+      "exact_revision": "6f6851dfd353bb716eeffc05a701b6bc4dab5132",
+      "file_sha256": "d6615ec8757dfbc86a8ce6c8ca49427123a6e54c132507b38109a028929a2ad7",
+      "github_artifact_digest_sha256": "98e4ce8e03dc228cc3a0d7b4dfddd723cf0e257b8b153d36f8fac89450635b96",
+      "source_job": "clean-install-macos-x86_64",
+      "source_job_id": 98763185642,
+      "validation_result": "PASS"
+    },
+    {
+      "artifact_id": 9675347129,
+      "artifact_name": "core-1.0a-platform-macos-arm64",
+      "digest_verified": true,
+      "downloaded_archive_sha256": "8fe9dc695b38ed9641611d65f300959d4c374bbdf6ae9531017bddcdeb085de1",
+      "downloaded_file": "core-1.0a-platform-macos-arm64/platform-macos-arm64.json",
+      "exact_revision": "6f6851dfd353bb716eeffc05a701b6bc4dab5132",
+      "file_sha256": "a016d19f480b68b3cbad9d0b3641ab3320793c6fa8ec29bce4c8868016966ae0",
+      "github_artifact_digest_sha256": "8fe9dc695b38ed9641611d65f300959d4c374bbdf6ae9531017bddcdeb085de1",
+      "source_job": "clean-install-macos-arm64",
+      "source_job_id": 98763185660,
+      "validation_result": "PASS"
+    },
+    {
+      "artifact_id": 9675350998,
+      "artifact_name": "core-1.0a-python-3.11",
+      "digest_verified": true,
+      "downloaded_archive_sha256": "494e99adbec4f189ffa1583ffdd8525cd9b67d42254d623d29da75908759cb3a",
+      "downloaded_file": "core-1.0a-python-3.11/python-3.11.json",
+      "exact_revision": "6f6851dfd353bb716eeffc05a701b6bc4dab5132",
+      "file_sha256": "523623dcc950a9d1276ce9098350ead170d26a102352695cf9a5d4ddca154b17",
+      "github_artifact_digest_sha256": "494e99adbec4f189ffa1583ffdd8525cd9b67d42254d623d29da75908759cb3a",
+      "source_job": "cpython-3.11-linux-x86_64",
+      "source_job_id": 98763185661,
+      "validation_result": "PASS"
+    },
+    {
+      "artifact_id": 9675347580,
+      "artifact_name": "core-1.0a-python-3.12",
+      "digest_verified": true,
+      "downloaded_archive_sha256": "d6c9b39cc0385eb924c6ad44e31b256ab5f740e033e60296d095cf55e12061e3",
+      "downloaded_file": "core-1.0a-python-3.12/python-3.12.json",
+      "exact_revision": "6f6851dfd353bb716eeffc05a701b6bc4dab5132",
+      "file_sha256": "7675f2a38ce24ff1780260ff4d192cbb1f02dd1e3d79e5712f4c3c0ddf07626a",
+      "github_artifact_digest_sha256": "d6c9b39cc0385eb924c6ad44e31b256ab5f740e033e60296d095cf55e12061e3",
+      "source_job": "cpython-3.12-linux-x86_64",
+      "source_job_id": 98763185662,
+      "validation_result": "PASS"
+    },
+    {
+      "artifact_id": 9675346810,
+      "artifact_name": "core-1.0a-python-3.13",
+      "digest_verified": true,
+      "downloaded_archive_sha256": "9b8bfc8dd27e21a12482fc85d5ef0721588bc871acb6e0040026e35bb869bff2",
+      "downloaded_file": "core-1.0a-python-3.13/python-3.13.json",
+      "exact_revision": "6f6851dfd353bb716eeffc05a701b6bc4dab5132",
+      "file_sha256": "9999686b76cd7b8ebb7e71606d508ea4c946a9306102d17bbd4bfe68d489423f",
+      "github_artifact_digest_sha256": "9b8bfc8dd27e21a12482fc85d5ef0721588bc871acb6e0040026e35bb869bff2",
+      "source_job": "cpython-3.13-linux-x86_64",
+      "source_job_id": 98763185693,
+      "validation_result": "PASS"
+    },
+    {
+      "artifact_id": 9675348193,
+      "artifact_name": "core-1.0a-python-3.14",
+      "digest_verified": true,
+      "downloaded_archive_sha256": "0896a2da2324ec6ae0886d8a2f78e965023459aeaaf294a7b20ca710fbb56868",
+      "downloaded_file": "core-1.0a-python-3.14/python-3.14.json",
+      "exact_revision": "6f6851dfd353bb716eeffc05a701b6bc4dab5132",
+      "file_sha256": "655857145f0fd3636b5c6099599b7ca5626eeda1cb8fcc78cf3d417493c93edb",
+      "github_artifact_digest_sha256": "0896a2da2324ec6ae0886d8a2f78e965023459aeaaf294a7b20ca710fbb56868",
+      "source_job": "cpython-3.14-linux-x86_64",
+      "source_job_id": 98763185624,
+      "validation_result": "PASS"
+    }
+  ],
+  "artifact_schema_version": 1,
+  "closure_date": "2026-08-28",
+  "eligibility_checks": {
+    "aggregate_artifact_qualified": true,
+    "all_artifact_digests_verified": true,
+    "all_artifact_files_hashed": true,
+    "all_machine_readable_revisions_exact": true,
+    "all_required_artifacts_present": true,
+    "all_required_jobs_success": true,
+    "cpython_3_11_through_3_14_qualified": true,
+    "exact_revision_gate": true,
+    "four_platform_clean_install_qualified": true,
+    "historical_incident_preserved": true,
+    "production_contracts_preserved": true,
+    "run_conclusion_success": true,
+    "semantic_historical_failures_deep_qualified": true,
+    "sessions_gil_memory_qualified": true
+  },
+  "final_decision": "CORE_IN_PROCESS_BOUNDARY_QUALIFIED",
+  "historical_incident": {
+    "causes": [
+      "maturin develop was invoked outside a virtualenv",
+      "the wheel selector incorrectly assumed exactly one wheel"
+    ],
+    "decision": "CORE_IN_PROCESS_BOUNDARY_QUALIFICATION_BLOCKED",
+    "exact_revision": "2401ab8d56c13d7837aab245735105764e65ade0",
+    "immutable": true,
+    "relationship": "independent earlier qualification; not overwritten or reinterpreted",
+    "run_id": 33143156047,
+    "status": "FAILED"
+  },
+  "kind": "core_1_0a_in_process_compiler_core_qualification_closure",
+  "milestone": "CORE-1.0A",
+  "official_aggregate_validation": {
+    "aggregate_artifact_id": 9675384624,
+    "aggregate_decision": "CORE_IN_PROCESS_BOUNDARY_QUALIFIED",
+    "aggregate_errors": [],
+    "aggregate_file_sha256": "8e70eb181f9b5adc4749cb1fd2baf68ad21a386f7ff5956762bb0a6fc868bf8f",
+    "checker": "scripts/check_core_1_0a_in_process.py",
+    "checker_sha256": "95316cf90b3b4385c8df71ad71362311ce3bc627e78868a63b13d500ab567481",
+    "input_artifact_count": 11,
+    "official_and_recomputed_byte_identical": true,
+    "recomputed_decision": "CORE_IN_PROCESS_BOUNDARY_QUALIFIED",
+    "validation_result": "PASS"
+  },
+  "packaging_trust_statement": "Qualified wheels can be installed and used by the tested clean consumer environments without Rust/Cargo being available to the consumer.",
+  "performance": {
+    "correction_gate": false,
+    "rounds": 5,
+    "warmups": 2,
+    "workloads": [
+      {
+        "companion_median_ms": 0.26591200000325443,
+        "in_process_median_ms": 0.13014500001418128,
+        "name": "ordinary",
+        "payload_count": 1
+      },
+      {
+        "companion_median_ms": 407.0463090000942,
+        "in_process_median_ms": 393.82044600026234,
+        "name": "historical_batch",
+        "payload_count": 116
+      },
+      {
+        "companion_median_ms": 229.09413100001075,
+        "in_process_median_ms": 231.79345099998727,
+        "name": "deep_cfg",
+        "payload_count": 1
+      },
+      {
+        "companion_median_ms": 3.484920999994756,
+        "in_process_median_ms": 3.3141489999763962,
+        "name": "repository_real",
+        "payload_count": 1
+      }
+    ]
+  },
+  "platform_matrix": [
+    {
+      "companion_contract": "PASS",
+      "compiler_core_session_creation": "PASS",
+      "consumer_without_rust_or_cargo": true,
+      "extension_import": "PASS",
+      "ordinary_operation": "PASS",
+      "platform": "linux-x86_64",
+      "probe_status": "PASS",
+      "python_version": "3.13.15",
+      "repeated_use": "PASS",
+      "structured_failure": "PASS",
+      "wheel_filename": "aether_core_qualification-0.1.0-cp313-cp313-manylinux_2_34_x86_64.whl",
+      "wheel_sha256": "697bc57834d6d1d42b851c11483c6f62f0d401fd7afe9859bf48b63e5568a76e",
+      "wheel_tag": "cp313-cp313-manylinux_2_34_x86_64"
+    },
+    {
+      "companion_contract": "PASS",
+      "compiler_core_session_creation": "PASS",
+      "consumer_without_rust_or_cargo": true,
+      "extension_import": "PASS",
+      "ordinary_operation": "PASS",
+      "platform": "windows-x86_64",
+      "probe_status": "PASS",
+      "python_version": "3.13.15",
+      "repeated_use": "PASS",
+      "structured_failure": "PASS",
+      "wheel_filename": "aether_core_qualification-0.1.0-cp313-cp313-win_amd64.whl",
+      "wheel_sha256": "e751ede16f5a398195eeed70844cdf7f023a6aea3de3e69ceaa65d906f9c801f",
+      "wheel_tag": "cp313-cp313-win_amd64"
+    },
+    {
+      "companion_contract": "PASS",
+      "compiler_core_session_creation": "PASS",
+      "consumer_without_rust_or_cargo": true,
+      "extension_import": "PASS",
+      "ordinary_operation": "PASS",
+      "platform": "macos-x86_64",
+      "probe_status": "PASS",
+      "python_version": "3.13.15",
+      "repeated_use": "PASS",
+      "structured_failure": "PASS",
+      "wheel_filename": "aether_core_qualification-0.1.0-cp313-cp313-macosx_10_12_x86_64.whl",
+      "wheel_sha256": "01ec9613b961cfc9b53f71c7e476427b6b39feda5b4427adaaca2e033953c4c6",
+      "wheel_tag": "cp313-cp313-macosx_10_12_x86_64"
+    },
+    {
+      "companion_contract": "PASS",
+      "compiler_core_session_creation": "PASS",
+      "consumer_without_rust_or_cargo": true,
+      "extension_import": "PASS",
+      "ordinary_operation": "PASS",
+      "platform": "macos-arm64",
+      "probe_status": "PASS",
+      "python_version": "3.13.14",
+      "repeated_use": "PASS",
+      "structured_failure": "PASS",
+      "wheel_filename": "aether_core_qualification-0.1.0-cp313-cp313-macosx_11_0_arm64.whl",
+      "wheel_sha256": "b2fcfbf70c6708743cad80e3339198269bb84213e225df1f0b4ebf3f14050035",
+      "wheel_tag": "cp313-cp313-macosx_11_0_arm64"
+    }
+  ],
+  "production_regression": {
+    "companion_remains_production_and_rollback": true,
+    "default_mode_changed": false,
+    "focused_tests": "51 passed, 34 deselected",
+    "gates": {
+      "differential_python_shadow": true,
+      "lifecycle": true,
+      "persistent_companion": true,
+      "protocol_v1": true,
+      "rollback_modes": true,
+      "rust_4_5_default_policy": true,
+      "rust_ssa_output": true,
+      "structured_failure_and_locations": true,
+      "verification_and_refinement": true
+    },
+    "in_process_is_production_default": false,
+    "shared_compiler_core_guards": {
+      "companion_calls_compiler_core": true,
+      "core_not_coupled_to_pyo3": true,
+      "in_process_not_in_default_selector": true,
+      "pyo3_calls_compiler_core": true
+    },
+    "status": "PASS"
+  },
+  "python_compatibility_matrix": [
+    {
+      "clean_consumer_contract": "PASS",
+      "compatibility_tags": ["cp311-cp311-manylinux_2_34_x86_64"],
+      "extension_import": "PASS",
+      "platform": "linux-x86_64",
+      "python_version": "3.11.16",
+      "smoke_operation": "PASS",
+      "wheel_filename": "aether_core_qualification-0.1.0-cp311-cp311-manylinux_2_34_x86_64.whl",
+      "wheel_sha256": "597ecb36dc0c8e84cab3f77d6c5361bf8f598adc014d9ff1f6b8642d63bc2f5a"
+    },
+    {
+      "clean_consumer_contract": "PASS",
+      "compatibility_tags": ["cp312-cp312-manylinux_2_34_x86_64"],
+      "extension_import": "PASS",
+      "platform": "linux-x86_64",
+      "python_version": "3.12.14",
+      "smoke_operation": "PASS",
+      "wheel_filename": "aether_core_qualification-0.1.0-cp312-cp312-manylinux_2_34_x86_64.whl",
+      "wheel_sha256": "0fb1eba321722b29dd75d549aa66097dfd7854b52c60da381a3c4d0d9a9028a9"
+    },
+    {
+      "clean_consumer_contract": "PASS",
+      "compatibility_tags": ["cp313-cp313-manylinux_2_34_x86_64"],
+      "extension_import": "PASS",
+      "platform": "linux-x86_64",
+      "python_version": "3.13.15",
+      "smoke_operation": "PASS",
+      "wheel_filename": "aether_core_qualification-0.1.0-cp313-cp313-manylinux_2_34_x86_64.whl",
+      "wheel_sha256": "1979edf8cd44c75539f57274fa9e89868f8f5791be60e4bdbeb0d6bebf322040"
+    },
+    {
+      "clean_consumer_contract": "PASS",
+      "compatibility_tags": ["cp314-cp314-manylinux_2_34_x86_64"],
+      "extension_import": "PASS",
+      "platform": "linux-x86_64",
+      "python_version": "3.14.7",
+      "smoke_operation": "PASS",
+      "wheel_filename": "aether_core_qualification-0.1.0-cp314-cp314-manylinux_2_34_x86_64.whl",
+      "wheel_sha256": "522d7c99767b116186916f84fe0597da1b7bcf0eee67b69dc6c78fc48182ff6d"
+    }
+  ],
+  "run": {
+    "conclusion": "success",
+    "created_at": "2026-08-28T05:25:51Z",
+    "event": "workflow_dispatch",
+    "exact_revision": "6f6851dfd353bb716eeffc05a701b6bc4dab5132",
+    "id": 33144738758,
+    "repository": "blas1306/Aether",
+    "status": "completed",
+    "updated_at": "2026-08-28T05:30:12Z",
+    "url": "https://github.com/blas1306/Aether/actions/runs/33144738758",
+    "workflow": "core-1.0a-in-process-qualification",
+    "workflow_path": ".github/workflows/core-in-process.yml"
+  },
+  "run_jobs": [
+    {"conclusion": "success", "id": 98763185488, "name": "semantic-historical-failures-deep"},
+    {"conclusion": "success", "id": 98763185574, "name": "rust-owned-sessions-gil-memory"},
+    {"conclusion": "success", "id": 98763185664, "name": "affected-rust-4.5-production-gates"},
+    {"conclusion": "success", "id": 98763185667, "name": "clean-install-linux-x86_64"},
+    {"conclusion": "success", "id": 98763185605, "name": "clean-install-windows-x86_64"},
+    {"conclusion": "success", "id": 98763185642, "name": "clean-install-macos-x86_64"},
+    {"conclusion": "success", "id": 98763185660, "name": "clean-install-macos-arm64"},
+    {"conclusion": "success", "id": 98763185661, "name": "cpython-3.11-linux-x86_64"},
+    {"conclusion": "success", "id": 98763185662, "name": "cpython-3.12-linux-x86_64"},
+    {"conclusion": "success", "id": 98763185693, "name": "cpython-3.13-linux-x86_64"},
+    {"conclusion": "success", "id": 98763185624, "name": "cpython-3.14-linux-x86_64"},
+    {"conclusion": "success", "id": 98763793041, "name": "aggregate-fail-closed-decision"}
+  ],
+  "scope": {
+    "authority_policy_changed": false,
+    "companion_remains_production_and_rollback": true,
+    "compiler_core_changed_by_closure": false,
+    "core_1_1_implemented": false,
+    "in_process_is_production_default": false,
+    "lifecycle_changed_by_closure": false,
+    "refinement_changed_by_closure": false,
+    "ssa_changed_by_closure": false
+  },
+  "semantic_qualification": {
+    "deep_cfg": [993, 1000, 5000, 10000],
+    "deep_cfg_status": "PASS",
+    "historical_companion": "116/116",
+    "historical_diagnostic_or_downstream_parity": "116/116",
+    "historical_in_process": "116/116",
+    "historical_transport_equivalence": "116/116",
+    "initial_ir_and_binding_failure_campaign": "8/8",
+    "initial_ir_failure_categories": [
+      "malformed Initial IR",
+      "invalid CFG",
+      "wrong return/value flow",
+      "lifecycle errors",
+      "malformed protocol/binding inputs"
+    ],
+    "ordinary_cases": "5/5",
+    "ssa_and_refinement_mutation_campaign": "13/13",
+    "ssa_and_refinement_mutation_categories": [
+      "invalid phi",
+      "refinement failures",
+      "imported SSA failures"
+    ],
+    "status": "PASS"
+  },
+  "sessions_gil_memory": {
+    "gil_ticker_progress_during_rust": 4008208,
+    "memory": {
+      "iterations": 500,
+      "python_traced_growth_bytes": 32,
+      "rss_growth_bytes": 0,
+      "unbounded_growth_observed": false
+    },
+    "rust_traits": {
+      "CompilationSession": "Send + Sync",
+      "CompilerCore": "Send + Sync",
+      "unsafe": false
+    },
+    "session_gates": {
+      "concurrent_failures": true,
+      "create_destroy_soak": true,
+      "create_repeated_use": true,
+      "exception_then_reuse": true,
+      "gil_released": true,
+      "independent_session_isolation": true,
+      "multiple_simultaneous_and_interleaved": true,
+      "no_raw_or_stale_handle_api": true,
+      "same_session_serialized": true
+    },
+    "same_session_contract": "serialized by Mutex<CompilationSession>; idempotent lowering",
+    "status": "PASS"
+  },
+  "trust_statement": "The in-process boundary is operationally qualified against the existing companion and qualified corpus on the tested platforms. This is not production promotion, universal correctness, companion removal, or authorization for CORE-1.1."
+}
