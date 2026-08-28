@@ -16,6 +16,18 @@ use serde::Serialize;
 use crate::ssa_wire_verifier::SSAWireVerificationError;
 use crate::verify_owned_ssa;
 
+/// Version of the transport-independent CompilerCore API exposed to adapters.
+pub const COMPILER_CORE_API_VERSION: u32 = 1;
+
+/// Persistent companion framing and response protocol version.
+pub const COMPILER_CORE_PROTOCOL_VERSION: u32 = 1;
+
+/// Initial IR schemas accepted by the current core adapters.
+pub const COMPILER_CORE_INPUT_SCHEMA_VERSIONS: &[u32] = &[1];
+
+/// SSA schemas materialized by the current core adapters.
+pub const COMPILER_CORE_OUTPUT_SCHEMA_VERSIONS: &[u32] = &[2];
+
 /// Stable top-level classification crossing binding and protocol adapters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

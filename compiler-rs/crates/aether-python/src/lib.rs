@@ -7,6 +7,11 @@
 use std::sync::Mutex;
 
 use aether_ir::wire::IRModuleDTO;
+#[cfg(feature = "productive-distribution")]
+use aether_verifier::{
+    COMPILER_CORE_API_VERSION, COMPILER_CORE_INPUT_SCHEMA_VERSIONS,
+    COMPILER_CORE_OUTPUT_SCHEMA_VERSIONS, COMPILER_CORE_PROTOCOL_VERSION,
+};
 use aether_verifier::{
     CompilationSession, CompilerCore, CompilerError, CompilerErrorKind, CompilerPhase,
 };
@@ -234,11 +239,33 @@ impl PyCompilerCore {
     }
 }
 
-/// Qualification-only in-process extension module.
+/// Python adapter shared by the historical qualification wheel and the
+/// productive native distribution. The productive metadata is compiled only
+/// when the distribution-specific Maturin project enables its Cargo feature.
 #[pymodule]
 fn _aether_core(module: &Bound<'_, PyModule>) -> PyResult<()> {
-    module.add("__version__", env!("CARGO_PKG_VERSION"))?;
-    module.add("QUALIFICATION_ONLY", true)?;
+    #[cfg(feature = "productive-distribution")]
+    {
+        module.add("__version__", env!("AETHER_COMPILER_CORE_PACKAGE_VERSION"))?;
+        module.add("NATIVE_PRODUCT_VERSION", env!("CARGO_PKG_VERSION"))?;
+        module.add("COMPILER_CORE_API_VERSION", COMPILER_CORE_API_VERSION)?;
+        module.add("PROTOCOL_VERSION", COMPILER_CORE_PROTOCOL_VERSION)?;
+        module.add("INPUT_SCHEMA_VERSIONS", COMPILER_CORE_INPUT_SCHEMA_VERSIONS)?;
+        module.add(
+            "OUTPUT_SCHEMA_VERSIONS",
+            COMPILER_CORE_OUTPUT_SCHEMA_VERSIONS,
+        )?;
+        module.add(
+            "BUILD_IDENTITY",
+            env!("AETHER_COMPILER_CORE_BUILD_IDENTITY"),
+        )?;
+        module.add("QUALIFICATION_ONLY", false)?;
+    }
+    #[cfg(not(feature = "productive-distribution"))]
+    {
+        module.add("__version__", env!("CARGO_PKG_VERSION"))?;
+        module.add("QUALIFICATION_ONLY", true)?;
+    }
     module.add_class::<PyCompilerCore>()?;
     module.add_class::<PyCompilationSession>()?;
     module.add("AetherCoreError", module.py().get_type::<AetherCoreError>())?;

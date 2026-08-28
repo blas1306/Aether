@@ -1,0 +1,188 @@
+# CORE-1.0B — In-process production transport promotion
+
+Fecha de auditoría: 2026-08-28
+
+Revisión base: `68bb482594dfb372eee2f55f9c5b725dba84e7cd`
+
+## Decisión local
+
+`CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED`
+
+La promoción se detuvo antes de modificar el selector productivo. La condición
+de parada de CORE-1.0B se cumple: el binding calificado no forma parte de la
+distribución principal de Aether y promoverlo exige una decisión significativa
+de packaging/distribución.
+
+Actualmente:
+
+- `aether-language` usa `setuptools.build_meta`, declara un paquete Python
+  `py3-none-any` y no depende de un runtime nativo;
+- el binding se construye por separado con Maturin como
+  `aether-core-qualification`;
+- el módulo `_aether_core` publica `QUALIFICATION_ONLY=True`;
+- el adaptador `InProcessRustSSALoweringClient` rechaza cualquier extensión que
+  no declare exactamente ese estado de qualification;
+- CORE-1.0A sólo calificó clean install del wheel separado. Su cierre limita
+  explícitamente la afirmación a esos wheels calificados y dice que no es una
+  promoción productiva;
+- el rollback companion requiere además el binario y manifest instalados en
+  `<sys.prefix>/libexec/aether/ssa-shadow`; el wheel principal no los contiene.
+
+Cambiar el selector ahora haría que una instalación oficialmente documentada
+del wheel principal falle siempre al importar `_aether_core`, o exigiría un
+fallback silencioso al companion, expresamente prohibido por CORE-1.0B. No se
+eligió ninguna de esas dos conductas.
+
+## Auditoría del flujo productivo actual
+
+### Entradas reales
+
+Los consumidores nativos del CLI (`--emit-ssa`, `--emit-llvm` y ejecución
+nativa) pasan por `aether.pipeline.lower_to_verified_ssa`, que crea
+`SSAPipeline(builder="general")`. El punto único de selección está en
+`src/aether/pipeline.py::SSAPipeline.build`.
+
+La autoridad default de RUST-4.5 se resuelve en
+`src/aether/ssa/shadow.py::resolve_ssa_lowering_authority_mode` como
+`rust_ssa_authority_refinement_verified`. La rama correspondiente obtiene
+`default_rust_ssa_lowering_client()` y ejecuta
+`lower_with_shadow_independent_rust_authority()`.
+
+### Transporte productivo antes de CORE-1.0B
+
+`default_rust_ssa_lowering_client()` devuelve el singleton
+`ProductionRustSSALoweringClient`. En su primer request éste descubre solamente
+el companion instalado en el prefijo canónico, construye un
+`PersistentRustSSALoweringClient` y lo reutiliza durante el proceso Python. Un
+lock protege la creación del cliente y otro serializa los requests del proceso
+persistente. `atexit` cierra el companion.
+
+El protocolo-v1 observado es:
+
+1. Python verifica Initial IR, ejecuta `expand_lifecycle`, materializa
+   `schema-v1` y lo serializa una sola vez como JSON compacto.
+2. Python envía `u32` big-endian de longitud seguido por el payload.
+3. El companion deserializa `IRModuleDTO` y llama
+   `CompilerCore.lower_verified_ssa(initial)`.
+4. Rust conserva la semántica compartida: lifecycle policy-v1, lowering SSA y
+   verificación owned SSA; después materializa schema-v2.
+5. El companion responde otro frame JSON con `{"ok":true,"ssa":...}` o
+   `{"ok":false,"error":...}`.
+6. Python importa schema-v2 estrictamente, ejecuta `SSAVerifier`, comprueba
+   integridad same-input, ejecuta refinement obligatorio, vuelve a comprobar
+   integridad y ejecuta la verificación genérica final.
+
+No hay fallback de PATH, checkout o `target/`: la ausencia o incompatibilidad
+del companion instalado falla cerrada. La variable interna
+`AETHER_INTERNAL_RUST_SSA_QUALIFICATION_EXECUTABLE` puede seleccionar un path
+absoluto únicamente para el harness de qualification.
+
+### Semántica compartida y boundary PyO3 calificado
+
+No existen dos cores semánticos. El companion en
+`compiler-rs/crates/aether-verifier/src/bin/aether-ssa-shadow.rs` y PyO3 en
+`compiler-rs/crates/aether-python/src/lib.rs` delegan al mismo
+`aether_verifier::CompilerCore` definido en `compiler_core.rs`.
+
+PyO3 crea un `CompilerCore`, acepta bytes schema-v1 en una
+`CompilationSession` Rust-owned, ejecuta `lower_ssa()` y exporta schema-v2. La
+sesión usa `Mutex<CompilationSession>` y libera el GIL durante trabajo Rust. El
+adaptador Python crea un core por cliente, sesiones por compilación y mantiene
+el core durante el lifetime del cliente; no tiene registry global de handles ni
+fallback al companion.
+
+CORE-1.0A calificó formalmente este boundary en Linux x86_64, Windows x86_64,
+macOS x86_64, macOS arm64 y CPython 3.11–3.14. También calificó histórico
+116/116, failures, deep CFG 993/1000/5000/10000, sesiones, concurrencia y
+performance. Esa evidencia califica el boundary, no decide cómo distribuirlo
+como requisito del producto.
+
+### Contrato de error
+
+Los errores del `CompilerCore` tienen `kind`, `category`, `phase`, `code`,
+`function`, `block`, `source_location` y `message`. PyO3 los convierte en
+subclases de `AetherCoreError` con esos atributos. El companion ordinario
+mantiene el contrato protocol-v1 histórico de texto; el modo exclusivo
+`--qualification-structured-errors` expone el diagnóstico estructurado usado
+para parity. En producción, las capas Python convierten fallos de transporte,
+respuesta, import, verifier y refinement en clasificaciones fail-closed.
+
+No se modificaron formatting, schema-v1, schema-v2, lifecycle, refinement ni
+la asignación de errores.
+
+### Authority, rollback y differential
+
+La selección de autoridad está separada conceptualmente del transporte y se
+controla sólo mediante `AETHER_SSA_AUTHORITY_MODE`:
+
+- `rust_ssa_authority_refinement_verified` (default RUST-4.5);
+- `rust_ssa_authority_python_shadow` (differential fail-closed);
+- `python_ssa_authority_rust_shadow` (rollback de autoridad);
+- `python_ssa_only` (no invoca Rust).
+
+Hoy las tres ramas que invocan Rust reciben el mismo cliente companion por
+default. La rama Python-only no selecciona transporte. CORE-1.0B deberá cambiar
+solamente la fábrica del cliente y preservar estas ramas sin cambios
+semánticos.
+
+## Superficies separadas
+
+| Superficie | Implementación actual | Estado CORE-1.0B |
+|---|---|---|
+| Transporte | `ProductionRustSSALoweringClient` → protocol-v1 companion | Candidato a promoción, no modificado |
+| Semántica | `CompilerCore`, lifecycle/lowering/verifiers/refinement existentes | Fuera de alcance, no modificada |
+| Qualification | `InProcessRustSSALoweringClient` y workflow CORE-1.0A | Evidencia reutilizable |
+| Rollback | Companion persistente explícitamente instalable | Debe conservarse; packaging por decidir |
+| Differential Python-shadow | `GeneralSSABuilder` + comparación canónica | Debe conservarse con ambos transportes |
+
+## Decisión de distribución requerida
+
+Antes de continuar debe aprobarse uno de estos contratos de entrega:
+
+1. **Runtime nativo separado (recomendado).** Promover el wheel calificado a una
+   distribución productiva versionada, por ejemplo `aether-compiler-core`, que
+   incluya `_aether_core` y el companion/manifest de rollback. Hacer que
+   `aether-language` dependa de su misma versión exacta. Esto conserva el wheel
+   Python principal y aprovecha la matriz Maturin ya calificada, pero obliga a
+   coordinar publicación, versiones y disponibilidad de wheels nativos.
+2. **Wheel principal nativo unificado.** Migrar el build principal a un proyecto
+   Maturin mixto (o integrar `setuptools-rust`) y empaquetar extensión y
+   companion juntos. Simplifica la instalación a una distribución, pero cambia
+   el backend, los tags y el flujo editable/release de todo `aether-language`.
+3. **Instalación explícita de dos distribuciones sin dependencia.** Mantener el
+   wheel nativo separado y documentarlo como prerrequisito manual. No se
+   recomienda: una instalación normal de `aether-language` quedaría incompleta
+   aunque el transporte default fuese in-process.
+
+La opción recomendada también debe fijar:
+
+- nombre y versión de la distribución nativa;
+- si adopta la versión de Aether o un ABI/versionado independiente;
+- ubicación wheel del companion y manifest para que el rollback sea realmente
+  de primera clase;
+- política de sdist cuando no exista wheel compatible;
+- comportamiento de editable/source checkout;
+- publicación atómica de las cuatro plataformas y CPython soportados;
+- cómo CLI, VS Code/LSP e IntelliJ obtienen el mismo entorno instalado.
+
+## Trabajo deliberadamente no ejecutado
+
+Por la condición de parada no se agregaron aún
+`AETHER_RUST_CORE_TRANSPORT`, selector/provenance, tests CORE-1.0B, qualifier,
+checker ni workflow. Implementarlos antes de resolver packaging produciría
+evidencia sobre un entorno ensamblado a mano, no sobre una instalación
+productiva real.
+
+Tampoco se ejecutaron los gates de promoción: no existe una promoción válida
+que calificar. La evidencia CORE-1.0A permanece intacta y no se modificó su
+workflow histórico.
+
+## Confirmaciones de alcance
+
+- CORE-1.1 no fue implementado.
+- Las responsabilidades semánticas no cambiaron.
+- El companion no fue eliminado ni modificado.
+- No se agregó fallback automático.
+- No se cambió ningún authority mode.
+- No se cambió schema-v1/schema-v2.
+- No se creó commit.

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["maturin>=1.9.4,<2"]
+build-backend = "maturin"
+
+[project]
+name = "aether-compiler-core"
+version = "1.0.0rc4"
+description = "Productive native CompilerCore interfaces for Aether"
+requires-python = ">=3.11"
+license = "GPL-3.0-only"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Rust",
+]
+
+[tool.maturin]
+bindings = "pyo3"
+module-name = "aether_compiler_core._aether_core"
+manifest-path = "../../crates/aether-python/Cargo.toml"
+features = ["productive-distribution"]
+python-source = "python"
+python-packages = ["aether_compiler_core", "_aether_core"]
+exclude = ["python/aether_compiler_core/.gitignore"]
+include = [
+    { path = "aether-ssa-shadow*", from = "out-dir", to = "aether_compiler_core/_native/" },
+    { path = "native-core-manifest.json", from = "out-dir", to = "aether_compiler_core/_native/" },
+]
+strip = true

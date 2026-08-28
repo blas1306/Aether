@@ -1,0 +1,208 @@
+name: core-native-packaging
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  AETHER_COMPILER_CORE_BUILD_IDENTITY: ${{ github.sha }}
+
+jobs:
+  package-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: python -m pip install -r requirements.txt pytest
+      - run: PYTHONPATH=src python -m pytest -q tests/aether/test_core_pkg_1_native_distribution.py
+      - run: >-
+          python -c "import json,pathlib;
+          p=pathlib.Path('qualification/core-pkg-1/contract.json');p.parent.mkdir(parents=True,exist_ok=True);
+          p.write_text(json.dumps({'artifact_schema_version':1,'kind':'core_pkg_1_contract','status':'PASS'},sort_keys=True)+'\n')"
+      - uses: actions/upload-artifact@v4
+        with: {name: core-pkg-1-contract, path: qualification/core-pkg-1/contract.json}
+
+  clean-install-platform:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: linux-x86_64, os: ubuntu-latest}
+          - {platform: windows-x86_64, os: windows-latest}
+          - {platform: macos-x86_64, os: macos-15-intel}
+          - {platform: macos-arm64, os: macos-15}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'build>=1.2,<2'
+      - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
+      - run: python -m build --wheel --outdir language-dist
+      - name: Wheel-only consumer, binding and companion rollback
+        shell: bash
+        run: >-
+          python scripts/qualify_core_pkg_1_native_distribution.py
+          --native-wheel native-dist/*.whl
+          --language-wheel language-dist/*.whl
+          --platform "${{ matrix.platform }}"
+          --matrix-role platform
+          --python-minor 3.13
+          --output "qualification/core-pkg-1/platform-${{ matrix.platform }}.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-pkg-1-platform-${{ matrix.platform }}
+          path: qualification/core-pkg-1/platform-${{ matrix.platform }}.json
+
+  python-compatibility:
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "${{ matrix.python }}"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'build>=1.2,<2'
+      - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
+      - run: python -m build --wheel --outdir language-dist
+      - shell: bash
+        run: >-
+          python scripts/qualify_core_pkg_1_native_distribution.py
+          --native-wheel native-dist/*.whl
+          --language-wheel language-dist/*.whl
+          --platform linux-x86_64
+          --matrix-role python_compatibility
+          --python-minor "${{ matrix.python }}"
+          --output "qualification/core-pkg-1/python-${{ matrix.python }}.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-pkg-1-python-${{ matrix.python }}
+          path: qualification/core-pkg-1/python-${{ matrix.python }}.json
+
+  companion-installed-rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'build>=1.2,<2'
+      - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
+      - run: python -m pip install --no-deps native-dist/*.whl
+      - run: >-
+          python -c "from aether_compiler_core import companion_path;
+          import subprocess; p=companion_path(); assert p.is_file();
+          completed=subprocess.run([str(p)],capture_output=True,text=True);assert completed.returncode!=0"
+      - run: >-
+          python -c "import json,pathlib;
+          p=pathlib.Path('qualification/core-pkg-1/companion.json');p.parent.mkdir(parents=True,exist_ok=True);
+          p.write_text(json.dumps({'artifact_schema_version':1,'kind':'core_pkg_1_companion_smoke','status':'PASS'},sort_keys=True)+'\n')"
+      - uses: actions/upload-artifact@v4
+        with: {name: core-pkg-1-companion, path: qualification/core-pkg-1/companion.json}
+
+  binding-installed-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2' -r requirements.txt
+      - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
+      - run: python -m pip install --no-deps native-dist/*.whl
+      - run: >-
+          python -c "import _aether_core;from aether_compiler_core import CompilerCore,version_metadata;
+          assert _aether_core.QUALIFICATION_ONLY is False;assert CompilerCore();assert version_metadata()['protocol_version']==1"
+      - name: Replay CORE-1.0A regression lanes without promoting in-process
+        shell: bash
+        run: |
+          companion="$(python -c 'from aether_compiler_core import companion_path; print(companion_path())')"
+          extension="$(python -c 'import aether_compiler_core._aether_core as binding; print(binding.__file__)')"
+          for section in semantic production sessions; do
+            python scripts/qualify_core_1_0a_in_process.py \
+              --section "$section" \
+              --companion "$companion" \
+              --extension "$extension" \
+              --output "qualification/core-pkg-1/core-1-0a-$section.json" \
+              --smoke
+          done
+      - run: >-
+          python -c "import json,pathlib;
+          p=pathlib.Path('qualification/core-pkg-1/binding.json');p.parent.mkdir(parents=True,exist_ok=True);
+          p.write_text(json.dumps({'artifact_schema_version':1,'kind':'core_pkg_1_binding_smoke','status':'PASS'},sort_keys=True)+'\n')"
+      - uses: actions/upload-artifact@v4
+        with: {name: core-pkg-1-binding, path: qualification/core-pkg-1/binding.json}
+
+  source-development-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install compiler-rs/distributions/aether-compiler-core
+      - run: python -m pip install -e . --no-deps
+      - run: python -c "import _aether_core;from aether_compiler_core import companion_path;assert companion_path().is_file()"
+      - run: >-
+          python -c "import json,pathlib;
+          p=pathlib.Path('qualification/core-pkg-1/source.json');p.parent.mkdir(parents=True,exist_ok=True);
+          p.write_text(json.dumps({'artifact_schema_version':1,'kind':'core_pkg_1_source_development','status':'PASS'},sort_keys=True)+'\n')"
+      - uses: actions/upload-artifact@v4
+        with: {name: core-pkg-1-source, path: qualification/core-pkg-1/source.json}
+
+  failure-campaign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: python -m pip install -r requirements.txt pytest
+      - run: >-
+          PYTHONPATH=src python -m pytest -q
+          tests/aether/test_core_pkg_1_native_distribution.py
+          tests/aether/test_core_1_0a_qualification.py
+          -k 'fails_closed or shadow_binding or non_executable or missing_companion or incompatible_cpython_wheel'
+      - run: >-
+          python -c "import json,pathlib;
+          p=pathlib.Path('qualification/core-pkg-1/failures.json');p.parent.mkdir(parents=True,exist_ok=True);
+          p.write_text(json.dumps({'artifact_schema_version':1,'kind':'core_pkg_1_failure_campaign','status':'PASS'},sort_keys=True)+'\n')"
+      - uses: actions/upload-artifact@v4
+        with: {name: core-pkg-1-failures, path: qualification/core-pkg-1/failures.json}
+
+  aggregate-fail-closed:
+    if: always()
+    needs:
+      - package-contract
+      - clean-install-platform
+      - python-compatibility
+      - companion-installed-rollback
+      - binding-installed-smoke
+      - source-development-install
+      - failure-campaign
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with: {pattern: core-pkg-1-*, path: qualification/core-pkg-1/evidence, merge-multiple: true}
+      - run: >-
+          python scripts/check_core_pkg_1_native_distribution.py
+          --evidence-dir qualification/core-pkg-1/evidence
+          --output qualification/core-pkg-1/aggregate.json
+          --ci-closure --require-ready
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: core-pkg-1-aggregate, path: qualification/core-pkg-1/aggregate.json}

@@ -6,10 +6,15 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+build = "build.rs"
 
 [lib]
 name = "_aether_core"
 crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+productive-distribution = []
 
 [lints]
 workspace = true

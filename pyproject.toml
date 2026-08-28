@@ -11,11 +11,15 @@ requires-python = ">=3.11"
 license = "GPL-3.0-only"
 license-files = ["LICENSE"]
 dependencies = [
+    "aether-compiler-core==1.0.0rc4",
     "numpy==2.4.2",
     "scipy==1.17.1",
     "sympy==1.14.0",
     "matplotlib==3.10.8",
 ]
+
+[tool.uv.sources]
+aether-compiler-core = { path = "compiler-rs/distributions/aether-compiler-core" }
 
 [project.optional-dependencies]
 release = ["build>=1.2,<2"]

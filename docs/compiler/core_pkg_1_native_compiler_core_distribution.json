@@ -1,0 +1,66 @@
+{
+  "artifact_schema_version": 1,
+  "build_requires_rust": true,
+  "clean_wheel_consumer_requires_rust": false,
+  "compiler_core_api_version": 1,
+  "decision": "CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_PENDING_CI",
+  "distribution": {
+    "contents": [
+      "_aether_core",
+      "aether_compiler_core",
+      "aether-ssa-shadow[.exe]",
+      "native-core-manifest.json"
+    ],
+    "name": "aether-compiler-core",
+    "version": "1.0.0rc4"
+  },
+  "historical_qualification_distribution": {
+    "action": "retained as a separate qualification-only build",
+    "name": "aether-core-qualification",
+    "version": "0.1.0"
+  },
+  "language_dependency": "aether-compiler-core==1.0.0rc4",
+  "local_validation": {
+    "clean_consumer_status": "PASS",
+    "dependency_install_mode": "preinstalled_dependency_wheels_via_unprocessed_pth",
+    "language_wheel": {
+      "filename": "aether_language-1.0.0rc4-py3-none-any.whl",
+      "sha256": "074bb129dca6a4557e118acf237c6c98954eed6811feaebc9c43e7d9f7557bfe",
+      "tag": "py3-none-any"
+    },
+    "native_wheel": {
+      "filename": "aether_compiler_core-1.0.0rc4-cp314-cp314-manylinux_2_34_x86_64.whl",
+      "sha256": "cde8701b7a682d9a23217d165a4cee5996336d2e3289757a6f62e6c159ae4f25",
+      "tag": "cp314-cp314-manylinux_2_34_x86_64"
+    },
+    "platform": "linux-x86_64",
+    "python": "3.14",
+    "scope": "Native/language wheels were locally built; third-party Python dependency wheels were reused without exposing editable checkout .pth processing. CI performs normal pip resolution."
+  },
+  "milestone": "CORE-PKG-1",
+  "native_product_version": "0.1.0",
+  "production_transport": "companion",
+  "production_transport_changed": false,
+  "protocol_version": 1,
+  "python_strategy": {
+    "abi3": false,
+    "interpreters": [
+      "cp311",
+      "cp312",
+      "cp313",
+      "cp314"
+    ]
+  },
+  "required_platforms": [
+    "linux-x86_64",
+    "windows-x86_64",
+    "macos-x86_64",
+    "macos-arm64"
+  ],
+  "schemas": {
+    "input": [1],
+    "output": [2]
+  },
+  "semantics_changed": false,
+  "single_core_implementation": "aether-verifier::CompilerCore"
+}

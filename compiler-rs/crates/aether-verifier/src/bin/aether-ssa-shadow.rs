@@ -6,7 +6,11 @@ use std::time::Instant;
 
 use aether_ir::wire::IRModuleDTO;
 use aether_ir::{characterize_lower_normalized_ir_to_ssa_v1, normalize_lifecycle_v1};
-use aether_verifier::{CompilerCore, CompilerError, verify_owned_ssa};
+use aether_verifier::{
+    COMPILER_CORE_API_VERSION, COMPILER_CORE_INPUT_SCHEMA_VERSIONS,
+    COMPILER_CORE_OUTPUT_SCHEMA_VERSIONS, COMPILER_CORE_PROTOCOL_VERSION, CompilerCore,
+    CompilerError, verify_owned_ssa,
+};
 use serde::Serialize;
 use serde_json::json;
 
@@ -76,6 +80,22 @@ fn write_frame(out: &mut impl Write, value: &impl Serialize) -> Result<(), Box<d
 
 fn main() -> Result<(), Box<dyn Error>> {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
+    if arguments.as_slice() == ["--distribution-metadata"] {
+        println!(
+            "{}",
+            serde_json::to_string(&json!({
+                "build_identity": option_env!("AETHER_COMPILER_CORE_BUILD_IDENTITY")
+                    .unwrap_or("unversioned-development-build"),
+                "compiler_core_api_version": COMPILER_CORE_API_VERSION,
+                "input_schema_versions": COMPILER_CORE_INPUT_SCHEMA_VERSIONS,
+                "output_schema_versions": COMPILER_CORE_OUTPUT_SCHEMA_VERSIONS,
+                "product": "aether-ssa-shadow",
+                "product_version": env!("CARGO_PKG_VERSION"),
+                "protocol_version": COMPILER_CORE_PROTOCOL_VERSION,
+            }))?
+        );
+        return Ok(());
+    }
     if arguments.first().map(String::as_str) != Some("--persistent") {
         return Err("aether-ssa-shadow requires --persistent".into());
     }

@@ -40,8 +40,9 @@ pub use combined_verifier::{
     VerificationPhase, VerificationResult, verify_module,
 };
 pub use compiler_core::{
-    CompilationSession, CompilerCore, CompilerError, CompilerErrorKind, CompilerPhase,
-    SourceLocation,
+    COMPILER_CORE_API_VERSION, COMPILER_CORE_INPUT_SCHEMA_VERSIONS,
+    COMPILER_CORE_OUTPUT_SCHEMA_VERSIONS, COMPILER_CORE_PROTOCOL_VERSION, CompilationSession,
+    CompilerCore, CompilerError, CompilerErrorKind, CompilerPhase, SourceLocation,
 };
 pub use dominance_error::{
     BlockDominanceError, DominanceRuleError, DominanceUseLocation, FunctionDominanceError,

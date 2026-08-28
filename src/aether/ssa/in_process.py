@@ -21,8 +21,30 @@ class InProcessRustSSALoweringClient:
             if extension is not None
             else importlib.import_module("_aether_core")
         )
-        if self._extension.QUALIFICATION_ONLY is not True:
-            raise RuntimeError("in-process compiler core is not qualification-only")
+        qualification_only = getattr(self._extension, "QUALIFICATION_ONLY", None)
+        if qualification_only is False:
+            expected = {
+                "__version__": "1.0.0rc4",
+                "COMPILER_CORE_API_VERSION": 1,
+                "PROTOCOL_VERSION": 1,
+                "INPUT_SCHEMA_VERSIONS": (1,),
+                "OUTPUT_SCHEMA_VERSIONS": (2,),
+            }
+            mismatches = {
+                name: getattr(self._extension, name, None)
+                for name, value in expected.items()
+                if (
+                    tuple(getattr(self._extension, name, ())) != value
+                    if isinstance(value, tuple)
+                    else getattr(self._extension, name, None) != value
+                )
+            }
+            if mismatches:
+                raise RuntimeError(
+                    f"productive in-process compiler core is incompatible: {mismatches!r}"
+                )
+        elif qualification_only is not True:
+            raise RuntimeError("in-process compiler core has no recognized provenance")
         self._core = self._extension.CompilerCore()
         self._requests = 0
         self.last_error_detail: dict[str, object] | None = None

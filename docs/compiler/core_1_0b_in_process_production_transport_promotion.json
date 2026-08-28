@@ -1,0 +1,117 @@
+{
+  "artifact_schema_version": 1,
+  "kind": "core_1_0b_in_process_production_transport_promotion",
+  "milestone": "CORE-1.0B",
+  "audit_date": "2026-08-28",
+  "base_revision": "68bb482594dfb372eee2f55f9c5b725dba84e7cd",
+  "decision": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED",
+  "blocking_condition": {
+    "category": "significant_distribution_decision_required",
+    "stop_condition_triggered": true,
+    "summary": "The qualified PyO3 binding is a separate qualification-only wheel and is not delivered by the supported aether-language installation; promoting it to the default requires an explicit native runtime packaging contract.",
+    "facts": {
+      "main_distribution": "aether-language",
+      "main_build_backend": "setuptools.build_meta",
+      "main_wheel_kind": "pure Python py3-none-any",
+      "main_declares_native_runtime_dependency": false,
+      "binding_distribution": "aether-core-qualification",
+      "binding_build_backend": "maturin",
+      "binding_module": "_aether_core",
+      "binding_qualification_only": true,
+      "companion_required_install_location": "<sys.prefix>/libexec/aether/ssa-shadow",
+      "main_wheel_contains_companion": false
+    }
+  },
+  "production_audit": {
+    "entrypoints": [
+      "CLI native execution",
+      "CLI --emit-ssa",
+      "CLI --emit-llvm",
+      "aether.pipeline.lower_to_verified_ssa"
+    ],
+    "selection_point": "src/aether/pipeline.py::SSAPipeline.build",
+    "authority_resolver": "src/aether/ssa/shadow.py::resolve_ssa_lowering_authority_mode",
+    "current_default_authority": "rust_ssa_authority_refinement_verified",
+    "current_default_transport": "companion",
+    "current_client_factory": "src/aether/ssa/shadow.py::default_rust_ssa_lowering_client",
+    "current_production_client": "ProductionRustSSALoweringClient",
+    "persistent_client": "PersistentRustSSALoweringClient",
+    "protocol": "protocol-v1 length-framed JSON",
+    "input": "lifecycle-normalized Initial IR schema-v1",
+    "output": "SSA schema-v2",
+    "post_transport_stages": [
+      "schema_v2_import",
+      "imported_ssa_verification",
+      "same_input_integrity_before_refinement",
+      "independent_refinement_verification",
+      "same_input_integrity_after_refinement",
+      "final_generic_verification"
+    ],
+    "automatic_fallback": false,
+    "provenance_available": false
+  },
+  "shared_core": {
+    "shared": true,
+    "implementation": "aether_verifier::CompilerCore",
+    "companion_adapter": "compiler-rs/crates/aether-verifier/src/bin/aether-ssa-shadow.rs",
+    "pyo3_adapter": "compiler-rs/crates/aether-python/src/lib.rs",
+    "separate_semantic_cores": false
+  },
+  "authority_modes_preserved": [
+    "rust_ssa_authority_refinement_verified",
+    "rust_ssa_authority_python_shadow",
+    "python_ssa_authority_rust_shadow",
+    "python_ssa_only"
+  ],
+  "core_1_0a_basis": {
+    "formal_decision": "CORE_IN_PROCESS_BOUNDARY_QUALIFIED",
+    "historical_parity": "116/116",
+    "deep_cfg": [993, 1000, 5000, 10000],
+    "platforms": [
+      "linux-x86_64",
+      "windows-x86_64",
+      "macos-x86_64",
+      "macos-arm64"
+    ],
+    "cpython": ["3.11", "3.12", "3.13", "3.14"],
+    "scope_limit": "Qualified a separate qualification-only binding wheel; did not promote or package it as the aether-language production dependency."
+  },
+  "recommended_distribution_contract": {
+    "option": "separate version-locked native runtime distribution",
+    "contents": [
+      "_aether_core production binding",
+      "aether-ssa-shadow rollback companion",
+      "companion manifest"
+    ],
+    "consumer_contract": "aether-language declares an exact-version dependency on the native runtime distribution",
+    "unresolved_decisions": [
+      "production distribution name and version coupling",
+      "companion wheel install layout",
+      "sdist/no-compatible-wheel policy",
+      "editable and source-checkout behavior",
+      "atomic platform and CPython publication",
+      "CLI/LSP/IDE environment integration"
+    ]
+  },
+  "implementation": {
+    "transport_selector_added": false,
+    "default_changed": false,
+    "provenance_added": false,
+    "tests_added": false,
+    "qualification_script_added": false,
+    "checker_added": false,
+    "workflow_added": false,
+    "reason": "CORE-1.0B stop condition requires packaging approval before production architecture changes."
+  },
+  "scope_confirmations": {
+    "core_1_1_implemented": false,
+    "semantic_responsibilities_changed": false,
+    "schema_changed": false,
+    "lifecycle_changed": false,
+    "refinement_changed": false,
+    "authority_model_changed": false,
+    "companion_retained": true,
+    "automatic_fallback_added": false,
+    "commit_created": false
+  }
+}

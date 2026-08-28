@@ -3,9 +3,15 @@ revision = 3
 requires-python = ">=3.11"
 
 [[package]]
+name = "aether-compiler-core"
+version = "1.0.0rc4"
+source = { directory = "compiler-rs/distributions/aether-compiler-core" }
+
+[[package]]
 name = "aether-language"
 source = { editable = "." }
 dependencies = [
+    { name = "aether-compiler-core" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "scipy" },
@@ -27,6 +33,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aether-compiler-core", directory = "compiler-rs/distributions/aether-compiler-core" },
     { name = "build", marker = "extra == 'release'", specifier = ">=1.2,<2" },
     { name = "matplotlib", specifier = "==3.10.8" },
     { name = "numpy", specifier = "==2.4.2" },

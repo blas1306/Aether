@@ -368,7 +368,14 @@ class ProductionRustSSALoweringClient:
     def lower(self, payload: bytes) -> Mapping[str, object]:
         with self._lock:
             if self._client is None:
-                executable = discover_packaged_rust_ssa_shadow(self.package_directory())
+                try:
+                    from aether_compiler_core import companion_path
+                except ImportError as exc:
+                    raise RuntimeError(
+                        "compatible aether-compiler-core is required for the "
+                        "production SSA companion transport"
+                    ) from exc
+                executable = companion_path()
                 self._client = PersistentRustSSALoweringClient(
                     executable,
                     timeout_seconds=self.timeout_seconds,
