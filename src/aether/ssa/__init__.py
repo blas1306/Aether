@@ -22,6 +22,9 @@ from .general_builder import GeneralSSABuildError, GeneralSSABuilder
 from .shadow import (
     PersistentRustSSALoweringClient,
     ProductionRustSSALoweringClient,
+    RUST_CORE_TRANSPORT_ENV,
+    RustCoreTransport,
+    RustCoreTransportProvenance,
     SSALoweringAuthorityConfiguration,
     SSALoweringAuthorityMode,
     SSAShadowFailure,
@@ -32,6 +35,7 @@ from .shadow import (
     diagnostic_lower_with_rust_authority_without_python_shadow,
     SSAPerformanceProfile,
     production_rust_ssa_lowering_client,
+    resolve_rust_core_transport,
     resolve_ssa_lowering_authority_mode,
 )
 from .shadow_independent import (
@@ -145,6 +149,9 @@ __all__ = [
     "GeneralSSABuilder",
     "PersistentRustSSALoweringClient",
     "ProductionRustSSALoweringClient",
+    "RUST_CORE_TRANSPORT_ENV",
+    "RustCoreTransport",
+    "RustCoreTransportProvenance",
     "SSALoweringAuthorityConfiguration",
     "SSALoweringAuthorityMode",
     "SSAShadowFailure",
@@ -156,6 +163,7 @@ __all__ = [
     "SSAPerformanceProfile",
     "characterize_python_ssa_only",
     "production_rust_ssa_lowering_client",
+    "resolve_rust_core_transport",
     "resolve_ssa_lowering_authority_mode",
     "SHADOW_INDEPENDENT_QUALIFICATION_REVISION",
     "SHADOW_INDEPENDENT_STAGE_MANIFEST",

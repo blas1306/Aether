@@ -223,7 +223,7 @@ def test_checker_blocks_missing_evidence(tmp_path: Path) -> None:
     assert aggregate["companion_remains_production_and_rollback"] is True
 
 
-def test_adapters_share_core_without_making_binding_the_default() -> None:
+def test_historical_adapters_still_share_core_after_transport_promotion() -> None:
     companion = (
         ROOT / "compiler-rs/crates/aether-verifier/src/bin/aether-ssa-shadow.rs"
     ).read_text(encoding="utf-8")
@@ -237,6 +237,7 @@ def test_adapters_share_core_without_making_binding_the_default() -> None:
     assert "lower_verified_ssa(initial)" in companion
     assert "CompilerCore.accept_initial_ir(initial_ir)" in binding
     assert "pyo3" not in core
-    assert "InProcessRustSSALoweringClient" not in selector
+    assert "InProcessRustSSALoweringClient(binding())" in selector
+    assert 'RUST_CORE_TRANSPORT_ENV = "AETHER_RUST_CORE_TRANSPORT"' in selector
     assert "qualification_structured_errors: bool = False" in selector
     assert '#[serde(skip_serializing_if = "Option::is_none")]' in companion

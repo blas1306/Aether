@@ -4,7 +4,58 @@
   "milestone": "CORE-1.0B",
   "audit_date": "2026-08-28",
   "base_revision": "68bb482594dfb372eee2f55f9c5b725dba84e7cd",
-  "decision": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED",
+  "decision": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_PENDING_CI",
+  "historical_attempt": {
+    "base_revision": "68bb482594dfb372eee2f55f9c5b725dba84e7cd",
+    "decision": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED",
+    "evidence_preserved_below": true,
+    "sole_blocker": "productive native distribution"
+  },
+  "legacy_fields_scope": "The original blocking_condition, production_audit, shared_core, core_1_0a_basis, recommended_distribution_contract, implementation, and scope_confirmations fields below are the preserved first-attempt record.",
+  "resumed_promotion": {
+    "resumed_after": "CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_QUALIFIED",
+    "core_pkg_1_official_run": "33216160463",
+    "core_pkg_1_revision": "77417e7751482fc5a88a7d4207e99d67692da043",
+    "transport_environment": "AETHER_RUST_CORE_TRANSPORT",
+    "default_transport": "in_process",
+    "explicit_rollback_transport": "companion",
+    "automatic_fallback": false,
+    "productive_distribution": "aether-compiler-core==1.0.0rc4",
+    "stable_binding_interface": "aether_compiler_core.binding()",
+    "stable_companion_interface": "aether_compiler_core.companion_path()",
+    "provenance_fields": ["requested_transport", "observed_transport"],
+    "authority_modes_preserved": [
+      "rust_ssa_authority_refinement_verified",
+      "rust_ssa_authority_python_shadow",
+      "python_ssa_authority_rust_shadow",
+      "python_ssa_only"
+    ],
+    "required_artifacts": {
+      "qualifier": "scripts/qualify_core_1_0b_in_process_transport.py",
+      "checker": "scripts/check_core_1_0b_in_process_transport.py",
+      "tests": "tests/aether/test_core_1_0b_in_process_transport.py",
+      "workflow": ".github/workflows/core-in-process-promotion.yml"
+    },
+    "local_qualification": {
+      "decision": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_PENDING_CI",
+      "historical_both_transports": "116/116",
+      "production_pipeline_both_transports": "116/116",
+      "deep_cfg": [993, 1000, 5000, 10000],
+      "differential_match_and_divergence_fail_closed": ["in_process", "companion"],
+      "ssa_refinement_corruption_fail_closed": ["in_process", "companion"],
+      "companion_process_starts": 1,
+      "requested_equals_observed": true,
+      "warm_performance_seconds": {
+        "runs": 5,
+        "in_process_median": 0.006287443000474013,
+        "in_process_pstdev": 0.0009907485350818996,
+        "companion_median": 0.007316750008612871,
+        "companion_pstdev": 0.0019318137762339702,
+        "correctness_gate": false
+      }
+    },
+    "qualification_state": "local implementation complete; official platform/Python CI evidence not yet available"
+  },
   "blocking_condition": {
     "category": "significant_distribution_decision_required",
     "stop_condition_triggered": true,

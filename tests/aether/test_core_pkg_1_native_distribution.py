@@ -78,16 +78,20 @@ def test_python_compatibility_keeps_interpreter_specific_wheels() -> None:
     assert 'requires-python = ">=3.11"' in (NATIVE / "pyproject.toml").read_text()
 
 
-def test_production_default_remains_companion() -> None:
-    assert isinstance(default_rust_ssa_lowering_client(), ProductionRustSSALoweringClient)
+def test_production_default_uses_transport_router() -> None:
+    selected = default_rust_ssa_lowering_client()
+    assert isinstance(selected, ProductionRustSSALoweringClient)
+    assert selected.requested_transport == "in_process"
 
 
 def test_production_discovery_uses_stable_native_package_helper() -> None:
     source = (ROOT / "src/aether/ssa/shadow.py").read_text(encoding="utf-8")
     production = source[source.index("class ProductionRustSSALoweringClient"):source.index("_PRODUCTION_RUST_SSA_CLIENT")]
+    assert "from aether_compiler_core import binding" in production
+    assert "InProcessRustSSALoweringClient(binding())" in production
     assert "from aether_compiler_core import companion_path" in production
-    assert "executable = companion_path()" in production
-    assert "_aether_core" not in production
+    assert "companion_path()" in production
+    assert "import _aether_core" not in production
 
 
 def test_wrapper_fails_closed_on_missing_distribution(monkeypatch) -> None:

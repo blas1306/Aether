@@ -40,6 +40,7 @@ RUST_SSA_QUALIFICATION_EXECUTABLE_ENV = (
     "AETHER_INTERNAL_RUST_SSA_QUALIFICATION_EXECUTABLE"
 )
 SSA_AUTHORITY_MODE_ENV = "AETHER_SSA_AUTHORITY_MODE"
+RUST_CORE_TRANSPORT_ENV = "AETHER_RUST_CORE_TRANSPORT"
 
 _SSA_SHADOW_PLATFORMS = {
     "linux-x86_64": "x86_64-unknown-linux-gnu",
@@ -63,6 +64,38 @@ class SSALoweringAuthorityMode(str, Enum):
 class SSAShadowFailurePolicy(str, Enum):
     FAIL_CLOSED = "fail_closed"
     OBSERVE = "observe"
+
+
+@unique
+class RustCoreTransport(str, Enum):
+    IN_PROCESS = "in_process"
+    COMPANION = "companion"
+
+
+def resolve_rust_core_transport(
+    environment: Mapping[str, str] | None = None,
+) -> RustCoreTransport:
+    """Resolve transport independently from the SSA authority policy."""
+    values = os.environ if environment is None else environment
+    raw = values.get(RUST_CORE_TRANSPORT_ENV)
+    if raw is None:
+        return RustCoreTransport.IN_PROCESS
+    try:
+        return RustCoreTransport(raw)
+    except ValueError:
+        supported = ", ".join(transport.value for transport in RustCoreTransport)
+        raise ValueError(
+            f"invalid {RUST_CORE_TRANSPORT_ENV}={raw!r}; expected one of: "
+            f"{supported}"
+        ) from None
+
+
+@dataclass(frozen=True)
+class RustCoreTransportProvenance:
+    """Machine-readable observation of one productive Rust client."""
+
+    requested_transport: str
+    observed_transport: str
 
 
 def resolve_ssa_lowering_authority_mode(
@@ -193,6 +226,7 @@ class RustSSALoweringClient(Protocol):
     @property
     def request_count(self) -> int: ...
     def lower(self, payload: bytes) -> Mapping[str, object]: ...
+    def close(self) -> None: ...
 
 
 class PersistentRustSSALoweringClient:
@@ -342,20 +376,34 @@ class PersistentRustSSALoweringClient:
 
 
 class ProductionRustSSALoweringClient:
-    """Lazily use the strictly packaged production companion.
+    """Lazily create one explicitly selected productive Rust transport.
 
-    The package is selected only from the canonical installation prefix.  No
-    PATH, checkout, Cargo target-directory, or debug-binary fallback exists.
+    Selection is immutable for the lifetime of this client. Either adapter is
+    discovered only through ``aether_compiler_core`` and failures are returned
+    directly: this class never attempts the other transport.
     """
 
-    def __init__(self, *, timeout_seconds: float = 10.0) -> None:
+    def __init__(
+        self,
+        transport: RustCoreTransport | str | None = None,
+        *,
+        timeout_seconds: float = 10.0,
+    ) -> None:
         self.timeout_seconds = timeout_seconds
-        self._client: PersistentRustSSALoweringClient | None = None
+        if transport is None:
+            self._transport = resolve_rust_core_transport()
+        else:
+            try:
+                self._transport = RustCoreTransport(transport)
+            except ValueError:
+                supported = ", ".join(value.value for value in RustCoreTransport)
+                raise ValueError(
+                    f"invalid Rust core transport {transport!r}; expected one of: "
+                    f"{supported}"
+                ) from None
+        self._client: RustSSALoweringClient | None = None
+        self._observed_transport: RustCoreTransport | None = None
         self._lock = threading.Lock()
-
-    @staticmethod
-    def package_directory() -> Path:
-        return Path(sys.prefix) / "libexec" / "aether" / "ssa-shadow"
 
     @property
     def process_start_count(self) -> int:
@@ -365,21 +413,55 @@ class ProductionRustSSALoweringClient:
     def request_count(self) -> int:
         return self._client.request_count if self._client is not None else 0
 
+    @property
+    def requested_transport(self) -> str:
+        return self._transport.value
+
+    @property
+    def observed_transport(self) -> str | None:
+        observed = self._observed_transport
+        return observed.value if observed is not None else None
+
+    @property
+    def provenance(self) -> RustCoreTransportProvenance:
+        observed = self._observed_transport
+        if observed is None:
+            raise RuntimeError("Rust core transport has not been observed yet")
+        return RustCoreTransportProvenance(
+            requested_transport=self._transport.value,
+            observed_transport=observed.value,
+        )
+
+    def _create_client(self) -> RustSSALoweringClient:
+        if self._transport is RustCoreTransport.IN_PROCESS:
+            try:
+                from aether_compiler_core import binding
+            except ImportError as exc:
+                raise RuntimeError(
+                    "compatible aether-compiler-core is required for the "
+                    "in-process Rust core transport"
+                ) from exc
+            from .in_process import InProcessRustSSALoweringClient
+
+            return InProcessRustSSALoweringClient(binding())
+
+        try:
+            from aether_compiler_core import companion_path
+        except ImportError as exc:
+            raise RuntimeError(
+                "compatible aether-compiler-core is required for the "
+                "companion Rust core transport"
+            ) from exc
+        return PersistentRustSSALoweringClient(
+            companion_path(),
+            timeout_seconds=self.timeout_seconds,
+        )
+
     def lower(self, payload: bytes) -> Mapping[str, object]:
         with self._lock:
             if self._client is None:
-                try:
-                    from aether_compiler_core import companion_path
-                except ImportError as exc:
-                    raise RuntimeError(
-                        "compatible aether-compiler-core is required for the "
-                        "production SSA companion transport"
-                    ) from exc
-                executable = companion_path()
-                self._client = PersistentRustSSALoweringClient(
-                    executable,
-                    timeout_seconds=self.timeout_seconds,
-                )
+                self._client = self._create_client()
+                self._observed_transport = self._transport
             client = self._client
         return client.lower(payload)
 
@@ -390,8 +472,21 @@ class ProductionRustSSALoweringClient:
             client.close()
 
 
-_PRODUCTION_RUST_SSA_CLIENT = ProductionRustSSALoweringClient()
-atexit.register(_PRODUCTION_RUST_SSA_CLIENT.close)
+_PRODUCTION_RUST_SSA_CLIENTS: dict[
+    RustCoreTransport, ProductionRustSSALoweringClient
+] = {}
+_PRODUCTION_RUST_SSA_CLIENTS_LOCK = threading.Lock()
+
+
+def _close_production_rust_ssa_clients() -> None:
+    with _PRODUCTION_RUST_SSA_CLIENTS_LOCK:
+        clients = tuple(_PRODUCTION_RUST_SSA_CLIENTS.values())
+        _PRODUCTION_RUST_SSA_CLIENTS.clear()
+    for client in clients:
+        client.close()
+
+
+atexit.register(_close_production_rust_ssa_clients)
 
 _QUALIFICATION_RUST_SSA_CLIENTS: dict[Path, PersistentRustSSALoweringClient] = {}
 _QUALIFICATION_RUST_SSA_CLIENTS_LOCK = threading.Lock()
@@ -408,9 +503,21 @@ def _close_qualification_rust_ssa_clients() -> None:
 atexit.register(_close_qualification_rust_ssa_clients)
 
 
-def production_rust_ssa_lowering_client() -> ProductionRustSSALoweringClient:
-    """Return the process-wide persistent production companion client."""
-    return _PRODUCTION_RUST_SSA_CLIENT
+def production_rust_ssa_lowering_client(
+    transport: RustCoreTransport | str | None = None,
+) -> ProductionRustSSALoweringClient:
+    """Return the process-wide reusable client for one selected transport."""
+    selected = (
+        resolve_rust_core_transport()
+        if transport is None
+        else RustCoreTransport(transport)
+    )
+    with _PRODUCTION_RUST_SSA_CLIENTS_LOCK:
+        client = _PRODUCTION_RUST_SSA_CLIENTS.get(selected)
+        if client is None:
+            client = ProductionRustSSALoweringClient(selected)
+            _PRODUCTION_RUST_SSA_CLIENTS[selected] = client
+        return client
 
 
 def default_rust_ssa_lowering_client() -> RustSSALoweringClient:

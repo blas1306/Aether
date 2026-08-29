@@ -1,0 +1,217 @@
+name: core-in-process-production-transport-promotion
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  AETHER_COMPILER_CORE_BUILD_IDENTITY: ${{ github.sha }}
+
+jobs:
+  production-default-in-process:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: python -m pip install -r requirements.txt pytest
+      - run: PYTHONPATH=src python -m pytest -q tests/aether/test_core_1_0b_in_process_transport.py -k 'default or policy or provenance'
+
+  explicit-companion-rollback:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: python -m pip install -r requirements.txt pytest
+      - run: PYTHONPATH=src AETHER_RUST_CORE_TRANSPORT=companion python -m pytest -q tests/aether/test_core_1_0b_in_process_transport.py -k 'companion or rollback'
+
+  no-fallback:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: python -m pip install -r requirements.txt pytest
+      - run: PYTHONPATH=src python -m pytest -q tests/aether/test_core_1_0b_in_process_transport.py -k 'broken or missing or hidden or invalid'
+
+  sessions-concurrency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: python -m pip install -r requirements.txt pytest
+      - run: PYTHONPATH=src python -m pytest -q tests/aether/test_core_1_0b_in_process_transport.py tests/aether/test_core_1_0_in_process_boundary.py -k 'reuse or concurrent or session or one_productive'
+
+  differential-both-transports:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: python -m pip install -r requirements.txt pytest
+      - run: PYTHONPATH=src python -m pytest -q tests/aether/test_core_1_0b_in_process_transport.py -k 'orthogonal'
+
+  affected-rust-4-5:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt pytest 'maturin>=1.9.4,<2'
+      - run: python -m pip install --no-build-isolation compiler-rs/distributions/aether-compiler-core
+      - run: >-
+          PYTHONPATH=src python -m pytest -q
+          tests/aether/test_core_1_0b_in_process_transport.py
+          tests/aether/test_rust_ssa_shadow_mode.py
+          tests/aether/test_rust_ssa_shadow_independent.py
+
+  transport-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt pytest 'maturin>=1.9.4,<2'
+      - run: python -m pip install --no-build-isolation compiler-rs/distributions/aether-compiler-core
+      - run: python -m pip install -e . --no-deps
+      - run: >-
+          python scripts/qualify_core_1_0b_in_process_transport.py
+          --revision "${{ github.sha }}"
+          --ci-run-id "${{ github.run_id }}"
+          --output qualification/core-1.0b/functional.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: core-1-0b-functional, path: qualification/core-1.0b/functional.json}
+
+  production-pipeline:
+    needs: transport-parity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt pytest 'maturin>=1.9.4,<2'
+      - run: python -m pip install --no-build-isolation compiler-rs/distributions/aether-compiler-core
+      - run: >-
+          PYTHONPATH=src python -m pytest -q
+          tests/aether/test_pipeline.py
+          tests/aether/test_expense_tracker_example.py
+          tests/aether/test_numerical_methods_example.py
+
+  packaging-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'build>=1.2,<2'
+      - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
+      - run: python -m build --wheel --outdir language-dist
+      - run: python -m pip install --force-reinstall --no-deps native-dist/*.whl language-dist/*.whl
+      - name: Clean consumer has no Cargo or rustc
+        shell: bash
+        run: |
+          consumer_python="$(command -v python)"
+          consumer_path="$(dirname "$consumer_python"):/usr/bin:/bin"
+          PATH="$consumer_path" "$consumer_python" -c "import shutil; assert shutil.which('cargo') is None; assert shutil.which('rustc') is None"
+      - run: python -c "from aether.ssa.shadow import production_rust_ssa_lowering_client as c;from aether.ir.model import IRModule;from aether.pipeline import SSAPipeline;assert SSAPipeline().run(IRModule()).ssa_module is not None;assert c().requested_transport=='in_process'"
+      - run: AETHER_RUST_CORE_TRANSPORT=companion python -c "from aether.ir.model import IRModule;from aether.pipeline import SSAPipeline;assert SSAPipeline().run(IRModule()).ssa_module is not None"
+
+  platform-matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: linux-x86_64, os: ubuntu-latest}
+          - {platform: windows-x86_64, os: windows-latest}
+          - {platform: macos-x86_64, os: macos-15-intel}
+          - {platform: macos-arm64, os: macos-15}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt pytest 'maturin>=1.9.4,<2'
+      - run: python -m pip install --no-build-isolation compiler-rs/distributions/aether-compiler-core
+      - run: python -m pip install -e . --no-deps
+      - shell: bash
+        run: >-
+          python scripts/qualify_core_1_0b_in_process_transport.py --smoke
+          --revision "${{ github.sha }}" --ci-run-id "${{ github.run_id }}"
+          --platform "${{ matrix.platform }}" --matrix-role platform
+          --output "qualification/core-1.0b/platform-${{ matrix.platform }}.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: core-1-0b-platform-${{ matrix.platform }}, path: qualification/core-1.0b/*.json}
+
+  python-compatibility:
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "${{ matrix.python }}"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt pytest 'maturin>=1.9.4,<2'
+      - run: python -m pip install --no-build-isolation compiler-rs/distributions/aether-compiler-core
+      - run: python -m pip install -e . --no-deps
+      - run: >-
+          python scripts/qualify_core_1_0b_in_process_transport.py --smoke
+          --revision "${{ github.sha }}" --ci-run-id "${{ github.run_id }}"
+          --platform linux-x86_64 --python-minor "${{ matrix.python }}"
+          --matrix-role python_compatibility
+          --output "qualification/core-1.0b/python-${{ matrix.python }}.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: core-1-0b-python-${{ matrix.python }}, path: qualification/core-1.0b/*.json}
+
+  aggregate-fail-closed:
+    if: always()
+    needs:
+      - production-default-in-process
+      - explicit-companion-rollback
+      - transport-parity
+      - differential-both-transports
+      - production-pipeline
+      - no-fallback
+      - sessions-concurrency
+      - affected-rust-4-5
+      - packaging-regression
+      - platform-matrix
+      - python-compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Require every promotion prerequisite
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: exit 1
+      - uses: actions/download-artifact@v4
+        if: always()
+        with: {pattern: core-1-0b-*, path: qualification/core-1.0b, merge-multiple: true}
+      - if: always()
+        run: >-
+          python scripts/check_core_1_0b_in_process_transport.py
+          --evidence-dir qualification/core-1.0b
+          --revision "${{ github.sha }}"
+          --ci-closure --require-promoted
+          --output qualification/core-1.0b/aggregate.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: core-1-0b-aggregate, path: qualification/core-1.0b/aggregate.json}

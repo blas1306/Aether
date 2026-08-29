@@ -186,3 +186,64 @@ workflow histórico.
 - No se cambió ningún authority mode.
 - No se cambió schema-v1/schema-v2.
 - No se creó commit.
+
+---
+
+## Promoción retomada después de CORE-PKG-1
+
+La sección anterior conserva el primer intento y su decisión
+`CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED`. Ese intento no fue
+incorrecto ni se reinterpreta: su único STOP blocker era la ausencia de una
+distribución productiva del binding. CORE-PKG-1 lo resolvió formalmente con
+`aether-compiler-core==1.0.0rc4` (run `33216160463`, revisión
+`77417e7751482fc5a88a7d4207e99d67692da043`). No apareció otro bloqueo durante
+la reauditoría del punto productivo.
+
+La promoción retomada agrega el eje ortogonal
+`AETHER_RUST_CORE_TRANSPORT`. La ausencia de la variable y el valor
+`in_process` seleccionan PyO3; `companion` selecciona protocol-v1. Cualquier
+otro valor falla cerrado. La selección queda fija en cada cliente productivo,
+ambos clientes se reutilizan durante el proceso y ninguna excepción intenta el
+otro transporte.
+
+La ruta PyO3 entra por `aether_compiler_core.binding()` y la ruta rollback por
+`aether_compiler_core.companion_path()`. Por lo tanto ambas ejecutan el mismo
+build productivo versionado y verificado por CORE-PKG-1, sin depender de CWD,
+PATH, checkout, `target/release` ni de `aether-core-qualification`.
+
+`ProductionRustSSALoweringClient.provenance` expone de forma machine-readable
+`requested_transport` y `observed_transport`. El core PyO3 se crea lazy una vez
+por transporte y se reutiliza; cada request conserva una sesión Rust-owned
+independiente. El contador y el último error estructurado son seguros para
+concurrencia (este último es local al thread). El companion conserva startup
+lazy, reuse persistente, recovery y cierre por `atexit`.
+
+No cambió `SSAPipeline.build`: los tres modos de authority que necesitan Rust
+siguen recibiendo el mismo protocolo lógico de cliente y pueden ejecutar ambos
+transportes. `python_ssa_only` no consulta la política de transporte. Tampoco
+cambiaron Initial IR, schema-v1/v2, lifecycle, SSA, import, verifier,
+refinement, canonical comparison, optimizer, backend ni protocol-v1.
+
+La calificación executable queda definida por:
+
+- `tests/aether/test_core_1_0b_in_process_transport.py`: política, provenance,
+  no-fallback, sesiones/concurrencia, default guard y ortogonalidad;
+- `scripts/qualify_core_1_0b_in_process_transport.py`: pipeline `.ae`, corpus
+  histórico, CFG profundo, failures, differential, rollback y performance por
+  ambos transportes productivos;
+- `scripts/check_core_1_0b_in_process_transport.py`: aggregate fail-closed con
+  revisión exacta, matrices completas y ausencia de evidencia tratada como
+  bloqueo;
+- `.github/workflows/core-in-process-promotion.yml`: Linux/Windows/macOS,
+  x86_64/arm64 y CPython 3.11–3.14, sin modificar los workflows históricos.
+
+CLI, VS Code/LSP e IntelliJ no poseen un selector de companion separado: todos
+terminan en el paquete/CLI Python y `SSAPipeline`; por eso la promoción no exige
+rediseño IDE. El workflow agrega smoke del pipeline compartido y clean-wheel
+consumer para ambos transportes.
+
+La decisión previa al CI oficial es
+`CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_PENDING_CI`. Sólo el aggregate
+con evidencia oficial completa puede emitir
+`CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTED`; cualquier lane ausente o
+fallida emite `CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED`.
