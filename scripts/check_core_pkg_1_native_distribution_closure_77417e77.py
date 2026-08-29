@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import tempfile
 
 
@@ -135,6 +136,23 @@ EXPECTED_ARTIFACTS = {
     ),
 }
 
+EXPECTED_ARTIFACT_SIZES = {
+    "core-pkg-1-aggregate": 1234,
+    "core-pkg-1-platform-macos-x86_64": 1569,
+    "core-pkg-1-contract": 220,
+    "core-pkg-1-platform-windows-x86_64": 1587,
+    "core-pkg-1-platform-macos-arm64": 1567,
+    "core-pkg-1-python-3.14": 1487,
+    "core-pkg-1-python-3.13": 1490,
+    "core-pkg-1-binding": 2741,
+    "core-pkg-1-python-3.11": 1489,
+    "core-pkg-1-python-3.12": 1488,
+    "core-pkg-1-source": 223,
+    "core-pkg-1-companion": 227,
+    "core-pkg-1-platform-linux-x86_64": 1499,
+    "core-pkg-1-failures": 226,
+}
+
 EXPECTED_PLATFORMS = {
     "linux-x86_64": (
         "3.13.15",
@@ -218,6 +236,7 @@ EXPECTED_ELIGIBILITY = {
     "failure_campaign_qualified",
     "four_platform_clean_consumers_qualified",
     "historical_failed_run_preserved",
+    "known_warnings_classified",
     "package_contract_qualified",
     "production_companion_default_preserved",
     "run_conclusion_success",
@@ -300,6 +319,7 @@ def _check_artifacts(evidence: dict[str, object]) -> bool:
         if not (
             row.get("artifact_id") == artifact_id
             and row.get("archive_filename") == f"{name}.zip"
+            and row.get("archive_size_bytes") == EXPECTED_ARTIFACT_SIZES[name]
             and row.get("github_digest_sha256") == digest
             and row.get("archive_sha256") == digest
             and row.get("digest_verified") is True
@@ -377,6 +397,9 @@ def _check_identity(evidence: dict[str, object]) -> bool:
         and row.get("input_schema_versions") == [1]
         and row.get("output_schema_versions") == [2]
         and row.get("build_identity") == REVISION
+        and row.get("binding_build_identity") == REVISION
+        and row.get("manifest_build_identity") == REVISION
+        and row.get("companion_build_identity") == REVISION
         and row.get("single_core_implementation") == "aether-verifier::CompilerCore"
         and row.get("binding_and_companion_same_contract") is True
         and "do not claim universal semantic identity" in str(row.get("scope"))
@@ -454,6 +477,11 @@ def _check_binding(evidence: dict[str, object]) -> bool:
         and row.get("protocol_version") == 1
         and row.get("production_regression_gate_count") == 9
         and row.get("shared_core_guard_count") == 4
+        and row.get("required_job_steps") == {
+            "Project checked production guard into CORE-PKG-1 evidence": "success",
+            "Replay CORE-1.0A regression lanes without promoting in-process": "success",
+            "Validate exact CORE-1.0A production evidence": "success",
+        }
         and row.get("exact_core_1_0a_production_evidence") == "PASS"
         and row.get("upstream_decision") == "CORE_IN_PROCESS_PRODUCTION_GUARD_QUALIFIED"
         and row.get("production_guard_projected") is True
@@ -545,6 +573,34 @@ def _check_historical(evidence: dict[str, object]) -> bool:
     )
 
 
+def _check_warnings(evidence: dict[str, object]) -> bool:
+    row = evidence.get("known_warnings_and_limitations")
+    if not isinstance(row, dict):
+        return False
+    node = row.get("node_js_runtime")
+    return bool(
+        isinstance(node, dict)
+        and node == {
+            "actions_target": "Node.js 20",
+            "affected_actions": [
+                "actions/checkout@v4",
+                "actions/setup-python@v5",
+                "actions/download-artifact@v4",
+                "actions/upload-artifact@v4",
+            ],
+            "classification": "CI maintenance warning",
+            "core_pkg_1_failure": False,
+            "executed_runtime": "Node.js 24",
+            "observed": True,
+        }
+        and row.get("performance_characterization_available") is False
+        and row.get("rust_required_in_build_environment") is True
+        and row.get("rust_or_cargo_required_by_clean_consumer") is False
+        and row.get("universal_platform_compatibility_claimed") is False
+        and row.get("universal_python_compatibility_claimed") is False
+    )
+
+
 def _check_scope(evidence: dict[str, object]) -> bool:
     scope = evidence.get("scope")
     blocker = evidence.get("core_1_0b_distribution_blocker")
@@ -575,7 +631,18 @@ def _check_source_snapshot(evidence: dict[str, object], root: Path) -> bool:
     snapshot = evidence.get("source_snapshot")
     if snapshot != EXPECTED_SOURCE_SNAPSHOT:
         return False
-    return all((root / name).is_file() and _digest(root / name) == digest for name, digest in EXPECTED_SOURCE_SNAPSHOT.items())
+    # This is a historical closure. Validate the immutable qualified revision,
+    # not a later worktree that may legitimately implement subsequent milestones.
+    for name, digest in EXPECTED_SOURCE_SNAPSHOT.items():
+        completed = subprocess.run(
+            ["git", "show", f"{REVISION}:{name}"],
+            cwd=root,
+            check=False,
+            capture_output=True,
+        )
+        if completed.returncode != 0 or sha256(completed.stdout).hexdigest() != digest:
+            return False
+    return True
 
 
 def _check_report(report_path: Path) -> bool:
@@ -591,6 +658,7 @@ def _check_report(report_path: Path) -> bool:
         "CORE-1.1 was not implemented",
         "14 artifacts",
         "byte-identical",
+        "CI maintenance warning",
     )
     return all(token in report for token in required)
 
@@ -603,7 +671,11 @@ def verify_downloaded_official_evidence(
     files_ok = True
     for name, (_artifact_id, digest, _job, files) in EXPECTED_ARTIFACTS.items():
         archive = archive_dir / f"{name}.zip"
-        archives_ok &= archive.is_file() and _digest(archive) == digest
+        archives_ok &= (
+            archive.is_file()
+            and archive.stat().st_size == EXPECTED_ARTIFACT_SIZES[name]
+            and _digest(archive) == digest
+        )
         for filename, expected_hash in files.items():
             matches = list(evidence_dir.rglob(filename))
             files_ok &= len(matches) == 1 and _digest(matches[0]) == expected_hash
@@ -675,6 +747,7 @@ def build_record(
         "failure_campaign": _check_failure_campaign(evidence),
         "production_companion_default_guard": _check_production_guard(evidence),
         "historical_failed_run": _check_historical(evidence),
+        "known_warnings_and_limitations": _check_warnings(evidence),
         "closure_scope": _check_scope(evidence),
         "source_snapshot": _check_source_snapshot(evidence, root),
         "closure_report": _check_report(report_path),

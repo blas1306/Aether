@@ -43,25 +43,26 @@ missing, skipped, neutral, cancelled ni con otra revisión.
 GitHub publicó exactamente 14 artifacts. Cada ZIP fue descargado por artifact
 ID a un directorio temporal separado. Los 14 SHA-256 calculados coinciden con
 los 14 digests `sha256:` publicados por GitHub. Se extrajeron 16 archivos JSON;
-todos fueron parseados y hasheados. El manifest completo, incluidos filenames y
-SHA-256 de cada archivo extraído, está en el JSON machine-readable del cierre.
+todos fueron parseados y hasheados. El manifest completo, incluidos tamaños de
+archive, filenames y SHA-256 de cada archivo extraído, está en el JSON
+machine-readable del cierre.
 
-| Artifact | ID | Job fuente | Digest del ZIP |
-|---|---:|---|---|
-| core-pkg-1-aggregate | 9703572314 | aggregate-fail-closed | `a92971fc…d12c6` |
-| core-pkg-1-platform-macos-x86_64 | 9703566500 | clean-install macOS x86_64 | `0f513c11…0143d` |
-| core-pkg-1-contract | 9703547555 | package-contract | `df70a059…fbfb97` |
-| core-pkg-1-platform-windows-x86_64 | 9703523966 | clean-install Windows x86_64 | `23c8bb54…0f042` |
-| core-pkg-1-platform-macos-arm64 | 9703484287 | clean-install macOS arm64 | `49e4aa9f…84270` |
-| core-pkg-1-python-3.14 | 9703471366 | python-compatibility 3.14 | `92610936…70014` |
-| core-pkg-1-python-3.13 | 9703470254 | python-compatibility 3.13 | `af7e929e…b8c6e` |
-| core-pkg-1-binding | 9703468423 | binding-installed-smoke | `160e9447…e38ad` |
-| core-pkg-1-python-3.11 | 9703467588 | python-compatibility 3.11 | `be4494f2…0385e` |
-| core-pkg-1-python-3.12 | 9703465913 | python-compatibility 3.12 | `56fa5890…81063` |
-| core-pkg-1-source | 9703458937 | source-development-install | `55f743fd…fbeb3` |
-| core-pkg-1-companion | 9703458761 | companion-installed-rollback | `1169c900…3c767` |
-| core-pkg-1-platform-linux-x86_64 | 9703456798 | clean-install Linux x86_64 | `5c246fbf…2fb8f` |
-| core-pkg-1-failures | 9703424671 | failure-campaign | `7e4020f4…1ffd8e` |
+| Artifact | ID | Bytes | Job fuente | Digest del ZIP |
+|---|---:|---:|---|---|
+| core-pkg-1-aggregate | 9703572314 | 1234 | aggregate-fail-closed | `a92971fc…d12c6` |
+| core-pkg-1-platform-macos-x86_64 | 9703566500 | 1569 | clean-install macOS x86_64 | `0f513c11…0143d` |
+| core-pkg-1-contract | 9703547555 | 220 | package-contract | `df70a059…fbfb97` |
+| core-pkg-1-platform-windows-x86_64 | 9703523966 | 1587 | clean-install Windows x86_64 | `23c8bb54…0f042` |
+| core-pkg-1-platform-macos-arm64 | 9703484287 | 1567 | clean-install macOS arm64 | `49e4aa9f…84270` |
+| core-pkg-1-python-3.14 | 9703471366 | 1487 | python-compatibility 3.14 | `92610936…70014` |
+| core-pkg-1-python-3.13 | 9703470254 | 1490 | python-compatibility 3.13 | `af7e929e…b8c6e` |
+| core-pkg-1-binding | 9703468423 | 2741 | binding-installed-smoke | `160e9447…e38ad` |
+| core-pkg-1-python-3.11 | 9703467588 | 1489 | python-compatibility 3.11 | `be4494f2…0385e` |
+| core-pkg-1-python-3.12 | 9703465913 | 1488 | python-compatibility 3.12 | `56fa5890…81063` |
+| core-pkg-1-source | 9703458937 | 223 | source-development-install | `55f743fd…fbeb3` |
+| core-pkg-1-companion | 9703458761 | 227 | companion-installed-rollback | `1169c900…3c767` |
+| core-pkg-1-platform-linux-x86_64 | 9703456798 | 1499 | clean-install Linux x86_64 | `5c246fbf…2fb8f` |
+| core-pkg-1-failures | 9703424671 | 226 | failure-campaign | `7e4020f4…1ffd8e` |
 
 Los artifacts `contract`, `companion`, `source` y `failures` son marcadores
 machine-readable `PASS`; no se les atribuyen campos que no contienen. Sus
@@ -143,6 +144,11 @@ checker devolvió `CORE_IN_PROCESS_PRODUCTION_GUARD_QUALIFIED`, y la proyección
 registró nueve regression gates y cuatro shared-core guards. La evidencia
 upstream sigue marcada `CORE-1.0A` y `qualification_only=true`.
 
+Los steps `Replay CORE-1.0A regression lanes without promoting in-process`,
+`Validate exact CORE-1.0A production evidence` y
+`Project checked production guard into CORE-PKG-1 evidence` se ejecutaron y
+terminaron individualmente en `success`; no se infieren sólo del color del job.
+
 El job dedicado de companion, en Ubuntu con CPython 3.13.15, instaló el wheel
 nativo, descubrió el binario por `aether_compiler_core.companion_path`, comprobó
 su existencia y verificó que arrancar sin una request válida falla. El protocolo,
@@ -191,6 +197,13 @@ sobrescribe ni reinterpreta el histórico.
 
 ## Límites y cambios
 
+GitHub emitió en los 14 jobs el warning de que `actions/checkout@v4`,
+`actions/setup-python@v5`, `actions/download-artifact@v4` y
+`actions/upload-artifact@v4` todavía targetean Node.js 20 y fueron forzadas a
+ejecutarse bajo Node.js 24. Se clasifica como **CI maintenance warning**, no
+como fallo CORE-PKG-1: los jobs y gates siguieron en `success` y no hay evidencia
+contraria en el run.
+
 No hay caracterización de performance en estos artifacts y performance no es un
 gate. Este cierre crea sólo documento, manifest, checker y tests separados. No
 modifica packaging productivo, workflow, CompilerCore, SSA, refinement,
@@ -201,4 +214,5 @@ El checker fail-closed
 revisión, jobs, artifact IDs/digests/hashes, aggregate, contrato, identidad,
 matrices, smoke/rollback/source/failures y el guard companion-default. También
 puede recibir los directorios de ZIPs y evidencia oficial para reverificar los
-payloads descargados y la reproducción byte-identical.
+payloads descargados y la reproducción byte-identical. El snapshot de fuentes
+se verifica contra la revisión histórica exacta, no contra un worktree posterior.

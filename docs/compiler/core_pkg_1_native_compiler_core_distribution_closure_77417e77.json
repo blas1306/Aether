@@ -37,6 +37,7 @@
   "artifact_manifest": [
     {
       "archive_filename": "core-pkg-1-aggregate.zip",
+      "archive_size_bytes": 1234,
       "archive_sha256": "a92971fc62bc74b24b840059d64611dd915dbf77406aa150afe495c3ef4d12c6",
       "artifact_id": 9703572314,
       "artifact_name": "core-pkg-1-aggregate",
@@ -50,6 +51,7 @@
     },
     {
       "archive_filename": "core-pkg-1-platform-macos-x86_64.zip",
+      "archive_size_bytes": 1569,
       "archive_sha256": "0f513c1132df98b1fbb587be2774fb88ad61d7d50df4807d9c28ddc99ad0143d",
       "artifact_id": 9703566500,
       "artifact_name": "core-pkg-1-platform-macos-x86_64",
@@ -63,6 +65,7 @@
     },
     {
       "archive_filename": "core-pkg-1-contract.zip",
+      "archive_size_bytes": 220,
       "archive_sha256": "df70a0599185745152ea821be40c1fd7b7c971fead6dc1a9c7bd7940f8fbfb97",
       "artifact_id": 9703547555,
       "artifact_name": "core-pkg-1-contract",
@@ -76,6 +79,7 @@
     },
     {
       "archive_filename": "core-pkg-1-platform-windows-x86_64.zip",
+      "archive_size_bytes": 1587,
       "archive_sha256": "23c8bb544ac360803cceba939df6ae34f22a0278723a5c2739d2c1c2c130f042",
       "artifact_id": 9703523966,
       "artifact_name": "core-pkg-1-platform-windows-x86_64",
@@ -89,6 +93,7 @@
     },
     {
       "archive_filename": "core-pkg-1-platform-macos-arm64.zip",
+      "archive_size_bytes": 1567,
       "archive_sha256": "49e4aa9fd5f4bd9a2f1c6118cf9095a422d7e750e12356d7d06e806211484270",
       "artifact_id": 9703484287,
       "artifact_name": "core-pkg-1-platform-macos-arm64",
@@ -102,6 +107,7 @@
     },
     {
       "archive_filename": "core-pkg-1-python-3.14.zip",
+      "archive_size_bytes": 1487,
       "archive_sha256": "926109369126414200567861f458c6e472a0e9a77576d80e4dcc2a97b8d70014",
       "artifact_id": 9703471366,
       "artifact_name": "core-pkg-1-python-3.14",
@@ -115,6 +121,7 @@
     },
     {
       "archive_filename": "core-pkg-1-python-3.13.zip",
+      "archive_size_bytes": 1490,
       "archive_sha256": "af7e929ef0c1a086a7b610fddc191026a5b5e6aff1e0f4e6504515e2025b8c6e",
       "artifact_id": 9703470254,
       "artifact_name": "core-pkg-1-python-3.13",
@@ -128,6 +135,7 @@
     },
     {
       "archive_filename": "core-pkg-1-binding.zip",
+      "archive_size_bytes": 2741,
       "archive_sha256": "160e9447fe60cd29e86b48a9c57d405e7ec18846c373ce775f6c5610195e38ad",
       "artifact_id": 9703468423,
       "artifact_name": "core-pkg-1-binding",
@@ -145,6 +153,7 @@
     },
     {
       "archive_filename": "core-pkg-1-python-3.11.zip",
+      "archive_size_bytes": 1489,
       "archive_sha256": "be4494f2ab890cad510fee121016ba1e6ff8327c359b9f9bd8eba0ebd9e0385e",
       "artifact_id": 9703467588,
       "artifact_name": "core-pkg-1-python-3.11",
@@ -158,6 +167,7 @@
     },
     {
       "archive_filename": "core-pkg-1-python-3.12.zip",
+      "archive_size_bytes": 1488,
       "archive_sha256": "56fa5890feed832a5351eac6d70e48158968b55178edae8d223c6bb4c1481063",
       "artifact_id": 9703465913,
       "artifact_name": "core-pkg-1-python-3.12",
@@ -171,6 +181,7 @@
     },
     {
       "archive_filename": "core-pkg-1-source.zip",
+      "archive_size_bytes": 223,
       "archive_sha256": "55f743fdcea0ad297479350d660c2d1634344abcf1bc0af1775ca836802fbeb3",
       "artifact_id": 9703458937,
       "artifact_name": "core-pkg-1-source",
@@ -184,6 +195,7 @@
     },
     {
       "archive_filename": "core-pkg-1-companion.zip",
+      "archive_size_bytes": 227,
       "archive_sha256": "1169c9009bd814949cebe4fbbcea102f600f12386f3cafcd46ece9610e73c767",
       "artifact_id": 9703458761,
       "artifact_name": "core-pkg-1-companion",
@@ -197,6 +209,7 @@
     },
     {
       "archive_filename": "core-pkg-1-platform-linux-x86_64.zip",
+      "archive_size_bytes": 1499,
       "archive_sha256": "5c246fbfa1cca2e1626c85f08817eea0115a4d391cb7c1079ca3aa4ace32fb8f",
       "artifact_id": 9703456798,
       "artifact_name": "core-pkg-1-platform-linux-x86_64",
@@ -210,6 +223,7 @@
     },
     {
       "archive_filename": "core-pkg-1-failures.zip",
+      "archive_size_bytes": 226,
       "archive_sha256": "7e4020f4256d07299e9b09ddcb20a6abfd4f1e2a4bcdb2fe93cb779e461ffd8e",
       "artifact_id": 9703424671,
       "artifact_name": "core-pkg-1-failures",
@@ -264,9 +278,12 @@
   },
   "compiler_core_identity": {
     "binding_and_companion_same_contract": true,
+    "binding_build_identity": "77417e7751482fc5a88a7d4207e99d67692da043",
     "build_identity": "77417e7751482fc5a88a7d4207e99d67692da043",
+    "companion_build_identity": "77417e7751482fc5a88a7d4207e99d67692da043",
     "compiler_core_api_version": 1,
     "input_schema_versions": [1],
+    "manifest_build_identity": "77417e7751482fc5a88a7d4207e99d67692da043",
     "native_product_version": "0.1.0",
     "output_schema_versions": [2],
     "package_version": "1.0.0rc4",
@@ -424,6 +441,11 @@
     "production_regression_gate_count": 9,
     "protocol_version": 1,
     "qualification_only": false,
+    "required_job_steps": {
+      "Project checked production guard into CORE-PKG-1 evidence": "success",
+      "Replay CORE-1.0A regression lanes without promoting in-process": "success",
+      "Validate exact CORE-1.0A production evidence": "success"
+    },
     "shared_core_guard_count": 4,
     "status": "PASS",
     "upstream_decision": "CORE_IN_PROCESS_PRODUCTION_GUARD_QUALIFIED"
@@ -518,6 +540,26 @@
     "correctness_gate": false,
     "result": "No performance claim is made by this closure."
   },
+  "known_warnings_and_limitations": {
+    "node_js_runtime": {
+      "actions_target": "Node.js 20",
+      "affected_actions": [
+        "actions/checkout@v4",
+        "actions/setup-python@v5",
+        "actions/download-artifact@v4",
+        "actions/upload-artifact@v4"
+      ],
+      "classification": "CI maintenance warning",
+      "core_pkg_1_failure": false,
+      "executed_runtime": "Node.js 24",
+      "observed": true
+    },
+    "performance_characterization_available": false,
+    "rust_required_in_build_environment": true,
+    "rust_or_cargo_required_by_clean_consumer": false,
+    "universal_platform_compatibility_claimed": false,
+    "universal_python_compatibility_claimed": false
+  },
   "source_snapshot": {
     ".github/workflows/core-native-packaging.yml": "583a18f7327cac20ceac58ea706ed610c754faa0cee5076a7b071fb7545cffad",
     "compiler-rs/distributions/aether-compiler-core/pyproject.toml": "93a09f7e5527836560486eb94d2cae3e96858b6d7cf09e6622860e12770e72c5",
@@ -542,6 +584,7 @@
     "failure_campaign_qualified": true,
     "four_platform_clean_consumers_qualified": true,
     "historical_failed_run_preserved": true,
+    "known_warnings_classified": true,
     "package_contract_qualified": true,
     "production_companion_default_preserved": true,
     "run_conclusion_success": true,

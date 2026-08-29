@@ -80,6 +80,16 @@ def test_closure_rejects_artifact_id_digest_or_file_hash_substitution(tmp_path: 
     record = _record(_write(tmp_path, tampered))
     assert record["checks"]["artifact_manifest"] is False
 
+    missing = _evidence()
+    missing["artifact_manifest"] = missing["artifact_manifest"][:-1]
+    record = _record(_write(tmp_path, missing))
+    assert record["checks"]["artifact_manifest"] is False
+
+    wrong_size = _evidence()
+    wrong_size["artifact_manifest"][0]["archive_size_bytes"] += 1
+    record = _record(_write(tmp_path, wrong_size))
+    assert record["checks"]["artifact_manifest"] is False
+
 
 def test_closure_rejects_non_reproducible_or_blocked_aggregate(tmp_path: Path) -> None:
     tampered = _evidence()
@@ -98,12 +108,22 @@ def test_closure_rejects_non_reproducible_or_blocked_aggregate(tmp_path: Path) -
 
 def test_closure_rejects_weakened_package_or_core_identity(tmp_path: Path) -> None:
     tampered = _evidence()
+    tampered["package_contract"]["native_version"] = "1.0.0rc5"
+    record = _record(_write(tmp_path, tampered))
+    assert record["checks"]["package_contract"] is False
+
+    tampered = _evidence()
     tampered["package_contract"]["native_dependency"] = "aether-compiler-core>=1.0.0rc4"
     record = _record(_write(tmp_path, tampered))
     assert record["checks"]["package_contract"] is False
 
     tampered = _evidence()
     tampered["compiler_core_identity"]["build_identity"] = "0" * 40
+    record = _record(_write(tmp_path, tampered))
+    assert record["checks"]["compiler_core_identity"] is False
+
+    tampered = _evidence()
+    tampered["compiler_core_identity"]["companion_build_identity"] = "0" * 40
     record = _record(_write(tmp_path, tampered))
     assert record["checks"]["compiler_core_identity"] is False
 
@@ -115,7 +135,7 @@ def test_closure_rejects_incomplete_platform_or_python_matrix(tmp_path: Path) ->
     assert record["checks"]["platform_matrix"] is False
 
     tampered = _evidence()
-    tampered["python_matrix"][0]["python_version"] = "3.11.0"
+    tampered["python_matrix"] = tampered["python_matrix"][:-1]
     record = _record(_write(tmp_path, tampered))
     assert record["checks"]["python_matrix"] is False
 
@@ -133,15 +153,27 @@ def test_closure_rejects_failed_binding_companion_source_or_failure_gate(tmp_pat
         record = _record(_write(tmp_path, tampered))
         assert record["checks"][check] is False
 
+    tampered = _evidence()
+    tampered["binding_installed_smoke"]["required_job_steps"][
+        "Validate exact CORE-1.0A production evidence"
+    ] = "skipped"
+    record = _record(_write(tmp_path, tampered))
+    assert record["checks"]["binding_installed_smoke"] is False
+
 
 def test_closure_rejects_pyo3_promotion_or_companion_removal(tmp_path: Path) -> None:
     tampered = _evidence()
-    tampered["production_architecture_guard"]["production_transport"] = "in-process"
+    tampered["production_architecture_guard"]["production_transport"] = "in_process"
     tampered["production_architecture_guard"]["pyo3_is_production_default"] = True
     tampered["scope"]["pyo3_is_production_default"] = True
     record = _record(_write(tmp_path, tampered))
     assert record["checks"]["production_companion_default_guard"] is False
     assert record["checks"]["closure_scope"] is False
+
+    tampered = _evidence()
+    del tampered["companion_installed_rollback"]
+    record = _record(_write(tmp_path, tampered))
+    assert record["checks"]["companion_installed_rollback"] is False
 
 
 def test_closure_rejects_rewriting_historical_failure(tmp_path: Path) -> None:
@@ -166,13 +198,22 @@ def test_closure_rejects_hand_edited_decision_or_eligibility(tmp_path: Path) -> 
     assert record["checks"]["declared_eligibility"] is False
 
 
-def test_pre_ci_document_and_productive_sources_remain_pinned() -> None:
+def test_pre_ci_document_and_qualified_revision_sources_remain_pinned() -> None:
     checker = _checker_module()
     evidence = _evidence()
     assert checker._check_source_snapshot(evidence, ROOT) is True
     assert evidence["source_snapshot"][
         "docs/compiler/CORE_PKG_1_NATIVE_COMPILER_CORE_DISTRIBUTION.md"
     ] == "cf9557da2c82643c4f17ca83ab54ab95ea92e04a72a317c28c0774feca7356bb"
+
+
+def test_closure_rejects_missing_warning_classification(tmp_path: Path) -> None:
+    tampered = _evidence()
+    tampered["known_warnings_and_limitations"]["node_js_runtime"]["classification"] = (
+        "CORE-PKG-1 failure"
+    )
+    record = _record(_write(tmp_path, tampered))
+    assert record["checks"]["known_warnings_and_limitations"] is False
 
 
 def test_closure_scope_is_distribution_only() -> None:
