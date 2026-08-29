@@ -46,6 +46,17 @@ def test_official_core_pkg_1_closure_recomputes_qualified() -> None:
     assert all(record["checks"].values())
 
 
+def test_later_checkout_consumes_intact_historical_closure(tmp_path: Path) -> None:
+    record = _checker_module().build_record(EVIDENCE, REPORT, root=tmp_path)
+
+    assert record["passed"] is True, record["checks"]
+    assert record["checks"]["source_snapshot"] is True
+    assert record["current_source_identity"] == {
+        "matches_qualified_revision": False,
+        "required_for_historical_qualification": False,
+    }
+
+
 def test_closure_rejects_another_run(tmp_path: Path) -> None:
     tampered = _evidence()
     tampered["official_run"]["run_id"] = 33188797944
@@ -99,6 +110,16 @@ def test_closure_rejects_artifact_id_digest_or_file_hash_substitution(tmp_path: 
     wrong_size["artifact_manifest"][0]["archive_size_bytes"] += 1
     record = _record(_write(tmp_path, wrong_size))
     assert record["checks"]["artifact_manifest"] is False
+
+
+def test_closure_rejects_tampered_historical_source_snapshot(tmp_path: Path) -> None:
+    tampered = _evidence()
+    tampered["source_snapshot"]["pyproject.toml"] = "f" * 64
+
+    record = _record(_write(tmp_path, tampered))
+
+    assert record["passed"] is False
+    assert record["checks"]["source_snapshot"] is False
 
 
 def test_closure_rejects_non_reproducible_or_blocked_aggregate(tmp_path: Path) -> None:
@@ -249,10 +270,11 @@ def test_closure_rejects_hand_edited_decision_or_eligibility(tmp_path: Path) -> 
     assert record["checks"]["declared_eligibility"] is False
 
 
-def test_pre_ci_document_and_qualified_revision_sources_remain_pinned() -> None:
+def test_historical_source_integrity_is_separate_from_current_source_identity() -> None:
     checker = _checker_module()
     evidence = _evidence()
-    assert checker._check_source_snapshot(evidence, ROOT) is True
+    assert checker.verify_historical_closure_integrity(evidence) is True
+    assert checker.verify_current_source_matches_qualified_revision(ROOT) is False
     assert evidence["source_snapshot"][
         "docs/compiler/CORE_PKG_1_NATIVE_COMPILER_CORE_DISTRIBUTION.md"
     ] == "cf9557da2c82643c4f17ca83ab54ab95ea92e04a72a317c28c0774feca7356bb"

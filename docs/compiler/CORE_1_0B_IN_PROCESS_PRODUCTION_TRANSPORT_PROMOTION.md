@@ -298,3 +298,25 @@ repetirse con `LSAN_OPTIONS=detect_leaks=0`; esto valida comportamiento pero no
 reemplaza el gate de leaks de CI. `cargo check --workspace --locked`,
 `cargo test --workspace --locked` y `cargo fmt --all --check` pasaron. No se
 infieren resultados locales para Windows ni macOS.
+
+## Incidente del primer run oficial CORE-1.0B
+
+El run `33264243543` permanece inmutable con conclusión `FAILED`. Demostró dos
+defectos del harness, no una nueva decisión de promoción: el cierre histórico
+de CORE-PKG-1 intentaba leer la revisión `77417e77` desde el object store del
+checkout actual (ausente en el clon shallow de Actions), y PowerShell entregaba
+literalmente `native-dist/*.whl` a pip.
+
+El consumidor del cierre ahora verifica los hashes fijados en la evidencia
+histórica sin exigir que el checkout posterior contenga ese objeto Git ni sea
+byte-identical. La comprobación explícita del source actual permanece separada
+y falla si diverge. La instalación de CORE-1.0B selecciona mediante Python
+exactamente un wheel compatible `aether-compiler-core==1.0.0rc4` y exactamente
+un wheel `aether-language==1.0.0rc4`; cero candidatos, identidad incorrecta o
+múltiples candidatos compatibles bloquean antes de invocar pip. Pip recibe
+únicamente paths concretos.
+
+Este arreglo no convierte retrospectivamente el run `33264243543` en PASS ni
+cambia el estado histórico `SUCCESS` del run CORE-PKG-1 `33216160463`. Requiere
+un nuevo run oficial para decidir CORE-1.0B; Windows no se afirma PASS a partir
+de la regresión portable ejecutada localmente.

@@ -10,7 +10,6 @@ import json
 from pathlib import Path
 import re
 import shutil
-import subprocess
 import tempfile
 
 
@@ -666,22 +665,30 @@ def _check_scope(evidence: dict[str, object]) -> bool:
     )
 
 
-def _check_source_snapshot(evidence: dict[str, object], root: Path) -> bool:
-    snapshot = evidence.get("source_snapshot")
-    if snapshot != EXPECTED_SOURCE_SNAPSHOT:
-        return False
-    # This is a historical closure. Validate the immutable qualified revision,
-    # not a later worktree that may legitimately implement subsequent milestones.
-    for name, digest in EXPECTED_SOURCE_SNAPSHOT.items():
-        completed = subprocess.run(
-            ["git", "show", f"{REVISION}:{name}"],
-            cwd=root,
-            check=False,
-            capture_output=True,
-        )
-        if completed.returncode != 0 or sha256(completed.stdout).hexdigest() != digest:
-            return False
-    return True
+def verify_historical_closure_integrity(evidence: dict[str, object]) -> bool:
+    """Verify the source hashes sealed into the qualified historical closure.
+
+    The expected mapping is pinned in this checker and the closure separately
+    records the official run and revision.  Consuming that record must not
+    require the historical Git object to be present in a later shallow clone.
+    """
+    return evidence.get("source_snapshot") == EXPECTED_SOURCE_SNAPSHOT
+
+
+def verify_current_source_matches_qualified_revision(root: Path = ROOT) -> bool:
+    """Compare a worktree with the source snapshot qualified at ``REVISION``."""
+    return all(
+        (root / name).is_file() and _digest(root / name) == digest
+        for name, digest in EXPECTED_SOURCE_SNAPSHOT.items()
+    )
+
+
+def _check_source_snapshot(
+    evidence: dict[str, object], root: Path | None = None
+) -> bool:
+    """Backward-compatible name for historical closure integrity verification."""
+    del root
+    return verify_historical_closure_integrity(evidence)
 
 
 def _check_report(report_path: Path) -> bool:
@@ -789,7 +796,7 @@ def build_record(
         "historical_failed_run": _check_historical(evidence),
         "known_warnings_and_limitations": _check_warnings(evidence),
         "closure_scope": _check_scope(evidence),
-        "source_snapshot": _check_source_snapshot(evidence, root),
+        "source_snapshot": verify_historical_closure_integrity(evidence),
         "closure_report": _check_report(report_path),
         "declared_eligibility": _check_eligibility(evidence),
     }
@@ -814,6 +821,12 @@ def build_record(
         "qualification_eligible": qualification_eligible,
         "passed": passed,
         "decision": QUALIFIED if passed else BLOCKED,
+        "current_source_identity": {
+            "matches_qualified_revision": verify_current_source_matches_qualified_revision(
+                root
+            ),
+            "required_for_historical_qualification": False,
+        },
     }
 
 

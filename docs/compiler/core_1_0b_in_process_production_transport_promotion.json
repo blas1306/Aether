@@ -30,6 +30,16 @@
     },
     "core_pkg_1_official_run": "33216160463",
     "core_pkg_1_revision": "77417e7751482fc5a88a7d4207e99d67692da043",
+    "historical_failed_ci_run": {
+      "run_id": 33264243543,
+      "conclusion": "failure",
+      "immutable": true,
+      "causes": [
+        "CORE-PKG-1 historical source verification depended on the later checkout Git object store",
+        "PowerShell passed literal wheel globs to pip"
+      ],
+      "retrospectively_promoted": false
+    },
     "transport_environment": "AETHER_RUST_CORE_TRANSPORT",
     "default_transport": "in_process",
     "explicit_rollback_transport": "companion",
