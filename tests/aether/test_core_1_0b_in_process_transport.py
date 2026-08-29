@@ -31,8 +31,14 @@ EMPTY_SSA = {
 class StubClient:
     process_start_count = 0
 
-    def __init__(self, response: dict[str, object] | None = None) -> None:
+    def __init__(
+        self,
+        response: dict[str, object] | None = None,
+        *,
+        transport_name: str = "in_process",
+    ) -> None:
         self.response = response or {"ok": True, "ssa": EMPTY_SSA}
+        self.transport_name = transport_name
         self.request_count = 0
         self.closed = False
 
@@ -48,7 +54,7 @@ def selected_client(
     transport: RustCoreTransport,
     delegate: StubClient | None = None,
 ) -> tuple[ProductionRustSSALoweringClient, StubClient]:
-    delegate = delegate or StubClient()
+    delegate = delegate or StubClient(transport_name=transport.value)
     client = ProductionRustSSALoweringClient(transport)
     client._create_client = lambda: delegate  # type: ignore[method-assign]
     return client, delegate
@@ -76,6 +82,26 @@ def test_requested_transport_equals_machine_readable_observation(
     assert client.provenance.requested_transport == transport.value
     assert client.provenance.observed_transport == transport.value
     assert delegate.request_count == 1
+
+
+@pytest.mark.parametrize("requested", tuple(RustCoreTransport))
+def test_adapter_transport_mismatch_fails_closed_before_execution(
+    requested: RustCoreTransport,
+) -> None:
+    other = (
+        RustCoreTransport.COMPANION
+        if requested is RustCoreTransport.IN_PROCESS
+        else RustCoreTransport.IN_PROCESS
+    )
+    delegate = StubClient(transport_name=other.value)
+    client, _ = selected_client(requested, delegate)
+
+    with pytest.raises(RuntimeError, match="transport mismatch"):
+        client.lower(b"{}")
+
+    assert delegate.closed is True
+    assert delegate.request_count == 0
+    assert client.observed_transport is None
 
 
 def test_broken_in_process_never_discovers_or_executes_companion(
@@ -148,7 +174,10 @@ def test_handled_failure_reuses_same_transport_without_hidden_switch(
         "error": "representative CompilerCore rejection",
         "diagnostic": {"code": "CORE-TEST-001"},
     }
-    client, delegate = selected_client(transport, StubClient(failure))
+    client, delegate = selected_client(
+        transport,
+        StubClient(failure, transport_name=transport.value),
+    )
     assert client.lower(b"bad") == failure
     assert client.lower(b"bad-again") == failure
     assert delegate.request_count == 2

@@ -222,6 +222,11 @@ independiente. El contador y el último error estructurado son seguros para
 concurrencia (este último es local al thread). El companion conserva startup
 lazy, reuse persistente, recovery y cierre por `atexit`.
 
+La observación no se copia del selector: cada adaptador declara su identidad de
+transporte y el wrapper productivo la valida contra el valor solicitado antes
+del primer request. Una conexión accidental entre una rama y el adaptador
+opuesto se cierra sin ejecutar el request y falla cerrada.
+
 No cambió `SSAPipeline.build`: los tres modos de authority que necesitan Rust
 siguen recibiendo el mismo protocolo lógico de cliente y pueden ejecutar ambos
 transportes. `python_ssa_only` no consulta la política de transporte. Tampoco

@@ -58,6 +58,10 @@ class InProcessRustSSALoweringClient:
         self._thread_state = threading.local()
 
     @property
+    def transport_name(self) -> str:
+        return "in_process"
+
+    @property
     def last_error_detail(self) -> dict[str, object] | None:
         """Structured detail for the calling thread's most recent request."""
         return getattr(self._thread_state, "last_error_detail", None)

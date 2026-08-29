@@ -222,6 +222,8 @@ class SSAShadowFailure(RuntimeError):
 
 class RustSSALoweringClient(Protocol):
     @property
+    def transport_name(self) -> str: ...
+    @property
     def process_start_count(self) -> int: ...
     @property
     def request_count(self) -> int: ...
@@ -263,6 +265,10 @@ class PersistentRustSSALoweringClient:
         self._requests = 0
         self._last_startup_seconds = 0.0
         self._last_response_decode_seconds = 0.0
+
+    @property
+    def transport_name(self) -> str:
+        return RustCoreTransport.COMPANION.value
 
     @property
     def process_start_count(self) -> int: return self._starts
@@ -460,8 +466,25 @@ class ProductionRustSSALoweringClient:
     def lower(self, payload: bytes) -> Mapping[str, object]:
         with self._lock:
             if self._client is None:
-                self._client = self._create_client()
-                self._observed_transport = self._transport
+                client = self._create_client()
+                observed_name = getattr(client, "transport_name", None)
+                if observed_name not in {
+                    transport.value for transport in RustCoreTransport
+                }:
+                    client.close()
+                    raise RuntimeError(
+                        "productive Rust core adapter has no recognized "
+                        "transport provenance"
+                    )
+                observed = RustCoreTransport(observed_name)
+                if observed is not self._transport:
+                    client.close()
+                    raise RuntimeError(
+                        "productive Rust core transport mismatch: requested "
+                        f"{self._transport.value!r}, observed {observed.value!r}"
+                    )
+                self._client = client
+                self._observed_transport = observed
             client = self._client
         return client.lower(payload)
 

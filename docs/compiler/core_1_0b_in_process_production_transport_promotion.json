@@ -25,6 +25,7 @@
     "stable_binding_interface": "aether_compiler_core.binding()",
     "stable_companion_interface": "aether_compiler_core.companion_path()",
     "provenance_fields": ["requested_transport", "observed_transport"],
+    "adapter_transport_mismatch": "fail_closed_before_request",
     "authority_modes_preserved": [
       "rust_ssa_authority_refinement_verified",
       "rust_ssa_authority_python_shadow",
