@@ -236,6 +236,7 @@ EXPECTED_ELIGIBILITY = {
     "failure_campaign_qualified",
     "four_platform_clean_consumers_qualified",
     "historical_failed_run_preserved",
+    "ide_cli_scope_recorded",
     "known_warnings_classified",
     "package_contract_qualified",
     "production_companion_default_preserved",
@@ -522,6 +523,37 @@ def _check_source_install(evidence: dict[str, object]) -> bool:
     )
 
 
+def _check_cli_ide_scope(evidence: dict[str, object]) -> bool:
+    row = evidence.get("cli_and_ide_scope")
+    return isinstance(row, dict) and row == {
+        "cli": {
+            "entry_point_executed_end_to_end": False,
+            "qualified_evidence": (
+                "clean consumers imported the installed language package and exercised "
+                "ProductionRustSSALoweringClient with the installed companion"
+            ),
+            "scope": "installed package/production-client qualification; not a CLI execution lane",
+        },
+        "source_install": {
+            "executed": True,
+            "environment": "ubuntu-latest, CPython 3.13.15, Rust 1.85",
+            "scope": "the recorded native source plus editable language install workflow only",
+        },
+        "vscode": {
+            "audit_only": True,
+            "cross_platform_execution": False,
+            "entry_points": ["aether", "aether-lsp"],
+            "integration_change_required": False,
+        },
+        "intellij": {
+            "audit_only": True,
+            "cross_platform_execution": False,
+            "entry_points": ["aether", "aether-lsp"],
+            "integration_change_required": False,
+        },
+    }
+
+
 def _check_failure_campaign(evidence: dict[str, object]) -> bool:
     row = evidence.get("failure_campaign")
     return isinstance(row, dict) and bool(
@@ -744,6 +776,7 @@ def build_record(
         "binding_installed_smoke": _check_binding(evidence),
         "companion_installed_rollback": _check_companion(evidence),
         "source_development_install": _check_source_install(evidence),
+        "cli_and_ide_scope": _check_cli_ide_scope(evidence),
         "failure_campaign": _check_failure_campaign(evidence),
         "production_companion_default_guard": _check_production_guard(evidence),
         "historical_failed_run": _check_historical(evidence),

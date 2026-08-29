@@ -161,6 +161,22 @@ instalación nativa desde
 `aether-language` con `--no-deps`, import del binding y descubrimiento del
 companion instalado. No se califican otros workflows de desarrollo.
 
+## Alcance CLI e IDE
+
+CORE-PKG-1 no ejecutó el entry point CLI end-to-end como lane independiente.
+Los clean consumers sí importaron `aether` desde el wheel instalado y
+ejercitaron `ProductionRustSSALoweringClient`, comprobando que el transporte
+productivo resolvía y usaba el companion del mismo entorno. Ése es el alcance
+CLI demostrado: instalación y camino productivo subyacente, no una
+calificación de comandos de usuario.
+
+VS Code e IntelliJ fueron auditados, no ejecutados en la matriz cross-platform.
+Ambos delegan en los entry points `aether`/`aether-lsp` del ejecutable
+configurado, `.venv` de proyecto o PATH; ninguno descubre directamente el
+binding o el companion ni selecciona el transporte. La auditoría concluyó que
+no hacía falta cambiar los plugins o sus launch schemas, pero este cierre no
+afirma una calificación de ejecución de los IDEs.
+
 ## Failure campaign
 
 El job oficial terminó `13 passed, 14 deselected`. Cubre ausencia del package

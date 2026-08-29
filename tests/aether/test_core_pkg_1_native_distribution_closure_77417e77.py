@@ -43,9 +43,16 @@ def test_official_core_pkg_1_closure_recomputes_qualified() -> None:
     assert all(record["checks"].values())
 
 
-def test_closure_rejects_another_run_or_revision(tmp_path: Path) -> None:
+def test_closure_rejects_another_run(tmp_path: Path) -> None:
     tampered = _evidence()
     tampered["official_run"]["run_id"] = 33188797944
+    record = _record(_write(tmp_path, tampered))
+    assert record["passed"] is False
+    assert record["checks"]["official_run_identity"] is False
+
+
+def test_closure_rejects_another_revision(tmp_path: Path) -> None:
+    tampered = _evidence()
     tampered["official_run"]["head_sha"] = "0" * 40
     record = _record(_write(tmp_path, tampered))
     assert record["passed"] is False
@@ -129,6 +136,11 @@ def test_closure_rejects_weakened_package_or_core_identity(tmp_path: Path) -> No
 
 
 def test_closure_rejects_incomplete_platform_or_python_matrix(tmp_path: Path) -> None:
+    wrong_platform = _evidence()
+    wrong_platform["platform_matrix"][0]["platform"] = "linux-arm64"
+    record = _record(_write(tmp_path, wrong_platform))
+    assert record["checks"]["platform_matrix"] is False
+
     tampered = _evidence()
     tampered["platform_matrix"] = tampered["platform_matrix"][:-1]
     record = _record(_write(tmp_path, tampered))
@@ -159,6 +171,18 @@ def test_closure_rejects_failed_binding_companion_source_or_failure_gate(tmp_pat
     ] = "skipped"
     record = _record(_write(tmp_path, tampered))
     assert record["checks"]["binding_installed_smoke"] is False
+
+
+def test_closure_rejects_inflated_cli_or_ide_execution_claim(tmp_path: Path) -> None:
+    tampered = _evidence()
+    tampered["cli_and_ide_scope"]["vscode"]["cross_platform_execution"] = True
+    record = _record(_write(tmp_path, tampered))
+    assert record["checks"]["cli_and_ide_scope"] is False
+
+    tampered = _evidence()
+    tampered["cli_and_ide_scope"]["cli"]["entry_point_executed_end_to_end"] = True
+    record = _record(_write(tmp_path, tampered))
+    assert record["checks"]["cli_and_ide_scope"] is False
 
 
 def test_closure_rejects_pyo3_promotion_or_companion_removal(tmp_path: Path) -> None:

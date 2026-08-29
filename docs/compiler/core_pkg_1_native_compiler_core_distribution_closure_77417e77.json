@@ -476,6 +476,30 @@
     "scope": "This qualifies the recorded source/editable workflow only.",
     "status": "PASS"
   },
+  "cli_and_ide_scope": {
+    "cli": {
+      "entry_point_executed_end_to_end": false,
+      "qualified_evidence": "clean consumers imported the installed language package and exercised ProductionRustSSALoweringClient with the installed companion",
+      "scope": "installed package/production-client qualification; not a CLI execution lane"
+    },
+    "source_install": {
+      "executed": true,
+      "environment": "ubuntu-latest, CPython 3.13.15, Rust 1.85",
+      "scope": "the recorded native source plus editable language install workflow only"
+    },
+    "vscode": {
+      "audit_only": true,
+      "cross_platform_execution": false,
+      "entry_points": ["aether", "aether-lsp"],
+      "integration_change_required": false
+    },
+    "intellij": {
+      "audit_only": true,
+      "cross_platform_execution": false,
+      "entry_points": ["aether", "aether-lsp"],
+      "integration_change_required": false
+    }
+  },
   "failure_campaign": {
     "cases": [
       "missing native distribution metadata",
@@ -584,6 +608,7 @@
     "failure_campaign_qualified": true,
     "four_platform_clean_consumers_qualified": true,
     "historical_failed_run_preserved": true,
+    "ide_cli_scope_recorded": true,
     "known_warnings_classified": true,
     "package_contract_qualified": true,
     "production_companion_default_preserved": true,
