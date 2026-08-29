@@ -201,7 +201,13 @@ la reauditoría del punto productivo.
 
 Cada lane registra esta resolución como evidencia machine-readable mediante
 `"previous_blocker": "resolved_by_CORE_PKG_1"`; el aggregate la exige y falla
-cerrado si falta o cambia.
+cerrado si falta o cambia. Además, el aggregate vuelve a ejecutar el checker
+oficial de CORE-PKG-1 y exige exactamente decisión
+`CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_QUALIFIED`, run `33216160463`, revisión
+`77417e7751482fc5a88a7d4207e99d67692da043`, el pin `1.0.0rc4 == 1.0.0rc4` y
+las cuatro superficies productivas (wrapper, binding, companion y manifest).
+El job CI separado `blocker-resolution` hace la misma comprobación antes de
+aceptar el aggregate; una etiqueta de lane por sí sola no resuelve el blocker.
 
 La promoción retomada agrega el eje ortogonal
 `AETHER_RUST_CORE_TRANSPORT`. La ausencia de la variable y el valor
@@ -238,10 +244,12 @@ La calificación executable queda definida por:
 - `tests/aether/test_core_1_0b_in_process_transport.py`: política, provenance,
   no-fallback, sesiones/concurrencia, default guard y ortogonalidad;
 - `scripts/qualify_core_1_0b_in_process_transport.py`: pipeline `.ae`, corpus
-  histórico, CFG profundo, failures, differential, rollback y performance por
-  ambos transportes productivos. La caracterización usa warmup y cinco muestras
-  para workload ordinario, histórico 116, CFG profundo 1000 y
-  `expense_tracker`, sin umbral de corrección;
+  histórico, CFG profundo, seis rechazos Initial IR/binding representativos con
+  paridad estructurada, differential, rollback y performance por ambos
+  transportes productivos. La caracterización usa warmup y cinco muestras para
+  workload ordinario, histórico 116, CFG profundo 1000 y `expense_tracker`, sin
+  umbral de corrección; registra mediana y dispersión separadas para conversión
+  de entrada, core Rust, IPC/protocol y conversión de resultado;
 - `scripts/check_core_1_0b_in_process_transport.py`: aggregate fail-closed con
   revisión exacta, matrices completas, evidencia obligatoria del consumer
   empaquetado y ausencia de evidencia tratada como bloqueo;
@@ -251,7 +259,10 @@ La calificación executable queda definida por:
   recovery sobre el mismo cliente y bloquea si el rollback companion invoca el
   binding PyO3;
 - `.github/workflows/core-in-process-promotion.yml`: Linux/Windows/macOS,
-  x86_64/arm64 y CPython 3.11–3.14, sin modificar los workflows históricos.
+  x86_64/arm64 y CPython 3.11–3.14. Cada lane de plataforma y Python construye
+  wheels, ejecuta consumers aislados con ambos transportes y oculta Cargo/rustc;
+  un job separado repite el development install oficial. Los workflows
+  históricos no se modifican.
 
 CLI, VS Code/LSP e IntelliJ no poseen un selector de companion separado: todos
 terminan en el paquete/CLI Python y `SSAPipeline`; por eso la promoción no exige
@@ -263,3 +274,27 @@ La decisión previa al CI oficial es
 con evidencia oficial completa puede emitir
 `CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTED`; cualquier lane ausente o
 fallida emite `CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED`.
+
+## Revalidación local del segundo intento
+
+El 29 de agosto de 2026, sobre Linux x86_64 y CPython 3.14, la qualification
+completa observó 116/116 inputs por ambos transportes, pipeline productivo
+116/116, CFG 993/1000/5000/10000, seis rechazos estructurados equivalentes,
+differential positivo y divergencia/corrupción fail-closed en ambos
+transportes. El aggregate local recomputó CORE-PKG-1 y emitió
+`CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_PENDING_CI` sin errores.
+
+El procedimiento de development install reconstruyó el binding y companion
+productivos desde el árbol actual. Un venv separado, instalado sólo desde los
+wheels resultantes y ejecutado fuera del checkout sin Cargo/rustc en `PATH`,
+observó `in_process` por default (cero procesos) y `companion` por rollback
+explícito (un proceso persistente); ambos recuperaron el mismo cliente después
+de un rechazo manejado.
+
+La suite Python amplia obtuvo 5110 PASS y 4 SKIP. Sus 24 fallos pertenecieron
+exclusivamente a `test_native_exceptions.py`: LeakSanitizer informó que no puede
+ejecutarse bajo ptrace en este entorno. El archivo completo pasó 54/54 al
+repetirse con `LSAN_OPTIONS=detect_leaks=0`; esto valida comportamiento pero no
+reemplaza el gate de leaks de CI. `cargo check --workspace --locked`,
+`cargo test --workspace --locked` y `cargo fmt --all --check` pasaron. No se
+infieren resultados locales para Windows ni macOS.

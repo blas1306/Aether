@@ -4,21 +4,107 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 from pathlib import Path
 import re
 
 
+ROOT = Path(__file__).resolve().parents[1]
 PENDING = "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_PENDING_CI"
 PROMOTED = "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTED"
 BLOCKED = "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED"
+CORE_PKG_1_QUALIFIED = "CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_QUALIFIED"
+CORE_PKG_1_RUN_ID = 33216160463
+CORE_PKG_1_REVISION = "77417e7751482fc5a88a7d4207e99d67692da043"
 PLATFORMS = {"linux-x86_64", "windows-x86_64", "macos-x86_64", "macos-arm64"}
 PYTHONS = {"3.11", "3.12", "3.13", "3.14"}
+REPRESENTATIVE_REJECTIONS = {
+    "malformed_initial_ir_json",
+    "non_object_binding_input",
+    "unsupported_schema",
+    "unknown_root_field",
+    "invalid_cfg_target",
+    "duplicate_function",
+}
 
 
 def _require(condition: bool, message: str, errors: list[str]) -> None:
     if not condition:
         errors.append(message)
+
+
+def _blocker_resolution_record() -> dict[str, object]:
+    """Recompute the exact CORE-PKG-1 closure; never trust a lane label alone."""
+    checker_path = (
+        ROOT
+        / "scripts/check_core_pkg_1_native_distribution_closure_77417e77.py"
+    )
+    try:
+        spec = importlib.util.spec_from_file_location(
+            "core_pkg_1_closure_for_core_1_0b", checker_path
+        )
+        if spec is None or spec.loader is None:
+            raise RuntimeError("could not load the CORE-PKG-1 closure checker")
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        closure = checker.build_record(root=ROOT)
+        evidence = json.loads(checker.DEFAULT_EVIDENCE.read_text(encoding="utf-8"))
+        contract = evidence.get("package_contract")
+        run = evidence.get("official_run")
+        native_contents = (
+            contract.get("native_contents") if isinstance(contract, dict) else None
+        )
+        surfaces_present = bool(
+            isinstance(native_contents, dict)
+            and native_contents.get("stable_python_wrapper")
+            == "aether_compiler_core"
+            and native_contents.get("pyo3_binding") is True
+            and native_contents.get("installed_companion") is True
+            and native_contents.get("native_version_manifest") is True
+        )
+        exact_dependency = bool(
+            isinstance(contract, dict)
+            and contract.get("language_distribution") == "aether-language"
+            and contract.get("language_version") == "1.0.0rc4"
+            and contract.get("native_distribution") == "aether-compiler-core"
+            and contract.get("native_version") == "1.0.0rc4"
+            and contract.get("native_dependency")
+            == "aether-compiler-core==1.0.0rc4"
+            and contract.get("native_dependency_exact") is True
+        )
+        passed = bool(
+            closure.get("passed") is True
+            and closure.get("decision") == CORE_PKG_1_QUALIFIED
+            and closure.get("run_id") == CORE_PKG_1_RUN_ID
+            and closure.get("exact_revision") == CORE_PKG_1_REVISION
+            and evidence.get("decision") == CORE_PKG_1_QUALIFIED
+            and isinstance(run, dict)
+            and run.get("run_id") == CORE_PKG_1_RUN_ID
+            and run.get("head_sha") == CORE_PKG_1_REVISION
+            and exact_dependency
+            and surfaces_present
+        )
+        return {
+            "passed": passed,
+            "decision": closure.get("decision"),
+            "official_run": run.get("run_id") if isinstance(run, dict) else None,
+            "qualified_revision": (
+                run.get("head_sha") if isinstance(run, dict) else None
+            ),
+            "exact_version_contract": exact_dependency,
+            "productive_surfaces": surfaces_present,
+        }
+    except Exception as exc:
+        return {
+            "passed": False,
+            "decision": BLOCKED,
+            "official_run": None,
+            "qualified_revision": None,
+            "exact_version_contract": False,
+            "productive_surfaces": False,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
 
 def _performance_complete(value: object) -> bool:
@@ -35,23 +121,66 @@ def _performance_complete(value: object) -> bool:
         return False
     if not all(isinstance(workload, dict) for workload in workloads.values()):
         return False
+    phases = {"conversion", "core", "ipc_protocol", "result_conversion"}
+    if not all(
+        workload.get("phase_samples") == 5
+        and isinstance(workload.get("phase_median"), dict)
+        and set(workload["phase_median"]) == phases
+        and isinstance(workload.get("phase_dispersion_pstdev"), dict)
+        and set(workload["phase_dispersion_pstdev"]) == phases
+        for workload in workloads.values()
+    ):
+        return False
     historical = workloads["historical_116"]
     return historical.get("payloads_per_sample") == 116 and all(
         workload.get("samples") == 5 for workload in workloads.values()
     )
 
 
+def _failure_campaign_complete(value: object) -> bool:
+    if not isinstance(value, dict) or value.get("status") != "PASS":
+        return False
+    rows = value.get("same_input_structured_campaign")
+    compared = value.get("compared_contract")
+    return bool(
+        isinstance(rows, list)
+        and {str(row.get("case_id")) for row in rows if isinstance(row, dict)}
+        == REPRESENTATIVE_REJECTIONS
+        and all(
+            isinstance(row, dict)
+            and row.get("same_input_bytes") is True
+            and row.get("companion_accepts") is False
+            and row.get("in_process_accepts") is False
+            and row.get("acceptance_parity") is True
+            and row.get("machine_diagnostic_parity") is True
+            and row.get("source_location_parity") is True
+            and row.get("passed") is True
+            for row in rows
+        )
+        and set(compared or ())
+        == {
+            "accept_reject",
+            "structured_error_category",
+            "phase",
+            "source_location",
+        }
+    )
+
+
 def _packaged_consumer_complete(
-    records: list[dict[str, object]], revision: str
+    records: list[dict[str, object]],
+    revision: str,
+    *,
+    required_platforms: set[str] | None = None,
+    required_pythons: set[str] | None = None,
 ) -> bool:
-    if len(records) != 2:
-        return False
-    by_transport = {str(record.get("expected_transport")): record for record in records}
-    if set(by_transport) != {"in_process", "companion"}:
-        return False
-    for transport, record in by_transport.items():
+    valid: list[dict[str, object]] = []
+    for record in records:
+        transport = str(record.get("expected_transport"))
+        if transport not in {"in_process", "companion"}:
+            continue
         expected_starts = 1 if transport == "companion" else 0
-        if not (
+        if (
             record.get("status") == "PASS"
             and record.get("exact_revision") == revision
             and record.get("requested_transport") == transport
@@ -69,10 +198,35 @@ def _packaged_consumer_complete(
             and record.get("pyo3_binding_calls") == 0
             and str(record.get("ci_run_id")) not in {"", "LOCAL_PRE_CI"}
         ):
-            return False
-    return by_transport["in_process"].get("default_selection") is True and (
-        by_transport["companion"].get("default_selection") is False
-    )
+            valid.append(record)
+
+    def paired(rows: list[dict[str, object]]) -> bool:
+        by_transport = {
+            str(record.get("expected_transport")): record for record in rows
+        }
+        return bool(
+            set(by_transport) == {"in_process", "companion"}
+            and by_transport["in_process"].get("default_selection") is True
+            and by_transport["companion"].get("default_selection") is False
+        )
+
+    if not paired(valid):
+        return False
+    if required_platforms is not None and any(
+        not paired(
+            [record for record in valid if record.get("platform") == platform]
+        )
+        for platform in required_platforms
+    ):
+        return False
+    if required_pythons is not None and any(
+        not paired(
+            [record for record in valid if record.get("python_minor") == python]
+        )
+        for python in required_pythons
+    ):
+        return False
+    return True
 
 
 def check(
@@ -82,6 +236,12 @@ def check(
     ci_closure: bool = False,
 ) -> tuple[dict[str, object], list[str]]:
     errors: list[str] = []
+    blocker_resolution = _blocker_resolution_record()
+    _require(
+        blocker_resolution.get("passed") is True,
+        "CORE-PKG-1 blocker resolution did not revalidate",
+        errors,
+    )
     lanes: list[dict[str, object]] = []
     packaged_consumers: list[dict[str, object]] = []
     for path in sorted(evidence_dir.rglob("*.json")):
@@ -138,12 +298,16 @@ def check(
             "historical",
             "production_pipeline",
             "deep_cfg",
-            "representative_failures",
             "sessions_concurrency",
             "companion_rollback",
         ):
             value = lane.get(gate)
             _require(isinstance(value, dict) and value.get("status") == "PASS", f"{gate} failed: {label}", errors)
+        _require(
+            _failure_campaign_complete(lane.get("representative_failures")),
+            f"representative structured failure parity failed: {label}",
+            errors,
+        )
         differential = lane.get("differential")
         rollback = lane.get("rollback")
         for name, value in (
@@ -232,7 +396,12 @@ def check(
             errors,
         )
         _require(
-            _packaged_consumer_complete(packaged_consumers, revision),
+            _packaged_consumer_complete(
+                packaged_consumers,
+                revision,
+                required_platforms=PLATFORMS,
+                required_pythons=PYTHONS,
+            ),
             "packaged clean-consumer evidence is incomplete",
             errors,
         )
@@ -243,13 +412,17 @@ def check(
         "kind": "core_1_0b_transport_aggregate",
         "milestone": "CORE-1.0B",
         "decision": decision,
+        "blocker_resolution": blocker_resolution,
         "exact_revision": revision or None,
         "ci_closure": ci_closure,
         "lanes": len(lanes),
         "platforms": sorted(observed_platforms),
         "python_minors": sorted(observed_pythons),
         "packaged_clean_consumer": _packaged_consumer_complete(
-            packaged_consumers, revision
+            packaged_consumers,
+            revision,
+            required_platforms=PLATFORMS if ci_closure else None,
+            required_pythons=PYTHONS if ci_closure else None,
         ),
         "default_observed": "in_process" if not errors else None,
         "explicit_companion_observed": "companion" if not errors else None,

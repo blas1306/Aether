@@ -15,6 +15,19 @@
   "resumed_promotion": {
     "resumed_after": "CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_QUALIFIED",
     "previous_blocker": "resolved_by_CORE_PKG_1",
+    "blocker_resolution_gate": {
+      "decision": "CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_QUALIFIED",
+      "official_run": 33216160463,
+      "qualified_revision": "77417e7751482fc5a88a7d4207e99d67692da043",
+      "recomputed_by_promotion_aggregate": true,
+      "exact_version_contract": true,
+      "productive_surfaces": [
+        "aether_compiler_core",
+        "_aether_core",
+        "companion_path()",
+        "native manifest"
+      ]
+    },
     "core_pkg_1_official_run": "33216160463",
     "core_pkg_1_revision": "77417e7751482fc5a88a7d4207e99d67692da043",
     "transport_environment": "AETHER_RUST_CORE_TRANSPORT",
@@ -48,6 +61,34 @@
       "ssa_refinement_corruption_fail_closed": ["in_process", "companion"],
       "companion_process_starts": 1,
       "requested_equals_observed": true,
+      "representative_structured_rejections": 6,
+      "performance_phase_breakdown": [
+        "conversion",
+        "core",
+        "ipc_protocol",
+        "result_conversion"
+      ],
+      "latest_revalidation": {
+        "date": "2026-08-29",
+        "platform": "linux-x86_64",
+        "python_minor": "3.14",
+        "development_install": "PASS",
+        "wheel_only_default_in_process": "PASS",
+        "wheel_only_explicit_companion": "PASS",
+        "cargo_check_workspace_locked": "PASS",
+        "cargo_test_workspace_locked": "PASS",
+        "cargo_fmt_all_check": "PASS",
+        "python_suite": {
+          "passed": 5110,
+          "skipped": 4,
+          "environmental_failures": 24,
+          "limitation": "LeakSanitizer cannot run under ptrace in this environment",
+          "affected_file": "tests/aether/test_native_exceptions.py",
+          "behavioral_rerun_without_leak_detection": "54/54 PASS"
+        },
+        "windows_local": "NOT_RUN",
+        "macos_local": "NOT_RUN"
+      },
       "warm_performance_seconds": {
         "runs": 5,
         "in_process_median": 0.006287443000474013,

@@ -273,6 +273,7 @@ def test_aggregate_blocks_missing_machine_readable_evidence(tmp_path) -> None:
     assert errors
     assert checker._performance_complete({"workloads": {}}) is False
     assert checker._performance_complete({"workloads": "malformed"}) is False
+    assert checker._failure_campaign_complete({"status": "PASS"}) is False
     assert checker._packaged_consumer_complete([], "0" * 40) is False
 
 
@@ -313,6 +314,21 @@ def test_aggregate_requires_both_exact_packaged_consumer_observations() -> None:
 
     records = [record("in_process"), record("companion")]
     assert checker._packaged_consumer_complete(records, revision) is True
+    assert (
+        checker._packaged_consumer_complete(
+            records, revision, required_platforms={"linux-x86_64"}
+        )
+        is False
+    )
+    for item in records:
+        item["platform"] = "linux-x86_64"
+        item["python_minor"] = "3.13"
+    assert checker._packaged_consumer_complete(
+        records,
+        revision,
+        required_platforms={"linux-x86_64"},
+        required_pythons={"3.13"},
+    ) is True
     records[1]["observed_transport"] = "in_process"
     assert checker._packaged_consumer_complete(records, revision) is False
 
@@ -324,6 +340,7 @@ def test_dedicated_workflow_has_promotion_and_matrix_guards() -> None:
     workflow = root / ".github/workflows/core-in-process-promotion.yml"
     text = workflow.read_text(encoding="utf-8")
     for job in (
+        "blocker-resolution:",
         "production-default-in-process:",
         "explicit-companion-rollback:",
         "transport-parity:",
@@ -333,8 +350,9 @@ def test_dedicated_workflow_has_promotion_and_matrix_guards() -> None:
         "sessions-concurrency:",
         "affected-rust-4-5:",
         "packaging-regression:",
-        "platform-matrix:",
+        "clean-install-platform:",
         "python-compatibility:",
+        "source-development-install:",
         "aggregate-fail-closed:",
     ):
         assert job in text
@@ -359,6 +377,33 @@ def test_dedicated_workflow_has_promotion_and_matrix_guards() -> None:
     assert "--expected-transport in_process --expect-default" in text
     assert "--expected-transport companion" in text
     assert "core-1-0b-packaged-consumer" in text
+    assert (
+        "check_core_pkg_1_native_distribution_closure_77417e77.py" in text
+    )
+    assert "--require-qualified" in text
+
+
+def test_aggregate_recomputes_exact_core_pkg_1_blocker_resolution() -> None:
+    from pathlib import Path
+
+    checker_path = (
+        Path(__file__).resolve().parents[2]
+        / "scripts/check_core_1_0b_in_process_transport.py"
+    )
+    spec = importlib.util.spec_from_file_location("core_1_0b_checker", checker_path)
+    assert spec is not None and spec.loader is not None
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+
+    resolution = checker._blocker_resolution_record()
+    assert resolution == {
+        "passed": True,
+        "decision": "CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_QUALIFIED",
+        "official_run": 33216160463,
+        "qualified_revision": "77417e7751482fc5a88a7d4207e99d67692da043",
+        "exact_version_contract": True,
+        "productive_surfaces": True,
+    }
 
 
 def test_qualification_evidence_records_resolved_previous_blocker() -> None:

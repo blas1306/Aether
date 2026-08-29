@@ -8,7 +8,9 @@ from importlib import metadata as importlib_metadata
 import json
 import os
 from pathlib import Path
+import platform
 import shutil
+import sys
 
 
 def _inside(path: Path, root: Path) -> bool:
@@ -17,6 +19,26 @@ def _inside(path: Path, root: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _platform_id() -> str:
+    system = platform.system().lower()
+    os_name = (
+        "macos"
+        if system == "darwin"
+        else "windows"
+        if system == "windows"
+        else "linux"
+    )
+    machine = platform.machine().lower().replace("-", "_")
+    architecture = (
+        "arm64"
+        if machine in {"arm64", "aarch64"}
+        else "x86_64"
+        if machine in {"amd64", "x86_64"}
+        else machine
+    )
+    return f"{os_name}-{architecture}"
 
 
 def probe(args: argparse.Namespace) -> dict[str, object]:
@@ -110,6 +132,9 @@ def probe(args: argparse.Namespace) -> dict[str, object]:
         "status": "PASS",
         "exact_revision": args.revision,
         "ci_run_id": args.ci_run_id,
+        "platform": args.platform or _platform_id(),
+        "python_minor": args.python_minor
+        or f"{sys.version_info.major}.{sys.version_info.minor}",
         "expected_transport": expected,
         "default_selection": args.expect_default,
         "requested_transport": provenance.requested_transport,
@@ -138,6 +163,8 @@ def main() -> int:
     parser.add_argument("--forbidden-root", type=Path, required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--ci-run-id", required=True)
+    parser.add_argument("--platform")
+    parser.add_argument("--python-minor")
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
@@ -150,6 +177,9 @@ def main() -> int:
             "status": "BLOCKED",
             "exact_revision": args.revision,
             "ci_run_id": args.ci_run_id,
+            "platform": args.platform or _platform_id(),
+            "python_minor": args.python_minor
+            or f"{sys.version_info.major}.{sys.version_info.minor}",
             "expected_transport": args.expected_transport,
             "default_selection": args.expect_default,
             "error": f"{type(exc).__name__}: {exc}",

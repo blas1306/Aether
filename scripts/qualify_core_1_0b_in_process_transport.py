@@ -25,7 +25,9 @@ from aether.ir.lifecycle import expand_lifecycle  # noqa: E402
 from aether.ir.model import IRModule  # noqa: E402
 from aether.pipeline import IRBackend, SSAPipeline, prepare_typed_program  # noqa: E402
 from aether.ssa.dto import ssa_module_to_dto  # noqa: E402
+from aether.ssa.in_process import InProcessRustSSALoweringClient  # noqa: E402
 from aether.ssa.shadow import (  # noqa: E402
+    PersistentRustSSALoweringClient,
     ProductionRustSSALoweringClient,
     RustCoreTransport,
     SSALoweringAuthorityConfiguration,
@@ -33,12 +35,22 @@ from aether.ssa.shadow import (  # noqa: E402
     canonical_ssa,
 )
 from aether.typechecker import TypeChecker  # noqa: E402
+import qualify_core_1_0_in_process_boundary as core_1_0  # noqa: E402
+from qualify_core_1_0a_in_process import _initial_failure_payloads  # noqa: E402
 from qualify_rust_ssa_lowering_adversarial import linear  # noqa: E402
 
 
 PENDING = "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_PENDING_CI"
 BLOCKED = "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED"
 REQUIRED_DEEP = (993, 1000, 5000, 10000)
+REPRESENTATIVE_REJECTIONS = {
+    "malformed_initial_ir_json",
+    "non_object_binding_input",
+    "unsupported_schema",
+    "unknown_root_field",
+    "invalid_cfg_target",
+    "duplicate_function",
+}
 REPRESENTATIVE = (
     "examples/llvm/arithmetic.ae",
     "examples/llvm/string_choose.ae",
@@ -136,6 +148,115 @@ def _characterize_workload(
     }
 
 
+def _phase_statistics(samples: list[float]) -> dict[str, float]:
+    return {
+        "median_seconds": median(samples),
+        "dispersion_pstdev_seconds": pstdev(samples),
+    }
+
+
+def _characterize_transport_phases(
+    extension: object,
+    companion_path: Path,
+    workloads: dict[str, tuple[bytes, ...]],
+) -> dict[str, dict[str, dict[str, object]]]:
+    """Separate conversion/core/IPC/result costs without gating correctness."""
+    phase_names = ("conversion", "core", "ipc_protocol", "result_conversion")
+    results: dict[str, dict[str, dict[str, object]]] = {
+        transport.value: {} for transport in RustCoreTransport
+    }
+    in_process_core = extension.CompilerCore()
+    with PersistentRustSSALoweringClient(
+        companion_path,
+        timeout_seconds=180,
+        characterize_performance=True,
+    ) as performance_companion:
+        for workload_name, payloads in workloads.items():
+            for payload in payloads:
+                session = in_process_core.accept_initial_ir_schema_v1(payload)
+                session.lower_ssa()
+                json.loads(session.export_ssa_schema_v2())
+                if performance_companion.lower(payload).get("ok") is not True:
+                    raise RuntimeError("companion performance warmup was rejected")
+
+            samples = {
+                transport.value: {phase: [] for phase in phase_names}
+                for transport in RustCoreTransport
+            }
+            for _ in range(5):
+                in_process_totals = {phase: 0.0 for phase in phase_names}
+                companion_totals = {phase: 0.0 for phase in phase_names}
+                for payload in payloads:
+                    started = perf_counter()
+                    session = in_process_core.accept_initial_ir_schema_v1(payload)
+                    in_process_totals["conversion"] += perf_counter() - started
+                    started = perf_counter()
+                    session.lower_ssa()
+                    in_process_totals["core"] += perf_counter() - started
+                    started = perf_counter()
+                    json.loads(session.export_ssa_schema_v2())
+                    in_process_totals["result_conversion"] += (
+                        perf_counter() - started
+                    )
+
+                    boundary_started = perf_counter()
+                    response = performance_companion.lower(payload)
+                    elapsed = perf_counter() - boundary_started
+                    if response.get("ok") is not True:
+                        raise RuntimeError("companion performance sample was rejected")
+                    detail = response.get("performance")
+                    if not isinstance(detail, dict):
+                        raise RuntimeError("companion phase metadata is missing")
+                    phases = detail.get("phases")
+                    compute_ns = detail.get("request_compute_total")
+                    if not isinstance(phases, dict) or not isinstance(compute_ns, int):
+                        raise RuntimeError("companion phase metadata is malformed")
+                    conversion = int(phases["rust_input_parsing"]) / 1_000_000_000
+                    result_conversion = (
+                        int(phases["rust_schema_v2_materialization"]) / 1_000_000_000
+                        + performance_companion.last_response_decode_seconds
+                    )
+                    core = sum(
+                        int(phases[name]) / 1_000_000_000
+                        for name in (
+                            "rust_lifecycle_normalization",
+                            "rust_ssa_lowering",
+                            "rust_owned_ssa_verification",
+                            "rust_orchestration_unattributed",
+                        )
+                    )
+                    companion_totals["conversion"] += conversion
+                    companion_totals["core"] += core
+                    companion_totals["result_conversion"] += result_conversion
+                    companion_totals["ipc_protocol"] += max(
+                        0.0,
+                        elapsed
+                        - compute_ns / 1_000_000_000
+                        - performance_companion.last_response_decode_seconds,
+                    )
+                for phase in phase_names:
+                    samples["in_process"][phase].append(in_process_totals[phase])
+                    samples["companion"][phase].append(companion_totals[phase])
+
+            for transport in RustCoreTransport:
+                results[transport.value][workload_name] = {
+                    "phase_samples": 5,
+                    "phase_median": {
+                        phase: _phase_statistics(
+                            samples[transport.value][phase]
+                        )["median_seconds"]
+                        for phase in phase_names
+                    },
+                    "phase_dispersion_pstdev": {
+                        phase: _phase_statistics(
+                            samples[transport.value][phase]
+                        )["dispersion_pstdev_seconds"]
+                        for phase in phase_names
+                    },
+                }
+    return results
+
+
 def _pipeline_compare(
     case_id: str,
     initial: IRModule,
@@ -226,7 +347,39 @@ def qualify(args: argparse.Namespace) -> dict[str, object]:
     failure_responses = {
         transport.value: client.lower(invalid) for transport, client in clients.items()
     }
-    failures_pass = all(value.get("ok") is False for value in failure_responses.values())
+    with PersistentRustSSALoweringClient(
+        companion,
+        timeout_seconds=180,
+        qualification_structured_errors=True,
+    ) as structured_companion:
+        structured_in_process = InProcessRustSSALoweringClient(native)
+        valid_failure_basis = _payload(selected[0][1])
+        failure_campaign = []
+        for case_id, category, payload in _initial_failure_payloads(
+            valid_failure_basis
+        ):
+            if case_id not in REPRESENTATIVE_REJECTIONS:
+                continue
+            row = core_1_0.compare_payload(
+                case_id,
+                payload,
+                structured_companion,
+                structured_in_process,
+                expected_rejection=True,
+            )
+            row["campaign_category"] = category
+            row["passed"] = bool(
+                row.get("passed") is True
+                and row.get("companion_accepts") is False
+                and row.get("in_process_accepts") is False
+            )
+            failure_campaign.append(row)
+    failures_pass = bool(
+        all(value.get("ok") is False for value in failure_responses.values())
+        and all(row.get("passed") is True for row in failure_campaign)
+        and {str(row.get("case_id")) for row in failure_campaign}
+        == REPRESENTATIVE_REJECTIONS
+    )
 
     differential: dict[str, object] = {}
     rollback: dict[str, object] = {}
@@ -308,12 +461,17 @@ def qualify(args: argparse.Namespace) -> dict[str, object]:
         performance_payloads["historical_116"] = tuple(
             _payload(initial) for _path, initial in historical
         )
+    phase_breakdown = _characterize_transport_phases(
+        native, companion, performance_payloads
+    )
     performance: dict[str, object] = {}
     for transport, client in clients.items():
         workloads = {
             name: _characterize_workload(client, payloads)
             for name, payloads in performance_payloads.items()
         }
+        for name, workload in workloads.items():
+            workload.update(phase_breakdown[transport.value][name])
         ordinary_result = workloads["ordinary"]
         performance[transport.value] = {
             # Retain the original ordinary-workload summary for consumers of
@@ -388,7 +546,17 @@ def qualify(args: argparse.Namespace) -> dict[str, object]:
         },
         "production_pipeline": {"cases": parity_rows, "status": "PASS"},
         "deep_cfg": {"depths": list(deep_depths), "cases": deep_rows, "status": "PASS"},
-        "representative_failures": {"responses": failure_responses, "status": "PASS" if failures_pass else "BLOCKED"},
+        "representative_failures": {
+            "same_input_structured_campaign": failure_campaign,
+            "productive_recovery_responses": failure_responses,
+            "compared_contract": [
+                "accept_reject",
+                "structured_error_category",
+                "phase",
+                "source_location",
+            ],
+            "status": "PASS" if failures_pass else "BLOCKED",
+        },
         "differential": differential,
         "differential_divergence": divergence,
         "ssa_refinement_corruptions": corruption,
