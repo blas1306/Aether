@@ -109,6 +109,7 @@ jobs:
           tests/aether/test_numerical_methods_example.py
 
   packaging-regression:
+    name: packaged-clean-consumer
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -119,15 +120,40 @@ jobs:
       - run: python -m pip install 'maturin>=1.9.4,<2' 'build>=1.2,<2'
       - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
       - run: python -m build --wheel --outdir language-dist
-      - run: python -m pip install --force-reinstall --no-deps native-dist/*.whl language-dist/*.whl
-      - name: Clean consumer has no Cargo or rustc
+      - name: Install exact wheels into a clean consumer
         shell: bash
         run: |
-          consumer_python="$(command -v python)"
-          consumer_path="$(dirname "$consumer_python"):/usr/bin:/bin"
-          PATH="$consumer_path" "$consumer_python" -c "import shutil; assert shutil.which('cargo') is None; assert shutil.which('rustc') is None"
-      - run: python -c "from aether.ssa.shadow import production_rust_ssa_lowering_client as c;from aether.ir.model import IRModule;from aether.pipeline import SSAPipeline;assert SSAPipeline().run(IRModule()).ssa_module is not None;assert c().requested_transport=='in_process'"
-      - run: AETHER_RUST_CORE_TRANSPORT=companion python -c "from aether.ir.model import IRModule;from aether.pipeline import SSAPipeline;assert SSAPipeline().run(IRModule()).ssa_module is not None"
+          consumer="$RUNNER_TEMP/core-1-0b-consumer"
+          python -m venv "$consumer"
+          "$consumer/bin/python" -m pip install native-dist/*.whl language-dist/*.whl
+          cp scripts/core_1_0b_packaged_consumer_probe.py "$RUNNER_TEMP/core_1_0b_packaged_consumer_probe.py"
+      - name: Default wheel consumer observes in-process without a toolchain
+        shell: bash
+        run: |
+          consumer="$RUNNER_TEMP/core-1-0b-consumer"
+          mkdir -p "$RUNNER_TEMP/no-toolchain"
+          cd "$RUNNER_TEMP"
+          PATH="$consumer/bin:$RUNNER_TEMP/no-toolchain" "$consumer/bin/python" -I core_1_0b_packaged_consumer_probe.py \
+            --expected-transport in_process --expect-default \
+            --forbidden-root "$GITHUB_WORKSPACE" --revision "${{ github.sha }}" \
+            --ci-run-id "${{ github.run_id }}" \
+            --output core-1.0b-packaged-default.json
+      - name: Same wheel consumer observes explicit companion without PyO3 execution
+        shell: bash
+        run: |
+          consumer="$RUNNER_TEMP/core-1-0b-consumer"
+          cd "$RUNNER_TEMP"
+          PATH="$consumer/bin:$RUNNER_TEMP/no-toolchain" AETHER_RUST_CORE_TRANSPORT=companion \
+            "$consumer/bin/python" -I core_1_0b_packaged_consumer_probe.py \
+            --expected-transport companion \
+            --forbidden-root "$GITHUB_WORKSPACE" --revision "${{ github.sha }}" \
+            --ci-run-id "${{ github.run_id }}" \
+            --output core-1.0b-packaged-companion.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-1-0b-packaged-consumer
+          path: ${{ runner.temp }}/core-1.0b-packaged-*.json
 
   platform-matrix:
     strategy:

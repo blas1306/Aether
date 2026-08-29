@@ -240,9 +240,52 @@ def test_aggregate_blocks_missing_machine_readable_evidence(tmp_path) -> None:
     spec.loader.exec_module(checker)
     aggregate, errors = checker.check(tmp_path)
     assert aggregate["decision"] == checker.BLOCKED
+    assert aggregate["packaged_clean_consumer"] is False
     assert errors
     assert checker._performance_complete({"workloads": {}}) is False
     assert checker._performance_complete({"workloads": "malformed"}) is False
+    assert checker._packaged_consumer_complete([], "0" * 40) is False
+
+
+def test_aggregate_requires_both_exact_packaged_consumer_observations() -> None:
+    from pathlib import Path
+
+    checker_path = (
+        Path(__file__).resolve().parents[2]
+        / "scripts/check_core_1_0b_in_process_transport.py"
+    )
+    spec = importlib.util.spec_from_file_location("core_1_0b_checker", checker_path)
+    assert spec is not None and spec.loader is not None
+    checker = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(checker)
+    revision = "a" * 40
+
+    def record(transport: str) -> dict[str, object]:
+        return {
+            "status": "PASS",
+            "exact_revision": revision,
+            "ci_run_id": "123",
+            "expected_transport": transport,
+            "default_selection": transport == "in_process",
+            "requested_transport": transport,
+            "observed_transport": transport,
+            "language_version": "1.0.0rc4",
+            "native_version": "1.0.0rc4",
+            "exact_native_dependency": True,
+            "native_build_identity": revision,
+            "outside_source_checkout": True,
+            "cargo_available": False,
+            "rustc_available": False,
+            "handled_failure_recovery": True,
+            "process_start_count": 1 if transport == "companion" else 0,
+            "request_count": 3,
+            "pyo3_binding_calls": 0,
+        }
+
+    records = [record("in_process"), record("companion")]
+    assert checker._packaged_consumer_complete(records, revision) is True
+    records[1]["observed_transport"] = "in_process"
+    assert checker._packaged_consumer_complete(records, revision) is False
 
 
 def test_dedicated_workflow_has_promotion_and_matrix_guards() -> None:
@@ -282,6 +325,11 @@ def test_dedicated_workflow_has_promotion_and_matrix_guards() -> None:
     assert "tests/aether/test_rust_ssa_shadow_independent_qualification.py" in text
     assert "--ci-closure" in text
     assert "--require-promoted" in text
+    assert "name: packaged-clean-consumer" in text
+    assert "core_1_0b_packaged_consumer_probe.py" in text
+    assert "--expected-transport in_process --expect-default" in text
+    assert "--expected-transport companion" in text
+    assert "core-1-0b-packaged-consumer" in text
 
 
 def test_qualification_evidence_records_resolved_previous_blocker() -> None:

@@ -34,6 +34,7 @@
     "required_artifacts": {
       "qualifier": "scripts/qualify_core_1_0b_in_process_transport.py",
       "checker": "scripts/check_core_1_0b_in_process_transport.py",
+      "packaged_consumer_probe": "scripts/core_1_0b_packaged_consumer_probe.py",
       "tests": "tests/aether/test_core_1_0b_in_process_transport.py",
       "workflow": ".github/workflows/core-in-process-promotion.yml"
     },

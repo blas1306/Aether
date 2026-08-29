@@ -41,6 +41,40 @@ def _performance_complete(value: object) -> bool:
     )
 
 
+def _packaged_consumer_complete(
+    records: list[dict[str, object]], revision: str
+) -> bool:
+    if len(records) != 2:
+        return False
+    by_transport = {str(record.get("expected_transport")): record for record in records}
+    if set(by_transport) != {"in_process", "companion"}:
+        return False
+    for transport, record in by_transport.items():
+        expected_starts = 1 if transport == "companion" else 0
+        if not (
+            record.get("status") == "PASS"
+            and record.get("exact_revision") == revision
+            and record.get("requested_transport") == transport
+            and record.get("observed_transport") == transport
+            and record.get("language_version") == "1.0.0rc4"
+            and record.get("native_version") == "1.0.0rc4"
+            and record.get("exact_native_dependency") is True
+            and record.get("native_build_identity") == revision
+            and record.get("outside_source_checkout") is True
+            and record.get("cargo_available") is False
+            and record.get("rustc_available") is False
+            and record.get("handled_failure_recovery") is True
+            and record.get("process_start_count") == expected_starts
+            and record.get("request_count") == 3
+            and record.get("pyo3_binding_calls") == 0
+            and str(record.get("ci_run_id")) not in {"", "LOCAL_PRE_CI"}
+        ):
+            return False
+    return by_transport["in_process"].get("default_selection") is True and (
+        by_transport["companion"].get("default_selection") is False
+    )
+
+
 def check(
     evidence_dir: Path,
     *,
@@ -49,6 +83,7 @@ def check(
 ) -> tuple[dict[str, object], list[str]]:
     errors: list[str] = []
     lanes: list[dict[str, object]] = []
+    packaged_consumers: list[dict[str, object]] = []
     for path in sorted(evidence_dir.rglob("*.json")):
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
@@ -57,6 +92,8 @@ def check(
             continue
         if isinstance(value, dict) and value.get("kind") == "core_1_0b_transport_lane":
             lanes.append(value)
+        if isinstance(value, dict) and value.get("kind") == "core_1_0b_packaged_consumer":
+            packaged_consumers.append(value)
     _require(bool(lanes), "missing CORE-1.0B transport evidence", errors)
 
     revisions = {str(lane.get("exact_revision", "")) for lane in lanes}
@@ -194,6 +231,11 @@ def check(
             "official CI run provenance is missing",
             errors,
         )
+        _require(
+            _packaged_consumer_complete(packaged_consumers, revision),
+            "packaged clean-consumer evidence is incomplete",
+            errors,
+        )
 
     decision = BLOCKED if errors else PROMOTED if ci_closure else PENDING
     aggregate = {
@@ -206,6 +248,9 @@ def check(
         "lanes": len(lanes),
         "platforms": sorted(observed_platforms),
         "python_minors": sorted(observed_pythons),
+        "packaged_clean_consumer": _packaged_consumer_complete(
+            packaged_consumers, revision
+        ),
         "default_observed": "in_process" if not errors else None,
         "explicit_companion_observed": "companion" if not errors else None,
         "no_fallback": not errors,

@@ -238,8 +238,13 @@ La calificación executable queda definida por:
   para workload ordinario, histórico 116, CFG profundo 1000 y
   `expense_tracker`, sin umbral de corrección;
 - `scripts/check_core_1_0b_in_process_transport.py`: aggregate fail-closed con
-  revisión exacta, matrices completas y ausencia de evidencia tratada como
-  bloqueo;
+  revisión exacta, matrices completas, evidencia obligatoria del consumer
+  empaquetado y ausencia de evidencia tratada como bloqueo;
+- `scripts/core_1_0b_packaged_consumer_probe.py`: verifica sólo los wheels
+  productivos instalados en un venv fuera del checkout, sin Cargo/rustc en
+  `PATH`; registra `requested_transport`/`observed_transport`, prueba failure y
+  recovery sobre el mismo cliente y bloquea si el rollback companion invoca el
+  binding PyO3;
 - `.github/workflows/core-in-process-promotion.yml`: Linux/Windows/macOS,
   x86_64/arm64 y CPython 3.11–3.14, sin modificar los workflows históricos.
 
