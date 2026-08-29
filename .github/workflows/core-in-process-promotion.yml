@@ -143,7 +143,9 @@ jobs:
         run: |
           consumer="$RUNNER_TEMP/core-1-0b-consumer"
           python -m venv "$consumer"
-          python scripts/install_core_1_0b_wheels.py --python "$consumer/bin/python"
+          python scripts/install_core_1_0b_wheels.py --python "$consumer/bin/python" \
+            --revision "${{ github.sha }}" --ci-run-id "${{ github.run_id }}" \
+            --output "$RUNNER_TEMP/core-1-0b-packaged-install.json"
           cp scripts/core_1_0b_packaged_consumer_probe.py "$RUNNER_TEMP/core_1_0b_packaged_consumer_probe.py"
       - name: Default wheel consumer observes in-process without a toolchain
         shell: bash
@@ -153,6 +155,8 @@ jobs:
           cd "$RUNNER_TEMP"
           PATH="$consumer/bin:$RUNNER_TEMP/no-toolchain" "$consumer/bin/python" -I core_1_0b_packaged_consumer_probe.py \
             --expected-transport in_process --expect-default \
+            --artifact-role packaged_clean_consumer \
+            --install-manifest core-1-0b-packaged-install.json \
             --forbidden-root "$GITHUB_WORKSPACE" --revision "${{ github.sha }}" \
             --ci-run-id "${{ github.run_id }}" \
             --output core-1.0b-packaged-default.json
@@ -164,6 +168,8 @@ jobs:
           PATH="$consumer/bin:$RUNNER_TEMP/no-toolchain" AETHER_RUST_CORE_TRANSPORT=companion \
             "$consumer/bin/python" -I core_1_0b_packaged_consumer_probe.py \
             --expected-transport companion \
+            --artifact-role packaged_clean_consumer \
+            --install-manifest core-1-0b-packaged-install.json \
             --forbidden-root "$GITHUB_WORKSPACE" --revision "${{ github.sha }}" \
             --ci-run-id "${{ github.run_id }}" \
             --output core-1.0b-packaged-companion.json
@@ -171,7 +177,10 @@ jobs:
         if: always()
         with:
           name: core-1-0b-packaged-consumer
-          path: ${{ runner.temp }}/core-1.0b-packaged-*.json
+          path: |
+            ${{ runner.temp }}/core-1.0b-packaged-install.json
+            ${{ runner.temp }}/core-1.0b-packaged-default.json
+            ${{ runner.temp }}/core-1.0b-packaged-companion.json
 
   clean-install-platform:
     strategy:
@@ -210,12 +219,14 @@ jobs:
           cd "$isolated"
           PATH="$no_toolchain" "$runtime" -I probe.py \
             --expected-transport in_process --expect-default \
+            --artifact-role platform \
             --forbidden-root "$GITHUB_WORKSPACE" --revision "${{ github.sha }}" \
             --ci-run-id "${{ github.run_id }}" --platform "${{ matrix.platform }}" \
             --python-minor 3.13 \
             --output "$GITHUB_WORKSPACE/qualification/core-1.0b/consumer-${{ matrix.platform }}-in-process.json"
           PATH="$no_toolchain" AETHER_RUST_CORE_TRANSPORT=companion "$runtime" -I probe.py \
             --expected-transport companion \
+            --artifact-role platform \
             --forbidden-root "$GITHUB_WORKSPACE" --revision "${{ github.sha }}" \
             --ci-run-id "${{ github.run_id }}" --platform "${{ matrix.platform }}" \
             --python-minor 3.13 \
@@ -259,12 +270,14 @@ jobs:
           cd "$isolated"
           PATH="$no_toolchain" "$runtime" -I probe.py \
             --expected-transport in_process --expect-default \
+            --artifact-role python_compatibility \
             --forbidden-root "$GITHUB_WORKSPACE" --revision "${{ github.sha }}" \
             --ci-run-id "${{ github.run_id }}" --platform linux-x86_64 \
             --python-minor "${{ matrix.python }}" \
             --output "$GITHUB_WORKSPACE/qualification/core-1.0b/consumer-python-${{ matrix.python }}-in-process.json"
           PATH="$no_toolchain" AETHER_RUST_CORE_TRANSPORT=companion "$runtime" -I probe.py \
             --expected-transport companion \
+            --artifact-role python_compatibility \
             --forbidden-root "$GITHUB_WORKSPACE" --revision "${{ github.sha }}" \
             --ci-run-id "${{ github.run_id }}" --platform linux-x86_64 \
             --python-minor "${{ matrix.python }}" \
@@ -331,6 +344,7 @@ jobs:
           python scripts/check_core_1_0b_in_process_transport.py
           --evidence-dir qualification/core-1.0b
           --revision "${{ github.sha }}"
+          --ci-run-id "${{ github.run_id }}"
           --ci-closure --require-promoted
           --output qualification/core-1.0b/aggregate.json
       - uses: actions/upload-artifact@v4

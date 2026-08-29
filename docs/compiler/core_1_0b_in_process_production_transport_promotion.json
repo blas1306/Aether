@@ -40,6 +40,18 @@
       ],
       "retrospectively_promoted": false
     },
+    "latest_failed_ci_run": {
+      "run_id": 33265815894,
+      "conclusion": "failure",
+      "immutable": true,
+      "decision": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED",
+      "causes": [
+        "packaged-clean-consumer installed the exact Aether wheels with --no-deps before installing declared runtime dependencies",
+        "aggregate evidence matching allowed platform/Python consumer records to substitute for the mandatory packaged-clean-consumer artifact"
+      ],
+      "emitted_promoted_aggregate": "internally inconsistent / invalid for closure",
+      "retrospectively_promoted": false
+    },
     "transport_environment": "AETHER_RUST_CORE_TRANSPORT",
     "default_transport": "in_process",
     "explicit_rollback_transport": "companion",
@@ -58,8 +70,13 @@
     "required_artifacts": {
       "qualifier": "scripts/qualify_core_1_0b_in_process_transport.py",
       "checker": "scripts/check_core_1_0b_in_process_transport.py",
+      "wheel_installer": "scripts/install_core_1_0b_wheels.py",
       "packaged_consumer_probe": "scripts/core_1_0b_packaged_consumer_probe.py",
-      "tests": "tests/aether/test_core_1_0b_in_process_transport.py",
+      "tests": [
+        "tests/aether/test_core_1_0b_in_process_transport.py",
+        "tests/aether/test_core_1_0b_wheel_install.py",
+        "tests/aether/test_core_1_0b_aggregate_fail_closed.py"
+      ],
       "workflow": ".github/workflows/core-in-process-promotion.yml"
     },
     "local_qualification": {
@@ -85,6 +102,15 @@
         "development_install": "PASS",
         "wheel_only_default_in_process": "PASS",
         "wheel_only_explicit_companion": "PASS",
+        "runtime_dependencies_derived_from_wheel_metadata": [
+          "matplotlib==3.10.8",
+          "numpy==2.4.2",
+          "scipy==1.17.1",
+          "sympy==1.14.0"
+        ],
+        "exact_aether_wheel_hashes_recorded": true,
+        "packaged_transport_output_hash_match": true,
+        "aggregate_adversarial_regressions": "PASS",
         "cargo_check_workspace_locked": "PASS",
         "cargo_test_workspace_locked": "PASS",
         "cargo_fmt_all_check": "PASS",

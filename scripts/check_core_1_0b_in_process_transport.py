@@ -27,11 +27,76 @@ REPRESENTATIVE_REJECTIONS = {
     "invalid_cfg_target",
     "duplicate_function",
 }
+PACKAGED_CLEAN_CONSUMER_FILES = {
+    "in_process": "core-1.0b-packaged-default.json",
+    "companion": "core-1.0b-packaged-companion.json",
+}
+
+
+def _required_ci_artifacts() -> dict[str, dict[str, str]]:
+    """Return every machine-readable artifact required for CI closure."""
+    required = {
+        "blocker-resolution.json": {
+            "kind": "core_pkg_1_native_compiler_core_distribution_closure_check",
+            "role": "blocker_resolution",
+        },
+        "functional.json": {
+            "kind": "core_1_0b_transport_lane",
+            "role": "functional",
+        },
+        "development-install.json": {
+            "kind": "core_1_0b_transport_lane",
+            "role": "development_install",
+        },
+        "core-1.0b-packaged-install.json": {
+            "kind": "core_1_0b_clean_consumer_install",
+            "role": "packaged_clean_consumer_install",
+        },
+    }
+    for transport, filename in PACKAGED_CLEAN_CONSUMER_FILES.items():
+        required[filename] = {
+            "kind": "core_1_0b_packaged_clean_consumer",
+            "role": "packaged_clean_consumer",
+            "transport": transport,
+        }
+    for platform in sorted(PLATFORMS):
+        required[f"platform-{platform}.json"] = {
+            "kind": "core_1_0b_transport_lane",
+            "role": "platform",
+            "platform": platform,
+        }
+        for transport in ("in_process", "companion"):
+            transport_filename = transport.replace("_", "-")
+            required[f"consumer-{platform}-{transport_filename}.json"] = {
+                "kind": "core_1_0b_packaged_consumer",
+                "role": "platform",
+                "platform": platform,
+                "transport": transport,
+            }
+    for python in sorted(PYTHONS):
+        required[f"python-{python}.json"] = {
+            "kind": "core_1_0b_transport_lane",
+            "role": "python_compatibility",
+            "python_minor": python,
+        }
+        for transport in ("in_process", "companion"):
+            transport_filename = transport.replace("_", "-")
+            required[f"consumer-python-{python}-{transport_filename}.json"] = {
+                "kind": "core_1_0b_packaged_consumer",
+                "role": "python_compatibility",
+                "python_minor": python,
+                "transport": transport,
+            }
+    return required
 
 
 def _require(condition: bool, message: str, errors: list[str]) -> None:
     if not condition:
         errors.append(message)
+
+
+def _official_ci_run_id(value: object) -> bool:
+    return re.fullmatch(r"[1-9][0-9]*", str(value)) is not None
 
 
 def _blocker_resolution_record() -> dict[str, object]:
@@ -171,6 +236,7 @@ def _packaged_consumer_complete(
     records: list[dict[str, object]],
     revision: str,
     *,
+    required_role: str | None = None,
     required_platforms: set[str] | None = None,
     required_pythons: set[str] | None = None,
 ) -> bool:
@@ -182,6 +248,10 @@ def _packaged_consumer_complete(
         expected_starts = 1 if transport == "companion" else 0
         if (
             record.get("status") == "PASS"
+            and (
+                required_role is None
+                or record.get("artifact_role") == required_role
+            )
             and record.get("exact_revision") == revision
             and record.get("requested_transport") == transport
             and record.get("observed_transport") == transport
@@ -190,17 +260,28 @@ def _packaged_consumer_complete(
             and record.get("exact_native_dependency") is True
             and record.get("native_build_identity") == revision
             and record.get("outside_source_checkout") is True
+            and record.get("source_checkout_available") is False
             and record.get("cargo_available") is False
             and record.get("rustc_available") is False
             and record.get("handled_failure_recovery") is True
+            and record.get("representative_compilation") is True
+            and isinstance(record.get("successful_output_sha256"), str)
+            and len(str(record.get("successful_output_sha256"))) == 64
+            and isinstance(record.get("successful_function_count"), int)
+            and int(record.get("successful_function_count", 0)) > 0
+            and record.get("companion_from_installed_package") is True
+            and isinstance(record.get("python_executable"), str)
+            and isinstance(record.get("python_version"), str)
             and record.get("process_start_count") == expected_starts
             and record.get("request_count") == 3
             and record.get("pyo3_binding_calls") == 0
-            and str(record.get("ci_run_id")) not in {"", "LOCAL_PRE_CI"}
+            and _official_ci_run_id(record.get("ci_run_id"))
         ):
             valid.append(record)
 
     def paired(rows: list[dict[str, object]]) -> bool:
+        if len(rows) != 2:
+            return False
         by_transport = {
             str(record.get("expected_transport")): record for record in rows
         }
@@ -208,9 +289,15 @@ def _packaged_consumer_complete(
             set(by_transport) == {"in_process", "companion"}
             and by_transport["in_process"].get("default_selection") is True
             and by_transport["companion"].get("default_selection") is False
+            and by_transport["in_process"].get("successful_output_sha256")
+            == by_transport["companion"].get("successful_output_sha256")
         )
 
-    if not paired(valid):
+    if (
+        required_platforms is None
+        and required_pythons is None
+        and not paired(valid)
+    ):
         return False
     if required_platforms is not None and any(
         not paired(
@@ -229,10 +316,149 @@ def _packaged_consumer_complete(
     return True
 
 
+def _validate_required_ci_artifacts(
+    records_by_name: dict[str, dict[str, object]],
+    revision: str,
+    *,
+    expected_ci_run_id: str | None,
+    errors: list[str],
+) -> dict[str, bool]:
+    required = _required_ci_artifacts()
+    results: dict[str, bool] = {}
+    current_records = [
+        records_by_name[name]
+        for name in required
+        if name != "blocker-resolution.json" and name in records_by_name
+    ]
+    observed_run_ids = {
+        str(record.get("ci_run_id", "")) for record in current_records
+    }
+    if expected_ci_run_id is None:
+        _require(
+            len(observed_run_ids) == 1
+            and all(_official_ci_run_id(run_id) for run_id in observed_run_ids),
+            "required artifacts do not have one official CI run id",
+            errors,
+        )
+        required_run_id = next(iter(observed_run_ids), "")
+    else:
+        required_run_id = str(expected_ci_run_id)
+        _require(
+            _official_ci_run_id(required_run_id),
+            "expected CI run id is not an official numeric run id",
+            errors,
+        )
+        _require(
+            observed_run_ids == {required_run_id},
+            "required artifact run id differs from the expected CI run",
+            errors,
+        )
+
+    for filename, spec in required.items():
+        record = records_by_name.get(filename)
+        if record is None:
+            errors.append(f"missing required CI artifact: {filename}")
+            results[filename] = False
+            continue
+        artifact_errors: list[str] = []
+        _require(
+            record.get("kind") == spec["kind"],
+            f"required artifact kind mismatch: {filename}",
+            artifact_errors,
+        )
+        if filename == "blocker-resolution.json":
+            _require(
+                record.get("passed") is True
+                and record.get("decision") == CORE_PKG_1_QUALIFIED
+                and record.get("run_id") == CORE_PKG_1_RUN_ID
+                and record.get("exact_revision") == CORE_PKG_1_REVISION,
+                "blocker-resolution artifact did not pass its exact historical gate",
+                artifact_errors,
+            )
+        else:
+            _require(
+                record.get("status") == "PASS",
+                f"required artifact status is not PASS: {filename}",
+                artifact_errors,
+            )
+            _require(
+                record.get("exact_revision") == revision,
+                f"required artifact revision mismatch: {filename}",
+                artifact_errors,
+            )
+            _require(
+                str(record.get("ci_run_id", "")) == required_run_id,
+                f"required artifact run mismatch: {filename}",
+                artifact_errors,
+            )
+
+        role = spec.get("role")
+        if spec["kind"] == "core_1_0b_transport_lane":
+            _require(
+                record.get("matrix_role") == role,
+                f"required transport lane role mismatch: {filename}",
+                artifact_errors,
+            )
+        elif spec["kind"] in {
+            "core_1_0b_packaged_consumer",
+            "core_1_0b_packaged_clean_consumer",
+        }:
+            _require(
+                record.get("artifact_role") == role,
+                f"required packaged consumer role mismatch: {filename}",
+                artifact_errors,
+            )
+        if "transport" in spec:
+            _require(
+                record.get("expected_transport") == spec["transport"],
+                f"required transport subgate mismatch: {filename}",
+                artifact_errors,
+            )
+        if "platform" in spec:
+            _require(
+                record.get("platform") == spec["platform"],
+                f"required platform subgate mismatch: {filename}",
+                artifact_errors,
+            )
+        if "python_minor" in spec:
+            _require(
+                record.get("python_minor") == spec["python_minor"],
+                f"required Python subgate mismatch: {filename}",
+                artifact_errors,
+            )
+        if spec["kind"] == "core_1_0b_clean_consumer_install":
+            wheels = record.get("wheels")
+            _require(
+                isinstance(wheels, dict)
+                and set(wheels) == {"aether-language", "aether-compiler-core"}
+                and all(
+                    isinstance(wheels[name], dict)
+                    and wheels[name].get("version") == "1.0.0rc4"
+                    and isinstance(wheels[name].get("path"), str)
+                    and isinstance(wheels[name].get("sha256"), str)
+                    and len(str(wheels[name].get("sha256"))) == 64
+                    for name in wheels
+                )
+                and isinstance(
+                    record.get("runtime_requirements_from_wheel_metadata"), list
+                )
+                and bool(record.get("runtime_requirements_from_wheel_metadata"))
+                and isinstance(record.get("installed_distributions"), list)
+                and record.get("aether_index_resolution_permitted") is False
+                and record.get("dependency_validation") == "pip check PASS",
+                "packaged clean-consumer install evidence is incomplete",
+                artifact_errors,
+            )
+        errors.extend(artifact_errors)
+        results[filename] = not artifact_errors
+    return results
+
+
 def check(
     evidence_dir: Path,
     *,
     exact_revision: str | None = None,
+    ci_run_id: str | None = None,
     ci_closure: bool = False,
 ) -> tuple[dict[str, object], list[str]]:
     errors: list[str] = []
@@ -244,15 +470,26 @@ def check(
     )
     lanes: list[dict[str, object]] = []
     packaged_consumers: list[dict[str, object]] = []
+    records_by_name: dict[str, dict[str, object]] = {}
     for path in sorted(evidence_dir.rglob("*.json")):
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except Exception as exc:
             errors.append(f"invalid JSON evidence {path}: {exc}")
             continue
+        if not isinstance(value, dict):
+            errors.append(f"JSON evidence is not an object: {path}")
+            continue
+        if path.name in records_by_name:
+            errors.append(f"duplicate evidence filename: {path.name}")
+            continue
+        records_by_name[path.name] = value
         if isinstance(value, dict) and value.get("kind") == "core_1_0b_transport_lane":
             lanes.append(value)
-        if isinstance(value, dict) and value.get("kind") == "core_1_0b_packaged_consumer":
+        if value.get("kind") in {
+            "core_1_0b_packaged_consumer",
+            "core_1_0b_packaged_clean_consumer",
+        }:
             packaged_consumers.append(value)
     _require(bool(lanes), "missing CORE-1.0B transport evidence", errors)
 
@@ -378,7 +615,34 @@ def check(
 
     observed_platforms = {str(lane.get("platform")) for lane in lanes if lane.get("matrix_role") == "platform"}
     observed_pythons = {str(lane.get("python_minor")) for lane in lanes if lane.get("matrix_role") == "python_compatibility"}
+    prerequisite_results: dict[str, bool] = {}
+    packaged_clean_consumers = [
+        record
+        for record in packaged_consumers
+        if record.get("kind") == "core_1_0b_packaged_clean_consumer"
+    ]
+    platform_consumers = [
+        record
+        for record in packaged_consumers
+        if record.get("artifact_role") == "platform"
+    ]
+    python_consumers = [
+        record
+        for record in packaged_consumers
+        if record.get("artifact_role") == "python_compatibility"
+    ]
+    packaged_clean_consumer_complete = _packaged_consumer_complete(
+        packaged_clean_consumers,
+        revision,
+        required_role="packaged_clean_consumer",
+    )
     if ci_closure:
+        prerequisite_results = _validate_required_ci_artifacts(
+            records_by_name,
+            revision,
+            expected_ci_run_id=ci_run_id,
+            errors=errors,
+        )
         _require(observed_platforms == PLATFORMS, "platform matrix evidence is incomplete", errors)
         _require(observed_pythons == PYTHONS, "Python matrix evidence is incomplete", errors)
         _require(
@@ -391,18 +655,43 @@ def check(
             errors,
         )
         _require(
-            all(str(lane.get("ci_run_id")) not in {"", "LOCAL_PRE_CI"} for lane in lanes),
+            all(_official_ci_run_id(lane.get("ci_run_id")) for lane in lanes),
             "official CI run provenance is missing",
             errors,
         )
         _require(
+            packaged_clean_consumer_complete,
+            "dedicated packaged-clean-consumer evidence is incomplete",
+            errors,
+        )
+        install_record = records_by_name.get("core-1.0b-packaged-install.json")
+        _require(
+            isinstance(install_record, dict)
+            and all(
+                record.get("install_evidence") == install_record
+                for record in packaged_clean_consumers
+            ),
+            "dedicated packaged consumers do not reference the exact install evidence",
+            errors,
+        )
+        _require(
             _packaged_consumer_complete(
-                packaged_consumers,
+                platform_consumers,
                 revision,
+                required_role="platform",
                 required_platforms=PLATFORMS,
+            ),
+            "platform packaged-consumer evidence is incomplete",
+            errors,
+        )
+        _require(
+            _packaged_consumer_complete(
+                python_consumers,
+                revision,
+                required_role="python_compatibility",
                 required_pythons=PYTHONS,
             ),
-            "packaged clean-consumer evidence is incomplete",
+            "Python packaged-consumer evidence is incomplete",
             errors,
         )
 
@@ -418,12 +707,8 @@ def check(
         "lanes": len(lanes),
         "platforms": sorted(observed_platforms),
         "python_minors": sorted(observed_pythons),
-        "packaged_clean_consumer": _packaged_consumer_complete(
-            packaged_consumers,
-            revision,
-            required_platforms=PLATFORMS if ci_closure else None,
-            required_pythons=PYTHONS if ci_closure else None,
-        ),
+        "required_prerequisites": prerequisite_results,
+        "packaged_clean_consumer": packaged_clean_consumer_complete,
         "default_observed": "in_process" if not errors else None,
         "explicit_companion_observed": "companion" if not errors else None,
         "no_fallback": not errors,
@@ -437,6 +722,7 @@ def main() -> int:
     parser.add_argument("--evidence-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--revision")
+    parser.add_argument("--ci-run-id")
     parser.add_argument("--ci-closure", action="store_true")
     parser.add_argument("--require-pending", action="store_true")
     parser.add_argument("--require-promoted", action="store_true")
@@ -444,6 +730,7 @@ def main() -> int:
     aggregate, _errors = check(
         args.evidence_dir,
         exact_revision=args.revision,
+        ci_run_id=args.ci_run_id,
         ci_closure=args.ci_closure,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)

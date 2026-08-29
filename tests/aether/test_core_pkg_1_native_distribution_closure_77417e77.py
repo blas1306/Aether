@@ -73,6 +73,15 @@ def test_closure_rejects_another_revision(tmp_path: Path) -> None:
     assert record["checks"]["official_run_identity"] is False
 
 
+def test_closure_rejects_run_timestamp_mismatch(tmp_path: Path) -> None:
+    for field in ("created_at", "run_started_at", "updated_at"):
+        tampered = _evidence()
+        tampered["official_run"][field] = "2026-08-28T00:00:00Z"
+        record = _record(_write(tmp_path, tampered))
+        assert record["passed"] is False
+        assert record["checks"]["official_run_identity"] is False
+
+
 def test_closure_rejects_missing_or_non_success_job(tmp_path: Path) -> None:
     missing = _evidence()
     missing["run_jobs"] = missing["run_jobs"][:-1]

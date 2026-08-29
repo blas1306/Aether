@@ -320,3 +320,55 @@ Este arreglo no convierte retrospectivamente el run `33264243543` en PASS ni
 cambia el estado histórico `SUCCESS` del run CORE-PKG-1 `33216160463`. Requiere
 un nuevo run oficial para decidir CORE-1.0B; Windows no se afirma PASS a partir
 de la regresión portable ejecutada localmente.
+
+## Incidente del run oficial 33265815894
+
+El run `33265815894` también permanece inmutable con conclusión `FAILED` y
+decisión válida `CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED`. La
+qualification demostró exactamente dos gaps adicionales del harness:
+
+1. `packaged-clean-consumer` instalaba los dos wheels Aether con `--no-deps`
+   sin preparar las dependencias runtime declaradas por `aether-language`; el
+   probe se detenía con `ModuleNotFoundError: numpy` antes de observar un
+   transporte.
+2. El aggregate aceptaba indistintamente todos los records
+   `core_1_0b_packaged_consumer`. Por eso la evidencia redundante de las
+   matrices de plataforma/Python podía sustituir el artifact obligatorio del
+   job `packaged-clean-consumer` y producir incorrectamente `PROMOTED`.
+
+El artifact aggregate que emitió `PROMOTED` en ese run es internamente
+inconsistente e inválido para closure; no se reinterpreta como promoción.
+
+El instalador ahora lee `Requires-Dist` del METADATA del wheel exacto, exige el
+pin `aether-compiler-core==1.0.0rc4`, instala por separado los pins runtime
+activos y sólo entonces instala los dos paths de wheel seleccionados con
+`--no-deps`. Pip nunca recibe un requirement de Aether resoluble desde un
+índice. Un manifiesto registra paths y SHA-256 de ambos wheels, requirements e
+inventario instalado y el ejecutable/versión de Python.
+
+El consumer dedicado usa un kind distinto,
+`core_1_0b_packaged_clean_consumer`, y referencia ese manifiesto exacto. Ejecuta
+una compilación Aether representativa por default `in_process` y otra con el
+rollback explícito `companion`; registra el mismo hash SSA para ambas, orígenes
+importados, companion instalado, ausencia de checkout en `sys.path` y ausencia
+de Cargo/rustc.
+
+El checker mantiene una lista nominal de todos los artifacts requeridos:
+blocker resolution, functional, development install, matrices de plataforma y
+Python con sus consumers, manifiesto de instalación y ambos records del
+consumer dedicado. Exige archivo, JSON object, kind/role, revisión, run, PASS y
+subgate esperado. Los records de matrices ya no pueden sustituir al artifact
+dedicado. Ausencia, corrupción, FAIL, mismatch o transporte no observado
+bloquean y hacen fallar closure.
+
+La corrección local en Linux x86_64/CPython 3.14 construyó ambos wheels, instaló
+desde METADATA `matplotlib==3.10.8`, `numpy==2.4.2`, `scipy==1.17.1` y
+`sympy==1.14.0` en un venv temporal, y pasó ambos probes sin toolchain ni
+checkout importable. Las regresiones adversariales cubren evidencia válida,
+consumer dedicado ausente/fallido/corrupto/con revisión distinta, observación
+default incorrecta, rollback companion ausente, otro prerequisite ausente y
+evidencia redundante que intenta sustituir el artifact obligatorio.
+
+La decisión después de esta corrección local es
+`CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_PENDING_CI`. Sólo un nuevo run
+oficial completo puede emitir una promoción formal.

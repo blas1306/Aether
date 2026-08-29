@@ -10,6 +10,8 @@ El cierre consume exclusivamente metadata, jobs, logs y los 14 artifacts
 oficiales del GitHub Actions run `33216160463`. GitHub fija ese run al workflow
 `core-native-packaging`, evento `workflow_dispatch`, rama `main`, revisión exacta
 `77417e7751482fc5a88a7d4207e99d67692da043` y conclusión `success`.
+GitHub registra creación e inicio en `2026-08-28T22:16:52Z` y última
+actualización en `2026-08-28T22:23:27Z`; el checker sella los tres timestamps.
 
 El resultado califica la distribución conjunta de binding y companion para la
 matriz probada. No promueve el transporte in-process, no hace de PyO3 el default,

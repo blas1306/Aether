@@ -32,6 +32,7 @@ def _write_wheel(
     version: str = "1.0.0rc4",
     build: str = "",
     metadata_distribution: str | None = None,
+    requires_dist: tuple[str, ...] | None = None,
 ) -> Path:
     filename_distribution = distribution.replace("-", "_")
     build_component = f"-{build}" if build else ""
@@ -40,11 +41,20 @@ def _write_wheel(
     )
     dist_info = f"{filename_distribution}-{version}.dist-info"
     with ZipFile(wheel, "w", compression=ZIP_DEFLATED) as archive:
+        requirements = (
+            ("aether-compiler-core==1.0.0rc4",)
+            if requires_dist is None and distribution == "aether-language"
+            else requires_dist or ()
+        )
         archive.writestr(
             f"{dist_info}/METADATA",
             "Metadata-Version: 2.1\n"
             f"Name: {metadata_distribution or distribution}\n"
-            f"Version: {version}\n",
+            f"Version: {version}\n"
+            + "".join(
+                f"Requires-Dist: {requirement}\n"
+                for requirement in requirements
+            ),
         )
         archive.writestr(
             f"{dist_info}/WHEEL",
@@ -148,6 +158,7 @@ def test_installer_passes_concrete_paths_without_powershell_globbing(
         (
             [
                 str(windows_python),
+                "-I",
                 "-m",
                 "pip",
                 "install",
@@ -157,9 +168,76 @@ def test_installer_passes_concrete_paths_without_powershell_globbing(
                 str(language.resolve()),
             ],
             True,
-        )
+        ),
+        ([str(windows_python), "-I", "-m", "pip", "check"], True),
     ]
     assert all("*" not in argument for argument in calls[0][0])
+
+
+def test_installer_derives_runtime_dependencies_then_installs_exact_wheels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    installer = _installer_module()
+    native_dir = tmp_path / "native-dist"
+    language_dir = tmp_path / "language-dist"
+    native_dir.mkdir()
+    language_dir.mkdir()
+    native = _write_wheel(
+        native_dir, "aether-compiler-core", str(next(sys_tags()))
+    )
+    language = _write_wheel(
+        language_dir,
+        "aether-language",
+        "py3-none-any",
+        requires_dist=(
+            "aether-compiler-core==1.0.0rc4",
+            "numpy==2.4.2",
+            "conditional-runtime==7; python_version < '1'",
+        ),
+    )
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], *, check: bool):
+        assert check is True
+        calls.append(command)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(installer.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(INSTALLER),
+            "--native-dir",
+            str(native_dir),
+            "--language-dir",
+            str(language_dir),
+            "--python",
+            sys.executable,
+        ],
+    )
+
+    assert installer.main() == 0
+    assert calls == [
+        [
+            sys.executable,
+            "-I",
+            "-m",
+            "pip",
+            "install",
+            "--disable-pip-version-check",
+            "numpy==2.4.2",
+        ],
+        installer.concrete_install_command(
+            Path(sys.executable), native.resolve(), language.resolve()
+        ),
+        [sys.executable, "-I", "-m", "pip", "check"],
+    ]
+    assert all(
+        "aether-language" not in argument
+        and "aether-compiler-core" not in argument
+        for argument in calls[0]
+    )
 
 
 def test_installer_installs_both_concrete_wheels_into_clean_venv(
