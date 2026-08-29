@@ -241,6 +241,8 @@ def test_aggregate_blocks_missing_machine_readable_evidence(tmp_path) -> None:
     aggregate, errors = checker.check(tmp_path)
     assert aggregate["decision"] == checker.BLOCKED
     assert errors
+    assert checker._performance_complete({"workloads": {}}) is False
+    assert checker._performance_complete({"workloads": "malformed"}) is False
 
 
 def test_dedicated_workflow_has_promotion_and_matrix_guards() -> None:
@@ -272,5 +274,50 @@ def test_dedicated_workflow_has_promotion_and_matrix_guards() -> None:
     ):
         assert platform_id in text
     assert 'python: ["3.11", "3.12", "3.13", "3.14"]' in text
+    assert "tests/aether/test_rust_ssa_shadow_independent.py" not in text
+    assert (
+        "tests/aether/test_rust_ssa_shadow_independent_production_promotion.py"
+        in text
+    )
+    assert "tests/aether/test_rust_ssa_shadow_independent_qualification.py" in text
     assert "--ci-closure" in text
     assert "--require-promoted" in text
+
+
+def test_qualification_evidence_records_resolved_previous_blocker() -> None:
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2]
+    qualifier = (
+        root / "scripts/qualify_core_1_0b_in_process_transport.py"
+    ).read_text(encoding="utf-8")
+    checker = (
+        root / "scripts/check_core_1_0b_in_process_transport.py"
+    ).read_text(encoding="utf-8")
+    evidence = json.loads(
+        (
+            root
+            / "docs/compiler/core_1_0b_in_process_production_transport_promotion.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert '"previous_blocker": "resolved_by_CORE_PKG_1"' in qualifier
+    assert 'lane.get("previous_blocker") == "resolved_by_CORE_PKG_1"' in checker
+    assert evidence["resumed_promotion"]["previous_blocker"] == (
+        "resolved_by_CORE_PKG_1"
+    )
+
+
+def test_functional_qualification_characterizes_all_required_workloads() -> None:
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "scripts/qualify_core_1_0b_in_process_transport.py"
+    ).read_text(encoding="utf-8")
+    for workload in (
+        '"ordinary"',
+        '"historical_116"',
+        '"deep_cfg_1000"',
+        '"real_ae_expense_tracker"',
+    ):
+        assert workload in source

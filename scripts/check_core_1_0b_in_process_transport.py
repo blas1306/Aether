@@ -21,6 +21,26 @@ def _require(condition: bool, message: str, errors: list[str]) -> None:
         errors.append(message)
 
 
+def _performance_complete(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    workloads = value.get("workloads")
+    required = {
+        "ordinary",
+        "historical_116",
+        "deep_cfg_1000",
+        "real_ae_expense_tracker",
+    }
+    if not isinstance(workloads, dict) or set(workloads) != required:
+        return False
+    if not all(isinstance(workload, dict) for workload in workloads.values()):
+        return False
+    historical = workloads["historical_116"]
+    return historical.get("payloads_per_sample") == 116 and all(
+        workload.get("samples") == 5 for workload in workloads.values()
+    )
+
+
 def check(
     evidence_dir: Path,
     *,
@@ -49,6 +69,11 @@ def check(
     for lane in lanes:
         label = f"{lane.get('platform')}/{lane.get('python_minor')}/{lane.get('matrix_role')}"
         _require(lane.get("status") == "PASS", f"lane failed: {label}", errors)
+        _require(
+            lane.get("previous_blocker") == "resolved_by_CORE_PKG_1",
+            f"previous distribution blocker resolution is missing: {label}",
+            errors,
+        )
         _require(lane.get("default_transport") == "in_process", f"default guard failed: {label}", errors)
         _require(lane.get("automatic_fallback") is False, f"fallback guard failed: {label}", errors)
         native = lane.get("native_distribution")
@@ -136,6 +161,17 @@ def check(
                 for row in pipeline["cases"]
             ),
             "full production .ae pipeline parity evidence is incomplete",
+            errors,
+        )
+        performance = lane.get("performance")
+        _require(
+            isinstance(performance, dict)
+            and set(performance) == {"in_process", "companion"}
+            and all(
+                _performance_complete(performance[transport])
+                for transport in ("in_process", "companion")
+            ),
+            "multi-workload performance characterization is incomplete",
             errors,
         )
 

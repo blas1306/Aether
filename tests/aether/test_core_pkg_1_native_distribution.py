@@ -23,7 +23,9 @@ WRAPPER = NATIVE / "python/aether_compiler_core/__init__.py"
 
 def load_wrapper():
     spec = importlib.util.spec_from_file_location(
-        "aether_compiler_core", WRAPPER, submodule_search_locations=[str(WRAPPER.parent)]
+        "_aether_compiler_core_test_wrapper",
+        WRAPPER,
+        submodule_search_locations=[str(WRAPPER.parent)],
     )
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

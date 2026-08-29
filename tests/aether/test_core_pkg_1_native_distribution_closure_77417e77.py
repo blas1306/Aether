@@ -37,9 +37,12 @@ def _record(evidence: Path = EVIDENCE):
 
 def test_official_core_pkg_1_closure_recomputes_qualified() -> None:
     record = _record()
+    evidence = _evidence()
     assert record["passed"] is True, record["checks"]
     assert record["qualification_eligible"] is True
     assert record["decision"] == "CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_QUALIFIED"
+    assert evidence["decision"] == record["decision"]
+    assert evidence["final_decision"] == record["decision"]
     assert all(record["checks"].values())
 
 
@@ -209,10 +212,34 @@ def test_closure_rejects_rewriting_historical_failure(tmp_path: Path) -> None:
     record = _record(_write(tmp_path, tampered))
     assert record["checks"]["historical_failed_run"] is False
 
+    tampered = _evidence()
+    tampered["historical_failed_run"][
+        "revealed_qualification_or_ci_harness_defects_later_corrected"
+    ] = False
+    record = _record(_write(tmp_path, tampered))
+    assert record["checks"]["historical_failed_run"] is False
+
+
+def test_closure_rejects_blocker_resolution_without_qualified_packaging(
+    tmp_path: Path,
+) -> None:
+    tampered = _evidence()
+    tampered["core_1_0b_distribution_blocker"]["resolution"] = (
+        "CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_BLOCKED"
+    )
+    record = _record(_write(tmp_path, tampered))
+    assert record["passed"] is False
+    assert record["checks"]["closure_scope"] is False
+
 
 def test_closure_rejects_hand_edited_decision_or_eligibility(tmp_path: Path) -> None:
     tampered = _evidence()
     tampered["final_decision"] = "CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_BLOCKED"
+    record = _record(_write(tmp_path, tampered))
+    assert record["checks"]["decision_recomputes"] is False
+
+    tampered = _evidence()
+    tampered["decision"] = "CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_BLOCKED"
     record = _record(_write(tmp_path, tampered))
     assert record["checks"]["decision_recomputes"] is False
 

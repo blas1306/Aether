@@ -3,6 +3,7 @@
   "kind": "core_pkg_1_native_compiler_core_distribution_closure",
   "milestone": "CORE-PKG-1",
   "closure_date": "2026-08-28",
+  "decision": "CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_QUALIFIED",
   "final_decision": "CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_QUALIFIED",
   "official_run": {
     "artifact_count": 14,
@@ -550,10 +551,15 @@
     "exact_revision": "b219d60d1afe38bea560495536401e9997a4ea5a",
     "immutable": true,
     "relationship": "independent earlier qualification; not overwritten or reinterpreted",
+    "revealed_qualification_or_ci_harness_defects_later_corrected": true,
     "run_id": 33188797944,
     "status": "FAILED"
   },
   "core_1_0b_distribution_blocker": {
+    "previous_blocker": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED",
+    "blocker_reason": "production installation did not guarantee `_aether_core`",
+    "resolution": "CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_QUALIFIED",
+    "permitted_consequence": "CORE-1.0B may resume qualification/promotion work",
     "historical_blocker": "_aether_core was not part of normal aether-language installations",
     "resolved_for_qualified_matrix": true,
     "result": "The distribution blocker that stopped CORE-1.0B is resolved for the qualified platform/Python matrix.",

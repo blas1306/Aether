@@ -199,6 +199,15 @@ normales de `aether-language`. Los clean consumers prueban que el dependency
 contract instala ahora binding y companion juntos. Por tanto, el blocker de
 distribución que detuvo CORE-1.0B queda resuelto para la matriz calificada.
 
+El registro machine-readable fija explícitamente:
+
+```yaml
+previous_blocker: CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED
+blocker_reason: production installation did not guarantee `_aether_core`
+resolution: CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_QUALIFIED
+permitted_consequence: CORE-1.0B may resume qualification/promotion work
+```
+
 CORE-1.0B remains unpromoted. CORE-1.1 was not implemented.
 
 ## Historia preservada
@@ -209,7 +218,8 @@ permanece `CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_BLOCKED`. El job
 `binding-installed-smoke` falló la reproducción productiva CORE-1.0A; por ello
 no se publicó `core_pkg_1_binding_smoke`, y `aggregate-fail-closed` bloqueó por
 esa ausencia. El run exitoso es evidencia posterior e independiente; no
-sobrescribe ni reinterpreta el histórico.
+sobrescribe ni reinterpreta el histórico. El run fallido reveló defectos del
+qualification/CI harness que fueron corregidos posteriormente.
 
 ## Límites y cambios
 

@@ -68,7 +68,8 @@ jobs:
           PYTHONPATH=src python -m pytest -q
           tests/aether/test_core_1_0b_in_process_transport.py
           tests/aether/test_rust_ssa_shadow_mode.py
-          tests/aether/test_rust_ssa_shadow_independent.py
+          tests/aether/test_rust_ssa_shadow_independent_production_promotion.py
+          tests/aether/test_rust_ssa_shadow_independent_qualification.py
 
   transport-parity:
     runs-on: ubuntu-latest

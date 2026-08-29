@@ -199,6 +199,10 @@ distribución productiva del binding. CORE-PKG-1 lo resolvió formalmente con
 `77417e7751482fc5a88a7d4207e99d67692da043`). No apareció otro bloqueo durante
 la reauditoría del punto productivo.
 
+Cada lane registra esta resolución como evidencia machine-readable mediante
+`"previous_blocker": "resolved_by_CORE_PKG_1"`; el aggregate la exige y falla
+cerrado si falta o cambia.
+
 La promoción retomada agrega el eje ortogonal
 `AETHER_RUST_CORE_TRANSPORT`. La ausencia de la variable y el valor
 `in_process` seleccionan PyO3; `companion` selecciona protocol-v1. Cualquier
@@ -230,7 +234,9 @@ La calificación executable queda definida por:
   no-fallback, sesiones/concurrencia, default guard y ortogonalidad;
 - `scripts/qualify_core_1_0b_in_process_transport.py`: pipeline `.ae`, corpus
   histórico, CFG profundo, failures, differential, rollback y performance por
-  ambos transportes productivos;
+  ambos transportes productivos. La caracterización usa warmup y cinco muestras
+  para workload ordinario, histórico 116, CFG profundo 1000 y
+  `expense_tracker`, sin umbral de corrección;
 - `scripts/check_core_1_0b_in_process_transport.py`: aggregate fail-closed con
   revisión exacta, matrices completas y ausencia de evidencia tratada como
   bloqueo;

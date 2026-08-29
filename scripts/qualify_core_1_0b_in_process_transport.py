@@ -109,6 +109,33 @@ def _compare(
     return {"case": case_id, "accepted": accepted, "transport_parity": parity}
 
 
+def _characterize_workload(
+    client: ProductionRustSSALoweringClient,
+    payloads: tuple[bytes, ...],
+) -> dict[str, object]:
+    """Measure five warm batches without turning performance into a gate."""
+    if not payloads:
+        raise ValueError("performance workload must contain at least one payload")
+    for payload in payloads:
+        if client.lower(payload).get("ok") is not True:
+            raise RuntimeError("performance warmup workload was rejected")
+    samples: list[float] = []
+    started = perf_counter()
+    for _ in range(5):
+        sample_started = perf_counter()
+        for payload in payloads:
+            if client.lower(payload).get("ok") is not True:
+                raise RuntimeError("performance sample workload was rejected")
+        samples.append(perf_counter() - sample_started)
+    return {
+        "payloads_per_sample": len(payloads),
+        "samples": len(samples),
+        "median_seconds": median(samples),
+        "dispersion_pstdev_seconds": pstdev(samples),
+        "total_seconds": perf_counter() - started,
+    }
+
+
 def _pipeline_compare(
     case_id: str,
     initial: IRModule,
@@ -270,21 +297,34 @@ def qualify(args: argparse.Namespace) -> dict[str, object]:
         clients[RustCoreTransport.IN_PROCESS].request_count - before == 32
     )
 
+    ordinary = (_payload(selected[0][1]),)
+    real_ae = (_payload(_initial_for(ROOT / "examples/expense_tracker/Main.ae")),)
+    performance_payloads = {
+        "ordinary": ordinary,
+        "deep_cfg_1000": (_payload(linear("core_1_0b_perf_deep_1000", 1000)),),
+        "real_ae_expense_tracker": real_ae,
+    }
+    if not args.smoke:
+        performance_payloads["historical_116"] = tuple(
+            _payload(initial) for _path, initial in historical
+        )
     performance: dict[str, object] = {}
-    ordinary = _payload(selected[0][1])
     for transport, client in clients.items():
-        client.lower(ordinary)
-        samples: list[float] = []
-        started = perf_counter()
-        for _ in range(5):
-            sample_started = perf_counter()
-            client.lower(ordinary)
-            samples.append(perf_counter() - sample_started)
+        workloads = {
+            name: _characterize_workload(client, payloads)
+            for name, payloads in performance_payloads.items()
+        }
+        ordinary_result = workloads["ordinary"]
         performance[transport.value] = {
-            "warm_runs": 5,
-            "median_seconds": median(samples),
-            "dispersion_pstdev_seconds": pstdev(samples),
-            "total_seconds": perf_counter() - started,
+            # Retain the original ordinary-workload summary for consumers of
+            # the schema-v1 evidence and add explicit multi-workload detail.
+            "warm_runs": ordinary_result["samples"],
+            "median_seconds": ordinary_result["median_seconds"],
+            "dispersion_pstdev_seconds": ordinary_result[
+                "dispersion_pstdev_seconds"
+            ],
+            "total_seconds": ordinary_result["total_seconds"],
+            "workloads": workloads,
         }
 
     provenance = {
@@ -323,6 +363,7 @@ def qualify(args: argparse.Namespace) -> dict[str, object]:
         "artifact_schema_version": 1,
         "kind": "core_1_0b_transport_lane",
         "milestone": "CORE-1.0B",
+        "previous_blocker": "resolved_by_CORE_PKG_1",
         "exact_revision": _revision(args.revision),
         "ci_run_id": args.ci_run_id or os.environ.get("GITHUB_RUN_ID") or "LOCAL_PRE_CI",
         "platform": args.platform or _platform_id(),
@@ -385,6 +426,7 @@ def main() -> int:
             "artifact_schema_version": 1,
             "kind": "core_1_0b_transport_lane",
             "milestone": "CORE-1.0B",
+            "previous_blocker": "resolved_by_CORE_PKG_1",
             "exact_revision": _revision(args.revision),
             "ci_run_id": args.ci_run_id or os.environ.get("GITHUB_RUN_ID") or "LOCAL_PRE_CI",
             "platform": args.platform or _platform_id(),

@@ -597,6 +597,7 @@ def _check_historical(evidence: dict[str, object]) -> bool:
         and row.get("aggregate_decision") == BLOCKED
         and row.get("immutable") is True
         and row.get("relationship") == "independent earlier qualification; not overwritten or reinterpreted"
+        and row.get("revealed_qualification_or_ci_harness_defects_later_corrected") is True
         and row.get("causes") == [
             "binding-installed-smoke failed its CORE-1.0A production replay",
             "the binding evidence artifact was consequently absent",
@@ -649,10 +650,16 @@ def _check_scope(evidence: dict[str, object]) -> bool:
             "semantic_changes_in_closure": False,
             "universal_platform_or_python_correctness": False,
         }
-        and isinstance(blocker, dict)
-        and blocker.get("historical_blocker") == "_aether_core was not part of normal aether-language installations"
-        and blocker.get("resolved_for_qualified_matrix") is True
-        and blocker.get("core_1_0b_promoted") is False
+        and blocker == {
+            "previous_blocker": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED",
+            "blocker_reason": "production installation did not guarantee `_aether_core`",
+            "resolution": QUALIFIED,
+            "permitted_consequence": "CORE-1.0B may resume qualification/promotion work",
+            "historical_blocker": "_aether_core was not part of normal aether-language installations",
+            "resolved_for_qualified_matrix": True,
+            "result": "The distribution blocker that stopped CORE-1.0B is resolved for the qualified platform/Python matrix.",
+            "core_1_0b_promoted": False,
+        }
         and isinstance(performance, dict)
         and performance.get("characterization_available") is False
         and performance.get("correctness_gate") is False
@@ -793,7 +800,10 @@ def build_record(
 
     qualification_eligible = all(checks.values())
     expected_decision = QUALIFIED if qualification_eligible else BLOCKED
-    checks["decision_recomputes"] = evidence.get("final_decision") == expected_decision
+    checks["decision_recomputes"] = (
+        evidence.get("decision") == expected_decision
+        and evidence.get("final_decision") == expected_decision
+    )
     passed = qualification_eligible and all(checks.values())
     return {
         "artifact_schema_version": 1,
