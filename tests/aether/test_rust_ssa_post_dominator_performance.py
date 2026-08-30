@@ -73,7 +73,9 @@ def test_instrumentation_is_exclusive_to_explicit_companion_mode() -> None:
     compiler_core = (
         ROOT / "compiler-rs/crates/aether-verifier/src/compiler_core.rs"
     ).read_text(encoding="utf-8")
-    assert "lower_verified_ir_to_ssa_v1(&self.initial_ir, 1, 1)" in compiler_core
+    assert "normalize_lifecycle_v1(&self.initial_ir, 1)" in compiler_core
+    assert "lower_normalized_ir_to_ssa_v1(&normalized)" in compiler_core
+    assert "verify_owned_ssa_refinement(&normalized, &ssa)" in compiler_core
     assert "verify_owned_ssa(&ssa)" in compiler_core
 
     dominance = (

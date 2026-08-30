@@ -28,6 +28,7 @@ mod parity_registry;
 mod return_error;
 mod return_verifier;
 mod ssa_error;
+mod ssa_refinement_verifier;
 mod ssa_verifier;
 mod ssa_wire_verifier;
 mod structure_error;
@@ -72,6 +73,10 @@ pub use return_verifier::{verify_function_returns, verify_module_returns};
 pub use ssa_error::{
     BlockSSAError, FunctionSSAError, ModuleSSAError, SSADefinitionError, SSADefinitionLocation,
     SSAInstructionLocation, SSAUseLocation,
+};
+pub use ssa_refinement_verifier::{
+    RefinementSourceLocation, SsaRefinementErrorCategory, SsaRefinementPhase,
+    SsaRefinementVerificationError, verify_owned_ssa_refinement,
 };
 pub use ssa_verifier::{verify_function_ssa, verify_module_ssa};
 pub use ssa_wire_verifier::{SSAWireVerificationError, verify_owned_ssa, verify_ssa_module_dto};

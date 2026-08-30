@@ -10,11 +10,11 @@ use std::error::Error;
 use std::fmt;
 
 use aether_ir::wire::{IRModuleDTO, SSAModuleV2DTO};
-use aether_ir::{OwnedSsaModule, lower_verified_ir_to_ssa_v1};
+use aether_ir::{OwnedSsaModule, lower_normalized_ir_to_ssa_v1, normalize_lifecycle_v1};
 use serde::Serialize;
 
 use crate::ssa_wire_verifier::SSAWireVerificationError;
-use crate::verify_owned_ssa;
+use crate::{SsaRefinementVerificationError, verify_owned_ssa, verify_owned_ssa_refinement};
 
 /// Version of the transport-independent CompilerCore API exposed to adapters.
 pub const COMPILER_CORE_API_VERSION: u32 = 1;
@@ -116,6 +116,23 @@ impl CompilerError {
         }
     }
 
+    fn refinement_verification(error: SsaRefinementVerificationError) -> Self {
+        Self {
+            kind: CompilerErrorKind::Internal,
+            category: "ssa_refinement_verification",
+            phase: CompilerPhase::SsaVerification,
+            code: error.code,
+            message: error.to_string(),
+            function: error.function,
+            block: error.block,
+            source_location: error.source_location.map(|location| SourceLocation {
+                path: location.path,
+                line: u64::try_from(location.line).unwrap_or_default(),
+                column: u64::try_from(location.column).unwrap_or_default(),
+            }),
+        }
+    }
+
     fn missing_ssa() -> Self {
         Self {
             kind: CompilerErrorKind::Internal,
@@ -177,9 +194,13 @@ impl CompilationSession {
         if self.ssa.is_some() {
             return Ok(());
         }
-        let ssa = lower_verified_ir_to_ssa_v1(&self.initial_ir, 1, 1)
+        let normalized = normalize_lifecycle_v1(&self.initial_ir, 1)
+            .map_err(|error| CompilerError::lowering(error.to_string()))?;
+        let ssa = lower_normalized_ir_to_ssa_v1(&normalized)
             .map_err(|error| CompilerError::lowering(error.to_string()))?;
         verify_owned_ssa(&ssa).map_err(CompilerError::verification)?;
+        verify_owned_ssa_refinement(&normalized, &ssa)
+            .map_err(CompilerError::refinement_verification)?;
         self.ssa = Some(ssa);
         Ok(())
     }

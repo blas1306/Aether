@@ -9,7 +9,7 @@ use aether_ir::{characterize_lower_normalized_ir_to_ssa_v1, normalize_lifecycle_
 use aether_verifier::{
     COMPILER_CORE_API_VERSION, COMPILER_CORE_INPUT_SCHEMA_VERSIONS,
     COMPILER_CORE_OUTPUT_SCHEMA_VERSIONS, COMPILER_CORE_PROTOCOL_VERSION, CompilerCore,
-    CompilerError, verify_owned_ssa,
+    CompilerError, verify_owned_ssa, verify_owned_ssa_refinement,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -167,6 +167,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             let started = Instant::now();
             verify_owned_ssa(&owned)
+                .map_err(|error| RequestFailure::Instrumented(error.to_string()))?;
+            verify_owned_ssa_refinement(&normalized, &owned)
                 .map_err(|error| RequestFailure::Instrumented(error.to_string()))?;
             let owned_ssa_verification_ns = started.elapsed().as_nanos() as u64;
 
