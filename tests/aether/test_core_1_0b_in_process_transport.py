@@ -386,6 +386,8 @@ def test_dedicated_workflow_has_promotion_and_matrix_guards() -> None:
     assert "--expected-transport in_process --expect-default" in text
     assert "--expected-transport companion" in text
     assert "core-1-0b-packaged-consumer" in text
+    assert "core-1.0b-packaged-install.json" in text
+    assert "core-1-0b-packaged-install.json" not in text
     assert (
         "check_core_pkg_1_native_distribution_closure_77417e77.py" in text
     )

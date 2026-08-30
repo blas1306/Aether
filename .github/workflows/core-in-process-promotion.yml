@@ -145,7 +145,7 @@ jobs:
           python -m venv "$consumer"
           python scripts/install_core_1_0b_wheels.py --python "$consumer/bin/python" \
             --revision "${{ github.sha }}" --ci-run-id "${{ github.run_id }}" \
-            --output "$RUNNER_TEMP/core-1-0b-packaged-install.json"
+            --output "$RUNNER_TEMP/core-1.0b-packaged-install.json"
           cp scripts/core_1_0b_packaged_consumer_probe.py "$RUNNER_TEMP/core_1_0b_packaged_consumer_probe.py"
       - name: Default wheel consumer observes in-process without a toolchain
         shell: bash
@@ -156,7 +156,7 @@ jobs:
           PATH="$consumer/bin:$RUNNER_TEMP/no-toolchain" "$consumer/bin/python" -I core_1_0b_packaged_consumer_probe.py \
             --expected-transport in_process --expect-default \
             --artifact-role packaged_clean_consumer \
-            --install-manifest core-1-0b-packaged-install.json \
+            --install-manifest core-1.0b-packaged-install.json \
             --forbidden-root "$GITHUB_WORKSPACE" --revision "${{ github.sha }}" \
             --ci-run-id "${{ github.run_id }}" \
             --output core-1.0b-packaged-default.json
@@ -169,7 +169,7 @@ jobs:
             "$consumer/bin/python" -I core_1_0b_packaged_consumer_probe.py \
             --expected-transport companion \
             --artifact-role packaged_clean_consumer \
-            --install-manifest core-1-0b-packaged-install.json \
+            --install-manifest core-1.0b-packaged-install.json \
             --forbidden-root "$GITHUB_WORKSPACE" --revision "${{ github.sha }}" \
             --ci-run-id "${{ github.run_id }}" \
             --output core-1.0b-packaged-companion.json
