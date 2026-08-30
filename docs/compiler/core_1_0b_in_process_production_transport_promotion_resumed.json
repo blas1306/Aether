@@ -1,0 +1,173 @@
+{
+  "artifact_schema_version": 1,
+  "kind": "core_1_0b_in_process_production_transport_promotion_resumed",
+  "milestone": "CORE-1.0B",
+  "evidence_date": "2026-08-29",
+  "decision": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_PENDING_CI",
+  "historical_evidence": {
+    "markdown": "docs/compiler/CORE_1_0B_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION.md",
+    "markdown_sha256": "3789c67295f621eba13be6246dda6f1df97ce8637a27241ad11161bd9f200595",
+    "json": "docs/compiler/core_1_0b_in_process_production_transport_promotion.json",
+    "json_sha256": "b4c661732ed792c6fa1a70344f1124cbd85331955efcb891f051c6020669e3b9",
+    "decision": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED",
+    "preserved_unchanged": true
+  },
+  "history_chain": [
+    "initial promotion attempt",
+    "blocked by missing productive distribution",
+    "CORE-PKG-1",
+    "blocker formally resolved",
+    "resumed CORE-1.0B"
+  ],
+  "resumed_promotion": {
+    "resumed_after": "CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_QUALIFIED",
+    "previous_blocker": "resolved_by_CORE_PKG_1",
+    "blocker_resolution_gate": {
+      "decision": "CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_QUALIFIED",
+      "official_run": 33216160463,
+      "qualified_revision": "77417e7751482fc5a88a7d4207e99d67692da043",
+      "recomputed_by_promotion_aggregate": true,
+      "exact_version_contract": true,
+      "productive_surfaces": [
+        "aether_compiler_core",
+        "_aether_core",
+        "companion_path()",
+        "native manifest"
+      ]
+    },
+    "core_pkg_1_official_run": "33216160463",
+    "core_pkg_1_revision": "77417e7751482fc5a88a7d4207e99d67692da043",
+    "historical_failed_ci_run": {
+      "run_id": 33264243543,
+      "conclusion": "failure",
+      "immutable": true,
+      "causes": [
+        "CORE-PKG-1 historical source verification depended on the later checkout Git object store",
+        "PowerShell passed literal wheel globs to pip"
+      ],
+      "retrospectively_promoted": false
+    },
+    "latest_failed_ci_run": {
+      "run_id": 33265815894,
+      "conclusion": "failure",
+      "immutable": true,
+      "decision": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED",
+      "causes": [
+        "packaged-clean-consumer installed the exact Aether wheels with --no-deps before installing declared runtime dependencies",
+        "aggregate evidence matching allowed platform/Python consumer records to substitute for the mandatory packaged-clean-consumer artifact"
+      ],
+      "emitted_promoted_aggregate": "internally inconsistent / invalid for closure",
+      "retrospectively_promoted": false
+    },
+    "transport_environment": "AETHER_RUST_CORE_TRANSPORT",
+    "default_transport": "in_process",
+    "explicit_rollback_transport": "companion",
+    "automatic_fallback": false,
+    "productive_distribution": "aether-compiler-core==1.0.0rc4",
+    "stable_binding_interface": "aether_compiler_core.binding()",
+    "stable_companion_interface": "aether_compiler_core.companion_path()",
+    "provenance_fields": [
+      "requested_transport",
+      "observed_transport"
+    ],
+    "adapter_transport_mismatch": "fail_closed_before_request",
+    "authority_modes_preserved": [
+      "rust_ssa_authority_refinement_verified",
+      "rust_ssa_authority_python_shadow",
+      "python_ssa_authority_rust_shadow",
+      "python_ssa_only"
+    ],
+    "required_artifacts": {
+      "qualifier": "scripts/qualify_core_1_0b_in_process_transport.py",
+      "checker": "scripts/check_core_1_0b_in_process_transport.py",
+      "wheel_installer": "scripts/install_core_1_0b_wheels.py",
+      "packaged_consumer_probe": "scripts/core_1_0b_packaged_consumer_probe.py",
+      "tests": [
+        "tests/aether/test_core_1_0b_in_process_transport.py",
+        "tests/aether/test_core_1_0b_wheel_install.py",
+        "tests/aether/test_core_1_0b_aggregate_fail_closed.py"
+      ],
+      "workflow": ".github/workflows/core-in-process-promotion.yml"
+    },
+    "local_qualification": {
+      "decision": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_PENDING_CI",
+      "historical_both_transports": "116/116",
+      "production_pipeline_both_transports": "116/116",
+      "deep_cfg": [
+        993,
+        1000,
+        5000,
+        10000
+      ],
+      "differential_match_and_divergence_fail_closed": [
+        "in_process",
+        "companion"
+      ],
+      "ssa_refinement_corruption_fail_closed": [
+        "in_process",
+        "companion"
+      ],
+      "companion_process_starts": 1,
+      "requested_equals_observed": true,
+      "representative_structured_rejections": 6,
+      "performance_phase_breakdown": [
+        "conversion",
+        "core",
+        "ipc_protocol",
+        "result_conversion"
+      ],
+      "latest_revalidation": {
+        "date": "2026-08-29",
+        "platform": "linux-x86_64",
+        "python_minor": "3.14",
+        "development_install": "PASS",
+        "wheel_only_default_in_process": "PASS",
+        "wheel_only_explicit_companion": "PASS",
+        "runtime_dependencies_derived_from_wheel_metadata": [
+          "matplotlib==3.10.8",
+          "numpy==2.4.2",
+          "scipy==1.17.1",
+          "sympy==1.14.0"
+        ],
+        "exact_aether_wheel_hashes_recorded": true,
+        "packaged_transport_output_hash_match": true,
+        "aggregate_adversarial_regressions": "PASS",
+        "cargo_check_workspace_locked": "PASS",
+        "cargo_test_workspace_locked": "PASS",
+        "cargo_fmt_all_check": "PASS",
+        "python_suite": {
+          "passed": 5110,
+          "skipped": 4,
+          "environmental_failures": 24,
+          "limitation": "LeakSanitizer cannot run under ptrace in this environment",
+          "affected_file": "tests/aether/test_native_exceptions.py",
+          "behavioral_rerun_without_leak_detection": "54/54 PASS"
+        },
+        "windows_local": "NOT_RUN",
+        "macos_local": "NOT_RUN"
+      },
+      "warm_performance_seconds": {
+        "runs": 5,
+        "in_process_median": 0.006287443000474013,
+        "in_process_pstdev": 0.0009907485350818996,
+        "companion_median": 0.007316750008612871,
+        "companion_pstdev": 0.0019318137762339702,
+        "correctness_gate": false
+      }
+    },
+    "qualification_state": "local implementation complete; official platform/Python CI evidence not yet available"
+  },
+  "scope_confirmations": {
+    "core_1_1_implemented": false,
+    "compiler_core_semantics_changed": false,
+    "ssa_semantics_changed": false,
+    "authority_model_changed": false,
+    "schema_changed": false,
+    "lifecycle_or_refinement_changed": false,
+    "optimizer_or_backend_changed": false,
+    "protocol_v1_changed": false,
+    "packaging_reimplemented_by_core_1_0b": false,
+    "companion_retained": true,
+    "commit_created_by_implementation": false
+  }
+}

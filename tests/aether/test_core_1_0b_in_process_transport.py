@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+from hashlib import sha256
 import json
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -427,6 +428,12 @@ def test_qualification_evidence_records_resolved_previous_blocker() -> None:
     evidence = json.loads(
         (
             root
+            / "docs/compiler/core_1_0b_in_process_production_transport_promotion_resumed.json"
+        ).read_text(encoding="utf-8")
+    )
+    historical = json.loads(
+        (
+            root
             / "docs/compiler/core_1_0b_in_process_production_transport_promotion.json"
         ).read_text(encoding="utf-8")
     )
@@ -434,6 +441,25 @@ def test_qualification_evidence_records_resolved_previous_blocker() -> None:
     assert 'lane.get("previous_blocker") == "resolved_by_CORE_PKG_1"' in checker
     assert evidence["resumed_promotion"]["previous_blocker"] == (
         "resolved_by_CORE_PKG_1"
+    )
+    assert evidence["historical_evidence"]["preserved_unchanged"] is True
+    for field, path in (
+        (
+            "markdown_sha256",
+            root
+            / "docs/compiler/CORE_1_0B_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION.md",
+        ),
+        (
+            "json_sha256",
+            root
+            / "docs/compiler/core_1_0b_in_process_production_transport_promotion.json",
+        ),
+    ):
+        assert sha256(path.read_bytes()).hexdigest() == (
+            evidence["historical_evidence"][field]
+        )
+    assert historical["decision"] == (
+        "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED"
     )
 
 
