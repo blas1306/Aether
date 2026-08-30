@@ -178,6 +178,7 @@ def test_workflow_provisions_each_environment_by_its_contract() -> None:
     assert "python -m pip install -r requirements.txt --group dev" in source
     assert "python -m pip install -e . --no-deps" in source
     assert "--package aether-verifier --bin aether-ssa-shadow" in source
+    assert "--example verify_owned_ssa_refinement" in source
     assert "--release --locked\n          --package aether-ir-verifier" in source
     assert "python -m build --wheel --outdir language-dist" in packaged
     assert "python -m pip install -e ." not in packaged

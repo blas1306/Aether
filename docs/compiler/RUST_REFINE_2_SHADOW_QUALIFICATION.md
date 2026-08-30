@@ -38,3 +38,8 @@ The first official run, `33319278847`, is permanently recorded as
 documented in
 `RUST_REFINE_2_SHADOW_QUALIFICATION_RUN_33319278847.md`. That run can never be
 reinterpreted or rerun as a substitute for a new qualification.
+
+Follow-up run `33321279630` is likewise permanently `FAILED/BLOCKED`; it
+exposed one additional repository-test binary prerequisite that the two
+original mutation tests could not reach while their companion was absent.
+See `RUST_REFINE_2_SHADOW_QUALIFICATION_RUN_33321279630.md`.

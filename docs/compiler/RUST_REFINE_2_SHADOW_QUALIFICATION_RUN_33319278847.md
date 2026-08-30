@@ -223,8 +223,10 @@ pytest exited 1 and skipped the product probe. Therefore the published
 serve as mandatory PASS evidence.
 
 The remediation installs the declared `dev` dependency group, builds the debug
-SSA companion and release IR verifier demanded by the full repository suite,
-and continues to run all tests. No tests are excluded.
+SSA companion, debug `verify_owned_ssa_refinement` pair-verifier example, and
+release IR verifier demanded by the full repository suite, and continues to
+run all tests. No tests are excluded. The example prerequisite was initially
+masked by the missing companion and was exposed by follow-up run `33321279630`.
 
 ## Dependency/environment contracts
 
