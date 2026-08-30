@@ -1,0 +1,510 @@
+{
+  "artifact_schema_version": 1,
+  "kind": "core_1_0b_in_process_transport_promotion_closure",
+  "milestone": "CORE-1.0B",
+  "closure_date": "2026-08-30",
+  "decision": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTED",
+  "final_decision": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTED",
+  "official_run": {
+    "run_id": 33293548667,
+    "run_attempt": 1,
+    "workflow_name": "core-in-process-production-transport-promotion",
+    "workflow_path": ".github/workflows/core-in-process-promotion.yml",
+    "event": "workflow_dispatch",
+    "branch": "main",
+    "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020",
+    "status": "completed",
+    "conclusion": "success",
+    "created_at": "2026-08-30T04:55:20Z",
+    "run_started_at": "2026-08-30T04:55:20Z",
+    "updated_at": "2026-08-30T05:01:03Z",
+    "html_url": "https://github.com/blas1306/Aether/actions/runs/33293548667"
+  },
+  "run_jobs": [
+    {"id": 99209237775, "name": "affected-rust-4-5", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209237798, "name": "differential-both-transports", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209237814, "name": "production-default-in-process", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209237824, "name": "sessions-concurrency", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209237827, "name": "blocker-resolution", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209237836, "name": "no-fallback", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209237853, "name": "explicit-companion-rollback", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209237860, "name": "python-compatibility (3.13)", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209237871, "name": "transport-parity", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209237875, "name": "source-development-install", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209237878, "name": "clean-install-platform (macos-arm64, macos-15)", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209237880, "name": "clean-install-platform (macos-x86_64, macos-15-intel)", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209237896, "name": "packaged-clean-consumer", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209237943, "name": "python-compatibility (3.11)", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209237946, "name": "python-compatibility (3.14)", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209237954, "name": "clean-install-platform (windows-x86_64, windows-latest)", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209237970, "name": "clean-install-platform (linux-x86_64, ubuntu-latest)", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209237992, "name": "python-compatibility (3.12)", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209493921, "name": "production-pipeline", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"id": 99209748688, "name": "aggregate-fail-closed", "status": "completed", "conclusion": "success", "head_sha": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"}
+  ],
+  "artifact_manifest": [
+    {
+      "artifact_id": 9726749933,
+      "artifact_name": "core-1-0b-aggregate",
+      "archive_filename": "core-1-0b-aggregate.zip",
+      "archive_size_bytes": 822,
+      "github_digest_sha256": "0de046fd8ac8fdbe181a206737b6b36d565ee061165b556ee14ef25ef9cb87c0",
+      "archive_sha256": "0de046fd8ac8fdbe181a206737b6b36d565ee061165b556ee14ef25ef9cb87c0",
+      "digest_verified": true,
+      "source_job": "aggregate-fail-closed",
+      "source_job_id": 99209748688,
+      "validation_result": "PASS",
+      "record_kinds": ["core_1_0b_transport_aggregate"],
+      "record_status": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTED",
+      "record_revision": "a9d0df6eeec081cc8baf881450e5e3a30db9d020",
+      "record_ci_run_id": 33293548667,
+      "record_role": "aggregate",
+      "record_subgates": ["official_decision"],
+      "extracted_files": [
+        {"filename": "aggregate.json", "sha256": "4a0f7ab6ea6967fa0d5190f9a0f75f47e23b4170b45d944e550c360c7cb6baaa"}
+      ],
+      "records": [
+        {"filename": "aggregate.json", "kind": "core_1_0b_transport_aggregate", "status": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTED", "exact_revision": "a9d0df6eeec081cc8baf881450e5e3a30db9d020", "ci_run_id": 33293548667, "role": "aggregate", "subgate": "official_decision"}
+      ]
+    },
+    {
+      "artifact_id": 9726742173,
+      "artifact_name": "core-1-0b-platform-macos-x86_64",
+      "archive_filename": "core-1-0b-platform-macos-x86_64.zip",
+      "archive_size_bytes": 4812,
+      "github_digest_sha256": "50ef5ac1f74fa26b9efd3e0b1ac81717dd5558962c56b9a959e18e8751e8dfc0",
+      "archive_sha256": "50ef5ac1f74fa26b9efd3e0b1ac81717dd5558962c56b9a959e18e8751e8dfc0",
+      "digest_verified": true,
+      "source_job": "clean-install-platform (macos-x86_64, macos-15-intel)",
+      "source_job_id": 99209237880,
+      "validation_result": "PASS",
+      "record_kinds": ["core_1_0b_transport_lane", "core_1_0b_packaged_consumer"],
+      "record_status": "PASS",
+      "record_revision": "a9d0df6eeec081cc8baf881450e5e3a30db9d020",
+      "record_ci_run_id": 33293548667,
+      "record_role": "platform",
+      "record_subgates": ["lane", "in_process", "companion"],
+      "extracted_files": [
+        {"filename": "consumer-macos-x86_64-companion.json", "sha256": "f8a70eaa974b23478e77009d79f45874797051d5f7253e7db04dbbf4c92daa76"},
+        {"filename": "consumer-macos-x86_64-in-process.json", "sha256": "6fb4b470399ec65a4c1341ea72ef71f9e2b6a54412698abe1f363b8170843f2e"},
+        {"filename": "platform-macos-x86_64.json", "sha256": "22840303b2173b7fca3ac0b26e04d704b6d3583dd346f45d91ef2836658d7a91"}
+      ]
+    },
+    {
+      "artifact_id": 9726741419,
+      "artifact_name": "core-1-0b-platform-windows-x86_64",
+      "archive_filename": "core-1-0b-platform-windows-x86_64.zip",
+      "archive_size_bytes": 4825,
+      "github_digest_sha256": "a43a422f2b5fce45faa8e0fb99abdd977c2e8282a04023c9ddb81da6d3dc9e72",
+      "archive_sha256": "a43a422f2b5fce45faa8e0fb99abdd977c2e8282a04023c9ddb81da6d3dc9e72",
+      "digest_verified": true,
+      "source_job": "clean-install-platform (windows-x86_64, windows-latest)",
+      "source_job_id": 99209237954,
+      "validation_result": "PASS",
+      "record_kinds": ["core_1_0b_transport_lane", "core_1_0b_packaged_consumer"],
+      "record_status": "PASS",
+      "record_revision": "a9d0df6eeec081cc8baf881450e5e3a30db9d020",
+      "record_ci_run_id": 33293548667,
+      "record_role": "platform",
+      "record_subgates": ["lane", "in_process", "companion"],
+      "extracted_files": [
+        {"filename": "consumer-windows-x86_64-companion.json", "sha256": "b48469ee8d2a2d003af359ada7d28dc80a846322992d720edb2525bbd9410449"},
+        {"filename": "consumer-windows-x86_64-in-process.json", "sha256": "63e4bb6f0335d275ca16a1d243547461d27e05f27e18b9fcb5f26a86a9b0093a"},
+        {"filename": "platform-windows-x86_64.json", "sha256": "e9fd66c684be974753b696796d00133ffc41b41b09a971e5e2e4cba6c84bd329"}
+      ]
+    },
+    {
+      "artifact_id": 9726722333,
+      "artifact_name": "core-1-0b-functional",
+      "archive_filename": "core-1-0b-functional.zip",
+      "archive_size_bytes": 4318,
+      "github_digest_sha256": "8d10012ee7c7486cc4a9e2ee49645c3c19b76182afc65af23b0113b7d3f521ab",
+      "archive_sha256": "8d10012ee7c7486cc4a9e2ee49645c3c19b76182afc65af23b0113b7d3f521ab",
+      "digest_verified": true,
+      "source_job": "transport-parity",
+      "source_job_id": 99209237871,
+      "validation_result": "PASS",
+      "record_kinds": ["core_1_0b_transport_lane"],
+      "record_status": "PASS",
+      "record_revision": "a9d0df6eeec081cc8baf881450e5e3a30db9d020",
+      "record_ci_run_id": 33293548667,
+      "record_role": "functional",
+      "record_subgates": ["full_functional"],
+      "extracted_files": [
+        {"filename": "functional.json", "sha256": "49e7d8c11f23bf59671a924c13ba893cc2210672386c3691e21e0398c0fb139f"}
+      ]
+    },
+    {
+      "artifact_id": 9726720570,
+      "artifact_name": "core-1-0b-python-3.14",
+      "archive_filename": "core-1-0b-python-3.14.zip",
+      "archive_size_bytes": 4747,
+      "github_digest_sha256": "56736d6e29df0e9ea5b2f4043de6ea761351f8b627410aacddfb20f4ce151cfd",
+      "archive_sha256": "56736d6e29df0e9ea5b2f4043de6ea761351f8b627410aacddfb20f4ce151cfd",
+      "digest_verified": true,
+      "source_job": "python-compatibility (3.14)",
+      "source_job_id": 99209237946,
+      "validation_result": "PASS",
+      "record_kinds": ["core_1_0b_transport_lane", "core_1_0b_packaged_consumer"],
+      "record_status": "PASS",
+      "record_revision": "a9d0df6eeec081cc8baf881450e5e3a30db9d020",
+      "record_ci_run_id": 33293548667,
+      "record_role": "python_compatibility",
+      "record_subgates": ["lane", "in_process", "companion"],
+      "extracted_files": [
+        {"filename": "consumer-python-3.14-companion.json", "sha256": "28f9fe8045e9f4a9ec40e78216c51b4835a595d69d00b1ef1d8a987c656bfb0c"},
+        {"filename": "consumer-python-3.14-in-process.json", "sha256": "d71a2d0cf29a67aec5e3342f2de0835bdc659cadb4701af01db7b2efb7af7b84"},
+        {"filename": "python-3.14.json", "sha256": "465e7ca9321616f2a5058b6fc0c306be908224b59641256aabe042274026cde4"}
+      ]
+    },
+    {
+      "artifact_id": 9726720304,
+      "artifact_name": "core-1-0b-platform-linux-x86_64",
+      "archive_filename": "core-1-0b-platform-linux-x86_64.zip",
+      "archive_size_bytes": 4748,
+      "github_digest_sha256": "477c237807616176310bdadc2cd102e3263832a1e15b108a246b3c205ae6dc09",
+      "archive_sha256": "477c237807616176310bdadc2cd102e3263832a1e15b108a246b3c205ae6dc09",
+      "digest_verified": true,
+      "source_job": "clean-install-platform (linux-x86_64, ubuntu-latest)",
+      "source_job_id": 99209237970,
+      "validation_result": "PASS",
+      "record_kinds": ["core_1_0b_transport_lane", "core_1_0b_packaged_consumer"],
+      "record_status": "PASS",
+      "record_revision": "a9d0df6eeec081cc8baf881450e5e3a30db9d020",
+      "record_ci_run_id": 33293548667,
+      "record_role": "platform",
+      "record_subgates": ["lane", "in_process", "companion"],
+      "extracted_files": [
+        {"filename": "consumer-linux-x86_64-companion.json", "sha256": "7d74db5a21272f2b9048232c75e05593ac5fe5640dc319f02f99023147fd4725"},
+        {"filename": "consumer-linux-x86_64-in-process.json", "sha256": "051d6a0525efc229638e2aac365772f08e21f31d534354b1ed94441729a5f13a"},
+        {"filename": "platform-linux-x86_64.json", "sha256": "a741fe6cda90524ce733a122a77a2dfdcf67b91cb903d2784ea12081e9273a02"}
+      ]
+    },
+    {
+      "artifact_id": 9726720110,
+      "artifact_name": "core-1-0b-python-3.13",
+      "archive_filename": "core-1-0b-python-3.13.zip",
+      "archive_size_bytes": 4744,
+      "github_digest_sha256": "53066d20768621d00802b1c3e3d2890d9f6069561a455af44a0dc6b3228bf9c3",
+      "archive_sha256": "53066d20768621d00802b1c3e3d2890d9f6069561a455af44a0dc6b3228bf9c3",
+      "digest_verified": true,
+      "source_job": "python-compatibility (3.13)",
+      "source_job_id": 99209237860,
+      "validation_result": "PASS",
+      "record_kinds": ["core_1_0b_transport_lane", "core_1_0b_packaged_consumer"],
+      "record_status": "PASS",
+      "record_revision": "a9d0df6eeec081cc8baf881450e5e3a30db9d020",
+      "record_ci_run_id": 33293548667,
+      "record_role": "python_compatibility",
+      "record_subgates": ["lane", "in_process", "companion"],
+      "extracted_files": [
+        {"filename": "consumer-python-3.13-companion.json", "sha256": "46641774db82b62d356f5e2243026bf256ec741ce0b476dcd5de4193e717620b"},
+        {"filename": "consumer-python-3.13-in-process.json", "sha256": "e5ef16d0387571a22a012f4cad1a0c7c6c60d30abf3da857629881eae8a1a331"},
+        {"filename": "python-3.13.json", "sha256": "704088988617f654392e5c20cf295dba31e7d177dfc12d1de41d3a9cfab8ae31"}
+      ]
+    },
+    {
+      "artifact_id": 9726719670,
+      "artifact_name": "core-1-0b-development-install",
+      "archive_filename": "core-1-0b-development-install.zip",
+      "archive_size_bytes": 3026,
+      "github_digest_sha256": "e431dc495c4efd0c4936aa1f628870abe7d2f09d5bea4ad2b3887f624676b702",
+      "archive_sha256": "e431dc495c4efd0c4936aa1f628870abe7d2f09d5bea4ad2b3887f624676b702",
+      "digest_verified": true,
+      "source_job": "source-development-install",
+      "source_job_id": 99209237875,
+      "validation_result": "PASS",
+      "record_kinds": ["core_1_0b_transport_lane"],
+      "record_status": "PASS",
+      "record_revision": "a9d0df6eeec081cc8baf881450e5e3a30db9d020",
+      "record_ci_run_id": 33293548667,
+      "record_role": "development_install",
+      "record_subgates": ["source_development_install"],
+      "extracted_files": [
+        {"filename": "development-install.json", "sha256": "b30409f589d8c268813b8858247356299e0b83511ca48252b0fd42c3967784fa"}
+      ]
+    },
+    {
+      "artifact_id": 9726719635,
+      "artifact_name": "core-1-0b-python-3.11",
+      "archive_filename": "core-1-0b-python-3.11.zip",
+      "archive_size_bytes": 4735,
+      "github_digest_sha256": "7c9f867841f87985048d178311f9bfcb7b02be2299909d86f9a3bb4e15dde705",
+      "archive_sha256": "7c9f867841f87985048d178311f9bfcb7b02be2299909d86f9a3bb4e15dde705",
+      "digest_verified": true,
+      "source_job": "python-compatibility (3.11)",
+      "source_job_id": 99209237943,
+      "validation_result": "PASS",
+      "record_kinds": ["core_1_0b_transport_lane", "core_1_0b_packaged_consumer"],
+      "record_status": "PASS",
+      "record_revision": "a9d0df6eeec081cc8baf881450e5e3a30db9d020",
+      "record_ci_run_id": 33293548667,
+      "record_role": "python_compatibility",
+      "record_subgates": ["lane", "in_process", "companion"],
+      "extracted_files": [
+        {"filename": "consumer-python-3.11-companion.json", "sha256": "cbd9b9969b8481d3f0a10a4776079a25d18f7d0192bbbce0522cc18f13bcf570"},
+        {"filename": "consumer-python-3.11-in-process.json", "sha256": "290485094e57561f2d9147fd37df37561f9f2f62653ddede22d0127abcae528e"},
+        {"filename": "python-3.11.json", "sha256": "7b6e1d200a0f32df130f65bcf429488ad6f13e6d36a6663c84ff8913ecaf7053"}
+      ]
+    },
+    {
+      "artifact_id": 9726717779,
+      "artifact_name": "core-1-0b-packaged-consumer",
+      "archive_filename": "core-1-0b-packaged-consumer.zip",
+      "archive_size_bytes": 3946,
+      "github_digest_sha256": "e0e02fb6b47c4cc27275fb428b49c8ea7d33c7b3d8e7a751479373328fe4ed9b",
+      "archive_sha256": "e0e02fb6b47c4cc27275fb428b49c8ea7d33c7b3d8e7a751479373328fe4ed9b",
+      "digest_verified": true,
+      "source_job": "packaged-clean-consumer",
+      "source_job_id": 99209237896,
+      "validation_result": "PASS",
+      "record_kinds": ["core_1_0b_clean_consumer_install", "core_1_0b_packaged_clean_consumer"],
+      "record_status": "PASS",
+      "record_revision": "a9d0df6eeec081cc8baf881450e5e3a30db9d020",
+      "record_ci_run_id": 33293548667,
+      "record_role": "packaged_clean_consumer",
+      "record_subgates": ["install", "in_process", "companion"],
+      "extracted_files": [
+        {"filename": "core-1.0b-packaged-companion.json", "sha256": "2d634f35b0af3bc834b5f1de0d889ee978ebca2f17e1767324a822c3d242c0bd"},
+        {"filename": "core-1.0b-packaged-default.json", "sha256": "60caab2e778afe576042289dbd8f08caa594cd5772935d2dc381955d6b1c7f0b"},
+        {"filename": "core-1.0b-packaged-install.json", "sha256": "0dfb4a045c7ca7323d4853d2a271c5038604b5f6a9ed4097d5c80c5a719337d8"}
+      ],
+      "records": [
+        {"filename": "core-1.0b-packaged-install.json", "kind": "core_1_0b_clean_consumer_install", "status": "PASS", "exact_revision": "a9d0df6eeec081cc8baf881450e5e3a30db9d020", "ci_run_id": 33293548667, "role": "packaged_clean_consumer_install", "subgate": "exact_wheel_install"},
+        {"filename": "core-1.0b-packaged-default.json", "kind": "core_1_0b_packaged_clean_consumer", "status": "PASS", "exact_revision": "a9d0df6eeec081cc8baf881450e5e3a30db9d020", "ci_run_id": 33293548667, "role": "packaged_clean_consumer", "subgate": "in_process"},
+        {"filename": "core-1.0b-packaged-companion.json", "kind": "core_1_0b_packaged_clean_consumer", "status": "PASS", "exact_revision": "a9d0df6eeec081cc8baf881450e5e3a30db9d020", "ci_run_id": 33293548667, "role": "packaged_clean_consumer", "subgate": "companion"}
+      ]
+    },
+    {
+      "artifact_id": 9726716078,
+      "artifact_name": "core-1-0b-python-3.12",
+      "archive_filename": "core-1-0b-python-3.12.zip",
+      "archive_size_bytes": 4737,
+      "github_digest_sha256": "7f8e23f3d2be195c646c6c0bd78793b312dba907789a429fdcc04a2fb8d632a1",
+      "archive_sha256": "7f8e23f3d2be195c646c6c0bd78793b312dba907789a429fdcc04a2fb8d632a1",
+      "digest_verified": true,
+      "source_job": "python-compatibility (3.12)",
+      "source_job_id": 99209237992,
+      "validation_result": "PASS",
+      "record_kinds": ["core_1_0b_transport_lane", "core_1_0b_packaged_consumer"],
+      "record_status": "PASS",
+      "record_revision": "a9d0df6eeec081cc8baf881450e5e3a30db9d020",
+      "record_ci_run_id": 33293548667,
+      "record_role": "python_compatibility",
+      "record_subgates": ["lane", "in_process", "companion"],
+      "extracted_files": [
+        {"filename": "consumer-python-3.12-companion.json", "sha256": "b278b68ad9b641cc9915c3fe3ed0503f5753f60156df40ce7e90103ba19ddda4"},
+        {"filename": "consumer-python-3.12-in-process.json", "sha256": "a00016d2baa3b4d6e291a1f7ea89b572aaea07f092e2d63d0ee7c4607e605b61"},
+        {"filename": "python-3.12.json", "sha256": "e6983c392af71d0930f4aa752eedea71241ef8cccd2f49f6fd968ebd208807d5"}
+      ]
+    },
+    {
+      "artifact_id": 9726714595,
+      "artifact_name": "core-1-0b-platform-macos-arm64",
+      "archive_filename": "core-1-0b-platform-macos-arm64.zip",
+      "archive_size_bytes": 4791,
+      "github_digest_sha256": "557e1cc1c25e302f5c47fe08f129e241ef975f0b8dc34cf2cacf98149bb1abcc",
+      "archive_sha256": "557e1cc1c25e302f5c47fe08f129e241ef975f0b8dc34cf2cacf98149bb1abcc",
+      "digest_verified": true,
+      "source_job": "clean-install-platform (macos-arm64, macos-15)",
+      "source_job_id": 99209237878,
+      "validation_result": "PASS",
+      "record_kinds": ["core_1_0b_transport_lane", "core_1_0b_packaged_consumer"],
+      "record_status": "PASS",
+      "record_revision": "a9d0df6eeec081cc8baf881450e5e3a30db9d020",
+      "record_ci_run_id": 33293548667,
+      "record_role": "platform",
+      "record_subgates": ["lane", "in_process", "companion"],
+      "extracted_files": [
+        {"filename": "consumer-macos-arm64-companion.json", "sha256": "7a0c498bdc7ae97eab4a86fae2059d0157c437ba07c671e4cb3f132837ccb506"},
+        {"filename": "consumer-macos-arm64-in-process.json", "sha256": "ef9add9161e0d70b85ae0c4f536cecd92f284c9d7b904b85f8d6ec8e6cb9fcb0"},
+        {"filename": "platform-macos-arm64.json", "sha256": "013e933e0b407892dc413acb51a881267d20c150cd836c6e08e00d6ecd3404a8"}
+      ]
+    },
+    {
+      "artifact_id": 9726696549,
+      "artifact_name": "core-1-0b-blocker-resolution",
+      "archive_filename": "core-1-0b-blocker-resolution.zip",
+      "archive_size_bytes": 698,
+      "github_digest_sha256": "1363606b54bbfd9e08a5d1268391425e9496ad4ef6e21074f0990f150b1eb0ed",
+      "archive_sha256": "1363606b54bbfd9e08a5d1268391425e9496ad4ef6e21074f0990f150b1eb0ed",
+      "digest_verified": true,
+      "source_job": "blocker-resolution",
+      "source_job_id": 99209237827,
+      "validation_result": "PASS",
+      "record_kinds": ["core_pkg_1_native_compiler_core_distribution_closure_check"],
+      "record_status": "PASS",
+      "record_revision": "77417e7751482fc5a88a7d4207e99d67692da043",
+      "record_ci_run_id": 33216160463,
+      "record_role": "blocker_resolution",
+      "record_subgates": ["CORE-PKG-1"],
+      "extracted_files": [
+        {"filename": "blocker-resolution.json", "sha256": "0df74351f7a7bd74aa0e9bf8cd4947ec921897760f505cfdc889f72bdee630ae"}
+      ],
+      "records": [
+        {"filename": "blocker-resolution.json", "kind": "core_pkg_1_native_compiler_core_distribution_closure_check", "status": "PASS", "exact_revision": "77417e7751482fc5a88a7d4207e99d67692da043", "ci_run_id": 33216160463, "role": "blocker_resolution", "subgate": "CORE-PKG-1"}
+      ]
+    }
+  ],
+  "core_pkg_1_prerequisite": {
+    "decision": "CORE_NATIVE_COMPILER_CORE_DISTRIBUTION_QUALIFIED",
+    "run_id": 33216160463,
+    "revision": "77417e7751482fc5a88a7d4207e99d67692da043",
+    "recomputed": true,
+    "exact_version_contract": "aether-language==1.0.0rc4 requires aether-compiler-core==1.0.0rc4"
+  },
+  "aggregate_validation": {
+    "official_decision": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTED",
+    "recomposed_decision": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTED",
+    "official_errors": [],
+    "official_sha256": "4a0f7ab6ea6967fa0d5190f9a0f75f47e23b4170b45d944e550c360c7cb6baaa",
+    "recomposed_sha256": "4a0f7ab6ea6967fa0d5190f9a0f75f47e23b4170b45d944e550c360c7cb6baaa",
+    "byte_identical": true,
+    "input_artifacts": 12,
+    "checker": "scripts/check_core_1_0b_in_process_transport.py",
+    "checker_sha256": "12a660a4f26a3dae0c12d87b4ac408892f924f385813675f8a8b56e31fae6150"
+  },
+  "transport_contract": {
+    "default_requested": "in_process",
+    "default_observed": "in_process",
+    "explicit_rollback_requested": "companion",
+    "explicit_rollback_observed": "companion",
+    "automatic_fallback": false,
+    "mismatch_fails_closed": true,
+    "invalid_selection_fails_closed": true,
+    "companion_protocol": 1,
+    "companion_remains_available": true
+  },
+  "sessions_concurrency": {
+    "status": "PASS",
+    "concurrent_requests": 32,
+    "compiler_core_reused": true,
+    "rust_owned_sessions_per_request": true,
+    "request_accounting": true,
+    "structured_last_error_isolated": true,
+    "cross_session_state_leak_observed": false
+  },
+  "functional_qualification": {
+    "status": "PASS",
+    "historical": "116/116 both transports",
+    "production_pipeline": "116/116 both transports",
+    "deep_cfg": [993, 1000, 5000, 10000],
+    "representative_failures": 6,
+    "differential_both_transports": true,
+    "divergence_fail_closed": true,
+    "refinement_corruption_fail_closed": true,
+    "affected_rust_gates": "PASS",
+    "production_pipeline_job": "PASS",
+    "authority_modes_changed": false
+  },
+  "structured_failure_campaign": {
+    "status": "PASS",
+    "cases": [
+      "malformed_initial_ir_json",
+      "non_object_binding_input",
+      "unsupported_schema",
+      "unknown_root_field",
+      "invalid_cfg_target",
+      "duplicate_function"
+    ],
+    "compared_contract": ["accept_reject", "structured_error_category", "phase", "source_location"],
+    "textual_identity_required": false
+  },
+  "performance_characterization": {
+    "correctness_gate": false,
+    "workloads": ["ordinary", "deep_cfg_1000", "historical_116", "real_ae_expense_tracker"],
+    "phases": ["conversion", "core", "ipc_protocol", "result_conversion"],
+    "transports": {
+      "in_process": {"warm_runs": 5, "ordinary_median_seconds": 0.0009717480000119849},
+      "companion": {"warm_runs": 5, "ordinary_median_seconds": 0.0011008080000181053}
+    },
+    "universal_superiority_claimed": false
+  },
+  "platform_matrix": [
+    {"platform": "linux-x86_64", "python_patch": "3.13.15", "status": "PASS", "default_observed": "in_process", "rollback_observed": "companion", "consumer_without_cargo_or_rustc": true, "matching_build_identity": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"platform": "windows-x86_64", "python_patch": "3.13.15", "status": "PASS", "default_observed": "in_process", "rollback_observed": "companion", "consumer_without_cargo_or_rustc": true, "matching_build_identity": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"platform": "macos-x86_64", "python_patch": "3.13.15", "status": "PASS", "default_observed": "in_process", "rollback_observed": "companion", "consumer_without_cargo_or_rustc": true, "matching_build_identity": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"},
+    {"platform": "macos-arm64", "python_patch": "3.13.14", "status": "PASS", "default_observed": "in_process", "rollback_observed": "companion", "consumer_without_cargo_or_rustc": true, "matching_build_identity": "a9d0df6eeec081cc8baf881450e5e3a30db9d020"}
+  ],
+  "python_matrix": [
+    {"minor": "3.11", "patch": "3.11.16", "platform": "linux-x86_64", "status": "PASS", "default_observed": "in_process", "rollback_observed": "companion"},
+    {"minor": "3.12", "patch": "3.12.14", "platform": "linux-x86_64", "status": "PASS", "default_observed": "in_process", "rollback_observed": "companion"},
+    {"minor": "3.13", "patch": "3.13.15", "platform": "linux-x86_64", "status": "PASS", "default_observed": "in_process", "rollback_observed": "companion"},
+    {"minor": "3.14", "patch": "3.14.7", "platform": "linux-x86_64", "status": "PASS", "default_observed": "in_process", "rollback_observed": "companion"}
+  ],
+  "packaged_clean_consumer": {
+    "status": "PASS",
+    "artifact_kind": "core_1_0b_packaged_clean_consumer",
+    "artifact_role": "packaged_clean_consumer",
+    "dedicated_records": ["core-1.0b-packaged-default.json", "core-1.0b-packaged-companion.json"],
+    "install_manifest": "core-1.0b-packaged-install.json",
+    "matrix_records_cannot_substitute": true,
+    "language_version": "1.0.0rc4",
+    "native_version": "1.0.0rc4",
+    "native_build_identity": "a9d0df6eeec081cc8baf881450e5e3a30db9d020",
+    "wheel_sha256": {
+      "aether-language": "1207a8cee7b125bf7fdbc0ce987b3a4ec2eb7f898c1104e41dd837e38a0b4ff2",
+      "aether-compiler-core": "928657961c9228785aa0bbab37818b8f3897d8ef144a3813b769189accad2ae7"
+    },
+    "runtime_requirements_from_metadata": ["matplotlib==3.10.8", "numpy==2.4.2", "scipy==1.17.1", "sympy==1.14.0"],
+    "aether_index_resolution_permitted": false,
+    "dependency_validation": "pip check PASS",
+    "cargo_available": false,
+    "rustc_available": false,
+    "outside_checkout": true,
+    "checkout_importable": false,
+    "default_observed": "in_process",
+    "rollback_observed": "companion",
+    "in_process_companion_starts": 0,
+    "companion_process_starts": 1,
+    "companion_pyo3_calls": 0,
+    "request_count_each": 3,
+    "handled_failure_recovery": true,
+    "representative_compilation": true,
+    "matching_output_sha256": "2522a8877eaac3b97be8dc43413396514a8a5ac5ae0637da4da5c770b7bcf5b2",
+    "companion_from_installed_package": true
+  },
+  "source_development_install": {
+    "status": "PASS",
+    "source_checkout": true,
+    "native_build_install": true,
+    "editable_language_install": true,
+    "binding_discovery": true,
+    "companion_discovery": true,
+    "default_observed": "in_process",
+    "rollback_observed": "companion"
+  },
+  "historical_failed_runs": [
+    {"run_id": 33264243543, "conclusion": "failure", "decision": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED", "retrospectively_promoted": false},
+    {"run_id": 33265815894, "conclusion": "failure", "decision": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED", "packaged_clean_consumer": "failure", "aggregate_fail_closed": "failure", "emitted_promoted_aggregate_valid": false, "retrospectively_promoted": false},
+    {"run_id": 33293069494, "conclusion": "failure", "decision": "CORE_IN_PROCESS_PRODUCTION_TRANSPORT_PROMOTION_BLOCKED", "defect_class": "qualification_harness", "cause": "packaged install manifest filename mismatch", "retrospectively_promoted": false}
+  ],
+  "scope": {
+    "in_process_is_production_default": true,
+    "companion_is_explicit_rollback": true,
+    "companion_removable": false,
+    "protocol_v1_removable": false,
+    "automatic_fallback": false,
+    "core_1_1_authorized": false,
+    "universal_platform_support": false,
+    "universal_python_support": false,
+    "universal_semantic_correctness": false,
+    "universal_thread_safety": false,
+    "universal_performance_superiority": false,
+    "production_semantics_changed_beyond_transport_promotion": false,
+    "closure_commit_created": false
+  },
+  "source_snapshot": {
+    ".github/workflows/core-in-process-promotion.yml": "421f8909b90dd8b5c0b20aa7a5fcde856e051142fdf01d5e10e7b3b2eac97e44",
+    "scripts/check_core_1_0b_in_process_transport.py": "12a660a4f26a3dae0c12d87b4ac408892f924f385813675f8a8b56e31fae6150",
+    "scripts/install_core_1_0b_wheels.py": "84d6037fc9f34a168f53afe58fc0a406c02c695acbd6a7c605a566d3f456a940",
+    "scripts/core_1_0b_packaged_consumer_probe.py": "6bf645a630a3d2bbe25760bbc6254d5d80787f9071dad3bf83b27fc92c98e344",
+    "scripts/qualify_core_1_0b_in_process_transport.py": "b6645acedd904bc91acb1e4052704ccaffeef287460fb4f5e0809a5ff597b83e",
+    "tests/aether/test_core_1_0b_in_process_transport.py": "8e802ba0daea76259a08258c43a923d6062625b5023987195dc6f01bc06a048b",
+    "tests/aether/test_core_1_0b_wheel_install.py": "056e23024e5aa681d32b4c7135c9a5380ffd86d93d02522c7cdc21c32f2f46b5",
+    "tests/aether/test_core_1_0b_aggregate_fail_closed.py": "5bc6fba8eb0fba8c1f2b43c0ee02c80a6c278821d4b2b5c632e146d6f07f0c87",
+    "tests/aether/test_core_1_0b_in_process_transport_closure_a9d0df6.py": "0c1cb5d80d8666d30d03f45c2e7fd71d371a81b345b0e7e9c49125e73943955f",
+    "scripts/check_core_1_0b_in_process_transport_closure_a9d0df6.py": "7341191169f792f978c809b3477bd3749b41b2b284ffc7c2f7e9c4a560651c51"
+  },
+  "closure_report_sha256": "1fffb57b1f36e7ba8dd963289925de01c2666ac0d4eb2456798fd5f15e2f15c6"
+}
