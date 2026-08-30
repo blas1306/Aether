@@ -17,6 +17,7 @@ RUN_ID = "12345"
 BASELINE = "b5835a5cc3c947333e6576791149767713dd0689"
 PLATFORMS = ("linux-x86_64", "windows-x86_64", "macos-x86_64", "macos-arm64")
 PYTHONS = ("3.11", "3.12", "3.13", "3.14")
+WORKFLOW = ROOT / ".github/workflows/rust-refine-shadow-qualification.yml"
 
 
 def load_checker():
@@ -156,6 +157,30 @@ def test_complete_official_artifact_set_qualifies(tmp_path: Path) -> None:
     result = checker.check(write_fixture(tmp_path, valid_records()))
     assert result["passed"] is True
     assert result["decision"] == "RUST_REFINEMENT_SHADOW_QUALIFIED"
+
+
+def test_workflow_provisions_each_environment_by_its_contract() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    contract = workflow[
+        workflow.index("  contract-and-baseline:"):
+        workflow.index("  rust-unit-and-adversarial:")
+    ]
+    source = workflow[
+        workflow.index("  source-development-install:"):
+        workflow.index("  deep-cfg-stress:")
+    ]
+    packaged = workflow[
+        workflow.index("  packaged-clean-consumer:"):
+        workflow.index("  source-development-install:")
+    ]
+
+    assert "python -m pip install -r requirements.txt" in contract
+    assert "python -m pip install -r requirements.txt --group dev" in source
+    assert "python -m pip install -e . --no-deps" in source
+    assert "--package aether-verifier --bin aether-ssa-shadow" in source
+    assert "--release --locked\n          --package aether-ir-verifier" in source
+    assert "python -m build --wheel --outdir language-dist" in packaged
+    assert "python -m pip install -e ." not in packaged
 
 
 @pytest.mark.parametrize(

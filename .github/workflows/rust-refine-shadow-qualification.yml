@@ -20,6 +20,7 @@ jobs:
         with: {fetch-depth: 0}
       - uses: actions/setup-python@v5
         with: {python-version: "3.13"}
+      - run: python -m pip install -r requirements.txt
       - run: >-
           python scripts/qualify_rust_refine_2_shadow.py --mode contract
           --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
@@ -161,9 +162,17 @@ jobs:
         with: {python-version: "3.13"}
       - uses: dtolnay/rust-toolchain@stable
         with: {toolchain: "1.85"}
-      - run: python -m pip install -r requirements.txt pytest 'maturin>=1.9.4,<2'
+      - run: >-
+          python -m pip install -r requirements.txt --group dev
+          'maturin>=1.9.4,<2'
       - run: python -m pip install compiler-rs/distributions/aether-compiler-core
       - run: python -m pip install -e . --no-deps
+      - run: >-
+          cargo build --manifest-path compiler-rs/Cargo.toml --locked
+          --package aether-verifier --bin aether-ssa-shadow
+      - run: >-
+          cargo build --manifest-path compiler-rs/Cargo.toml --release --locked
+          --package aether-ir-verifier
       - shell: bash
         run: |
           set -o pipefail

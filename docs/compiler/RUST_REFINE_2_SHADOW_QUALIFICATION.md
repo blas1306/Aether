@@ -32,3 +32,9 @@ Local tests validate the infrastructure but are not qualification evidence.
 `RUST_REFINEMENT_SHADOW_QUALIFIED` may be recorded only from a successful
 official `workflow_dispatch` run whose downloaded artifacts pass
 `scripts/check_rust_refine_2_shadow_qualification.py`.
+
+The first official run, `33319278847`, is permanently recorded as
+`FAILED/BLOCKED`. Its partial evidence and the harness-only remediation are
+documented in
+`RUST_REFINE_2_SHADOW_QUALIFICATION_RUN_33319278847.md`. That run can never be
+reinterpreted or rerun as a substitute for a new qualification.
