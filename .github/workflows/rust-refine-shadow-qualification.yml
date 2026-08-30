@@ -1,0 +1,360 @@
+name: rust-refine-2-shadow-qualification
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CARGO_TERM_COLOR: always
+  AETHER_COMPILER_CORE_BUILD_IDENTITY: ${{ github.sha }}
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  contract-and-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: >-
+          python scripts/qualify_rust_refine_2_shadow.py --mode contract
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-refine-2/contract.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-refine-2-contract, path: qualification/rust-refine-2/contract.json}
+
+  rust-unit-and-adversarial:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: {fetch-depth: 0}
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85", components: "rustfmt, clippy"}
+      - run: python -m pip install -r requirements.txt pytest
+      - run: cargo fmt --check
+        working-directory: compiler-rs
+      - run: cargo test --workspace --locked
+        working-directory: compiler-rs
+      - run: >-
+          python -m pytest -q tests/aether/test_rust_refine_1_shadow.py
+          tests/aether/test_rust_ssa_independent_refinement_verifier.py
+          tests/aether/test_rust_refine_2_shadow_qualification.py
+      - run: >-
+          python scripts/check_rust_refine_2_clippy_delta.py
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-refine-2/rust-validation.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-refine-2-rust-validation, path: qualification/rust-refine-2/rust-validation.json}
+
+  historical-differential:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --package aether-verifier --bin aether-ssa-shadow --example verify_owned_ssa_refinement
+      - run: >-
+          python scripts/qualify_rust_refine_2_shadow.py --mode differential
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-refine-2/historical.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-refine-2-historical, path: qualification/rust-refine-2/historical.json}
+
+  mutation-campaign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --package aether-verifier --bin aether-ssa-shadow --example verify_owned_ssa_refinement
+      - run: >-
+          python scripts/qualify_rust_refine_2_shadow.py --mode mutations
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-refine-2/mutations.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-refine-2-mutations, path: qualification/rust-refine-2/mutations.json}
+
+  production-pipeline-shadow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt 'maturin>=1.9.4,<2'
+      - run: python -m pip install compiler-rs/distributions/aether-compiler-core
+      - run: python -m pip install -e . --no-deps
+      - run: >-
+          python scripts/rust_refine_2_product_probe.py --mode pipeline
+          --root "${{ github.workspace }}" --repository "${{ github.workspace }}"
+          --transport in_process --revision "${{ github.sha }}"
+          --run-id "${{ github.run_id }}"
+          --output qualification/rust-refine-2/production-pipeline.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-refine-2-production-pipeline, path: qualification/rust-refine-2/production-pipeline.json}
+
+  transport-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt 'maturin>=1.9.4,<2'
+      - run: python -m pip install compiler-rs/distributions/aether-compiler-core
+      - run: python -m pip install -e . --no-deps
+      - run: >-
+          python scripts/rust_refine_2_product_probe.py --mode transport
+          --root "${{ github.workspace }}" --repository "${{ github.workspace }}"
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-refine-2/transport.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-refine-2-transport-parity, path: qualification/rust-refine-2/transport.json}
+
+  packaged-clean-consumer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'build>=1.2,<2'
+      - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
+      - run: python -m build --wheel --outdir language-dist
+      - shell: bash
+        run: >-
+          python scripts/qualify_rust_refine_2_clean_consumer.py
+          --native-wheel native-dist/*.whl --language-wheel language-dist/*.whl
+          --kind packaged_clean_consumer --role dedicated --platform linux-x86_64
+          --python-minor 3.13 --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-refine-2/packaged.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-refine-2-packaged-consumer, path: qualification/rust-refine-2/packaged.json}
+
+  source-development-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt pytest 'maturin>=1.9.4,<2'
+      - run: python -m pip install compiler-rs/distributions/aether-compiler-core
+      - run: python -m pip install -e . --no-deps
+      - shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p qualification/rust-refine-2
+          python -m pytest -q tests | tee qualification/rust-refine-2/full-pytest.log
+      - run: >-
+          python scripts/rust_refine_2_product_probe.py --mode environment
+          --kind source_development_install --role source --platform linux-x86_64
+          --python-minor 3.13 --full-python-suite PASS
+          --full-python-suite-log qualification/rust-refine-2/full-pytest.log
+          --root "${{ github.workspace }}" --repository "${{ github.workspace }}"
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-refine-2/source.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-refine-2-source-install
+          path: |
+            qualification/rust-refine-2/source.json
+            qualification/rust-refine-2/full-pytest.log
+
+  deep-cfg-stress:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --package aether-verifier --bin aether-ssa-shadow --example verify_owned_ssa_refinement
+      - run: >-
+          python scripts/qualify_rust_refine_2_shadow.py --mode deep-cfg
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-refine-2/deep.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-refine-2-deep-cfg, path: qualification/rust-refine-2/deep.json}
+
+  cost-characterization:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --package aether-verifier --bin aether-ssa-shadow --example verify_owned_ssa_refinement
+      - run: >-
+          python scripts/qualify_rust_refine_2_shadow.py --mode cost
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-refine-2/cost.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-refine-2-cost, path: qualification/rust-refine-2/cost.json}
+
+  platform-qualification:
+    name: platform-${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {platform: linux-x86_64, os: ubuntu-latest}
+          - {platform: windows-x86_64, os: windows-latest}
+          - {platform: macos-x86_64, os: macos-15-intel}
+          - {platform: macos-arm64, os: macos-15}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'build>=1.2,<2'
+      - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
+      - run: python -m build --wheel --outdir language-dist
+      - shell: bash
+        run: >-
+          python scripts/qualify_rust_refine_2_clean_consumer.py
+          --native-wheel native-dist/*.whl --language-wheel language-dist/*.whl
+          --kind platform_qualification --role platform --platform "${{ matrix.platform }}"
+          --python-minor 3.13 --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output "qualification/rust-refine-2/platform-${{ matrix.platform }}.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-refine-2-platform-${{ matrix.platform }}
+          path: qualification/rust-refine-2/platform-${{ matrix.platform }}.json
+
+  python-compatibility:
+    name: python-${{ matrix.python }}
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "${{ matrix.python }}"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'build>=1.2,<2'
+      - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
+      - run: python -m build --wheel --outdir language-dist
+      - shell: bash
+        run: >-
+          python scripts/qualify_rust_refine_2_clean_consumer.py
+          --native-wheel native-dist/*.whl --language-wheel language-dist/*.whl
+          --kind python_compatibility --role python_compatibility --platform linux-x86_64
+          --python-minor "${{ matrix.python }}" --revision "${{ github.sha }}"
+          --run-id "${{ github.run_id }}"
+          --output "qualification/rust-refine-2/python-${{ matrix.python }}.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-refine-2-python-${{ matrix.python }}
+          path: qualification/rust-refine-2/python-${{ matrix.python }}.json
+
+  aggregate-fail-closed:
+    if: always()
+    needs:
+      - contract-and-baseline
+      - rust-unit-and-adversarial
+      - historical-differential
+      - mutation-campaign
+      - production-pipeline-shadow
+      - transport-parity
+      - packaged-clean-consumer
+      - source-development-install
+      - deep-cfg-stress
+      - cost-characterization
+      - platform-qualification
+      - python-compatibility
+    runs-on: ubuntu-latest
+    env:
+      RESULT_CONTRACT: ${{ needs.contract-and-baseline.result }}
+      RESULT_RUST: ${{ needs.rust-unit-and-adversarial.result }}
+      RESULT_HISTORICAL: ${{ needs.historical-differential.result }}
+      RESULT_MUTATIONS: ${{ needs.mutation-campaign.result }}
+      RESULT_PIPELINE: ${{ needs.production-pipeline-shadow.result }}
+      RESULT_TRANSPORT: ${{ needs.transport-parity.result }}
+      RESULT_PACKAGED: ${{ needs.packaged-clean-consumer.result }}
+      RESULT_SOURCE: ${{ needs.source-development-install.result }}
+      RESULT_DEEP: ${{ needs.deep-cfg-stress.result }}
+      RESULT_COST: ${{ needs.cost-characterization.result }}
+      RESULT_PLATFORM: ${{ needs.platform-qualification.result }}
+      RESULT_PYTHON: ${{ needs.python-compatibility.result }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: rust-refine-2-*
+          path: qualification/aggregate/downloaded
+      - name: Record exact mandatory job conclusions
+        run: >-
+          python -c "import json,os,pathlib;
+          keys={'contract-and-baseline':'RESULT_CONTRACT','rust-unit-and-adversarial':'RESULT_RUST','historical-differential':'RESULT_HISTORICAL','mutation-campaign':'RESULT_MUTATIONS','production-pipeline-shadow':'RESULT_PIPELINE','transport-parity':'RESULT_TRANSPORT','packaged-clean-consumer':'RESULT_PACKAGED','source-development-install':'RESULT_SOURCE','deep-cfg-stress':'RESULT_DEEP','cost-characterization':'RESULT_COST','platform-qualification':'RESULT_PLATFORM','python-compatibility':'RESULT_PYTHON'};
+          p=pathlib.Path('qualification/aggregate/job-results.json');p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps({k:os.environ[v] for k,v in keys.items()},sort_keys=True)+'\n')"
+      - name: Download official artifact API records and ZIPs
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p qualification/aggregate/zips
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" > qualification/aggregate/artifacts-api.json
+          shopt -s nullglob
+          for directory in qualification/aggregate/downloaded/rust-refine-2-*; do
+            name="$(basename "$directory")"
+            id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" --jq ".artifacts[] | select(.name == \"$name\") | .id")"
+            test -n "$id"
+            gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}/zip" > "qualification/aggregate/zips/${name}.zip"
+          done
+      - name: Build official manifest and decide fail-closed
+        run: |
+          python scripts/build_rust_refine_2_artifact_manifest.py \
+            --api qualification/aggregate/artifacts-api.json \
+            --downloaded qualification/aggregate/downloaded \
+            --zips qualification/aggregate/zips \
+            --job-results qualification/aggregate/job-results.json \
+            --revision "${{ github.sha }}" --run-id "${{ github.run_id }}" \
+            --output qualification/aggregate/artifact-manifest.json
+          python scripts/check_rust_refine_2_shadow_qualification.py \
+            --manifest qualification/aggregate/artifact-manifest.json \
+            --output qualification/aggregate/decision.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-refine-2-aggregate
+          path: qualification/aggregate
