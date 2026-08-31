@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from time import perf_counter
-from typing import Callable, Mapping, Protocol
+from typing import Callable, Literal, Mapping, Protocol
 
 from aether.ir.dto import ir_module_to_dto
 from aether.ir.lifecycle import expand_lifecycle
@@ -24,16 +24,16 @@ from .refinement_verifier import verify_ssa_refinement
 from .verifier import SSAVerifier
 
 
-SHADOW_INDEPENDENT_QUALIFICATION_REVISION = 1
+SHADOW_INDEPENDENT_QUALIFICATION_REVISION = 2
 SHADOW_INDEPENDENT_STAGE_MANIFEST = (
     "initial_ir_verification",
     "lifecycle_normalization",
     "rust_ssa_lowering_and_verification",
     "schema_v2_import",
     "imported_ssa_verification",
-    "same_input_integrity_before_refinement",
-    "independent_refinement_verification",
-    "same_input_integrity_after_refinement",
+    "same_input_integrity_before_acceptance",
+    "python_refinement_oracle",
+    "same_input_integrity_after_oracle",
     "final_generic_verification",
     "accept",
 )
@@ -59,7 +59,10 @@ class ShadowIndependentQualificationTrace:
     stage_seconds: Mapping[str, float]
     rust_ssa_lowering_executed: bool
     rust_side_verification_succeeded: bool
-    refinement_verification_executed: bool
+    rust_refinement_verification_observed: bool
+    refinement_authority: str
+    python_refinement_role: str
+    python_refinement_verification_executed: bool
     final_generic_verification_executed: bool
     python_general_ssa_builder_instantiated: bool
     python_ssa_lowering_executed: bool
@@ -79,8 +82,13 @@ class ShadowIndependentQualificationTrace:
             "rust_side_verification_succeeded": (
                 self.rust_side_verification_succeeded
             ),
-            "refinement_verification_executed": (
-                self.refinement_verification_executed
+            "rust_refinement_verification_observed": (
+                self.rust_refinement_verification_observed
+            ),
+            "refinement_authority": self.refinement_authority,
+            "python_refinement_role": self.python_refinement_role,
+            "python_refinement_verification_executed": (
+                self.python_refinement_verification_executed
             ),
             "final_generic_verification_executed": (
                 self.final_generic_verification_executed
@@ -93,6 +101,11 @@ class ShadowIndependentQualificationTrace:
                 self.canonical_rust_python_comparison_executed
             ),
         }
+
+    @property
+    def refinement_verification_executed(self) -> bool:
+        """Compatibility alias for the former Python refinement trace bit."""
+        return self.python_refinement_verification_executed
 
 
 class ShadowIndependentRustAuthorityFailure(RuntimeError):
@@ -121,14 +134,21 @@ class _QualificationHooks:
 
 
 class _TraceRecorder:
-    def __init__(self, mode: str) -> None:
+    def __init__(
+        self,
+        mode: str,
+        *,
+        python_refinement_role: Literal["not_executed", "oracle_only"],
+    ) -> None:
         self.mode = mode
+        self.python_refinement_role = python_refinement_role
         self.completed: list[str] = []
         self.counts = {stage: 0 for stage in SHADOW_INDEPENDENT_STAGE_MANIFEST}
         self.seconds: dict[str, float] = {}
         self.rust_executed = False
         self.rust_verified = False
-        self.refinement_executed = False
+        self.rust_refinement_observed = False
+        self.python_refinement_executed = False
         self.final_verification_executed = False
 
     def run(self, stage: str, operation: Callable[[], object]) -> object:
@@ -157,7 +177,14 @@ class _TraceRecorder:
             stage_seconds=dict(self.seconds),
             rust_ssa_lowering_executed=self.rust_executed,
             rust_side_verification_succeeded=self.rust_verified,
-            refinement_verification_executed=self.refinement_executed,
+            rust_refinement_verification_observed=(
+                self.rust_refinement_observed
+            ),
+            refinement_authority="rust",
+            python_refinement_role=self.python_refinement_role,
+            python_refinement_verification_executed=(
+                self.python_refinement_executed
+            ),
             final_generic_verification_executed=(
                 self.final_verification_executed
             ),
@@ -188,11 +215,15 @@ def _lower_shadow_independent_rust_ssa(
     client: RustSSAQualificationClient,
     *,
     mode: str,
+    python_refinement_role: Literal["not_executed", "oracle_only"],
     _hooks: _QualificationHooks | None = None,
 ) -> tuple[SSAModule, ShadowIndependentQualificationTrace]:
     """Accept Rust SSA without executing or consuming a Python SSA result."""
 
-    recorder = _TraceRecorder(mode)
+    recorder = _TraceRecorder(
+        mode,
+        python_refinement_role=python_refinement_role,
+    )
     hooks = _hooks or _QualificationHooks()
 
     try:
@@ -234,11 +265,20 @@ def _lower_shadow_independent_rust_ssa(
         if not isinstance(response, Mapping):
             raise TypeError("Rust companion response is not an object")
         if response.get("ok") is not True:
-            raise RuntimeError(str(response.get("error", "Rust lowering rejected")))
+            rejection = {
+                "error": str(response.get("error", "Rust lowering rejected")),
+                "diagnostic": response.get("diagnostic"),
+            }
+            raise RuntimeError(json.dumps(rejection, sort_keys=True))
         response_ssa = response.get("ssa")
         if not isinstance(response_ssa, dict):
             raise TypeError("Rust companion response has no schema-v2 SSA object")
         recorder.rust_verified = True
+        # CompilerCore publishes SSA only after both verify_owned_ssa and
+        # verify_owned_ssa_refinement have returned successfully.  This bit is
+        # therefore derived from the observed successful request, not from the
+        # selected Python policy.
+        recorder.rust_refinement_observed = True
     except Exception as exc:
         _raise_failure(
             recorder,
@@ -279,42 +319,43 @@ def _lower_shadow_independent_rust_ssa(
             raise RuntimeError("normalized Initial IR changed during qualification")
 
     try:
-        recorder.run("same_input_integrity_before_refinement", verify_integrity)
+        recorder.run("same_input_integrity_before_acceptance", verify_integrity)
     except Exception as exc:
         _raise_failure(
             recorder,
-            "same_input_integrity_before_refinement",
+            "same_input_integrity_before_acceptance",
             "same_input_integrity_failure",
             exc,
         )
 
-    try:
-        recorder.refinement_executed = True
-        recorder.run(
-            "independent_refinement_verification",
-            lambda: verify_ssa_refinement(normalized, imported),
-        )
-    except Exception as exc:
-        _raise_failure(
-            recorder,
-            "independent_refinement_verification",
-            "refinement_verifier_failure",
-            exc,
-        )
-    if hooks.after_refinement is not None:
-        replacement = hooks.after_refinement(imported)
-        if replacement is not None:
-            imported = replacement
+    if python_refinement_role == "oracle_only":
+        try:
+            recorder.python_refinement_executed = True
+            recorder.run(
+                "python_refinement_oracle",
+                lambda: verify_ssa_refinement(normalized, imported),
+            )
+        except Exception as exc:
+            _raise_failure(
+                recorder,
+                "python_refinement_oracle",
+                "python_refinement_oracle_rejection",
+                exc,
+            )
+        if hooks.after_refinement is not None:
+            replacement = hooks.after_refinement(imported)
+            if replacement is not None:
+                imported = replacement
 
-    try:
-        recorder.run("same_input_integrity_after_refinement", verify_integrity)
-    except Exception as exc:
-        _raise_failure(
-            recorder,
-            "same_input_integrity_after_refinement",
-            "same_input_integrity_failure",
-            exc,
-        )
+        try:
+            recorder.run("same_input_integrity_after_oracle", verify_integrity)
+        except Exception as exc:
+            _raise_failure(
+                recorder,
+                "same_input_integrity_after_oracle",
+                "same_input_integrity_failure",
+                exc,
+            )
 
     try:
         recorder.final_verification_executed = True
@@ -343,6 +384,7 @@ def lower_with_shadow_independent_rust_authority(
         module,
         client,
         mode="rust_ssa_authority_refinement_verified",
+        python_refinement_role="not_executed",
     )
 
 
@@ -357,6 +399,7 @@ def qualify_shadow_independent_rust_ssa(
         module,
         client,
         mode="qualification_only_shadow_independent",
+        python_refinement_role="oracle_only",
         _hooks=_hooks,
     )
 

@@ -169,9 +169,20 @@ def test_new_default_has_exact_order_and_no_python_shadow(
     assert pipeline.last_returned_ssa_origin == "rust_schema_v2_import"
     assert trace is not None
     assert trace.mode == "rust_ssa_authority_refinement_verified"
-    assert trace.completed_stages == SHADOW_INDEPENDENT_STAGE_MANIFEST
-    assert set(trace.stage_execution_counts.values()) == {1}
-    assert trace.refinement_verification_executed is True
+    assert trace.completed_stages == tuple(
+        stage
+        for stage in SHADOW_INDEPENDENT_STAGE_MANIFEST
+        if stage
+        not in {
+            "python_refinement_oracle",
+            "same_input_integrity_after_oracle",
+        }
+    )
+    assert trace.stage_execution_counts["python_refinement_oracle"] == 0
+    assert trace.refinement_authority == "rust"
+    assert trace.rust_refinement_verification_observed is True
+    assert trace.python_refinement_role == "not_executed"
+    assert trace.python_refinement_verification_executed is False
     assert trace.final_generic_verification_executed is True
     assert trace.python_general_ssa_builder_instantiated is False
     assert trace.python_ssa_lowering_executed is False
@@ -222,7 +233,7 @@ def test_new_default_fails_closed_without_python_fallback(
         SSAPipeline(rust_shadow_client=StaticClient(response)).run(IRModule())
 
 
-def test_new_default_refinement_failure_is_mandatory_and_closed(
+def test_new_default_does_not_consult_python_refinement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def reject(*_args, **_kwargs):
@@ -231,11 +242,11 @@ def test_new_default_refinement_failure_is_mandatory_and_closed(
     monkeypatch.setattr(
         "aether.ssa.shadow_independent.verify_ssa_refinement", reject
     )
-    with pytest.raises(ShadowIndependentRustAuthorityFailure) as caught:
-        SSAPipeline(rust_shadow_client=StaticClient()).run(IRModule())
-    assert caught.value.trace.failure_classification == "refinement_verifier_failure"
-    assert caught.value.trace.final_generic_verification_executed is False
-    assert caught.value.trace.python_ssa_lowering_executed is False
+    pipeline = SSAPipeline(rust_shadow_client=StaticClient())
+    pipeline.run(IRModule())
+    trace = pipeline.last_authority_report
+    assert trace.python_refinement_verification_executed is False
+    assert trace.final_generic_verification_executed is True
 
 
 def test_differential_mode_executes_python_and_canonical_comparison(
@@ -287,29 +298,23 @@ def test_differential_canonical_mismatch_remains_fail_closed(
     assert caught.value.report.phase == "canonical_comparison"
 
 
-def test_differential_refinement_failure_remains_fail_closed(
+def test_differential_product_mode_does_not_consult_python_refinement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def reject(*_args, **_kwargs):
         raise RuntimeError("injected differential refinement rejection")
 
-    def forbidden(*_args, **_kwargs):
-        raise AssertionError("Python shadow ran after refinement rejection")
-
     monkeypatch.setattr("aether.ssa.shadow.verify_ssa_refinement", reject)
-    monkeypatch.setattr(GeneralSSABuilder, "build", forbidden)
     configuration = SSALoweringAuthorityConfiguration(
         SSALoweringAuthorityMode.RUST_SSA_AUTHORITY_PYTHON_SHADOW
     )
 
-    with pytest.raises(SSAShadowFailure) as caught:
-        SSAPipeline(
-            authority_configuration=configuration,
-            rust_shadow_client=StaticClient(),
-        ).run(IRModule())
-
-    assert caught.value.report.classification == "refinement_verifier_failure"
-    assert caught.value.report.phase == "refinement_verification"
+    pipeline = SSAPipeline(
+        authority_configuration=configuration,
+        rust_shadow_client=StaticClient(),
+    )
+    pipeline.run(IRModule())
+    assert pipeline.last_authority_report.classification == "match"
 
 
 @pytest.mark.parametrize(

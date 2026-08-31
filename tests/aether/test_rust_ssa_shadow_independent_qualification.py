@@ -187,7 +187,7 @@ def test_input_integrity_failure_precedes_refinement() -> None:
         StaticClient(_response()),
         hooks=_QualificationHooks(after_normalization=mutate_normalized),
     )
-    assert trace.failed_stage == "same_input_integrity_before_refinement"
+    assert trace.failed_stage == "same_input_integrity_before_acceptance"
     assert trace.refinement_verification_executed is False
 
 
@@ -199,8 +199,8 @@ def test_refinement_failure_is_closed_without_python_fallback(monkeypatch) -> No
         "aether.ssa.shadow_independent.verify_ssa_refinement", reject
     )
     trace = _failure(StaticClient(_response()))
-    assert trace.failed_stage == "independent_refinement_verification"
-    assert trace.failure_classification == "refinement_verifier_failure"
+    assert trace.failed_stage == "python_refinement_oracle"
+    assert trace.failure_classification == "python_refinement_oracle_rejection"
     assert trace.python_ssa_lowering_executed is False
 
 

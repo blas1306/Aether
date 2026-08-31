@@ -188,9 +188,9 @@ def main() -> int:
     )
     historical_fail_closed = historical_corruption_applied and _matches_failure(
         historical_observation,
-        classification="refinement_verifier_failure",
-        phase="refinement_verification",
-        python_shadow_reached=False,
+        classification="semantic_mismatch",
+        phase="canonical_comparison",
+        python_shadow_reached=True,
     )
     canonical_observation = _failure_observation(
         _Client(),
@@ -295,8 +295,8 @@ def main() -> int:
             "historical_semantic_corruption": {
                 "injection": "unexpected_struct_definition",
                 "injection_applied": historical_corruption_applied,
-                "expected_classification": "refinement_verifier_failure",
-                "expected_phase": "refinement_verification",
+                "expected_classification": "semantic_mismatch",
+                "expected_phase": "canonical_comparison",
                 **historical_observation,
                 "status": "PASS" if historical_fail_closed else "BLOCKED",
             },

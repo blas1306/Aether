@@ -118,8 +118,10 @@ def resolve_ssa_lowering_authority_mode(
 
 @dataclass(frozen=True)
 class SSALoweringAuthorityConfiguration:
-    # RUST-4.5 production default. Rust returns the authoritative schema-v2
-    # import only after mandatory imported, refinement, and final verification.
+    # RUST-REFINE-3 production default. Rust returns the authoritative
+    # schema-v2 import after Rust owned-SSA/refinement verification and the
+    # still-mandatory Python generic SSA checks. Python refinement is an
+    # explicit qualification oracle, never a productive acceptance condition.
     # An explicit environment override is resolved in this one location.
     mode: SSALoweringAuthorityMode = field(
         default_factory=resolve_ssa_lowering_authority_mode
@@ -897,7 +899,7 @@ def _lower_dual_lane(
     rust_authoritative: bool,
     characterize_performance: bool = False,
     execute_python_shadow: bool = True,
-    execute_refinement_verifier: bool = True,
+    execute_python_refinement_oracle: bool = False,
     test_only_post_verification_mutator: (
         Callable[[SSAModule], SSAModule | None] | None
     ) = None,
@@ -1072,17 +1074,17 @@ def _lower_dual_lane(
     if rust_authoritative:
         rust_ssa = run_rust()
         verify_input_integrity("before_refinement_verification")
-        if execute_refinement_verifier:
+        if execute_python_refinement_oracle:
             try:
                 started = perf_counter() if characterize_performance else 0.0
                 verify_ssa_refinement(normalized_module, rust_ssa)
                 if characterize_performance:
-                    phases["refinement_verification"] = perf_counter() - started
+                    phases["python_refinement_oracle"] = perf_counter() - started
             except Exception as exc:
                 raise SSAShadowFailure(
                     SSAShadowReport(
-                        "refinement_verifier_failure",
-                        "refinement_verification",
+                        "python_refinement_oracle_rejection",
+                        "python_refinement_oracle",
                         first_difference=str(exc)[:240],
                         python_seconds=python_seconds,
                         rust_seconds=rust_seconds,
@@ -1208,12 +1210,17 @@ def lower_with_rust_authority(
     *,
     characterize_performance: bool = False,
 ) -> tuple[object, SSAShadowReport]:
-    """Return imported Rust SSA only after its Python shadow matches."""
+    """Return imported Rust SSA after Rust authority and Python shadow match.
+
+    The compatibility shadow may still reject a canonical result mismatch,
+    but Python SSA refinement is not executed by this productive entry point.
+    """
     return _lower_dual_lane(
         module,
         client,
         rust_authoritative=True,
         characterize_performance=characterize_performance,
+        execute_python_refinement_oracle=False,
     )
 
 
@@ -1246,7 +1253,7 @@ def diagnostic_lower_with_rust_authority_without_refinement(
         client,
         rust_authoritative=True,
         characterize_performance=True,
-        execute_refinement_verifier=False,
+        execute_python_refinement_oracle=False,
     )
 
 
@@ -1260,5 +1267,24 @@ def diagnostic_inject_post_rust_verification_corruption(
         module,
         client,
         rust_authoritative=True,
+        execute_python_refinement_oracle=True,
         test_only_post_verification_mutator=mutator,
+    )
+
+
+def qualify_with_python_refinement_oracle(
+    module: IRModule,
+    client: RustSSALoweringClient,
+) -> tuple[object, SSAShadowReport]:
+    """Run the retired Python refinement condition as an explicit oracle.
+
+    This entry point is for tests and differential qualification only.  It is
+    absent from the authority-mode dispatcher and cannot be selected through
+    the production environment.
+    """
+    return _lower_dual_lane(
+        module,
+        client,
+        rust_authoritative=True,
+        execute_python_refinement_oracle=True,
     )

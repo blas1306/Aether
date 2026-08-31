@@ -1,0 +1,60 @@
+{
+  "artifact_schema_version": 1,
+  "authority_after_implementation": {
+    "productive_refinement_authority": "rust",
+    "python_refinement_role": "oracle_only",
+    "python_refinement_productive": false,
+    "python_ssa_verifier_retired": false
+  },
+  "contract_audit": {
+    "classified_differences": [
+      {
+        "classification": "representation-only",
+        "id": "owned_wire_vs_python_model"
+      },
+      {
+        "classification": "input-domain",
+        "effect": "both_reject_rust_earlier",
+        "id": "missing_reachable_block"
+      },
+      {
+        "classification": "diagnostic-only",
+        "id": "structured_rust_error_vs_python_value_error"
+      }
+    ],
+    "unexplained_semantic_contract_differences": []
+  },
+  "decision": "RUST_REFINEMENT_AUTHORITY_PROMOTION_PENDING_CI",
+  "historical_runs": {
+    "33319278847": "FAILED/BLOCKED",
+    "33321279630": "FAILED/BLOCKED"
+  },
+  "local_validation": {
+    "complete_suite": {
+      "passed": 5201,
+      "skipped": 4,
+      "warnings": 6
+    },
+    "cost_samples": 4,
+    "deep_cfg_blocks": 5000,
+    "directed_differential_cases": 223,
+    "mutation_cases": 403,
+    "mutation_cases_accepted": 0,
+    "productive_categories": 15,
+    "rust_accept_python_reject": 0,
+    "rust_reject_python_accept": 0,
+    "transport_parity": "PASS"
+  },
+  "milestone": "RUST-REFINE-3",
+  "official_rust_refine_3_run": null,
+  "prerequisite": {
+    "artifact_count": 19,
+    "decision": "RUST_REFINEMENT_SHADOW_QUALIFIED",
+    "independent_replay": "RUST_REFINEMENT_SHADOW_QUALIFIED",
+    "revision": "0bff8c0a78005d97ee5c7c2e0eb09a6a6b3b1fef",
+    "run_id": "33321791729",
+    "workflow": "rust-refine-2-shadow-qualification"
+  },
+  "qualification_closure_created": false,
+  "status": "PENDING_CI"
+}

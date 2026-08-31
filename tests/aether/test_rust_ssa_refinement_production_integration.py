@@ -20,6 +20,7 @@ from aether.ssa.shadow import (
     SSAShadowFailure,
     diagnostic_inject_post_rust_verification_corruption,
     lower_with_rust_authority,
+    qualify_with_python_refinement_oracle,
 )
 
 
@@ -116,8 +117,8 @@ def test_injected_corruption_fails_at_refinement_before_python_shadow(
             module, client, _mutator(mutation)
         )
 
-    assert caught.value.report.classification == "refinement_verifier_failure"
-    assert caught.value.report.phase == "refinement_verification"
+    assert caught.value.report.classification == "python_refinement_oracle_rejection"
+    assert caught.value.report.phase == "python_refinement_oracle"
     assert shadow_calls == 0
 
 
@@ -140,7 +141,7 @@ def test_rust_refinement_and_python_share_one_normalized_input_object(
 
     monkeypatch.setattr(shadow, "verify_ssa_refinement", capture_refinement)
     monkeypatch.setattr(shadow.GeneralSSABuilder, "build", capture_shadow)
-    lower_with_rust_authority(module, client)
+    qualify_with_python_refinement_oracle(module, client)
 
     assert observed["refinement"] is observed["shadow"]
     assert client.payloads == [ir_module_to_dto(observed["refinement"])]
@@ -176,7 +177,9 @@ def test_mutation_between_refinement_and_python_fails_same_input(
 
     monkeypatch.setattr(shadow, "verify_ssa_refinement", mutating_refinement)
     with pytest.raises(SSAShadowFailure) as caught:
-        lower_with_rust_authority(module, StaticClient(_response(module)))
+        qualify_with_python_refinement_oracle(
+            module, StaticClient(_response(module))
+        )
 
     assert caught.value.report.classification == "same_input_violation"
     assert caught.value.report.phase == "before_python_shadow"
@@ -199,16 +202,18 @@ def test_stale_or_reconstructed_different_ir_is_rejected_before_shadow(
 
     monkeypatch.setattr(shadow.GeneralSSABuilder, "build", forbidden)
     with pytest.raises(SSAShadowFailure) as caught:
-        lower_with_rust_authority(current, StaticClient(stale_response))
+        qualify_with_python_refinement_oracle(
+            current, StaticClient(stale_response)
+        )
 
-    assert caught.value.report.classification == "refinement_verifier_failure"
+    assert caught.value.report.classification == "python_refinement_oracle_rejection"
     assert called is False
 
 
 def test_injection_state_does_not_leak_to_next_compilation() -> None:
     module = R40.branch_module()
     client = StaticClient(_response(module))
-    with pytest.raises(SSAShadowFailure, match="refinement_verifier_failure"):
+    with pytest.raises(SSAShadowFailure, match="python_refinement_oracle_rejection"):
         diagnostic_inject_post_rust_verification_corruption(
             module, client, _mutator("wrong_return")
         )
@@ -218,7 +223,7 @@ def test_injection_state_does_not_leak_to_next_compilation() -> None:
     assert ssa_module_to_dto(returned, schema_version=2) == client.response["ssa"]
 
 
-def test_refinement_runs_only_when_rust_is_authoritative(
+def test_refinement_runs_only_in_explicit_qualification_oracle(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = 0
@@ -237,7 +242,7 @@ def test_refinement_runs_only_when_rust_is_authoritative(
 
     rust_authority = SSAPipeline(rust_shadow_client=StaticClient(response))
     rust_authority.run(module)
-    assert calls == 1
+    assert calls == 0
 
     differential = SSAPipeline(
         authority_configuration=SSALoweringAuthorityConfiguration(
@@ -246,7 +251,7 @@ def test_refinement_runs_only_when_rust_is_authoritative(
         rust_shadow_client=StaticClient(response),
     )
     differential.run(module)
-    assert calls == 2
+    assert calls == 0
 
     python_authority = SSAPipeline(
         authority_configuration=SSALoweringAuthorityConfiguration(
@@ -261,7 +266,10 @@ def test_refinement_runs_only_when_rust_is_authoritative(
         )
     )
     python_only.run(module)
-    assert calls == 2
+    assert calls == 0
+
+    qualify_with_python_refinement_oracle(module, StaticClient(response))
+    assert calls == 1
 
 
 def test_ordinary_return_shape_and_protocol_are_unchanged() -> None:
@@ -297,7 +305,7 @@ def test_ordinary_return_shape_and_protocol_are_unchanged() -> None:
     assert ssa_module_to_dto(returned, schema_version=2) == response["ssa"]
 
 
-def test_production_boundaries_execute_in_fail_closed_order(
+def test_qualification_oracle_boundaries_execute_in_fail_closed_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     module = IRModule()
@@ -342,7 +350,7 @@ def test_production_boundaries_execute_in_fail_closed_order(
     monkeypatch.setattr(shadow.GeneralSSABuilder, "build", python_shadow)
     monkeypatch.setattr(shadow, "_difference", compare)
 
-    lower_with_rust_authority(module, client)
+    qualify_with_python_refinement_oracle(module, client)
 
     first_ssa_verification = events.index("ssa_verification")
     assert events.index("rust_lowering") < events.index("schema_v2_import")
@@ -352,13 +360,15 @@ def test_production_boundaries_execute_in_fail_closed_order(
     assert events.index("python_shadow") < events.index("canonical_comparison")
 
 
-def test_checked_in_rust_4_2_evidence_passes_fail_closed_checker() -> None:
+def test_checked_in_rust_4_2_evidence_remains_historical_after_promotion() -> None:
     checker = _load("rust_4_2_checker_tests", CHECKER)
+    evidence = json.loads(EVIDENCE.read_text(encoding="utf-8"))
     record = checker.build_record(EVIDENCE, REPORT)
-    assert record["passed"] is True
-    assert record["decision"] == (
+    assert evidence["decision"] == (
         "RUST_SSA_REFINEMENT_PRODUCTION_INTEGRATION_QUALIFIED"
     )
+    assert record["checks"]["identity"] is True
+    assert record["checks"]["production_fail_closed"] is False
 
 
 def test_checker_rejects_claim_that_python_shadow_is_optional(tmp_path: Path) -> None:

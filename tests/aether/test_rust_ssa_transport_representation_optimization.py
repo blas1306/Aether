@@ -166,7 +166,7 @@ def test_failed_then_successful_compilation_does_not_retain_dto_mutation() -> No
     mismatch_before = deepcopy(mismatching)
     client = SharedResponseClient([mismatching, valid])
 
-    with pytest.raises(SSAShadowFailure, match="refinement_verifier_failure"):
+    with pytest.raises(SSAShadowFailure, match="semantic_mismatch"):
         lower_with_rust_authority(module, client)
     result, report = lower_with_rust_authority(module, client)
 

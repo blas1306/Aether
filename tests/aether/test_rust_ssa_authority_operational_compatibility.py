@@ -18,7 +18,7 @@ def _qualification_module():
     return module
 
 
-def test_historical_corruption_is_intercepted_by_refinement_before_shadow() -> None:
+def test_historical_corruption_is_intercepted_by_canonical_shadow() -> None:
     qualification = _qualification_module()
     client = qualification._historical_semantic_corruption_client()
 
@@ -29,9 +29,9 @@ def test_historical_corruption_is_intercepted_by_refinement_before_shadow() -> N
     ]
     assert observation == {
         "rejected": True,
-        "classification": "refinement_verifier_failure",
-        "phase": "refinement_verification",
-        "python_shadow_reached": False,
+        "classification": "semantic_mismatch",
+        "phase": "canonical_comparison",
+        "python_shadow_reached": True,
         "rust_requests": 1,
     }
 

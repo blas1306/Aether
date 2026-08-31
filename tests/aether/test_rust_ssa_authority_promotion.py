@@ -156,7 +156,7 @@ def test_differential_mode_returns_rust_ssa_and_still_rejects_mismatch(
             authority_configuration=differential,
             rust_shadow_client=mismatched,
         ).run(IRModule())
-    assert caught.value.report.classification == "refinement_verifier_failure"
+    assert caught.value.report.classification == "semantic_mismatch"
     assert mismatched.request_count == 1
 
 
@@ -225,7 +225,7 @@ def test_python_shadow_runs_after_rust_and_cannot_be_skipped_or_substituted(monk
                     },
                 }
             ),
-            "refinement_verifier_failure",
+            "semantic_mismatch",
         ),
     ],
 )

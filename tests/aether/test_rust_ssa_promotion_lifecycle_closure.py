@@ -120,11 +120,31 @@ def test_classified_lifecycle_reproducers_match_at_boundary_b_and_in_all_modes(
             assert isinstance(trace, ShadowIndependentQualificationTrace)
             assert trace.accepted is True
             assert trace.mode == mode.value
-            assert trace.completed_stages == SHADOW_INDEPENDENT_STAGE_MANIFEST
+            assert trace.completed_stages == tuple(
+                stage
+                for stage in SHADOW_INDEPENDENT_STAGE_MANIFEST
+                if stage
+                not in {
+                    "python_refinement_oracle",
+                    "same_input_integrity_after_oracle",
+                }
+            )
             assert trace.stage_execution_counts == {
-                stage: 1 for stage in SHADOW_INDEPENDENT_STAGE_MANIFEST
+                stage: (
+                    0
+                    if stage
+                    in {
+                        "python_refinement_oracle",
+                        "same_input_integrity_after_oracle",
+                    }
+                    else 1
+                )
+                for stage in SHADOW_INDEPENDENT_STAGE_MANIFEST
             }
-            assert trace.refinement_verification_executed is True
+            assert trace.refinement_authority == "rust"
+            assert trace.rust_refinement_verification_observed is True
+            assert trace.python_refinement_role == "not_executed"
+            assert trace.refinement_verification_executed is False
             assert trace.final_generic_verification_executed is True
             assert trace.python_general_ssa_builder_instantiated is False
             assert trace.python_ssa_lowering_executed is False
