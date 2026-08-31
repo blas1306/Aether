@@ -30,8 +30,28 @@ def _load(name: str, path: Path):
     return module
 
 
-R1 = _load("rust_refine_3_r1", ROOT / "scripts/qualify_rust_refine_1_shadow.py")
-R2 = _load("rust_refine_3_r2", ROOT / "scripts/qualify_rust_refine_2_shadow.py")
+_R1 = None
+_R2 = None
+
+
+def _r1():
+    global _R1
+    if _R1 is None:
+        _R1 = _load(
+            "rust_refine_3_r1",
+            ROOT / "scripts/qualify_rust_refine_1_shadow.py",
+        )
+    return _R1
+
+
+def _r2():
+    global _R2
+    if _R2 is None:
+        _R2 = _load(
+            "rust_refine_3_r2",
+            ROOT / "scripts/qualify_rust_refine_2_shadow.py",
+        )
+    return _R2
 
 
 def envelope(
@@ -232,7 +252,8 @@ def contract(revision: str, run_id: str) -> dict[str, Any]:
 def historical_differential(revision: str, run_id: str) -> dict[str, Any]:
     from aether.ir.lifecycle import expand_lifecycle
 
-    result = R1.qualify(include_historical=True)
+    r1 = _r1()
+    result = r1.qualify(include_historical=True)
     rust_accept_python_reject = [
         row
         for row in result["rows"]
@@ -244,28 +265,28 @@ def historical_differential(revision: str, run_id: str) -> dict[str, Any]:
         if not row["rust"]["accepted"] and row["python"]["accepted"]
     ]
     generated_modules = [
-        ("loop", R1.ORACLE.loop_module()),
-        ("nested_loop", R1.ORACLE.nested_loop_module()),
-        ("irreducible", R1.ORACLE.irreducible_module()),
-        ("unreachable", R1.ORACLE.unreachable_module()),
-        ("multiple_phi", R1.ORACLE.multiple_phi_module()),
-        ("deep_100", R1.ORACLE.deep_linear_module(100)),
-        ("deep_1000", R1.ORACLE.deep_linear_module(1000)),
+        ("loop", r1.ORACLE.loop_module()),
+        ("nested_loop", r1.ORACLE.nested_loop_module()),
+        ("irreducible", r1.ORACLE.irreducible_module()),
+        ("unreachable", r1.ORACLE.unreachable_module()),
+        ("multiple_phi", r1.ORACLE.multiple_phi_module()),
+        ("deep_100", r1.ORACLE.deep_linear_module(100)),
+        ("deep_1000", r1.ORACLE.deep_linear_module(1000)),
         *[
-            (f"seeded_diamond_{seed}", R1.ORACLE.randomized_diamond(seed))
+            (f"seeded_diamond_{seed}", r1.ORACLE.randomized_diamond(seed))
             for seed in range(64)
         ],
     ]
     generated_rows = []
-    with R1.PersistentRustSSALoweringClient(
-        R1.COMPANION,
+    with r1.PersistentRustSSALoweringClient(
+        r1.COMPANION,
         timeout_seconds=120,
     ) as client:
         for seed, module in generated_modules:
             normalized = expand_lifecycle(module)
-            ssa = R1._rust_baseline(client, module)
-            rust = R1._rust_outcome(normalized, ssa)
-            python = R1._python_outcome(normalized, ssa)
+            ssa = r1._rust_baseline(client, module)
+            rust = r1._rust_outcome(normalized, ssa)
+            python = r1._python_outcome(normalized, ssa)
             generated_rows.append(
                 {
                     "seed": seed,
@@ -308,21 +329,22 @@ def historical_differential(revision: str, run_id: str) -> dict[str, Any]:
 def mutation_adversarial(revision: str, run_id: str) -> dict[str, Any]:
     from aether.ir.lifecycle import expand_lifecycle
 
+    r1 = _r1()
     fixtures = {
-        "branch": expand_lifecycle(R1.ORACLE.RUST_4_0.branch_module()),
-        "effects": expand_lifecycle(R1.ORACLE.effect_module()),
+        "branch": expand_lifecycle(r1.ORACLE.RUST_4_0.branch_module()),
+        "effects": expand_lifecycle(r1.ORACLE.effect_module()),
     }
     rows: list[dict[str, Any]] = []
     generation_failures: list[dict[str, str]] = []
-    with R1.PersistentRustSSALoweringClient(
-        R1.COMPANION,
+    with r1.PersistentRustSSALoweringClient(
+        r1.COMPANION,
         timeout_seconds=60,
     ) as client:
         baselines = {
-            name: R1._rust_baseline(client, initial)
+            name: r1._rust_baseline(client, initial)
             for name, initial in fixtures.items()
         }
-        cases = [case for case in R1.ORACLE.mutation_cases() if case.semantic]
+        cases = [case for case in r1.ORACLE.mutation_cases() if case.semantic]
         for fixture, initial in fixtures.items():
             selected = [case for case in cases if case.fixture == fixture]
             for left, right in combinations(selected, 2):
@@ -336,8 +358,8 @@ def mutation_adversarial(revision: str, run_id: str) -> dict[str, Any]:
                         {"seed": seed, "error": type(error).__name__}
                     )
                     continue
-                rust = R1._rust_outcome(initial, candidate)
-                python = R1._python_outcome(initial, candidate)
+                rust = r1._rust_outcome(initial, candidate)
+                python = r1._python_outcome(initial, candidate)
                 rows.append(
                     {
                         "seed": seed,
@@ -382,7 +404,7 @@ def deep_stress(
     companion: Path,
     verifier: Path,
 ) -> dict[str, Any]:
-    row = R2.deep_cfg(revision, run_id, companion, verifier)
+    row = _r2().deep_cfg(revision, run_id, companion, verifier)
     return envelope(
         "deep_stress",
         revision,
@@ -411,7 +433,7 @@ def cost_characterization(
     companion: Path,
     verifier: Path,
 ) -> dict[str, Any]:
-    row = R2.cost(revision, run_id, companion, verifier)
+    row = _r2().cost(revision, run_id, companion, verifier)
     samples = row.get("samples", [])
     for sample in samples:
         separate = sample.get("separate_seconds", {})

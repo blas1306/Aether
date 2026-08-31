@@ -5,6 +5,9 @@ from hashlib import sha256
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
+import sys
+from types import SimpleNamespace
 import zipfile
 
 import pytest
@@ -23,6 +26,8 @@ from aether.ssa.shadow_independent import (
 ROOT = Path(__file__).resolve().parents[2]
 CHECKER = ROOT / "scripts/check_rust_refine_3_authority_promotion.py"
 WORKFLOW = ROOT / ".github/workflows/rust-refine-authority-promotion.yml"
+QUALIFIER = ROOT / "scripts/qualify_rust_refine_3_authority_promotion.py"
+PROBE = ROOT / "scripts/rust_refine_3_product_probe.py"
 REVISION = "1" * 40
 RUN_ID = "12345"
 PLATFORMS = ("linux-x86_64", "windows-x86_64", "macos-x86_64", "macos-arm64")
@@ -31,6 +36,14 @@ PYTHONS = ("3.11", "3.12", "3.13", "3.14")
 
 def _load_checker():
     spec = importlib.util.spec_from_file_location("rust_refine_3_checker", CHECKER)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _load_path(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -147,6 +160,94 @@ def test_rust_rejection_is_final_no_python_rescue_and_next_request_recovers(
     assert calls == 0
 
 
+def test_product_probe_lowers_typed_program_before_explicit_oracle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[IRModule] = []
+
+    def qualify(initial: IRModule, _client: object):
+        assert isinstance(initial, IRModule)
+        observed.append(initial)
+        return SSAModule(), SimpleNamespace(
+            accepted=True,
+            refinement_authority="rust",
+            python_refinement_role="oracle_only",
+            python_refinement_verification_executed=True,
+        )
+
+    monkeypatch.setattr(
+        "aether.ssa.shadow_independent.qualify_shadow_independent_rust_ssa",
+        qualify,
+    )
+    probe = _load_path("rust_refine_3_product_probe_test", PROBE)
+    result = probe._qualification_oracle(probe.SCALAR_SOURCE, ROOT, object())
+    assert len(observed) == 1
+    assert result["accepted"] is True
+    assert result["python_refinement_role"] == "oracle_only"
+
+
+def test_stdlib_only_gates_do_not_import_differential_dependencies(
+    tmp_path: Path,
+) -> None:
+    decision = tmp_path / "r2-decision.json"
+    api = tmp_path / "r2-artifacts.json"
+    decision.write_text(
+        json.dumps(
+            {
+                "decision": "RUST_REFINEMENT_SHADOW_QUALIFIED",
+                "passed": True,
+                "run_id": "33321791729",
+                "revision": "0bff8c0a78005d97ee5c7c2e0eb09a6a6b3b1fef",
+            }
+        ),
+        encoding="utf-8",
+    )
+    api.write_text(
+        json.dumps(
+            {
+                "artifacts": [
+                    {
+                        "id": index,
+                        "digest": f"sha256:{index:064x}",
+                    }
+                    for index in range(1, 20)
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    for mode, extra in (
+        ("contract", []),
+        (
+            "prerequisite",
+            [
+                "--prerequisite-decision",
+                str(decision),
+                "--prerequisite-artifacts-api",
+                str(api),
+            ],
+        ),
+    ):
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-S",
+                str(QUALIFIER),
+                "--mode",
+                mode,
+                "--revision",
+                REVISION,
+                "--run-id",
+                RUN_ID,
+                "--output",
+                str(tmp_path / f"{mode}.json"),
+                *extra,
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 0, completed.stderr
 def _base(kind: str) -> dict[str, object]:
     return {
         "artifact_schema_version": 1,

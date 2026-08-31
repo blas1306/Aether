@@ -164,8 +164,20 @@ RUST_REFINEMENT_AUTHORITY_PROMOTED
 RUST_REFINEMENT_AUTHORITY_PROMOTION_BLOCKED
 ```
 
-At this implementation stage no RUST-REFINE-3 run exists and no closure files
-exist. The only valid current state is:
+Official qualification run `33360257587` tested implementation revision
+`1db406d152870602532ab5fbbbb6c62ea75db76e` and concluded `failure`. Its
+official aggregate, a replay of that aggregate, and an independently rebuilt
+aggregate all returned `RUST_REFINEMENT_AUTHORITY_PROMOTION_BLOCKED` with 71
+fail-closed errors. The run is permanently preserved as `FAILED/BLOCKED`; it
+will not be rerun or reinterpreted. See
+`RUST_REFINE_3_AUTHORITY_PROMOTION_RUN_33360257587.md` for the sealed run,
+job, artifact, digest, ZIP SHA-256, and evidence SHA-256 record.
+
+The failures exposed two qualification-harness defects: stdlib-only gates
+eagerly imported optional differential dependencies, and the packaged oracle
+received a `TypedProgram` instead of lowered `IRModule`. Both corrections
+require a new commit and a new official run. No closure files exist. The only
+valid current state remains:
 
 ```text
 RUST_REFINEMENT_AUTHORITY_PROMOTION_PENDING_CI

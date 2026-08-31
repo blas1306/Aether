@@ -107,12 +107,13 @@ def _qualification_oracle(
     source_root: Path,
     client: object,
 ) -> dict[str, Any]:
-    from aether.pipeline import prepare_typed_program
+    from aether.pipeline import SSAPipeline, prepare_typed_program
     from aether.ssa.shadow_independent import qualify_shadow_independent_rust_ssa
     from aether.typechecker import TypeChecker
 
     typed = prepare_typed_program(source, TypeChecker(source_root=source_root))
-    _ssa, trace = qualify_shadow_independent_rust_ssa(typed, client)
+    initial = SSAPipeline().lower_ir(typed)
+    _ssa, trace = qualify_shadow_independent_rust_ssa(initial, client)
     return {
         "accepted": trace.accepted,
         "refinement_authority": trace.refinement_authority,

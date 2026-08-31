@@ -27,7 +27,8 @@
   "decision": "RUST_REFINEMENT_AUTHORITY_PROMOTION_PENDING_CI",
   "historical_runs": {
     "33319278847": "FAILED/BLOCKED",
-    "33321279630": "FAILED/BLOCKED"
+    "33321279630": "FAILED/BLOCKED",
+    "33360257587": "FAILED/BLOCKED"
   },
   "local_validation": {
     "complete_suite": {
@@ -46,7 +47,18 @@
     "transport_parity": "PASS"
   },
   "milestone": "RUST-REFINE-3",
-  "official_rust_refine_3_run": null,
+  "official_rust_refine_3_run": {
+    "aggregate_decision": "RUST_REFINEMENT_AUTHORITY_PROMOTION_BLOCKED",
+    "attempt": 1,
+    "conclusion": "failure",
+    "independent_decision": "RUST_REFINEMENT_AUTHORITY_PROMOTION_BLOCKED",
+    "replay_decision": "RUST_REFINEMENT_AUTHORITY_PROMOTION_BLOCKED",
+    "revision": "1db406d152870602532ab5fbbbb6c62ea75db76e",
+    "run_id": "33360257587",
+    "status": "FAILED/BLOCKED",
+    "workflow": "rust-refine-3-authority-promotion",
+    "workflow_id": 346335540
+  },
   "prerequisite": {
     "artifact_count": 19,
     "decision": "RUST_REFINEMENT_SHADOW_QUALIFIED",
