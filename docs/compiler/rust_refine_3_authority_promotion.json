@@ -24,7 +24,7 @@
     ],
     "unexplained_semantic_contract_differences": []
   },
-  "decision": "RUST_REFINEMENT_AUTHORITY_PROMOTION_PENDING_CI",
+  "decision": "RUST_REFINEMENT_AUTHORITY_PROMOTED",
   "historical_runs": {
     "33319278847": "FAILED/BLOCKED",
     "33321279630": "FAILED/BLOCKED",
@@ -48,14 +48,16 @@
   },
   "milestone": "RUST-REFINE-3",
   "official_rust_refine_3_run": {
-    "aggregate_decision": "RUST_REFINEMENT_AUTHORITY_PROMOTION_BLOCKED",
+    "aggregate_decision": "RUST_REFINEMENT_AUTHORITY_PROMOTED",
     "attempt": 1,
-    "conclusion": "failure",
-    "independent_decision": "RUST_REFINEMENT_AUTHORITY_PROMOTION_BLOCKED",
-    "replay_decision": "RUST_REFINEMENT_AUTHORITY_PROMOTION_BLOCKED",
-    "revision": "1db406d152870602532ab5fbbbb6c62ea75db76e",
-    "run_id": "33360257587",
-    "status": "FAILED/BLOCKED",
+    "artifact_count": 21,
+    "conclusion": "success",
+    "independent_decision": "RUST_REFINEMENT_AUTHORITY_PROMOTED",
+    "job_count": 21,
+    "replay_decision": "RUST_REFINEMENT_AUTHORITY_PROMOTED",
+    "revision": "a5ae9d4b3a50843faf68bdeb4d8afc227b900bc9",
+    "run_id": "33361044254",
+    "status": "QUALIFIED",
     "workflow": "rust-refine-3-authority-promotion",
     "workflow_id": 346335540
   },
@@ -67,6 +69,7 @@
     "run_id": "33321791729",
     "workflow": "rust-refine-2-shadow-qualification"
   },
-  "qualification_closure_created": false,
-  "status": "PENDING_CI"
+  "qualification_closure_created": true,
+  "qualification_closure_revision": "a5ae9d4b3a50843faf68bdeb4d8afc227b900bc9",
+  "status": "PROMOTED"
 }

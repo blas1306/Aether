@@ -1,11 +1,9 @@
 # RUST-REFINE-3 — owned SSA refinement authority promotion
 
-Status: `RUST_REFINEMENT_AUTHORITY_PROMOTION_PENDING_CI`.
+Status: `RUST_REFINEMENT_AUTHORITY_PROMOTED`.
 
-This document records the implementation-phase audit and local qualification.
-It is not a formal closure and does not declare Rust promoted. Promotion requires
-a new successful official `workflow_dispatch` run, replay of its official
-artifacts, an independent aggregate decision, and the SHA-specific closure files.
+This document records the implementation audit and qualification design. The
+formal promotion is sealed by the SHA-specific closure for revision `a5ae9d4b`.
 
 ## RUST-REFINE-2 prerequisite
 
@@ -175,10 +173,21 @@ job, artifact, digest, ZIP SHA-256, and evidence SHA-256 record.
 
 The failures exposed two qualification-harness defects: stdlib-only gates
 eagerly imported optional differential dependencies, and the packaged oracle
-received a `TypedProgram` instead of lowered `IRModule`. Both corrections
-require a new commit and a new official run. No closure files exist. The only
-valid current state remains:
+received a `TypedProgram` instead of lowered `IRModule`. Both corrections were
+committed as `a5ae9d4b3a50843faf68bdeb4d8afc227b900bc9` and evaluated in the
+separate official run `33361044254`.
+
+That new run completed all 21 mandatory jobs successfully and published 21
+official artifacts. Every GitHub digest matched the freshly downloaded ZIP
+SHA-256. The official aggregate, its checker replay, and an independently
+rebuilt aggregate all returned the same zero-error decision. Exact job IDs,
+artifact IDs, digests, ZIP hashes, evidence hashes, matrix versions, and
+authority provenance are sealed in
+`RUST_REFINE_3_AUTHORITY_PROMOTION_CLOSURE_A5AE9D4B.md` and its machine-readable
+companion.
+
+The formally qualified state is:
 
 ```text
-RUST_REFINEMENT_AUTHORITY_PROMOTION_PENDING_CI
+RUST_REFINEMENT_AUTHORITY_PROMOTED
 ```
