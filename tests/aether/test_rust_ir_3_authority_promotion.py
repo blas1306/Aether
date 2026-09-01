@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import re
+from pathlib import Path
 
 import pytest
 
@@ -28,6 +30,20 @@ from aether.ir import (
 )
 from aether.pipeline import IRBackend, SSAPipeline, prepare_typed_program
 from aether.typechecker import TypeChecker
+
+
+_WORKFLOW = Path(".github/workflows/rust-ir-authority-promotion.yml")
+
+
+def _workflow_job(name: str) -> str:
+    workflow = _WORKFLOW.read_text(encoding="utf-8")
+    match = re.search(
+        rf"^  {re.escape(name)}:\n(?P<body>.*?)(?=^  [a-z0-9][a-z0-9-]*:\n|\Z)",
+        workflow,
+        flags=re.MULTILINE | re.DOTALL,
+    )
+    assert match is not None
+    return match.group("body")
 
 
 def _module(*, valid: bool = True) -> IRModule:
@@ -204,3 +220,19 @@ def test_rejection_stops_lifecycle_and_ssa_construction(
         SSAPipeline().run(_module(valid=False))
     assert lifecycle_calls == 0
     assert ssa_build_calls == 0
+
+
+def test_qualification_workflow_builds_every_campaign_prerequisite() -> None:
+    oracle_campaigns = (
+        "directed-false-negative-search",
+        "directed-rust-stricter-search",
+        "positive-regression",
+        "mutation-campaign",
+        "deep-stress",
+    )
+    for job in oracle_campaigns:
+        assert "pip install -r requirements.txt --group dev" in _workflow_job(job)
+
+    source_job = _workflow_job("source-development-install")
+    assert "--workspace --all-targets" in source_job
+    assert "--release --package aether-ir-verifier" in source_job
