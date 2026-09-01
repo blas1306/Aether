@@ -42,6 +42,7 @@ if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
 from aether.ir import IRModule, IRVerificationError, IRVerifier  # noqa: E402
+from aether.pipeline import IRBackend  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -306,12 +307,18 @@ def _materialize_modules(entries: Sequence[CorpusEntry]) -> list[tuple[CorpusEnt
     collector = _CorpusCollector(entries)
     tests = sorted({entry.test for entry in entries})
     original_verify: Callable[[IRVerifier], IRModule] = IRVerifier.verify
+    original_admit = IRBackend.admit_initial_ir
 
     def recording_verify(verifier: IRVerifier) -> IRModule:
         collector.record(verifier.module)
         return original_verify(verifier)
 
+    def recording_admit(backend: IRBackend, module: IRModule) -> IRModule:
+        collector.record(module)
+        return original_admit(backend, module)
+
     IRVerifier.verify = recording_verify
+    IRBackend.admit_initial_ir = recording_admit
     previous_directory = Path.cwd()
     try:
         os.chdir(REPOSITORY_ROOT)
@@ -322,6 +329,7 @@ def _materialize_modules(entries: Sequence[CorpusEntry]) -> list[tuple[CorpusEnt
     finally:
         os.chdir(previous_directory)
         IRVerifier.verify = original_verify
+        IRBackend.admit_initial_ir = original_admit
 
     if exit_code != pytest.ExitCode.OK:
         raise RuntimeError(f"Corpus materialization failed with pytest exit code {exit_code}")

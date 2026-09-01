@@ -1,9 +1,9 @@
-"""Initial IR dual-verifier execution and continuous comparison.
+"""Initial IR authority and explicit differential verification.
 
 The reusable authority pipeline retains the historical migration modes.  The
-product admission wrapper added by RUST-IR-1 uses it only as a double
-fail-closed gate: Python and Rust must both accept the same pre-lifecycle
-module before compilation may continue.
+RUST-IR-3 product admission wrapper is deliberately Rust-only.  Python remains
+available through the reusable dual-verifier pipeline for tests, qualification,
+and diagnostics, but it is not consulted by productive Initial IR admission.
 """
 
 from __future__ import annotations
@@ -402,6 +402,43 @@ class ShadowVerificationReport:
                 "reason": self.comparison.reason,
             },
             "metadata": self.metadata.semantic_snapshot(),
+        }
+
+
+@dataclass(frozen=True)
+class ProductInitialIRAuthorityProvenance:
+    """Execution-derived evidence for one productive pre-lifecycle decision."""
+
+    product_authority: str
+    python_ir_verifier_role: str
+    representation_phase: str
+    stage: str
+    rust_verify_module_executed: bool
+    rust_verify_module_accepted: bool
+    python_ir_verifier_consulted: bool
+    request_sha256: str | None
+    client_kind: str
+    protocol_version: int
+    ir_schema_version: int
+    failure_kind: str | None = None
+    total_duration_seconds: float | None = field(default=None, compare=False)
+
+    def semantic_snapshot(self) -> dict[str, object]:
+        """Return deterministic, machine-readable authority evidence."""
+
+        return {
+            "product_authority": self.product_authority,
+            "python_ir_verifier_role": self.python_ir_verifier_role,
+            "representation_phase": self.representation_phase,
+            "stage": self.stage,
+            "rust_verify_module_executed": self.rust_verify_module_executed,
+            "rust_verify_module_accepted": self.rust_verify_module_accepted,
+            "python_ir_verifier_consulted": self.python_ir_verifier_consulted,
+            "request_sha256": self.request_sha256,
+            "client_kind": self.client_kind,
+            "protocol_version": self.protocol_version,
+            "ir_schema_version": self.ir_schema_version,
+            "failure_kind": self.failure_kind,
         }
 
 
@@ -913,6 +950,86 @@ class DoubleFailClosedVerifierPipeline(VerifierAuthorityPipeline):
         )
 
 
+class RustInitialIRProductAuthorityPipeline:
+    """Resolve productive Initial IR admission exclusively with Rust.
+
+    This class intentionally has no Python verifier dependency in ``verify``.
+    The separate :class:`DoubleFailClosedVerifierPipeline` remains the explicit
+    differential/oracle path used by qualification.
+    """
+
+    def __init__(
+        self,
+        *,
+        client: RustVerifierClient,
+        client_kind: str | None = None,
+    ) -> None:
+        self._client = client
+        self._client_kind = _bounded_summary(
+            client_kind if client_kind is not None else type(client).__name__
+        )
+        self.last_provenance: ProductInitialIRAuthorityProvenance | None = None
+
+    def verify(
+        self,
+        module: IRModule,
+        *,
+        stage: ShadowVerificationStage = ShadowVerificationStage.INITIAL,
+    ) -> IRModule:
+        """Run Rust once and treat its decision as final, without rescue."""
+
+        if stage is not ShadowVerificationStage.INITIAL:
+            raise ValueError("product Rust Initial IR authority is pre-lifecycle only")
+        started_at = perf_counter()
+        request_hash: str | None = None
+        protocol_version = RUST_VERIFIER_PROTOCOL_VERSION
+        ir_schema_version = IR_SCHEMA_VERSION
+        rust_executed = False
+        invocation_client_kind = self._client_kind
+        failure_cause: RustVerifierIntegrationError | None = None
+        try:
+            request = build_canonical_rust_verifier_request(module)
+        except RustVerifierIntegrationError as error:
+            outcome: ShadowRustObservation = _integration_failure(error)
+            failure_cause = error
+        else:
+            request_hash = sha256(request.payload).hexdigest()
+            protocol_version = request.protocol_version
+            ir_schema_version = request.ir_schema_version
+            rust_executed = True
+            try:
+                invocation = self._client.verify(request)
+            except RustVerifierIntegrationError as error:
+                outcome = _integration_failure(error)
+                failure_cause = error
+            else:
+                outcome = _normalize_rust_invocation(invocation)
+                invocation_client_kind = invocation.metadata.client_kind.value
+
+        accepted = isinstance(outcome, ShadowRustAccepted)
+        failure_kind, _failure_summary = _failure_metadata(outcome)
+        self.last_provenance = ProductInitialIRAuthorityProvenance(
+            product_authority="rust",
+            python_ir_verifier_role="oracle_only",
+            representation_phase="pre_lifecycle",
+            stage=stage.value,
+            rust_verify_module_executed=rust_executed,
+            rust_verify_module_accepted=accepted,
+            python_ir_verifier_consulted=False,
+            request_sha256=request_hash,
+            client_kind=invocation_client_kind,
+            protocol_version=protocol_version,
+            ir_schema_version=ir_schema_version,
+            failure_kind=failure_kind,
+            total_duration_seconds=perf_counter() - started_at,
+        )
+        return _RustVerifierExecution(
+            module=module,
+            outcome=outcome,
+            failure_cause=failure_cause,
+        ).resolve()
+
+
 class ProductionInitialIRVerifierClient:
     """Lazily use the verifier installed by ``aether-compiler-core``.
 
@@ -980,12 +1097,16 @@ atexit.register(_PRODUCTION_INITIAL_IR_CLIENT.close)
 def production_initial_ir_admission_pipeline(
     *,
     sink: ShadowReportSink | None = None,
-) -> DoubleFailClosedVerifierPipeline:
-    """Build the product double gate over the process-wide native client."""
+) -> RustInitialIRProductAuthorityPipeline:
+    """Build the exclusive Rust product gate over the native client.
 
-    return DoubleFailClosedVerifierPipeline(
+    ``sink`` is retained as a source-compatible keyword for RUST-IR-1/2 debug
+    callers. Product authority provenance is exposed on ``last_provenance``.
+    """
+
+    del sink
+    return RustInitialIRProductAuthorityPipeline(
         client=_PRODUCTION_INITIAL_IR_CLIENT,
-        sink=sink,
         client_kind="aether_compiler_core_initial_ir_verifier",
     )
 
@@ -1148,6 +1269,7 @@ __all__ = [
     "PythonShadowAccepted",
     "PythonShadowOutcome",
     "PythonShadowRejected",
+    "ProductInitialIRAuthorityProvenance",
     "ProductionInitialIRVerifierClient",
     "RUST_INITIAL_IR_QUALIFICATION_EXECUTABLE_ENV",
     "ShadowClassification",
@@ -1166,6 +1288,7 @@ __all__ = [
     "ShadowVerificationReport",
     "ShadowVerificationStage",
     "ShadowVerifierCoordinator",
+    "RustInitialIRProductAuthorityPipeline",
     "VerifierAuthorityConfiguration",
     "VerifierAuthorityEnvironment",
     "VerifierAuthorityMode",

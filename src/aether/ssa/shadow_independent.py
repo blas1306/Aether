@@ -60,6 +60,9 @@ class ShadowIndependentQualificationTrace:
     rust_ssa_lowering_executed: bool
     rust_side_verification_succeeded: bool
     rust_refinement_verification_observed: bool
+    initial_ir_product_authority: str
+    python_ir_verifier_role: str
+    python_ir_verifier_executed: bool
     refinement_authority: str
     python_refinement_role: str
     python_refinement_verification_executed: bool
@@ -85,6 +88,9 @@ class ShadowIndependentQualificationTrace:
             "rust_refinement_verification_observed": (
                 self.rust_refinement_verification_observed
             ),
+            "initial_ir_product_authority": self.initial_ir_product_authority,
+            "python_ir_verifier_role": self.python_ir_verifier_role,
+            "python_ir_verifier_executed": self.python_ir_verifier_executed,
             "refinement_authority": self.refinement_authority,
             "python_refinement_role": self.python_refinement_role,
             "python_refinement_verification_executed": (
@@ -138,9 +144,11 @@ class _TraceRecorder:
         self,
         mode: str,
         *,
+        python_ir_verifier_role: Literal["not_executed", "oracle_only"],
         python_refinement_role: Literal["not_executed", "oracle_only"],
     ) -> None:
         self.mode = mode
+        self.python_ir_verifier_role = python_ir_verifier_role
         self.python_refinement_role = python_refinement_role
         self.completed: list[str] = []
         self.counts = {stage: 0 for stage in SHADOW_INDEPENDENT_STAGE_MANIFEST}
@@ -179,6 +187,11 @@ class _TraceRecorder:
             rust_side_verification_succeeded=self.rust_verified,
             rust_refinement_verification_observed=(
                 self.rust_refinement_observed
+            ),
+            initial_ir_product_authority="rust",
+            python_ir_verifier_role=self.python_ir_verifier_role,
+            python_ir_verifier_executed=(
+                self.python_ir_verifier_role == "oracle_only"
             ),
             refinement_authority="rust",
             python_refinement_role=self.python_refinement_role,
@@ -222,14 +235,25 @@ def _lower_shadow_independent_rust_ssa(
 
     recorder = _TraceRecorder(
         mode,
+        python_ir_verifier_role=(
+            "not_executed"
+            if mode == "rust_ssa_authority_refinement_verified"
+            else "oracle_only"
+        ),
         python_refinement_role=python_refinement_role,
     )
     hooks = _hooks or _QualificationHooks()
 
     try:
-        verified = recorder.run(
-            "initial_ir_verification", lambda: IRVerifier(module).verify()
-        )
+        if recorder.python_ir_verifier_role == "oracle_only":
+            verified = recorder.run(
+                "initial_ir_verification", lambda: IRVerifier(module).verify()
+            )
+        else:
+            # SSAPipeline product entry points have already crossed the Rust
+            # Initial IR authority gate. Preserve the exact accepted snapshot
+            # without introducing a second Python acceptance condition.
+            verified = recorder.run("initial_ir_verification", lambda: module)
     except Exception as exc:
         _raise_failure(
             recorder,

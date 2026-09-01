@@ -1,0 +1,574 @@
+name: rust-ir-3-authority-promotion
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CARGO_TERM_COLOR: always
+  AETHER_COMPILER_CORE_BUILD_IDENTITY: ${{ github.sha }}
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  prerequisite-rust-ir-2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - name: Replay every official RUST-IR-2 artifact
+        env: {GH_TOKEN: "${{ github.token }}"}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p qualification/rust-ir-3/r2/{zips,aggregate}
+          gh api 'repos/${{ github.repository }}/actions/runs/33465504645/artifacts?per_page=100' > qualification/rust-ir-3/r2/artifacts-api.json
+          gh api 'repos/${{ github.repository }}/actions/runs/33465504645/jobs?per_page=100' > qualification/rust-ir-3/r2/jobs-api.json
+          test "$(jq '.total_count' qualification/rust-ir-3/r2/artifacts-api.json)" = 21
+          jq -r '.artifacts[] | [.id,.name,.digest] | @tsv' qualification/rust-ir-3/r2/artifacts-api.json |
+          while IFS=$'\t' read -r id name digest; do
+            gh api "repos/${{ github.repository }}/actions/artifacts/${id}/zip" > "qualification/rust-ir-3/r2/zips/${name}.zip"
+            actual="sha256:$(sha256sum "qualification/rust-ir-3/r2/zips/${name}.zip" | cut -d' ' -f1)"
+            test "${actual}" = "${digest}"
+          done
+          unzip -q qualification/rust-ir-3/r2/zips/rust-ir-2-aggregate.zip -d qualification/rust-ir-3/r2/aggregate
+          python scripts/check_rust_ir_2_pre_lifecycle_shadow_qualification.py \
+            --manifest qualification/rust-ir-3/r2/aggregate/artifact-manifest.json \
+            --output qualification/rust-ir-3/r2/replay-decision.json
+          test "$(jq -r '.decision' qualification/rust-ir-3/r2/replay-decision.json)" = RUST_INITIAL_IR_PRE_LIFECYCLE_SHADOW_QUALIFIED
+      - run: >-
+          python scripts/qualify_rust_ir_3_authority_promotion.py --mode prerequisite
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --prerequisite-decision qualification/rust-ir-3/r2/replay-decision.json
+          --prerequisite-artifacts-api qualification/rust-ir-3/r2/artifacts-api.json
+          --prerequisite-jobs-api qualification/rust-ir-3/r2/jobs-api.json
+          --output qualification/rust-ir-3/prerequisite.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-prerequisite, path: qualification/rust-ir-3/prerequisite.json}
+
+  authority-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - run: >-
+          python scripts/qualify_rust_ir_3_authority_promotion.py --mode audit
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/contract.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-contract, path: qualification/rust-ir-3/contract.json}
+
+  directed-false-negative-search:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --package aether-ir-verifier
+      - run: >-
+          python scripts/qualify_rust_ir_3_authority_promotion.py --mode false-negative
+          --rust-verifier compiler-rs/target/debug/aether-ir-verifier
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/false-negative.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-false-negative, path: qualification/rust-ir-3/false-negative.json}
+
+  directed-rust-stricter-search:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --package aether-ir-verifier
+      - run: >-
+          python scripts/qualify_rust_ir_3_authority_promotion.py --mode rust-stricter
+          --rust-verifier compiler-rs/target/debug/aether-ir-verifier
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/rust-stricter.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-rust-stricter, path: qualification/rust-ir-3/rust-stricter.json}
+
+  positive-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --package aether-ir-verifier
+      - run: >-
+          python scripts/qualify_rust_ir_3_authority_promotion.py --mode positive
+          --rust-verifier compiler-rs/target/debug/aether-ir-verifier
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/positive.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-positive, path: qualification/rust-ir-3/positive.json}
+
+  mutation-campaign:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --package aether-ir-verifier
+      - run: >-
+          python scripts/qualify_rust_ir_3_authority_promotion.py --mode mutations
+          --rust-verifier compiler-rs/target/debug/aether-ir-verifier
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/mutations.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-mutations, path: qualification/rust-ir-3/mutations.json}
+
+  critical-irv041:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --package aether-ir-verifier
+      - run: >-
+          python scripts/qualify_rust_ir_3_authority_promotion.py --mode irv041
+          --rust-verifier compiler-rs/target/debug/aether-ir-verifier
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/irv041.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-irv041, path: qualification/rust-ir-3/irv041.json}
+
+  product-authority-provenance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt 'maturin>=1.9.4,<2'
+      - run: python -m pip install compiler-rs/distributions/aether-compiler-core
+      - run: python -m pip install -e . --no-deps
+      - run: >-
+          python scripts/rust_ir_3_product_probe.py --mode provenance
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/provenance.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-provenance, path: qualification/rust-ir-3/provenance.json}
+
+  no-python-rescue:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt 'maturin>=1.9.4,<2'
+      - run: python -m pip install compiler-rs/distributions/aether-compiler-core
+      - run: python -m pip install -e . --no-deps
+      - run: >-
+          python scripts/rust_ir_3_product_probe.py --mode no-rescue
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/no-rescue.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-no-rescue, path: qualification/rust-ir-3/no-rescue.json}
+
+  lifecycle-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt 'maturin>=1.9.4,<2'
+      - run: python -m pip install compiler-rs/distributions/aether-compiler-core
+      - run: python -m pip install -e . --no-deps
+      - run: >-
+          python scripts/rust_ir_3_product_probe.py --mode lifecycle
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/lifecycle.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-lifecycle, path: qualification/rust-ir-3/lifecycle.json}
+
+  packaged-clean-consumer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'build>=1.2,<2'
+      - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
+      - run: python -m build --wheel --outdir language-dist
+      - shell: bash
+        run: >-
+          python scripts/qualify_rust_ir_3_clean_consumer.py
+          --native-wheel native-dist/*.whl --language-wheel language-dist/*.whl
+          --kind packaged_clean_consumer --role dedicated --platform linux-x86_64
+          --python-minor 3.13 --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/packaged.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-packaged, path: qualification/rust-ir-3/packaged.json}
+
+  source-development-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt --group dev 'maturin>=1.9.4,<2'
+      - run: python -m pip install compiler-rs/distributions/aether-compiler-core
+      - run: python -m pip install -e . --no-deps
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --workspace
+      - run: python -m pytest -q tests
+      - run: >-
+          python scripts/rust_ir_3_product_probe.py --mode environment
+          --kind source_development_install --role source --platform linux-x86_64
+          --python-minor 3.13 --repository "${{ github.workspace }}"
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/source.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-source, path: qualification/rust-ir-3/source.json}
+
+  next-request-recovery:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt 'maturin>=1.9.4,<2'
+      - run: python -m pip install compiler-rs/distributions/aether-compiler-core
+      - run: python -m pip install -e . --no-deps
+      - run: >-
+          python scripts/rust_ir_3_product_probe.py --mode recovery
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/recovery.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-recovery, path: qualification/rust-ir-3/recovery.json}
+
+  transport-continuity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt 'maturin>=1.9.4,<2'
+      - run: python -m pip install compiler-rs/distributions/aether-compiler-core
+      - run: python -m pip install -e . --no-deps
+      - run: >-
+          python scripts/rust_ir_3_product_probe.py --mode transport
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/transport.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-transport, path: qualification/rust-ir-3/transport.json}
+
+  deep-stress:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --package aether-ir-verifier
+      - run: >-
+          python scripts/qualify_rust_ir_3_authority_promotion.py --mode deep
+          --rust-verifier compiler-rs/target/debug/aether-ir-verifier
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/deep.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-deep, path: qualification/rust-ir-3/deep.json}
+
+  performance-characterization:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install -r requirements.txt
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --package aether-ir-verifier
+      - run: >-
+          python scripts/qualify_rust_ir_3_authority_promotion.py --mode performance
+          --rust-verifier compiler-rs/target/debug/aether-ir-verifier --samples 9
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/performance.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-performance, path: qualification/rust-ir-3/performance.json}
+
+  platform-linux-x86_64:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'build>=1.2,<2'
+      - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
+      - run: python -m build --wheel --outdir language-dist
+      - shell: bash
+        run: >-
+          python scripts/qualify_rust_ir_3_clean_consumer.py
+          --native-wheel native-dist/*.whl --language-wheel language-dist/*.whl
+          --kind platform_qualification --role platform --platform linux-x86_64
+          --python-minor 3.13 --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/platform-linux-x86_64.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-platform-linux-x86_64, path: qualification/rust-ir-3/platform-linux-x86_64.json}
+
+  platform-windows-x86_64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'build>=1.2,<2'
+      - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
+      - run: python -m build --wheel --outdir language-dist
+      - shell: bash
+        run: >-
+          python scripts/qualify_rust_ir_3_clean_consumer.py
+          --native-wheel native-dist/*.whl --language-wheel language-dist/*.whl
+          --kind platform_qualification --role platform --platform windows-x86_64
+          --python-minor 3.13 --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/platform-windows-x86_64.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-platform-windows-x86_64, path: qualification/rust-ir-3/platform-windows-x86_64.json}
+
+  platform-macos-x86_64:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'build>=1.2,<2'
+      - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
+      - run: python -m build --wheel --outdir language-dist
+      - run: >-
+          python scripts/qualify_rust_ir_3_clean_consumer.py
+          --native-wheel native-dist/*.whl --language-wheel language-dist/*.whl
+          --kind platform_qualification --role platform --platform macos-x86_64
+          --python-minor 3.13 --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/platform-macos-x86_64.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-platform-macos-x86_64, path: qualification/rust-ir-3/platform-macos-x86_64.json}
+
+  platform-macos-arm64:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'build>=1.2,<2'
+      - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
+      - run: python -m build --wheel --outdir language-dist
+      - run: >-
+          python scripts/qualify_rust_ir_3_clean_consumer.py
+          --native-wheel native-dist/*.whl --language-wheel language-dist/*.whl
+          --kind platform_qualification --role platform --platform macos-arm64
+          --python-minor 3.13 --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/platform-macos-arm64.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-platform-macos-arm64, path: qualification/rust-ir-3/platform-macos-arm64.json}
+
+  python-3-11:
+    name: python-3.11
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.11"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'build>=1.2,<2'
+      - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
+      - run: python -m build --wheel --outdir language-dist
+      - shell: bash
+        run: >-
+          python scripts/qualify_rust_ir_3_clean_consumer.py --native-wheel native-dist/*.whl --language-wheel language-dist/*.whl
+          --kind python_compatibility --role python --platform linux-x86_64 --python-minor 3.11
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}" --output qualification/rust-ir-3/python-3.11.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-python-3.11, path: qualification/rust-ir-3/python-3.11.json}
+
+  python-3-12:
+    name: python-3.12
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'build>=1.2,<2'
+      - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
+      - run: python -m build --wheel --outdir language-dist
+      - shell: bash
+        run: >-
+          python scripts/qualify_rust_ir_3_clean_consumer.py --native-wheel native-dist/*.whl --language-wheel language-dist/*.whl
+          --kind python_compatibility --role python --platform linux-x86_64 --python-minor 3.12
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}" --output qualification/rust-ir-3/python-3.12.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-python-3.12, path: qualification/rust-ir-3/python-3.12.json}
+
+  python-3-13:
+    name: python-3.13
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'build>=1.2,<2'
+      - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
+      - run: python -m build --wheel --outdir language-dist
+      - shell: bash
+        run: >-
+          python scripts/qualify_rust_ir_3_clean_consumer.py --native-wheel native-dist/*.whl --language-wheel language-dist/*.whl
+          --kind python_compatibility --role python --platform linux-x86_64 --python-minor 3.13
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}" --output qualification/rust-ir-3/python-3.13.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-python-3.13, path: qualification/rust-ir-3/python-3.13.json}
+
+  python-3-14:
+    name: python-3.14
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.14"}
+      - uses: dtolnay/rust-toolchain@stable
+        with: {toolchain: "1.85"}
+      - run: python -m pip install 'maturin>=1.9.4,<2' 'build>=1.2,<2'
+      - run: python -m pip wheel --no-build-isolation --no-deps compiler-rs/distributions/aether-compiler-core --wheel-dir native-dist
+      - run: python -m build --wheel --outdir language-dist
+      - shell: bash
+        run: >-
+          python scripts/qualify_rust_ir_3_clean_consumer.py --native-wheel native-dist/*.whl --language-wheel language-dist/*.whl
+          --kind python_compatibility --role python --platform linux-x86_64 --python-minor 3.14
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}" --output qualification/rust-ir-3/python-3.14.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: rust-ir-3-python-3.14, path: qualification/rust-ir-3/python-3.14.json}
+
+  aggregate-fail-closed:
+    if: always()
+    needs:
+      - prerequisite-rust-ir-2
+      - authority-contract
+      - directed-false-negative-search
+      - directed-rust-stricter-search
+      - positive-regression
+      - mutation-campaign
+      - critical-irv041
+      - product-authority-provenance
+      - no-python-rescue
+      - lifecycle-boundary
+      - packaged-clean-consumer
+      - source-development-install
+      - next-request-recovery
+      - transport-continuity
+      - deep-stress
+      - performance-characterization
+      - platform-linux-x86_64
+      - platform-windows-x86_64
+      - platform-macos-x86_64
+      - platform-macos-arm64
+      - python-3-11
+      - python-3-12
+      - python-3-13
+      - python-3-14
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.13"}
+      - uses: actions/download-artifact@v4
+        with:
+          path: qualification/rust-ir-3/downloads
+      - name: Record official APIs and ZIP digests
+        env: {GH_TOKEN: "${{ github.token }}"}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p qualification/rust-ir-3/{zips,aggregate}
+          gh api 'repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?per_page=100' > qualification/rust-ir-3/artifacts-api.json
+          gh api 'repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs?per_page=100' > qualification/rust-ir-3/jobs-api.json
+          test "$(jq '.total_count' qualification/rust-ir-3/artifacts-api.json)" = 24
+          jq -r '.artifacts[] | [.id,.name] | @tsv' qualification/rust-ir-3/artifacts-api.json |
+          while IFS=$'\t' read -r id name; do
+            gh api "repos/${{ github.repository }}/actions/artifacts/${id}/zip" > "qualification/rust-ir-3/zips/${name}.zip"
+          done
+      - run: >-
+          python scripts/build_rust_ir_3_artifact_manifest.py
+          --artifact-root qualification/rust-ir-3/downloads
+          --zip-root qualification/rust-ir-3/zips
+          --artifacts-api qualification/rust-ir-3/artifacts-api.json
+          --jobs-api qualification/rust-ir-3/jobs-api.json
+          --revision "${{ github.sha }}" --run-id "${{ github.run_id }}"
+          --output qualification/rust-ir-3/aggregate/artifact-manifest.json
+      - run: >-
+          python scripts/check_rust_ir_3_authority_promotion.py
+          --manifest qualification/rust-ir-3/aggregate/artifact-manifest.json
+          --output qualification/rust-ir-3/aggregate/decision.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rust-ir-3-aggregate
+          path: qualification/rust-ir-3

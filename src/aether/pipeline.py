@@ -95,6 +95,7 @@ class IRBackend:
         self.output_writer = output_writer
         self.program_arguments = tuple(program_arguments)
         self.verification_pipeline = shadow_verifier
+        self.last_initial_ir_authority_provenance: object | None = None
         # Compatibility attribute for the existing explicit shadow harness.
         self.shadow_verifier = shadow_verifier
         self.output = ""
@@ -139,10 +140,14 @@ class IRBackend:
         if self.verification_pipeline is not None:
             return self.verify(module)
 
-        # RUST-IR-1 product admission: the module is exactly the object emitted
-        # by IRLowerer.  The coordinator runs the mandatory Python verifier and
-        # Rust verify_module over its schema-v1 snapshot before any lifecycle
-        # expansion or optimization can occur.
+        return self.admit_initial_ir(module)
+
+    def admit_initial_ir(self, module: IRModule) -> IRModule:
+        """Apply the exclusive Rust product authority to pre-lifecycle IR."""
+
+        # RUST-IR-3 product admission: the module is exactly the object emitted
+        # by IRLowerer (or supplied to the internal compiler boundary). Rust
+        # verify_module alone decides before lifecycle expansion or SSA.
         from .ir.shadow_verifier import (
             AuthoritativeVerificationError,
             ShadowVerificationStage,
@@ -150,12 +155,20 @@ class IRBackend:
         )
         from .ir.verifier import IRVerificationError
 
+        pipeline = production_initial_ir_admission_pipeline()
         try:
-            return production_initial_ir_admission_pipeline().verify(
+            verified = pipeline.verify(
                 module,
                 stage=ShadowVerificationStage.INITIAL,
             )
+            self.last_initial_ir_authority_provenance = getattr(
+                pipeline, "last_provenance", None
+            )
+            return verified
         except (IRVerificationError, AuthoritativeVerificationError) as exc:
+            self.last_initial_ir_authority_provenance = getattr(
+                pipeline, "last_provenance", None
+            )
             location = getattr(exc, "source_location", None)
             raise AetherRuntimeError(
                 f"IR verifier rejected module: {exc}",
@@ -177,19 +190,17 @@ class IRBackend:
             if optimizer is not None
             else OptimizerPipeline(iterative=True)
         )
-        # Lifecycle has already been verified at this boundary.  Optimizing
-        # the current all-trivial representation after structural expansion
-        # recovers the historical scalar opportunities without teaching the
-        # optimizer to rewrite ownership actions.
+        # LifecycleExpander remains the productive lifecycle authority. The
+        # resulting post-lifecycle representation is outside Rust Initial IR's
+        # contract and Python IRVerifier is no longer a productive gate.
         optimized = pipeline.run(expand_lifecycle(module))
+        if self.verification_pipeline is None:
+            return optimized
         from .ir.shadow_verifier import ShadowVerificationStage
 
-        # The expanded/optimized representation is outside verify_module's
-        # contract domain.  Python remains the only verifier at this boundary.
-        return self.verify(
-            optimized,
-            stage=ShadowVerificationStage.POST_OPTIMIZATION,
-        )
+        # Explicit custom/debug coordinators preserve their post-optimization
+        # oracle behavior without affecting the default product path.
+        return self.verify(optimized, stage=ShadowVerificationStage.POST_OPTIMIZATION)
 
     def run(self, typed_program: TypedProgram) -> Environment:
         from .ir.interpreter import IRExecutionError, IRInterpreter
@@ -312,7 +323,7 @@ class SSAPipeline:
         if isinstance(program, TypedProgram):
             ir_module = self.lower_ir(program)
         else:
-            ir_module = IRBackend().verify(program)
+            ir_module = IRBackend().admit_initial_ir(program)
 
         ssa_module = self.verify(self.build(ir_module))
         return SSACompileResult(ir_module, ssa_module)
