@@ -1,9 +1,9 @@
-"""Initial IR authority execution with continuous cross-verifier comparison.
+"""Initial IR dual-verifier execution and continuous comparison.
 
-Rust is the production authority and Python remains the required RP3 shadow.
-The pipeline always runs both verifier engines, compares their semantic
-outcomes, emits one bounded report, and only then resolves the selected
-authority.
+The reusable authority pipeline retains the historical migration modes.  The
+product admission wrapper added by RUST-IR-1 uses it only as a double
+fail-closed gate: Python and Rust must both accept the same pre-lifecycle
+module before compilation may continue.
 """
 
 from __future__ import annotations
@@ -11,7 +11,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum, unique
 from hashlib import sha256
+import atexit
+import os
+from pathlib import Path
 import re
+import threading
 from time import perf_counter
 from types import TracebackType
 from typing import Protocol, TypeAlias, runtime_checkable
@@ -35,6 +39,9 @@ from .verifier import IRVerificationError, IRVerifier
 
 _SUMMARY_LIMIT = 240
 _WHITESPACE = re.compile(r"\s+")
+RUST_INITIAL_IR_QUALIFICATION_EXECUTABLE_ENV = (
+    "AETHER_INTERNAL_RUST_INITIAL_IR_QUALIFICATION_EXECUTABLE"
+)
 
 
 @unique
@@ -73,10 +80,11 @@ class VerifierImplementation(str, Enum):
 
 @unique
 class VerifierAuthorityMode(str, Enum):
-    """Closed authority/shadow pairings; no partial mode is representable."""
+    """Closed verifier admission policies; no partial mode is representable."""
 
     PYTHON_AUTHORITY_RUST_SHADOW = "python_authority_rust_shadow"
     RUST_AUTHORITY_PYTHON_SHADOW = "rust_authority_python_shadow"
+    DOUBLE_FAIL_CLOSED = "double_fail_closed"
 
 
 @unique
@@ -104,15 +112,25 @@ class VerifierAuthorityConfiguration:
 
     @property
     def authority(self) -> VerifierImplementation:
-        if self.mode is VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW:
+        if self.mode in {
+            VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW,
+            VerifierAuthorityMode.DOUBLE_FAIL_CLOSED,
+        }:
             return VerifierImplementation.PYTHON
         return VerifierImplementation.RUST
 
     @property
     def shadow(self) -> VerifierImplementation:
-        if self.mode is VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW:
+        if self.mode in {
+            VerifierAuthorityMode.PYTHON_AUTHORITY_RUST_SHADOW,
+            VerifierAuthorityMode.DOUBLE_FAIL_CLOSED,
+        }:
             return VerifierImplementation.RUST
         return VerifierImplementation.PYTHON
+
+    @property
+    def is_double_fail_closed(self) -> bool:
+        return self.mode is VerifierAuthorityMode.DOUBLE_FAIL_CLOSED
 
     @property
     def is_canary(self) -> bool:
@@ -560,9 +578,19 @@ class AuthoritativeVerifierRejected(AuthoritativeVerificationError):
         self,
         implementation: VerifierImplementation,
         diagnostic: ShadowDiagnosticKey,
+        *,
+        source_location: object | None = None,
     ) -> None:
         self.implementation = implementation
         self.diagnostic = diagnostic
+        self.category = (
+            diagnostic.category.value if diagnostic.category is not None else None
+        )
+        self.phase = diagnostic.phase.value if diagnostic.phase is not None else None
+        self.code = diagnostic.invariant_id
+        self.function = diagnostic.function_name
+        self.block = diagnostic.block_name
+        self.source_location = source_location
         super().__init__(
             f"{implementation.value} verifier rejected module "
             f"({diagnostic.invariant_id})"
@@ -582,6 +610,12 @@ class AuthoritativeVerifierUnavailable(AuthoritativeVerificationError):
         self.implementation = implementation
         self.kind = kind
         self.summary = summary
+        self.category = "infrastructure"
+        self.phase = "initial_ir_admission"
+        self.code = kind
+        self.function = None
+        self.block = None
+        self.source_location = None
         super().__init__(
             f"{implementation.value} authoritative verifier failed: {kind}"
         )
@@ -624,6 +658,10 @@ class _RustVerifierExecution:
             raise AuthoritativeVerifierRejected(
                 VerifierImplementation.RUST,
                 self.outcome.diagnostic,
+                source_location=_rust_rejection_source_location(
+                    self.module,
+                    self.outcome.diagnostic,
+                ),
             )
         if isinstance(
             self.outcome,
@@ -791,6 +829,17 @@ class VerifierAuthorityPipeline:
             if self._strict_sink_errors:
                 sink_error = error
 
+        if self._configuration.is_double_fail_closed:
+            # Both executions have already completed and the report retains
+            # both outcomes.  Resolve Python first so its historical verifier
+            # remains a mandatory gate, then resolve Rust.  No acceptance from
+            # either side can rescue a rejection from the other.
+            python_execution.resolve()
+            verified_module = rust_execution.resolve()
+            if sink_error is not None:
+                raise sink_error
+            return verified_module
+
         if (
             authority_implementation is VerifierImplementation.RUST
             and comparison.classification
@@ -810,6 +859,135 @@ class VerifierAuthorityPipeline:
 
 class ShadowVerifierCoordinator(VerifierAuthorityPipeline):
     """Compatibility name for the default dual-verifier authority pipeline."""
+
+
+def _rust_rejection_source_location(
+    module: IRModule,
+    diagnostic: ShadowDiagnosticKey,
+) -> object | None:
+    """Recover source context from the unchanged Python snapshot when present."""
+
+    if diagnostic.function_index is None or diagnostic.block_index is None:
+        return None
+    try:
+        block = module.functions[diagnostic.function_index].blocks[
+            diagnostic.block_index
+        ]
+    except IndexError:
+        return None
+    if diagnostic.instruction_index is None:
+        return None
+    try:
+        instruction = block.instructions[diagnostic.instruction_index]
+    except IndexError:
+        return None
+    return getattr(instruction, "source_location", None)
+
+
+class DoubleFailClosedVerifierPipeline(VerifierAuthorityPipeline):
+    """Require both Python and Rust to accept one pre-lifecycle module.
+
+    Python remains the current authority and Rust is the mandatory shadow,
+    while either rejection or infrastructure failure blocks admission.  No
+    acceptance from either verifier can override or rescue the other.
+    """
+
+    def __init__(
+        self,
+        *,
+        client: RustVerifierClient,
+        sink: ShadowReportSink | None = None,
+        registry: ShadowDivergenceRegistry | None = None,
+        strict_sink_errors: bool = False,
+        client_kind: str | None = None,
+    ) -> None:
+        super().__init__(
+            client=client,
+            sink=sink,
+            registry=registry,
+            strict_sink_errors=strict_sink_errors,
+            client_kind=client_kind,
+            configuration=VerifierAuthorityConfiguration(
+                VerifierAuthorityMode.DOUBLE_FAIL_CLOSED
+            ),
+        )
+
+
+class ProductionInitialIRVerifierClient:
+    """Lazily use the verifier installed by ``aether-compiler-core``.
+
+    Initial IR admission is deliberately independent of the later SSA
+    ``in_process``/``companion`` selection.  Both SSA transports therefore
+    cross this one pre-lifecycle gate before lifecycle expansion.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._client: RustVerifierClient | None = None
+
+    def verify(self, request: object) -> RustVerifierInvocation:
+        from .rust_verifier_client import CanonicalRustVerifierRequest
+
+        if not isinstance(request, CanonicalRustVerifierRequest):
+            raise TypeError("request must be a CanonicalRustVerifierRequest")
+        with self._lock:
+            if self._client is None:
+                self._client = self._create_client()
+            client = self._client
+        return client.verify(request)
+
+    def _create_client(self) -> RustVerifierClient:
+        qualification_executable = os.environ.get(
+            RUST_INITIAL_IR_QUALIFICATION_EXECUTABLE_ENV
+        )
+        if qualification_executable is not None:
+            executable = Path(qualification_executable)
+            if not executable.is_absolute():
+                from .rust_verifier_client import RustVerifierAdapterError
+
+                raise RustVerifierAdapterError(
+                    "Rust Initial IR qualification executable must be an absolute path"
+                )
+            from .rust_verifier import PersistentSubprocessRustVerifierClient
+
+            return PersistentSubprocessRustVerifierClient(executable=executable)
+        try:
+            from aether_compiler_core import initial_ir_verifier_path
+
+            executable = initial_ir_verifier_path()
+        except (ImportError, RuntimeError) as error:
+            from .rust_verifier_client import RustVerifierAdapterError
+
+            raise RustVerifierAdapterError(
+                "compatible aether-compiler-core Initial IR verifier is required"
+            ) from error
+        from .rust_verifier import PersistentSubprocessRustVerifierClient
+
+        return PersistentSubprocessRustVerifierClient(executable=executable)
+
+    def close(self) -> None:
+        with self._lock:
+            client, self._client = self._client, None
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
+
+
+_PRODUCTION_INITIAL_IR_CLIENT = ProductionInitialIRVerifierClient()
+atexit.register(_PRODUCTION_INITIAL_IR_CLIENT.close)
+
+
+def production_initial_ir_admission_pipeline(
+    *,
+    sink: ShadowReportSink | None = None,
+) -> DoubleFailClosedVerifierPipeline:
+    """Build the product double gate over the process-wide native client."""
+
+    return DoubleFailClosedVerifierPipeline(
+        client=_PRODUCTION_INITIAL_IR_CLIENT,
+        sink=sink,
+        client_kind="aether_compiler_core_initial_ir_verifier",
+    )
 
 
 def _normalize_rust_invocation(
@@ -965,10 +1143,13 @@ __all__ = [
     "AuthoritativeVerifierUnavailable",
     "CollectingShadowReportSink",
     "ComparisonResult",
+    "DoubleFailClosedVerifierPipeline",
     "NullShadowReportSink",
     "PythonShadowAccepted",
     "PythonShadowOutcome",
     "PythonShadowRejected",
+    "ProductionInitialIRVerifierClient",
+    "RUST_INITIAL_IR_QUALIFICATION_EXECUTABLE_ENV",
     "ShadowClassification",
     "ShadowComparison",
     "ShadowDiagnosticKey",
@@ -994,6 +1175,7 @@ __all__ = [
     "VerifierObservation",
     "compare_shadow_outcomes",
     "normalize_python_rejection",
+    "production_initial_ir_admission_pipeline",
     "python_shadow_outcome_key",
     "rust_shadow_outcome_key",
 ]

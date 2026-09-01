@@ -110,25 +110,59 @@ class IRBackend:
         *,
         stage: ShadowVerificationStage | None = None,
     ) -> IRModule:
-        from .ir.shadow_verifier import AuthoritativeVerificationError
+        from .ir.shadow_verifier import (
+            AuthoritativeVerificationError,
+            ShadowVerificationStage,
+        )
         from .ir.verifier import IRVerificationError, IRVerifier
 
         try:
-            if self.verification_pipeline is None:
+            if (
+                self.verification_pipeline is None
+                or stage is ShadowVerificationStage.POST_OPTIMIZATION
+            ):
                 return IRVerifier(module).verify()
             if stage is None:
-                from .ir.shadow_verifier import ShadowVerificationStage
-
                 stage = ShadowVerificationStage.INITIAL
             return self.verification_pipeline.verify(module, stage=stage)
         except (IRVerificationError, AuthoritativeVerificationError) as exc:
+            location = getattr(exc, "source_location", None)
             raise AetherRuntimeError(
                 f"IR verifier rejected module: {exc}",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
                 kind="ir",
             ) from exc
 
     def lower_verified(self, typed_program: TypedProgram) -> IRModule:
-        return self.verify(self.lower(typed_program))
+        module = self.lower(typed_program)
+        if self.verification_pipeline is not None:
+            return self.verify(module)
+
+        # RUST-IR-1 product admission: the module is exactly the object emitted
+        # by IRLowerer.  The coordinator runs the mandatory Python verifier and
+        # Rust verify_module over its schema-v1 snapshot before any lifecycle
+        # expansion or optimization can occur.
+        from .ir.shadow_verifier import (
+            AuthoritativeVerificationError,
+            ShadowVerificationStage,
+            production_initial_ir_admission_pipeline,
+        )
+        from .ir.verifier import IRVerificationError
+
+        try:
+            return production_initial_ir_admission_pipeline().verify(
+                module,
+                stage=ShadowVerificationStage.INITIAL,
+            )
+        except (IRVerificationError, AuthoritativeVerificationError) as exc:
+            location = getattr(exc, "source_location", None)
+            raise AetherRuntimeError(
+                f"IR verifier rejected module: {exc}",
+                line=getattr(location, "line", None),
+                column=getattr(location, "column", None),
+                kind="ir",
+            ) from exc
 
     def optimize_verified(
         self,
@@ -148,10 +182,10 @@ class IRBackend:
         # recovers the historical scalar opportunities without teaching the
         # optimizer to rewrite ownership actions.
         optimized = pipeline.run(expand_lifecycle(module))
-        if self.verification_pipeline is None:
-            return self.verify(optimized)
         from .ir.shadow_verifier import ShadowVerificationStage
 
+        # The expanded/optimized representation is outside verify_module's
+        # contract domain.  Python remains the only verifier at this boundary.
         return self.verify(
             optimized,
             stage=ShadowVerificationStage.POST_OPTIMIZATION,

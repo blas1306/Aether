@@ -20,6 +20,9 @@ from rust_authority_canary_harness import (
     RustAuthorityCanaryHarness,
 )
 from aether.pipeline import SSAPipeline
+from aether.ir.shadow_verifier import (
+    RUST_INITIAL_IR_QUALIFICATION_EXECUTABLE_ENV,
+)
 from aether.ssa.shadow import (
     PersistentRustSSALoweringClient,
     RUST_SSA_QUALIFICATION_EXECUTABLE_ENV,
@@ -92,6 +95,25 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    if RUST_INITIAL_IR_QUALIFICATION_EXECUTABLE_ENV not in os.environ:
+        executable_name = (
+            "aether-ir-verifier.exe"
+            if sys.platform == "win32"
+            else "aether-ir-verifier"
+        )
+        for profile in ("release", "debug"):
+            candidate = (
+                ROOT_DIR
+                / "compiler-rs"
+                / "target"
+                / profile
+                / executable_name
+            )
+            if candidate.is_file():
+                os.environ[RUST_INITIAL_IR_QUALIFICATION_EXECUTABLE_ENV] = str(
+                    candidate.resolve()
+                )
+                break
     executable = config.getoption("--shadow-validation-executable")
     canary_values = {
         "configuration": config.getoption("--rust-authority-canary-config"),

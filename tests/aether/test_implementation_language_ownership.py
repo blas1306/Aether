@@ -45,13 +45,25 @@ def test_ownership_registry_has_one_legal_authority_per_responsibility() -> None
         entry for entry in components
         if entry["component"] == "initial_ir_verification"
     )
-    assert initial_verifier["current_authority"] == "rust"
-    assert initial_verifier["migration_phase"] == "RP3"
-    assert initial_verifier["allowed_shadows"] == ["python"]
-    assert initial_verifier["next_promotion"] == "RP4_AFTER_SOAK"
-    assert initial_verifier["semantic_parity_status"] == "complete_rust_1_1"
-    assert initial_verifier["operational_readiness_status"] == "promoted_rust_2"
-    assert initial_verifier["companion_packaging_model"] == "B1_platform_native_binary_artifact"
+    assert initial_verifier["current_authority"] == "python"
+    assert initial_verifier["migration_phase"] == "RP2"
+    assert initial_verifier["allowed_shadows"] == ["rust"]
+    assert (
+        initial_verifier["next_promotion"]
+        == "RUST_IR_2_PRE_LIFECYCLE_SHADOW_QUALIFICATION"
+    )
+    assert (
+        initial_verifier["semantic_parity_status"]
+        == "pre_lifecycle_acceptance_parity"
+    )
+    assert (
+        initial_verifier["operational_readiness_status"]
+        == "double_fail_closed_shadow_integrated"
+    )
+    assert (
+        initial_verifier["companion_packaging_model"]
+        == "native_compiler_core_wheel"
+    )
 
     for component in ("ssa_construction", "ssa_verification"):
         ssa = next(entry for entry in components if entry["component"] == component)

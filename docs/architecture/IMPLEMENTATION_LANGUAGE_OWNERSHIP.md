@@ -301,7 +301,7 @@ translation and error payload ownership is explicit.
 | Lexer, parser, AST | Python | Rust golden/differential port | Rust Stage0; optional Aether parser | Tokens/versioned syntax schema; parser needs differential migration. |
 | Resolver, typechecker, lowering | Python | Rust | Rust | Golden corpus plus differential for semantic phases; typed core API. |
 | Initial IR model | Python, Rust owned shadow model | Versioned schema parity | Rust | Schema/wire protocol. |
-| Initial IR verifier | Rust authority, Python shadow | RP3→RP4→RP5 | Rust | `DIFFERENTIAL_MIGRATION`, protocol v1+. |
+| Initial IR verifier | Python and Rust double fail-closed on pre-lifecycle IR | RUST-IR-2 qualification, then a separate authority decision | Rust | `DIFFERENTIAL_MIGRATION`, protocol v1 over the pre-lifecycle schema-v1 snapshot. |
 | SSA construction | Python | Rust port | Rust | Golden normalized SSA corpus. |
 | SSA verifier | Python authority, Rust implementation off production path | Rust differential qualification | Rust | SSA wire/owned API. |
 | Analyses, optimizer | Python | Pass-by-pass Rust ports | Rust | Golden/differential according to semantic risk; owned IR. |
@@ -336,9 +336,11 @@ parser where diagnostics/acceptance matter), `DIRECT_PORT_WITH_GOLDEN_CORPUS`
 for deterministic utilities and isolated transforms, and `NO_PORT_NEEDED` for
 permanent Python tooling or responsibilities intentionally owned by Aether.
 
-RUST-2 enacted the separately qualified authority switch. RP3 retains Python
-as a required shadow for soak evidence and explicit rollback; a later,
-separately approved milestone may enact RP4 or RP5.
+RUST-IR-1 corrected the previously declared but unimplemented authority state.
+Python `IRVerifier` and Rust `verify_module` are both mandatory on the original
+pre-lifecycle module. This is shadow/double-admission integration, not exclusive
+Rust authority and not lifecycle promotion. A later, separately approved
+milestone may qualify or promote authority.
 
 That verifier is also the first Python production authority to retire. Switch
 only after the audit: RP3 keeps Python shadow for a release-window defined by
@@ -350,7 +352,7 @@ archived. No Python code is deleted by ARCH-1.
 Recommended sequence:
 
 1. Accept ARCH-1 and enforce the registry (this milestone).
-2. Complete Initial IR verifier authority-readiness and promote to RP3 (done).
+2. Qualify the integrated pre-lifecycle Initial IR shadow before any authority promotion.
 3. Audit and design the canonical runtime ABI schema (String/Array first).
 4. Qualify one further coherent Rust core boundary—owned Initial IR through
    verification—without requiring a wholesale compiler rewrite.
@@ -372,7 +374,11 @@ expand a retiring Python authority without a migration plan.
 
 ## Immediate milestone decisions
 
-The Initial IR verifier is at RP3 (Rust authority, Python shadow).
+The Initial IR verifier is at an RP2-style double fail-closed boundary: Python
+remains mandatory and Rust verifies the same pre-lifecycle snapshot. The
+historical RP3 promotion artifacts described readiness and policy but did not
+wire the Rust verifier into ordinary product compilation; RUST-IR-1 corrects
+that architectural record rather than claiming exclusive Rust authority.
 The RUST-1 qualification result is `KEEP_RUST_SHADOW`; see
 [`RUST_INITIAL_IR_VERIFIER_AUTHORITY_READINESS.md`](../compiler/RUST_INITIAL_IR_VERIFIER_AUTHORITY_READINESS.md)
 and its deterministic JSON artifact. This readiness reference does not change

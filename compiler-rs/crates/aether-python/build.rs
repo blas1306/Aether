@@ -1,4 +1,4 @@
-//! Build and stage the platform companion beside the productive PyO3 wheel.
+//! Build and stage the native executables beside the productive `PyO3` wheel.
 
 use std::env;
 use std::fs;
@@ -9,9 +9,17 @@ const DISTRIBUTION: &str = "aether-compiler-core";
 const PACKAGE_VERSION: &str = "1.0.0rc4";
 const NATIVE_PRODUCT_VERSION: &str = "0.1.0";
 
+struct NativeBinary<'a> {
+    package: &'a str,
+    binary: &'a str,
+    file_name: &'a str,
+}
+
+#[allow(clippy::too_many_lines)]
 fn main() {
     println!("cargo:rerun-if-env-changed=AETHER_COMPILER_CORE_BUILD_IDENTITY");
     println!("cargo:rerun-if-env-changed=AETHER_COMPILER_CORE_COMPANION");
+    println!("cargo:rerun-if-env-changed=AETHER_COMPILER_CORE_INITIAL_IR_VERIFIER");
     if env::var_os("CARGO_FEATURE_PRODUCTIVE_DISTRIBUTION").is_none() {
         return;
     }
@@ -38,44 +46,66 @@ fn main() {
     println!("cargo:rerun-if-changed=../aether-verifier/src");
     println!("cargo:rerun-if-changed=../aether-ir/src");
 
-    let binary_name = if target_os == "windows" {
+    let companion_binary_name = if target_os == "windows" {
         "aether-ssa-shadow.exe"
     } else {
         "aether-ssa-shadow"
     };
-    let source = match env::var_os("AETHER_COMPILER_CORE_COMPANION") {
+    let companion_source = match env::var_os("AETHER_COMPILER_CORE_COMPANION") {
         Some(path) => PathBuf::from(path),
-        None => build_companion(
+        None => build_native_binary(
             workspace,
             &out_dir,
             &target,
             &profile,
             &build_identity,
-            binary_name,
+            &NativeBinary {
+                package: "aether-verifier",
+                binary: "aether-ssa-shadow",
+                file_name: companion_binary_name,
+            },
         ),
     };
-    if !source.is_file() {
-        panic!(
-            "native compiler-core companion was not produced at {}",
-            source.display()
-        );
-    }
-    let destination = out_dir.join(binary_name);
-    fs::copy(&source, &destination).unwrap_or_else(|error| {
-        panic!(
-            "failed to stage native compiler-core companion {}: {error}",
-            source.display()
-        )
-    });
-    preserve_executable_mode(&source, &destination);
+    stage_executable(
+        &companion_source,
+        &out_dir.join(companion_binary_name),
+        "native compiler-core companion",
+    );
+
+    let verifier_binary_name = if target_os == "windows" {
+        "aether-ir-verifier.exe"
+    } else {
+        "aether-ir-verifier"
+    };
+    let verifier_source = match env::var_os("AETHER_COMPILER_CORE_INITIAL_IR_VERIFIER") {
+        Some(path) => PathBuf::from(path),
+        None => build_native_binary(
+            workspace,
+            &out_dir,
+            &target,
+            &profile,
+            &build_identity,
+            &NativeBinary {
+                package: "aether-ir-verifier",
+                binary: "aether-ir-verifier",
+                file_name: verifier_binary_name,
+            },
+        ),
+    };
+    stage_executable(
+        &verifier_source,
+        &out_dir.join(verifier_binary_name),
+        "native Initial IR verifier",
+    );
 
     let manifest = format!(
         concat!(
             "{{\n",
-            "  \"binary\": \"{binary_name}\",\n",
+            "  \"binary\": \"{companion_binary_name}\",\n",
             "  \"build_identity\": \"{build_identity}\",\n",
             "  \"compiler_core_api_version\": 1,\n",
             "  \"distribution\": \"{distribution}\",\n",
+            "  \"initial_ir_verifier_binary\": \"{verifier_binary_name}\",\n",
             "  \"input_schema_versions\": [1],\n",
             "  \"language_package_version\": \"{package_version}\",\n",
             "  \"manifest_schema_version\": 1,\n",
@@ -88,7 +118,8 @@ fn main() {
             "  \"wheel_record_integrity_required\": true\n",
             "}}\n"
         ),
-        binary_name = json_escape(binary_name),
+        companion_binary_name = json_escape(companion_binary_name),
+        verifier_binary_name = json_escape(verifier_binary_name),
         build_identity = json_escape(&build_identity),
         distribution = DISTRIBUTION,
         native_product_version = NATIVE_PRODUCT_VERSION,
@@ -99,13 +130,28 @@ fn main() {
         .expect("failed to write native compiler-core manifest");
 }
 
-fn build_companion(
+fn stage_executable(source: &Path, destination: &Path, description: &str) {
+    assert!(
+        source.is_file(),
+        "{description} was not produced at {}",
+        source.display()
+    );
+    fs::copy(source, destination).unwrap_or_else(|error| {
+        panic!(
+            "failed to stage {description} {}: {error}",
+            source.display()
+        )
+    });
+    preserve_executable_mode(source, destination);
+}
+
+fn build_native_binary(
     workspace: &Path,
     out_dir: &Path,
     target: &str,
     profile: &str,
     build_identity: &str,
-    binary_name: &str,
+    executable: &NativeBinary<'_>,
 ) -> PathBuf {
     // A nested Cargo process cannot use a target directory below the outer
     // Cargo target: the parent build holds that directory lock. Use the OS
@@ -127,9 +173,9 @@ fn build_companion(
         .arg(workspace.join("Cargo.toml"))
         .arg("--locked")
         .arg("--package")
-        .arg("aether-verifier")
+        .arg(executable.package)
         .arg("--bin")
-        .arg("aether-ssa-shadow")
+        .arg(executable.binary)
         .arg("--target")
         .arg(target)
         .arg("--target-dir")
@@ -140,11 +186,15 @@ fn build_companion(
     }
     let status = command
         .status()
-        .expect("failed to launch Cargo for the native compiler-core companion");
-    if !status.success() {
-        panic!("Cargo failed while building the native compiler-core companion");
-    }
-    nested_target.join(target).join(profile).join(binary_name)
+        .expect("failed to launch Cargo for a native compiler-core executable");
+    assert!(
+        status.success(),
+        "Cargo failed while building a native compiler-core executable"
+    );
+    nested_target
+        .join(target)
+        .join(profile)
+        .join(executable.file_name)
 }
 
 fn repository_identity(repository: &Path) -> String {

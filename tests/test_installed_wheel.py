@@ -89,6 +89,10 @@ def test_clean_wheel_install_has_rust_verifier_metadata(
 
     clean_environment = os.environ.copy()
     clean_environment.pop("PYTHONPATH", None)
+    clean_environment.pop(
+        "AETHER_INTERNAL_RUST_INITIAL_IR_QUALIFICATION_EXECUTABLE",
+        None,
+    )
     completed = subprocess.run(
         [str(scripts / ("aether.exe" if os.name == "nt" else "aether")), "--version"],
         cwd=tmp_path,

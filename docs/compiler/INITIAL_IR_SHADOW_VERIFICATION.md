@@ -1,170 +1,93 @@
-# Initial IR Shadow Verification
+# Initial IR pre-lifecycle shadow verification
 
-Phase 4.3 adds an opt-in, Python-authoritative shadow mode for the Initial IR
-verifier. It is a development observation mechanism, not a verifier selector:
-Python remains the only verifier that can accept or reject compilation.
+RUST-IR-1 integrates Rust Initial IR admission into ordinary product lowering.
+Compilation now requires both verifiers to accept:
 
-Shadow mode is **disabled by default**. `IRBackend()` still constructs no Rust
-client, performs no executable discovery or canonical serialization, computes
-no request hash, and emits no report. There is no environment-variable or CLI
-activation and no automatic fallback.
-
-## Execution and authority
-
-An explicitly configured `ShadowVerifierCoordinator` performs these operations
-sequentially:
-
-1. Run `IRVerifier(module).verify()` exactly once.
-2. Normalize an ordinary `IRVerificationError` into a message-free outcome.
-3. Build exactly one canonical protocol-v1 request and hash its complete
-   payload with lowercase SHA-256.
-4. Call the explicitly supplied `RustVerifierClient`.
-5. Classify the observation and emit one immutable report.
-6. Return the module accepted by Python, or re-raise the original Python error
-   object with its traceback and cause chain.
-
-Only `IRVerificationError` is an ordinary authoritative rejection. An
-unexpected Python `AssertionError`, `TypeError`, `ValueError`, or other
-implementation error propagates immediately and Rust is not invoked.
-Classifier, registry, and report-construction bugs also propagate; they are not
-misreported as transport failures.
-
-Rust acceptance, rejection, disagreement, timeout, process failure, protocol
-failure, malformed response, or non-strict sink failure cannot change the
-Python result. The coordinator does not print, log globally, transmit data, or
-modify emitted IR/SSA/LLVM/native artifacts.
-
-## Programmatic enablement
-
-The executable must be selected explicitly:
-
-```python
-from aether.ir import (
-    CollectingShadowReportSink,
-    ShadowVerifierCoordinator,
-)
-from aether.ir.rust_verifier import SubprocessRustVerifierClient
-from aether.pipeline import IRBackend
-
-sink = CollectingShadowReportSink()
-client = SubprocessRustVerifierClient(
-    executable="/explicit/development/path/aether-ir-verifier",
-)
-coordinator = ShadowVerifierCoordinator(client=client, sink=sink)
-backend = IRBackend(shadow_verifier=coordinator)
+```text
+Python IRLowerer
+  -> Python IRVerifier
+  -> Rust aether_verifier::verify_module (same pre-lifecycle snapshot)
+  -> Python LifecycleExpander
+  -> existing post-lifecycle schema-v1 transport
+  -> CompilerCore / Rust lifecycle normalization / owned SSA verification
 ```
 
-This integration does not call
-`discover_rust_verifier_executable()`. Packaged executable discovery, PyO3,
-concurrency, stable user-facing configuration, telemetry, and Rust authority
-remain outside Phase 4.3.
+This is a synchronous double fail-closed gate. Python rejection, Rust
+rejection, Rust infrastructure failure, request-construction failure, or an
+acceptance disagreement blocks compilation. There is no rescue, override, or
+automatic fallback. Python `IRVerifier` remains mandatory and Python
+`LifecycleExpander` remains product lifecycle authority.
 
-## Outcomes and classification
+## Exact boundary
 
-Python normalization retains the invariant and category from
-`VerifierFailure`. Phase and function/block/instruction context are optional.
-The current Python error API does not expose that structural context, so the
-normalizer records `None`; it never derives context from message text or
-invents it. The original `IRVerificationError` stays only in coordinator
-control flow and is not retained in reports.
+`IRBackend.lower_verified()` receives the exact `IRModule` object emitted by
+`IRLowerer`. The coordinator first verifies that object with Python, then
+serializes that same unchanged object once with `ir_module_to_dto()` and sends
+the canonical protocol-v1 request to Rust. The snapshot retains lifecycle
+pseudo-operations, `IRStorage`, `transferred_storage`, borrow flags/scopes,
+types, CFG and exceptional edges, metadata, source locations, functions and
+struct definitions.
 
-Rust diagnostics use the transport-neutral normalized fields. Message prose,
-source paths, invocation metadata, and timings never participate in identity.
-The closed classifications are:
+The serializer is only a verification snapshot. It does not replace the
+Python object and Rust does not return a rewritten module. Lifecycle expansion
+and all downstream stages continue to consume the existing Python-owned
+module.
 
-- `MATCH_ACCEPTED`
-- `MATCH_REJECTED_EXACT`
-- `MATCH_REJECTED_SEMANTIC`
-- `DOCUMENTED_DIAGNOSTIC_DIVERGENCE`
-- `DOCUMENTED_OUTCOME_DIVERGENCE`
-- `UNEXPECTED_DIAGNOSTIC_DIVERGENCE`
-- `UNEXPECTED_OUTCOME_DIVERGENCE`
-- `RUST_INFRASTRUCTURE_FAILURE`
-- `RUST_INTEGRATION_FAILURE`
-- `SHADOW_SKIPPED`
-- `SHADOW_COORDINATOR_FAILURE` (reserved for a future controlled reporting
-  mechanism; current internal bugs propagate)
+The schema-v1 structures are currently reusable on both sides of lifecycle
+expansion and have no phase discriminator. That does not make the semantic
+domains equal. `verify_module` is a pre-lifecycle verifier. Post-lifecycle and
+post-optimization checks remain Python-only; the Rust gate is never inferred
+from an arbitrary schema-v1 `IRModule` passed later to SSA.
 
-An exact rejection match means the complete available keys are equal. A
-semantic rejection match requires equal invariant IDs, no category or phase
-contradiction, agreement on every structural field available on both sides,
-and missing context on one side. A different invariant, category, phase, or
-shared structural value is an unexpected diagnostic divergence unless one
-exact reviewed rule matches.
+## Native execution and transports
 
-The original Phase 4.3 set of 128 transportable corpus observations split into
-64 accepted matches, 60 semantic rejection matches, three documented
-diagnostic divergences, and one documented outcome divergence. The rejection
-matches are semantic because Rust reports structural context that the current
-Python exception API does not expose. The two nontransportable DTO-boundary
-cases are represented explicitly by test-harness `SHADOW_SKIPPED`
-observations.
+The productive `aether-compiler-core` wheel contains both
+`aether-ir-verifier` and the existing `aether-ssa-shadow` companion. The stable
+wrapper validates each executable against wheel `RECORD`. Initial IR admission
+uses the existing persistent framed verifier client and unchanged verifier
+protocol v1. No PyO3 method or CompilerCore protocol operation was added.
 
-Phase 4.5C later resolved that sole outcome divergence by aligning Python
-IRV-024 with Rust's graph semantics. The current 141-case baseline is 65
-accepted matches, 73 semantic rejection matches, three documented diagnostic
-divergences, and zero documented outcome divergences.
+This verifier process is an admission operation independent of the later SSA
+transport selector. Consequently both `in_process` and `companion` SSA paths
+cross the same gate before `LifecycleExpander`; neither transport changes its
+selection, payload, fallback policy, or lifecycle normalization behavior.
 
-## Hash-scoped documented divergences
+Tests may provide the internal exact-path qualification variable
+`AETHER_INTERNAL_RUST_INITIAL_IR_QUALIFICATION_EXECUTABLE`. It has no discovery
+fallback: absent that test-only override, production resolves only the
+RECORD-validated executable from `aether-compiler-core`.
 
-`shadow_divergences.py` owns an immutable production registry. It does not
-import the test manifest. Every rule matches all of:
+## Provenance and diagnostics
 
-- stable rule ID;
-- exact SHA-256 of the complete canonical request;
-- complete expected Python and Rust outcome keys;
-- protocol version;
-- IR schema version;
-- documented diagnostic or outcome classification.
+Every dual observation can emit an immutable `ShadowVerificationReport` with
+the request SHA-256, client kind, protocol/schema versions, stage, Python and
+Rust outcomes, comparison classification, serialization time, Rust invocation
+time, and total gate time. Tests instrument the real stage calls and require
+the observed order `Python verifier -> Rust verifier -> LifecycleExpander`.
 
-The registry now contains only the three reviewed schema-v1 diagnostic cases:
+Rust semantic errors preserve category, phase, invariant code, function,
+block, and instruction context from protocol v1. When the reported instruction
+has an `IRSourceLocation`, the product boundary recovers that location from the
+unchanged Python snapshot without changing the protocol. Diagnostic prose is
+not used as semantic identity.
 
-| Rule | Canonical request SHA-256 |
-| --- | --- |
-| Python IRV-031 / Rust IRV-032 | `65b64a4021d20766e845fb23e48fd90c4992cf0f23936298e147f8b4eb6c095e` |
-| Python IRV-050 / Rust IRV-026 | `90c0a3fccf6b737179d1feef9c32d11b3874edfccc3914facbd0df1d904803d9` |
-| Python IRV-036 / Rust IRV-028 | `2b1463ad529acf1b86dccd04c89408431826d51d0a0bba8739830c4e46d30d1f` |
+## Differential boundary
 
-A matching invariant pair with a different hash, context, version, or outcome
-direction is not documented.
+The migration corpus contains 142 indexed cases: 140 schema-v1 transportable
+cases and two explicit representation-domain exclusions. The transportable
+set consists of 65 shared acceptances and 75 shared semantic rejections. The
+only documented diagnostic differences are `undefined-slot`,
+`return-storage-after-move`, and `inconsistent-branch-initialization`; they do
+not change acceptance. The excluded lifecycle-destination shape and Python
+integer outside schema-v1 i32 are classified as representation-domain
+differences, not verifier divergences.
 
-The retired IRV-024 rule used request hash
-`d635f6fc4c9e933e20442539c12409fcdc3de3da0938927f6b784c3002550baa`.
-It remains recorded here as migration history, but is no longer executable
-policy because both verifiers accept that graph.
+The borrow-to-owned regression demonstrates the phase contract directly: its
+original pre-lifecycle IR is accepted by both verifiers, while applying the
+Rust Initial IR verifier to the Python-expanded form produces `IRV-041`. That
+post-lifecycle rejection is a contract-boundary regression test, not an
+expected product failure.
 
-## Reports, sinks, stages, and privacy
-
-`ShadowVerificationReport` is frozen and contains the authoritative normalized
-outcome, Rust-safe observation, comparison, and operational metadata. Reports
-retain only the request hash, client kind, protocol/schema versions, compiler
-stage, lightweight monotonic timings, optional documented rule ID, and a
-bounded normalized failure kind/summary. They do not contain source, full IR,
-request bytes, arbitrary stderr, environment values, PIDs, home directories,
-or temporary paths.
-
-`semantic_snapshot()` excludes timings, making repeated semantic reports
-deterministic. `NullShadowReportSink` and `CollectingShadowReportSink` implement
-the explicit `ShadowReportSink` protocol. Sink failures are ignored by default
-and are not recursively reported. A narrow `strict_sink_errors=True` test mode
-can expose a sink exception after a Python acceptance; an already determined
-Python rejection still wins.
-
-`IRBackend` labels normal lowering/verification as `INITIAL` and verification
-after IR optimization as `POST_OPTIMIZATION`. Direct coordinator use defaults
-to `EXTERNAL`. Repeated calls emit repeated reports even when their request
-hashes are equal. `--emit-cfg`, direct `IRVerifier` calls, AST, REPL, and LSP
-paths remain outside shadow mode.
-
-Infrastructure failures are valid Rust protocol responses whose outcome is
-non-semantic. Integration failures occur while constructing the request or
-invoking/decoding the configured transport. Both are reported safely and both
-follow Python.
-
-## Current transition boundary
-
-The reports provide initial parity evidence only. Before Rust can become
-authoritative, an extended validation phase still needs production packaging
-and executable selection, sustained parity/performance review, a policy for
-unexpected divergence, and an explicit authority transition design. Phase 4.3
-does not implement any of those decisions.
+The next milestone is `RUST-IR-2 PRE-LIFECYCLE INITIAL IR SHADOW
+QUALIFICATION`. RUST-IR-1 does not implement that qualification or promote
+exclusive Rust authority.

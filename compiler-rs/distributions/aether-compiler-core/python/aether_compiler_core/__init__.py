@@ -119,13 +119,20 @@ def _manifest() -> tuple[dict[str, object], Path]:
         "output_schema_versions": list(OUTPUT_SCHEMA_VERSIONS),
         "wheel_record_integrity_required": True,
     }
-    required = set(expected) | {"binary", "build_identity", "target"}
+    required = set(expected) | {
+        "binary",
+        "build_identity",
+        "initial_ir_verifier_binary",
+        "target",
+    }
     if (
         not isinstance(value, dict)
         or set(value) != required
         or any(value.get(name) != expected_value for name, expected_value in expected.items())
         or not isinstance(value.get("binary"), str)
         or value["binary"] not in {"aether-ssa-shadow", "aether-ssa-shadow.exe"}
+        or value.get("initial_ir_verifier_binary")
+        not in {"aether-ir-verifier", "aether-ir-verifier.exe"}
         or not isinstance(value.get("build_identity"), str)
         or not value["build_identity"]
         or not isinstance(value.get("target"), str)
@@ -201,6 +208,30 @@ def companion_path() -> Path:
     return binary
 
 
+def initial_ir_verifier_path() -> Path:
+    """Return the installed pre-lifecycle Initial IR verifier executable."""
+    distribution = _distribution()
+    _validate_language_version()
+    manifest, manifest_path = _manifest()
+    _verify_record(distribution, manifest_path, _MANIFEST_RELATIVE)
+    binary_name = str(manifest["initial_ir_verifier_binary"])
+    binary = manifest_path.with_name(binary_name).resolve()
+    expected_name = (
+        "aether-ir-verifier.exe" if os.name == "nt" else "aether-ir-verifier"
+    )
+    if binary.name != expected_name:
+        raise NativeCoreDistributionError(
+            f"native compiler-core wheel contains {binary.name!r}; expected {expected_name!r}"
+        )
+    if not binary.is_file():
+        raise NativeCoreDistributionError("native Initial IR verifier is missing")
+    binary_relative = f"aether_compiler_core/_native/{binary_name}"
+    _verify_record(distribution, binary, binary_relative)
+    if os.name != "nt" and not os.access(binary, os.X_OK):
+        raise NativeCoreDistributionError("native Initial IR verifier is not executable")
+    return binary
+
+
 def version_metadata() -> dict[str, object]:
     """Return a copy of the validated machine-readable native build contract."""
     _distribution()
@@ -238,5 +269,6 @@ __all__ = [
     "NativeCoreDistributionError",
     "binding",
     "companion_path",
+    "initial_ir_verifier_path",
     "version_metadata",
 ]

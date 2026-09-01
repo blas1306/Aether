@@ -24,6 +24,7 @@ python-packages = ["aether_compiler_core", "_aether_core"]
 exclude = ["python/aether_compiler_core/.gitignore"]
 include = [
     { path = "aether-ssa-shadow*", from = "out-dir", to = "aether_compiler_core/_native/" },
+    { path = "aether-ir-verifier*", from = "out-dir", to = "aether_compiler_core/_native/" },
     { path = "native-core-manifest.json", from = "out-dir", to = "aether_compiler_core/_native/" },
 ]
 strip = true

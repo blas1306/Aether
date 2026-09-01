@@ -4,7 +4,15 @@ import pytest
 
 from aether.errors import AetherRuntimeError, IRBackendUnsupportedFeatureError
 from aether.interpreter import Interpreter
-from aether.ir import IRBasicBlock, IRFunction, IRModule, IRReturn, IRValue, IntType
+from aether.ir import (
+    IRBasicBlock,
+    IRFunction,
+    IRModule,
+    IRReturn,
+    IRValue,
+    IRVerifier,
+    IntType,
+)
 from aether.pipeline import (
     ASTBackend,
     IRBackend,
@@ -86,7 +94,9 @@ int main() {
     assert env.values[IR_MAIN_RESULT_NAME].value == 42
 
 
-def test_ir_backend_verifies_before_interpreting() -> None:
+def test_ir_backend_verifies_before_interpreting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     typed_program = prepare_typed_program(
         """
 int main() {
@@ -95,14 +105,15 @@ int main() {
 """,
         TypeChecker(),
     )
-    calls = []
+    calls: list[list[str]] = []
+    original_verify = IRVerifier.verify
 
-    class RecordingIRBackend(IRBackend):
-        def verify(self, module):
-            calls.append([function.name for function in module.functions])
-            return super().verify(module)
+    def recording_verify(verifier: IRVerifier) -> IRModule:
+        calls.append([function.name for function in verifier.module.functions])
+        return original_verify(verifier)
 
-    RecordingIRBackend().run(typed_program)
+    monkeypatch.setattr(IRVerifier, "verify", recording_verify)
+    IRBackend().run(typed_program)
 
     assert calls == [["main"]]
 

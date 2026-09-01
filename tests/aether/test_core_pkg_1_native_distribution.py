@@ -49,6 +49,7 @@ def test_native_wheel_declares_binding_wrapper_and_companion_outputs() -> None:
     assert 'python-packages = ["aether_compiler_core", "_aether_core"]' in metadata
     assert 'from = "out-dir"' in metadata
     assert "aether-ssa-shadow*" in metadata
+    assert "aether-ir-verifier*" in metadata
     assert "native-core-manifest.json" in metadata
 
 
@@ -94,6 +95,11 @@ def test_production_discovery_uses_stable_native_package_helper() -> None:
     assert "from aether_compiler_core import companion_path" in production
     assert "companion_path()" in production
     assert "import _aether_core" not in production
+    initial_ir = (ROOT / "src/aether/ir/shadow_verifier.py").read_text(
+        encoding="utf-8"
+    )
+    assert "from aether_compiler_core import initial_ir_verifier_path" in initial_ir
+    assert "PersistentSubprocessRustVerifierClient" in initial_ir
 
 
 def test_wrapper_fails_closed_on_missing_distribution(monkeypatch) -> None:
@@ -209,6 +215,26 @@ def test_wrapper_fails_closed_on_missing_companion(tmp_path: Path, monkeypatch) 
     monkeypatch.setattr(wrapper, "_verify_record", lambda *_args: None)
     with pytest.raises(wrapper.NativeCoreDistributionError, match="companion is missing"):
         wrapper.companion_path()
+
+
+def test_wrapper_fails_closed_on_missing_initial_ir_verifier(
+    tmp_path: Path, monkeypatch
+) -> None:
+    wrapper = load_wrapper()
+    manifest_path = tmp_path / "native-core-manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(wrapper, "_distribution", lambda: object())
+    monkeypatch.setattr(
+        wrapper,
+        "_manifest",
+        lambda: ({"initial_ir_verifier_binary": "aether-ir-verifier"}, manifest_path),
+    )
+    monkeypatch.setattr(wrapper, "_verify_record", lambda *_args: None)
+    with pytest.raises(
+        wrapper.NativeCoreDistributionError,
+        match="Initial IR verifier is missing",
+    ):
+        wrapper.initial_ir_verifier_path()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX executable bit contract")

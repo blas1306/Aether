@@ -85,10 +85,9 @@ Current compiler-design documents:
   coverage, determinism, failure injection, privacy review, the narrow Rust
   unreachable-dominance fix, and the evidence still required before authority.
 - [INITIAL_IR_SHADOW_VERIFICATION.md](INITIAL_IR_SHADOW_VERIFICATION.md):
-  Phase 4.3 Python-authoritative shadow semantics, explicit programmatic
-  enablement, classification and hash-scoped divergence rules, immutable
-  reports and sinks, pipeline stages, privacy guarantees, corpus baseline, and
-  the boundary before Rust authority.
+  productive RUST-IR-1 double fail-closed admission over the exact
+  pre-lifecycle snapshot, native execution, provenance, diagnostics, corpus
+  boundary, and the prohibition on post-lifecycle `verify_module`.
 - [IR_VERIFIER_PROTOCOL.md](IR_VERIFIER_PROTOCOL.md): protocol-v1 request and
   response contract, stable diagnostic spellings, executable build/invocation,
   exit codes, panic containment, and the Phase 4.2A/4.2B integration boundary.

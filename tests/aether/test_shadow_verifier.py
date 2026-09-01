@@ -828,7 +828,7 @@ def test_enabled_backend_preserves_python_rendered_diagnostic_and_cause() -> Non
     )
 
 
-def test_ir_backend_emits_initial_and_post_optimization_stages() -> None:
+def test_ir_backend_never_sends_post_lifecycle_ir_to_initial_rust_verifier() -> None:
     class IdentityOptimizer:
         def run(self, module: IRModule) -> IRModule:
             return module
@@ -846,7 +846,6 @@ def test_ir_backend_emits_initial_and_post_optimization_stages() -> None:
 
     assert [report.metadata.stage for report in sink.reports] == [
         ShadowVerificationStage.INITIAL,
-        ShadowVerificationStage.POST_OPTIMIZATION,
     ]
 
 
