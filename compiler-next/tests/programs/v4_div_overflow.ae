@@ -1,0 +1,2 @@
+int64 divide(int64 a, int64 b) { return a / b; }
+int main() { return divide(-9223372036854775808, -1); }

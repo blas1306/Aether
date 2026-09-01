@@ -1,4 +1,4 @@
-# Aether NEXT-VERTICAL-3
+# Aether NEXT-VERTICAL-4
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. It does not replace the production `aether` CLI or import any legacy
@@ -30,7 +30,7 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and scalar IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-3 grammar
+## Vertical-4 grammar
 
 ```text
 program    := import* (alias | function)+ EOF
@@ -51,9 +51,14 @@ call       := IDENT "(" arguments? ")"
             | IDENT "." IDENT "(" arguments? ")"
 arguments  := expression ("," expression)*
             | "-" expression
-            | expression ("*" | "+" | "-" | "<" | "<=" | ">" | ">="
+            | expression ("*" | "/" | "%" | "+" | "-" | "<" | "<=" | ">" | ">="
                          | "==" | "!=") expression
 ```
+
+After name/type resolution, a one-argument call whose callee names a built-in
+or module-local alias type is an explicit value conversion:
+`TargetType(expression)`. It is not an ordinary call, user-defined constructor,
+bitcast or reinterpretation.
 
 The canonical scalar set is `bool`, `int8`/`16`/`32`/`64`,
 `uint8`/`16`/`32`/`64`, `isize`, `usize`, `float32` and `float64`. Transparent
@@ -66,7 +71,12 @@ unconstrained defaults are `int64` and `float64`. Non-literal implicit
 conversions are limited to widening within the signed family, widening within
 the unsigned family, and `float32 -> float64`. HIR records each widening as a
 `SignExtend`, `ZeroExtend`, or `FloatExtend`; MIR and SSA verify it explicitly.
-Signed/unsigned, integer/float, narrowing, and bool/numeric conversions fail.
+Signed/unsigned, integer/float, narrowing, and bool/numeric conversions remain
+invalid implicitly. Explicit numeric conversions are represented by a fully
+typed `CastKind`. Integer conversions trap rather than wrap when the value is
+not representable; float-to-integer truncates toward zero and traps for NaN,
+infinity or an unrepresentable result. Integer-to-float and float narrowing may
+round according to IEEE semantics. Bool has no numeric conversions.
 
 Canonical scalar types are explicit enums, not strings. A global `TypeId`
 interner is intentionally deferred: it becomes useful when recursive composite
@@ -76,10 +86,14 @@ set.
 
 All integer `+`, `-`, `*`, and signed negation are checked at their exact
 width. LLVM uses signed or unsigned overflow intrinsics without `nsw`/`nuw`.
-Floats use ordinary strict-baseline `fadd`/`fsub`/`fmul` without fast-math.
+Integer `/` returns the same promoted integer type and truncates toward zero
+when signed. Integer `%` is the corresponding remainder, so `-5 % 2 == -1`.
+Zero divisors trap; signed `MIN / -1` traps separately, while `MIN % -1` is
+lowered safely to zero. Floats use ordinary strict-baseline
+`fadd`/`fsub`/`fmul`/`fdiv` without fast-math; floating division by zero follows
+IEEE and floating `%` remains rejected.
 Floating `==`, `<`, `<=`, `>`, `>=` are ordered (false with NaN); `!=` is
-unordered (true with NaN). Division and remainder remain structured
-unsupported-feature errors.
+unordered (true with NaN).
 
 The driver treats the entry file's directory as the explicit bootstrap source
 root. `import math;` resolves only `<source-root>/math.ae`; there is no PATH,

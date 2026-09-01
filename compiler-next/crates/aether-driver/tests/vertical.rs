@@ -1,4 +1,4 @@
-//! Cross-layer and native qualification for NEXT-VERTICAL-3.
+//! Cross-layer and native qualification for NEXT-VERTICAL-4.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -437,7 +437,7 @@ fn vertical3_alias_signatures_work_across_modules() {
     .unwrap();
     fs::write(
         root.join("math.ae"),
-        "alias Scalar=int16;int answer(Scalar x){return x+x;}",
+        "alias Scalar=int16;int answer(Scalar x){return int(x+x);}",
     )
     .unwrap();
     let compilation = compile_session(
@@ -446,7 +446,141 @@ fn vertical3_alias_signatures_work_across_modules() {
     )
     .unwrap();
     assert!(compilation.dumps[&Emit::Hir].contains("Scalar"));
+    assert!(compilation.dumps[&Emit::Hir].contains("ExplicitCast"));
     let _ = fs::remove_file(root.join("main.ae"));
     let _ = fs::remove_file(root.join("math.ae"));
     let _ = fs::remove_dir(root);
+}
+
+#[test]
+fn vertical4_cast_diagnostics_and_dumps_are_structured() {
+    for (text, code) in [
+        ("int main(){return int8(128);}", "E0231"),
+        ("int main(){return uint32(-1);}", "E0231"),
+        ("int main(){return int32(2147483648);}", "E0231"),
+        ("int main(){return int32(2147483648.0);}", "E0231"),
+        ("int main(){return int(true);}", "E0232"),
+        ("int main(){return bool(1);}", "E0232"),
+    ] {
+        let diagnostic = compile_source(&SourceFile::new("cast-error.ae", text), &[])
+            .unwrap_err()
+            .remove(0);
+        assert_eq!(diagnostic.code, code, "{text}");
+        assert!(diagnostic.span.is_some());
+    }
+
+    let text = fs::read_to_string(program("v4_casts.ae")).unwrap();
+    let result = compile_source(
+        &SourceFile::new("v4_casts.ae", text),
+        &[Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+    )
+    .unwrap();
+    assert!(result.dumps[&Emit::Hir].contains("ExplicitCast"));
+    for phase in [Emit::Mir, Emit::Ssa] {
+        let dump = &result.dumps[&phase];
+        assert!(dump.contains("Cast"), "{phase:?}");
+        assert!(dump.contains("ConversionOutOfRange"), "{phase:?}");
+    }
+    assert!(result.llvm.contains("trap_conversion_out_of_range"));
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical4_casts_execute_and_runtime_failures_trap() {
+    let (_, status) = run_path(&program("v4_casts.ae"), &[], &ClangToolchain::default()).unwrap();
+    assert_eq!(status.code(), Some(127));
+
+    for source in [
+        "v4_cast_trap.ae",
+        "v4_signed_unsigned_trap.ae",
+        "v4_unsigned_signed_trap.ae",
+    ] {
+        let (_, status) = run_path(&program(source), &[], &ClangToolchain::default()).unwrap();
+        assert!(!status.success(), "{source}");
+    }
+
+    let artifact = temporary("v4-cast-boundaries");
+    let source = SourceFile::new(
+        "cast-boundaries.ae",
+        "int main(){if(int32(3.9)==3){if(int32(-3.9)==-3){if(uint8(-0.9)==0){if(int8(-128.9)==-128){uint64 u=18446744073709551615;usize z=usize(u);uint64 back=uint64(z);isize s=-1;int64 signed_back=int64(s);float64 d=float64(back);float32 f=float32(d);if(signed_back==-1){if(d>0.0){if(f>0.0){return 42;}}}}}}}return 0;}",
+    );
+    let compilation = compile_source(&source, &[]).unwrap();
+    ClangToolchain::default()
+        .link_executable(&compilation.llvm, &artifact)
+        .unwrap();
+    assert_eq!(Command::new(&artifact).status().unwrap().code(), Some(42));
+    let _ = fs::remove_file(artifact);
+}
+
+#[test]
+fn vertical4_division_diagnostics_and_ir_contracts_are_structured() {
+    for (text, code) in [
+        ("int main(){return 1/0;}", "E0233"),
+        ("int main(){return -9223372036854775808/-1;}", "E0234"),
+        ("int main(){return int(4.0%2.0);}", "E0235"),
+    ] {
+        let diagnostic = compile_source(&SourceFile::new("division-error.ae", text), &[])
+            .unwrap_err()
+            .remove(0);
+        assert_eq!(diagnostic.code, code, "{text}");
+        assert!(diagnostic.span.is_some());
+    }
+
+    let text = fs::read_to_string(program("v4_division.ae")).unwrap();
+    let result = compile_source(
+        &SourceFile::new("v4_division.ae", text),
+        &[Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+    )
+    .unwrap();
+    assert!(result.dumps[&Emit::Hir].contains("DivideIntegerSignedChecked"));
+    for phase in [Emit::Mir, Emit::Ssa] {
+        let dump = &result.dumps[&phase];
+        assert!(dump.contains("DivisionByZero"), "{phase:?}");
+        assert!(dump.contains("DivisionOverflow"), "{phase:?}");
+        assert!(dump.contains("RemainderIntegerSignedChecked"), "{phase:?}");
+    }
+    assert!(result.llvm.contains("trap_division_by_zero"));
+    assert!(result.llvm.contains("trap_division_overflow"));
+    assert!(result.llvm.contains("fdiv double"));
+
+    let widths = SourceFile::new(
+        "division-widths.ae",
+        r"
+int8 s8(int8 a,int8 b){return a/b;} int16 s16(int16 a,int16 b){return a%b;}
+int32 s32(int32 a,int32 b){return a/b;} int64 s64(int64 a,int64 b){return a%b;}
+uint8 u8(uint8 a,uint8 b){return a/b;} uint16 u16(uint16 a,uint16 b){return a%b;}
+uint32 u32(uint32 a,uint32 b){return a/b;} uint64 u64(uint64 a,uint64 b){return a%b;}
+isize si(isize a,isize b){return a/b;} usize ui(usize a,usize b){return a%b;}
+int main(){return s8(5,2);}
+",
+    );
+    let llvm = compile_source(&widths, &[]).unwrap().llvm;
+    for operation in [
+        "sdiv i8", "srem i16", "sdiv i32", "srem i64", "udiv i8", "urem i16", "udiv i32",
+        "urem i64",
+    ] {
+        assert!(llvm.contains(operation), "{operation}");
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical4_division_and_remainder_execute_without_backend_ub() {
+    for (source, expected) in [
+        ("v4_division.ae", 42),
+        ("v4_rem_min.ae", 0),
+        ("v4_float_ieee.ae", 42),
+    ] {
+        let (_, status) = run_path(&program(source), &[], &ClangToolchain::default()).unwrap();
+        assert_eq!(status.code(), Some(expected), "{source}");
+    }
+    for source in [
+        "v4_div_zero.ae",
+        "v4_div_overflow.ae",
+        "v4_float_to_int_trap.ae",
+        "v4_nan_to_int_trap.ae",
+    ] {
+        let (_, status) = run_path(&program(source), &[], &ClangToolchain::default()).unwrap();
+        assert!(!status.success(), "{source}");
+    }
 }

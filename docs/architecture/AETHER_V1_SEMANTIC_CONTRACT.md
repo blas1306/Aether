@@ -168,16 +168,11 @@ minimum this permits widening within signed or unsigned families and
 contextual exact conversion of a literal.  Signed↔unsigned, narrowing and
 float→integer conversions MUST be explicit.
 
-Whether an integer type implicitly converts to a floating type is an
-**OPEN DECISION** because not all 32/64-bit integer values are exactly
-representable in binary32/binary64.  Choices are:
-
-- permit conventional rank-based widening and document precision loss;
-- permit only when compile-time value is exactly representable;
-- require explicit conversion for non-literals.
-
-Mixed arithmetic and generic numeric constraints cannot be frozen before this
-choice.  No conversion may depend on C integer promotion rules.
+Integer-to-floating conversion is not implicit in the scalar baseline because
+not all 32/64-bit integer values are exactly representable in binary32/binary64.
+Source must request it with the explicit conversion syntax below. Mixed
+arithmetic does not create a special exception, and no conversion depends on C
+integer promotion rules.
 
 **NEXT-VERTICAL-3 implemented baseline (2026-09-01):** contextual literals may
 select any representable scalar numeric type. Already typed values widen only
@@ -186,6 +181,30 @@ and `float32 -> float64`. `isize`/`usize` do not implicitly convert to or from
 fixed-width types. Signed/unsigned, integer/floating, narrowing, and bool/numeric
 conversions are rejected. HIR makes admitted conversions explicit; MIR and SSA
 perform no numeric inference.
+
+**NEXT-VERTICAL-4 explicit-conversion baseline (2026-09-01):** the source form
+`TargetType(expression)` denotes a value conversion when the target resolves to
+a primitive numeric type or transparent alias. It is not an ordinary call,
+constructor, bitcast, reinterpretation or unsafe cast. HIR records the exact
+source type, target type and selected conversion category; MIR and SSA preserve
+that decision without adding conversions.
+
+All integer-to-integer combinations are explicit and checked. A value converts
+only if it is exactly representable in the target; otherwise execution traps
+with `ConversionOutOfRange`. A statically known failure is diagnosed instead.
+This includes narrowing and signed/unsigned boundaries, and applies to the
+distinct `isize`/`usize` types using the target pointer width. There is no
+wrapping explicit cast.
+
+Integer-to-float conversion uses the source signedness and may round when the
+integer is not exactly representable. Float-to-integer truncates toward zero,
+then requires the result to be representable; NaN, either infinity and values
+whose truncated result is out of range trap with `ConversionOutOfRange`.
+Checks precede backend `fptosi`/`fptoui`, so poison or undefined backend results
+are not source behavior. `float32 -> float64` and `float64 -> float32` are both
+available explicitly; narrowing follows IEEE rounding and preserves the
+finite/infinity/NaN category as the target format permits. Numeric conversion
+to or from `bool` is invalid.
 
 ### 2.3 Integer overflow — DECIDED baseline
 
@@ -200,7 +219,7 @@ operation is in range.
 For NEXT-VERTICAL-0 this rule covers the admitted ordinary integer addition,
 subtraction, multiplication and signed negation operations.  Integer division
 or remainder by zero traps with `DivisionByZero`; the signed minimum divided by
-`-1` traps with `IntegerOverflow`.  A constant expression whose failure is
+`-1` traps with `DivisionOverflow`.  A constant expression whose failure is
 known is rejected at compile time with the same failure category and a source
 span.  Otherwise MIR carries an explicit checked operation/trap edge and the
 backend materializes the check.
@@ -208,9 +227,8 @@ backend materializes the check.
 Future explicitly requested `wrapping`, `checked` (value/status result) and
 `saturating` operation families are reserved.  Their API or syntax is an
 **OPEN DECISION**; their future existence does not weaken ordinary arithmetic.
-Shift counts, exponentiation, lossy numeric conversions and any unchecked
-escape hatch remain outside NEXT-VERTICAL-0 and require separate exact rules
-before admission.
+Shift counts, exponentiation and any unchecked conversion/escape hatch remain
+outside this baseline and require separate exact rules before admission.
 
 ## 3. Floating point
 
@@ -237,8 +255,8 @@ optimization is enabled.
 The contract still needs decisions for, and NEXT-VERTICAL-0 does not need to
 admit floating operations before they close:
 
-- implicit and explicit integer/float and float/float conversions;
-- default and explicit rounding behavior;
+- implicit integer/float conversion and rounding modes beyond the explicit
+  conversion baseline in section 2.2;
 - NaN comparison/propagation and payload behavior;
 - infinity-producing operations and domain/pole behavior;
 - subnormal preservation or target-profile restrictions;
@@ -247,7 +265,6 @@ admit floating operations before they close:
 - exact parse/format algorithms and shortest-roundtrip requirements;
 - reproducibility across targets versus conformance within a target;
 - explicit rounding-mode APIs and whether ambient hardware mode is observable;
-- float→integer results for NaN, infinity and out-of-range values;
 - constant evaluator parity with target execution;
 - libm accuracy requirements for transcendental functions.
 
@@ -264,16 +281,27 @@ not-equal and is true if either operand is NaN. This closes comparison truth
 values for the scalar subset; NaN payload propagation, ambient rounding modes,
 cross-target bit reproducibility and constant-folding parity remain open.
 
-### 3.3 Integer division and remainder — OPEN DECISION
+### 3.3 Integer division and remainder — DECIDED baseline
 
-NEXT-VERTICAL-3 deliberately keeps `/` and `%` fail-closed. The recommended v1
-direction is C-like typed integer quotient (`int / int -> same integer type`),
-truncating toward zero for signed values, with same-type remainder satisfying
-`a = (a / b) * b + a % b`; division by zero and signed `MIN / -1` trap. Real
-division should require floating operands (or an explicit conversion). This is
-predictable, efficient, closed under generic integer algorithms, and avoids an
-implicit lossy integer-to-float conversion. It still requires an explicit-cast
-design before admission, so the recommendation is not yet implemented.
+NEXT-VERTICAL-4 implements typed integer quotient: after the ordinary
+same-family widening rules, `integer / integer` returns that same integer type.
+Signed quotient truncates toward zero; unsigned quotient is ordinary unsigned
+division. A zero divisor traps with `DivisionByZero`. Signed `MIN / -1` traps
+with the distinct `DivisionOverflow` category before backend division executes.
+
+`%` is remainder corresponding to that quotient, not an always-nonnegative
+mathematical modulo. Thus `-5 % 2 == -1`, and for valid division operands
+`a = (a / b) * b + (a % b)`. A zero divisor traps. Signed `MIN % -1` is zero
+and uses guarded control flow so LLVM's problematic `srem` case never executes.
+
+Floating `/` accepts same/promoted floating operands and follows IEEE behavior,
+including infinity or NaN for zero divisors; it does not use integer trap
+semantics. Integer-to-float conversion remains explicit, so merely mixing an
+integer and float does not make `/` valid. Floating `%` is not admitted.
+
+This deliberately diverges from the legacy compiler, where `int / int`
+produced `double`. Compatibility evidence labels the difference as intentional;
+legacy code requiring real division must convert an operand explicitly.
 
 ## 4. Evaluation, calls and assignment
 
@@ -477,21 +505,24 @@ No ordinary owning/reference/string value is implicitly nullable.  The
 decision depends on tagged unions, pattern matching and error handling and
 must precede public ABI stabilization.
 
-### 8.2 Scalar traps for NEXT-VERTICAL-0 — DECIDED
+### 8.2 Scalar traps — DECIDED
 
 NEXT-VERTICAL-0 models non-recoverable scalar failures explicitly in Flow MIR.
 A trap is a typed/structured terminator or checked-operation failure edge with
 a source span, not an arbitrary backend string or a host-language exception.
-The minimum failure kinds are:
+The admitted scalar failure kinds are:
 
 ```text
 IntegerOverflow
 DivisionByZero
+ConversionOutOfRange
+DivisionOverflow
 ```
 
-The first covers the checked overflow cases in section 2.3.  The second covers
-admitted integer division and remainder with a zero divisor.  No additional
-kind is added unless an operation strictly required by the slice needs it.
+The first covers checked addition/subtraction/multiplication/negation. The
+second covers integer division and remainder with a zero divisor. The third
+covers runtime-failing explicit conversions, and the fourth distinguishes
+signed `MIN / -1` from ordinary arithmetic overflow.
 Verified MIR and verified SSA must make every possible trap explicit enough
 for control-flow, effect and optimization checks; optimizers preserve its
 observable ordering unless they prove the failure impossible.

@@ -51,6 +51,10 @@ pub enum TokenKind {
     Minus,
     /// `*`.
     Star,
+    /// `/`.
+    Slash,
+    /// `%`.
+    Percent,
     /// `=`.
     Equal,
     /// `==`.
@@ -161,6 +165,8 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
             b'+' => single(&mut tokens, TokenKind::Plus, source, &mut cursor),
             b'-' => single(&mut tokens, TokenKind::Minus, source, &mut cursor),
             b'*' => single(&mut tokens, TokenKind::Star, source, &mut cursor),
+            b'/' => single(&mut tokens, TokenKind::Slash, source, &mut cursor),
+            b'%' => single(&mut tokens, TokenKind::Percent, source, &mut cursor),
             b'=' => double_or_single(
                 &mut tokens,
                 source,
@@ -185,19 +191,6 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
             b'!' if bytes.get(cursor + 1) == Some(&b'=') => {
                 cursor += 2;
                 push(&mut tokens, TokenKind::BangEqual, source, start, cursor);
-            }
-            b'/' | b'%' => {
-                cursor += 1;
-                diagnostics.push(Diagnostic::new(
-                    "E0002",
-                    Phase::Lex,
-                    DiagnosticCategory::Unsupported,
-                    format!(
-                        "operator `{}` is not admitted in NEXT-VERTICAL-3",
-                        &source.text[start..cursor]
-                    ),
-                    Some(Span::in_source(source.id, start, cursor)),
-                ));
             }
             byte => {
                 let len = if byte.is_ascii() {
@@ -277,9 +270,9 @@ mod tests {
     }
 
     #[test]
-    fn division_fails_closed() {
-        let error = lex(&SourceFile::new("bad.ae", "int main(){return 4/2;}")).unwrap_err();
-        assert_eq!(error[0].code, "E0002");
-        assert_eq!(error[0].category, DiagnosticCategory::Unsupported);
+    fn division_and_remainder_are_tokens() {
+        let tokens = lex(&SourceFile::new("ops.ae", "int main(){return 4/2%1;}")).unwrap();
+        assert!(tokens.iter().any(|token| token.kind == TokenKind::Slash));
+        assert!(tokens.iter().any(|token| token.kind == TokenKind::Percent));
     }
 }

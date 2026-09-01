@@ -3,8 +3,10 @@
 #![allow(
     clippy::cast_possible_truncation,
     clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
     clippy::enum_glob_use,
     clippy::many_single_char_names,
+    clippy::float_cmp,
     clippy::semicolon_if_nothing_returned,
     clippy::too_many_lines,
     clippy::unused_self
@@ -221,6 +223,12 @@ pub enum HirExprKind {
         kind: CoercionKind,
         operand: Box<HirExpr>,
     },
+    ExplicitCast {
+        kind: CastKind,
+        source_type: Type,
+        target_type: Type,
+        operand: Box<HirExpr>,
+    },
     Unary {
         op: HirUnaryOp,
         operand: Box<HirExpr>,
@@ -237,6 +245,22 @@ pub enum CoercionKind {
     ZeroExtend,
     FloatExtend,
 }
+/// Value-conversion semantics selected completely by HIR.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CastKind {
+    Identity,
+    IntegerExtendSigned,
+    IntegerExtendUnsigned,
+    IntegerNarrowChecked,
+    IntegerReencode,
+    IntegerSignednessChecked,
+    SignedIntegerToFloat,
+    UnsignedIntegerToFloat,
+    FloatToSignedIntegerChecked,
+    FloatToUnsignedIntegerChecked,
+    FloatExtend,
+    FloatTruncate,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HirUnaryOp {
     NegateIntegerChecked,
@@ -247,9 +271,14 @@ pub enum HirBinaryOp {
     AddIntegerChecked,
     SubtractIntegerChecked,
     MultiplyIntegerChecked,
+    DivideIntegerSignedChecked,
+    DivideIntegerUnsignedChecked,
+    RemainderIntegerSignedChecked,
+    RemainderIntegerUnsignedChecked,
     AddFloat,
     SubtractFloat,
     MultiplyFloat,
+    DivideFloat,
     Less,
     LessEqual,
     Greater,
@@ -316,16 +345,18 @@ pub fn collect_program_signatures(
     for module in &program.modules {
         for f in module.ast.functions() {
             let id = FunctionId(signatures.len() as u32);
-            if names[module.info.id.0 as usize]
-                .insert(f.name.clone(), id)
-                .is_some()
+            if builtin(&f.name).is_some()
+                || aliases[module.info.id.0 as usize].contains_key(&f.name)
+                || names[module.info.id.0 as usize]
+                    .insert(f.name.clone(), id)
+                    .is_some()
             {
                 return Err(vec![src(
                     Diagnostic::new(
                         "E0211",
                         Phase::Semantic,
                         DiagnosticCategory::Name,
-                        format!("duplicate function `{}`", f.name),
+                        format!("duplicate function or type name `{}`", f.name),
                         Some(f.span),
                     ),
                     module,
@@ -572,7 +603,12 @@ struct Analyzer<'a> {
 }
 struct Checked {
     expr: HirExpr,
-    constant: Option<i128>,
+    constant: Option<ConstantValue>,
+}
+#[derive(Clone, Copy)]
+enum ConstantValue {
+    Integer(i128),
+    Float(FloatValue),
 }
 impl Analyzer<'_> {
     fn block(&mut self, b: &AstBlock, nested: bool) -> Result<HirBlock, Vec<Diagnostic>> {
@@ -704,7 +740,14 @@ impl Analyzer<'_> {
                     constant: None,
                 }
             }
-            AstExprKind::Call { callee, args } => self.call(callee, args, e.span)?,
+            AstExprKind::Call { callee, args } => {
+                if let Some(target) = builtin(callee).or_else(|| self.aliases.get(callee).copied())
+                {
+                    self.explicit_cast(callee, target, args, e.span)?
+                } else {
+                    self.call(callee, args, e.span)?
+                }
+            }
             AstExprKind::QualifiedCall {
                 module,
                 function,
@@ -771,7 +814,7 @@ impl Analyzer<'_> {
                 ty,
                 span,
             },
-            constant: Some(value),
+            constant: Some(ConstantValue::Integer(value)),
         })
     }
     fn float(
@@ -816,7 +859,7 @@ impl Analyzer<'_> {
                 ty,
                 span,
             },
-            constant: None,
+            constant: Some(ConstantValue::Float(value)),
         })
     }
     fn negate(&self, o: &AstExpr, span: Span) -> Result<Checked, Vec<Diagnostic>> {
@@ -845,7 +888,81 @@ impl Analyzer<'_> {
                 ty,
                 span,
             },
-            constant: c.constant.and_then(i128::checked_neg),
+            constant: match c.constant {
+                Some(ConstantValue::Integer(value)) => {
+                    value.checked_neg().map(ConstantValue::Integer)
+                }
+                Some(ConstantValue::Float(FloatValue::Float32(bits))) => Some(
+                    ConstantValue::Float(FloatValue::Float32((-f32::from_bits(bits)).to_bits())),
+                ),
+                Some(ConstantValue::Float(FloatValue::Float64(bits))) => Some(
+                    ConstantValue::Float(FloatValue::Float64((-f64::from_bits(bits)).to_bits())),
+                ),
+                None => None,
+            },
+        })
+    }
+    fn explicit_cast(
+        &self,
+        spelling: &str,
+        target: Type,
+        args: &[AstExpr],
+        span: Span,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        if args.len() != 1 {
+            return Err(vec![Diagnostic::new(
+                "E0230",
+                Phase::Semantic,
+                DiagnosticCategory::Conversion,
+                format!("conversion target `{spelling}` expects exactly one operand"),
+                Some(span),
+            )]);
+        }
+        let operand = match self.expression(&args[0], None) {
+            Ok(value) => value,
+            Err(diagnostics)
+                if target.as_integer().is_some()
+                    && diagnostics.first().is_some_and(|d| d.code == "E0209") =>
+            {
+                self.expression(&args[0], Some(target))?
+            }
+            Err(diagnostics) => return Err(diagnostics),
+        };
+        let source = operand.expr.ty;
+        if source == Type::Bool || target == Type::Bool {
+            return Err(vec![Diagnostic::new(
+                "E0232",
+                Phase::Semantic,
+                DiagnosticCategory::Conversion,
+                format!("bool has no numeric conversions ({source} to {target})"),
+                Some(span),
+            )]);
+        }
+        let kind = select_cast_kind(source, target, self.target).ok_or_else(|| {
+            vec![Diagnostic::new(
+                "E0230",
+                Phase::Semantic,
+                DiagnosticCategory::Conversion,
+                format!("invalid explicit scalar conversion from {source} to {target}"),
+                Some(span),
+            )]
+        })?;
+        let constant = operand
+            .constant
+            .map(|value| convert_constant(value, target, self.target, span))
+            .transpose()?;
+        Ok(Checked {
+            expr: HirExpr {
+                kind: HirExprKind::ExplicitCast {
+                    kind,
+                    source_type: source,
+                    target_type: target,
+                    operand: Box::new(operand.expr),
+                },
+                ty: target,
+                span,
+            },
+            constant,
         })
     }
     fn call(&self, n: &str, args: &[AstExpr], span: Span) -> Result<Checked, Vec<Diagnostic>> {
@@ -984,17 +1101,30 @@ impl Analyzer<'_> {
             .ok_or_else(|| vec![conversion_error(l.expr.ty, r.expr.ty, span)])?;
         let l = self.coerce(l, Some(common))?;
         let r = self.coerce(r, Some(common))?;
+        if matches!(op, AstBinaryOp::Remainder) && common.as_float().is_some() {
+            return Err(vec![Diagnostic::new(
+                "E0235",
+                Phase::Semantic,
+                DiagnosticCategory::Division,
+                "floating `%` is not supported; `%` is the integer remainder operator",
+                Some(span),
+            )]);
+        }
         let arithmetic = matches!(
             op,
-            AstBinaryOp::Add | AstBinaryOp::Subtract | AstBinaryOp::Multiply
+            AstBinaryOp::Add
+                | AstBinaryOp::Subtract
+                | AstBinaryOp::Multiply
+                | AstBinaryOp::Divide
+                | AstBinaryOp::Remainder
         );
         let result = if arithmetic { common } else { Type::Bool };
         let known_integer = common.as_integer().is_some()
             && arithmetic
             && l.constant.is_some()
             && r.constant.is_some();
-        let constant = if common.as_integer().is_some() {
-            const_bin(op, l.constant, r.constant)
+        let constant = if let Some(integer) = common.as_integer() {
+            const_bin(op, l.constant, r.constant, integer, span, self.target)?
         } else {
             None
         };
@@ -1007,7 +1137,7 @@ impl Analyzer<'_> {
                 Some(span),
             )]);
         }
-        if let Some(v) = constant {
+        if let Some(ConstantValue::Integer(v)) = constant {
             check_value(v, common, span, self.target)?
         }
         Ok(bin_result(op, l, r, result, constant))
@@ -1064,21 +1194,142 @@ fn common(a: Type, b: Type) -> Option<Type> {
         _ => None,
     }
 }
+fn select_cast_kind(from: Type, to: Type, target: TargetProperties) -> Option<CastKind> {
+    Some(match (from, to) {
+        (a, b) if a == b => CastKind::Identity,
+        (Type::Integer(a), Type::Integer(b)) if a.is_signed() != b.is_signed() => {
+            CastKind::IntegerSignednessChecked
+        }
+        (Type::Integer(a), Type::Integer(b)) => match a.bits(target).cmp(&b.bits(target)) {
+            std::cmp::Ordering::Less if a.is_signed() => CastKind::IntegerExtendSigned,
+            std::cmp::Ordering::Less => CastKind::IntegerExtendUnsigned,
+            std::cmp::Ordering::Equal => CastKind::IntegerReencode,
+            std::cmp::Ordering::Greater => CastKind::IntegerNarrowChecked,
+        },
+        (Type::Integer(a), Type::Float(_)) if a.is_signed() => CastKind::SignedIntegerToFloat,
+        (Type::Integer(_), Type::Float(_)) => CastKind::UnsignedIntegerToFloat,
+        (Type::Float(_), Type::Integer(b)) if b.is_signed() => {
+            CastKind::FloatToSignedIntegerChecked
+        }
+        (Type::Float(_), Type::Integer(_)) => CastKind::FloatToUnsignedIntegerChecked,
+        (Type::Float(FloatType::Float32), Type::Float(FloatType::Float64)) => CastKind::FloatExtend,
+        (Type::Float(FloatType::Float64), Type::Float(FloatType::Float32)) => {
+            CastKind::FloatTruncate
+        }
+        _ => return None,
+    })
+}
+
+fn convert_constant(
+    value: ConstantValue,
+    target: Type,
+    properties: TargetProperties,
+    span: Span,
+) -> Result<ConstantValue, Vec<Diagnostic>> {
+    match (value, target) {
+        (ConstantValue::Integer(value), Type::Integer(integer)) => {
+            let (min, max) = integer.range(properties);
+            if value < min || value > max {
+                return Err(vec![cast_range(value.to_string(), target, span)]);
+            }
+            Ok(ConstantValue::Integer(value))
+        }
+        (ConstantValue::Integer(value), Type::Float(FloatType::Float32)) => Ok(
+            ConstantValue::Float(FloatValue::Float32((value as f32).to_bits())),
+        ),
+        (ConstantValue::Integer(value), Type::Float(FloatType::Float64)) => Ok(
+            ConstantValue::Float(FloatValue::Float64((value as f64).to_bits())),
+        ),
+        (ConstantValue::Float(value), Type::Integer(integer)) => {
+            let number = float_as_f64(value);
+            let (min, max) = integer.range(properties);
+            let lower_ok = if integer.is_signed() {
+                let min_float = integer_boundary_as_f64(value, min);
+                let below = integer_boundary_as_f64(value, min - 1);
+                if below == min_float {
+                    number >= min_float
+                } else {
+                    number > below
+                }
+            } else {
+                number > -1.0
+            };
+            let upper_exclusive = integer_boundary_as_f64(value, max + 1);
+            if !number.is_finite() || !lower_ok || number >= upper_exclusive {
+                return Err(vec![cast_range(format_float(value), target, span)]);
+            }
+            Ok(ConstantValue::Integer(number.trunc() as i128))
+        }
+        (ConstantValue::Float(value), Type::Float(FloatType::Float32)) => Ok(ConstantValue::Float(
+            FloatValue::Float32((float_as_f64(value) as f32).to_bits()),
+        )),
+        (ConstantValue::Float(value), Type::Float(FloatType::Float64)) => Ok(ConstantValue::Float(
+            FloatValue::Float64(float_as_f64(value).to_bits()),
+        )),
+        _ => unreachable!("bool conversions are rejected before constant conversion"),
+    }
+}
+
+fn float_as_f64(value: FloatValue) -> f64 {
+    match value {
+        FloatValue::Float32(bits) => f64::from(f32::from_bits(bits)),
+        FloatValue::Float64(bits) => f64::from_bits(bits),
+    }
+}
+
+fn integer_boundary_as_f64(source: FloatValue, value: i128) -> f64 {
+    match source {
+        FloatValue::Float32(_) => f64::from(value as f32),
+        FloatValue::Float64(_) => value as f64,
+    }
+}
+
+fn format_float(value: FloatValue) -> String {
+    match value {
+        FloatValue::Float32(bits) => f32::from_bits(bits).to_string(),
+        FloatValue::Float64(bits) => f64::from_bits(bits).to_string(),
+    }
+}
+
+fn cast_range(value: impl std::fmt::Display, target: Type, span: Span) -> Diagnostic {
+    Diagnostic::new(
+        "E0231",
+        Phase::Semantic,
+        DiagnosticCategory::Conversion,
+        format!("constant value `{value}` is outside the representable range of {target}"),
+        Some(span),
+    )
+}
 fn bin_result(
     aop: AstBinaryOp,
     l: Checked,
     r: Checked,
     ty: Type,
-    constant: Option<i128>,
+    constant: Option<ConstantValue>,
 ) -> Checked {
     let float = l.expr.ty.as_float().is_some();
     let op = match aop {
         AstBinaryOp::Add if float => HirBinaryOp::AddFloat,
         AstBinaryOp::Subtract if float => HirBinaryOp::SubtractFloat,
         AstBinaryOp::Multiply if float => HirBinaryOp::MultiplyFloat,
+        AstBinaryOp::Divide if float => HirBinaryOp::DivideFloat,
         AstBinaryOp::Add => HirBinaryOp::AddIntegerChecked,
         AstBinaryOp::Subtract => HirBinaryOp::SubtractIntegerChecked,
         AstBinaryOp::Multiply => HirBinaryOp::MultiplyIntegerChecked,
+        AstBinaryOp::Divide => {
+            if l.expr.ty.as_integer().unwrap().is_signed() {
+                HirBinaryOp::DivideIntegerSignedChecked
+            } else {
+                HirBinaryOp::DivideIntegerUnsignedChecked
+            }
+        }
+        AstBinaryOp::Remainder => {
+            if l.expr.ty.as_integer().unwrap().is_signed() {
+                HirBinaryOp::RemainderIntegerSignedChecked
+            } else {
+                HirBinaryOp::RemainderIntegerUnsignedChecked
+            }
+        }
         AstBinaryOp::Less => HirBinaryOp::Less,
         AstBinaryOp::LessEqual => HirBinaryOp::LessEqual,
         AstBinaryOp::Greater => HirBinaryOp::Greater,
@@ -1100,14 +1351,45 @@ fn bin_result(
         constant,
     }
 }
-fn const_bin(op: AstBinaryOp, a: Option<i128>, b: Option<i128>) -> Option<i128> {
-    let (a, b) = (a?, b?);
-    match op {
+fn const_bin(
+    op: AstBinaryOp,
+    a: Option<ConstantValue>,
+    b: Option<ConstantValue>,
+    ty: IntegerType,
+    span: Span,
+    target: TargetProperties,
+) -> Result<Option<ConstantValue>, Vec<Diagnostic>> {
+    let (Some(ConstantValue::Integer(a)), Some(ConstantValue::Integer(b))) = (a, b) else {
+        return Ok(None);
+    };
+    let value = match op {
         AstBinaryOp::Add => a.checked_add(b),
         AstBinaryOp::Subtract => a.checked_sub(b),
         AstBinaryOp::Multiply => a.checked_mul(b),
-        _ => None,
-    }
+        AstBinaryOp::Divide | AstBinaryOp::Remainder if b == 0 => {
+            return Err(vec![Diagnostic::new(
+                "E0233",
+                Phase::Semantic,
+                DiagnosticCategory::Division,
+                "constant integer division or remainder by zero",
+                Some(span),
+            )]);
+        }
+        AstBinaryOp::Divide if ty.is_signed() && a == ty.range(target).0 && b == -1 => {
+            return Err(vec![Diagnostic::new(
+                "E0234",
+                Phase::Semantic,
+                DiagnosticCategory::Division,
+                format!("constant signed division overflows {ty}: MIN / -1"),
+                Some(span),
+            )]);
+        }
+        AstBinaryOp::Divide => a.checked_div(b),
+        AstBinaryOp::Remainder if ty.is_signed() && a == ty.range(target).0 && b == -1 => Some(0),
+        AstBinaryOp::Remainder => a.checked_rem(b),
+        _ => return Ok(None),
+    };
+    Ok(value.map(ConstantValue::Integer))
 }
 fn builtin(n: &str) -> Option<Type> {
     use IntegerType::*;
@@ -1398,6 +1680,21 @@ fn verify_expr(
                 return Err(fail("HIR coercion invalid".into()));
             }
         }
+        HirExprKind::ExplicitCast {
+            kind,
+            source_type,
+            target_type,
+            operand,
+        } => {
+            verify_expr(operand, f, sigs, fail)?;
+            if operand.ty != *source_type
+                || e.ty != *target_type
+                || select_cast_kind(*source_type, *target_type, TargetProperties::LINUX_X86_64)
+                    != Some(*kind)
+            {
+                return Err(fail("HIR explicit cast contract invalid".into()));
+            }
+        }
         HirExprKind::Unary { op, operand } => {
             verify_expr(operand, f, sigs, fail)?;
             let ok = match op {
@@ -1422,9 +1719,21 @@ fn verify_expr(
                 | HirBinaryOp::MultiplyIntegerChecked => {
                     left.ty.as_integer().is_some() && e.ty == left.ty
                 }
-                HirBinaryOp::AddFloat | HirBinaryOp::SubtractFloat | HirBinaryOp::MultiplyFloat => {
-                    left.ty.as_float().is_some() && e.ty == left.ty
+                HirBinaryOp::DivideIntegerSignedChecked
+                | HirBinaryOp::RemainderIntegerSignedChecked => {
+                    left.ty.as_integer().is_some_and(IntegerType::is_signed) && e.ty == left.ty
                 }
+                HirBinaryOp::DivideIntegerUnsignedChecked
+                | HirBinaryOp::RemainderIntegerUnsignedChecked => {
+                    left.ty
+                        .as_integer()
+                        .is_some_and(|integer| !integer.is_signed())
+                        && e.ty == left.ty
+                }
+                HirBinaryOp::AddFloat
+                | HirBinaryOp::SubtractFloat
+                | HirBinaryOp::MultiplyFloat
+                | HirBinaryOp::DivideFloat => left.ty.as_float().is_some() && e.ty == left.ty,
                 HirBinaryOp::Less
                 | HirBinaryOp::LessEqual
                 | HirBinaryOp::Greater
@@ -1481,5 +1790,40 @@ mod tests {
     fn recursion() {
         check("int fact(int n){if(n<=1){return 1;}return n*fact(n-1);}int main(){return fact(5);}")
             .unwrap();
+    }
+    #[test]
+    fn explicit_scalar_casts_are_typed_and_constant_checked() {
+        let hir = check("alias Tiny=int8;int main(){int64 x=127;Tiny y=Tiny(x);uint16 u=uint16(y);float64 f=double(u);return int32(f);}").unwrap();
+        let dump = hir.dump();
+        assert!(dump.contains("ExplicitCast"));
+        assert!(dump.contains("source_type"));
+        assert!(dump.contains("target_type"));
+        check("int main(){uint64 x=uint64(18446744073709551615);return 0;}").unwrap();
+        check("int main(){return int8(-128.9);}").unwrap();
+
+        for (source, code) in [
+            ("int main(){return int8(128);}", "E0231"),
+            ("int main(){return uint32(-1);}", "E0231"),
+            ("int main(){return int8(-129.0);}", "E0231"),
+            ("int main(){return int(true);}", "E0232"),
+            ("int main(){return bool(1);}", "E0232"),
+            ("int main(){return int32(1.0,2.0);}", "E0230"),
+        ] {
+            assert_eq!(check(source).unwrap_err()[0].code, code, "{source}");
+        }
+    }
+    #[test]
+    fn division_and_remainder_constants_follow_v1_rules() {
+        check("int main(){if(-5/2==-2){if(-5%2==-1){return 42;}}return 0;}").unwrap();
+        check("int main(){int8 a=7;int16 b=2;return a/b;}").unwrap();
+        check("int main(){float32 a=5.0;float64 b=2.0;float64 c=a/b;return int(c);}").unwrap();
+        for (source, code) in [
+            ("int main(){return 1/0;}", "E0233"),
+            ("int main(){return -9223372036854775808/-1;}", "E0234"),
+            ("int main(){return int(4.0%2.0);}", "E0235"),
+        ] {
+            assert_eq!(check(source).unwrap_err()[0].code, code, "{source}");
+        }
+        check("int main(){return -9223372036854775808%-1;}").unwrap();
     }
 }

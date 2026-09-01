@@ -13,11 +13,11 @@ pub use ast::{
 };
 pub use diagnostic::{Diagnostic, DiagnosticCategory, Phase, SourceFile, SourceId, Span};
 pub use hir::{
-    CoercionKind, DeclaredProgram, FloatValue, FunctionId, FunctionSignature, HirBinaryOp,
-    HirBlock, HirExpr, HirExprKind, HirFunction, HirLocal, HirParameter, HirStmt, HirStmtKind,
-    HirUnaryOp, LocalId, ModuleId, ModuleInfo, ParameterSignature, ParsedModule, ParsedProgram,
-    ResolvedImport, TypeAliasInfo, TypedHir, analyze, analyze_bodies, analyze_bodies_for_target,
-    collect_program_signatures, collect_signatures, verify_hir,
+    CastKind, CoercionKind, DeclaredProgram, FloatValue, FunctionId, FunctionSignature,
+    HirBinaryOp, HirBlock, HirExpr, HirExprKind, HirFunction, HirLocal, HirParameter, HirStmt,
+    HirStmtKind, HirUnaryOp, LocalId, ModuleId, ModuleInfo, ParameterSignature, ParsedModule,
+    ParsedProgram, ResolvedImport, TypeAliasInfo, TypedHir, analyze, analyze_bodies,
+    analyze_bodies_for_target, collect_program_signatures, collect_signatures, verify_hir,
 };
 pub use lexer::{Token, TokenKind, lex};
 pub use parser::parse;

@@ -1,0 +1,31 @@
+int64 signed_div(int64 a, int64 b) { return a / b; }
+int64 signed_rem(int64 a, int64 b) { return a % b; }
+uint16 unsigned_div(uint16 a, uint16 b) { return a / b; }
+uint16 unsigned_rem(uint16 a, uint16 b) { return a % b; }
+
+int main() {
+    if (signed_div(5, 2) == 2) {
+        if (signed_div(-5, 2) == -2) {
+            if (signed_div(5, -2) == -2) {
+                if (signed_div(-5, -2) == 2) {
+                    if (signed_rem(-5, 2) == -1) {
+                        if (signed_div(-5, 2) * 2 + signed_rem(-5, 2) == -5) {
+                            if (unsigned_div(9, 2) == 4) {
+                                if (unsigned_rem(9, 2) == 1) {
+                                    int32 narrow = 9;
+                                    int64 wide = 2;
+                                    if (narrow / wide == 4) {
+                                        float32 f = 5.0;
+                                        float64 d = 2.0;
+                                        if (f / d == 2.5) { return 42; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return 0;
+}

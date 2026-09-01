@@ -1,0 +1,4 @@
+int main() {
+    float64 nan = 0.0 / 0.0;
+    return int(nan);
+}

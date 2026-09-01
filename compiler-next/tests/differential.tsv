@@ -16,8 +16,8 @@ type_mismatch	PRESERVE_REJECTION	reject:E0205	reject	programs/type_mismatch.ae
 non_bool_condition	PRESERVE_REJECTION	reject:E0205	reject	programs/non_bool_condition.ae
 literal_out_of_range	PRESERVE_REJECTION	reject:E0209	reject	programs/literal_out_of_range.ae
 constant_overflow	V1_CONTRACT	reject:E0210	n/a	programs/constant_overflow.ae
-unsupported_division	OPEN_DECISION	reject:E0002	accept:7	programs/unsupported_division.ae
-unsupported_modulo	OPEN_DECISION	reject:E0002	n/a	programs/unsupported_modulo.ae
+integer_division_semantic_change	INTENTIONAL_CHANGE	accept:7	accept:0	programs/unsupported_division.ae
+integer_remainder	V1_CONTRACT	accept:0	n/a	programs/unsupported_modulo.ae
 malformed	PRESERVE_REJECTION	reject:E0100	reject	programs/malformed.ae
 invalid_main_parameter	V1_CONTRACT	reject:E0201	n/a	programs/unsupported_parameter.ae
 missing_main	V1_CONTRACT	reject:E0200	n/a	programs/unsupported_function.ae
@@ -43,3 +43,14 @@ unsigned_width	V1_CONTRACT	accept:42	n/a	programs/v3_uint.ae
 float32_physical	V1_CONTRACT	accept:42	n/a	programs/v3_float32.ae
 numeric_narrowing	V1_CONTRACT	reject:E0218	n/a	programs/v3_narrowing.ae
 alias_cycle	V1_CONTRACT	reject:E0226	n/a	programs/v3_alias_cycle.ae
+explicit_scalar_casts	V1_CONTRACT	accept:127	n/a	programs/v4_casts.ae
+checked_cast_runtime	V1_CONTRACT	trap	n/a	programs/v4_cast_trap.ae
+signed_unsigned_cast_runtime	V1_CONTRACT	trap	n/a	programs/v4_signed_unsigned_trap.ae
+unsigned_signed_cast_runtime	V1_CONTRACT	trap	n/a	programs/v4_unsigned_signed_trap.ae
+integer_float_division	INTENTIONAL_CHANGE	accept:42	n/a	programs/v4_division.ae
+division_by_zero	V1_CONTRACT	trap	n/a	programs/v4_div_zero.ae
+division_overflow	V1_CONTRACT	trap	n/a	programs/v4_div_overflow.ae
+safe_min_remainder	V1_CONTRACT	accept:0	n/a	programs/v4_rem_min.ae
+float_ieee_division	V1_CONTRACT	accept:42	n/a	programs/v4_float_ieee.ae
+float_to_int_runtime	V1_CONTRACT	trap	n/a	programs/v4_float_to_int_trap.ae
+nan_to_int_runtime	V1_CONTRACT	trap	n/a	programs/v4_nan_to_int_trap.ae

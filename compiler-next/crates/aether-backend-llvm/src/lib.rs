@@ -1,9 +1,9 @@
-//! LLVM backend for verified Vertical-3 program SSA.
+//! LLVM backend for verified Vertical-4 program SSA.
 
 use std::fmt::Write;
 
 use aether_frontend::{
-    CoercionKind, FloatType, FloatValue, FunctionSignature, IntegerType, ModuleInfo,
+    CastKind, CoercionKind, FloatType, FloatValue, FunctionSignature, IntegerType, ModuleInfo,
     TargetProperties, Type,
 };
 use aether_middle::{
@@ -21,7 +21,7 @@ pub struct TargetDescriptor {
 }
 
 impl TargetDescriptor {
-    /// The target admitted by NEXT-VERTICAL-3.
+    /// The target admitted by NEXT-VERTICAL-4.
     #[must_use]
     pub const fn linux_x86_64() -> Self {
         Self {
@@ -52,7 +52,7 @@ impl Backend for LlvmTextBackend {
 pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let program = ssa.as_ssa();
     let mut output = String::new();
-    writeln!(output, "; Aether NEXT-VERTICAL-3").unwrap();
+    writeln!(output, "; Aether NEXT-VERTICAL-4").unwrap();
     writeln!(
         output,
         "; Internal bootstrap ABI and symbol mangling; not a public Aether ABI"
@@ -137,6 +137,8 @@ fn emit_function(
         .collect();
     let mut overflow_trap = false;
     let mut division_trap = false;
+    let mut conversion_trap = false;
+    let mut division_overflow_trap = false;
     for block in &function.blocks {
         writeln!(output, "{}:", block_label(block.id)).unwrap();
         for phi in &block.phis {
@@ -192,6 +194,26 @@ fn emit_function(
                     )
                     .unwrap();
                 }
+                SsaOp::Cast {
+                    kind,
+                    operand,
+                    from,
+                    trap,
+                } => {
+                    if *trap == Some(TrapKind::ConversionOutOfRange) {
+                        conversion_trap = true;
+                    }
+                    emit_cast(
+                        output,
+                        block.id,
+                        instruction.result.0,
+                        *kind,
+                        operand,
+                        *from,
+                        instruction.ty,
+                        *trap,
+                    );
+                }
                 SsaOp::Unary {
                     op: UnaryOp::NegateIntegerChecked,
                     operand,
@@ -228,6 +250,7 @@ fn emit_function(
                     left,
                     right,
                     trap,
+                    secondary_trap,
                 } => match op {
                     BinaryOp::AddIntegerChecked
                     | BinaryOp::SubtractIntegerChecked
@@ -255,11 +278,39 @@ fn emit_function(
                             &llvm_operand(right),
                         );
                     }
-                    BinaryOp::AddFloat | BinaryOp::SubtractFloat | BinaryOp::MultiplyFloat => {
+                    BinaryOp::DivideIntegerSignedChecked
+                    | BinaryOp::DivideIntegerUnsignedChecked
+                    | BinaryOp::RemainderIntegerSignedChecked
+                    | BinaryOp::RemainderIntegerUnsignedChecked => {
+                        division_trap = true;
+                        if matches!(op, BinaryOp::DivideIntegerSignedChecked) {
+                            division_overflow_trap = true;
+                        }
+                        emit_integer_division(
+                            output,
+                            block.id,
+                            instruction.result.0,
+                            *op,
+                            operand_type(function, left),
+                            &llvm_operand(left),
+                            &llvm_operand(right),
+                        );
+                        debug_assert_eq!(*trap, Some(TrapKind::DivisionByZero));
+                        debug_assert_eq!(
+                            *secondary_trap,
+                            matches!(op, BinaryOp::DivideIntegerSignedChecked)
+                                .then_some(TrapKind::DivisionOverflow)
+                        );
+                    }
+                    BinaryOp::AddFloat
+                    | BinaryOp::SubtractFloat
+                    | BinaryOp::MultiplyFloat
+                    | BinaryOp::DivideFloat => {
                         let opcode = match op {
                             BinaryOp::AddFloat => "fadd",
                             BinaryOp::SubtractFloat => "fsub",
                             BinaryOp::MultiplyFloat => "fmul",
+                            BinaryOp::DivideFloat => "fdiv",
                             _ => unreachable!(),
                         };
                         writeln!(
@@ -398,6 +449,14 @@ fn emit_function(
                 division_trap = true;
                 writeln!(output, "  br label %trap_division_by_zero").unwrap();
             }
+            SsaTerminator::Trap(TrapKind::ConversionOutOfRange) => {
+                conversion_trap = true;
+                writeln!(output, "  br label %trap_conversion_out_of_range").unwrap();
+            }
+            SsaTerminator::Trap(TrapKind::DivisionOverflow) => {
+                division_overflow_trap = true;
+                writeln!(output, "  br label %trap_division_overflow").unwrap();
+            }
         }
     }
     if overflow_trap {
@@ -411,6 +470,20 @@ fn emit_function(
         writeln!(
             output,
             "trap_division_by_zero:\n  call void @llvm.trap()\n  unreachable"
+        )
+        .unwrap();
+    }
+    if conversion_trap {
+        writeln!(
+            output,
+            "trap_conversion_out_of_range:\n  call void @llvm.trap()\n  unreachable"
+        )
+        .unwrap();
+    }
+    if division_overflow_trap {
+        writeln!(
+            output,
+            "trap_division_overflow:\n  call void @llvm.trap()\n  unreachable"
         )
         .unwrap();
     }
@@ -450,16 +523,372 @@ fn emit_checked(
     writeln!(output, "{}:", continuation_label(block, result)).unwrap();
 }
 
+#[allow(clippy::too_many_arguments)]
+fn emit_cast(
+    output: &mut String,
+    block: BlockId,
+    result: u32,
+    kind: CastKind,
+    operand: &SsaOperand,
+    from: Type,
+    to: Type,
+    trap: Option<TrapKind>,
+) {
+    let value = llvm_operand(operand);
+    match kind {
+        CastKind::Identity | CastKind::IntegerReencode => {
+            emit_identity(output, result, to, &value);
+        }
+        CastKind::IntegerExtendSigned => {
+            writeln!(
+                output,
+                "  %v{result} = sext {} {value} to {}",
+                llvm_type(from),
+                llvm_type(to)
+            )
+            .unwrap();
+        }
+        CastKind::IntegerExtendUnsigned => {
+            writeln!(
+                output,
+                "  %v{result} = zext {} {value} to {}",
+                llvm_type(from),
+                llvm_type(to)
+            )
+            .unwrap();
+        }
+        CastKind::IntegerNarrowChecked | CastKind::IntegerSignednessChecked => {
+            if trap == Some(TrapKind::ConversionOutOfRange) {
+                emit_integer_cast_check(output, block, result, &value, from, to);
+            }
+            emit_integer_cast_value(output, result, &value, from, to);
+        }
+        CastKind::SignedIntegerToFloat | CastKind::UnsignedIntegerToFloat => {
+            let opcode = if kind == CastKind::SignedIntegerToFloat {
+                "sitofp"
+            } else {
+                "uitofp"
+            };
+            writeln!(
+                output,
+                "  %v{result} = {opcode} {} {value} to {}",
+                llvm_type(from),
+                llvm_type(to)
+            )
+            .unwrap();
+        }
+        CastKind::FloatToSignedIntegerChecked | CastKind::FloatToUnsignedIntegerChecked => {
+            emit_float_to_integer_check(output, block, result, &value, from, to);
+            let opcode = if kind == CastKind::FloatToSignedIntegerChecked {
+                "fptosi"
+            } else {
+                "fptoui"
+            };
+            writeln!(
+                output,
+                "  %v{result} = {opcode} {} {value} to {}",
+                llvm_type(from),
+                llvm_type(to)
+            )
+            .unwrap();
+        }
+        CastKind::FloatExtend => {
+            writeln!(
+                output,
+                "  %v{result} = fpext {} {value} to {}",
+                llvm_type(from),
+                llvm_type(to)
+            )
+            .unwrap();
+        }
+        CastKind::FloatTruncate => {
+            writeln!(
+                output,
+                "  %v{result} = fptrunc {} {value} to {}",
+                llvm_type(from),
+                llvm_type(to)
+            )
+            .unwrap();
+        }
+    }
+}
+
+fn emit_identity(output: &mut String, result: u32, ty: Type, value: &str) {
+    writeln!(
+        output,
+        "  %v{result} = select i1 true, {} {value}, {} {value}",
+        llvm_type(ty),
+        llvm_type(ty)
+    )
+    .unwrap();
+}
+
+fn emit_integer_cast_check(
+    output: &mut String,
+    block: BlockId,
+    result: u32,
+    value: &str,
+    from: Type,
+    to: Type,
+) {
+    let source = from.as_integer().expect("verified integer cast source");
+    let target = to.as_integer().expect("verified integer cast target");
+    let properties = TargetProperties::LINUX_X86_64;
+    let (source_min, source_max) = source.range(properties);
+    let (target_min, target_max) = target.range(properties);
+    let predicate_prefix = if source.is_signed() { 's' } else { 'u' };
+    let mut conditions = Vec::new();
+    if target_min > source_min {
+        writeln!(
+            output,
+            "  %cast_lower{result} = icmp {predicate_prefix}ge {} {value}, {target_min}",
+            llvm_type(from)
+        )
+        .unwrap();
+        conditions.push(format!("%cast_lower{result}"));
+    }
+    if target_max < source_max {
+        writeln!(
+            output,
+            "  %cast_upper{result} = icmp {predicate_prefix}le {} {value}, {target_max}",
+            llvm_type(from)
+        )
+        .unwrap();
+        conditions.push(format!("%cast_upper{result}"));
+    }
+    let condition = match conditions.as_slice() {
+        [condition] => condition.clone(),
+        [lower, upper] => {
+            writeln!(output, "  %cast_ok{result} = and i1 {lower}, {upper}").unwrap();
+            format!("%cast_ok{result}")
+        }
+        _ => unreachable!("fallible integer cast has at least one range boundary"),
+    };
+    writeln!(
+        output,
+        "  br i1 {condition}, label %{}, label %trap_conversion_out_of_range",
+        continuation_label(block, result)
+    )
+    .unwrap();
+    writeln!(output, "{}:", continuation_label(block, result)).unwrap();
+}
+
+fn emit_integer_cast_value(output: &mut String, result: u32, value: &str, from: Type, to: Type) {
+    let properties = TargetProperties::LINUX_X86_64;
+    let source = from.as_integer().unwrap();
+    let target = to.as_integer().unwrap();
+    match source.bits(properties).cmp(&target.bits(properties)) {
+        std::cmp::Ordering::Less => {
+            let opcode = if source.is_signed() && target.is_signed() {
+                "sext"
+            } else {
+                "zext"
+            };
+            writeln!(
+                output,
+                "  %v{result} = {opcode} {} {value} to {}",
+                llvm_type(from),
+                llvm_type(to)
+            )
+            .unwrap();
+        }
+        std::cmp::Ordering::Greater => writeln!(
+            output,
+            "  %v{result} = trunc {} {value} to {}",
+            llvm_type(from),
+            llvm_type(to)
+        )
+        .unwrap(),
+        std::cmp::Ordering::Equal => emit_identity(output, result, to, value),
+    }
+}
+
+fn emit_float_to_integer_check(
+    output: &mut String,
+    block: BlockId,
+    result: u32,
+    value: &str,
+    from: Type,
+    to: Type,
+) {
+    let source = from.as_float().unwrap();
+    let target = to.as_integer().unwrap();
+    let (min, max) = target.range(TargetProperties::LINUX_X86_64);
+    let (lower_predicate, lower) = if target.is_signed() {
+        let minimum = float_boundary(source, min);
+        let below = float_boundary(source, min - 1);
+        if below == minimum {
+            ("oge", minimum)
+        } else {
+            ("ogt", below)
+        }
+    } else {
+        ("ogt", float_boundary(source, -1))
+    };
+    let upper = float_boundary(source, max + 1);
+    writeln!(
+        output,
+        "  %cast_lower{result} = fcmp {lower_predicate} {} {value}, {}",
+        llvm_type(from),
+        float_operand(lower)
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "  %cast_upper{result} = fcmp olt {} {value}, {}",
+        llvm_type(from),
+        float_operand(upper)
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "  %cast_ok{result} = and i1 %cast_lower{result}, %cast_upper{result}"
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "  br i1 %cast_ok{result}, label %{}, label %trap_conversion_out_of_range",
+        continuation_label(block, result)
+    )
+    .unwrap();
+    writeln!(output, "{}:", continuation_label(block, result)).unwrap();
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn float_boundary(source: FloatType, value: i128) -> FloatValue {
+    match source {
+        FloatType::Float32 => FloatValue::Float32((value as f32).to_bits()),
+        FloatType::Float64 => FloatValue::Float64((value as f64).to_bits()),
+    }
+}
+
+fn emit_integer_division(
+    output: &mut String,
+    block: BlockId,
+    result: u32,
+    op: BinaryOp,
+    ty: Type,
+    left: &str,
+    right: &str,
+) {
+    let llvm_ty = llvm_type(ty);
+    writeln!(output, "  %div_zero{result} = icmp eq {llvm_ty} {right}, 0").unwrap();
+    let nonzero = if matches!(
+        op,
+        BinaryOp::DivideIntegerUnsignedChecked | BinaryOp::RemainderIntegerUnsignedChecked
+    ) {
+        continuation_label(block, result)
+    } else {
+        format!("bb{}_nonzero_v{result}", block.0)
+    };
+    writeln!(
+        output,
+        "  br i1 %div_zero{result}, label %trap_division_by_zero, label %{nonzero}"
+    )
+    .unwrap();
+    writeln!(output, "{nonzero}:").unwrap();
+    match op {
+        BinaryOp::DivideIntegerUnsignedChecked | BinaryOp::RemainderIntegerUnsignedChecked => {
+            let opcode = if matches!(op, BinaryOp::DivideIntegerUnsignedChecked) {
+                "udiv"
+            } else {
+                "urem"
+            };
+            writeln!(output, "  %v{result} = {opcode} {llvm_ty} {left}, {right}").unwrap();
+        }
+        BinaryOp::DivideIntegerSignedChecked => {
+            let integer = ty.as_integer().unwrap();
+            let min = integer.range(TargetProperties::LINUX_X86_64).0;
+            writeln!(
+                output,
+                "  %div_min{result} = icmp eq {llvm_ty} {left}, {min}"
+            )
+            .unwrap();
+            writeln!(
+                output,
+                "  %div_neg_one{result} = icmp eq {llvm_ty} {right}, -1"
+            )
+            .unwrap();
+            writeln!(
+                output,
+                "  %div_overflow{result} = and i1 %div_min{result}, %div_neg_one{result}"
+            )
+            .unwrap();
+            writeln!(
+                output,
+                "  br i1 %div_overflow{result}, label %trap_division_overflow, label %{}",
+                continuation_label(block, result)
+            )
+            .unwrap();
+            writeln!(output, "{}:", continuation_label(block, result)).unwrap();
+            writeln!(output, "  %v{result} = sdiv {llvm_ty} {left}, {right}").unwrap();
+        }
+        BinaryOp::RemainderIntegerSignedChecked => {
+            let integer = ty.as_integer().unwrap();
+            let min = integer.range(TargetProperties::LINUX_X86_64).0;
+            let special = format!("bb{}_remainder_min_v{result}", block.0);
+            let normal = format!("bb{}_remainder_normal_v{result}", block.0);
+            writeln!(
+                output,
+                "  %rem_min{result} = icmp eq {llvm_ty} {left}, {min}"
+            )
+            .unwrap();
+            writeln!(
+                output,
+                "  %rem_neg_one{result} = icmp eq {llvm_ty} {right}, -1"
+            )
+            .unwrap();
+            writeln!(
+                output,
+                "  %rem_special{result} = and i1 %rem_min{result}, %rem_neg_one{result}"
+            )
+            .unwrap();
+            writeln!(
+                output,
+                "  br i1 %rem_special{result}, label %{special}, label %{normal}"
+            )
+            .unwrap();
+            writeln!(
+                output,
+                "{special}:\n  br label %{}",
+                continuation_label(block, result)
+            )
+            .unwrap();
+            writeln!(output, "{normal}:").unwrap();
+            writeln!(
+                output,
+                "  %rem_value{result} = srem {llvm_ty} {left}, {right}"
+            )
+            .unwrap();
+            writeln!(output, "  br label %{}", continuation_label(block, result)).unwrap();
+            writeln!(output, "{}:", continuation_label(block, result)).unwrap();
+            writeln!(
+                output,
+                "  %v{result} = phi {llvm_ty} [ 0, %{special} ], [ %rem_value{result}, %{normal} ]"
+            )
+            .unwrap();
+        }
+        _ => unreachable!("verified integer division opcode"),
+    }
+}
+
 fn is_checked(op: &SsaOp) -> bool {
     matches!(
         op,
         SsaOp::Unary {
             op: UnaryOp::NegateIntegerChecked,
             ..
+        } | SsaOp::Cast {
+            trap: Some(TrapKind::ConversionOutOfRange),
+            ..
         } | SsaOp::Binary {
             op: BinaryOp::AddIntegerChecked
                 | BinaryOp::SubtractIntegerChecked
-                | BinaryOp::MultiplyIntegerChecked,
+                | BinaryOp::MultiplyIntegerChecked
+                | BinaryOp::DivideIntegerSignedChecked
+                | BinaryOp::DivideIntegerUnsignedChecked
+                | BinaryOp::RemainderIntegerSignedChecked
+                | BinaryOp::RemainderIntegerUnsignedChecked,
             ..
         }
     )
@@ -531,14 +960,13 @@ fn operand_type(function: &SsaFunction, operand: &SsaOperand) -> Type {
 }
 
 fn float_operand(value: FloatValue) -> String {
-    let mut s = match value {
-        FloatValue::Float32(bits) => f32::from_bits(bits).to_string(),
-        FloatValue::Float64(bits) => f64::from_bits(bits).to_string(),
+    let bits = match value {
+        // LLVM spells non-double hexadecimal constants with the exact double
+        // encoding of the represented value.
+        FloatValue::Float32(bits) => f64::from(f32::from_bits(bits)).to_bits(),
+        FloatValue::Float64(bits) => bits,
     };
-    if !s.contains(['.', 'e', 'E']) {
-        s.push_str(".0");
-    }
-    s
+    format!("0x{bits:016X}")
 }
 
 /// Exposes deterministic bootstrap mangling for qualification without making it public ABI.
@@ -607,5 +1035,31 @@ mod tests {
             bootstrap_symbol_for("a_b", "c"),
             bootstrap_symbol_for("a", "b_c")
         );
+    }
+
+    #[test]
+    fn emits_explicit_scalar_conversion_instructions_and_checks() {
+        let output = llvm(
+            "int main(){int64 x=127;int8 y=int8(x);uint16 u=uint16(y);float64 f=double(u);float32 g=float32(f);return int32(g);}",
+        );
+        assert!(output.contains("trunc i64"));
+        assert!(output.contains("zext i8"));
+        assert!(output.contains("uitofp i16"));
+        assert!(output.contains("fptrunc double"));
+        assert!(output.contains("fptosi float"));
+        assert!(output.contains("trap_conversion_out_of_range"));
+    }
+
+    #[test]
+    fn emits_checked_integer_and_ieee_float_division() {
+        let output = llvm(
+            "int64 q(int64 a,int64 b){return a/b;}int64 r(int64 a,int64 b){return a%b;}float64 f(float64 a,float64 b){return a/b;}int main(){return q(5,2)+r(5,2)+int(f(4.0,2.0));}",
+        );
+        assert!(output.contains("icmp eq i64"));
+        assert!(output.contains("trap_division_by_zero"));
+        assert!(output.contains("trap_division_overflow"));
+        assert!(output.contains(" = sdiv i64 "));
+        assert!(output.contains(" = srem i64 "));
+        assert!(output.contains(" = fdiv double "));
     }
 }

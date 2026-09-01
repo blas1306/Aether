@@ -1,0 +1,10 @@
+int main() {
+    float64 infinity = 1.0 / 0.0;
+    float64 nan = 0.0 / 0.0;
+    float32 narrow_infinity = float32(infinity);
+    float32 narrow_nan = float32(nan);
+    if (narrow_infinity > 0.0) {
+        if (narrow_nan != narrow_nan) { return 42; }
+    }
+    return 0;
+}

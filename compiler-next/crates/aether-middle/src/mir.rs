@@ -5,9 +5,9 @@ use std::collections::VecDeque;
 use std::fmt::Write;
 
 use aether_frontend::{
-    CoercionKind, Diagnostic, DiagnosticCategory, FloatValue, FunctionId, FunctionSignature,
-    HirBinaryOp, HirBlock, HirExpr, HirExprKind, HirFunction, HirStmtKind, HirUnaryOp, LocalId,
-    ModuleInfo, Phase, Span, Type, TypedHir,
+    CastKind, CoercionKind, Diagnostic, DiagnosticCategory, FloatValue, FunctionId,
+    FunctionSignature, HirBinaryOp, HirBlock, HirExpr, HirExprKind, HirFunction, HirStmtKind,
+    HirUnaryOp, LocalId, ModuleInfo, Phase, Span, Type, TypedHir,
 };
 
 /// Basic-block identity, equal to its stable vector index.
@@ -54,8 +54,12 @@ pub enum Operand {
 pub enum TrapKind {
     /// Checked arithmetic overflow.
     IntegerOverflow,
-    /// Reserved for admitted division/remainder in a later slice.
+    /// Integer division or remainder by zero.
     DivisionByZero,
+    /// A checked value conversion cannot represent its result.
+    ConversionOutOfRange,
+    /// Signed `MIN / -1` cannot be represented.
+    DivisionOverflow,
 }
 
 /// Explicit scalar unary operations.
@@ -76,10 +80,15 @@ pub enum BinaryOp {
     SubtractIntegerChecked,
     /// Checked signed multiplication.
     MultiplyIntegerChecked,
+    DivideIntegerSignedChecked,
+    DivideIntegerUnsignedChecked,
+    RemainderIntegerSignedChecked,
+    RemainderIntegerUnsignedChecked,
     /// IEEE floating operations.
     AddFloat,
     SubtractFloat,
     MultiplyFloat,
+    DivideFloat,
     /// Signed comparison.
     Less,
     /// Signed comparison.
@@ -106,6 +115,13 @@ pub enum Rvalue {
         operand: Operand,
         from: Type,
     },
+    /// Explicit value conversion selected and typed in HIR.
+    Cast {
+        kind: CastKind,
+        operand: Operand,
+        from: Type,
+        trap: Option<TrapKind>,
+    },
     /// Unary computation, carrying its required trap effect in the opcode.
     Unary {
         op: UnaryOp,
@@ -118,6 +134,7 @@ pub enum Rvalue {
         left: Operand,
         right: Operand,
         trap: Option<TrapKind>,
+        secondary_trap: Option<TrapKind>,
     },
     /// Resolved direct call. The function table, not a source string, is authoritative.
     Call {
@@ -389,6 +406,7 @@ impl Builder {
         self.current = Some(exit);
     }
 
+    #[allow(clippy::too_many_lines)]
     fn lower_expr(&mut self, expression: &HirExpr) -> Operand {
         match &expression.kind {
             HirExprKind::Int(value) => Operand::Int {
@@ -432,6 +450,28 @@ impl Builder {
                 );
                 Operand::Local(destination)
             }
+            HirExprKind::ExplicitCast {
+                kind,
+                source_type,
+                target_type,
+                operand,
+            } => {
+                let operand = self.lower_expr(operand);
+                let destination = self.temporary(*target_type);
+                let trap = cast_can_fail(*source_type, *target_type)
+                    .then_some(TrapKind::ConversionOutOfRange);
+                self.assign(
+                    destination,
+                    Rvalue::Cast {
+                        kind: *kind,
+                        operand,
+                        from: *source_type,
+                        trap,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
             HirExprKind::Unary { op, operand } => {
                 let operand = self.lower_expr(operand);
                 let destination = self.temporary(expression.ty);
@@ -452,27 +492,52 @@ impl Builder {
             HirExprKind::Binary { op, left, right } => {
                 let left = self.lower_expr(left);
                 let right = self.lower_expr(right);
-                let (op, trap) = match op {
-                    HirBinaryOp::AddIntegerChecked => {
-                        (BinaryOp::AddIntegerChecked, Some(TrapKind::IntegerOverflow))
-                    }
+                let (op, trap, secondary_trap) = match op {
+                    HirBinaryOp::AddIntegerChecked => (
+                        BinaryOp::AddIntegerChecked,
+                        Some(TrapKind::IntegerOverflow),
+                        None,
+                    ),
                     HirBinaryOp::SubtractIntegerChecked => (
                         BinaryOp::SubtractIntegerChecked,
                         Some(TrapKind::IntegerOverflow),
+                        None,
                     ),
                     HirBinaryOp::MultiplyIntegerChecked => (
                         BinaryOp::MultiplyIntegerChecked,
                         Some(TrapKind::IntegerOverflow),
+                        None,
                     ),
-                    HirBinaryOp::AddFloat => (BinaryOp::AddFloat, None),
-                    HirBinaryOp::SubtractFloat => (BinaryOp::SubtractFloat, None),
-                    HirBinaryOp::MultiplyFloat => (BinaryOp::MultiplyFloat, None),
-                    HirBinaryOp::Less => (BinaryOp::Less, None),
-                    HirBinaryOp::LessEqual => (BinaryOp::LessEqual, None),
-                    HirBinaryOp::Greater => (BinaryOp::Greater, None),
-                    HirBinaryOp::GreaterEqual => (BinaryOp::GreaterEqual, None),
-                    HirBinaryOp::Equal => (BinaryOp::Equal, None),
-                    HirBinaryOp::NotEqual => (BinaryOp::NotEqual, None),
+                    HirBinaryOp::DivideIntegerSignedChecked => (
+                        BinaryOp::DivideIntegerSignedChecked,
+                        Some(TrapKind::DivisionByZero),
+                        Some(TrapKind::DivisionOverflow),
+                    ),
+                    HirBinaryOp::DivideIntegerUnsignedChecked => (
+                        BinaryOp::DivideIntegerUnsignedChecked,
+                        Some(TrapKind::DivisionByZero),
+                        None,
+                    ),
+                    HirBinaryOp::RemainderIntegerSignedChecked => (
+                        BinaryOp::RemainderIntegerSignedChecked,
+                        Some(TrapKind::DivisionByZero),
+                        None,
+                    ),
+                    HirBinaryOp::RemainderIntegerUnsignedChecked => (
+                        BinaryOp::RemainderIntegerUnsignedChecked,
+                        Some(TrapKind::DivisionByZero),
+                        None,
+                    ),
+                    HirBinaryOp::AddFloat => (BinaryOp::AddFloat, None, None),
+                    HirBinaryOp::SubtractFloat => (BinaryOp::SubtractFloat, None, None),
+                    HirBinaryOp::MultiplyFloat => (BinaryOp::MultiplyFloat, None, None),
+                    HirBinaryOp::DivideFloat => (BinaryOp::DivideFloat, None, None),
+                    HirBinaryOp::Less => (BinaryOp::Less, None, None),
+                    HirBinaryOp::LessEqual => (BinaryOp::LessEqual, None, None),
+                    HirBinaryOp::Greater => (BinaryOp::Greater, None, None),
+                    HirBinaryOp::GreaterEqual => (BinaryOp::GreaterEqual, None, None),
+                    HirBinaryOp::Equal => (BinaryOp::Equal, None, None),
+                    HirBinaryOp::NotEqual => (BinaryOp::NotEqual, None, None),
                 };
                 let destination = self.temporary(expression.ty);
                 self.assign(
@@ -482,6 +547,7 @@ impl Builder {
                         left,
                         right,
                         trap,
+                        secondary_trap,
                     },
                     expression.span,
                 );
@@ -726,6 +792,22 @@ fn validate_rvalue(
                 return Err("invalid MIR coercion contract".into());
             }
         }
+        Rvalue::Cast {
+            kind,
+            operand,
+            from,
+            trap,
+        } => {
+            validate_operand(function, operand, initialized)?;
+            let required_trap =
+                cast_can_fail(*from, destination).then_some(TrapKind::ConversionOutOfRange);
+            if operand_type(function, operand)? != *from
+                || !valid_cast(*kind, *from, destination)
+                || *trap != required_trap
+            {
+                return Err("invalid MIR explicit-cast contract".into());
+            }
+        }
         Rvalue::Unary { op, operand, trap } => {
             validate_operand(function, operand, initialized)?;
             let operand_ty = operand_type(function, operand)?;
@@ -746,6 +828,7 @@ fn validate_rvalue(
             left,
             right,
             trap,
+            secondary_trap,
         } => {
             validate_operand(function, left, initialized)?;
             validate_operand(function, right, initialized)?;
@@ -754,8 +837,13 @@ fn validate_rvalue(
             if left_ty != right_ty {
                 return Err("MIR binary operands have different types".into());
             }
-            let (required_operand, result, required_trap) = binary_contract(*op, left_ty)?;
-            if left_ty != required_operand || destination != result || *trap != required_trap {
+            let (required_operand, result, required_trap, required_secondary) =
+                binary_contract(*op, left_ty)?;
+            if left_ty != required_operand
+                || destination != result
+                || *trap != required_trap
+                || *secondary_trap != required_secondary
+            {
                 return Err(format!(
                     "MIR binary operation {op:?} violates its type/trap contract"
                 ));
@@ -780,28 +868,60 @@ fn validate_rvalue(
     Ok(())
 }
 
-fn binary_contract(op: BinaryOp, operand: Type) -> Result<(Type, Type, Option<TrapKind>), String> {
+pub(crate) fn binary_contract(
+    op: BinaryOp,
+    operand: Type,
+) -> Result<(Type, Type, Option<TrapKind>, Option<TrapKind>), String> {
     match op {
         BinaryOp::AddIntegerChecked
         | BinaryOp::SubtractIntegerChecked
         | BinaryOp::MultiplyIntegerChecked
             if operand.as_integer().is_some() =>
         {
-            Ok((operand, operand, Some(TrapKind::IntegerOverflow)))
+            Ok((operand, operand, Some(TrapKind::IntegerOverflow), None))
         }
-        BinaryOp::AddFloat | BinaryOp::SubtractFloat | BinaryOp::MultiplyFloat
+        BinaryOp::DivideIntegerSignedChecked
+            if operand
+                .as_integer()
+                .is_some_and(aether_frontend::IntegerType::is_signed) =>
+        {
+            Ok((
+                operand,
+                operand,
+                Some(TrapKind::DivisionByZero),
+                Some(TrapKind::DivisionOverflow),
+            ))
+        }
+        BinaryOp::DivideIntegerUnsignedChecked | BinaryOp::RemainderIntegerUnsignedChecked
+            if operand
+                .as_integer()
+                .is_some_and(|integer| !integer.is_signed()) =>
+        {
+            Ok((operand, operand, Some(TrapKind::DivisionByZero), None))
+        }
+        BinaryOp::RemainderIntegerSignedChecked
+            if operand
+                .as_integer()
+                .is_some_and(aether_frontend::IntegerType::is_signed) =>
+        {
+            Ok((operand, operand, Some(TrapKind::DivisionByZero), None))
+        }
+        BinaryOp::AddFloat
+        | BinaryOp::SubtractFloat
+        | BinaryOp::MultiplyFloat
+        | BinaryOp::DivideFloat
             if operand.as_float().is_some() =>
         {
-            Ok((operand, operand, None))
+            Ok((operand, operand, None, None))
         }
         BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual => {
             if operand.is_numeric() {
-                Ok((operand, Type::Bool, None))
+                Ok((operand, Type::Bool, None, None))
             } else {
                 Err("ordered comparison requires numeric operands".into())
             }
         }
-        BinaryOp::Equal | BinaryOp::NotEqual => Ok((operand, Type::Bool, None)),
+        BinaryOp::Equal | BinaryOp::NotEqual => Ok((operand, Type::Bool, None, None)),
         _ => Err("MIR numeric opcode/type mismatch".into()),
     }
 }
@@ -847,6 +967,60 @@ fn valid_coercion(kind: CoercionKind, from: Type, to: Type) -> bool {
             Type::Float(aether_frontend::FloatType::Float32),
             Type::Float(aether_frontend::FloatType::Float64),
         ) => true,
+        _ => false,
+    }
+}
+
+pub(crate) fn valid_cast(kind: CastKind, from: Type, to: Type) -> bool {
+    use aether_frontend::{FloatType, TargetProperties};
+    let target = TargetProperties::LINUX_X86_64;
+    match (kind, from, to) {
+        (CastKind::Identity, a, b) => a == b && a != Type::Bool,
+        (CastKind::IntegerExtendSigned, Type::Integer(a), Type::Integer(b)) => {
+            a.is_signed() && b.is_signed() && a.bits(target) < b.bits(target)
+        }
+        (CastKind::IntegerExtendUnsigned, Type::Integer(a), Type::Integer(b)) => {
+            !a.is_signed() && !b.is_signed() && a.bits(target) < b.bits(target)
+        }
+        (CastKind::IntegerNarrowChecked, Type::Integer(a), Type::Integer(b)) => {
+            a.is_signed() == b.is_signed() && a.bits(target) > b.bits(target)
+        }
+        (CastKind::IntegerReencode, Type::Integer(a), Type::Integer(b)) => {
+            a != b && a.is_signed() == b.is_signed() && a.bits(target) == b.bits(target)
+        }
+        (CastKind::IntegerSignednessChecked, Type::Integer(a), Type::Integer(b)) => {
+            a.is_signed() != b.is_signed()
+        }
+        (CastKind::SignedIntegerToFloat, Type::Integer(a), Type::Float(_)) => a.is_signed(),
+        (CastKind::UnsignedIntegerToFloat, Type::Integer(a), Type::Float(_)) => !a.is_signed(),
+        (CastKind::FloatToSignedIntegerChecked, Type::Float(_), Type::Integer(b)) => b.is_signed(),
+        (CastKind::FloatToUnsignedIntegerChecked, Type::Float(_), Type::Integer(b)) => {
+            !b.is_signed()
+        }
+        (
+            CastKind::FloatExtend,
+            Type::Float(FloatType::Float32),
+            Type::Float(FloatType::Float64),
+        )
+        | (
+            CastKind::FloatTruncate,
+            Type::Float(FloatType::Float64),
+            Type::Float(FloatType::Float32),
+        ) => true,
+        _ => false,
+    }
+}
+
+pub(crate) fn cast_can_fail(from: Type, to: Type) -> bool {
+    use aether_frontend::TargetProperties;
+    match (from, to) {
+        (Type::Integer(a), Type::Integer(b)) => {
+            let target = TargetProperties::LINUX_X86_64;
+            let (source_min, source_max) = a.range(target);
+            let (target_min, target_max) = b.range(target);
+            source_min < target_min || source_max > target_max
+        }
+        (Type::Float(_), Type::Integer(_)) => true,
         _ => false,
     }
 }
@@ -926,7 +1100,7 @@ mod tests {
     }
 
     #[test]
-    fn trap_terminator_represents_future_division_failure() {
+    fn trap_terminator_represents_division_failure() {
         let raw = FlowMir {
             modules: vec![ModuleInfo {
                 id: ModuleId(0),
@@ -1006,5 +1180,33 @@ mod tests {
             args.clear();
         }
         assert!(verify_mir(arity).is_err());
+    }
+
+    #[test]
+    fn verifier_rejects_corrupt_cast_and_division_contracts() {
+        let mut cast = mir("int8 narrow(int64 x){return int8(x);}int main(){return narrow(1);}");
+        let instruction = cast.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| matches!(instruction.value, Rvalue::Cast { .. }))
+            .unwrap();
+        if let Rvalue::Cast { kind, .. } = &mut instruction.value {
+            *kind = CastKind::Identity;
+        }
+        assert!(verify_mir(cast).is_err());
+
+        let mut division =
+            mir("int64 divide(int64 a,int64 b){return a/b;}int main(){return divide(4,2);}");
+        let instruction = division.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| matches!(instruction.value, Rvalue::Binary { .. }))
+            .unwrap();
+        if let Rvalue::Binary { secondary_trap, .. } = &mut instruction.value {
+            *secondary_trap = None;
+        }
+        assert!(verify_mir(division).is_err());
     }
 }

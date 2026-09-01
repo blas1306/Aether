@@ -1,0 +1,12 @@
+alias Tiny = int8;
+
+int main() {
+    int64 wide = 127;
+    Tiny narrow = Tiny(wide);
+    uint16 unsigned_value = uint16(narrow);
+    int16 signed_value = int16(unsigned_value);
+    double precise = double(signed_value);
+    float32 rounded = float32(precise + 0.75);
+    int32 truncated = int32(rounded);
+    return int(truncated);
+}

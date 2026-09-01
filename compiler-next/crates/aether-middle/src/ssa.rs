@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 
 use aether_frontend::{
-    CoercionKind, Diagnostic, DiagnosticCategory, FloatValue, FunctionId, FunctionSignature,
-    LocalId, ModuleInfo, Phase, Span, Type,
+    CastKind, CoercionKind, Diagnostic, DiagnosticCategory, FloatValue, FunctionId,
+    FunctionSignature, LocalId, ModuleInfo, Phase, Span, Type,
 };
 
 use crate::{
@@ -66,6 +66,13 @@ pub enum SsaOp {
         operand: SsaOperand,
         from: Type,
     },
+    /// Explicit value conversion preserved from HIR/MIR.
+    Cast {
+        kind: CastKind,
+        operand: SsaOperand,
+        from: Type,
+        trap: Option<TrapKind>,
+    },
     /// Unary computation with explicit trap effect.
     Unary {
         op: UnaryOp,
@@ -78,6 +85,7 @@ pub enum SsaOp {
         left: SsaOperand,
         right: SsaOperand,
         trap: Option<TrapKind>,
+        secondary_trap: Option<TrapKind>,
     },
     /// Resolved direct call.
     Call {
@@ -384,6 +392,17 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>]) -> SsaOp {
             operand: rename_operand(operand, stacks),
             from: *from,
         },
+        Rvalue::Cast {
+            kind,
+            operand,
+            from,
+            trap,
+        } => SsaOp::Cast {
+            kind: *kind,
+            operand: rename_operand(operand, stacks),
+            from: *from,
+            trap: *trap,
+        },
         Rvalue::Unary { op, operand, trap } => SsaOp::Unary {
             op: *op,
             operand: rename_operand(operand, stacks),
@@ -394,11 +413,13 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>]) -> SsaOp {
             left,
             right,
             trap,
+            secondary_trap,
         } => SsaOp::Binary {
             op: *op,
             left: rename_operand(left, stacks),
             right: rename_operand(right, stacks),
             trap: *trap,
+            secondary_trap: *secondary_trap,
         },
         Rvalue::Call { callee, args } => SsaOp::Call {
             callee: *callee,
@@ -604,9 +625,10 @@ fn mir_liveness(function: &MirFunction, cfg: &Cfg) -> Vec<BTreeSet<LocalId>> {
 
 fn rvalue_locals(value: &Rvalue) -> Vec<LocalId> {
     match value {
-        Rvalue::Use(operand) | Rvalue::Coerce { operand, .. } | Rvalue::Unary { operand, .. } => {
-            operand_local(operand).into_iter().collect()
-        }
+        Rvalue::Use(operand)
+        | Rvalue::Coerce { operand, .. }
+        | Rvalue::Cast { operand, .. }
+        | Rvalue::Unary { operand, .. } => operand_local(operand).into_iter().collect(),
         Rvalue::Binary { left, right, .. } => operand_local(left)
             .into_iter()
             .chain(operand_local(right))
@@ -893,6 +915,21 @@ fn verify_op(
                 return Err("invalid SSA coercion contract".into());
             }
         }
+        SsaOp::Cast {
+            kind,
+            operand,
+            from,
+            trap,
+        } => {
+            let required_trap =
+                crate::mir::cast_can_fail(*from, result).then_some(TrapKind::ConversionOutOfRange);
+            if operand_ty(operand)? != *from
+                || !crate::mir::valid_cast(*kind, *from, result)
+                || *trap != required_trap
+            {
+                return Err("invalid SSA explicit-cast contract".into());
+            }
+        }
         SsaOp::Unary { op, operand, trap } => {
             let ty = operand_ty(operand)?;
             let valid = match op {
@@ -912,37 +949,20 @@ fn verify_op(
             left,
             right,
             trap,
+            secondary_trap,
         } => {
             let left = operand_ty(left)?;
             let right = operand_ty(right)?;
             if left != right {
                 return Err("SSA binary operand type mismatch".into());
             }
-            let (required, output, required_trap) = match op {
-                BinaryOp::AddIntegerChecked
-                | BinaryOp::SubtractIntegerChecked
-                | BinaryOp::MultiplyIntegerChecked
-                    if left.as_integer().is_some() =>
-                {
-                    (left, left, Some(TrapKind::IntegerOverflow))
-                }
-                BinaryOp::AddFloat | BinaryOp::SubtractFloat | BinaryOp::MultiplyFloat
-                    if left.as_float().is_some() =>
-                {
-                    (left, left, None)
-                }
-                BinaryOp::Less
-                | BinaryOp::LessEqual
-                | BinaryOp::Greater
-                | BinaryOp::GreaterEqual
-                    if left.is_numeric() =>
-                {
-                    (left, Type::Bool, None)
-                }
-                BinaryOp::Equal | BinaryOp::NotEqual => (left, Type::Bool, None),
-                _ => return Err("SSA numeric opcode/type mismatch".into()),
-            };
-            if left != required || result != output || *trap != required_trap {
+            let (required, output, required_trap, required_secondary) =
+                crate::mir::binary_contract(*op, left)?;
+            if left != required
+                || result != output
+                || *trap != required_trap
+                || *secondary_trap != required_secondary
+            {
                 return Err(format!("invalid SSA contract for {op:?}"));
             }
         }
@@ -983,7 +1003,9 @@ fn valid_coercion(kind: CoercionKind, from: Type, to: Type) -> bool {
 
 fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
     match op {
-        SsaOp::Use(value) | SsaOp::Coerce { operand: value, .. } => vec![value],
+        SsaOp::Use(value)
+        | SsaOp::Coerce { operand: value, .. }
+        | SsaOp::Cast { operand: value, .. } => vec![value],
         SsaOp::Unary { operand, .. } => vec![operand],
         SsaOp::Binary { left, right, .. } => vec![left, right],
         SsaOp::Call { args, .. } => args.iter().collect(),
@@ -1142,5 +1164,34 @@ mod tests {
             };
         }
         assert!(verify_ssa(ssa).is_err());
+    }
+
+    #[test]
+    fn verifier_rejects_corrupt_ssa_cast_and_division_contracts() {
+        let mut cast =
+            raw_ssa("int8 narrow(int64 x){return int8(x);}int main(){return narrow(1);}");
+        let instruction = cast.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| matches!(instruction.op, SsaOp::Cast { .. }))
+            .unwrap();
+        if let SsaOp::Cast { trap, .. } = &mut instruction.op {
+            *trap = None;
+        }
+        assert!(verify_ssa(cast).is_err());
+
+        let mut division =
+            raw_ssa("int64 divide(int64 a,int64 b){return a/b;}int main(){return divide(4,2);}");
+        let instruction = division.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| matches!(instruction.op, SsaOp::Binary { .. }))
+            .unwrap();
+        if let SsaOp::Binary { secondary_trap, .. } = &mut instruction.op {
+            *secondary_trap = None;
+        }
+        assert!(verify_ssa(division).is_err());
     }
 }

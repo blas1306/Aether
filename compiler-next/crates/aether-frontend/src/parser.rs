@@ -1,4 +1,4 @@
-//! Recursive-descent parser for the deliberately closed Vertical-3 grammar.
+//! Recursive-descent parser for the deliberately closed Vertical-4 grammar.
 
 use crate::{
     AstAlias, AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstImport, AstParameter,
@@ -225,7 +225,7 @@ impl Parser {
                     span: start.through(body.span),
                 });
             }
-            _ => return Err(self.error("E0102", "expected a Vertical-3 statement")),
+            _ => return Err(self.error("E0102", "expected a Vertical-4 statement")),
         };
         let semicolon = self.expect(TokenKind::Semicolon, "expected `;` after statement")?;
         Ok(AstStmt {
@@ -315,12 +315,19 @@ impl Parser {
 
     fn factor(&mut self) -> Result<AstExpr, Diagnostic> {
         let mut expr = self.unary()?;
-        while self.consume(TokenKind::Star).is_some() {
+        loop {
+            let op = match self.current().kind {
+                TokenKind::Star => AstBinaryOp::Multiply,
+                TokenKind::Slash => AstBinaryOp::Divide,
+                TokenKind::Percent => AstBinaryOp::Remainder,
+                _ => break,
+            };
+            self.advance();
             let right = self.unary()?;
             let span = expr.span.through(right.span);
             expr = AstExpr {
                 kind: AstExprKind::Binary {
-                    op: AstBinaryOp::Multiply,
+                    op,
                     left: Box::new(expr),
                     right: Box::new(right),
                 },
@@ -375,7 +382,9 @@ impl Parser {
                     span: token.span.through(member.span),
                 });
             }
-            TokenKind::Identifier if self.consume(TokenKind::LeftParen).is_some() => {
+            TokenKind::Identifier | TokenKind::KwInt | TokenKind::KwBool
+                if self.consume(TokenKind::LeftParen).is_some() =>
+            {
                 let (args, right) = self.arguments()?;
                 return Ok(AstExpr {
                     kind: AstExprKind::Call {

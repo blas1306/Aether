@@ -1,0 +1,2 @@
+int64 convert(uint64 value) { return int64(value); }
+int main() { int64 value = convert(18446744073709551615); return value; }

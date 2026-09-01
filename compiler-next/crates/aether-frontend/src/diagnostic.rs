@@ -82,6 +82,10 @@ pub enum DiagnosticCategory {
     Type,
     /// Compile-time integer range or overflow failure.
     Integer,
+    /// Invalid or statically failing explicit scalar conversion.
+    Conversion,
+    /// Invalid or statically failing division/remainder.
+    Division,
     /// Internal IR invariant rejection.
     Verification,
     /// Host toolchain failure.

@@ -196,6 +196,10 @@ pub enum AstBinaryOp {
     Subtract,
     /// Checked integer multiplication.
     Multiply,
+    /// Division; semantic analysis selects integer or IEEE behavior.
+    Divide,
+    /// Integer remainder.
+    Remainder,
     /// Ordered comparison.
     Less,
     /// Ordered comparison.
