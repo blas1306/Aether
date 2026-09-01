@@ -556,7 +556,12 @@ def test_source_install_builds_binaries_required_by_full_repository_suite() -> N
         workflow.index("  source-development-install:") : workflow.index("  next-request-recovery:")
     ]
     assert "--package aether-verifier --bin aether-ssa-shadow" in source
+    assert "--package aether-verifier --example verify_owned_ssa_refinement" in source
     assert "--release --package aether-ir-verifier" in source
     full_suite = source.index("python -m pytest -q tests")
     assert source.index("--package aether-verifier --bin aether-ssa-shadow") < full_suite
+    assert (
+        source.index("--package aether-verifier --example verify_owned_ssa_refinement")
+        < full_suite
+    )
     assert source.index("--release --package aether-ir-verifier") < full_suite

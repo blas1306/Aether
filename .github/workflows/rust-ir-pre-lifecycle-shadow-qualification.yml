@@ -193,6 +193,9 @@ jobs:
       - run: >-
           cargo build --manifest-path compiler-rs/Cargo.toml --locked
           --package aether-verifier --bin aether-ssa-shadow
+      - run: >-
+          cargo build --manifest-path compiler-rs/Cargo.toml --locked
+          --package aether-verifier --example verify_owned_ssa_refinement
       - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --release --package aether-ir-verifier
       - shell: bash
         run: |
