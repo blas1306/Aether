@@ -1,0 +1,10 @@
+bool positive(int x) {
+    return x > 0;
+}
+
+int main() {
+    if (positive(5)) {
+        return 1;
+    }
+    return 0;
+}

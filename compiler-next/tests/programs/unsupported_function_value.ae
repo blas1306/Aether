@@ -1,0 +1,5 @@
+int helper() { return 1; }
+int main() {
+    int value = helper;
+    return value;
+}

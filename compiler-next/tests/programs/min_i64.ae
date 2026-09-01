@@ -1,0 +1,1 @@
+int main() { int minimum = -9223372036854775808; if (minimum < 0) { return 3; } else { return 1; } }

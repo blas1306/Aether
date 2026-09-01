@@ -1,0 +1,19 @@
+[package]
+name = "aether-driver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+aether-frontend = { path = "../aether-frontend" }
+aether-middle = { path = "../aether-middle" }
+aether-backend-llvm = { path = "../aether-backend-llvm" }
+
+[[bin]]
+name = "aether-next"
+path = "src/main.rs"
+
+[lints]
+workspace = true

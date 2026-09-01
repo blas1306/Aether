@@ -1,0 +1,8 @@
+import b;
+
+int even(int n) {
+    if (n == 0) {
+        return 42;
+    }
+    return b.odd(n - 1);
+}

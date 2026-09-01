@@ -1,0 +1,3 @@
+int call_common() {
+    return common.value();
+}

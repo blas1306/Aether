@@ -1,0 +1,16 @@
+# case	expectation	coverage
+one_import	accept:42	qualified direct call
+multiple	accept:42	multiple imports and same function name
+transitive	accept:42	transitive discovery
+shared	accept:41	shared dependency discovered once
+cycle	accept:42	declarative cycle and cross-module mutual recursion
+imported_main	accept:42	entry main selected only from entry module
+errors/missing_module	reject:E0701	missing imported source
+errors/unknown_function	reject:E0222	unknown qualified function
+errors/not_imported	reject:E0223	known module absent from local imports
+errors/unknown_module	reject:E0221	unknown module qualifier
+errors/invalid_qualified	reject:E0224	qualified value expression
+errors/duplicate_import	reject:E0220	duplicate import
+errors/malformed_import	reject:E0100	unsupported selective import syntax
+errors/imported_semantic	reject:E0202	imported-source semantic provenance
+errors/imported_unsupported	reject:E0001	imported unsupported top-level feature

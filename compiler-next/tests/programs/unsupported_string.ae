@@ -1,0 +1,1 @@
+int main() { string value = "no"; return 0; }

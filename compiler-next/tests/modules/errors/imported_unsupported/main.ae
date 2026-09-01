@@ -1,0 +1,5 @@
+import broken;
+
+int main() {
+    return broken.value();
+}

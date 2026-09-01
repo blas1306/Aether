@@ -1,0 +1,6 @@
+import a;
+import b;
+
+int main() {
+    return a.from_a(10) + b.from_b(11);
+}

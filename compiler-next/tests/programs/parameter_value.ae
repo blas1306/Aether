@@ -1,0 +1,10 @@
+int increment(int x) {
+    x = x + 1;
+    return x;
+}
+
+int main() {
+    int x = 4;
+    int y = increment(x);
+    return x + y;
+}

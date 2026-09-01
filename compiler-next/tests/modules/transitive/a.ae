@@ -1,0 +1,5 @@
+import b;
+
+int from_a(int x) {
+    return b.from_b(x);
+}

@@ -1,0 +1,5 @@
+import absent;
+
+int main() {
+    return 0;
+}

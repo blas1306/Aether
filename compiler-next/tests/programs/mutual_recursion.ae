@@ -1,0 +1,20 @@
+bool even(int n) {
+    if (n == 0) {
+        return true;
+    }
+    return odd(n - 1);
+}
+
+bool odd(int n) {
+    if (n == 0) {
+        return false;
+    }
+    return even(n - 1);
+}
+
+int main() {
+    if (even(10)) {
+        return 7;
+    }
+    return 3;
+}

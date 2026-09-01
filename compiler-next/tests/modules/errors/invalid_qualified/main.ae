@@ -1,0 +1,5 @@
+import math;
+
+int main() {
+    return math.add;
+}

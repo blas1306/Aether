@@ -1,0 +1,2 @@
+int broken(int value, ) { return value; }
+int main() { return 0; }

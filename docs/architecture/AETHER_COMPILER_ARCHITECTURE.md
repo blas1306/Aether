@@ -907,3 +907,127 @@ slice.  After promotion and consolidation, the canonical compiler should be
   continued mechanically;
 - no public ABI, FFI syntax, generic syntax, unsafe syntax, `int` width or
   indexing-base decision was invented without evidence.
+
+## 17. NEXT-VERTICAL-0 implementation confirmation
+
+Implementation began after the scaffold decision and now lives in the isolated
+`compiler-next/` Rust workspace described in section 14.  The implemented
+workspace confirms, rather than changes, the AST/HIR/MIR/SSA boundaries in
+sections 5 and 6:
+
+- `aether-frontend` owns `ParsedAst` and `TypedHir`; exact decimal literal text
+  survives parsing until contextual `int64` analysis, and resolved expressions
+  use stable `LocalId` identities;
+- `aether-middle` owns raw `FlowMir`, immutable `VerifiedMir`, raw `SsaIr` and
+  immutable `VerifiedSsa`; SSA construction only accepts `VerifiedMir`, and the
+  backend only accepts `VerifiedSsa`;
+- MIR is the first CFG.  Its verifier checks canonical locals/blocks, existing
+  targets, required terminators, reachable blocks, definite initialization,
+  operand/result types, return type and checked-operation trap contracts;
+- scalar SSA promotion uses iterated dominance-frontier phi placement pruned by
+  MIR liveness, followed by dominator-tree renaming.  Its independent verifier
+  checks dense single definitions, defined uses, definition-before-use,
+  dominance, exact phi predecessor coverage and types, CFG and terminators;
+- `aether-backend-llvm` emits textual LLVM for the explicit Linux x86_64 target.
+  Checked addition, subtraction, multiplication and negation use the LLVM
+  signed-with-overflow intrinsics and branch to `llvm.trap`, with no `nsw`
+  assumption;
+- `aether-driver` owns clang invocation and provides the separate `aether-next`
+  build/run interface, deterministic phase dumps and per-phase wall timings.
+  `run` builds and executes a temporary native artifact through the same path
+  used by retained builds.
+
+No legacy file, production CLI path, Python component, JSON/schema transport or
+legacy IR representation participates in this pipeline.  There are no external
+Rust crate dependencies in this slice.  Textual LLVM and clang remain bootstrap
+implementation choices behind backend/toolchain boundaries, as proposed.
+
+The implementation exposes two consciously narrow facts for later decisions.
+First, the process-entry wrapper converts Aether's `i64` main result to the host
+`i32` process status, and POSIX observation remains byte-sized; this is a
+development observable, not a public Aether ABI.  Second, the current
+diagnostic renderer is stable at code/phase/span level but the dump text and
+English messages are explicitly inspection formats rather than versioned public
+interfaces.  Neither finding removes the need for HIR or MIR; both boundaries
+proved useful in this slice.
+
+## 18. NEXT-VERTICAL-1 implementation confirmation
+
+The isolated `compiler-next/` workspace now extends the confirmed scalar spine
+with direct scalar functions inside one source unit. The implementation does
+not change the legacy compiler or product CLI and does not admit modules.
+
+- The parser accepts repeated `int`/`bool` function definitions, scalar
+  parameters and direct call expressions. It still rejects imports, externs,
+  overload declarations, function values, closures, generics and non-scalar
+  types.
+- Semantic analysis is split into signature collection and body checking.
+  `FunctionId(u32)` is assigned deterministically in source order, while the
+  source name is metadata. A complete table is available before any body is
+  checked, so forward calls, direct recursion and mutual recursion work without
+  textual-order exceptions.
+- Parameters receive normal function-local `LocalId` identities. They are
+  initialized at each MIR entry and seeded as SSA definitions; later assignment
+  changes only the callee's scalar copy.
+- Typed HIR keeps `FunctionSignature` separate from `HirFunction` bodies and
+  verifies direct-call identities, arity, argument/result types, parameter
+  identities and returns. MIR and SSA are program containers of independently
+  verified function-local CFGs. Both use explicit identity-bearing direct-call
+  operations and verify them against the shared signature table.
+- LLVM emits `i64`/`i1` function parameters, returns and calls. Bootstrap
+  symbols are deterministic `FunctionId`-based names and are explicitly not a
+  stable mangling or public ABI. The convention is an internal bootstrap ABI,
+  distinct from future `extern C` support.
+- The platform wrapper remains separate: host `main` calls Aether `int main()`
+  and truncates its semantic `int64` result to the host `i32` status. POSIX
+  status observation remains narrower still. Neither conversion is a language
+  return-value contract.
+- Phase dumps display the function table, identities, signatures, parameter
+  mappings and per-function MIR/SSA. Timings now distinguish signature
+  collection from semantic body analysis.
+
+Accepted bootstrap debt is limited to textual LLVM/clang, the temporary
+mangling/calling convention, the process-entry mapping and a single explicit
+Linux x86_64 target. Vertical-1 adds no optimizer, runtime, ownership model,
+module identity, visibility rule, overload selection, generic instance or
+public ABI commitment.
+
+## 19. NEXT-VERTICAL-2 implementation confirmation
+
+The isolated `compiler-next/` workspace now compiles one entry source and its
+transitively imported modules as one program. `CompilationSession` owns the
+source root, source table, parsed modules, resolved graph and discovery timing;
+compilation consumes the session so a module cannot be analyzed repeatedly in
+one production transition.
+
+- `SourceId(u32)` is session-local provenance identity and is embedded in every
+  `Span`. `ModuleId(u32)` is separate session-local semantic identity. Module
+  records retain logical names and normalized source-root-relative display
+  paths; raw paths are never semantic identity.
+- The sole bootstrap syntax is `import name;`, resolving deterministically to
+  `<entry-directory>/name.ae`. A queue and logical-name map ensure each module
+  is read, parsed and resolved once. The graph stores resolved `ModuleId` edges
+  and admits declaration-only cycles.
+- Declaration collection covers every discovered module before any body is
+  checked. `FunctionId(u32)` is global and dense for O(1) downstream table
+  access. Local calls resolve only within their declaring module; imported
+  calls require `module.function(...)` and lower to the same resolved call form.
+- The provisional visibility rule exposes all top-level functions for qualified
+  calls. No visibility keywords, unqualified import injection, aliases,
+  reexports, wildcard/selective imports, packages or module initialization are
+  implied by this rule.
+- HIR, MIR and SSA carry the module table as program metadata. MIR and SSA CFG,
+  dominance and phi construction remain function-local; their verifiers check
+  resolved calls against the one global signature table.
+- One textual LLVM module contains all discovered functions. Bootstrap symbols
+  are derived from length-delimited logical module/function names rather than
+  discovery IDs, preventing cross-module collisions without declaring a stable
+  ABI. The platform wrapper calls only the entry module's valid `int main()`.
+- Diagnostics retain code, phase, category, `SourceId`-qualified span and source
+  display provenance. Timings distinguish discovery, file loading, aggregate
+  parsing, declaration collection, body analysis, MIR, SSA and LLVM.
+
+The module resolution policy is temporary bootstrap source-root behavior, not a
+package model. Package identity, manifests, dependencies, stable cross-session
+IDs, final visibility, module initialization, object-per-module emission and
+incremental cache keys remain open work; Vertical-2 does not choose them.

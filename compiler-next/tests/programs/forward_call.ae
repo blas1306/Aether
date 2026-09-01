@@ -1,0 +1,11 @@
+int first(int x) {
+    return second(x);
+}
+
+int second(int x) {
+    return x + 1;
+}
+
+int main() {
+    return first(10);
+}

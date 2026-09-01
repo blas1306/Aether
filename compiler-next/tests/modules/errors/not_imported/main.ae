@@ -1,0 +1,6 @@
+import a;
+import common;
+
+int main() {
+    return a.call_common();
+}

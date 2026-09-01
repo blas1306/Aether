@@ -1,0 +1,6 @@
+import a;
+import b;
+
+int main() {
+    return a.foo() + b.foo();
+}

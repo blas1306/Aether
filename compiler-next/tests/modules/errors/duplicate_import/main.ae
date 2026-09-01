@@ -1,0 +1,6 @@
+import math;
+import math;
+
+int main() {
+    return math.value();
+}
