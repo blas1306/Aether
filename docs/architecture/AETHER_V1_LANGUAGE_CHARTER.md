@@ -132,6 +132,27 @@ middle-end MUST preserve high-level facts needed for fusion, buffer reuse,
 allocation elimination, SIMD and BLAS selection until the relevant decision is
 made.
 
+### Closed primitive scalar baseline
+
+For the reconstruction, `int` is the transparent, target-independent alias of
+`int64`; only `isize`/`usize` follow pointer width.  Integer literals are exact
+contextual compiler values and default to `int` when unconstrained.  Ordinary
+signed and unsigned overflow traps rather than wrapping or becoming undefined,
+independently of optimization level.  Explicit wrapping, checked-result and
+saturating families may be designed later.
+
+`float32` and `float64` use IEEE-754 binary32 and binary64 representations;
+`float = float32`, `double = float64`, and an unconstrained floating literal
+defaults to `float64`.  Full conversion, rounding, NaN, infinity, subnormal,
+signed-zero, FMA and cross-target reproducibility rules remain in the semantic
+decision ledger.  No normal optimization profile implies fast math.
+
+Primitive booleans, integers, floating values and `char` have value semantics:
+copying or assigning them has no ARC, ownership transfer or observable aliasing.
+The first vertical compiler represents scalar overflow and division-by-zero as
+structured non-recoverable MIR traps; this intentionally does not choose the
+future recoverable error or exception model.
+
 ## Safety and control
 
 Safe and ergonomic behavior is the default.  Value semantics, moves, shared

@@ -4,6 +4,12 @@
 > contrato observado del profile native 24. No define una ABI pública, una FFI
 > ni compatibilidad binaria entre releases.
 
+La reconstrucción posterior fija un target distinto para los scalars en
+[`AETHER_V1_SEMANTIC_CONTRACT.md`](../architecture/AETHER_V1_SEMANTIC_CONTRACT.md):
+`int` será alias transparente de `int64`. Esa decisión no cambia
+retroactivamente los hechos i32 de este documento ni la implementación legacy;
+exige una nueva frontera/version ABI para los artefactos del compilador nuevo.
+
 ## 1. Dominios de compatibilidad
 
 Es necesario distinguir cuatro contratos:
@@ -412,6 +418,13 @@ Según las features usadas, el módulo declara símbolos de:
 manifest de imports runtime, son detectados a partir del LLVM textual.
 
 ## 13. Estabilidad y decisiones pendientes
+
+La tabla siguiente continúa describiendo exclusivamente el profile native 24
+legacy. En NEXT-VERTICAL-0, `int` y `int64` tendrán una única identidad
+semántica/ABI de 64 bits; una futura C FFI los proyectará como ancho fijo
+equivalente a `int64_t`, nunca como C `int`/`long`. `isize`/`usize` serán los
+únicos enteros dependientes del ancho de puntero. No se intenta enlazar objetos
+legacy i32 con objetos nuevos int64 bajo el mismo símbolo o mangling.
 
 | Área | Estable semánticamente | Provisional/interna | Pendiente antes de versionar |
 | --- | --- | --- | --- |

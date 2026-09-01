@@ -7,6 +7,10 @@ Audit baseline: `ad9282d` (`main`, equal to `origin/main` when inspected),
 `rust-verifier-v1`, `v1.0.0-rc.1`, `v1.0.0-rc.2` and `v1.0.0-rc.3`; no tag or
 branch was created by this audit.
 
+Scalar decision closure: 2026-09-01.  Sections 4.1, 5.1, 13 and 14 incorporate
+the post-audit decisions that unblock NEXT-VERTICAL-0; they do not rewrite the
+legacy facts observed at the audit baseline.
+
 If a historical marker is desired, the recommended local annotated tag is
 `pre-compiler-reconstruction` pointing to `ad9282d`, the commit immediately
 before these reconstruction documents.  Create/publish it only as an explicit
@@ -191,6 +195,8 @@ Confirmed:
 - fixed-width numeric names and separate `isize`/`usize` are the correct
   foundation;
 - aliases are transparent and user aliases belong before self-hosting;
+- the reconstruction scalar baseline is `int = int64`, contextual exact
+  integer literals, checked ordinary integer arithmetic and value semantics;
 - strict floating semantics are independent of optimization level;
 - local inference and explicit public APIs are the right bias;
 - generics, ownership facts, target layout and scientific shapes must influence
@@ -198,10 +204,8 @@ Confirmed:
 - current compiler, interpreters, tests and qualification infrastructure are
   valuable oracles and assets, not disposable legacy.
 
-Challenged or kept open:
+Challenged or kept open after the scalar closure:
 
-- `int` cannot be selected responsibly without compatibility and performance
-  evidence; neither i32 nor i64 follows automatically from the vision;
 - making row/column orientation mandatory on every vector may harm ordinary
   vector use; oriented views may be better than universal orientation;
 - preserving current one-based Vector/Matrix indexing alongside zero-based
@@ -216,17 +220,45 @@ Challenged or kept open:
 - all of AST, HIR, MIR and SSA are justified only with distinct invariants;
   a lossless CST and a separate optimizer IR are not justified for milestone 1.
 
+### 4.1 Scalar closure versus the legacy implementation
+
+The original audit correctly refused to derive an `int` width from the charter
+alone.  The subsequent language decision selects `int64` with the compatibility
+cost made explicit.  Legacy evidence supports the checked-safety direction but
+not the new width or representation:
+
+- `src/aether/integer_arithmetic.py` defines the current range as signed i32,
+  performs checked operations and distinguishes integer overflow from division
+  by zero;
+- `src/aether/typechecker.py` diagnoses immediate i32 literals and has special
+  handling for the signed minimum magnitude;
+- `compiler-rs/crates/aether-ir/src/types.rs`, `constant.rs` and `wire.rs`
+  encode one legacy `IntType` and `i32` constant/DTO payloads;
+- `src/aether/backend/llvm/integer_runtime.py` emits checked i32 LLVM helpers
+  and terminating diagnostics;
+- current lifecycle analysis treats scalar `IntType` as trivial, consistent
+  with the target value-semantics decision.
+
+Therefore the new compiler must introduce width-aware canonical integer types
+and an exact/contextual literal representation before HIR.  It MUST NOT reuse
+the legacy `IntType` with a different hidden meaning, widen schema-v1 in place,
+or claim object/ABI compatibility.  Conversely, the checked-operation tests,
+panic characterization, CFG/SSA corpus and verifier algorithms are useful
+oracles to port to i64 and later to the other explicit widths.
+
 ## 5. Candidate compiler pipeline
 
 ```text
 source files + project/target configuration
   -> source database, lexer, parser
-  -> source AST
+  -> parsed source AST
   -> module graph + declaration/name resolution
   -> typed HIR (generics and high-level scientific operations intact)
   -> monomorphization planning + target-independent semantic checks
-  -> flow MIR (CFG, places, initialization, ownership, cleanup, errors)
-  -> verified SSA IR (values, effects, alias/shape/layout facts)
+  -> flow MIR (CFG, places, initialization, ownership, cleanup, traps/errors)
+  -> verified flow MIR
+  -> SSA IR (values, effects, alias/shape/layout facts)
+  -> verified SSA IR
   -> target layout + optimization pipeline
   -> Backend interface
        -> LLVM backend -> object emission
@@ -246,9 +278,41 @@ interfaces from day one: `Backend::emit_object` (or temporary
 `emit_llvm_module`) and `Toolchain::link`.  Source semantics cannot inspect the
 chosen clang command or LLVM spelling.
 
+### 5.1 Rust type-state phase boundaries — DECIDED principle
+
+Phase invariants are represented by Rust type boundaries, not by comments or
+a boolean `verified` flag on one mutable module.  Illustrative names are:
+
+```text
+ParsedAst
+  -> ResolvedHir / TypedHir
+  -> FlowMir -> VerifiedMir
+  -> SsaIr -> VerifiedSsa
+```
+
+These names and whether resolution and typing use one or two concrete wrappers
+are not fixed.  The boundary rule is fixed:
+
+- a phase consumes the narrowest state whose invariants it requires and
+  returns a new state only after enforcing its postconditions;
+- backend lowering and optimization entry points cannot accept unverified SSA;
+- SSA construction cannot accept ambiguous/untyped HIR or an unverified CFG;
+- verification wrappers do not expose mutation that could invalidate their
+  proof; a transforming pass returns another unverified value or re-verifies
+  before producing the verified wrapper;
+- diagnostics/recovery nodes cannot leak from parsed AST into typed HIR;
+- conversion between states is explicit and one-way in the production path.
+
+This directly addresses the audited legacy path where PRE-lifecycle admission
+can be re-run on post-lifecycle data and Rust/Python/DTO layers reconstruct the
+same semantic state repeatedly.  Existing Rust dominance, SSA and refinement
+algorithms remain reusable, but their legacy `IntType`/`IRConstant::Int(i32)`
+schema and schema-v1/v2 transport are compatibility inputs, not the new
+compiler's canonical types or phase boundary.
+
 ## 6. Representation evaluation
 
-### 6.1 Source AST — justified
+### 6.1 Parsed source AST — justified
 
 | Question | Answer |
 |---|---|
@@ -257,7 +321,7 @@ chosen clang command or LLVM spelling.
 | Decisions resolved | Grammar, precedence and delimiter association only |
 | Preserves | User spelling, aliases, literal text and source structure needed by diagnostics |
 | Eliminates | Trivia may be excluded from the compiler AST; a tooling syntax tree may retain it separately |
-| Consumers | Resolver, HIR lowering, diagnostics; formatter/LSP through a stable syntax service |
+| Consumers | Resolver, HIR lowering, diagnostics; formatter/LSP through a stable syntax service. Production consumers receive the `ParsedAst` state, not a partially filled mutable tree |
 | Why not adjacent | Tokens are too weak for declarations/precedence; putting symbol/type identities here recreates the current parser/type coupling |
 
 A separate lossless syntax tree is useful for formatting and IDE refactors, but
@@ -273,7 +337,7 @@ stream later.
 | Decisions resolved | Names, scopes, type inference, conversions, callable target, generic constraints and desugaring of purely syntactic sugar |
 | Preserves | Generic identity, aliases for diagnostics, shape/orientation, allocation-relevant operation identity, purity/effect declarations and source provenance |
 | Eliminates | Ambiguous syntax, unresolved names, implicit conversions and parser recovery nodes |
-| Consumers | Semantic diagnostics, monomorphization planner, const evaluator, MIR lowering, IDE semantic queries |
+| Consumers | Semantic diagnostics, monomorphization planner, const evaluator, MIR lowering, IDE semantic queries. MIR lowering receives only the resolved/typed state |
 | Why not adjacent | A typed AST would either mutate source nodes as today or mix syntax and canonical types. MIR is too low to provide good generic/type diagnostics or retain natural scientific operations |
 
 HIR is the one additional layer not present cleanly today.  It is justified by
@@ -288,7 +352,7 @@ generics, tooling and the need to retain domain semantics before CFG/lifecycle.
 | Decisions resolved | Evaluation order, desugared control flow, storage versus value, cleanup placement, call ownership modes, exception strategy and initial layout requirements |
 | Preserves | Source spans, alias classes, borrows, shape/stride/layout constraints, effect/trap information and high-level buffer operations |
 | Eliminates | Lexical scopes as execution constructs, most source syntax and implicit destruction |
-| Consumers | MIR verifier/interpreter, borrow/lifecycle analysis, monomorphization completion, SSA construction, early optimizations |
+| Consumers | MIR verifier/interpreter and analyses; SSA construction receives `VerifiedMir`, never raw `FlowMir` |
 | Why not adjacent | HIR cannot express path-sensitive initialization/cleanup without becoming CFG MIR. SSA alone is awkward for addressable places, partial initialization, moves and exceptional cleanup |
 
 This is the architectural successor to current Initial IR, not a commitment to
@@ -304,7 +368,7 @@ invariants should seed it.
 | Decisions resolved | Promotion of eligible locals, use-def graph, control merges and concrete lifecycle actions; target layout may remain symbolic |
 | Preserves | Facts required for BCE, ARC elimination, fusion, buffer reuse, SIMD/BLAS selection and later debug mapping |
 | Eliminates | Source variables/places promoted to values and most structured control syntax |
-| Consumers | Analyses, optimizer, verifier, backend lowering and optional differential evaluator |
+| Consumers | Verifier consumes raw SSA; analyses, optimizer, backend lowering and optional differential evaluator consume `VerifiedSsa` (transforms must re-establish verification) |
 | Why not adjacent | MIR place mutation obscures global value flow; LLVM is too target-specific and loses Aether ownership/shape semantics too early |
 
 Current Rust SSA construction, dominance, verifiers and refinement work are the
@@ -627,8 +691,8 @@ CI rejects:
 - preserve all current source/compiler areas and the default CLI;
 - establish charter, semantic decision ledger, architecture/audit and feature
   inventory;
-- freeze a versioned differential manifest and choose the first scalar/error/
-  ownership decisions needed by the vertical milestone;
+- freeze a versioned differential manifest and record the closed scalar/trap
+  decisions plus the ownership decisions deferred beyond the vertical;
 - do not create empty compiler layers before their invariants can be tested.
 
 ### Phase B — first vertical Rust compiler
@@ -641,8 +705,9 @@ default; an internal/new executable invokes the new compiler explicitly.
 
 ### Phase C — expand vertical slices
 
-Add features in dependency order: explicit scalars/control, functions/modules,
-aggregates/lifecycle, generics/core collections, strings/views, scientific
+Add features in dependency order: the remaining explicit scalars, functions
+and modules not needed by Vertical-0, aggregates/lifecycle, generics/core
+collections, strings/views, scientific
 buffers/operations, errors/FFI.  Each slice closes parser→native plus
 diagnostics/tests.  Legacy components become oracles, not fallbacks.
 
@@ -692,53 +757,110 @@ pipeline, not language breadth.
 
 Prerequisites:
 
-- close the source spelling/width used for the milestone (`int` decision or an
-  explicitly temporary legacy-i32 compatibility profile);
-- choose panic behavior for checked scalar failures in this subset;
+- use the closed scalar baseline: transparent `int = int64`, abstract
+  contextual integer literals defaulting to `int`, and checked ordinary
+  integer overflow independent of optimization level;
+- use explicit structured MIR traps `IntegerOverflow` and `DivisionByZero`,
+  lowered initially to diagnostic abort/trap without exceptions or unwinding;
 - define structured diagnostic/span and target descriptor minimums;
 - version a differential manifest of approximately 20 positive/negative scalar
   programs.
 
 Required implementation:
 
-- new Rust driver/session, source database, lexer/parser and source AST for one
-  file;
-- explicit `main`, local typed bindings, integer/bool literals, arithmetic,
-  comparison, `if`, return and direct helper functions;
-- resolved typed HIR, flow MIR, verified SSA and LLVM backend boundaries with
-  the invariants in section 6;
+- a native Rust end-to-end compiler path with a new driver/session, source
+  database, lexer/parser and parsed AST for exactly one source file;
+- explicit `main`; simple direct functions only when needed to characterize
+  calls; local variables; `bool`; canonical signed `int64`; integer and boolean
+  literals; checked integer `+`, `-`, `*` and negation; comparisons;
+  `if`/`else`; `while`; and `return`;
+- abstract/contextual integer literals in semantic analysis even if the first
+  parser accepts only the required source spelling `int` for canonical
+  `int64`; explicit built-in aliases remain semantic identities, not nominal
+  wrapper types, and their additional spellings may be admitted later;
+- typed/resolved HIR, raw and verified flow MIR, raw and verified SSA, and an
+  LLVM backend boundary with the type-state invariants in sections 5.1 and 6;
+- checked operations/trap effects preserved through MIR, SSA, optimization and
+  backend lowering, with compile-time diagnostics for statically known literal
+  or constant overflow;
 - Linux x86_64 object/executable via LLVM/clang bootstrap;
 - `run` implemented strictly as build-to-temp plus execute in the new internal
   driver; build retains the same artifact;
 - stable diagnostic IDs/spans, IR dumps for debugging and phase timings;
-- old/new accepted/rejected, stdout/stderr/exit and optimization parity at O0;
+- old/new accepted/rejected, stdout/stderr/exit and optimization parity at O0,
+  classifying deliberate differences caused by the legacy i32-to-int64 change;
 - fail-closed rejection for every syntax/feature outside the slice.
 
-Explicitly excluded: generics, strings, heap allocation, ARC, Matrix/Vector,
-FFI, module initialization, exceptions/unwind, O2/O3 and self-hosting.
+Explicitly excluded initially: arrays, strings, heap allocation, ARC,
+references/borrows, generics, modules/imports, structs, enums, exceptions,
+recoverable `Result`/panic unwinding, FFI, Matrix/Vector, the scientific
+library, user-defined aliases, optimization profiles beyond O0 and
+self-hosting.  Floating types and operations need not enter this slice; their
+representation/default baseline is closed, while detailed IEEE operational
+policy remains open.  No excluded feature may be accepted merely because the
+legacy parser or AST supports it.
+
+The source spelling and result rules for integer division/remainder remain a
+separate **OPEN DECISION**: the legacy `/` over two `int` values produces
+`double`, which conflicts with an integer-only slice if copied blindly.
+Vertical-0 therefore need not admit source division/remainder.  Its MIR trap
+vocabulary still includes `DivisionByZero`, and verifier/backend tests can
+exercise that structured failure directly until a source operation is
+admitted.  This is the one material legacy incompatibility left intentionally
+at the edge of “basic arithmetic”, not an invitation for the parser or backend
+to choose truncation semantics accidentally.
+
+The minimum control-flow characterization must include a loop-carried local so
+the slice exercises a nontrivial CFG, dominance and phi construction.  A
+representative program is:
+
+```aether
+int main() {
+    int n = 10;
+    int sum = 0;
+    int i = 0;
+
+    while (i < n) {
+        sum = sum + i;
+        i = i + 1;
+    }
+
+    return sum;
+}
+```
+
+This is a characterization case, not the only test.  Branch merges, zero and
+multiple loop iterations, rejected out-of-range literals, statically known
+overflow and dynamic overflow need independent source cases.
+`DivisionByZero` needs MIR/verifier/backend cases and becomes an end-to-end
+source case when integer division or remainder is admitted.
 
 Exit criteria:
 
 1. no Python object or JSON boundary inside the new source→SSA/backend path;
-2. all IRs independently verified in tests;
+2. phase-state boundaries make ambiguous later inputs unrepresentable and MIR
+   plus SSA are independently verified in tests;
 3. same program feeds new build and run paths;
 4. differential manifest has no unexplained divergence;
 5. invalid features fail before unsupported lowering;
 6. deterministic IR/artifact metadata across paths/host hash seeds where
    applicable;
 7. compile phase timing baseline recorded;
-8. current compiler and default CLI test suites remain green.
+8. required scalar traps have the same semantics for every optimization level
+   the slice exposes;
+9. current compiler and default CLI test suites remain green.
 
-The next milestone should then add functions/modules or the first nontrivial
-owned value only after its relevant semantic decisions are closed; it should
-not jump directly to scientific libraries.
+The next milestone should then add full functions/modules or the first
+nontrivial owned value only after its relevant semantic decisions are closed;
+it should not jump directly to scientific libraries.
 
 ## 14. Scaffold decision and repository shape
 
-No scaffold is created in this audit.  This is deliberate: `int`, literal
-typing/overflow, error cleanup, parameter ownership and buffer value semantics
-still influence the crate and IR boundaries.  Empty AST/HIR/MIR/SSA crates now
-would encode names and dependencies without an executable invariant.
+No scaffold is created by this documentation decision.  The scalar decisions
+that blocked NEXT-VERTICAL-0 are now closed, but parameter ownership and buffer
+value semantics still constrain later slices.  Empty AST/HIR/MIR/SSA crates
+would encode names and dependencies without an executable invariant; create
+the minimal crates only when implementation of the vertical begins.
 
 When NEXT-VERTICAL-0 starts, the temporary shape should be minimal, for example:
 

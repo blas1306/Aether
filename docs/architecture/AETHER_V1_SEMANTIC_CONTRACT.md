@@ -22,7 +22,7 @@ Keywords:
 
 ### 1.1 Primitive set — DECIDED
 
-The candidate primitive set is:
+The target primitive set is:
 
 ```text
 bool
@@ -54,9 +54,10 @@ Aliases are transparent: they introduce a spelling, never a nominal type or a
 new layout.  User aliases are a v1 language feature and MUST exist before
 self-hosting.
 
-The baseline compatibility aliases are:
+The baseline aliases are:
 
 ```text
+alias int    = int64;
 alias double = float64;
 alias float  = float32;
 alias byte   = uint8;
@@ -69,22 +70,41 @@ Nominal wrappers/newtypes are a separate future facility.
 Alias expansion MUST terminate, reject cycles, preserve source alias names for
 diagnostics where useful and canonicalize before layout/code generation.
 
-### 1.3 Meaning of `int` — OPEN DECISION
+### 1.3 Meaning of `int` — DECIDED
 
-`int` MUST have one target-independent width.  It MUST NOT silently follow
-pointer width.  The live choices are:
+`int` is a transparent alias of `int64`.  It is the same semantic type, has the
+same range and layout, and does not create a distinct overload, conversion or
+ABI identity.  It has a target-independent width and MUST NOT silently follow
+pointer width.  `isize` and `usize` are the only fundamental integers whose
+width follows the target's natural pointer width.
 
-| Choice | Advantages | Costs |
-|---|---|---|
-| `int32` | Current Aether compatibility; compact arrays; common hardware scalar; existing overflow corpus and ABI | More overflow surprises in general/scientific counters; frequent conversion to `usize`; legacy name remains narrower than many users expect |
-| `int64` | Larger ergonomic default; safer literals/counters; common scientific integer width | Breaks current code/ABI/goldens; doubles many integer buffers; may add conversions and reduce some SIMD density |
-| no `int` | Maximum precision clarity | Harms the “comfortable by default” charter and makes literals/APIs noisy |
+The rationale is to keep the common spelling comfortable for counters and
+scientific/general-purpose integer work without making source meaning depend
+on the compilation target.  Explicit `int8`/`int16`/`int32`/`int64` and their
+unsigned counterparts remain available when storage, vector density, binary
+formats or interoperation require a precise width.
 
-Recommendation pending measurement: compare `int32` and `int64` on the
-versioned corpus for source breakage, memory, diagnostics, LLVM quality and
-index conversions.  `isize`/`usize` remove the only valid reason for a
-target-varying `int`.  The first vertical compiler milestone SHOULD use an
-internal explicitly named integer type, not freeze the source alias.
+Consequences:
+
+- ABI and layout canonicalize `int` to signed 64-bit.  An Aether function
+  spelled with `int` and one spelled with `int64` have the same signature; the
+  alias spelling MAY survive only for diagnostics and source metadata.
+- This deliberately breaks the legacy compiler's signed checked-i32 `int`
+  ABI, IR constants, range diagnostics and affected goldens.  Existing
+  compiled objects are not link-compatible merely because the source spelling
+  is unchanged; reconstruction artifacts require a new ABI/version boundary.
+- An unconstrained integer literal and a locally inferred binding default to
+  `int`, hence `int64`.  Context may instead select any representable explicit
+  integer type as specified in section 2.1.
+- `int` is not an index-sized synonym.  Target layouts and physical offsets use
+  `usize`/`isize` where appropriate.  The eventual source indexing API still
+  must define its accepted type and checked conversions; choosing `int64` does
+  not silently convert negative values to `usize` or settle that later API.
+- C FFI canonicalizes Aether `int` as an exact signed 64-bit value (for
+  example, C `int64_t` on a conforming binding), never as C `int` or C `long`.
+  `isize`/`usize` require a target-specific pointer-width match.  Public FFI
+  schemas SHOULD prefer the explicit canonical spelling `int64` even when
+  source APIs use `int`.
 
 ### 1.4 Complex numbers — OPEN DECISION
 
@@ -99,22 +119,47 @@ operator/conversion rules, transcendental semantics and LLVM codegen evidence.
 
 ## 2. Literals and numeric conversions
 
-### 2.1 Literal typing — OPEN DECISION
+### 2.1 Literal typing — DECIDED
 
 Integer and real literals MUST retain exact source magnitude (and for reals,
 source spelling or an exact parsed representation) until contextual typing.
 The host language's integer/float behavior MUST NOT define acceptance.
 
-Candidates:
+Integer literals are compiler-only abstract/contextual values until the
+surrounding expression requires a concrete type.  The same literal may become
+`int8`, `uint32`, `int`/`int64`, or another explicit integer type exactly when
+its mathematical value is representable in that type.  Contextual literal
+conversion is not a runtime numeric conversion and must not wrap, saturate or
+truncate.
 
-- default immediately to `int`/`float64` with range diagnostics;
-- use compiler-only unbounded literal types resolved by context;
-- require suffixes when the default cannot represent the value.
+```aether
+int8 a = 42;
+uint32 b = 42;
+int c = 42;
+x = 42;       // conceptually unconstrained: defaults to int/int64
+```
 
-The second option best supports fixed-width types and clear diagnostics, but
-must be bounded so overload/generic inference stays deterministic.  Suffix
-syntax remains open.  The current decimal-only, `int32`/`double` behavior is a
-legacy oracle, not the target decision.
+Without a constraining context, an integer literal resolves to `int`, hence
+`int64`.  Without a constraining context, a floating literal resolves to
+`float64`.  This defaulting happens after the exact literal has been parsed;
+the compiler does not first coerce through a host integer or host float.
+
+Range errors are compile-time diagnostics:
+
+- when context chooses a concrete integer type, reject a value below its
+  minimum or above its maximum and report the value, target type and range;
+- when no context exists, apply the `int64` default and diagnose values outside
+  that range;
+- preserve the unsigned magnitude and source span through unary sign handling
+  so the minimum signed value (for example `-9223372036854775808` for `int64`)
+  can be recognized without first constructing an invalid positive value;
+- constant evaluation uses mathematical/exact intermediates and diagnoses a
+  known unrepresentable result rather than inheriting host overflow.
+
+Literal suffix syntax remains an **OPEN DECISION** and is not needed for
+NEXT-VERTICAL-0.  Contextual literals do not imply general implicit narrowing
+for non-literal values.  The current decimal-only, immediate `int32`/`double`
+behavior remains a legacy oracle and compatibility input, not the target rule.
 
 ### 2.2 Implicit conversions — PROVISIONAL
 
@@ -134,55 +179,65 @@ representable in binary32/binary64.  Choices are:
 Mixed arithmetic and generic numeric constraints cannot be frozen before this
 choice.  No conversion may depend on C integer promotion rules.
 
-### 2.3 Integer overflow — OPEN DECISION
+### 2.3 Integer overflow — DECIDED baseline
 
-The current language traps on signed i32 add/sub/mul/neg/div/rem/power.  The
-recommended baseline is checked arithmetic in safe code, independent of
-optimization level, with explicit wrapping, saturating and unchecked
-operations when requested.  Before closing the decision, measure loop/kernel
-impact and specify:
+Ordinary signed and unsigned integer arithmetic has checked semantics.  If its
+mathematical result is not representable in the operation's concrete result
+type, execution traps with `IntegerOverflow` unless the compiler can diagnose
+the failure statically.  Overflow is never undefined behavior and never
+silently wraps.  `-O0` through `-O3` MUST preserve this meaning; a release or
+optimization profile cannot remove a required check without proof that the
+operation is in range.
 
-- signed and unsigned add/sub/mul/negation;
-- division by zero and signed minimum divided by `-1`;
-- shifts and shift counts;
-- exponentiation;
-- conversions and literal overflow;
-- constant-evaluation equivalence with runtime.
+For NEXT-VERTICAL-0 this rule covers the admitted ordinary integer addition,
+subtraction, multiplication and signed negation operations.  Integer division
+or remainder by zero traps with `DivisionByZero`; the signed minimum divided by
+`-1` traps with `IntegerOverflow`.  A constant expression whose failure is
+known is rejected at compile time with the same failure category and a source
+span.  Otherwise MIR carries an explicit checked operation/trap edge and the
+backend materializes the check.
 
-Release mode MUST NOT silently change checked operations to wrapping.
+Future explicitly requested `wrapping`, `checked` (value/status result) and
+`saturating` operation families are reserved.  Their API or syntax is an
+**OPEN DECISION**; their future existence does not weaken ordinary arithmetic.
+Shift counts, exponentiation, lossy numeric conversions and any unchecked
+escape hatch remain outside NEXT-VERTICAL-0 and require separate exact rules
+before admission.
 
 ## 3. Floating point
 
-### 3.1 Strict baseline — DECIDED
+### 3.1 Representation and optimization baseline — DECIDED
 
-On an admitted target, `float32` and `float64` use IEEE-754 binary32/binary64
-values and operations.  Normal optimization levels preserve the language's
-strict floating semantics.  `-O3` (or equivalent) MUST NOT imply fast math.
-A separately requested relaxed-math policy may weaken named guarantees and
-MUST be visible in build metadata.
+`float32` is IEEE-754 binary32 and `float64` is IEEE-754 binary64 on admitted
+targets.  `float` is a transparent alias of `float32`; `double` is a
+transparent alias of `float64`.  A floating literal without a constraining
+context defaults to `float64` as specified in section 2.1.
 
-Strict mode preserves:
+Normal optimization levels preserve the language's floating semantics.  `-O3`
+(or equivalent) MUST NOT imply fast math.  Relaxed/fast mathematics will be a
+separately requested policy, visible in build metadata, and cannot be inferred
+from the optimization level.
 
-- NaN unordered behavior and propagation permitted by the specified operation;
-- positive and negative infinities;
-- signed zero where IEEE distinguishes it;
-- subnormals unless the target profile explicitly rejects the target or a
-  relaxed mode requests flush behavior;
-- round-to-nearest, ties-to-even for ordinary operations unless an explicit
-  rounding facility says otherwise.
-
-The optimizer MUST NOT assume `x == x`, reassociate, contract operations,
-discard signed zero, ignore NaN/infinity, or introduce flush-to-zero without a
-semantic permission attached to that operation/function/module.
+This fixes formats and defaults, not every operational detail.  Until the open
+items below are decided, the optimizer and backend must use conservative
+settings: no reassociation, contraction, no-NaN/no-infinity assumptions,
+signed-zero disregard or flush-to-zero may be introduced merely because
+optimization is enabled.
 
 ### 3.2 Floating details — OPEN DECISION
 
-The contract still needs decisions for:
+The contract still needs decisions for, and NEXT-VERTICAL-0 does not need to
+admit floating operations before they close:
 
+- implicit and explicit integer/float and float/float conversions;
+- default and explicit rounding behavior;
+- NaN comparison/propagation and payload behavior;
+- infinity-producing operations and domain/pole behavior;
+- subnormal preservation or target-profile restrictions;
+- signed-zero observability;
 - permitted fused multiply-add contraction in strict mode;
 - exact parse/format algorithms and shortest-roundtrip requirements;
 - reproducibility across targets versus conformance within a target;
-- signaling NaNs and payload preservation;
 - explicit rounding-mode APIs and whether ambient hardware mode is observable;
 - float→integer results for NaN, infinity and out-of-range values;
 - constant evaluator parity with target execution;
@@ -212,7 +267,7 @@ Whether all local declarations require an initializer or types may define a
 default value is an **OPEN DECISION**.  Any default MUST be type-owned and
 cannot invent a null handle for non-null reference types.
 
-### 4.3 Assignment, copy and move — PROVISIONAL
+### 4.3 Assignment, copy and move — DECIDED for primitive scalars / PROVISIONAL otherwise
 
 Assignment denotes logical replacement of the destination after the right-hand
 side has been evaluated successfully.  Self-assignment must be safe.  A failed
@@ -228,10 +283,17 @@ assign(place, value)
 destroy(place)
 ```
 
-Trivial scalars copy by value.  Value aggregates recursively follow field
-semantics.  Move transfers ownership and makes the previous owning place
-unavailable.  Whether a source-level move is implicit from last use, explicit,
-or both is an **OPEN DECISION**.  The existing Initial IR lifecycle operations
+Primitive `bool`, every signed/unsigned integer type, `float32`, `float64` and
+`char` have value semantics.  Their initialization, assignment, argument
+passing and return copy the scalar value and introduce no ownership, ARC,
+destruction or observably shared alias.  `int`, `float` and `double` inherit
+this rule through transparent aliasing.  NEXT-VERTICAL-0 therefore needs no
+borrow or lifecycle analysis for its admitted scalar locals.
+
+Value aggregates recursively follow field semantics.  Move transfers
+ownership and makes the previous owning place unavailable.  Whether a
+source-level move is implicit from last use, explicit, or both is an **OPEN
+DECISION** for nontrivial values.  The existing Initial IR lifecycle operations
 and verifier are valuable executable evidence, not automatically the final
 surface model.
 
@@ -387,7 +449,32 @@ No ordinary owning/reference/string value is implicitly nullable.  The
 decision depends on tagged unions, pattern matching and error handling and
 must precede public ABI stabilization.
 
-### 8.2 Errors, panic and exceptions — OPEN DECISION
+### 8.2 Scalar traps for NEXT-VERTICAL-0 — DECIDED
+
+NEXT-VERTICAL-0 models non-recoverable scalar failures explicitly in Flow MIR.
+A trap is a typed/structured terminator or checked-operation failure edge with
+a source span, not an arbitrary backend string or a host-language exception.
+The minimum failure kinds are:
+
+```text
+IntegerOverflow
+DivisionByZero
+```
+
+The first covers the checked overflow cases in section 2.3.  The second covers
+admitted integer division and remainder with a zero divisor.  No additional
+kind is added unless an operation strictly required by the slice needs it.
+Verified MIR and verified SSA must make every possible trap explicit enough
+for control-flow, effect and optimization checks; optimizers preserve its
+observable ordering unless they prove the failure impossible.
+
+The bootstrap backend/runtime may initially lower a trap to an abort or target
+trap plus an appropriate diagnostic and non-success exit.  Exact rendering,
+exit code and runtime symbol ABI remain implementation contracts to qualify,
+not a recoverable language error facility.  Because this slice owns no
+nontrivial resources, it requires neither unwinding nor cleanup edges.
+
+### 8.3 Recoverable errors, panic and exceptions — OPEN DECISION
 
 The repository has a qualified native exception model plus typed result structs
 for parsing/files, while native safety panics currently terminate without
@@ -399,9 +486,10 @@ unwinding.  The reconstruction must choose and distinguish:
 - foreign/runtime errors across the C ABI.
 
 The choice controls MIR exceptional edges, cleanup, ABI, code size and
-self-hosting ergonomics.  Raw Rust/C++ exceptions MUST NOT cross FFI.  Until
-closed, the new core must model exceptional control-flow explicitly rather than
-assuming abort or unwind.
+self-hosting ergonomics.  Raw Rust/C++ exceptions MUST NOT cross FFI.  The
+structured scalar traps in section 8.2 are intentionally separate from this
+future recoverable model and do not decide whether exceptions, `Result` or
+unwinding eventually exist.
 
 ## 9. Modules and initialization
 
@@ -496,17 +584,17 @@ floating-point guarantees globally.
 
 ## 13. Decision dependencies and closure order
 
-The highest-impact open decisions should close in this order:
+The highest-impact remaining open decisions should close in this order:
 
-1. `int`, literal typing, conversions and overflow;
-2. error model and exceptional cleanup;
+1. numeric conversions beyond contextual literals;
+2. recoverable error model and exceptional cleanup;
 3. ownership parameter modes, moves and non-owning views;
 4. Array assignment/value model and slice/view lifetime;
 5. string indexing/view semantics;
 6. generic constraints plus orientation/static-dimension policy;
 7. module initialization;
 8. runtime handle schema, target layout and C FFI surface;
-9. relaxed floating-point modes and low-level syntax.
+9. full floating-point/relaxed-math policy and low-level syntax.
 
 Each closure requires source examples, rejected examples, semantic tests,
 targeted native codegen evidence, diagnostic expectations and a compatibility
