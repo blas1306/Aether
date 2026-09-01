@@ -62,7 +62,8 @@ jobs:
         with: {python-version: "3.13"}
       - uses: dtolnay/rust-toolchain@stable
         with: {toolchain: "1.85"}
-      - run: python -m pip install -r requirements.txt pytest
+      - run: python -m pip install -r requirements.txt pytest 'maturin>=1.9.4,<2'
+      - run: python -m pip install compiler-rs/distributions/aether-compiler-core
       - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --package aether-ir-verifier
       - run: >-
           python scripts/qualify_rust_ir_2_pre_lifecycle.py --mode valid-corpus
@@ -81,7 +82,8 @@ jobs:
         with: {python-version: "3.13"}
       - uses: dtolnay/rust-toolchain@stable
         with: {toolchain: "1.85"}
-      - run: python -m pip install -r requirements.txt pytest
+      - run: python -m pip install -r requirements.txt pytest 'maturin>=1.9.4,<2'
+      - run: python -m pip install compiler-rs/distributions/aether-compiler-core
       - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --package aether-ir-verifier
       - run: >-
           python scripts/qualify_rust_ir_2_pre_lifecycle.py --mode mutations
@@ -138,7 +140,7 @@ jobs:
         with: {python-version: "3.13"}
       - uses: dtolnay/rust-toolchain@stable
         with: {toolchain: "1.85"}
-      - run: python -m pip install -r requirements.txt 'maturin>=1.9.4,<2'
+      - run: python -m pip install -r requirements.txt pytest 'maturin>=1.9.4,<2'
       - run: python -m pip install compiler-rs/distributions/aether-compiler-core
       - run: python -m pip install -e . --no-deps
       - run: >-
@@ -188,6 +190,10 @@ jobs:
       - run: python -m pip install -r requirements.txt --group dev 'maturin>=1.9.4,<2'
       - run: python -m pip install compiler-rs/distributions/aether-compiler-core
       - run: python -m pip install -e . --no-deps
+      - run: >-
+          cargo build --manifest-path compiler-rs/Cargo.toml --locked
+          --package aether-verifier --bin aether-ssa-shadow
+      - run: cargo build --manifest-path compiler-rs/Cargo.toml --locked --release --package aether-ir-verifier
       - shell: bash
         run: |
           set -o pipefail

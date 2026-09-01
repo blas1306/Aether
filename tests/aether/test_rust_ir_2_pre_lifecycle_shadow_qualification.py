@@ -527,3 +527,36 @@ def test_workflow_has_dedicated_fail_closed_gates_and_no_historical_reuse() -> N
     assert "python -m build --wheel" in packaged
     assert "python -m pip install -e ." not in packaged
     assert "target/" not in packaged
+
+
+def test_workflow_installs_corpus_and_lifecycle_test_prerequisites() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    valid = workflow[
+        workflow.index("  valid-corpus-differential:") : workflow.index("  mutation-campaign:")
+    ]
+    mutations = workflow[
+        workflow.index("  mutation-campaign:") : workflow.index("  critical-irv041-regressions:")
+    ]
+    lifecycle = workflow[
+        workflow.index("  lifecycle-boundary-regression:") : workflow.index("  packaged-clean-consumer:")
+    ]
+    for section in (valid, mutations):
+        assert (
+            "python -m pip install compiler-rs/distributions/aether-compiler-core"
+            in section
+        )
+        assert "pytest" in section
+        assert "maturin>=1.9.4,<2" in section
+    assert "pytest" in lifecycle
+
+
+def test_source_install_builds_binaries_required_by_full_repository_suite() -> None:
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    source = workflow[
+        workflow.index("  source-development-install:") : workflow.index("  next-request-recovery:")
+    ]
+    assert "--package aether-verifier --bin aether-ssa-shadow" in source
+    assert "--release --package aether-ir-verifier" in source
+    full_suite = source.index("python -m pytest -q tests")
+    assert source.index("--package aether-verifier --bin aether-ssa-shadow") < full_suite
+    assert source.index("--release --package aether-ir-verifier") < full_suite
