@@ -179,6 +179,14 @@ representable in binary32/binary64.  Choices are:
 Mixed arithmetic and generic numeric constraints cannot be frozen before this
 choice.  No conversion may depend on C integer promotion rules.
 
+**NEXT-VERTICAL-3 implemented baseline (2026-09-01):** contextual literals may
+select any representable scalar numeric type. Already typed values widen only
+along `int8 -> int16 -> int32 -> int64`, `uint8 -> uint16 -> uint32 -> uint64`,
+and `float32 -> float64`. `isize`/`usize` do not implicitly convert to or from
+fixed-width types. Signed/unsigned, integer/floating, narrowing, and bool/numeric
+conversions are rejected. HIR makes admitted conversions explicit; MIR and SSA
+perform no numeric inference.
+
 ### 2.3 Integer overflow — DECIDED baseline
 
 Ordinary signed and unsigned integer arithmetic has checked semantics.  If its
@@ -246,6 +254,26 @@ admit floating operations before they close:
 LLVM constrained floating-point intrinsics, ordinary FP instructions and
 target attributes must be evaluated against this list.  A global fast-math bit
 is insufficiently precise for mixed strict/relaxed code.
+
+**NEXT-VERTICAL-3 operational baseline:** literals are rounded by the bootstrap
+compiler to IEEE binary32 or binary64 after contextual type selection. The
+backend emits ordinary LLVM floating operations with no fast-math flags and no
+contraction request. Comparisons use ordered predicates for `==`, `<`, `<=`,
+`>`, and `>=`, so each is false if either operand is NaN. `!=` uses unordered
+not-equal and is true if either operand is NaN. This closes comparison truth
+values for the scalar subset; NaN payload propagation, ambient rounding modes,
+cross-target bit reproducibility and constant-folding parity remain open.
+
+### 3.3 Integer division and remainder — OPEN DECISION
+
+NEXT-VERTICAL-3 deliberately keeps `/` and `%` fail-closed. The recommended v1
+direction is C-like typed integer quotient (`int / int -> same integer type`),
+truncating toward zero for signed values, with same-type remainder satisfying
+`a = (a / b) * b + a % b`; division by zero and signed `MIN / -1` trap. Real
+division should require floating operands (or an explicit conversion). This is
+predictable, efficient, closed under generic integer algorithms, and avoids an
+implicit lossy integer-to-float conversion. It still requires an explicit-cast
+design before admission, so the recommendation is not yet implemented.
 
 ## 4. Evaluation, calls and assignment
 

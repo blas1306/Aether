@@ -1,11 +1,12 @@
 //! MIR-to-SSA promotion, phi construction, dominance and verification.
+#![allow(missing_docs)]
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 
 use aether_frontend::{
-    Diagnostic, DiagnosticCategory, FunctionId, FunctionSignature, LocalId, ModuleInfo, Phase,
-    Span, Type,
+    CoercionKind, Diagnostic, DiagnosticCategory, FloatValue, FunctionId, FunctionSignature,
+    LocalId, ModuleInfo, Phase, Span, Type,
 };
 
 use crate::{
@@ -22,7 +23,9 @@ pub enum SsaOperand {
     /// SSA value use.
     Value(ValueId),
     /// Signed 64-bit constant.
-    Int(i64),
+    Int { value: i128, ty: Type },
+    /// IEEE literal bits and canonical type.
+    Float { value: FloatValue, ty: Type },
     /// Boolean constant.
     Bool(bool),
 }
@@ -57,11 +60,17 @@ pub struct SsaParameter {
 pub enum SsaOp {
     /// Scalar copy.
     Use(SsaOperand),
+    /// Explicit widening selected in HIR.
+    Coerce {
+        kind: CoercionKind,
+        operand: SsaOperand,
+        from: Type,
+    },
     /// Unary computation with explicit trap effect.
     Unary {
         op: UnaryOp,
         operand: SsaOperand,
-        trap: TrapKind,
+        trap: Option<TrapKind>,
     },
     /// Binary computation with an optional explicit trap effect.
     Binary {
@@ -366,6 +375,15 @@ fn rename_block(
 fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>]) -> SsaOp {
     match value {
         Rvalue::Use(operand) => SsaOp::Use(rename_operand(operand, stacks)),
+        Rvalue::Coerce {
+            kind,
+            operand,
+            from,
+        } => SsaOp::Coerce {
+            kind: *kind,
+            operand: rename_operand(operand, stacks),
+            from: *from,
+        },
         Rvalue::Unary { op, operand, trap } => SsaOp::Unary {
             op: *op,
             operand: rename_operand(operand, stacks),
@@ -399,7 +417,14 @@ fn rename_operand(operand: &Operand, stacks: &[Vec<ValueId>]) -> SsaOperand {
                 .last()
                 .expect("verified MIR use has reaching definition"),
         ),
-        Operand::Int(value) => SsaOperand::Int(*value),
+        Operand::Int { value, ty } => SsaOperand::Int {
+            value: *value,
+            ty: *ty,
+        },
+        Operand::Float { value, ty } => SsaOperand::Float {
+            value: *value,
+            ty: *ty,
+        },
         Operand::Bool(value) => SsaOperand::Bool(*value),
     }
 }
@@ -579,7 +604,7 @@ fn mir_liveness(function: &MirFunction, cfg: &Cfg) -> Vec<BTreeSet<LocalId>> {
 
 fn rvalue_locals(value: &Rvalue) -> Vec<LocalId> {
     match value {
-        Rvalue::Use(operand) | Rvalue::Unary { operand, .. } => {
+        Rvalue::Use(operand) | Rvalue::Coerce { operand, .. } | Rvalue::Unary { operand, .. } => {
             operand_local(operand).into_iter().collect()
         }
         Rvalue::Binary { left, right, .. } => operand_local(left)
@@ -753,7 +778,7 @@ fn verify_ssa_function(
                 .get(value)
                 .map(|definition| definition.ty)
                 .ok_or_else(|| format!("SSA use of undefined value {value:?}")),
-            SsaOperand::Int(_) => Ok(Type::Int64),
+            SsaOperand::Int { ty, .. } | SsaOperand::Float { ty, .. } => Ok(*ty),
             SsaOperand::Bool(_) => Ok(Type::Bool),
         }
     };
@@ -859,15 +884,26 @@ fn verify_op(
                 return Err("SSA copy type mismatch".into());
             }
         }
-        SsaOp::Unary {
-            op: UnaryOp::NegateChecked,
+        SsaOp::Coerce {
+            kind,
             operand,
-            trap,
+            from,
         } => {
-            if operand_ty(operand)? != Type::Int64
-                || result != Type::Int64
-                || *trap != TrapKind::IntegerOverflow
-            {
+            if operand_ty(operand)? != *from || !valid_coercion(*kind, *from, result) {
+                return Err("invalid SSA coercion contract".into());
+            }
+        }
+        SsaOp::Unary { op, operand, trap } => {
+            let ty = operand_ty(operand)?;
+            let valid = match op {
+                UnaryOp::NegateIntegerChecked => ty
+                    .as_integer()
+                    .is_some_and(aether_frontend::IntegerType::is_signed),
+                UnaryOp::NegateFloat => ty.as_float().is_some(),
+            };
+            let required_trap =
+                matches!(op, UnaryOp::NegateIntegerChecked).then_some(TrapKind::IntegerOverflow);
+            if result != ty || !valid || *trap != required_trap {
                 return Err("invalid SSA checked-negation contract".into());
             }
         }
@@ -883,14 +919,28 @@ fn verify_op(
                 return Err("SSA binary operand type mismatch".into());
             }
             let (required, output, required_trap) = match op {
-                BinaryOp::AddChecked | BinaryOp::SubtractChecked | BinaryOp::MultiplyChecked => {
-                    (Type::Int64, Type::Int64, Some(TrapKind::IntegerOverflow))
+                BinaryOp::AddIntegerChecked
+                | BinaryOp::SubtractIntegerChecked
+                | BinaryOp::MultiplyIntegerChecked
+                    if left.as_integer().is_some() =>
+                {
+                    (left, left, Some(TrapKind::IntegerOverflow))
+                }
+                BinaryOp::AddFloat | BinaryOp::SubtractFloat | BinaryOp::MultiplyFloat
+                    if left.as_float().is_some() =>
+                {
+                    (left, left, None)
                 }
                 BinaryOp::Less
                 | BinaryOp::LessEqual
                 | BinaryOp::Greater
-                | BinaryOp::GreaterEqual => (Type::Int64, Type::Bool, None),
+                | BinaryOp::GreaterEqual
+                    if left.is_numeric() =>
+                {
+                    (left, Type::Bool, None)
+                }
                 BinaryOp::Equal | BinaryOp::NotEqual => (left, Type::Bool, None),
+                _ => return Err("SSA numeric opcode/type mismatch".into()),
             };
             if left != required || result != output || *trap != required_trap {
                 return Err(format!("invalid SSA contract for {op:?}"));
@@ -914,9 +964,26 @@ fn verify_op(
     Ok(())
 }
 
+fn valid_coercion(kind: CoercionKind, from: Type, to: Type) -> bool {
+    match (kind, from, to) {
+        (CoercionKind::SignExtend, Type::Integer(a), Type::Integer(b)) => {
+            a.is_signed() && a.can_widen_to(b)
+        }
+        (CoercionKind::ZeroExtend, Type::Integer(a), Type::Integer(b)) => {
+            !a.is_signed() && a.can_widen_to(b)
+        }
+        (
+            CoercionKind::FloatExtend,
+            Type::Float(aether_frontend::FloatType::Float32),
+            Type::Float(aether_frontend::FloatType::Float64),
+        ) => true,
+        _ => false,
+    }
+}
+
 fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
     match op {
-        SsaOp::Use(value) => vec![value],
+        SsaOp::Use(value) | SsaOp::Coerce { operand: value, .. } => vec![value],
         SsaOp::Unary { operand, .. } => vec![operand],
         SsaOp::Binary { left, right, .. } => vec![left, right],
         SsaOp::Call { args, .. } => args.iter().collect(),
@@ -1069,7 +1136,10 @@ mod tests {
             .find(|instruction| matches!(instruction.op, SsaOp::Call { .. }))
             .unwrap();
         if let SsaOp::Call { args, .. } = &mut call.op {
-            args[0] = SsaOperand::Int(1);
+            args[0] = SsaOperand::Int {
+                value: 1,
+                ty: Type::INT64,
+            };
         }
         assert!(verify_ssa(ssa).is_err());
     }

@@ -1,8 +1,11 @@
-//! LLVM backend for verified Vertical-2 program SSA.
+//! LLVM backend for verified Vertical-3 program SSA.
 
 use std::fmt::Write;
 
-use aether_frontend::{FunctionSignature, ModuleInfo, Type};
+use aether_frontend::{
+    CoercionKind, FloatType, FloatValue, FunctionSignature, IntegerType, ModuleInfo,
+    TargetProperties, Type,
+};
 use aether_middle::{
     BinaryOp, BlockId, SsaFunction, SsaOp, SsaOperand, SsaTerminator, TrapKind, UnaryOp,
     VerifiedSsa,
@@ -13,14 +16,17 @@ use aether_middle::{
 pub struct TargetDescriptor {
     /// LLVM target triple.
     pub triple: &'static str,
+    /// Semantic/layout properties shared with type analysis.
+    pub properties: TargetProperties,
 }
 
 impl TargetDescriptor {
-    /// The target admitted by NEXT-VERTICAL-2.
+    /// The target admitted by NEXT-VERTICAL-3.
     #[must_use]
     pub const fn linux_x86_64() -> Self {
         Self {
             triple: "x86_64-unknown-linux-gnu",
+            properties: TargetProperties::LINUX_X86_64,
         }
     }
 }
@@ -46,28 +52,20 @@ impl Backend for LlvmTextBackend {
 pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let program = ssa.as_ssa();
     let mut output = String::new();
-    writeln!(output, "; Aether NEXT-VERTICAL-2").unwrap();
+    writeln!(output, "; Aether NEXT-VERTICAL-3").unwrap();
     writeln!(
         output,
         "; Internal bootstrap ABI and symbol mangling; not a public Aether ABI"
     )
     .unwrap();
     writeln!(output, "target triple = \"{}\"\n", target.triple).unwrap();
-    writeln!(
-        output,
-        "declare {{ i64, i1 }} @llvm.sadd.with.overflow.i64(i64, i64)"
-    )
-    .unwrap();
-    writeln!(
-        output,
-        "declare {{ i64, i1 }} @llvm.ssub.with.overflow.i64(i64, i64)"
-    )
-    .unwrap();
-    writeln!(
-        output,
-        "declare {{ i64, i1 }} @llvm.smul.with.overflow.i64(i64, i64)"
-    )
-    .unwrap();
+    for bits in [8, 16, 32, 64] {
+        for family in ['s', 'u'] {
+            for op in ["add", "sub", "mul"] {
+                writeln!(output,"declare {{ i{bits}, i1 }} @llvm.{family}{op}.with.overflow.i{bits}(i{bits}, i{bits})").unwrap();
+            }
+        }
+    }
     writeln!(output, "declare void @llvm.trap() cold noreturn nounwind\n").unwrap();
 
     for function in &program.functions {
@@ -164,66 +162,115 @@ fn emit_function(
         }
         for instruction in &block.instructions {
             match &instruction.op {
-                SsaOp::Use(operand) => match instruction.ty {
-                    Type::Int64 => writeln!(
-                        output,
-                        "  %v{} = add i64 {}, 0",
-                        instruction.result.0,
-                        llvm_operand(operand)
-                    )
-                    .unwrap(),
-                    Type::Bool => writeln!(
-                        output,
-                        "  %v{} = or i1 {}, false",
-                        instruction.result.0,
-                        llvm_operand(operand)
-                    )
-                    .unwrap(),
-                },
-                SsaOp::Unary {
-                    op: UnaryOp::NegateChecked,
+                SsaOp::Use(operand) => writeln!(
+                    output,
+                    "  %v{} = select i1 true, {} {}, {} {}",
+                    instruction.result.0,
+                    llvm_type(instruction.ty),
+                    llvm_operand(operand),
+                    llvm_type(instruction.ty),
+                    llvm_operand(operand)
+                )
+                .unwrap(),
+                SsaOp::Coerce {
+                    kind,
                     operand,
-                    trap: TrapKind::IntegerOverflow,
+                    from,
+                } => {
+                    let opcode = match kind {
+                        CoercionKind::SignExtend => "sext",
+                        CoercionKind::ZeroExtend => "zext",
+                        CoercionKind::FloatExtend => "fpext",
+                    };
+                    writeln!(
+                        output,
+                        "  %v{} = {opcode} {} {} to {}",
+                        instruction.result.0,
+                        llvm_type(*from),
+                        llvm_operand(operand),
+                        llvm_type(instruction.ty)
+                    )
+                    .unwrap();
+                }
+                SsaOp::Unary {
+                    op: UnaryOp::NegateIntegerChecked,
+                    operand,
+                    trap: Some(TrapKind::IntegerOverflow),
                 } => {
                     overflow_trap = true;
                     emit_checked(
                         output,
                         block.id,
                         instruction.result.0,
-                        "llvm.ssub.with.overflow.i64",
+                        &format!("llvm.ssub.with.overflow.{}", llvm_type(instruction.ty)),
+                        llvm_type(instruction.ty),
                         "0",
                         &llvm_operand(operand),
                     );
                 }
                 SsaOp::Unary {
-                    trap: TrapKind::DivisionByZero,
-                    ..
-                } => unreachable!("verified unary trap contract"),
+                    op: UnaryOp::NegateFloat,
+                    operand,
+                    trap: None,
+                } => {
+                    writeln!(
+                        output,
+                        "  %v{} = fneg {} {}",
+                        instruction.result.0,
+                        llvm_type(instruction.ty),
+                        llvm_operand(operand)
+                    )
+                    .unwrap();
+                }
+                SsaOp::Unary { .. } => unreachable!("verified unary trap contract"),
                 SsaOp::Binary {
                     op,
                     left,
                     right,
                     trap,
                 } => match op {
-                    BinaryOp::AddChecked
-                    | BinaryOp::SubtractChecked
-                    | BinaryOp::MultiplyChecked => {
+                    BinaryOp::AddIntegerChecked
+                    | BinaryOp::SubtractIntegerChecked
+                    | BinaryOp::MultiplyIntegerChecked => {
                         overflow_trap = true;
-                        let intrinsic = match op {
-                            BinaryOp::AddChecked => "llvm.sadd.with.overflow.i64",
-                            BinaryOp::SubtractChecked => "llvm.ssub.with.overflow.i64",
-                            BinaryOp::MultiplyChecked => "llvm.smul.with.overflow.i64",
+                        let operand_ty = operand_type(function, left);
+                        let integer = operand_ty.as_integer().expect("verified integer op");
+                        let prefix = if integer.is_signed() { 's' } else { 'u' };
+                        let opname = match op {
+                            BinaryOp::AddIntegerChecked => "add",
+                            BinaryOp::SubtractIntegerChecked => "sub",
+                            BinaryOp::MultiplyIntegerChecked => "mul",
                             _ => unreachable!(),
                         };
+                        let llvm_ty = llvm_type(operand_ty);
+                        let intrinsic = format!("llvm.{prefix}{opname}.with.overflow.{llvm_ty}");
                         debug_assert_eq!(*trap, Some(TrapKind::IntegerOverflow));
                         emit_checked(
                             output,
                             block.id,
                             instruction.result.0,
-                            intrinsic,
+                            &intrinsic,
+                            llvm_ty,
                             &llvm_operand(left),
                             &llvm_operand(right),
                         );
+                    }
+                    BinaryOp::AddFloat | BinaryOp::SubtractFloat | BinaryOp::MultiplyFloat => {
+                        let opcode = match op {
+                            BinaryOp::AddFloat => "fadd",
+                            BinaryOp::SubtractFloat => "fsub",
+                            BinaryOp::MultiplyFloat => "fmul",
+                            _ => unreachable!(),
+                        };
+                        writeln!(
+                            output,
+                            "  %v{} = {opcode} {} {}, {}",
+                            instruction.result.0,
+                            llvm_type(operand_type(function, left)),
+                            llvm_operand(left),
+                            llvm_operand(right)
+                        )
+                        .unwrap();
                     }
                     BinaryOp::Less
                     | BinaryOp::LessEqual
@@ -231,26 +278,72 @@ fn emit_function(
                     | BinaryOp::GreaterEqual
                     | BinaryOp::Equal
                     | BinaryOp::NotEqual => {
-                        let predicate = match op {
-                            BinaryOp::Less => "slt",
-                            BinaryOp::LessEqual => "sle",
-                            BinaryOp::Greater => "sgt",
-                            BinaryOp::GreaterEqual => "sge",
-                            BinaryOp::Equal => "eq",
-                            BinaryOp::NotEqual => "ne",
-                            _ => unreachable!(),
-                        };
                         let operand_ty = operand_type(function, left);
-                        writeln!(
-                            output,
-                            "  %v{} = icmp {} {} {}, {}",
-                            instruction.result.0,
-                            predicate,
-                            llvm_type(operand_ty),
-                            llvm_operand(left),
-                            llvm_operand(right)
-                        )
-                        .unwrap();
+                        if let Type::Float(_) = operand_ty {
+                            let predicate = match op {
+                                BinaryOp::Less => "olt",
+                                BinaryOp::LessEqual => "ole",
+                                BinaryOp::Greater => "ogt",
+                                BinaryOp::GreaterEqual => "oge",
+                                BinaryOp::Equal => "oeq",
+                                BinaryOp::NotEqual => "une",
+                                _ => unreachable!(),
+                            };
+                            writeln!(
+                                output,
+                                "  %v{} = fcmp {predicate} {} {}, {}",
+                                instruction.result.0,
+                                llvm_type(operand_ty),
+                                llvm_operand(left),
+                                llvm_operand(right)
+                            )
+                            .unwrap();
+                        } else {
+                            let signed =
+                                operand_ty.as_integer().is_some_and(IntegerType::is_signed);
+                            let predicate = match op {
+                                BinaryOp::Less => {
+                                    if signed {
+                                        "slt"
+                                    } else {
+                                        "ult"
+                                    }
+                                }
+                                BinaryOp::LessEqual => {
+                                    if signed {
+                                        "sle"
+                                    } else {
+                                        "ule"
+                                    }
+                                }
+                                BinaryOp::Greater => {
+                                    if signed {
+                                        "sgt"
+                                    } else {
+                                        "ugt"
+                                    }
+                                }
+                                BinaryOp::GreaterEqual => {
+                                    if signed {
+                                        "sge"
+                                    } else {
+                                        "uge"
+                                    }
+                                }
+                                BinaryOp::Equal => "eq",
+                                BinaryOp::NotEqual => "ne",
+                                _ => unreachable!(),
+                            };
+                            writeln!(
+                                output,
+                                "  %v{} = icmp {predicate} {} {}, {}",
+                                instruction.result.0,
+                                llvm_type(operand_ty),
+                                llvm_operand(left),
+                                llvm_operand(right)
+                            )
+                            .unwrap();
+                        }
                     }
                 },
                 SsaOp::Call { callee, args } => {
@@ -329,22 +422,23 @@ fn emit_checked(
     block: BlockId,
     result: u32,
     intrinsic: &str,
+    ty: &str,
     left: &str,
     right: &str,
 ) {
     writeln!(
         output,
-        "  %checked{result} = call {{ i64, i1 }} @{intrinsic}(i64 {left}, i64 {right})"
+        "  %checked{result} = call {{ {ty}, i1 }} @{intrinsic}({ty} {left}, {ty} {right})"
     )
     .unwrap();
     writeln!(
         output,
-        "  %v{result} = extractvalue {{ i64, i1 }} %checked{result}, 0"
+        "  %v{result} = extractvalue {{ {ty}, i1 }} %checked{result}, 0"
     )
     .unwrap();
     writeln!(
         output,
-        "  %overflow{result} = extractvalue {{ i64, i1 }} %checked{result}, 1"
+        "  %overflow{result} = extractvalue {{ {ty}, i1 }} %checked{result}, 1"
     )
     .unwrap();
     writeln!(
@@ -359,11 +453,15 @@ fn emit_checked(
 fn is_checked(op: &SsaOp) -> bool {
     matches!(
         op,
-        SsaOp::Unary { .. }
-            | SsaOp::Binary {
-                op: BinaryOp::AddChecked | BinaryOp::SubtractChecked | BinaryOp::MultiplyChecked,
-                ..
-            }
+        SsaOp::Unary {
+            op: UnaryOp::NegateIntegerChecked,
+            ..
+        } | SsaOp::Binary {
+            op: BinaryOp::AddIntegerChecked
+                | BinaryOp::SubtractIntegerChecked
+                | BinaryOp::MultiplyIntegerChecked,
+            ..
+        }
     )
 }
 
@@ -382,22 +480,30 @@ fn continuation_label(block: BlockId, result: u32) -> String {
 
 fn llvm_type(ty: Type) -> &'static str {
     match ty {
-        Type::Int64 => "i64",
         Type::Bool => "i1",
+        Type::Integer(IntegerType::Int8 | IntegerType::Uint8) => "i8",
+        Type::Integer(IntegerType::Int16 | IntegerType::Uint16) => "i16",
+        Type::Integer(IntegerType::Int32 | IntegerType::Uint32) => "i32",
+        Type::Integer(
+            IntegerType::Int64 | IntegerType::Uint64 | IntegerType::Isize | IntegerType::Usize,
+        ) => "i64",
+        Type::Float(FloatType::Float32) => "float",
+        Type::Float(FloatType::Float64) => "double",
     }
 }
 
 fn llvm_operand(operand: &SsaOperand) -> String {
     match operand {
         SsaOperand::Value(value) => format!("%v{}", value.0),
-        SsaOperand::Int(value) => value.to_string(),
+        SsaOperand::Int { value, .. } => value.to_string(),
+        SsaOperand::Float { value, .. } => float_operand(*value),
         SsaOperand::Bool(value) => value.to_string(),
     }
 }
 
 fn operand_type(function: &SsaFunction, operand: &SsaOperand) -> Type {
     match operand {
-        SsaOperand::Int(_) => Type::Int64,
+        SsaOperand::Int { ty, .. } | SsaOperand::Float { ty, .. } => *ty,
         SsaOperand::Bool(_) => Type::Bool,
         SsaOperand::Value(value) => function
             .parameters
@@ -422,6 +528,17 @@ fn operand_type(function: &SsaFunction, operand: &SsaOperand) -> Type {
             })
             .expect("verified SSA value has definition"),
     }
+}
+
+fn float_operand(value: FloatValue) -> String {
+    let mut s = match value {
+        FloatValue::Float32(bits) => f32::from_bits(bits).to_string(),
+        FloatValue::Float64(bits) => f64::from_bits(bits).to_string(),
+    };
+    if !s.contains(['.', 'e', 'E']) {
+        s.push_str(".0");
+    }
+    s
 }
 
 /// Exposes deterministic bootstrap mangling for qualification without making it public ABI.

@@ -1,4 +1,4 @@
-//! Cross-layer and native qualification for NEXT-VERTICAL-2.
+//! Cross-layer and native qualification for NEXT-VERTICAL-3.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -292,4 +292,161 @@ fn multi_file_diagnostics_are_structured_and_keep_source_provenance() {
     assert_eq!(error.code, "E0701");
     assert_eq!(error.source_name.as_deref(), Some("main.ae"));
     assert!(error.span.is_some());
+}
+
+#[test]
+fn vertical3_scalar_contract_is_canonical_and_explicit() {
+    let source = SourceFile::new(
+        "scalars.ae",
+        r"
+alias Tiny = int8;
+alias TinyChain = Tiny;
+int64 signed_widen(TinyChain x) { int16 a = x; int32 b = a; return b; }
+uint64 unsigned_widen(byte x) { uint16 a = x; uint32 b = a; return b; }
+float64 float_widen(float x) { return x; }
+float32 add32(float32 a,float32 b){return a+b;}
+bool feq(float64 a,float64 b){return a==b;} bool fne(float64 a,float64 b){return a!=b;}
+bool flt(float64 a,float64 b){return a<b;} bool fle(float64 a,float64 b){return a<=b;}
+bool fgt(float64 a,float64 b){return a>b;} bool fge(float64 a,float64 b){return a>=b;}
+bool default_float(){return 3.14==3.14;} bool default_integer(){return 7==7;}
+int main() {
+    Tiny lo = -128; int8 hi = 127;
+    uint8 zero = 0; byte top = 255;
+    isize si = -1; usize ui = 1;
+    float32 f = 1.5; double d = float_widen(f) * 2.0;
+    if (lo < hi) { if (zero < top) { if (d == 3.0) { return signed_widen(42); } } }
+    return 0;
+}
+",
+    );
+    let result = compile_source(&source, &[Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm]).unwrap();
+    let hir = &result.dumps[&Emit::Hir];
+    assert!(hir.contains("TinyChain"));
+    assert!(
+        hir.contains("canonical: Integer(\n            Int8")
+            || hir.contains("canonical: Integer(Int8)")
+    );
+    assert!(hir.contains("SignExtend"));
+    assert!(hir.contains("FloatExtend"));
+    let llvm = &result.llvm;
+    assert!(llvm.contains("sext i8"));
+    assert!(llvm.contains("zext i8"));
+    assert!(llvm.contains("fpext float"));
+    assert!(llvm.contains("fmul double"));
+    assert!(llvm.contains("fadd float"));
+    assert!(llvm.contains("fcmp oeq double"));
+    assert!(llvm.contains("icmp eq i64"));
+    assert!(llvm.contains("icmp ult i8"));
+    for predicate in ["une", "olt", "ole", "ogt", "oge"] {
+        assert!(
+            llvm.contains(&format!("fcmp {predicate} double")),
+            "{predicate}"
+        );
+    }
+}
+
+#[test]
+fn vertical3_ranges_conversions_and_alias_cycles_are_structured() {
+    for (text, code) in [
+        ("int main(){int8 x=128;return x;}", "E0209"),
+        ("int main(){uint8 x=-1;return x;}", "E0209"),
+        ("int main(){int16 x=1;int8 y=x;return y;}", "E0218"),
+        ("int main(){int8 x=1;uint8 y=2;return x+y;}", "E0218"),
+        ("int main(){float32 x=1.0;int64 y=x;return y;}", "E0218"),
+        ("alias A=B;alias B=A;int main(){return 0;}", "E0226"),
+        ("alias A=Missing;int main(){return 0;}", "E0204"),
+    ] {
+        let error = compile_source(&SourceFile::new("negative.ae", text), &[]).unwrap_err();
+        assert_eq!(error[0].code, code, "{text}");
+        assert!(error[0].span.is_some());
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical3_scalars_execute_and_unsigned_underflow_traps() {
+    let ok = temporary("v3-ok");
+    let compiled = compile_source(&SourceFile::new("v3.ae", "int main(){uint8 x=250;uint8 y=5;uint8 z=x+y;float32 f=1.5;float64 d=f+0.5;if(z==255){if(d==2.0){return 42;}}return 0;}"), &[]).unwrap();
+    ClangToolchain::default()
+        .link_executable(&compiled.llvm, &ok)
+        .unwrap();
+    assert_eq!(Command::new(&ok).status().unwrap().code(), Some(42));
+    let _ = fs::remove_file(ok);
+
+    let trap = temporary("v3-trap");
+    let compiled = compile_source(
+        &SourceFile::new(
+            "trap.ae",
+            "int main(){uint8 x=0;uint8 one=1;x=x-one;return 0;}",
+        ),
+        &[],
+    )
+    .unwrap();
+    ClangToolchain::default()
+        .link_executable(&compiled.llvm, &trap)
+        .unwrap();
+    assert!(!Command::new(&trap).status().unwrap().success());
+    let _ = fs::remove_file(trap);
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical3_all_integer_boundaries_and_checked_families_compile() {
+    let source = SourceFile::new(
+        "widths.ae",
+        r"
+int8 s8(int8 a,int8 b){return a+b;} int16 s16(int16 a,int16 b){return a-b;}
+int32 s32(int32 a,int32 b){return a*b;} uint8 u8(uint8 a,uint8 b){return a+b;}
+uint16 u16(uint16 a,uint16 b){return a-b;} uint32 u32(uint32 a,uint32 b){return a*b;}
+uint64 u64(uint64 a,uint64 b){return a+b;}
+int main(){int8 a=-128;int8 b=127;int16 c=-32768;int16 d=32767;
+int32 e=-2147483648;int32 f=2147483647;int64 g=-9223372036854775808;int64 g2=9223372036854775807;
+uint8 h0=0;uint8 h=255;uint16 i0=0;uint16 i=65535;uint32 j0=0;uint32 j=4294967295;
+uint64 k0=0;uint64 k=18446744073709551615;isize p=-9223372036854775808;usize q=18446744073709551615;
+return s8(1,2);}
+",
+    );
+    let llvm = compile_source(&source, &[]).unwrap().llvm;
+    for intrinsic in [
+        "llvm.sadd.with.overflow.i8",
+        "llvm.ssub.with.overflow.i16",
+        "llvm.smul.with.overflow.i32",
+        "llvm.uadd.with.overflow.i8",
+        "llvm.usub.with.overflow.i16",
+        "llvm.umul.with.overflow.i32",
+        "llvm.uadd.with.overflow.i64",
+    ] {
+        assert!(llvm.contains(intrinsic), "{intrinsic}");
+    }
+    let artifact = temporary("v3-widths");
+    ClangToolchain::default()
+        .link_executable(&llvm, &artifact)
+        .unwrap();
+    assert_eq!(Command::new(&artifact).status().unwrap().code(), Some(3));
+    let _ = fs::remove_file(artifact);
+}
+
+#[test]
+fn vertical3_alias_signatures_work_across_modules() {
+    let root = temporary("v3-modules");
+    fs::create_dir(&root).unwrap();
+    fs::write(
+        root.join("main.ae"),
+        "import math;int main(){return math.answer(21);}",
+    )
+    .unwrap();
+    fs::write(
+        root.join("math.ae"),
+        "alias Scalar=int16;int answer(Scalar x){return x+x;}",
+    )
+    .unwrap();
+    let compilation = compile_session(
+        CompilationSession::discover(&root.join("main.ae")).unwrap(),
+        &[Emit::Hir],
+    )
+    .unwrap();
+    assert!(compilation.dumps[&Emit::Hir].contains("Scalar"));
+    let _ = fs::remove_file(root.join("main.ae"));
+    let _ = fs::remove_file(root.join("math.ae"));
+    let _ = fs::remove_dir(root);
 }

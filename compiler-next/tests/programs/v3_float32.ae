@@ -1,0 +1,1 @@
+int main() { float32 left = 1.5; float right = 2.0; float64 result = left * right; if (result == 3.0) { return 42; } return 0; }

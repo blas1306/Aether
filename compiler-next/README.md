@@ -1,4 +1,4 @@
-# Aether NEXT-VERTICAL-2
+# Aether NEXT-VERTICAL-3
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. It does not replace the production `aether` CLI or import any legacy
@@ -30,22 +30,23 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and scalar IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-2 grammar
+## Vertical-3 grammar
 
 ```text
-program    := import* function+ EOF
+program    := import* (alias | function)+ EOF
 import     := "import" IDENT ";"
+alias      := "alias" IDENT "=" type ";"
 function   := type IDENT "(" parameters? ")" block
 parameters := parameter ("," parameter)*
 parameter  := type IDENT
-type       := "int" | "bool"
+type       := "bool" | integer-type | float-type | IDENT
 block      := "{" statement* "}"
-statement  := ("int" | "bool") IDENT "=" expression ";"
+statement  := type IDENT "=" expression ";"
             | IDENT "=" expression ";"
             | "if" "(" expression ")" block ("else" block)?
             | "while" "(" expression ")" block
             | "return" expression ";"
-expression := integer | "true" | "false" | IDENT | call | "(" expression ")"
+expression := integer | float | "true" | "false" | IDENT | call | "(" expression ")"
 call       := IDENT "(" arguments? ")"
             | IDENT "." IDENT "(" arguments? ")"
 arguments  := expression ("," expression)*
@@ -54,11 +55,31 @@ arguments  := expression ("," expression)*
                          | "==" | "!=") expression
 ```
 
-Operator precedence is conventional: unary, multiplication, addition and
-subtraction, ordered comparisons, then equality. Integers canonicalize to
-signed `int64`. Constant overflow is rejected; dynamic `+`, `-`, `*`, and
-negation use LLVM checked-overflow intrinsics and trap on the overflow edge.
-Division and remainder are lexed as structured unsupported-feature errors.
+The canonical scalar set is `bool`, `int8`/`16`/`32`/`64`,
+`uint8`/`16`/`32`/`64`, `isize`, `usize`, `float32` and `float64`. Transparent
+built-ins are `int = int64`, `byte = uint8`, `float = float32`, and
+`double = float64`. User `alias` declarations are module-local transparent
+aliases; chains are canonicalized once and cycles are rejected.
+
+Integer and floating literals remain source spellings until contextual typing;
+unconstrained defaults are `int64` and `float64`. Non-literal implicit
+conversions are limited to widening within the signed family, widening within
+the unsigned family, and `float32 -> float64`. HIR records each widening as a
+`SignExtend`, `ZeroExtend`, or `FloatExtend`; MIR and SSA verify it explicitly.
+Signed/unsigned, integer/float, narrowing, and bool/numeric conversions fail.
+
+Canonical scalar types are explicit enums, not strings. A global `TypeId`
+interner is intentionally deferred: it becomes useful when recursive composite
+types and instantiated generics make structural type values recursive or
+expensive, but adds no correctness or performance value for this closed scalar
+set.
+
+All integer `+`, `-`, `*`, and signed negation are checked at their exact
+width. LLVM uses signed or unsigned overflow intrinsics without `nsw`/`nuw`.
+Floats use ordinary strict-baseline `fadd`/`fsub`/`fmul` without fast-math.
+Floating `==`, `<`, `<=`, `>`, `>=` are ordered (false with NaN); `!=` is
+unordered (true with NaN). Division and remainder remain structured
+unsupported-feature errors.
 
 The driver treats the entry file's directory as the explicit bootstrap source
 root. `import math;` resolves only `<source-root>/math.ae`; there is no PATH,
@@ -143,6 +164,6 @@ module initializers or initialization order. This is precisely why import
 cycles have no execution-order meaning in this slice. There are also no
 packages, nested/selective/wildcard/aliased imports, reexports, visibility
 keywords, overloads, generics, function values, closures, extern functions,
-heap values, strings, floating point, aggregates, ownership, optimization
+heap values, strings, aggregates, ownership, optimization
 pipeline, public ABI, runtime, or LLVM library binding. Unsupported forms fail
 closed before lowering.

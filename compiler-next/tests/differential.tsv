@@ -38,3 +38,8 @@ wrong_argument_type	V1_CONTRACT	reject:E0214	n/a	programs/wrong_argument_type.ae
 return_wrong_type	V1_CONTRACT	reject:E0205	n/a	programs/return_wrong_type.ae
 unsupported_function_value	FAIL_CLOSED	reject:E0215	n/a	programs/unsupported_function_value.ae
 malformed_function	PRESERVE_REJECTION	reject:E0104	n/a	programs/malformed_function.ae
+scalar_aliases	V1_CONTRACT	accept:42	n/a	programs/v3_alias.ae
+unsigned_width	V1_CONTRACT	accept:42	n/a	programs/v3_uint.ae
+float32_physical	V1_CONTRACT	accept:42	n/a	programs/v3_float32.ae
+numeric_narrowing	V1_CONTRACT	reject:E0218	n/a	programs/v3_narrowing.ae
+alias_cycle	V1_CONTRACT	reject:E0226	n/a	programs/v3_alias_cycle.ae

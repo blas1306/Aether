@@ -9,6 +9,8 @@ pub enum TokenKind {
     Identifier,
     /// Unsuffixed decimal integer literal.
     Integer,
+    /// Unsuffixed decimal floating literal.
+    Float,
     /// `int`.
     KwInt,
     /// `bool`.
@@ -27,6 +29,8 @@ pub enum TokenKind {
     KwReturn,
     /// `import`.
     KwImport,
+    /// `alias`.
+    KwAlias,
     /// `(`.
     LeftParen,
     /// `)`.
@@ -92,7 +96,37 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                 while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
                     cursor += 1;
                 }
-                push(&mut tokens, TokenKind::Integer, source, start, cursor);
+                let mut kind = TokenKind::Integer;
+                if bytes.get(cursor) == Some(&b'.')
+                    && bytes.get(cursor + 1).is_some_and(u8::is_ascii_digit)
+                {
+                    kind = TokenKind::Float;
+                    cursor += 1;
+                    while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+                        cursor += 1;
+                    }
+                }
+                if matches!(bytes.get(cursor), Some(b'e' | b'E')) {
+                    kind = TokenKind::Float;
+                    cursor += 1;
+                    if matches!(bytes.get(cursor), Some(b'+' | b'-')) {
+                        cursor += 1;
+                    }
+                    let exponent_start = cursor;
+                    while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
+                        cursor += 1;
+                    }
+                    if cursor == exponent_start {
+                        diagnostics.push(Diagnostic::new(
+                            "E0001",
+                            Phase::Lex,
+                            DiagnosticCategory::Syntax,
+                            "floating exponent requires digits",
+                            Some(Span::in_source(source.id, start, cursor)),
+                        ));
+                    }
+                }
+                push(&mut tokens, kind, source, start, cursor);
             }
             b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
                 cursor += 1;
@@ -112,6 +146,7 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                     "while" => TokenKind::KwWhile,
                     "return" => TokenKind::KwReturn,
                     "import" => TokenKind::KwImport,
+                    "alias" => TokenKind::KwAlias,
                     _ => TokenKind::Identifier,
                 };
                 push(&mut tokens, kind, source, start, cursor);
@@ -158,7 +193,7 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                     Phase::Lex,
                     DiagnosticCategory::Unsupported,
                     format!(
-                        "operator `{}` is not admitted in NEXT-VERTICAL-2",
+                        "operator `{}` is not admitted in NEXT-VERTICAL-3",
                         &source.text[start..cursor]
                     ),
                     Some(Span::in_source(source.id, start, cursor)),

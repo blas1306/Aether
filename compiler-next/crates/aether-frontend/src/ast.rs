@@ -6,6 +6,7 @@ use crate::Span;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParsedAst {
     pub(crate) imports: Vec<AstImport>,
+    pub(crate) aliases: Vec<AstAlias>,
     pub(crate) functions: Vec<AstFunction>,
 }
 
@@ -22,14 +23,31 @@ impl ParsedAst {
         &self.imports
     }
 
+    /// User type aliases in deterministic source order.
+    #[must_use]
+    pub fn aliases(&self) -> &[AstAlias] {
+        &self.aliases
+    }
+
     /// Deterministic inspection dump.
     #[must_use]
     pub fn dump(&self) -> String {
         format!(
-            "imports: {:#?}\nfunctions: {:#?}",
-            self.imports, self.functions
+            "imports: {:#?}\naliases: {:#?}\nfunctions: {:#?}",
+            self.imports, self.aliases, self.functions
         )
     }
+}
+
+/// Transparent source-level type alias.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AstAlias {
+    /// New transparent spelling.
+    pub name: String,
+    /// Aliased source type.
+    pub target: AstType,
+    /// Declaration provenance.
+    pub span: Span,
 }
 
 /// Minimal source import, unresolved until module discovery.
@@ -68,12 +86,12 @@ pub struct AstParameter {
 }
 
 /// Admitted source type spelling.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum AstType {
-    /// Transparent alias of signed 64-bit integer.
-    Int,
-    /// Logical boolean.
-    Bool,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AstType {
+    /// Exact source spelling, resolved and canonicalized during semantics.
+    pub name: String,
+    /// Type-token provenance.
+    pub span: Span,
 }
 
 /// Lexical statement block.
@@ -133,6 +151,8 @@ pub struct AstExpr {
 pub enum AstExprKind {
     /// Exact decimal spelling, not yet a host integer.
     Integer(String),
+    /// Exact source spelling, not yet rounded to a concrete IEEE format.
+    Float(String),
     /// Boolean literal.
     Bool(bool),
     /// Unresolved name.

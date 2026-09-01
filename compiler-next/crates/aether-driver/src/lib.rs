@@ -9,8 +9,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use aether_backend_llvm::{Backend, LlvmTextBackend, TargetDescriptor};
 use aether_frontend::{
     Diagnostic, DiagnosticCategory, ModuleId, ModuleInfo, ParsedAst, ParsedModule, ParsedProgram,
-    Phase, ResolvedImport, SourceFile, SourceId, analyze_bodies, collect_program_signatures,
-    collect_signatures, parse_source,
+    Phase, ResolvedImport, SourceFile, SourceId, analyze_bodies_for_target,
+    collect_program_signatures, collect_signatures, parse_source,
 };
 use aether_middle::{build_ssa, lower_hir, verify_mir, verify_ssa};
 
@@ -233,7 +233,8 @@ pub fn compile_source(source: &SourceFile, emits: &[Emit]) -> Result<Compilation
         started.elapsed().as_nanos(),
     );
     let started = Instant::now();
-    let hir = analyze_bodies(declared)?;
+    let target = TargetDescriptor::linux_x86_64();
+    let hir = analyze_bodies_for_target(declared, target.properties)?;
     timings_ns.insert("frontend.semantic_bodies", started.elapsed().as_nanos());
     if emits.contains(&Emit::Hir) {
         dumps.insert(Emit::Hir, hir.dump());
@@ -260,7 +261,7 @@ pub fn compile_source(source: &SourceFile, emits: &[Emit]) -> Result<Compilation
     }
 
     let started = Instant::now();
-    let llvm = LlvmTextBackend.emit(&ssa, &TargetDescriptor::linux_x86_64());
+    let llvm = LlvmTextBackend.emit(&ssa, &target);
     timings_ns.insert("backend.llvm", started.elapsed().as_nanos());
     if emits.contains(&Emit::Llvm) {
         dumps.insert(Emit::Llvm, llvm.clone());
@@ -295,7 +296,8 @@ pub fn compile_session(
         started.elapsed().as_nanos(),
     );
     let started = Instant::now();
-    let hir = analyze_bodies(declared)?;
+    let target = TargetDescriptor::linux_x86_64();
+    let hir = analyze_bodies_for_target(declared, target.properties)?;
     timings_ns.insert("frontend.semantic_bodies", started.elapsed().as_nanos());
     if emits.contains(&Emit::Hir) {
         dumps.insert(Emit::Hir, hir.dump());
@@ -322,7 +324,7 @@ pub fn compile_session(
     }
 
     let started = Instant::now();
-    let llvm = LlvmTextBackend.emit(&ssa, &TargetDescriptor::linux_x86_64());
+    let llvm = LlvmTextBackend.emit(&ssa, &target);
     timings_ns.insert("backend.llvm", started.elapsed().as_nanos());
     if emits.contains(&Emit::Llvm) {
         dumps.insert(Emit::Llvm, llvm.clone());

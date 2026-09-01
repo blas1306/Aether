@@ -1,9 +1,9 @@
-//! Recursive-descent parser for the deliberately closed Vertical-2 grammar.
+//! Recursive-descent parser for the deliberately closed Vertical-3 grammar.
 
 use crate::{
-    AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstImport, AstParameter, AstStmt,
-    AstStmtKind, AstType, AstUnaryOp, Diagnostic, DiagnosticCategory, ParsedAst, Phase, SourceFile,
-    Token, TokenKind,
+    AstAlias, AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstImport, AstParameter,
+    AstStmt, AstStmtKind, AstType, AstUnaryOp, Diagnostic, DiagnosticCategory, ParsedAst, Phase,
+    SourceFile, Token, TokenKind,
 };
 
 /// Parses an already tokenized source file.
@@ -16,11 +16,19 @@ pub fn parse(_source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<
             Err(error) => return Err(vec![error]),
         }
     }
+    let mut aliases = Vec::new();
     let mut functions = Vec::new();
     while !parser.at(TokenKind::Eof) {
-        match parser.function() {
-            Ok(function) => functions.push(function),
-            Err(error) => return Err(vec![error]),
+        if parser.at(TokenKind::KwAlias) {
+            match parser.alias() {
+                Ok(alias) => aliases.push(alias),
+                Err(error) => return Err(vec![error]),
+            }
+        } else {
+            match parser.function() {
+                Ok(function) => functions.push(function),
+                Err(error) => return Err(vec![error]),
+            }
         }
     }
     if functions.is_empty() {
@@ -29,7 +37,11 @@ pub fn parse(_source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<
             "expected at least one function declaration",
         )])
     } else {
-        Ok(ParsedAst { imports, functions })
+        Ok(ParsedAst {
+            imports,
+            aliases,
+            functions,
+        })
     }
 }
 
@@ -39,6 +51,23 @@ struct Parser {
 }
 
 impl Parser {
+    fn alias(&mut self) -> Result<AstAlias, Diagnostic> {
+        let start = self.expect(TokenKind::KwAlias, "expected `alias`")?.span;
+        let name = self
+            .expect(TokenKind::Identifier, "expected alias name")?
+            .lexeme;
+        self.expect(TokenKind::Equal, "expected `=` in alias declaration")?;
+        let target = self.ty()?;
+        let end = self
+            .expect(TokenKind::Semicolon, "expected `;` after alias declaration")?
+            .span;
+        Ok(AstAlias {
+            name,
+            target,
+            span: start.through(end),
+        })
+    }
+
     fn import(&mut self) -> Result<AstImport, Diagnostic> {
         let start = self.expect(TokenKind::KwImport, "expected `import`")?.span;
         let module = self
@@ -94,13 +123,14 @@ impl Parser {
     }
 
     fn ty(&mut self) -> Result<AstType, Diagnostic> {
-        if self.consume(TokenKind::KwInt).is_some() {
-            Ok(AstType::Int)
-        } else if self.consume(TokenKind::KwBool).is_some() {
-            Ok(AstType::Bool)
-        } else {
-            Err(self.error("E0100", "expected admitted type `int` or `bool`"))
-        }
+        let token = match self.current().kind {
+            TokenKind::KwInt | TokenKind::KwBool | TokenKind::Identifier => self.advance(),
+            _ => return Err(self.error("E0100", "expected type name")),
+        };
+        Ok(AstType {
+            name: token.lexeme,
+            span: token.span,
+        })
     }
 
     fn block(&mut self) -> Result<AstBlock, Diagnostic> {
@@ -120,6 +150,19 @@ impl Parser {
         let start = self.current().span;
         let kind = match self.current().kind {
             TokenKind::KwInt | TokenKind::KwBool => {
+                let ty = self.ty()?;
+                let name = self
+                    .expect(TokenKind::Identifier, "expected local name")?
+                    .lexeme;
+                self.expect(TokenKind::Equal, "locals require an initializer")?;
+                let initializer = self.expression()?;
+                AstStmtKind::Local {
+                    ty,
+                    name,
+                    initializer,
+                }
+            }
+            TokenKind::Identifier if self.peek_kind(1) == TokenKind::Identifier => {
                 let ty = self.ty()?;
                 let name = self
                     .expect(TokenKind::Identifier, "expected local name")?
@@ -182,7 +225,7 @@ impl Parser {
                     span: start.through(body.span),
                 });
             }
-            _ => return Err(self.error("E0102", "expected a Vertical-2 statement")),
+            _ => return Err(self.error("E0102", "expected a Vertical-3 statement")),
         };
         let semicolon = self.expect(TokenKind::Semicolon, "expected `;` after statement")?;
         Ok(AstStmt {
@@ -307,6 +350,7 @@ impl Parser {
         let token = self.advance();
         let kind = match token.kind {
             TokenKind::Integer => AstExprKind::Integer(token.lexeme),
+            TokenKind::Float => AstExprKind::Float(token.lexeme),
             TokenKind::KwTrue => AstExprKind::Bool(true),
             TokenKind::KwFalse => AstExprKind::Bool(false),
             TokenKind::Identifier if self.consume(TokenKind::Dot).is_some() => {
@@ -389,6 +433,12 @@ impl Parser {
 
     fn at(&self, kind: TokenKind) -> bool {
         self.current().kind == kind
+    }
+
+    fn peek_kind(&self, offset: usize) -> TokenKind {
+        self.tokens
+            .get(self.cursor + offset)
+            .map_or(TokenKind::Eof, |token| token.kind)
     }
 
     fn advance(&mut self) -> Token {

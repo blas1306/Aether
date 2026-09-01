@@ -1,12 +1,13 @@
 //! Explicit control-flow MIR and fail-closed verification.
+#![allow(missing_docs)]
 
 use std::collections::VecDeque;
 use std::fmt::Write;
 
 use aether_frontend::{
-    Diagnostic, DiagnosticCategory, FunctionId, FunctionSignature, HirBinaryOp, HirBlock, HirExpr,
-    HirExprKind, HirFunction, HirStmtKind, HirUnaryOp, LocalId, ModuleInfo, Phase, Span, Type,
-    TypedHir,
+    CoercionKind, Diagnostic, DiagnosticCategory, FloatValue, FunctionId, FunctionSignature,
+    HirBinaryOp, HirBlock, HirExpr, HirExprKind, HirFunction, HirStmtKind, HirUnaryOp, LocalId,
+    ModuleInfo, Phase, Span, Type, TypedHir,
 };
 
 /// Basic-block identity, equal to its stable vector index.
@@ -41,7 +42,9 @@ pub enum Operand {
     /// Storage read.
     Local(LocalId),
     /// Signed 64-bit constant.
-    Int(i64),
+    Int { value: i128, ty: Type },
+    /// IEEE literal bits and exact canonical type.
+    Float { value: FloatValue, ty: Type },
     /// Logical constant.
     Bool(bool),
 }
@@ -59,18 +62,24 @@ pub enum TrapKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UnaryOp {
     /// Checked signed negation.
-    NegateChecked,
+    NegateIntegerChecked,
+    /// IEEE floating negation.
+    NegateFloat,
 }
 
 /// Explicit scalar binary operations.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BinaryOp {
     /// Checked signed addition.
-    AddChecked,
+    AddIntegerChecked,
     /// Checked signed subtraction.
-    SubtractChecked,
+    SubtractIntegerChecked,
     /// Checked signed multiplication.
-    MultiplyChecked,
+    MultiplyIntegerChecked,
+    /// IEEE floating operations.
+    AddFloat,
+    SubtractFloat,
+    MultiplyFloat,
     /// Signed comparison.
     Less,
     /// Signed comparison.
@@ -91,11 +100,17 @@ pub enum BinaryOp {
 pub enum Rvalue {
     /// Scalar copy.
     Use(Operand),
+    /// Explicit semantic widening.
+    Coerce {
+        kind: CoercionKind,
+        operand: Operand,
+        from: Type,
+    },
     /// Unary computation, carrying its required trap effect in the opcode.
     Unary {
         op: UnaryOp,
         operand: Operand,
-        trap: TrapKind,
+        trap: Option<TrapKind>,
     },
     /// Binary computation. Checked opcodes carry `IntegerOverflow` explicitly.
     Binary {
@@ -376,7 +391,14 @@ impl Builder {
 
     fn lower_expr(&mut self, expression: &HirExpr) -> Operand {
         match &expression.kind {
-            HirExprKind::Int(value) => Operand::Int(*value),
+            HirExprKind::Int(value) => Operand::Int {
+                value: *value,
+                ty: expression.ty,
+            },
+            HirExprKind::Float(value) => Operand::Float {
+                value: *value,
+                ty: expression.ty,
+            },
             HirExprKind::Bool(value) => Operand::Bool(*value),
             HirExprKind::Local(local) => Operand::Local(*local),
             HirExprKind::Call { callee, args } => {
@@ -395,19 +417,34 @@ impl Builder {
                 );
                 Operand::Local(destination)
             }
-            HirExprKind::Unary {
-                op: HirUnaryOp::NegateChecked,
-                operand,
-            } => {
+            HirExprKind::Coerce { kind, operand } => {
+                let from = operand.ty;
                 let operand = self.lower_expr(operand);
-                let destination = self.temporary(Type::Int64);
+                let destination = self.temporary(expression.ty);
                 self.assign(
                     destination,
-                    Rvalue::Unary {
-                        op: UnaryOp::NegateChecked,
+                    Rvalue::Coerce {
+                        kind: *kind,
                         operand,
-                        trap: TrapKind::IntegerOverflow,
+                        from,
                     },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::Unary { op, operand } => {
+                let operand = self.lower_expr(operand);
+                let destination = self.temporary(expression.ty);
+                let (op, trap) = match op {
+                    HirUnaryOp::NegateIntegerChecked => (
+                        UnaryOp::NegateIntegerChecked,
+                        Some(TrapKind::IntegerOverflow),
+                    ),
+                    HirUnaryOp::NegateFloat => (UnaryOp::NegateFloat, None),
+                };
+                self.assign(
+                    destination,
+                    Rvalue::Unary { op, operand, trap },
                     expression.span,
                 );
                 Operand::Local(destination)
@@ -416,15 +453,20 @@ impl Builder {
                 let left = self.lower_expr(left);
                 let right = self.lower_expr(right);
                 let (op, trap) = match op {
-                    HirBinaryOp::AddChecked => {
-                        (BinaryOp::AddChecked, Some(TrapKind::IntegerOverflow))
+                    HirBinaryOp::AddIntegerChecked => {
+                        (BinaryOp::AddIntegerChecked, Some(TrapKind::IntegerOverflow))
                     }
-                    HirBinaryOp::SubtractChecked => {
-                        (BinaryOp::SubtractChecked, Some(TrapKind::IntegerOverflow))
-                    }
-                    HirBinaryOp::MultiplyChecked => {
-                        (BinaryOp::MultiplyChecked, Some(TrapKind::IntegerOverflow))
-                    }
+                    HirBinaryOp::SubtractIntegerChecked => (
+                        BinaryOp::SubtractIntegerChecked,
+                        Some(TrapKind::IntegerOverflow),
+                    ),
+                    HirBinaryOp::MultiplyIntegerChecked => (
+                        BinaryOp::MultiplyIntegerChecked,
+                        Some(TrapKind::IntegerOverflow),
+                    ),
+                    HirBinaryOp::AddFloat => (BinaryOp::AddFloat, None),
+                    HirBinaryOp::SubtractFloat => (BinaryOp::SubtractFloat, None),
+                    HirBinaryOp::MultiplyFloat => (BinaryOp::MultiplyFloat, None),
                     HirBinaryOp::Less => (BinaryOp::Less, None),
                     HirBinaryOp::LessEqual => (BinaryOp::LessEqual, None),
                     HirBinaryOp::Greater => (BinaryOp::Greater, None),
@@ -672,16 +714,30 @@ fn validate_rvalue(
                 return Err("MIR copy type mismatch".into());
             }
         }
-        Rvalue::Unary {
-            op: UnaryOp::NegateChecked,
+        Rvalue::Coerce {
+            kind,
             operand,
-            trap,
+            from,
         } => {
             validate_operand(function, operand, initialized)?;
-            if destination != Type::Int64
-                || operand_type(function, operand)? != Type::Int64
-                || *trap != TrapKind::IntegerOverflow
+            if operand_type(function, operand)? != *from
+                || !valid_coercion(*kind, *from, destination)
             {
+                return Err("invalid MIR coercion contract".into());
+            }
+        }
+        Rvalue::Unary { op, operand, trap } => {
+            validate_operand(function, operand, initialized)?;
+            let operand_ty = operand_type(function, operand)?;
+            let valid = match op {
+                UnaryOp::NegateIntegerChecked => operand_ty
+                    .as_integer()
+                    .is_some_and(aether_frontend::IntegerType::is_signed),
+                UnaryOp::NegateFloat => operand_ty.as_float().is_some(),
+            };
+            let required_trap =
+                matches!(op, UnaryOp::NegateIntegerChecked).then_some(TrapKind::IntegerOverflow);
+            if destination != operand_ty || !valid || *trap != required_trap {
                 return Err("invalid checked-negation MIR contract".into());
             }
         }
@@ -726,18 +782,27 @@ fn validate_rvalue(
 
 fn binary_contract(op: BinaryOp, operand: Type) -> Result<(Type, Type, Option<TrapKind>), String> {
     match op {
-        BinaryOp::AddChecked | BinaryOp::SubtractChecked | BinaryOp::MultiplyChecked => {
-            Ok((Type::Int64, Type::Int64, Some(TrapKind::IntegerOverflow)))
+        BinaryOp::AddIntegerChecked
+        | BinaryOp::SubtractIntegerChecked
+        | BinaryOp::MultiplyIntegerChecked
+            if operand.as_integer().is_some() =>
+        {
+            Ok((operand, operand, Some(TrapKind::IntegerOverflow)))
+        }
+        BinaryOp::AddFloat | BinaryOp::SubtractFloat | BinaryOp::MultiplyFloat
+            if operand.as_float().is_some() =>
+        {
+            Ok((operand, operand, None))
         }
         BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual => {
-            Ok((Type::Int64, Type::Bool, None))
+            if operand.is_numeric() {
+                Ok((operand, Type::Bool, None))
+            } else {
+                Err("ordered comparison requires numeric operands".into())
+            }
         }
-        BinaryOp::Equal | BinaryOp::NotEqual if matches!(operand, Type::Int64 | Type::Bool) => {
-            Ok((operand, Type::Bool, None))
-        }
-        BinaryOp::Equal | BinaryOp::NotEqual => {
-            Err("MIR equality has unsupported operand type".into())
-        }
+        BinaryOp::Equal | BinaryOp::NotEqual => Ok((operand, Type::Bool, None)),
+        _ => Err("MIR numeric opcode/type mismatch".into()),
     }
 }
 
@@ -764,8 +829,25 @@ fn operand_type(function: &MirFunction, operand: &Operand) -> Result<Type, Strin
             .get(local.0 as usize)
             .map(|local| local.ty)
             .ok_or_else(|| format!("unknown MIR local {local:?}")),
-        Operand::Int(_) => Ok(Type::Int64),
+        Operand::Int { ty, .. } | Operand::Float { ty, .. } => Ok(*ty),
         Operand::Bool(_) => Ok(Type::Bool),
+    }
+}
+
+fn valid_coercion(kind: CoercionKind, from: Type, to: Type) -> bool {
+    match (kind, from, to) {
+        (CoercionKind::SignExtend, Type::Integer(a), Type::Integer(b)) => {
+            a.is_signed() && a.can_widen_to(b)
+        }
+        (CoercionKind::ZeroExtend, Type::Integer(a), Type::Integer(b)) => {
+            !a.is_signed() && a.can_widen_to(b)
+        }
+        (
+            CoercionKind::FloatExtend,
+            Type::Float(aether_frontend::FloatType::Float32),
+            Type::Float(aether_frontend::FloatType::Float64),
+        ) => true,
+        _ => false,
     }
 }
 
@@ -822,7 +904,7 @@ mod tests {
                     matches!(
                         instruction.value,
                         Rvalue::Binary {
-                            op: BinaryOp::AddChecked,
+                            op: BinaryOp::AddIntegerChecked,
                             trap: Some(TrapKind::IntegerOverflow),
                             ..
                         }
@@ -858,13 +940,13 @@ mod tests {
                 module: ModuleId(0),
                 name: "main".into(),
                 parameters: vec![],
-                return_type: Type::Int64,
+                return_type: Type::INT64,
                 span: Span::new(0, 0),
             }],
             functions: vec![MirFunction {
                 id: FunctionId(0),
                 parameters: vec![],
-                return_type: Type::Int64,
+                return_type: Type::INT64,
                 locals: vec![],
                 blocks: vec![BasicBlock {
                     id: BlockId(0),

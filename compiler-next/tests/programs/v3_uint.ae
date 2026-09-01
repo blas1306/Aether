@@ -1,0 +1,1 @@
+int main() { uint8 left = 40; uint8 right = 2; uint8 value = left + right; if (value == 42) { return 42; } return 0; }
