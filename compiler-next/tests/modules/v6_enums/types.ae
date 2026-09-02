@@ -1,0 +1,14 @@
+enum Number {
+    Integer(int),
+    Real(float64),
+}
+
+enum Flag {
+    Integer(bool),
+}
+
+enum State {
+    Idle,
+}
+
+alias Numeric = Number;

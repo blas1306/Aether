@@ -5,8 +5,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 
 use aether_frontend::{
-    CastKind, CoercionKind, Diagnostic, DiagnosticCategory, FieldId, FloatValue, FunctionId,
-    FunctionSignature, LocalId, ModuleInfo, Phase, Span, StructId, StructInfo, Type,
+    CastKind, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId, FloatValue,
+    FunctionId, FunctionSignature, IntegerType, LocalId, ModuleInfo, Phase, Span, StructId,
+    StructInfo, Type, VariantId,
 };
 
 use crate::{
@@ -64,6 +65,21 @@ pub enum SsaOp {
     Aggregate {
         struct_id: StructId,
         fields: Vec<(FieldId, SsaOperand)>,
+    },
+    EnumConstruct {
+        enum_id: EnumId,
+        variant_id: VariantId,
+        payloads: Vec<SsaOperand>,
+    },
+    EnumDiscriminant {
+        value: SsaOperand,
+        enum_id: EnumId,
+    },
+    EnumPayload {
+        value: SsaOperand,
+        enum_id: EnumId,
+        variant_id: VariantId,
+        index: u32,
     },
     /// Pure aggregate projection.
     ExtractField {
@@ -135,6 +151,12 @@ pub enum SsaTerminator {
         then_block: BlockId,
         else_block: BlockId,
     },
+    Switch {
+        discriminant: SsaOperand,
+        cases: Vec<(u32, BlockId)>,
+        otherwise: Option<BlockId>,
+        exhaustive_enum: Option<EnumId>,
+    },
     /// Function result.
     Return(SsaOperand),
     /// Explicit failure.
@@ -176,6 +198,8 @@ pub struct SsaIr {
     pub modules: Vec<ModuleInfo>,
     /// Nominal aggregate metadata shared with MIR and the backend.
     pub structs: Vec<StructInfo>,
+    /// Nominal enum metadata shared with MIR and the backend.
+    pub enums: Vec<EnumInfo>,
     /// Source-unit signature table.
     pub signatures: Vec<FunctionSignature>,
     /// Function-local SSA graphs in identity order.
@@ -189,8 +213,8 @@ impl SsaIr {
     #[must_use]
     pub fn dump(&self) -> String {
         let mut dump = format!(
-            "entry: {:#?}\nmodules: {:#?}\nstructs: {:#?}\nsignatures: {:#?}",
-            self.entry, self.modules, self.structs, self.signatures
+            "entry: {:#?}\nmodules: {:#?}\nstructs: {:#?}\nenums: {:#?}\nsignatures: {:#?}",
+            self.entry, self.modules, self.structs, self.enums, self.signatures
         );
         for module in &self.modules {
             let functions: Vec<_> = self
@@ -234,6 +258,7 @@ pub fn build_ssa(mir: &VerifiedMir) -> SsaIr {
     SsaIr {
         modules: mir.modules.clone(),
         structs: mir.structs.clone(),
+        enums: mir.enums.clone(),
         signatures: mir.signatures.clone(),
         functions: mir.functions.iter().map(build_function_ssa).collect(),
         entry: mir.entry,
@@ -433,6 +458,33 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>]) -> SsaOp {
                 .map(|(field, operand)| (*field, rename_operand(operand, stacks)))
                 .collect(),
         },
+        Rvalue::EnumConstruct {
+            enum_id,
+            variant_id,
+            payloads,
+        } => SsaOp::EnumConstruct {
+            enum_id: *enum_id,
+            variant_id: *variant_id,
+            payloads: payloads
+                .iter()
+                .map(|operand| rename_operand(operand, stacks))
+                .collect(),
+        },
+        Rvalue::EnumDiscriminant { value, enum_id } => SsaOp::EnumDiscriminant {
+            value: rename_operand(value, stacks),
+            enum_id: *enum_id,
+        },
+        Rvalue::EnumPayload {
+            value,
+            enum_id,
+            variant_id,
+            index,
+        } => SsaOp::EnumPayload {
+            value: rename_operand(value, stacks),
+            enum_id: *enum_id,
+            variant_id: *variant_id,
+            index: *index,
+        },
         Rvalue::Coerce {
             kind,
             operand,
@@ -511,6 +563,17 @@ fn rename_terminator(terminator: &Terminator, stacks: &[Vec<ValueId>]) -> SsaTer
             condition: rename_operand(condition, stacks),
             then_block: *then_block,
             else_block: *else_block,
+        },
+        Terminator::Switch {
+            discriminant,
+            cases,
+            otherwise,
+            exhaustive_enum,
+        } => SsaTerminator::Switch {
+            discriminant: rename_operand(discriminant, stacks),
+            cases: cases.clone(),
+            otherwise: *otherwise,
+            exhaustive_enum: *exhaustive_enum,
         },
         Terminator::Return(value) => SsaTerminator::Return(rename_operand(value, stacks)),
         Terminator::Trap(kind) => SsaTerminator::Trap(*kind),
@@ -689,6 +752,12 @@ fn rvalue_locals(value: &Rvalue) -> Vec<LocalId> {
             .iter()
             .filter_map(|(_, operand)| operand_local(operand))
             .collect(),
+        Rvalue::EnumConstruct { payloads, .. } => {
+            payloads.iter().filter_map(operand_local).collect()
+        }
+        Rvalue::EnumDiscriminant { value, .. } | Rvalue::EnumPayload { value, .. } => {
+            operand_local(value).into_iter().collect()
+        }
         Rvalue::Binary { left, right, .. } => operand_local(left)
             .into_iter()
             .chain(operand_local(right))
@@ -701,6 +770,9 @@ fn terminator_locals(terminator: &Terminator) -> Vec<LocalId> {
     match terminator {
         Terminator::Branch { condition, .. } | Terminator::Return(condition) => {
             operand_local(condition).into_iter().collect()
+        }
+        Terminator::Switch { discriminant, .. } => {
+            operand_local(discriminant).into_iter().collect()
         }
         Terminator::Goto(_) | Terminator::Trap(_) => vec![],
     }
@@ -741,7 +813,14 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
         if signature.module.0 as usize >= ssa.modules.len() {
             return Err(fail("SSA signature names an unknown module".into()));
         }
-        verify_ssa_function(function, signature, &ssa.signatures, &ssa.structs, &fail)?;
+        verify_ssa_function(
+            function,
+            signature,
+            &ssa.signatures,
+            &ssa.structs,
+            &ssa.enums,
+            &fail,
+        )?;
     }
     Ok(VerifiedSsa(ssa))
 }
@@ -752,6 +831,7 @@ fn verify_ssa_function(
     signature: &FunctionSignature,
     signatures: &[FunctionSignature],
     structs: &[StructInfo],
+    enums: &[EnumInfo],
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
     if function.return_type != signature.return_type
@@ -939,6 +1019,7 @@ fn verify_ssa_function(
                 instruction.ty,
                 signatures,
                 structs,
+                enums,
                 &operand_ty,
             )
             .map_err(&fail)?;
@@ -948,6 +1029,58 @@ fn verify_ssa_function(
                 validate_use(condition, block.id, Some(block.instructions.len())).map_err(&fail)?;
                 if operand_ty(condition).map_err(&fail)? != Type::Bool {
                     return Err(fail("SSA branch condition is not bool".into()));
+                }
+            }
+            SsaTerminator::Switch {
+                discriminant,
+                cases,
+                otherwise,
+                exhaustive_enum,
+            } => {
+                validate_use(discriminant, block.id, Some(block.instructions.len()))
+                    .map_err(&fail)?;
+                if operand_ty(discriminant).map_err(&fail)? != Type::Integer(IntegerType::Uint32) {
+                    return Err(fail("SSA switch discriminant is not uint32".into()));
+                }
+                let values = cases
+                    .iter()
+                    .map(|(value, _)| *value)
+                    .collect::<BTreeSet<_>>();
+                if values.len() != cases.len() || cases.is_empty() {
+                    return Err(fail("SSA switch cases are empty or duplicated".into()));
+                }
+                if let Some(enum_id) = exhaustive_enum {
+                    let info = enums
+                        .get(enum_id.0 as usize)
+                        .filter(|info| info.id == *enum_id)
+                        .ok_or_else(|| fail("SSA exhaustive switch names unknown enum".into()))?;
+                    let expected = info
+                        .variants
+                        .iter()
+                        .map(|variant| variant.discriminant)
+                        .collect::<BTreeSet<_>>();
+                    if values != expected || otherwise.is_some() {
+                        return Err(fail(
+                            "SSA exhaustive enum switch does not cover exact tags".into(),
+                        ));
+                    }
+                    let SsaOperand::Value(tag_value) = discriminant else {
+                        return Err(fail(
+                            "SSA exhaustive enum switch requires an extracted tag value".into(),
+                        ));
+                    };
+                    let tag_definition = function
+                        .blocks
+                        .iter()
+                        .flat_map(|candidate| &candidate.instructions)
+                        .find(|instruction| instruction.result == *tag_value);
+                    if !tag_definition.is_some_and(|instruction| {
+                        matches!(instruction.op, SsaOp::EnumDiscriminant { enum_id: extracted, .. } if extracted == *enum_id)
+                    }) {
+                        return Err(fail(
+                            "SSA exhaustive switch tag does not originate from its enum".into(),
+                        ));
+                    }
                 }
             }
             SsaTerminator::Return(value) => {
@@ -968,6 +1101,7 @@ fn verify_op(
     result: Type,
     signatures: &[FunctionSignature],
     structs: &[StructInfo],
+    enums: &[EnumInfo],
     operand_ty: &impl Fn(&SsaOperand) -> Result<Type, String>,
 ) -> Result<(), String> {
     match op {
@@ -988,6 +1122,60 @@ fn verify_op(
                 if *field_id != declared.id || operand_ty(operand)? != declared.ty {
                     return Err("SSA aggregate field identity/type mismatch".into());
                 }
+            }
+        }
+        SsaOp::EnumConstruct {
+            enum_id,
+            variant_id,
+            payloads,
+        } => {
+            let info = enums
+                .get(enum_id.0 as usize)
+                .filter(|info| info.id == *enum_id)
+                .ok_or_else(|| "SSA enum construction names unknown enum".to_string())?;
+            let variant = info
+                .variants
+                .get(variant_id.index as usize)
+                .filter(|variant| variant.id == *variant_id)
+                .ok_or_else(|| "SSA enum construction names wrong variant".to_string())?;
+            if result != Type::Enum(*enum_id) || payloads.len() != variant.payloads.len() {
+                return Err("SSA enum construction arity/result mismatch".into());
+            }
+            for (operand, declared) in payloads.iter().zip(&variant.payloads) {
+                if operand_ty(operand)? != declared.ty {
+                    return Err("SSA enum payload type mismatch".into());
+                }
+            }
+        }
+        SsaOp::EnumDiscriminant { value, enum_id } => {
+            if enums.get(enum_id.0 as usize).map(|info| info.id) != Some(*enum_id)
+                || operand_ty(value)? != Type::Enum(*enum_id)
+                || result != Type::Integer(IntegerType::Uint32)
+            {
+                return Err("SSA enum discriminant contract invalid".into());
+            }
+        }
+        SsaOp::EnumPayload {
+            value,
+            enum_id,
+            variant_id,
+            index,
+        } => {
+            let info = enums
+                .get(enum_id.0 as usize)
+                .filter(|info| info.id == *enum_id)
+                .ok_or_else(|| "SSA enum payload names unknown enum".to_string())?;
+            let variant = info
+                .variants
+                .get(variant_id.index as usize)
+                .filter(|variant| variant.id == *variant_id)
+                .ok_or_else(|| "SSA enum payload names wrong variant".to_string())?;
+            let payload = variant
+                .payloads
+                .get(*index as usize)
+                .ok_or_else(|| "SSA enum payload slot out of bounds".to_string())?;
+            if operand_ty(value)? != Type::Enum(*enum_id) || result != payload.ty {
+                return Err("SSA enum payload extraction type mismatch".into());
             }
         }
         SsaOp::ExtractField {
@@ -1131,8 +1319,11 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
     match op {
         SsaOp::Use(value)
         | SsaOp::Coerce { operand: value, .. }
-        | SsaOp::Cast { operand: value, .. } => vec![value],
+        | SsaOp::Cast { operand: value, .. }
+        | SsaOp::EnumDiscriminant { value, .. }
+        | SsaOp::EnumPayload { value, .. } => vec![value],
         SsaOp::Aggregate { fields, .. } => fields.iter().map(|(_, value)| value).collect(),
+        SsaOp::EnumConstruct { payloads, .. } => payloads.iter().collect(),
         SsaOp::ExtractField { aggregate, .. } => vec![aggregate],
         SsaOp::InsertField {
             aggregate, value, ..
@@ -1151,6 +1342,15 @@ fn mir_targets(terminator: &Terminator) -> Vec<BlockId> {
             else_block,
             ..
         } => vec![*then_block, *else_block],
+        Terminator::Switch {
+            cases, otherwise, ..
+        } => {
+            let mut targets: Vec<_> = cases.iter().map(|(_, target)| *target).collect();
+            targets.extend(otherwise.iter().copied());
+            targets.sort();
+            targets.dedup();
+            targets
+        }
         Terminator::Return(_) | Terminator::Trap(_) => vec![],
     }
 }
@@ -1163,6 +1363,15 @@ fn ssa_targets(terminator: &SsaTerminator) -> Vec<BlockId> {
             else_block,
             ..
         } => vec![*then_block, *else_block],
+        SsaTerminator::Switch {
+            cases, otherwise, ..
+        } => {
+            let mut targets: Vec<_> = cases.iter().map(|(_, target)| *target).collect();
+            targets.extend(otherwise.iter().copied());
+            targets.sort();
+            targets.dedup();
+            targets
+        }
         SsaTerminator::Return(_) | SsaTerminator::Trap(_) => vec![],
     }
 }
@@ -1295,6 +1504,35 @@ mod tests {
             };
         }
         assert!(verify_ssa(ssa).is_err());
+    }
+
+    #[test]
+    fn enum_ssa_switch_and_payload_contracts_are_verified() {
+        let source =
+            "enum E{A,B(int),}int main(){E e=E.B(7);match(e){E.A=>{return 0;}E.B(x)=>{return x;}}}";
+        let raw = raw_ssa(source);
+        assert!(
+            raw.functions[0]
+                .blocks
+                .iter()
+                .any(|block| matches!(block.terminator, SsaTerminator::Switch { .. }))
+        );
+        verify_ssa(raw).unwrap();
+
+        let mut bad = raw_ssa(source);
+        let extraction = bad.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| matches!(instruction.op, SsaOp::EnumPayload { .. }))
+            .unwrap();
+        if let SsaOp::EnumPayload { variant_id, .. } = &mut extraction.op {
+            *variant_id = VariantId {
+                enum_id: EnumId(0),
+                index: 99,
+            };
+        }
+        assert!(verify_ssa(bad).is_err());
     }
 
     #[test]

@@ -8,6 +8,7 @@ pub struct ParsedAst {
     pub(crate) imports: Vec<AstImport>,
     pub(crate) aliases: Vec<AstAlias>,
     pub(crate) structs: Vec<AstStruct>,
+    pub(crate) enums: Vec<AstEnum>,
     pub(crate) functions: Vec<AstFunction>,
 }
 
@@ -36,14 +37,38 @@ impl ParsedAst {
         &self.structs
     }
 
+    /// Enum declarations in deterministic source order.
+    #[must_use]
+    pub fn enums(&self) -> &[AstEnum] {
+        &self.enums
+    }
+
     /// Deterministic inspection dump.
     #[must_use]
     pub fn dump(&self) -> String {
         format!(
-            "imports: {:#?}\naliases: {:#?}\nstructs: {:#?}\nfunctions: {:#?}",
-            self.imports, self.aliases, self.structs, self.functions
+            "imports: {:#?}\naliases: {:#?}\nstructs: {:#?}\nenums: {:#?}\nfunctions: {:#?}",
+            self.imports, self.aliases, self.structs, self.enums, self.functions
         )
     }
+}
+
+/// Nominal tagged value declaration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub struct AstEnum {
+    pub name: String,
+    pub variants: Vec<AstVariant>,
+    pub span: Span,
+}
+
+/// One enum variant with positional payload type spellings.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub struct AstVariant {
+    pub name: String,
+    pub payloads: Vec<AstType>,
+    pub span: Span,
 }
 
 /// Nominal value-aggregate declaration.
@@ -163,8 +188,33 @@ pub enum AstStmtKind {
     },
     /// Pre-test loop.
     While { condition: AstExpr, body: AstBlock },
+    /// Exhaustive enum match with block arms.
+    Match {
+        scrutinee: AstExpr,
+        arms: Vec<AstMatchArm>,
+    },
     /// Value return.
     Return(AstExpr),
+}
+
+/// One source match arm.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub struct AstMatchArm {
+    pub pattern: AstVariantPattern,
+    pub body: AstBlock,
+    pub span: Span,
+}
+
+/// Minimal qualified variant pattern with positional name bindings.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub struct AstVariantPattern {
+    pub module: Option<String>,
+    pub enum_name: String,
+    pub variant: String,
+    pub bindings: Vec<(String, Span)>,
+    pub span: Span,
 }
 
 /// Source-level assignable place. Resolution assigns semantic field identities.
@@ -209,6 +259,13 @@ pub enum AstExprKind {
     },
     /// Qualified value syntax retained so semantic analysis can reject it precisely.
     QualifiedName { module: String, member: String },
+    /// Three-part imported enum variant construction.
+    VariantCall {
+        module: String,
+        enum_name: String,
+        variant: String,
+        args: Vec<AstExpr>,
+    },
     /// Unresolved field projection.
     Field {
         base: Box<AstExpr>,

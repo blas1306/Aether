@@ -161,6 +161,14 @@ below HIR. Named-field initializer syntax is not part of this milestone; a
 future named-argument design should apply coherently to functions and aggregate
 construction.
 
+NEXT-VERTICAL-6 adds nominal value enums with positional payloads and exhaustive
+statement matching. Variants have resolved semantic identities, are constructed
+through an explicit enum qualifier, and copy by value. Matching covers every
+variant exactly once and binds payloads by copy. Declaration-order bootstrap
+tags and a typed internal layout do not stabilize public discriminants or ABI,
+and this milestone adds no wildcard patterns, ownership, allocation or special
+error-propagation semantics.
+
 ## Safety and control
 
 Safe and ergonomic behavior is the default.  Value semantics, moves, shared

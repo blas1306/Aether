@@ -1,0 +1,6 @@
+import types;
+
+int main() {
+    Number number = Number.Integer(42);
+    return 0;
+}

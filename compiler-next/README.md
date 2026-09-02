@@ -1,4 +1,4 @@
-# Aether NEXT-VERTICAL-5
+# Aether NEXT-VERTICAL-6
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. It does not replace the production `aether` CLI or import any legacy
@@ -30,14 +30,16 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-5 grammar
+## Vertical-6 grammar
 
 ```text
-program    := import* (alias | struct | function)+ EOF
+program    := import* (alias | struct | enum | function)+ EOF
 import     := "import" IDENT ";"
 alias      := "alias" IDENT "=" type ";"
 struct     := "struct" IDENT "{" field* "}"
 field      := type IDENT ";"
+enum       := "enum" IDENT "{" variant ("," variant)* ","? "}"
+variant    := IDENT | IDENT "(" type ("," type)* ")"
 function   := type IDENT "(" parameters? ")" block
 parameters := parameter ("," parameter)*
 parameter  := type IDENT
@@ -47,20 +49,25 @@ statement  := type IDENT "=" expression ";"
             | place "=" expression ";"
             | "if" "(" expression ")" block ("else" block)?
             | "while" "(" expression ")" block
+            | "match" "(" expression ")" "{" match-arm+ "}"
             | "return" expression ";"
+match-arm  := variant-path ("(" IDENT ("," IDENT)* ")")? "=>" block
 expression := integer | float | "true" | "false" | IDENT | apply
             | expression "." IDENT | "(" expression ")" | "-" expression
             | expression ("*" | "/" | "%" | "+" | "-" | "<" | "<=" | ">" | ">="
                          | "==" | "!=") expression
 apply      := IDENT "(" arguments? ")"
             | IDENT "." IDENT "(" arguments? ")"
+            | IDENT "." IDENT "." IDENT "(" arguments? ")"
+variant-path := IDENT "." IDENT | IDENT "." IDENT "." IDENT
 arguments  := expression ("," expression)*
 place      := IDENT ("." IDENT)*
 ```
 
 Application syntax remains neutral in the AST. Semantic analysis resolves its
-single top-level name to exactly one of `Call(FunctionId, ...)`, explicit scalar
-conversion, or `StructInit(StructId, ...)`; no ambiguity survives HIR. The
+source application/path to exactly one of `Call(FunctionId, ...)`, explicit
+scalar conversion, `StructInit(StructId, ...)` or `EnumInit`; no ambiguity
+survives HIR. The
 canonical aggregate construction is positional, for example
 `Point(3.0, 4.0)`. Arguments map to `FieldId`s in declaration order and every
 field is required. This is structural construction, not a function call or a
@@ -72,8 +79,23 @@ different `StructId`s, including declarations with the same spelling in two
 modules. Imported struct types and construction require direct qualification,
 for example `geometry.Point`; imports never inject unqualified type names.
 Transparent aliases to structs preserve the underlying nominal identity.
-Functions, structs and aliases share one fail-closed top-level namespace per
-module, so an application spelling always has one interpretation.
+Functions, structs, enums and aliases share one fail-closed top-level namespace
+per module, so an application spelling always has one interpretation.
+
+Enums are nominal, module-owned value types. `EnumId` identifies a declaration
+and `VariantId { enum_id, index }` identifies a declaration-order variant in
+O(1); source spellings are metadata below HIR. Variants are never injected into
+local scope. Construction
+is qualified (`Number.Integer(42)`, payloadless `State.Idle`, and imported
+`types.Number.Integer(42)`). Positional payloads use ordinary contextual literal
+and widening rules. Transparent aliases preserve the original `EnumId` and may
+qualify construction.
+
+Vertical-6 `match` is a statement with block arms, positional payload bindings,
+and no wildcard, guard, nested pattern or result value. Every variant must
+occur exactly once. HIR resolves the scrutinee `EnumId`, every arm `VariantId`
+and every binding `LocalId`, rejecting duplicates and missing variants before
+MIR.
 
 The canonical scalar set is `bool`, `int8`/`16`/`32`/`64`,
 `uint8`/`16`/`32`/`64`, `isize`, `usize`, `float32` and `float64`. Transparent
@@ -94,18 +116,19 @@ infinity or an unrepresentable result. Integer-to-float and float narrowing may
 round according to IEEE semantics. Bool has no numeric conversions.
 
 Canonical semantic types are the small copyable tagged value `Type::{Bool,
-Integer, Float, Struct(StructId)}` rather than strings. `StructId` supplies
-nominality and keeps recursive declaration graphs out of the type value itself;
+Integer, Float, Struct(StructId), Enum(EnumId)}` rather than strings. Nominal IDs
+supply nominality and keep recursive declaration graphs out of the type value;
 `FieldId` removes field-name lookup below HIR. A universal `TypeId` interner is
-still intentionally deferred: Vertical-5 has no recursively nested semantic
+still intentionally deferred: Vertical-6 has no recursively nested semantic
 type expressions or generic instantiations, so an arena would add indirection
 without canonicalization value. References, arrays, function types and generic
 applications are the point at which `Type` should become an interned `TypeId`
 arena rather than grow recursive payloads.
 
-Struct declarations are collected in all discovered modules before aliases,
-field types and function signatures are resolved. A target-aware DFS rejects
-self and mutual by-value recursion, calculates nested size/alignment/padding,
+Struct and enum declarations are collected in all discovered modules before
+aliases, payload/field types and function signatures are resolved. A
+target-aware DFS rejects self and mutual by-value recursion across both
+aggregate kinds, calculates nested size/alignment/padding,
 and preserves source field order as physical bootstrap order. Reordering fields
 is therefore a source API change. The layout and aggregate calling convention
 are internal bootstrap contracts, not public ABI.
@@ -130,21 +153,22 @@ read and parsed once even with shared dependencies or cycles.
 `SourceId` qualifies every span and indexes source provenance. `ModuleId` is a
 separate, session-local logical identity; source paths never become semantic
 identity. The resolved module graph uses `ModuleId` edges. The bootstrap
-visibility policy makes every top-level function and struct in a discovered
-module available through a direct qualifier, but imported declarations never
+visibility policy makes every top-level function, struct and enum in a
+discovered module available through a direct qualifier, but imported declarations never
 enter unqualified scope. This policy is deliberately not the final v1
 visibility design.
 
-The frontend collects every struct identity and signature in every discovered
-module before checking any body. `FunctionId` is global and dense within the compilation
+The frontend collects every struct/enum identity and signature in every
+discovered module before checking any body. `FunctionId` is global and dense within the compilation
 session, while names and module spellings remain metadata after resolution.
 Local/qualified calls both become a concrete `FunctionId`, admitting forward
 calls, recursion, import cycles and cross-module mutual recursion without
 textual or filesystem order exceptions. Parameters retain ordinary
 function-local `LocalId` identities and value semantics.
 
-HIR carries `StructInfo`/`FieldInfo` tables and fully resolved `StructInit` and
-field places. MIR uses the reusable `Place { local, projections: FieldId* }`
+HIR carries `StructInfo`/`FieldInfo` and `EnumInfo`/`VariantInfo` tables plus
+fully resolved `StructInit`, `EnumInit`, matches and field places. MIR uses the
+reusable `Place { local, projections: FieldId* }`
 model for reads and nested stores. SSA promotes aggregates as ordinary SSA
 values: construction is `Aggregate`, field reads are `ExtractField`, and field
 mutation produces a new aggregate with `InsertField`. This functional update
@@ -152,6 +176,16 @@ strategy makes copy-by-value observable without `alloca`, MemorySSA, sharing or
 ownership machinery. LLVM lowers these operations to named aggregate types,
 `insertvalue` and `extractvalue`; aggregate parameters and results use the
 internal bootstrap ABI by value.
+
+MIR lowers enum matching to `EnumDiscriminant` and a reusable multi-way
+`Switch`; arm entries perform explicit `EnumPayload` copies into binding locals.
+SSA retains verified `EnumConstruct`, tag, payload and switch operations. LLVM
+uses a fixed bootstrap `i32` tag and a typed envelope
+`{ tag, variant-0-tuple, variant-1-tuple, ... }`, initialized from zero. This is
+larger than a byte union but avoids type-punning, stack storage and MemorySSA.
+Tags follow declaration order from zero. Tags, layout and aggregate calling
+convention remain internal bootstrap details; niche/union compaction is
+deferred.
 
 ## Development CLI
 
@@ -175,7 +209,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 tests/run-differential.sh
 ```
 
-`tests/differential.tsv` remains the versioned scalar manifest. It distinguishes
+`tests/differential.tsv` remains the versioned admission manifest. It distinguishes
 legacy-equivalent cases, deliberate `int64` changes, v1-contract cases,
 open-decision rejection and fail-closed rejection. The integration suite checks
 all new-compiler admission expectations and executes multiple native artifacts.
@@ -208,6 +242,6 @@ module initializers or initialization order. This is precisely why import
 cycles have no execution-order meaning in this slice. There are also no
 packages, nested/selective/wildcard/aliased imports, reexports, visibility
 keywords, overloads, generics, function values, closures, extern functions,
-heap values, strings, named initializers, methods, enums, ownership, optimization
+heap values, strings, named initializers, methods, ownership, optimization
 pipeline, public ABI, runtime, or LLVM library binding. Unsupported forms fail
 closed before lowering.

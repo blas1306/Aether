@@ -33,6 +33,10 @@ pub enum TokenKind {
     KwAlias,
     /// `struct`.
     KwStruct,
+    /// `enum`.
+    KwEnum,
+    /// `match`.
+    KwMatch,
     /// `(`.
     LeftParen,
     /// `)`.
@@ -59,6 +63,8 @@ pub enum TokenKind {
     Percent,
     /// `=`.
     Equal,
+    /// `=>`.
+    FatArrow,
     /// `==`.
     EqualEqual,
     /// `!=`.
@@ -154,6 +160,8 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                     "import" => TokenKind::KwImport,
                     "alias" => TokenKind::KwAlias,
                     "struct" => TokenKind::KwStruct,
+                    "enum" => TokenKind::KwEnum,
+                    "match" => TokenKind::KwMatch,
                     _ => TokenKind::Identifier,
                 };
                 push(&mut tokens, kind, source, start, cursor);
@@ -170,6 +178,10 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
             b'*' => single(&mut tokens, TokenKind::Star, source, &mut cursor),
             b'/' => single(&mut tokens, TokenKind::Slash, source, &mut cursor),
             b'%' => single(&mut tokens, TokenKind::Percent, source, &mut cursor),
+            b'=' if bytes.get(cursor + 1) == Some(&b'>') => {
+                cursor += 2;
+                push(&mut tokens, TokenKind::FatArrow, source, start, cursor);
+            }
             b'=' => double_or_single(
                 &mut tokens,
                 source,

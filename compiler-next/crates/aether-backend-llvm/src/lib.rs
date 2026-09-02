@@ -1,10 +1,10 @@
-//! LLVM backend for verified Vertical-5 program SSA.
+//! LLVM backend for verified Vertical-6 program SSA.
 
 use std::fmt::Write;
 
 use aether_frontend::{
-    CastKind, CoercionKind, FieldId, FloatType, FloatValue, FunctionSignature, IntegerType,
-    ModuleInfo, StructInfo, TargetProperties, Type,
+    CastKind, CoercionKind, EnumInfo, FieldId, FloatType, FloatValue, FunctionSignature,
+    IntegerType, ModuleInfo, StructInfo, TargetProperties, Type,
 };
 use aether_middle::{
     BinaryOp, BlockId, SsaFunction, SsaOp, SsaOperand, SsaTerminator, TrapKind, UnaryOp,
@@ -21,7 +21,7 @@ pub struct TargetDescriptor {
 }
 
 impl TargetDescriptor {
-    /// The target admitted through NEXT-VERTICAL-5.
+    /// The target admitted through NEXT-VERTICAL-6.
     #[must_use]
     pub const fn linux_x86_64() -> Self {
         Self {
@@ -52,7 +52,7 @@ impl Backend for LlvmTextBackend {
 pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let program = ssa.as_ssa();
     let mut output = String::new();
-    writeln!(output, "; Aether NEXT-VERTICAL-5").unwrap();
+    writeln!(output, "; Aether NEXT-VERTICAL-6").unwrap();
     writeln!(
         output,
         "; Internal bootstrap ABI and symbol mangling; not a public Aether ABI"
@@ -82,7 +82,26 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         )
         .unwrap();
     }
-    if !program.structs.is_empty() {
+    for info in &program.enums {
+        let mut fields = vec!["i32".to_string()];
+        fields.extend(info.variants.iter().map(|variant| {
+            let payloads = variant
+                .payloads
+                .iter()
+                .map(|payload| llvm_type(payload.ty))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{{ {payloads} }}")
+        }));
+        writeln!(
+            output,
+            "{} = type {{ {} }}",
+            llvm_type(Type::Enum(info.id)),
+            fields.join(", ")
+        )
+        .unwrap();
+    }
+    if !program.structs.is_empty() || !program.enums.is_empty() {
         writeln!(output).unwrap();
     }
 
@@ -95,6 +114,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             &program.signatures,
             &program.modules,
             &program.structs,
+            &program.enums,
         );
     }
 
@@ -125,6 +145,7 @@ fn emit_function(
     signatures: &[FunctionSignature],
     modules: &[ModuleInfo],
     structs: &[StructInfo],
+    enums: &[EnumInfo],
 ) {
     let parameters = function
         .parameters
@@ -229,6 +250,80 @@ fn emit_function(
                             .unwrap();
                         }
                     }
+                }
+                SsaOp::EnumConstruct {
+                    enum_id,
+                    variant_id,
+                    payloads,
+                } => {
+                    let info = &enums[enum_id.0 as usize];
+                    let variant = &info.variants[variant_id.index as usize];
+                    let aggregate_ty = Type::Enum(*enum_id);
+                    let tag_result = if payloads.is_empty() {
+                        format!("%v{}", instruction.result.0)
+                    } else {
+                        format!("%enum{}_tag", instruction.result.0)
+                    };
+                    writeln!(
+                        output,
+                        "  {tag_result} = insertvalue {} zeroinitializer, i32 {}, 0",
+                        llvm_type(aggregate_ty),
+                        variant.discriminant
+                    )
+                    .unwrap();
+                    for (position, (operand, payload)) in
+                        payloads.iter().zip(&variant.payloads).enumerate()
+                    {
+                        let previous = if position == 0 {
+                            tag_result.clone()
+                        } else {
+                            format!("%enum{}_payload{}", instruction.result.0, position - 1)
+                        };
+                        let result_name = if position + 1 == payloads.len() {
+                            format!("%v{}", instruction.result.0)
+                        } else {
+                            format!("%enum{}_payload{}", instruction.result.0, position)
+                        };
+                        writeln!(
+                            output,
+                            "  {result_name} = insertvalue {} {previous}, {} {}, {}, {}",
+                            llvm_type(aggregate_ty),
+                            llvm_type(payload.ty),
+                            llvm_operand(operand),
+                            variant.index + 1,
+                            payload.index
+                        )
+                        .unwrap();
+                    }
+                }
+                SsaOp::EnumDiscriminant { value, enum_id } => {
+                    writeln!(
+                        output,
+                        "  %v{} = extractvalue {} {}, 0",
+                        instruction.result.0,
+                        llvm_type(Type::Enum(*enum_id)),
+                        llvm_operand(value)
+                    )
+                    .unwrap();
+                }
+                SsaOp::EnumPayload {
+                    value,
+                    enum_id,
+                    variant_id,
+                    index,
+                } => {
+                    let info = &enums[enum_id.0 as usize];
+                    let variant = &info.variants[variant_id.index as usize];
+                    writeln!(
+                        output,
+                        "  %v{} = extractvalue {} {}, {}, {}",
+                        instruction.result.0,
+                        llvm_type(Type::Enum(*enum_id)),
+                        llvm_operand(value),
+                        variant.index + 1,
+                        index
+                    )
+                    .unwrap();
                 }
                 SsaOp::ExtractField {
                     aggregate,
@@ -524,6 +619,30 @@ fn emit_function(
                 block_label(*else_block)
             )
             .unwrap(),
+            SsaTerminator::Switch {
+                discriminant,
+                cases,
+                otherwise,
+                ..
+            } => {
+                let default = otherwise.map_or_else(
+                    || format!("switch_unreachable_bb{}", block.id.0),
+                    block_label,
+                );
+                writeln!(
+                    output,
+                    "  switch i32 {}, label %{default} [",
+                    llvm_operand(discriminant)
+                )
+                .unwrap();
+                for (value, target) in cases {
+                    writeln!(output, "    i32 {value}, label %{}", block_label(*target)).unwrap();
+                }
+                writeln!(output, "  ]").unwrap();
+                if otherwise.is_none() {
+                    writeln!(output, "{default}:\n  unreachable").unwrap();
+                }
+            }
             SsaTerminator::Return(value) => writeln!(
                 output,
                 "  ret {} {}",
@@ -1009,6 +1128,7 @@ fn llvm_type(ty: Type) -> String {
         Type::Float(FloatType::Float32) => "float".into(),
         Type::Float(FloatType::Float64) => "double".into(),
         Type::Struct(id) => format!("%aether.struct.{}", id.0),
+        Type::Enum(id) => format!("%aether.enum.{}", id.0),
     }
 }
 
@@ -1180,5 +1300,16 @@ mod tests {
         assert!(output.contains(" = sdiv i64 "));
         assert!(output.contains(" = srem i64 "));
         assert!(output.contains(" = fdiv double "));
+    }
+
+    #[test]
+    fn emits_typed_enum_envelope_payload_ops_and_switch() {
+        let output = llvm(
+            "enum E{A,B(int,bool),}int main(){E e=E.B(42,true);match(e){E.A=>{return 0;}E.B(x,yes)=>{if(yes){return x;}return 0;}}}",
+        );
+        assert!(output.contains("%aether.enum.0 = type { i32, {  }, { i64, i1 } }"));
+        assert!(output.contains("insertvalue %aether.enum.0"));
+        assert!(output.contains("extractvalue %aether.enum.0"));
+        assert!(output.contains("switch i32"));
     }
 }

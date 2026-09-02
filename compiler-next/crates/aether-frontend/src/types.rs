@@ -7,6 +7,20 @@ use std::fmt;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StructId(pub u32);
 
+/// Session-local nominal identity of a source `enum` declaration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct EnumId(pub u32);
+
+/// Session-local semantic identity of one enum variant. Variant names are
+/// metadata after HIR resolution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct VariantId {
+    /// Owning nominal enum identity.
+    pub enum_id: EnumId,
+    /// Declaration-order index within the owner.
+    pub index: u32,
+}
+
 /// Session-local identity of a field declaration. Field names are metadata
 /// after HIR resolution; this identity is authoritative below the frontend.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -127,6 +141,8 @@ pub enum Type {
     Float(FloatType),
     /// Nominal, module-owned value aggregate.
     Struct(StructId),
+    /// Nominal, module-owned tagged value aggregate.
+    Enum(EnumId),
 }
 
 impl Type {
@@ -159,6 +175,14 @@ impl Type {
             None
         }
     }
+    #[must_use]
+    pub const fn as_enum(self) -> Option<EnumId> {
+        if let Self::Enum(id) = self {
+            Some(id)
+        } else {
+            None
+        }
+    }
 }
 
 impl fmt::Display for Type {
@@ -168,6 +192,7 @@ impl fmt::Display for Type {
             Self::Integer(v) => v.fmt(f),
             Self::Float(v) => v.fmt(f),
             Self::Struct(id) => write!(f, "struct#{}", id.0),
+            Self::Enum(id) => write!(f, "enum#{}", id.0),
         }
     }
 }

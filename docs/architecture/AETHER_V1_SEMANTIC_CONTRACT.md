@@ -397,6 +397,28 @@ Field access and mutation resolve source names once to `FieldId` projections.
 Nested assignment denotes replacement of the projected subvalue. Struct
 initialization, assignment, parameter passing and return copy the complete
 logical value, with no identity, sharing, heap storage, ARC or destruction.
+
+### 4.6 Nominal payload enums and exhaustive matching — NEXT-VERTICAL-6 DECIDED baseline
+
+Vertical-6 admits nominal, module-owned enums with payloadless variants and
+positional value payloads. Equal names and payload types do not make two enum
+declarations equivalent. Construction is qualified (`Number.Integer(42)`,
+`State.Idle`); imported enums remain directly qualified and variants never
+enter unqualified scope. Transparent aliases preserve enum identity and may
+qualify construction.
+
+`match (value) { Enum.Variant(binding) => { ... } }` is initially a statement.
+Every variant occurs exactly once with exact positional binding arity. No
+wildcard, guard, OR/range/nested/reference pattern or expression-valued match is
+admitted. Bindings are ordinary function-local values copied from payloads.
+Enums recursively containing Vertical-0..6 value types copy by value; direct or
+mixed struct/enum by-value cycles are rejected as infinite.
+
+The bootstrap discriminant is unsigned 32-bit and declaration ordered from
+zero. LLVM uses a deterministic typed tagged envelope without niche
+optimization or type-punning. Discriminants, physical layout and aggregate
+calling convention remain internal rather than stable source/public ABI.
+`Result`, `Option` and similarly named enums receive no language magic.
 Direct or mutual by-value recursive layouts are rejected as infinite-size.
 
 ## 5. Mutability, ownership and aliasing

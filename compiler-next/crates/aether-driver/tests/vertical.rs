@@ -1,4 +1,4 @@
-//! Cross-layer and native qualification through NEXT-VERTICAL-5.
+//! Cross-layer and native qualification through NEXT-VERTICAL-6.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -53,6 +53,7 @@ fn native_programs_execute_with_expected_status() {
         ("mutual_recursion.ae", 7),
         ("parameter_value.ae", 9),
         ("v5_structs.ae", 42),
+        ("v6_enums.ae", 42),
     ] {
         let (_, status) = run_path(&program(source), &[], &toolchain).unwrap();
         assert_eq!(status.code(), Some(expected), "{source}");
@@ -212,6 +213,7 @@ fn multi_module_programs_build_and_run_natively() {
         ("cycle", 42),
         ("imported_main", 42),
         ("v5_structs", 20),
+        ("v6_enums", 42),
     ] {
         let (_, status) = run_path(&module_program(case), &[], &ClangToolchain::default()).unwrap();
         assert_eq!(status.code(), Some(expected), "{case}");
@@ -310,6 +312,105 @@ fn vertical5_qualified_and_unqualified_type_resolution() {
         .unwrap_err()
         .remove(0);
     assert_eq!(diagnostic.code, "E0214");
+    assert_eq!(diagnostic.source_name.as_deref(), Some("main.ae"));
+}
+
+#[test]
+fn vertical6_enum_diagnostics_are_structured() {
+    for (text, code) in [
+        ("enum A{X,}enum A{Y,}int main(){return 0;}", "E0240"),
+        ("enum A{X,X,}int main(){return 0;}", "E0251"),
+        ("enum A{X,}int main(){A a=A.X();return 0;}", "E0250"),
+        ("enum A{X(int),}int main(){A a=A.X;return 0;}", "E0250"),
+        ("enum A{X,}int main(){A a=A.Y;return 0;}", "E0252"),
+        ("enum A{X(int),}int main(){A a=A.X();return 0;}", "E0253"),
+        (
+            "enum A{X(int),}int main(){A a=A.X(true);return 0;}",
+            "E0254",
+        ),
+        ("int main(){int x=1;match(x){}return 0;}", "E0255"),
+        (
+            "enum A{X,}int main(){A a=A.X;match(a){A.X=>{return 1;}A.X=>{return 2;}}}",
+            "E0256",
+        ),
+        (
+            "enum A{X,}enum B{X,}int main(){A a=A.X;match(a){B.X=>{return 1;}}}",
+            "E0257",
+        ),
+        (
+            "enum A{X,Y,}int main(){A a=A.X;match(a){A.X=>{return 1;}}}",
+            "E0258",
+        ),
+        (
+            "enum List{Nil,Cons(int,List),}int main(){return 0;}",
+            "E0259",
+        ),
+        (
+            "struct A{B b;}enum B{Value(A),}int main(){return 0;}",
+            "E0259",
+        ),
+        (
+            "enum A{X,}int A(int x){return x;}int main(){return 0;}",
+            "E0240",
+        ),
+        ("struct A{int x;}enum A{X,}int main(){return 0;}", "E0240"),
+    ] {
+        let diagnostic = compile_source(&SourceFile::new("v6-error.ae", text), &[])
+            .unwrap_err()
+            .remove(0);
+        assert_eq!(diagnostic.code, code, "{text}: {}", diagnostic.message);
+        assert!(diagnostic.span.is_some(), "{text}");
+    }
+}
+
+#[test]
+fn vertical6_dumps_expose_nominal_ids_switch_and_tagged_lowering() {
+    let text = fs::read_to_string(program("v6_enums.ae")).unwrap();
+    let result = compile_source(
+        &SourceFile::new("v6_enums.ae", text),
+        &[Emit::Ast, Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+    )
+    .unwrap();
+    let ast = &result.dumps[&Emit::Ast];
+    assert!(ast.contains("AstEnum"));
+    assert!(ast.contains("Match"));
+    let hir = &result.dumps[&Emit::Hir];
+    assert!(hir.contains("EnumId"));
+    assert!(hir.contains("VariantId"));
+    assert!(hir.contains("EnumInit"));
+    assert!(hir.contains("HirMatchBinding"));
+    for phase in [Emit::Mir, Emit::Ssa] {
+        let dump = &result.dumps[&phase];
+        assert!(dump.contains("EnumConstruct"), "{phase:?}");
+        assert!(dump.contains("EnumDiscriminant"), "{phase:?}");
+        assert!(dump.contains("EnumPayload"), "{phase:?}");
+        assert!(dump.contains("Switch"), "{phase:?}");
+    }
+    let llvm = &result.dumps[&Emit::Llvm];
+    assert!(llvm.contains("%aether.enum.0 = type"));
+    assert!(llvm.contains("switch i32"));
+    assert!(llvm.contains("insertvalue %aether.enum.0"));
+    assert!(llvm.contains("extractvalue %aether.enum.0"));
+}
+
+#[test]
+fn vertical6_qualified_alias_construction_and_matching_resolve() {
+    let compilation = compile_session(
+        CompilationSession::discover(&module_program("v6_enums")).unwrap(),
+        &[Emit::Ast, Emit::Hir, Emit::Llvm],
+    )
+    .unwrap();
+    assert!(compilation.dumps[&Emit::Ast].contains("VariantCall"));
+    let hir = &compilation.dumps[&Emit::Hir];
+    assert!(hir.contains("Numeric"));
+    assert!(hir.contains("canonical: Enum"));
+    assert!(compilation.llvm.contains("switch i32"));
+
+    let diagnostic = CompilationSession::discover(&module_program("errors/v6_unqualified"))
+        .and_then(|session| compile_session(session, &[]))
+        .unwrap_err()
+        .remove(0);
+    assert_eq!(diagnostic.code, "E0204");
     assert_eq!(diagnostic.source_name.as_deref(), Some("main.ae"));
 }
 

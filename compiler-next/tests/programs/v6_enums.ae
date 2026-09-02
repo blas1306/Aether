@@ -1,0 +1,56 @@
+struct ErrorInfo {
+    int code;
+}
+
+enum Number {
+    Empty,
+    Integer(int),
+    Real(float64),
+    Pair(int, bool),
+    Info(ErrorInfo),
+}
+
+struct Wrapper {
+    Number value;
+}
+
+Number choose(bool real) {
+    Number value = Number.Integer(1);
+    if (real) {
+        value = Number.Real(42.9);
+    }
+    return value;
+}
+
+int toInt(Number number) {
+    match (number) {
+        Number.Empty => { return 0; }
+        Number.Integer(value) => { return value; }
+        Number.Real(value) => { return int(value); }
+        Number.Pair(value, positive) => {
+            if (positive) { return value; }
+            return 0;
+        }
+        Number.Info(info) => { return info.code; }
+    }
+}
+
+int main() {
+    Wrapper wrapped = Wrapper(Number.Integer(42));
+    Number copied = wrapped.value;
+    Number merged = choose(false);
+    Number empty = Number.Empty;
+    Number pair = Number.Pair(41, true);
+    ErrorInfo info = ErrorInfo(40);
+    Number withInfo = Number.Info(info);
+    if (toInt(empty) == 0) {
+        if (toInt(pair) == 41) {
+            if (toInt(withInfo) == 40) {
+                if (toInt(merged) == 1) {
+                    return toInt(copied);
+                }
+            }
+        }
+    }
+    return 0;
+}

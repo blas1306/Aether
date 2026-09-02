@@ -1,0 +1,23 @@
+import types;
+
+int toInt(types.Number number) {
+    match (number) {
+        types.Number.Integer(value) => { return value; }
+        types.Number.Real(value) => { return int(value); }
+    }
+}
+
+int stateValue(types.State state) {
+    match (state) {
+        types.State.Idle => { return 1; }
+    }
+}
+
+int main() {
+    types.Numeric number = types.Numeric.Integer(42);
+    types.State state = types.State.Idle;
+    if (stateValue(state) == 1) {
+        return toInt(number);
+    }
+    return 0;
+}

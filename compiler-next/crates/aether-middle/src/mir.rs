@@ -5,10 +5,10 @@ use std::collections::VecDeque;
 use std::fmt::Write;
 
 use aether_frontend::{
-    CastKind, CoercionKind, Diagnostic, DiagnosticCategory, FieldId, FloatValue, FunctionId,
-    FunctionSignature, HirBinaryOp, HirBlock, HirExpr, HirExprKind, HirFunction, HirPlace,
-    HirStmtKind, HirUnaryOp, LocalId, ModuleInfo, Phase, Span, StructId, StructInfo, Type,
-    TypedHir,
+    CastKind, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId, FloatValue,
+    FunctionId, FunctionSignature, HirBinaryOp, HirBlock, HirExpr, HirExprKind, HirFunction,
+    HirMatchArm, HirPlace, HirStmtKind, HirUnaryOp, IntegerType, LocalId, ModuleInfo, Phase, Span,
+    StructId, StructInfo, Type, TypedHir, VariantId,
 };
 
 /// Basic-block identity, equal to its stable vector index.
@@ -125,6 +125,21 @@ pub enum Rvalue {
         struct_id: StructId,
         fields: Vec<(FieldId, Operand)>,
     },
+    EnumConstruct {
+        enum_id: EnumId,
+        variant_id: VariantId,
+        payloads: Vec<Operand>,
+    },
+    EnumDiscriminant {
+        value: Operand,
+        enum_id: EnumId,
+    },
+    EnumPayload {
+        value: Operand,
+        enum_id: EnumId,
+        variant_id: VariantId,
+        index: u32,
+    },
     /// Explicit semantic widening.
     Coerce {
         kind: CoercionKind,
@@ -182,6 +197,14 @@ pub enum Terminator {
         then_block: BlockId,
         else_block: BlockId,
     },
+    /// Reusable integral multi-way control flow. `exhaustive_enum` records the
+    /// stronger contract emitted by source enum matching.
+    Switch {
+        discriminant: Operand,
+        cases: Vec<(u32, BlockId)>,
+        otherwise: Option<BlockId>,
+        exhaustive_enum: Option<EnumId>,
+    },
     /// Function result.
     Return(Operand),
     /// Explicit unconditional failure.
@@ -223,6 +246,8 @@ pub struct FlowMir {
     pub modules: Vec<ModuleInfo>,
     /// Nominal aggregate and field metadata.
     pub structs: Vec<StructInfo>,
+    /// Nominal tagged aggregate and variant metadata.
+    pub enums: Vec<EnumInfo>,
     /// Program-global signature table.
     pub signatures: Vec<FunctionSignature>,
     /// Function-local CFGs in stable identity order.
@@ -236,8 +261,8 @@ impl FlowMir {
     #[must_use]
     pub fn dump(&self) -> String {
         let mut dump = format!(
-            "entry: {:#?}\nmodules: {:#?}\nstructs: {:#?}\nsignatures: {:#?}",
-            self.entry, self.modules, self.structs, self.signatures
+            "entry: {:#?}\nmodules: {:#?}\nstructs: {:#?}\nenums: {:#?}\nsignatures: {:#?}",
+            self.entry, self.modules, self.structs, self.enums, self.signatures
         );
         for module in &self.modules {
             let functions: Vec<_> = self
@@ -277,24 +302,25 @@ impl VerifiedMir {
 /// Lowers typed, resolved HIR into a raw CFG.
 #[must_use]
 pub fn lower_hir(hir: TypedHir) -> FlowMir {
-    let (modules, structs, signatures, functions, entry) = hir.into_parts();
+    let (modules, structs, enums, signatures, functions, entry) = hir.into_parts();
     let functions = functions
         .iter()
         .map(|function| {
             let return_type = signatures[function.id.0 as usize].return_type;
-            lower_function(function, return_type)
+            lower_function(function, return_type, &enums)
         })
         .collect();
     FlowMir {
         modules,
         structs,
+        enums,
         signatures,
         functions,
         entry,
     }
 }
 
-fn lower_function(function: &HirFunction, return_type: Type) -> MirFunction {
+fn lower_function(function: &HirFunction, return_type: Type, enums: &[EnumInfo]) -> MirFunction {
     let locals = function
         .locals
         .iter()
@@ -327,17 +353,19 @@ fn lower_function(function: &HirFunction, return_type: Type) -> MirFunction {
             entry: BlockId(0),
         },
         current: Some(BlockId(0)),
+        enums,
     };
     builder.lower_block(&function.body);
     builder.function
 }
 
-struct Builder {
+struct Builder<'a> {
     function: MirFunction,
     current: Option<BlockId>,
+    enums: &'a [EnumInfo],
 }
 
-impl Builder {
+impl Builder<'_> {
     fn lower_block(&mut self, block: &HirBlock) {
         for statement in &block.statements {
             match &statement.kind {
@@ -366,6 +394,11 @@ impl Builder {
                     else_block,
                 } => self.lower_if(condition, then_block, else_block.as_ref()),
                 HirStmtKind::While { condition, body } => self.lower_while(condition, body),
+                HirStmtKind::Match {
+                    scrutinee,
+                    enum_id,
+                    arms,
+                } => self.lower_match(scrutinee, *enum_id, arms),
             }
         }
     }
@@ -432,6 +465,71 @@ impl Builder {
         self.current = Some(exit);
     }
 
+    fn lower_match(&mut self, scrutinee: &HirExpr, enum_id: EnumId, arms: &[HirMatchArm]) {
+        let enum_value = self.lower_expr(scrutinee);
+        let tag = self.temporary(Type::Integer(IntegerType::Uint32));
+        self.assign(
+            Place {
+                local: tag,
+                projections: vec![],
+            },
+            Rvalue::EnumDiscriminant {
+                value: enum_value.clone(),
+                enum_id,
+            },
+            scrutinee.span,
+        );
+        let arm_blocks: Vec<BlockId> = arms.iter().map(|_| self.new_block()).collect();
+        let info = &self.enums[enum_id.0 as usize];
+        let cases = arms
+            .iter()
+            .zip(&arm_blocks)
+            .map(|(arm, block)| {
+                let variant = &info.variants[arm.variant_id.index as usize];
+                (variant.discriminant, *block)
+            })
+            .collect();
+        self.terminate(Terminator::Switch {
+            discriminant: Operand::Local(tag),
+            cases,
+            otherwise: None,
+            exhaustive_enum: Some(enum_id),
+        });
+        let mut open_ends = Vec::new();
+        for (arm, block_id) in arms.iter().zip(arm_blocks) {
+            self.current = Some(block_id);
+            for binding in &arm.bindings {
+                self.assign(
+                    Place {
+                        local: binding.local,
+                        projections: vec![],
+                    },
+                    Rvalue::EnumPayload {
+                        value: enum_value.clone(),
+                        enum_id,
+                        variant_id: arm.variant_id,
+                        index: binding.payload_index,
+                    },
+                    binding.span,
+                );
+            }
+            self.lower_block(&arm.body);
+            if let Some(end) = self.current {
+                open_ends.push(end);
+            }
+        }
+        if open_ends.is_empty() {
+            self.current = None;
+        } else {
+            let join = self.new_block();
+            for end in open_ends {
+                self.current = Some(end);
+                self.terminate(Terminator::Goto(join));
+            }
+            self.current = Some(join);
+        }
+    }
+
     #[allow(clippy::too_many_lines)]
     fn lower_expr(&mut self, expression: &HirExpr) -> Operand {
         match &expression.kind {
@@ -490,6 +588,30 @@ impl Builder {
                     Rvalue::Aggregate {
                         struct_id: *struct_id,
                         fields,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::EnumInit {
+                enum_id,
+                variant_id,
+                payloads,
+            } => {
+                let payloads = payloads
+                    .iter()
+                    .map(|payload| self.lower_expr(payload))
+                    .collect();
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        local: destination,
+                        projections: vec![],
+                    },
+                    Rvalue::EnumConstruct {
+                        enum_id: *enum_id,
+                        variant_id: *variant_id,
+                        payloads,
                     },
                     expression.span,
                 );
@@ -702,7 +824,14 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
         if signature.module.0 as usize >= mir.modules.len() {
             return Err(fail("MIR signature names an unknown module".into()));
         }
-        verify_mir_function(function, signature, &mir.signatures, &mir.structs, &fail)?;
+        verify_mir_function(
+            function,
+            signature,
+            &mir.signatures,
+            &mir.structs,
+            &mir.enums,
+            &fail,
+        )?;
     }
     Ok(VerifiedMir(mir))
 }
@@ -713,6 +842,7 @@ fn verify_mir_function(
     signature: &FunctionSignature,
     signatures: &[FunctionSignature],
     structs: &[StructInfo],
+    enums: &[EnumInfo],
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
     if function.return_type != signature.return_type
@@ -833,6 +963,7 @@ fn verify_mir_function(
                 function,
                 signatures,
                 structs,
+                enums,
                 &instruction.value,
                 destination_ty,
                 &initialized,
@@ -850,6 +981,66 @@ fn verify_mir_function(
                     != Type::Bool
                 {
                     return Err(fail("MIR branch condition is not bool".into()));
+                }
+            }
+            Terminator::Switch {
+                discriminant,
+                cases,
+                otherwise,
+                exhaustive_enum,
+            } => {
+                validate_operand(function, discriminant, &initialized)
+                    .map_err(|message| fail(message.clone()))?;
+                if operand_type(function, discriminant).map_err(|message| fail(message.clone()))?
+                    != Type::Integer(IntegerType::Uint32)
+                {
+                    return Err(fail("MIR switch discriminant is not uint32".into()));
+                }
+                let mut values = std::collections::BTreeSet::new();
+                if cases.is_empty() || cases.iter().any(|(value, _)| !values.insert(*value)) {
+                    return Err(fail("MIR switch cases are empty or duplicated".into()));
+                }
+                if let Some(enum_id) = exhaustive_enum {
+                    let Some(info) = enums
+                        .get(enum_id.0 as usize)
+                        .filter(|info| info.id == *enum_id)
+                    else {
+                        return Err(fail("MIR exhaustive switch names unknown enum".into()));
+                    };
+                    let expected = info
+                        .variants
+                        .iter()
+                        .map(|variant| variant.discriminant)
+                        .collect::<std::collections::BTreeSet<_>>();
+                    if values != expected || otherwise.is_some() {
+                        return Err(fail(
+                            "MIR exhaustive enum switch does not cover exact tags".into(),
+                        ));
+                    }
+                    let Operand::Local(tag_local) = discriminant else {
+                        return Err(fail(
+                            "MIR exhaustive enum switch requires an extracted tag local".into(),
+                        ));
+                    };
+                    let definitions = function
+                        .blocks
+                        .iter()
+                        .flat_map(|candidate| &candidate.instructions)
+                        .filter(|instruction| {
+                            instruction.destination.local == *tag_local
+                                && instruction.destination.projections.is_empty()
+                        })
+                        .collect::<Vec<_>>();
+                    if definitions.len() != 1
+                        || !matches!(
+                            definitions[0].value,
+                            Rvalue::EnumDiscriminant { enum_id: extracted, .. } if extracted == *enum_id
+                        )
+                    {
+                        return Err(fail(
+                            "MIR exhaustive switch tag does not originate from its enum".into(),
+                        ));
+                    }
                 }
             }
             Terminator::Return(value) => {
@@ -872,6 +1063,7 @@ fn validate_rvalue(
     function: &MirFunction,
     signatures: &[FunctionSignature],
     structs: &[StructInfo],
+    enums: &[EnumInfo],
     value: &Rvalue,
     destination: Type,
     initialized: &[bool],
@@ -902,6 +1094,63 @@ fn validate_rvalue(
                 if *field_id != declared.id || operand_type(function, operand)? != declared.ty {
                     return Err("MIR aggregate field identity/type mismatch".into());
                 }
+            }
+        }
+        Rvalue::EnumConstruct {
+            enum_id,
+            variant_id,
+            payloads,
+        } => {
+            let info = enums
+                .get(enum_id.0 as usize)
+                .filter(|info| info.id == *enum_id)
+                .ok_or_else(|| "MIR enum construction names unknown enum".to_string())?;
+            let variant = info
+                .variants
+                .get(variant_id.index as usize)
+                .filter(|variant| variant.id == *variant_id)
+                .ok_or_else(|| "MIR enum construction names wrong variant".to_string())?;
+            if destination != Type::Enum(*enum_id) || payloads.len() != variant.payloads.len() {
+                return Err("MIR enum construction arity/result mismatch".into());
+            }
+            for (operand, declared) in payloads.iter().zip(&variant.payloads) {
+                validate_operand(function, operand, initialized)?;
+                if operand_type(function, operand)? != declared.ty {
+                    return Err("MIR enum payload type mismatch".into());
+                }
+            }
+        }
+        Rvalue::EnumDiscriminant { value, enum_id } => {
+            validate_operand(function, value, initialized)?;
+            if enums.get(enum_id.0 as usize).map(|info| info.id) != Some(*enum_id)
+                || operand_type(function, value)? != Type::Enum(*enum_id)
+                || destination != Type::Integer(IntegerType::Uint32)
+            {
+                return Err("MIR enum discriminant contract invalid".into());
+            }
+        }
+        Rvalue::EnumPayload {
+            value,
+            enum_id,
+            variant_id,
+            index,
+        } => {
+            validate_operand(function, value, initialized)?;
+            let info = enums
+                .get(enum_id.0 as usize)
+                .filter(|info| info.id == *enum_id)
+                .ok_or_else(|| "MIR enum payload names unknown enum".to_string())?;
+            let variant = info
+                .variants
+                .get(variant_id.index as usize)
+                .filter(|variant| variant.id == *variant_id)
+                .ok_or_else(|| "MIR enum payload names wrong variant".to_string())?;
+            let payload = variant
+                .payloads
+                .get(*index as usize)
+                .ok_or_else(|| "MIR enum payload slot out of bounds".to_string())?;
+            if operand_type(function, value)? != Type::Enum(*enum_id) || destination != payload.ty {
+                return Err("MIR enum payload extraction type mismatch".into());
             }
         }
         Rvalue::Coerce {
@@ -1202,6 +1451,15 @@ fn targets(terminator: &Terminator) -> Vec<BlockId> {
             else_block,
             ..
         } => vec![*then_block, *else_block],
+        Terminator::Switch {
+            cases, otherwise, ..
+        } => {
+            let mut targets: Vec<_> = cases.iter().map(|(_, target)| *target).collect();
+            targets.extend(otherwise.iter().copied());
+            targets.sort();
+            targets.dedup();
+            targets
+        }
         Terminator::Return(_) | Terminator::Trap(_) => Vec::new(),
     }
 }
@@ -1279,6 +1537,7 @@ mod tests {
                 imports: vec![],
             }],
             structs: vec![],
+            enums: vec![],
             signatures: vec![FunctionSignature {
                 id: FunctionId(0),
                 module: ModuleId(0),
@@ -1403,5 +1662,46 @@ mod tests {
             fields[0].0 = aether_frontend::FieldId(999);
         }
         assert!(verify_mir(raw).is_err());
+    }
+
+    #[test]
+    fn enum_switch_and_payload_contracts_are_verified() {
+        let source =
+            "enum E{A,B(int),}int main(){E e=E.B(7);match(e){E.A=>{return 0;}E.B(x)=>{return x;}}}";
+        let raw = mir(source);
+        assert!(
+            raw.functions[0]
+                .blocks
+                .iter()
+                .any(|block| matches!(block.terminator, Some(Terminator::Switch { .. })))
+        );
+        verify_mir(raw).unwrap();
+
+        let mut bad_switch = mir(source);
+        let switch = bad_switch.functions[0]
+            .blocks
+            .iter_mut()
+            .find_map(|block| {
+                if let Some(Terminator::Switch { cases, .. }) = &mut block.terminator {
+                    Some(cases)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        switch.pop();
+        assert!(verify_mir(bad_switch).is_err());
+
+        let mut bad_payload = mir(source);
+        let extraction = bad_payload.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| matches!(instruction.value, Rvalue::EnumPayload { .. }))
+            .unwrap();
+        if let Rvalue::EnumPayload { index, .. } = &mut extraction.value {
+            *index = 99;
+        }
+        assert!(verify_mir(bad_payload).is_err());
     }
 }

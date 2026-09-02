@@ -1102,3 +1102,35 @@ canonical interned `TypeId` arena and decide owning-array assignment/view
 semantics before implementing syntax. Do not add named struct initialization as
 a struct-only special form; design general named arguments for both functions
 and structural construction when that ergonomic feature is scheduled.
+
+## 23. NEXT-VERTICAL-6 implementation confirmation
+
+The isolated Rust compiler now admits nominal payload enums and exhaustive
+statement matching end to end. Global collection assigns dense `EnumId` and
+owner/index `VariantId` identities before alias, aggregate, signature or body
+resolution;
+functions, aliases, structs and enums share one fail-closed module namespace.
+Qualified local/imported construction, transparent enum aliases, payloadless
+and multi-payload variants, and copy-by-value parameters/results resolve in HIR
+without hidden variant functions.
+
+The target-aware aggregate dependency query covers structs and enums together,
+rejecting direct and mixed by-value cycles. Layout uses a fixed bootstrap i32
+tag followed by one typed tuple slot per variant. This sparse envelope is larger
+than a union but preserves aggregate SSA, avoids LLVM type-punning and requires
+neither stack allocation nor MemorySSA. Declaration order assigns tags from
+zero; layout, tags and function ABI remain internal.
+
+HIR matches contain resolved enum/variant/binding identities and verified
+exhaustiveness. MIR extracts a discriminant, terminates with reusable `Switch`,
+and copies payloads at arm entries. SSA retains verified enum construct, tag,
+payload and switch operations. LLVM lowers them with named enum aggregate types,
+`insertvalue`, `extractvalue` and native `switch`. Verifier tests corrupt case
+coverage and payload identities to demonstrate fail-closed contracts. No
+wildcard/guard/nested pattern, result-valued match, niche layout, heap,
+ownership, reference, generic or error-propagation semantics were added.
+
+For NEXT-VERTICAL-7, the strongest dependency-closing step is the canonical
+interned `TypeId` arena plus the ownership/view decision needed by arrays and
+generic core enums. If generics come first, preserve ordinary enum semantics
+and monomorphize without making `Result` or `Option` compiler magic.
