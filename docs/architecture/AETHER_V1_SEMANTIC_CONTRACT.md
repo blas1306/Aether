@@ -364,6 +364,41 @@ shared) and their source syntax are an **OPEN DECISION**.  A single implicit
 “borrow everything” convention is insufficient for FFI, buffers and returned
 views.
 
+### 4.5 Nominal value structs — NEXT-VERTICAL-5 DECIDED baseline
+
+Vertical-5 admits nominal, module-owned structs whose fields are recursively
+value-semantic scalars, transparent aliases, or other finite Vertical-5
+structs. Two struct declarations are distinct types even when their names,
+fields and target layouts coincide. Transparent aliases preserve the one
+underlying `StructId`; they do not create nominal wrappers.
+
+The canonical construction syntax is positional application syntax:
+
+```aether
+Point(3.0, 4.0)
+Segment(Point(0.0, 0.0), Point(1.0, 1.0))
+```
+
+Arguments correspond to fields in declaration order, with exact arity and the
+ordinary contextual-literal/widening rules. This form is structural aggregate
+construction: it creates no function, invokes no user code and is not a
+user-defined constructor. `Point { x: 3.0, y: 4.0 }`, named arguments, methods
+and user-defined constructors are not admitted. A future general named-argument
+facility may cover both functions and struct construction without changing the
+Vertical-5 positional meaning.
+
+The parsed application form is semantically neutral. HIR resolves it to a
+concrete `FunctionId`, a scalar conversion, or `StructInit(StructId, fields)`;
+no call-like ambiguity reaches MIR. Functions, structs and aliases occupy one
+fail-closed top-level namespace in each module. Imported structs remain directly
+qualified (`geometry.Point`) for both type use and construction.
+
+Field access and mutation resolve source names once to `FieldId` projections.
+Nested assignment denotes replacement of the projected subvalue. Struct
+initialization, assignment, parameter passing and return copy the complete
+logical value, with no identity, sharing, heap storage, ARC or destruction.
+Direct or mutual by-value recursive layouts are rejected as infinite-size.
+
 ## 5. Mutability, ownership and aliasing
 
 ### 5.1 Mutability — DECIDED
@@ -608,8 +643,13 @@ Only fixed-width scalars have an immediately fixed bit width.  Aggregate
 layout, alignment, padding and calling convention are target-specific unless a
 type explicitly requests an interoperable representation.
 
-Default struct field order, reorder permission, stable representation
-annotations and enum/tagged-union layout are **OPEN DECISIONS**.  Layout facts
+For the NEXT-VERTICAL-5 bootstrap representation, source declaration order is
+both positional-construction order and physical field order; changing it is a
+source API change. Size, alignment and padding are computed from the admitted
+target descriptor, and the resulting layout/calling convention is explicitly
+not public ABI. Reorder permission for a future optimized/default
+representation, stable representation annotations and enum/tagged-union layout
+remain **OPEN DECISIONS**. Layout facts
 must be calculated from a target descriptor, never duplicated as magic offsets
 across backend/runtime code.
 

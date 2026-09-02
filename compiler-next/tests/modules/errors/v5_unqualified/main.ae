@@ -1,0 +1,2 @@
+import geometry;
+int main() { Point p = Point(1); return p.x; }

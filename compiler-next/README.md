@@ -1,4 +1,4 @@
-# Aether NEXT-VERTICAL-4
+# Aether NEXT-VERTICAL-5
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. It does not replace the production `aether` CLI or import any legacy
@@ -12,7 +12,7 @@ entry SourceFile
   -> lexer/parser once per source -> ParsedProgram
   -> global declaration collection -> resolver/type analysis -> TypedHir
   -> CFG lowering -> FlowMir -> VerifiedMir
-  -> scalar promotion -> SsaIr -> VerifiedSsa
+  -> scalar and aggregate promotion -> SsaIr -> VerifiedSsa
   -> LLVM backend -> textual LLVM
   -> clang toolchain -> Linux x86_64 executable
 ```
@@ -27,38 +27,53 @@ entry SourceFile
   toolchain boundary and the internal `aether-next` command.
 
 The workspace has no third-party Rust dependencies. This is intentional: the
-closed grammar and scalar IR do not justify a parser framework, serialization,
+closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-4 grammar
+## Vertical-5 grammar
 
 ```text
-program    := import* (alias | function)+ EOF
+program    := import* (alias | struct | function)+ EOF
 import     := "import" IDENT ";"
 alias      := "alias" IDENT "=" type ";"
+struct     := "struct" IDENT "{" field* "}"
+field      := type IDENT ";"
 function   := type IDENT "(" parameters? ")" block
 parameters := parameter ("," parameter)*
 parameter  := type IDENT
-type       := "bool" | integer-type | float-type | IDENT
+type       := (IDENT ".")? ("bool" | integer-type | float-type | IDENT)
 block      := "{" statement* "}"
 statement  := type IDENT "=" expression ";"
-            | IDENT "=" expression ";"
+            | place "=" expression ";"
             | "if" "(" expression ")" block ("else" block)?
             | "while" "(" expression ")" block
             | "return" expression ";"
-expression := integer | float | "true" | "false" | IDENT | call | "(" expression ")"
-call       := IDENT "(" arguments? ")"
-            | IDENT "." IDENT "(" arguments? ")"
-arguments  := expression ("," expression)*
-            | "-" expression
+expression := integer | float | "true" | "false" | IDENT | apply
+            | expression "." IDENT | "(" expression ")" | "-" expression
             | expression ("*" | "/" | "%" | "+" | "-" | "<" | "<=" | ">" | ">="
                          | "==" | "!=") expression
+apply      := IDENT "(" arguments? ")"
+            | IDENT "." IDENT "(" arguments? ")"
+arguments  := expression ("," expression)*
+place      := IDENT ("." IDENT)*
 ```
 
-After name/type resolution, a one-argument call whose callee names a built-in
-or module-local alias type is an explicit value conversion:
-`TargetType(expression)`. It is not an ordinary call, user-defined constructor,
-bitcast or reinterpretation.
+Application syntax remains neutral in the AST. Semantic analysis resolves its
+single top-level name to exactly one of `Call(FunctionId, ...)`, explicit scalar
+conversion, or `StructInit(StructId, ...)`; no ambiguity survives HIR. The
+canonical aggregate construction is positional, for example
+`Point(3.0, 4.0)`. Arguments map to `FieldId`s in declaration order and every
+field is required. This is structural construction, not a function call or a
+user-defined constructor. Named initializers and named arguments are not part
+of Vertical-5.
+
+Structs are nominal, module-owned value types. Same-layout declarations have
+different `StructId`s, including declarations with the same spelling in two
+modules. Imported struct types and construction require direct qualification,
+for example `geometry.Point`; imports never inject unqualified type names.
+Transparent aliases to structs preserve the underlying nominal identity.
+Functions, structs and aliases share one fail-closed top-level namespace per
+module, so an application spelling always has one interpretation.
 
 The canonical scalar set is `bool`, `int8`/`16`/`32`/`64`,
 `uint8`/`16`/`32`/`64`, `isize`, `usize`, `float32` and `float64`. Transparent
@@ -78,11 +93,22 @@ not representable; float-to-integer truncates toward zero and traps for NaN,
 infinity or an unrepresentable result. Integer-to-float and float narrowing may
 round according to IEEE semantics. Bool has no numeric conversions.
 
-Canonical scalar types are explicit enums, not strings. A global `TypeId`
-interner is intentionally deferred: it becomes useful when recursive composite
-types and instantiated generics make structural type values recursive or
-expensive, but adds no correctness or performance value for this closed scalar
-set.
+Canonical semantic types are the small copyable tagged value `Type::{Bool,
+Integer, Float, Struct(StructId)}` rather than strings. `StructId` supplies
+nominality and keeps recursive declaration graphs out of the type value itself;
+`FieldId` removes field-name lookup below HIR. A universal `TypeId` interner is
+still intentionally deferred: Vertical-5 has no recursively nested semantic
+type expressions or generic instantiations, so an arena would add indirection
+without canonicalization value. References, arrays, function types and generic
+applications are the point at which `Type` should become an interned `TypeId`
+arena rather than grow recursive payloads.
+
+Struct declarations are collected in all discovered modules before aliases,
+field types and function signatures are resolved. A target-aware DFS rejects
+self and mutual by-value recursion, calculates nested size/alignment/padding,
+and preserves source field order as physical bootstrap order. Reordering fields
+is therefore a source API change. The layout and aggregate calling convention
+are internal bootstrap contracts, not public ABI.
 
 All integer `+`, `-`, `*`, and signed negation are checked at their exact
 width. LLVM uses signed or unsigned overflow intrinsics without `nsw`/`nuw`.
@@ -104,24 +130,28 @@ read and parsed once even with shared dependencies or cycles.
 `SourceId` qualifies every span and indexes source provenance. `ModuleId` is a
 separate, session-local logical identity; source paths never become semantic
 identity. The resolved module graph uses `ModuleId` edges. The bootstrap
-visibility policy makes every top-level function in a discovered module
-available through a direct qualified call, but imported functions never enter
-unqualified scope. This policy is deliberately not the final v1 visibility
-design.
+visibility policy makes every top-level function and struct in a discovered
+module available through a direct qualifier, but imported declarations never
+enter unqualified scope. This policy is deliberately not the final v1
+visibility design.
 
-The frontend collects every signature in every discovered module before
-checking any body. `FunctionId` is global and dense within the compilation
+The frontend collects every struct identity and signature in every discovered
+module before checking any body. `FunctionId` is global and dense within the compilation
 session, while names and module spellings remain metadata after resolution.
 Local/qualified calls both become a concrete `FunctionId`, admitting forward
 calls, recursion, import cycles and cross-module mutual recursion without
 textual or filesystem order exceptions. Parameters retain ordinary
-function-local `LocalId` identities and scalar value semantics.
+function-local `LocalId` identities and value semantics.
 
-HIR carries the resolved module table and keeps the global function table
-separate from typed bodies. MIR and SSA remain strictly function-local CFGs in
-program containers; they do no module/name resolution. Dumps expose module and
-source identities, import edges, global functions, parameters and resolved
-calls.
+HIR carries `StructInfo`/`FieldInfo` tables and fully resolved `StructInit` and
+field places. MIR uses the reusable `Place { local, projections: FieldId* }`
+model for reads and nested stores. SSA promotes aggregates as ordinary SSA
+values: construction is `Aggregate`, field reads are `ExtractField`, and field
+mutation produces a new aggregate with `InsertField`. This functional update
+strategy makes copy-by-value observable without `alloca`, MemorySSA, sharing or
+ownership machinery. LLVM lowers these operations to named aggregate types,
+`insertvalue` and `extractvalue`; aggregate parameters and results use the
+internal bootstrap ABI by value.
 
 ## Development CLI
 
@@ -159,7 +189,7 @@ these cases are not forced through legacy differential semantics.
 One entry module plus transitively imported source modules and exactly one
 selected `int main()` in the entry module are admitted. An imported module may
 spell a function `main`, but it is never selected as process entry. Function
-parameter and result lowering (`i64`/`i1`) is an
+parameter and result lowering (scalars and LLVM aggregates) is an
 **internal bootstrap ABI**, not a stable Aether ABI and not `extern C`.
 Bootstrap LLVM symbols use deterministic length-delimited logical module and
 function names. They do not depend on discovery-order IDs and cannot collide
@@ -178,6 +208,6 @@ module initializers or initialization order. This is precisely why import
 cycles have no execution-order meaning in this slice. There are also no
 packages, nested/selective/wildcard/aliased imports, reexports, visibility
 keywords, overloads, generics, function values, closures, extern functions,
-heap values, strings, aggregates, ownership, optimization
+heap values, strings, named initializers, methods, enums, ownership, optimization
 pipeline, public ABI, runtime, or LLVM library binding. Unsupported forms fail
 closed before lowering.

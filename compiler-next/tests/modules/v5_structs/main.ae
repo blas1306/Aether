@@ -1,0 +1,16 @@
+import geometry;
+
+struct Point {
+    int x;
+}
+
+geometry.Point identity(geometry.Point value) {
+    return value;
+}
+
+int main() {
+    geometry.Position imported = geometry.Position(20, 22);
+    geometry.Point copy = identity(imported);
+    Point local = Point(7);
+    return copy.x + local.x - 7;
+}

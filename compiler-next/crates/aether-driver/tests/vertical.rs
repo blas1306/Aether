@@ -1,4 +1,4 @@
-//! Cross-layer and native qualification for NEXT-VERTICAL-4.
+//! Cross-layer and native qualification through NEXT-VERTICAL-5.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -52,6 +52,7 @@ fn native_programs_execute_with_expected_status() {
         ("recursion.ae", 120),
         ("mutual_recursion.ae", 7),
         ("parameter_value.ae", 9),
+        ("v5_structs.ae", 42),
     ] {
         let (_, status) = run_path(&program(source), &[], &toolchain).unwrap();
         assert_eq!(status.code(), Some(expected), "{source}");
@@ -210,10 +211,106 @@ fn multi_module_programs_build_and_run_natively() {
         ("shared", 41),
         ("cycle", 42),
         ("imported_main", 42),
+        ("v5_structs", 20),
     ] {
         let (_, status) = run_path(&module_program(case), &[], &ClangToolchain::default()).unwrap();
         assert_eq!(status.code(), Some(expected), "{case}");
     }
+}
+
+#[test]
+fn vertical5_struct_diagnostics_are_structured() {
+    for (text, code) in [
+        (
+            "struct P{int x;int y;}int main(){P p=P(1);return 0;}",
+            "E0246",
+        ),
+        ("struct P{int x;}int main(){P p=P(1,2);return 0;}", "E0246"),
+        ("struct P{int x;}int main(){P p=P(true);return 0;}", "E0247"),
+        ("struct P{int x;int x;}int main(){return 0;}", "E0241"),
+        ("struct P{int x;}int main(){P p=P(1);return p.y;}", "E0243"),
+        ("int main(){int x=1;return x.y;}", "E0244"),
+        (
+            "struct P{int x;}int main(){P p=P(1);p.x=true;return 0;}",
+            "E0245",
+        ),
+        ("int main(){Missing p=Missing(1);return 0;}", "E0204"),
+        ("struct Node{Node next;}int main(){return 0;}", "E0242"),
+        ("struct A{B b;}struct B{A a;}int main(){return 0;}", "E0242"),
+        (
+            "struct P{int x;}struct P{int y;}int main(){return 0;}",
+            "E0240",
+        ),
+        (
+            "struct P{int x;}int P(int x){return x;}int main(){return 0;}",
+            "E0240",
+        ),
+        ("struct P{int x;}alias P=int;int main(){return 0;}", "E0240"),
+        (
+            "struct A{int x;}struct B{int x;}int take(A a){return a.x;}int main(){B b=B(1);return take(b);}",
+            "E0214",
+        ),
+    ] {
+        let diagnostic = compile_source(&SourceFile::new("v5-error.ae", text), &[])
+            .unwrap_err()
+            .remove(0);
+        assert_eq!(diagnostic.code, code, "{text}: {}", diagnostic.message);
+        assert!(diagnostic.span.is_some(), "{text}");
+    }
+}
+
+#[test]
+fn vertical5_dumps_resolve_fields_places_and_aggregate_ssa() {
+    let text = fs::read_to_string(program("v5_structs.ae")).unwrap();
+    let result = compile_source(
+        &SourceFile::new("v5_structs.ae", text),
+        &[Emit::Ast, Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+    )
+    .unwrap();
+    assert!(result.dumps[&Emit::Ast].contains("Call"));
+    let hir = &result.dumps[&Emit::Hir];
+    assert!(hir.contains("StructInit"));
+    assert!(hir.contains("StructId"));
+    assert!(hir.contains("FieldId"));
+    assert!(hir.contains("FloatExtend"));
+    let mir = &result.dumps[&Emit::Mir];
+    assert!(mir.contains("Place"));
+    assert!(mir.contains("Aggregate"));
+    let ssa = &result.dumps[&Emit::Ssa];
+    assert!(ssa.contains("ExtractField"));
+    assert!(ssa.contains("InsertField"));
+    assert!(ssa.contains("Phi {"));
+    let llvm = &result.dumps[&Emit::Llvm];
+    assert!(llvm.contains("%aether.struct.0 = type"));
+    assert!(llvm.contains("insertvalue"));
+    assert!(llvm.contains("extractvalue"));
+}
+
+#[test]
+fn vertical5_qualified_and_unqualified_type_resolution() {
+    let compilation = compile_session(
+        CompilationSession::discover(&module_program("v5_structs")).unwrap(),
+        &[Emit::Hir, Emit::Llvm],
+    )
+    .unwrap();
+    let hir = &compilation.dumps[&Emit::Hir];
+    assert!(hir.contains("geometry"));
+    assert!(hir.contains("Position"));
+    assert!(hir.matches("name: \"Point\"").count() >= 2);
+
+    let diagnostic = CompilationSession::discover(&module_program("errors/v5_unqualified"))
+        .and_then(|session| compile_session(session, &[]))
+        .unwrap_err()
+        .remove(0);
+    assert_eq!(diagnostic.code, "E0204");
+    assert_eq!(diagnostic.source_name.as_deref(), Some("main.ae"));
+
+    let diagnostic = CompilationSession::discover(&module_program("errors/v5_cross_nominality"))
+        .and_then(|session| compile_session(session, &[]))
+        .unwrap_err()
+        .remove(0);
+    assert_eq!(diagnostic.code, "E0214");
+    assert_eq!(diagnostic.source_name.as_deref(), Some("main.ae"));
 }
 
 #[test]

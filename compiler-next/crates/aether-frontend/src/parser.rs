@@ -1,9 +1,9 @@
-//! Recursive-descent parser for the deliberately closed Vertical-4 grammar.
+//! Recursive-descent parser for the deliberately closed Vertical-5 grammar.
 
 use crate::{
-    AstAlias, AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstImport, AstParameter,
-    AstStmt, AstStmtKind, AstType, AstUnaryOp, Diagnostic, DiagnosticCategory, ParsedAst, Phase,
-    SourceFile, Token, TokenKind,
+    AstAlias, AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstField, AstFunction, AstImport,
+    AstParameter, AstPlace, AstStmt, AstStmtKind, AstStruct, AstType, AstUnaryOp, Diagnostic,
+    DiagnosticCategory, ParsedAst, Phase, SourceFile, Token, TokenKind,
 };
 
 /// Parses an already tokenized source file.
@@ -17,11 +17,17 @@ pub fn parse(_source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<
         }
     }
     let mut aliases = Vec::new();
+    let mut structs = Vec::new();
     let mut functions = Vec::new();
     while !parser.at(TokenKind::Eof) {
         if parser.at(TokenKind::KwAlias) {
             match parser.alias() {
                 Ok(alias) => aliases.push(alias),
+                Err(error) => return Err(vec![error]),
+            }
+        } else if parser.at(TokenKind::KwStruct) {
+            match parser.struct_decl() {
+                Ok(struct_decl) => structs.push(struct_decl),
                 Err(error) => return Err(vec![error]),
             }
         } else {
@@ -31,15 +37,16 @@ pub fn parse(_source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<
             }
         }
     }
-    if functions.is_empty() {
+    if aliases.is_empty() && structs.is_empty() && functions.is_empty() {
         Err(vec![parser.error(
             "E0101",
-            "expected at least one function declaration",
+            "expected at least one top-level declaration",
         )])
     } else {
         Ok(ParsedAst {
             imports,
             aliases,
+            structs,
             functions,
         })
     }
@@ -51,6 +58,32 @@ struct Parser {
 }
 
 impl Parser {
+    fn struct_decl(&mut self) -> Result<AstStruct, Diagnostic> {
+        let start = self.expect(TokenKind::KwStruct, "expected `struct`")?.span;
+        let name = self
+            .expect(TokenKind::Identifier, "expected struct name")?
+            .lexeme;
+        self.expect(TokenKind::LeftBrace, "expected `{` after struct name")?;
+        let mut fields = Vec::new();
+        while !self.at(TokenKind::RightBrace) && !self.at(TokenKind::Eof) {
+            let field_start = self.current().span;
+            let ty = self.ty()?;
+            let field = self.expect(TokenKind::Identifier, "expected field name")?;
+            let end = self.expect(TokenKind::Semicolon, "expected `;` after field")?;
+            fields.push(AstField {
+                ty,
+                name: field.lexeme,
+                span: field_start.through(end.span),
+            });
+        }
+        let end = self.expect(TokenKind::RightBrace, "expected `}` to close struct")?;
+        Ok(AstStruct {
+            name,
+            fields,
+            span: start.through(end.span),
+        })
+    }
+
     fn alias(&mut self) -> Result<AstAlias, Diagnostic> {
         let start = self.expect(TokenKind::KwAlias, "expected `alias`")?.span;
         let name = self
@@ -127,10 +160,18 @@ impl Parser {
             TokenKind::KwInt | TokenKind::KwBool | TokenKind::Identifier => self.advance(),
             _ => return Err(self.error("E0100", "expected type name")),
         };
-        Ok(AstType {
-            name: token.lexeme,
-            span: token.span,
-        })
+        let (module, name, span) =
+            if token.kind == TokenKind::Identifier && self.consume(TokenKind::Dot).is_some() {
+                let member = self.expect(TokenKind::Identifier, "expected type name after `.`")?;
+                (
+                    Some(token.lexeme),
+                    member.lexeme,
+                    token.span.through(member.span),
+                )
+            } else {
+                (None, token.lexeme, token.span)
+            };
+        Ok(AstType { module, name, span })
     }
 
     fn block(&mut self) -> Result<AstBlock, Diagnostic> {
@@ -146,6 +187,7 @@ impl Parser {
         })
     }
 
+    #[allow(clippy::too_many_lines)]
     fn statement(&mut self) -> Result<AstStmt, Diagnostic> {
         let start = self.current().span;
         let kind = match self.current().kind {
@@ -162,7 +204,12 @@ impl Parser {
                     initializer,
                 }
             }
-            TokenKind::Identifier if self.peek_kind(1) == TokenKind::Identifier => {
+            TokenKind::Identifier
+                if self.peek_kind(1) == TokenKind::Identifier
+                    || (self.peek_kind(1) == TokenKind::Dot
+                        && self.peek_kind(2) == TokenKind::Identifier
+                        && self.peek_kind(3) == TokenKind::Identifier) =>
+            {
                 let ty = self.ty()?;
                 let name = self
                     .expect(TokenKind::Identifier, "expected local name")?
@@ -176,13 +223,28 @@ impl Parser {
                 }
             }
             TokenKind::Identifier => {
-                let name = self.advance().lexeme;
+                let root = self.advance();
+                let mut fields = Vec::new();
+                let mut end = root.span;
+                while self.consume(TokenKind::Dot).is_some() {
+                    let field =
+                        self.expect(TokenKind::Identifier, "expected field name after `.`")?;
+                    end = field.span;
+                    fields.push((field.lexeme, field.span));
+                }
                 self.expect(
                     TokenKind::Equal,
                     "only assignment statements are admitted here",
                 )?;
                 let value = self.expression()?;
-                AstStmtKind::Assign { name, value }
+                AstStmtKind::Assign {
+                    place: AstPlace {
+                        root: root.lexeme,
+                        fields,
+                        span: root.span.through(end),
+                    },
+                    value,
+                }
             }
             TokenKind::KwReturn => {
                 self.advance();
@@ -225,7 +287,7 @@ impl Parser {
                     span: start.through(body.span),
                 });
             }
-            _ => return Err(self.error("E0102", "expected a Vertical-4 statement")),
+            _ => return Err(self.error("E0102", "expected a Vertical-5 statement")),
         };
         let semicolon = self.expect(TokenKind::Semicolon, "expected `;` after statement")?;
         Ok(AstStmt {
@@ -355,53 +417,73 @@ impl Parser {
 
     fn primary(&mut self) -> Result<AstExpr, Diagnostic> {
         let token = self.advance();
-        let kind = match token.kind {
-            TokenKind::Integer => AstExprKind::Integer(token.lexeme),
-            TokenKind::Float => AstExprKind::Float(token.lexeme),
-            TokenKind::KwTrue => AstExprKind::Bool(true),
-            TokenKind::KwFalse => AstExprKind::Bool(false),
+        let mut expr = match token.kind {
+            TokenKind::Integer => AstExpr {
+                kind: AstExprKind::Integer(token.lexeme),
+                span: token.span,
+            },
+            TokenKind::Float => AstExpr {
+                kind: AstExprKind::Float(token.lexeme),
+                span: token.span,
+            },
+            TokenKind::KwTrue => AstExpr {
+                kind: AstExprKind::Bool(true),
+                span: token.span,
+            },
+            TokenKind::KwFalse => AstExpr {
+                kind: AstExprKind::Bool(false),
+                span: token.span,
+            },
             TokenKind::Identifier if self.consume(TokenKind::Dot).is_some() => {
                 let member =
-                    self.expect(TokenKind::Identifier, "expected function name after `.`")?;
+                    self.expect(TokenKind::Identifier, "expected member name after `.`")?;
                 if self.consume(TokenKind::LeftParen).is_some() {
                     let (args, right) = self.arguments()?;
-                    return Ok(AstExpr {
+                    AstExpr {
                         kind: AstExprKind::QualifiedCall {
                             module: token.lexeme,
                             function: member.lexeme,
                             args,
                         },
                         span: token.span.through(right),
-                    });
+                    }
+                } else {
+                    AstExpr {
+                        kind: AstExprKind::Field {
+                            base: Box::new(AstExpr {
+                                kind: AstExprKind::Name(token.lexeme),
+                                span: token.span,
+                            }),
+                            name: member.lexeme,
+                            name_span: member.span,
+                        },
+                        span: token.span.through(member.span),
+                    }
                 }
-                return Ok(AstExpr {
-                    kind: AstExprKind::QualifiedName {
-                        module: token.lexeme,
-                        member: member.lexeme,
-                    },
-                    span: token.span.through(member.span),
-                });
             }
             TokenKind::Identifier | TokenKind::KwInt | TokenKind::KwBool
                 if self.consume(TokenKind::LeftParen).is_some() =>
             {
                 let (args, right) = self.arguments()?;
-                return Ok(AstExpr {
+                AstExpr {
                     kind: AstExprKind::Call {
                         callee: token.lexeme,
                         args,
                     },
                     span: token.span.through(right),
-                });
+                }
             }
-            TokenKind::Identifier => AstExprKind::Name(token.lexeme),
+            TokenKind::Identifier => AstExpr {
+                kind: AstExprKind::Name(token.lexeme),
+                span: token.span,
+            },
             TokenKind::LeftParen => {
                 let expr = self.expression()?;
                 let right = self.expect(TokenKind::RightParen, "expected `)` after expression")?;
-                return Ok(AstExpr {
+                AstExpr {
                     span: token.span.through(right.span),
                     ..expr
-                });
+                }
             }
             _ => {
                 return Err(Diagnostic::new(
@@ -413,10 +495,19 @@ impl Parser {
                 ));
             }
         };
-        Ok(AstExpr {
-            kind,
-            span: token.span,
-        })
+        while self.consume(TokenKind::Dot).is_some() {
+            let member = self.expect(TokenKind::Identifier, "expected field name after `.`")?;
+            let span = expr.span.through(member.span);
+            expr = AstExpr {
+                kind: AstExprKind::Field {
+                    base: Box::new(expr),
+                    name: member.lexeme,
+                    name_span: member.span,
+                },
+                span,
+            };
+        }
+        Ok(expr)
     }
 
     fn arguments(&mut self) -> Result<(Vec<AstExpr>, crate::Span), Diagnostic> {

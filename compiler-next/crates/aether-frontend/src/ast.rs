@@ -7,6 +7,7 @@ use crate::Span;
 pub struct ParsedAst {
     pub(crate) imports: Vec<AstImport>,
     pub(crate) aliases: Vec<AstAlias>,
+    pub(crate) structs: Vec<AstStruct>,
     pub(crate) functions: Vec<AstFunction>,
 }
 
@@ -29,14 +30,42 @@ impl ParsedAst {
         &self.aliases
     }
 
+    /// Struct declarations in deterministic source order.
+    #[must_use]
+    pub fn structs(&self) -> &[AstStruct] {
+        &self.structs
+    }
+
     /// Deterministic inspection dump.
     #[must_use]
     pub fn dump(&self) -> String {
         format!(
-            "imports: {:#?}\naliases: {:#?}\nfunctions: {:#?}",
-            self.imports, self.aliases, self.functions
+            "imports: {:#?}\naliases: {:#?}\nstructs: {:#?}\nfunctions: {:#?}",
+            self.imports, self.aliases, self.structs, self.functions
         )
     }
+}
+
+/// Nominal value-aggregate declaration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AstStruct {
+    /// Declared nominal name.
+    pub name: String,
+    /// Fields in semantically significant declaration order.
+    pub fields: Vec<AstField>,
+    /// Full declaration provenance.
+    pub span: Span,
+}
+
+/// One struct field. Source order is semantically significant.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AstField {
+    /// Written field type.
+    pub ty: AstType,
+    /// Source field name.
+    pub name: String,
+    /// Field declaration provenance.
+    pub span: Span,
 }
 
 /// Transparent source-level type alias.
@@ -88,7 +117,9 @@ pub struct AstParameter {
 /// Admitted source type spelling.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AstType {
-    /// Exact source spelling, resolved and canonicalized during semantics.
+    /// Optional module qualifier; imported types never enter unqualified scope.
+    pub module: Option<String>,
+    /// Exact final source spelling, resolved and canonicalized during semantics.
     pub name: String,
     /// Type-token provenance.
     pub span: Span,
@@ -122,8 +153,8 @@ pub enum AstStmtKind {
         name: String,
         initializer: AstExpr,
     },
-    /// Assignment to a named local.
-    Assign { name: String, value: AstExpr },
+    /// Assignment to a local or nested field place.
+    Assign { place: AstPlace, value: AstExpr },
     /// Conditional statement.
     If {
         condition: AstExpr,
@@ -134,6 +165,17 @@ pub enum AstStmtKind {
     While { condition: AstExpr, body: AstBlock },
     /// Value return.
     Return(AstExpr),
+}
+
+/// Source-level assignable place. Resolution assigns semantic field identities.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AstPlace {
+    /// Root local spelling.
+    pub root: String,
+    /// Nested field spellings and their individual spans.
+    pub fields: Vec<(String, Span)>,
+    /// Complete place span.
+    pub span: Span,
 }
 
 /// Spanned source expression.
@@ -167,6 +209,12 @@ pub enum AstExprKind {
     },
     /// Qualified value syntax retained so semantic analysis can reject it precisely.
     QualifiedName { module: String, member: String },
+    /// Unresolved field projection.
+    Field {
+        base: Box<AstExpr>,
+        name: String,
+        name_span: Span,
+    },
     /// Prefix operation.
     Unary {
         op: AstUnaryOp,

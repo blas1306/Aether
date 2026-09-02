@@ -31,6 +31,8 @@ pub enum TokenKind {
     KwImport,
     /// `alias`.
     KwAlias,
+    /// `struct`.
+    KwStruct,
     /// `(`.
     LeftParen,
     /// `)`.
@@ -151,6 +153,7 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                     "return" => TokenKind::KwReturn,
                     "import" => TokenKind::KwImport,
                     "alias" => TokenKind::KwAlias,
+                    "struct" => TokenKind::KwStruct,
                     _ => TokenKind::Identifier,
                 };
                 push(&mut tokens, kind, source, start, cursor);

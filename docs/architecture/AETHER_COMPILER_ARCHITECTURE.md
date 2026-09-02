@@ -1031,3 +1031,74 @@ The module resolution policy is temporary bootstrap source-root behavior, not a
 package model. Package identity, manifests, dependencies, stable cross-session
 IDs, final visibility, module initialization, object-per-module emission and
 incremental cache keys remain open work; Vertical-2 does not choose them.
+
+## 20. NEXT-VERTICAL-3 and NEXT-VERTICAL-4 implementation confirmation
+
+The isolated compiler subsequently admitted the complete scalar set,
+transparent module-local aliases, contextual literals, explicit typed
+widenings, checked explicit numeric conversions, integer division/remainder and
+strict-baseline floating division. HIR owns every coercion/cast/operator choice;
+MIR and SSA verify rather than infer it. LLVM uses width/signedness-correct
+overflow, conversion and division checks. The detailed current contract and
+qualification commands live in `compiler-next/README.md` and the versioned
+differential manifest.
+
+## 21. NEXT-VERTICAL-5 implementation confirmation
+
+The compiler now admits the first user-defined composite type as a nominal,
+by-value aggregate. The source syntax is deliberately positional:
+`Point(3.0, 4.0)`. Field declaration order is the argument order and bootstrap
+physical order. Named-field initializer syntax, named arguments, constructors,
+methods, ownership and heap behavior remain excluded.
+
+- Parsing retains ordinary unqualified/qualified application syntax; it does
+  not assign callable or type meaning. Global collection assigns dense
+  session-local `StructId`, `FieldId` and `FunctionId` identities before bodies
+  are analyzed. A unified module-local top-level namespace rejects collisions
+  among functions, structs, aliases and built-in type names.
+- Canonical `Type` is now the compact tagged value `Bool | Integer | Float |
+  Struct(StructId)`. This is the smallest representation that gives nominality
+  without putting declaration graphs inside types. A universal `TypeId` interner
+  remains deferred until references, arrays, function types or generic
+  applications introduce recursive/expensive semantic type values; adding
+  recursive payloads directly to `Type` is not the intended next step.
+- Struct identities from every discovered module are collected before aliases,
+  field types and function signatures. Local uses resolve unqualified; imported
+  uses require a direct module qualifier. Transparent aliases canonicalize to
+  the original `Type::Struct` and never create a second nominal identity.
+- Field dependencies are checked by a target-aware DFS. Direct and mutual
+  by-value recursion are rejected. The same query caches target-specific size,
+  alignment, padding offsets and nested layout in `StructInfo`; this is internal
+  bootstrap layout, not ABI stabilization.
+- HIR distinguishes `Call(FunctionId)` from `StructInit(StructId,
+  [(FieldId, value)])` and represents field paths with resolved identities. MIR
+  introduces the reusable `Place { local, projections }` abstraction, verifies
+  place ownership/type and uses it for nested loads/stores.
+- The selected SSA strategy is aggregate SSA. Construction becomes `Aggregate`,
+  reads become `ExtractField`, and a projected store becomes a functional
+  `InsertField` definition of the enclosing aggregate. Scalars and aggregates
+  share phi/value verification. This preserves copy semantics, supports nested
+  mutation, and postpones memory/alias machinery until references and arrays
+  actually require it.
+- LLVM emits deterministic session-unique named aggregate types and lowers
+  construction/access/mutation with `insertvalue`/`extractvalue`. Aggregate
+  parameters and results pass by value through the internal bootstrap ABI.
+  There is still no promise of C ABI compatibility or stable Aether ABI.
+
+The native qualification covers local/nested construction, reads, nested
+mutation, independent copies, aliases, scalar coercions, forward field types,
+aggregate parameters/returns, qualified cross-module types, same-spelling
+cross-module nominality, recursion rejection and all required negative
+diagnostic families. Vertical-0 through Vertical-4 cases remain in the same
+workspace suite and differential manifests.
+
+## 22. Recommendation for NEXT-VERTICAL-6
+
+Close one dependency-bearing semantic decision before widening aggregate
+breadth. Payload enums plus matching are the strongest self-hosting enabler if
+they can reuse nominal IDs, target layout and aggregate SSA without forcing an
+error/unwind model. If the next priority is collections instead, introduce the
+canonical interned `TypeId` arena and decide owning-array assignment/view
+semantics before implementing syntax. Do not add named struct initialization as
+a struct-only special form; design general named arguments for both functions
+and structural construction when that ergonomic feature is scheduled.

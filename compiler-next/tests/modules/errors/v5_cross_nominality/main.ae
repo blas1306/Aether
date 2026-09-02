@@ -1,0 +1,11 @@
+import a;
+import b;
+
+int take_a(a.Point value) {
+    return value.x;
+}
+
+int main() {
+    b.Point value = b.Point(1);
+    return take_a(value);
+}

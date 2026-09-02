@@ -1,10 +1,10 @@
-//! LLVM backend for verified Vertical-4 program SSA.
+//! LLVM backend for verified Vertical-5 program SSA.
 
 use std::fmt::Write;
 
 use aether_frontend::{
-    CastKind, CoercionKind, FloatType, FloatValue, FunctionSignature, IntegerType, ModuleInfo,
-    TargetProperties, Type,
+    CastKind, CoercionKind, FieldId, FloatType, FloatValue, FunctionSignature, IntegerType,
+    ModuleInfo, StructInfo, TargetProperties, Type,
 };
 use aether_middle::{
     BinaryOp, BlockId, SsaFunction, SsaOp, SsaOperand, SsaTerminator, TrapKind, UnaryOp,
@@ -21,7 +21,7 @@ pub struct TargetDescriptor {
 }
 
 impl TargetDescriptor {
-    /// The target admitted by NEXT-VERTICAL-4.
+    /// The target admitted through NEXT-VERTICAL-5.
     #[must_use]
     pub const fn linux_x86_64() -> Self {
         Self {
@@ -52,7 +52,7 @@ impl Backend for LlvmTextBackend {
 pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let program = ssa.as_ssa();
     let mut output = String::new();
-    writeln!(output, "; Aether NEXT-VERTICAL-4").unwrap();
+    writeln!(output, "; Aether NEXT-VERTICAL-5").unwrap();
     writeln!(
         output,
         "; Internal bootstrap ABI and symbol mangling; not a public Aether ABI"
@@ -68,6 +68,24 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     }
     writeln!(output, "declare void @llvm.trap() cold noreturn nounwind\n").unwrap();
 
+    for info in &program.structs {
+        let fields = info
+            .fields
+            .iter()
+            .map(|field| llvm_type(field.ty))
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(
+            output,
+            "{} = type {{ {fields} }}",
+            llvm_type(Type::Struct(info.id))
+        )
+        .unwrap();
+    }
+    if !program.structs.is_empty() {
+        writeln!(output).unwrap();
+    }
+
     for function in &program.functions {
         let signature = &program.signatures[function.id.0 as usize];
         emit_function(
@@ -76,6 +94,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             signature,
             &program.signatures,
             &program.modules,
+            &program.structs,
         );
     }
 
@@ -105,6 +124,7 @@ fn emit_function(
     signature: &FunctionSignature,
     signatures: &[FunctionSignature],
     modules: &[ModuleInfo],
+    structs: &[StructInfo],
 ) {
     let parameters = function
         .parameters
@@ -174,6 +194,76 @@ fn emit_function(
                     llvm_operand(operand)
                 )
                 .unwrap(),
+                SsaOp::Aggregate { struct_id, fields } => {
+                    let aggregate_ty = Type::Struct(*struct_id);
+                    if fields.is_empty() {
+                        writeln!(
+                            output,
+                            "  %v{} = select i1 true, {} zeroinitializer, {} zeroinitializer",
+                            instruction.result.0,
+                            llvm_type(aggregate_ty),
+                            llvm_type(aggregate_ty)
+                        )
+                        .unwrap();
+                    } else {
+                        for (position, (field_id, operand)) in fields.iter().enumerate() {
+                            let field = field_info(structs, *field_id);
+                            let previous = if position == 0 {
+                                "poison".to_string()
+                            } else {
+                                format!("%agg{}_{}", instruction.result.0, position - 1)
+                            };
+                            let result_name = if position + 1 == fields.len() {
+                                format!("%v{}", instruction.result.0)
+                            } else {
+                                format!("%agg{}_{}", instruction.result.0, position)
+                            };
+                            writeln!(
+                                output,
+                                "  {result_name} = insertvalue {} {previous}, {} {}, {}",
+                                llvm_type(aggregate_ty),
+                                llvm_type(field.ty),
+                                llvm_operand(operand),
+                                field.index
+                            )
+                            .unwrap();
+                        }
+                    }
+                }
+                SsaOp::ExtractField {
+                    aggregate,
+                    projections,
+                } => {
+                    let aggregate_ty = operand_type(function, aggregate);
+                    let indices = llvm_projection_indices(aggregate_ty, projections, structs);
+                    writeln!(
+                        output,
+                        "  %v{} = extractvalue {} {}, {indices}",
+                        instruction.result.0,
+                        llvm_type(aggregate_ty),
+                        llvm_operand(aggregate)
+                    )
+                    .unwrap();
+                }
+                SsaOp::InsertField {
+                    aggregate,
+                    projections,
+                    value,
+                } => {
+                    let aggregate_ty = operand_type(function, aggregate);
+                    let value_ty = operand_type(function, value);
+                    let indices = llvm_projection_indices(aggregate_ty, projections, structs);
+                    writeln!(
+                        output,
+                        "  %v{} = insertvalue {} {}, {} {}, {indices}",
+                        instruction.result.0,
+                        llvm_type(aggregate_ty),
+                        llvm_operand(aggregate),
+                        llvm_type(value_ty),
+                        llvm_operand(value)
+                    )
+                    .unwrap();
+                }
                 SsaOp::Coerce {
                     kind,
                     operand,
@@ -225,7 +315,7 @@ fn emit_function(
                         block.id,
                         instruction.result.0,
                         &format!("llvm.ssub.with.overflow.{}", llvm_type(instruction.ty)),
-                        llvm_type(instruction.ty),
+                        &llvm_type(instruction.ty),
                         "0",
                         &llvm_operand(operand),
                     );
@@ -273,7 +363,7 @@ fn emit_function(
                             block.id,
                             instruction.result.0,
                             &intrinsic,
-                            llvm_ty,
+                            &llvm_ty,
                             &llvm_operand(left),
                             &llvm_operand(right),
                         );
@@ -907,18 +997,47 @@ fn continuation_label(block: BlockId, result: u32) -> String {
     format!("bb{}_after_v{}", block.0, result)
 }
 
-fn llvm_type(ty: Type) -> &'static str {
+fn llvm_type(ty: Type) -> String {
     match ty {
-        Type::Bool => "i1",
-        Type::Integer(IntegerType::Int8 | IntegerType::Uint8) => "i8",
-        Type::Integer(IntegerType::Int16 | IntegerType::Uint16) => "i16",
-        Type::Integer(IntegerType::Int32 | IntegerType::Uint32) => "i32",
+        Type::Bool => "i1".into(),
+        Type::Integer(IntegerType::Int8 | IntegerType::Uint8) => "i8".into(),
+        Type::Integer(IntegerType::Int16 | IntegerType::Uint16) => "i16".into(),
+        Type::Integer(IntegerType::Int32 | IntegerType::Uint32) => "i32".into(),
         Type::Integer(
             IntegerType::Int64 | IntegerType::Uint64 | IntegerType::Isize | IntegerType::Usize,
-        ) => "i64",
-        Type::Float(FloatType::Float32) => "float",
-        Type::Float(FloatType::Float64) => "double",
+        ) => "i64".into(),
+        Type::Float(FloatType::Float32) => "float".into(),
+        Type::Float(FloatType::Float64) => "double".into(),
+        Type::Struct(id) => format!("%aether.struct.{}", id.0),
     }
+}
+
+fn field_info(structs: &[StructInfo], id: FieldId) -> &aether_frontend::FieldInfo {
+    structs
+        .iter()
+        .find_map(|info| info.fields.iter().find(|field| field.id == id))
+        .expect("verified field identity")
+}
+
+fn llvm_projection_indices(
+    mut ty: Type,
+    projections: &[FieldId],
+    structs: &[StructInfo],
+) -> String {
+    projections
+        .iter()
+        .map(|field_id| {
+            let owner = ty.as_struct().expect("verified projection owner");
+            let field = structs[owner.0 as usize]
+                .fields
+                .iter()
+                .find(|field| field.id == *field_id)
+                .expect("verified projection field");
+            ty = field.ty;
+            field.index.to_string()
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn llvm_operand(operand: &SsaOperand) -> String {

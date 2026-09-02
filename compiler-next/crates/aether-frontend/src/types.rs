@@ -1,7 +1,16 @@
-//! Canonical scalar types and the minimal admitted target model.
+//! Canonical semantic types and the minimal admitted target model.
 #![allow(missing_docs)]
 
 use std::fmt;
+
+/// Session-local nominal identity of a source `struct` declaration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct StructId(pub u32);
+
+/// Session-local identity of a field declaration. Field names are metadata
+/// after HIR resolution; this identity is authoritative below the frontend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FieldId(pub u32);
 
 /// Properties that affect source-level scalar layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -116,6 +125,8 @@ pub enum Type {
     Bool,
     Integer(IntegerType),
     Float(FloatType),
+    /// Nominal, module-owned value aggregate.
+    Struct(StructId),
 }
 
 impl Type {
@@ -138,7 +149,15 @@ impl Type {
     }
     #[must_use]
     pub const fn is_numeric(self) -> bool {
-        !matches!(self, Self::Bool)
+        matches!(self, Self::Integer(_) | Self::Float(_))
+    }
+    #[must_use]
+    pub const fn as_struct(self) -> Option<StructId> {
+        if let Self::Struct(id) = self {
+            Some(id)
+        } else {
+            None
+        }
     }
 }
 
@@ -148,6 +167,7 @@ impl fmt::Display for Type {
             Self::Bool => f.write_str("bool"),
             Self::Integer(v) => v.fmt(f),
             Self::Float(v) => v.fmt(f),
+            Self::Struct(id) => write!(f, "struct#{}", id.0),
         }
     }
 }

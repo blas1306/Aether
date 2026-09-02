@@ -14,3 +14,6 @@ errors/duplicate_import	reject:E0220	duplicate import
 errors/malformed_import	reject:E0100	unsupported selective import syntax
 errors/imported_semantic	reject:E0202	imported-source semantic provenance
 errors/imported_unsupported	reject:E0001	imported unsupported top-level feature
+v5_structs	accept:20	qualified nominal structs and same spelling across modules
+errors/v5_unqualified	reject:E0204	imported structs require qualification
+errors/v5_cross_nominality	reject:E0214	same-layout structs in different modules remain nominally distinct

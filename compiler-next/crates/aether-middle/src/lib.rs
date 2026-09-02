@@ -5,7 +5,7 @@ mod ssa;
 
 pub use mir::{
     BasicBlock, BinaryOp, BlockId, FlowMir, MirFunction, MirInstruction, MirLocal, MirParameter,
-    Operand, Rvalue, Terminator, TrapKind, UnaryOp, VerifiedMir, lower_hir, verify_mir,
+    Operand, Place, Rvalue, Terminator, TrapKind, UnaryOp, VerifiedMir, lower_hir, verify_mir,
 };
 pub use ssa::{
     Phi, SsaBlock, SsaFunction, SsaInstruction, SsaIr, SsaOp, SsaOperand, SsaParameter,

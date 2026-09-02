@@ -1,4 +1,4 @@
-//! Alias-canonicalized and fully typed scalar HIR.
+//! Alias-canonicalized, nominal and fully typed HIR.
 #![allow(missing_docs)]
 #![allow(
     clippy::cast_possible_truncation,
@@ -12,9 +12,9 @@
     clippy::unused_self
 )]
 use crate::{
-    AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstStmtKind, AstType, AstUnaryOp,
-    Diagnostic, DiagnosticCategory, FloatType, IntegerType, ParsedAst, Phase, SourceId, Span,
-    TargetProperties, Type,
+    AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstPlace, AstStmtKind, AstType,
+    AstUnaryOp, Diagnostic, DiagnosticCategory, FieldId, FloatType, IntegerType, ParsedAst, Phase,
+    SourceId, Span, StructId, TargetProperties, Type,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
@@ -73,6 +73,33 @@ pub struct TypeAliasInfo {
     pub span: Span,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TypeLayout {
+    pub size: u64,
+    pub align: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FieldInfo {
+    pub id: FieldId,
+    pub owner: StructId,
+    pub index: u32,
+    pub name: String,
+    pub ty: Type,
+    pub offset: u64,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StructInfo {
+    pub id: StructId,
+    pub module: ModuleId,
+    pub name: String,
+    pub fields: Vec<FieldInfo>,
+    pub layout: TypeLayout,
+    pub span: Span,
+}
+
 #[derive(Clone, Debug)]
 pub struct DeclaredProgram {
     program: ParsedProgram,
@@ -82,6 +109,9 @@ pub struct DeclaredProgram {
     module_names: BTreeMap<String, ModuleId>,
     aliases: Vec<BTreeMap<String, Type>>,
     alias_info: Vec<TypeAliasInfo>,
+    structs: Vec<StructInfo>,
+    struct_names: Vec<BTreeMap<String, StructId>>,
+    field_names: Vec<BTreeMap<String, FieldId>>,
     entry: FunctionId,
 }
 impl DeclaredProgram {
@@ -109,6 +139,7 @@ pub struct HirParameter {
 pub struct TypedHir {
     modules: Vec<ModuleInfo>,
     aliases: Vec<TypeAliasInfo>,
+    structs: Vec<StructInfo>,
     signatures: Vec<FunctionSignature>,
     functions: Vec<HirFunction>,
     entry: FunctionId,
@@ -127,6 +158,10 @@ impl TypedHir {
         &self.aliases
     }
     #[must_use]
+    pub fn structs(&self) -> &[StructInfo] {
+        &self.structs
+    }
+    #[must_use]
     pub fn functions(&self) -> &[HirFunction] {
         &self.functions
     }
@@ -137,8 +172,8 @@ impl TypedHir {
     #[must_use]
     pub fn dump(&self) -> String {
         let mut d = format!(
-            "entry: {:#?}\nmodules: {:#?}\naliases (transparent -> canonical): {:#?}\nsignatures: {:#?}",
-            self.entry, self.modules, self.aliases, self.signatures
+            "entry: {:#?}\nmodules: {:#?}\naliases (transparent -> canonical): {:#?}\nstructs: {:#?}\nsignatures: {:#?}",
+            self.entry, self.modules, self.aliases, self.structs, self.signatures
         );
         for m in &self.modules {
             let f: Vec<_> = self.functions.iter().filter(|f| f.module == m.id).collect();
@@ -151,11 +186,18 @@ impl TypedHir {
         self,
     ) -> (
         Vec<ModuleInfo>,
+        Vec<StructInfo>,
         Vec<FunctionSignature>,
         Vec<HirFunction>,
         FunctionId,
     ) {
-        (self.modules, self.signatures, self.functions, self.entry)
+        (
+            self.modules,
+            self.structs,
+            self.signatures,
+            self.functions,
+            self.entry,
+        )
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -184,7 +226,7 @@ pub enum HirStmtKind {
         initializer: HirExpr,
     },
     Assign {
-        local: LocalId,
+        place: HirPlace,
         value: HirExpr,
     },
     If {
@@ -197,6 +239,13 @@ pub enum HirStmtKind {
         body: HirBlock,
     },
     Return(HirExpr),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HirPlace {
+    pub local: LocalId,
+    pub projections: Vec<FieldId>,
+    pub ty: Type,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HirExpr {
@@ -215,9 +264,14 @@ pub enum HirExprKind {
     Float(FloatValue),
     Bool(bool),
     Local(LocalId),
+    Load(HirPlace),
     Call {
         callee: FunctionId,
         args: Vec<HirExpr>,
+    },
+    StructInit {
+        struct_id: StructId,
+        fields: Vec<(FieldId, HirExpr)>,
     },
     Coerce {
         kind: CoercionKind,
@@ -307,87 +361,7 @@ pub fn collect_program_signatures(
     program: ParsedProgram,
 ) -> Result<DeclaredProgram, Vec<Diagnostic>> {
     validate_program(&program)?;
-    let mut aliases = vec![BTreeMap::new(); program.modules.len()];
-    let mut alias_info = vec![];
-    for module in &program.modules {
-        let mut declarations = BTreeMap::new();
-        for a in module.ast.aliases() {
-            if builtin(&a.name).is_some()
-                || declarations.insert(a.name.clone(), a).is_some()
-                || module.ast.functions().iter().any(|f| f.name == a.name)
-            {
-                return Err(vec![src(
-                    Diagnostic::new(
-                        "E0225",
-                        Phase::Semantic,
-                        DiagnosticCategory::Name,
-                        format!("duplicate alias or declaration name `{}`", a.name),
-                        Some(a.span),
-                    ),
-                    module,
-                )]);
-            }
-        }
-        let mut state = BTreeMap::new();
-        for name in declarations.keys() {
-            resolve_alias(
-                name,
-                module,
-                &declarations,
-                &mut state,
-                &mut aliases[module.info.id.0 as usize],
-                &mut alias_info,
-            )?;
-        }
-    }
-    let mut signatures = vec![];
-    let mut names = vec![BTreeMap::new(); program.modules.len()];
-    for module in &program.modules {
-        for f in module.ast.functions() {
-            let id = FunctionId(signatures.len() as u32);
-            if builtin(&f.name).is_some()
-                || aliases[module.info.id.0 as usize].contains_key(&f.name)
-                || names[module.info.id.0 as usize]
-                    .insert(f.name.clone(), id)
-                    .is_some()
-            {
-                return Err(vec![src(
-                    Diagnostic::new(
-                        "E0211",
-                        Phase::Semantic,
-                        DiagnosticCategory::Name,
-                        format!("duplicate function or type name `{}`", f.name),
-                        Some(f.span),
-                    ),
-                    module,
-                )]);
-            }
-            let amap = &aliases[module.info.id.0 as usize];
-            let parameters = f
-                .parameters
-                .iter()
-                .map(|p| {
-                    resolve_type(&p.ty, amap).map(|ty| ParameterSignature {
-                        name: p.name.clone(),
-                        ty,
-                        span: p.span,
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(|d| vec![src(d, module)])?;
-            let return_type =
-                resolve_type(&f.return_type, amap).map_err(|d| vec![src(d, module)])?;
-            signatures.push(FunctionSignature {
-                id,
-                module: module.info.id,
-                name: f.name.clone(),
-                parameters,
-                return_type,
-                span: f.span,
-            });
-        }
-    }
-    let imports = program
+    let imports: Vec<BTreeMap<String, ModuleId>> = program
         .modules
         .iter()
         .map(|m| {
@@ -398,11 +372,209 @@ pub fn collect_program_signatures(
                 .collect()
         })
         .collect();
-    let module_names = program
+    let module_names: BTreeMap<String, ModuleId> = program
         .modules
         .iter()
         .map(|m| (m.info.name.clone(), m.info.id))
         .collect();
+
+    // One fail-closed top-level namespace per module. This guarantees that a
+    // call-like spelling has exactly one semantic interpretation.
+    for module in &program.modules {
+        let mut declarations = BTreeMap::new();
+        for (kind, name, span) in module
+            .ast
+            .aliases()
+            .iter()
+            .map(|d| ("alias", &d.name, d.span))
+            .chain(
+                module
+                    .ast
+                    .structs()
+                    .iter()
+                    .map(|d| ("struct", &d.name, d.span)),
+            )
+            .chain(
+                module
+                    .ast
+                    .functions()
+                    .iter()
+                    .map(|d| ("function", &d.name, d.span)),
+            )
+        {
+            let previous = declarations.insert(name.clone(), kind);
+            if builtin(name).is_some() || previous.is_some() {
+                let code = match previous {
+                    Some("function") if kind == "function" => "E0211",
+                    Some("alias") if kind == "alias" => "E0225",
+                    _ if builtin(name).is_some() && kind == "function" => "E0211",
+                    _ if builtin(name).is_some() && kind == "alias" => "E0225",
+                    _ => "E0240",
+                };
+                return Err(vec![src(
+                    Diagnostic::new(
+                        code,
+                        Phase::Semantic,
+                        DiagnosticCategory::Name,
+                        format!("conflicting top-level declaration `{name}` ({kind})"),
+                        Some(span),
+                    ),
+                    module,
+                )]);
+            }
+        }
+    }
+
+    // Nominal identities exist before any field/signature type is resolved.
+    let mut struct_names = vec![BTreeMap::new(); program.modules.len()];
+    let mut struct_decls = Vec::new();
+    for module in &program.modules {
+        for declaration in module.ast.structs() {
+            let id = StructId(struct_decls.len() as u32);
+            struct_names[module.info.id.0 as usize].insert(declaration.name.clone(), id);
+            struct_decls.push((id, module.info.id, declaration));
+        }
+    }
+
+    let mut aliases = vec![BTreeMap::new(); program.modules.len()];
+    let mut alias_info = vec![];
+    for module in &program.modules {
+        let mut declarations = BTreeMap::new();
+        for a in module.ast.aliases() {
+            declarations.insert(a.name.clone(), a);
+        }
+        let mut state = BTreeMap::new();
+        for name in declarations.keys() {
+            resolve_alias(
+                name,
+                module,
+                &declarations,
+                &struct_names,
+                &imports,
+                &module_names,
+                &mut state,
+                &mut aliases[module.info.id.0 as usize],
+                &mut alias_info,
+            )?;
+        }
+    }
+
+    let mut structs = Vec::with_capacity(struct_decls.len());
+    let mut field_names = Vec::with_capacity(struct_decls.len());
+    let mut next_field = 0_u32;
+    for (id, module_id, declaration) in struct_decls {
+        let module = &program.modules[module_id.0 as usize];
+        let mut seen = BTreeMap::new();
+        let mut fields = Vec::new();
+        for (index, field) in declaration.fields.iter().enumerate() {
+            if seen.contains_key(&field.name) {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0241",
+                        Phase::Semantic,
+                        DiagnosticCategory::Name,
+                        format!(
+                            "duplicate field `{}` in struct `{}`",
+                            field.name, declaration.name
+                        ),
+                        Some(field.span),
+                    ),
+                    module,
+                )]);
+            }
+            let ty = resolve_type_in_module(
+                &field.ty,
+                module_id,
+                &aliases,
+                &struct_names,
+                &imports,
+                &module_names,
+            )
+            .map_err(|d| vec![src(d, module)])?;
+            let field_id = FieldId(next_field);
+            next_field += 1;
+            seen.insert(field.name.clone(), field_id);
+            fields.push(FieldInfo {
+                id: field_id,
+                owner: id,
+                index: index as u32,
+                name: field.name.clone(),
+                ty,
+                offset: 0,
+                span: field.span,
+            });
+        }
+        field_names.push(seen);
+        structs.push(StructInfo {
+            id,
+            module: module_id,
+            name: declaration.name.clone(),
+            fields,
+            layout: TypeLayout { size: 0, align: 1 },
+            span: declaration.span,
+        });
+    }
+    compute_struct_layouts(&mut structs, TargetProperties::LINUX_X86_64).map_err(
+        |(id, message)| {
+            let info = &structs[id.0 as usize];
+            vec![
+                Diagnostic::new(
+                    "E0242",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    message,
+                    Some(info.span),
+                )
+                .with_source_name(&program.modules[info.module.0 as usize].info.source_name),
+            ]
+        },
+    )?;
+
+    let mut signatures = vec![];
+    let mut names = vec![BTreeMap::new(); program.modules.len()];
+    for module in &program.modules {
+        for f in module.ast.functions() {
+            let id = FunctionId(signatures.len() as u32);
+            names[module.info.id.0 as usize].insert(f.name.clone(), id);
+            let parameters = f
+                .parameters
+                .iter()
+                .map(|p| {
+                    resolve_type_in_module(
+                        &p.ty,
+                        module.info.id,
+                        &aliases,
+                        &struct_names,
+                        &imports,
+                        &module_names,
+                    )
+                    .map(|ty| ParameterSignature {
+                        name: p.name.clone(),
+                        ty,
+                        span: p.span,
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|d| vec![src(d, module)])?;
+            let return_type = resolve_type_in_module(
+                &f.return_type,
+                module.info.id,
+                &aliases,
+                &struct_names,
+                &imports,
+                &module_names,
+            )
+            .map_err(|d| vec![src(d, module)])?;
+            signatures.push(FunctionSignature {
+                id,
+                module: module.info.id,
+                name: f.name.clone(),
+                parameters,
+                return_type,
+                span: f.span,
+            });
+        }
+    }
     let em = &program.modules[program.entry.0 as usize];
     let Some(entry) = names[program.entry.0 as usize].get("main").copied() else {
         return Err(vec![src(
@@ -437,6 +609,9 @@ pub fn collect_program_signatures(
         module_names,
         aliases,
         alias_info,
+        structs,
+        struct_names,
+        field_names,
         entry,
     })
 }
@@ -445,10 +620,14 @@ enum AliasState {
     Visiting,
     Done,
 }
+#[allow(clippy::too_many_arguments)]
 fn resolve_alias(
     name: &str,
     module: &ParsedModule,
     decl: &BTreeMap<String, &crate::AstAlias>,
+    struct_names: &[BTreeMap<String, StructId>],
+    imports: &[BTreeMap<String, ModuleId>],
+    module_names: &BTreeMap<String, ModuleId>,
     state: &mut BTreeMap<String, AliasState>,
     resolved: &mut BTreeMap<String, Type>,
     info: &mut Vec<TypeAliasInfo>,
@@ -471,10 +650,32 @@ fn resolve_alias(
     }
     state.insert(name.into(), AliasState::Visiting);
     let a = decl[name];
-    let ty = if let Some(t) = builtin(&a.target.name) {
+    let ty = if a.target.module.is_some() {
+        resolve_qualified_struct_type(
+            &a.target,
+            module.info.id,
+            None,
+            struct_names,
+            imports,
+            module_names,
+        )
+        .map_err(|d| vec![src(d, module)])?
+    } else if let Some(t) = builtin(&a.target.name) {
         t
+    } else if let Some(id) = struct_names[module.info.id.0 as usize].get(&a.target.name) {
+        Type::Struct(*id)
     } else if decl.contains_key(&a.target.name) {
-        resolve_alias(&a.target.name, module, decl, state, resolved, info)?
+        resolve_alias(
+            &a.target.name,
+            module,
+            decl,
+            struct_names,
+            imports,
+            module_names,
+            state,
+            resolved,
+            info,
+        )?
     } else {
         return Err(vec![src(unknown_type(&a.target), module)]);
     };
@@ -489,6 +690,153 @@ fn resolve_alias(
     });
     Ok(ty)
 }
+
+fn resolve_qualified_struct_type(
+    ty: &AstType,
+    current: ModuleId,
+    aliases: Option<&[BTreeMap<String, Type>]>,
+    struct_names: &[BTreeMap<String, StructId>],
+    imports: &[BTreeMap<String, ModuleId>],
+    module_names: &BTreeMap<String, ModuleId>,
+) -> Result<Type, Diagnostic> {
+    let module = ty.module.as_ref().expect("qualified type");
+    let Some(target) = module_names.get(module).copied() else {
+        return Err(Diagnostic::new(
+            "E0221",
+            Phase::Semantic,
+            DiagnosticCategory::Name,
+            format!("unknown module `{module}`"),
+            Some(ty.span),
+        ));
+    };
+    if imports[current.0 as usize].get(module) != Some(&target) {
+        return Err(Diagnostic::new(
+            "E0223",
+            Phase::Semantic,
+            DiagnosticCategory::Name,
+            format!("module `{module}` is not directly imported"),
+            Some(ty.span),
+        ));
+    }
+    struct_names[target.0 as usize]
+        .get(&ty.name)
+        .copied()
+        .map(Type::Struct)
+        .or_else(|| aliases.and_then(|maps| maps[target.0 as usize].get(&ty.name).copied()))
+        .ok_or_else(|| unknown_type(ty))
+}
+
+fn resolve_type_in_module(
+    ty: &AstType,
+    current: ModuleId,
+    aliases: &[BTreeMap<String, Type>],
+    struct_names: &[BTreeMap<String, StructId>],
+    imports: &[BTreeMap<String, ModuleId>],
+    module_names: &BTreeMap<String, ModuleId>,
+) -> Result<Type, Diagnostic> {
+    if ty.module.is_some() {
+        return resolve_qualified_struct_type(
+            ty,
+            current,
+            Some(aliases),
+            struct_names,
+            imports,
+            module_names,
+        );
+    }
+    builtin(&ty.name)
+        .or_else(|| aliases[current.0 as usize].get(&ty.name).copied())
+        .or_else(|| {
+            struct_names[current.0 as usize]
+                .get(&ty.name)
+                .copied()
+                .map(Type::Struct)
+        })
+        .ok_or_else(|| unknown_type(ty))
+}
+
+fn align_up(value: u64, align: u64) -> u64 {
+    value.div_ceil(align) * align
+}
+
+fn compute_struct_layouts(
+    structs: &mut [StructInfo],
+    target: TargetProperties,
+) -> Result<(), (StructId, String)> {
+    fn type_layout(
+        ty: Type,
+        structs: &mut [StructInfo],
+        state: &mut [u8],
+        target: TargetProperties,
+    ) -> Result<TypeLayout, (StructId, String)> {
+        Ok(match ty {
+            Type::Bool => TypeLayout { size: 1, align: 1 },
+            Type::Integer(integer) => {
+                let bytes = u64::from(integer.bits(target) / 8);
+                TypeLayout {
+                    size: bytes,
+                    align: bytes,
+                }
+            }
+            Type::Float(FloatType::Float32) => TypeLayout { size: 4, align: 4 },
+            Type::Float(FloatType::Float64) => TypeLayout { size: 8, align: 8 },
+            Type::Struct(id) => struct_layout(id, structs, state, target)?,
+        })
+    }
+    fn struct_layout(
+        id: StructId,
+        structs: &mut [StructInfo],
+        state: &mut [u8],
+        target: TargetProperties,
+    ) -> Result<TypeLayout, (StructId, String)> {
+        match state[id.0 as usize] {
+            2 => return Ok(structs[id.0 as usize].layout),
+            1 => {
+                return Err((
+                    id,
+                    format!(
+                        "recursive by-value struct `{}` has infinite size",
+                        structs[id.0 as usize].name
+                    ),
+                ));
+            }
+            _ => {}
+        }
+        state[id.0 as usize] = 1;
+        let field_types: Vec<Type> = structs[id.0 as usize]
+            .fields
+            .iter()
+            .map(|field| field.ty)
+            .collect();
+        let mut offset = 0;
+        let mut aggregate_align = 1;
+        let mut offsets = Vec::with_capacity(field_types.len());
+        for ty in field_types {
+            let layout = type_layout(ty, structs, state, target)?;
+            offset = align_up(offset, layout.align);
+            offsets.push(offset);
+            offset += layout.size;
+            aggregate_align = aggregate_align.max(layout.align);
+        }
+        let layout = TypeLayout {
+            size: align_up(offset, aggregate_align),
+            align: aggregate_align,
+        };
+        for (field, field_offset) in structs[id.0 as usize].fields.iter_mut().zip(offsets) {
+            field.offset = field_offset;
+        }
+        structs[id.0 as usize].layout = layout;
+        state[id.0 as usize] = 2;
+        Ok(layout)
+    }
+
+    let mut state = vec![0_u8; structs.len()];
+    for index in 0..structs.len() {
+        struct_layout(StructId(index as u32), structs, &mut state, target)?;
+    }
+    Ok(())
+}
+
 fn src(d: Diagnostic, m: &ParsedModule) -> Diagnostic {
     d.with_source_name(&m.info.source_name)
 }
@@ -516,6 +864,7 @@ pub fn analyze_bodies_for_target(
     let hir = TypedHir {
         modules: d.program.modules.iter().map(|m| m.info.clone()).collect(),
         aliases: d.alias_info,
+        structs: d.structs,
         signatures: d.signatures,
         functions,
         entry: d.entry,
@@ -541,7 +890,10 @@ fn analyze_function(
         names: &d.names,
         imports: &d.imports,
         module_names: &d.module_names,
-        aliases: &d.aliases[module.0 as usize],
+        aliases: &d.aliases,
+        structs: &d.structs,
+        struct_names: &d.struct_names,
+        field_names: &d.field_names,
         module,
         return_type: sig.return_type,
         target,
@@ -596,7 +948,10 @@ struct Analyzer<'a> {
     names: &'a [BTreeMap<String, FunctionId>],
     imports: &'a [BTreeMap<String, ModuleId>],
     module_names: &'a BTreeMap<String, ModuleId>,
-    aliases: &'a BTreeMap<String, Type>,
+    aliases: &'a [BTreeMap<String, Type>],
+    structs: &'a [StructInfo],
+    struct_names: &'a [BTreeMap<String, StructId>],
+    field_names: &'a [BTreeMap<String, FieldId>],
     module: ModuleId,
     return_type: Type,
     target: TargetProperties,
@@ -636,7 +991,15 @@ impl Analyzer<'_> {
                     if self.scopes.last().is_some_and(|x| x.contains_key(name)) {
                         return Err(vec![duplicate("local", name, s.span)]);
                     }
-                    let ty = resolve_type(ty, self.aliases).map_err(|d| vec![d])?;
+                    let ty = resolve_type_in_module(
+                        ty,
+                        self.module,
+                        self.aliases,
+                        self.struct_names,
+                        self.imports,
+                        self.module_names,
+                    )
+                    .map_err(|d| vec![d])?;
                     let initializer = self.expression(initializer, Some(ty))?.expr;
                     let local = LocalId(self.locals.len() as u32);
                     self.locals.push(HirLocal {
@@ -649,14 +1012,24 @@ impl Analyzer<'_> {
                     self.scopes.last_mut().unwrap().insert(name.clone(), local);
                     HirStmtKind::Local { local, initializer }
                 }
-                AstStmtKind::Assign { name, value } => {
-                    let Some(local) = self.lookup(name) else {
-                        return Err(vec![unknown_name(name, s.span)]);
-                    };
+                AstStmtKind::Assign { place, value } => {
+                    let place = self.resolve_place(place)?;
                     let value = self
-                        .expression(value, Some(self.locals[local.0 as usize].ty))?
+                        .expression(value, Some(place.ty))
+                        .map_err(|mut ds| {
+                            if !place.projections.is_empty() {
+                                if let Some(diagnostic) = ds.first_mut() {
+                                    diagnostic.code = "E0245";
+                                    diagnostic.message = format!(
+                                        "field assignment requires {}: {}",
+                                        place.ty, diagnostic.message
+                                    );
+                                }
+                            }
+                            ds
+                        })?
                         .expr;
-                    HirStmtKind::Assign { local, value }
+                    HirStmtKind::Assign { place, value }
                 }
                 AstStmtKind::If {
                     condition,
@@ -690,6 +1063,101 @@ impl Analyzer<'_> {
             span: b.span,
         })
     }
+
+    fn resolve_place(&self, place: &AstPlace) -> Result<HirPlace, Vec<Diagnostic>> {
+        let Some(local) = self.lookup(&place.root) else {
+            return Err(vec![unknown_name(&place.root, place.span)]);
+        };
+        let mut resolved = HirPlace {
+            local,
+            projections: Vec::new(),
+            ty: self.locals[local.0 as usize].ty,
+        };
+        for (name, span) in &place.fields {
+            self.project_field(&mut resolved, name, *span)?;
+        }
+        Ok(resolved)
+    }
+
+    fn resolve_expr_place(&self, expression: &AstExpr) -> Result<HirPlace, Vec<Diagnostic>> {
+        match &expression.kind {
+            AstExprKind::Name(name) => {
+                let Some(local) = self.lookup(name) else {
+                    return Err(vec![unknown_name(name, expression.span)]);
+                };
+                Ok(HirPlace {
+                    local,
+                    projections: Vec::new(),
+                    ty: self.locals[local.0 as usize].ty,
+                })
+            }
+            AstExprKind::Field {
+                base,
+                name,
+                name_span,
+            } => {
+                if let AstExprKind::Name(module) = &base.kind {
+                    if self.module_names.contains_key(module) && self.lookup(module).is_none() {
+                        return Err(vec![Diagnostic::new(
+                            "E0224",
+                            Phase::Semantic,
+                            DiagnosticCategory::Unsupported,
+                            format!("qualified value `{module}.{name}` is not admitted"),
+                            Some(expression.span),
+                        )]);
+                    }
+                }
+                let mut place = self.resolve_expr_place(base)?;
+                self.project_field(&mut place, name, *name_span)?;
+                Ok(place)
+            }
+            _ => Err(vec![Diagnostic::new(
+                "E0244",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "field access requires an addressable local value",
+                Some(expression.span),
+            )]),
+        }
+    }
+
+    fn project_field(
+        &self,
+        place: &mut HirPlace,
+        name: &str,
+        span: Span,
+    ) -> Result<(), Vec<Diagnostic>> {
+        let Some(struct_id) = place.ty.as_struct() else {
+            return Err(vec![Diagnostic::new(
+                "E0244",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!("field access on non-struct type {}", place.ty),
+                Some(span),
+            )]);
+        };
+        let Some(field_id) = self.field_names[struct_id.0 as usize].get(name).copied() else {
+            return Err(vec![Diagnostic::new(
+                "E0243",
+                Phase::Semantic,
+                DiagnosticCategory::Name,
+                format!(
+                    "unknown field `{name}` on struct `{}`",
+                    self.structs[struct_id.0 as usize].name
+                ),
+                Some(span),
+            )]);
+        };
+        let field = self.structs[struct_id.0 as usize]
+            .fields
+            .iter()
+            .find(|field| field.id == field_id)
+            .expect("field-name index is coherent");
+        place.projections.push(field_id);
+        place.ty = field.ty;
+        Ok(())
+    }
+
     fn expression(&self, e: &AstExpr, expected: Option<Type>) -> Result<Checked, Vec<Diagnostic>> {
         if let AstExprKind::Integer(t) = &e.kind {
             return self.integer(t, false, expected, e.span);
@@ -741,9 +1209,16 @@ impl Analyzer<'_> {
                 }
             }
             AstExprKind::Call { callee, args } => {
-                if let Some(target) = builtin(callee).or_else(|| self.aliases.get(callee).copied())
+                if let Some(target) = builtin(callee)
+                    .or_else(|| self.aliases[self.module.0 as usize].get(callee).copied())
                 {
-                    self.explicit_cast(callee, target, args, e.span)?
+                    if let Type::Struct(id) = target {
+                        self.struct_init(id, callee, args, e.span)?
+                    } else {
+                        self.explicit_cast(callee, target, args, e.span)?
+                    }
+                } else if let Some(id) = self.struct_names[self.module.0 as usize].get(callee) {
+                    self.struct_init(*id, callee, args, e.span)?
                 } else {
                     self.call(callee, args, e.span)?
                 }
@@ -752,7 +1227,18 @@ impl Analyzer<'_> {
                 module,
                 function,
                 args,
-            } => self.qcall(module, function, args, e.span)?,
+            } => self.qualified_apply(module, function, args, e.span)?,
+            AstExprKind::Field { .. } => {
+                let place = self.resolve_expr_place(e)?;
+                Checked {
+                    expr: HirExpr {
+                        ty: place.ty,
+                        kind: HirExprKind::Load(place),
+                        span: e.span,
+                    },
+                    constant: None,
+                }
+            }
             AstExprKind::QualifiedName { module, member } => {
                 return Err(vec![Diagnostic::new(
                     "E0224",
@@ -877,7 +1363,12 @@ impl Analyzer<'_> {
                 )]);
             }
             Type::Float(_) => HirUnaryOp::NegateFloat,
-            Type::Bool => return Err(vec![type_error("bool cannot be used numerically", span)]),
+            Type::Bool | Type::Struct(_) => {
+                return Err(vec![type_error(
+                    format!("{ty} cannot be used numerically"),
+                    span,
+                )]);
+            }
         };
         Ok(Checked {
             expr: HirExpr {
@@ -977,7 +1468,7 @@ impl Analyzer<'_> {
         };
         self.call_id(id, n, args, span)
     }
-    fn qcall(
+    fn qualified_apply(
         &self,
         m: &str,
         f: &str,
@@ -1002,16 +1493,75 @@ impl Analyzer<'_> {
                 Some(span),
             )]);
         }
-        let Some(id) = self.names[mid.0 as usize].get(f).copied() else {
+        if let Some(id) = self.names[mid.0 as usize].get(f).copied() {
+            return self.call_id(id, &format!("{m}.{f}"), args, span);
+        }
+        if let Some(id) = self.struct_names[mid.0 as usize].get(f).copied() {
+            return self.struct_init(id, &format!("{m}.{f}"), args, span);
+        }
+        if let Some(Type::Struct(id)) = self.aliases[mid.0 as usize].get(f).copied() {
+            return self.struct_init(id, &format!("{m}.{f}"), args, span);
+        }
+        Err(vec![Diagnostic::new(
+            "E0222",
+            Phase::Semantic,
+            DiagnosticCategory::Name,
+            format!("unknown function or struct `{f}` in module `{m}`"),
+            Some(span),
+        )])
+    }
+
+    fn struct_init(
+        &self,
+        id: StructId,
+        spelling: &str,
+        args: &[AstExpr],
+        span: Span,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        let info = &self.structs[id.0 as usize];
+        if args.len() != info.fields.len() {
             return Err(vec![Diagnostic::new(
-                "E0222",
+                "E0246",
                 Phase::Semantic,
-                DiagnosticCategory::Name,
-                format!("unknown function `{f}` in module `{m}`"),
+                DiagnosticCategory::Type,
+                format!(
+                    "struct `{spelling}` expects {} positional arguments, found {}",
+                    info.fields.len(),
+                    args.len()
+                ),
                 Some(span),
             )]);
-        };
-        self.call_id(id, &format!("{m}.{f}"), args, span)
+        }
+        let mut fields = Vec::with_capacity(args.len());
+        for (index, (argument, field)) in args.iter().zip(&info.fields).enumerate() {
+            match self.expression(argument, Some(field.ty)) {
+                Ok(value) => fields.push((field.id, value.expr)),
+                Err(mut diagnostics) => {
+                    if let Some(diagnostic) = diagnostics.first_mut() {
+                        diagnostic.code = "E0247";
+                        diagnostic.message = format!(
+                            "argument {} for field `{}` of `{spelling}` requires {}: {}",
+                            index + 1,
+                            field.name,
+                            field.ty,
+                            diagnostic.message
+                        );
+                    }
+                    return Err(diagnostics);
+                }
+            }
+        }
+        Ok(Checked {
+            expr: HirExpr {
+                kind: HirExprKind::StructInit {
+                    struct_id: id,
+                    fields,
+                },
+                ty: Type::Struct(id),
+                span,
+            },
+            constant: None,
+        })
     }
     fn call_id(
         &self,
@@ -1094,6 +1644,12 @@ impl Analyzer<'_> {
             }
             return Err(vec![type_error(
                 "bool cannot be used numerically or compared with a number",
+                span,
+            )]);
+        }
+        if l.expr.ty.as_struct().is_some() || r.expr.ty.as_struct().is_some() {
+            return Err(vec![type_error(
+                "struct values do not have implicit arithmetic or equality operators in Vertical-5",
                 span,
             )]);
         }
@@ -1410,11 +1966,6 @@ fn builtin(n: &str) -> Option<Type> {
         _ => return None,
     })
 }
-fn resolve_type(t: &AstType, a: &BTreeMap<String, Type>) -> Result<Type, Diagnostic> {
-    builtin(&t.name)
-        .or_else(|| a.get(&t.name).copied())
-        .ok_or_else(|| unknown_type(t))
-}
 fn unknown_type(t: &AstType) -> Diagnostic {
     Diagnostic::new(
         "E0204",
@@ -1563,6 +2114,21 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
     if e.name != "main" || e.return_type != Type::INT64 || !e.parameters.is_empty() {
         return Err(fail("HIR entry invalid".into()));
     }
+    let mut next_field = 0_u32;
+    for (index, info) in h.structs.iter().enumerate() {
+        if info.id.0 as usize != index || info.layout.align == 0 {
+            return Err(fail("HIR struct identity/layout invalid".into()));
+        }
+        for (field_index, field) in info.fields.iter().enumerate() {
+            if field.id.0 != next_field
+                || field.owner != info.id
+                || field.index as usize != field_index
+            {
+                return Err(fail("HIR field identity invalid".into()));
+            }
+            next_field += 1;
+        }
+    }
     for (i, (s, f)) in h.signatures.iter().zip(&h.functions).enumerate() {
         if s.id.0 as usize != i || f.id != s.id || f.module != s.module {
             return Err(fail("HIR function identity mismatch".into()));
@@ -1572,7 +2138,7 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
                 return Err(fail("HIR local identity invalid".into()));
             }
         }
-        verify_block(&f.body, f, s.return_type, &h.signatures, &fail)?
+        verify_block(&f.body, f, s.return_type, &h.signatures, &h.structs, &fail)?
     }
     Ok(())
 }
@@ -1581,18 +2147,22 @@ fn verify_block(
     f: &HirFunction,
     ret: Type,
     sigs: &[FunctionSignature],
+    structs: &[StructInfo],
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
     for s in &b.statements {
         match &s.kind {
-            HirStmtKind::Local { local, initializer }
-            | HirStmtKind::Assign {
-                local,
-                value: initializer,
-            } => {
-                verify_expr(initializer, f, sigs, fail)?;
+            HirStmtKind::Local { local, initializer } => {
+                verify_expr(initializer, f, sigs, structs, fail)?;
                 if f.locals.get(local.0 as usize).map(|l| l.ty) != Some(initializer.ty) {
                     return Err(fail("HIR assignment mismatch".into()));
+                }
+            }
+            HirStmtKind::Assign { place, value } => {
+                verify_expr(value, f, sigs, structs, fail)?;
+                verify_place(place, f, structs, fail)?;
+                if place.ty != value.ty {
+                    return Err(fail("HIR field assignment mismatch".into()));
                 }
             }
             HirStmtKind::If {
@@ -1600,24 +2170,24 @@ fn verify_block(
                 then_block,
                 else_block,
             } => {
-                verify_expr(condition, f, sigs, fail)?;
+                verify_expr(condition, f, sigs, structs, fail)?;
                 if condition.ty != Type::Bool {
                     return Err(fail("HIR condition not bool".into()));
                 }
-                verify_block(then_block, f, ret, sigs, fail)?;
+                verify_block(then_block, f, ret, sigs, structs, fail)?;
                 if let Some(x) = else_block {
-                    verify_block(x, f, ret, sigs, fail)?
+                    verify_block(x, f, ret, sigs, structs, fail)?
                 }
             }
             HirStmtKind::While { condition, body } => {
-                verify_expr(condition, f, sigs, fail)?;
+                verify_expr(condition, f, sigs, structs, fail)?;
                 if condition.ty != Type::Bool {
                     return Err(fail("HIR condition not bool".into()));
                 }
-                verify_block(body, f, ret, sigs, fail)?
+                verify_block(body, f, ret, sigs, structs, fail)?
             }
             HirStmtKind::Return(v) => {
-                verify_expr(v, f, sigs, fail)?;
+                verify_expr(v, f, sigs, structs, fail)?;
                 if v.ty != ret {
                     return Err(fail("HIR return mismatch".into()));
                 }
@@ -1630,6 +2200,7 @@ fn verify_expr(
     e: &HirExpr,
     f: &HirFunction,
     sigs: &[FunctionSignature],
+    structs: &[StructInfo],
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
     match &e.kind {
@@ -1646,6 +2217,12 @@ fn verify_expr(
         HirExprKind::Local(l) if f.locals.get(l.0 as usize).map(|x| x.ty) != Some(e.ty) => {
             return Err(fail("HIR local mismatch".into()));
         }
+        HirExprKind::Load(place) => {
+            verify_place(place, f, structs, fail)?;
+            if place.ty != e.ty {
+                return Err(fail("HIR load/place type mismatch".into()));
+            }
+        }
         HirExprKind::Call { callee, args } => {
             let Some(s) = sigs.get(callee.0 as usize) else {
                 return Err(fail("HIR callee missing".into()));
@@ -1654,14 +2231,31 @@ fn verify_expr(
                 return Err(fail("HIR call mismatch".into()));
             }
             for (a, p) in args.iter().zip(&s.parameters) {
-                verify_expr(a, f, sigs, fail)?;
+                verify_expr(a, f, sigs, structs, fail)?;
                 if a.ty != p.ty {
                     return Err(fail("HIR argument mismatch".into()));
                 }
             }
         }
+        HirExprKind::StructInit { struct_id, fields } => {
+            let Some(info) = structs
+                .get(struct_id.0 as usize)
+                .filter(|info| info.id == *struct_id)
+            else {
+                return Err(fail("HIR struct initializer has unknown identity".into()));
+            };
+            if e.ty != Type::Struct(*struct_id) || fields.len() != info.fields.len() {
+                return Err(fail("HIR struct initializer arity/type mismatch".into()));
+            }
+            for ((field_id, value), declared) in fields.iter().zip(&info.fields) {
+                verify_expr(value, f, sigs, structs, fail)?;
+                if *field_id != declared.id || value.ty != declared.ty {
+                    return Err(fail("HIR struct initializer field mismatch".into()));
+                }
+            }
+        }
         HirExprKind::Coerce { kind, operand } => {
-            verify_expr(operand, f, sigs, fail)?;
+            verify_expr(operand, f, sigs, structs, fail)?;
             let ok = match (kind, operand.ty, e.ty) {
                 (CoercionKind::SignExtend, Type::Integer(a), Type::Integer(b)) => {
                     a.is_signed() && a.can_widen_to(b)
@@ -1686,7 +2280,7 @@ fn verify_expr(
             target_type,
             operand,
         } => {
-            verify_expr(operand, f, sigs, fail)?;
+            verify_expr(operand, f, sigs, structs, fail)?;
             if operand.ty != *source_type
                 || e.ty != *target_type
                 || select_cast_kind(*source_type, *target_type, TargetProperties::LINUX_X86_64)
@@ -1696,7 +2290,7 @@ fn verify_expr(
             }
         }
         HirExprKind::Unary { op, operand } => {
-            verify_expr(operand, f, sigs, fail)?;
+            verify_expr(operand, f, sigs, structs, fail)?;
             let ok = match op {
                 HirUnaryOp::NegateIntegerChecked => {
                     operand.ty.as_integer().is_some_and(IntegerType::is_signed)
@@ -1708,8 +2302,8 @@ fn verify_expr(
             }
         }
         HirExprKind::Binary { op, left, right } => {
-            verify_expr(left, f, sigs, fail)?;
-            verify_expr(right, f, sigs, fail)?;
+            verify_expr(left, f, sigs, structs, fail)?;
+            verify_expr(right, f, sigs, structs, fail)?;
             if left.ty != right.ty {
                 return Err(fail("HIR binary operand mismatch".into()));
             }
@@ -1738,13 +2332,43 @@ fn verify_expr(
                 | HirBinaryOp::LessEqual
                 | HirBinaryOp::Greater
                 | HirBinaryOp::GreaterEqual => left.ty.is_numeric() && e.ty == Type::Bool,
-                HirBinaryOp::Equal | HirBinaryOp::NotEqual => e.ty == Type::Bool,
+                HirBinaryOp::Equal | HirBinaryOp::NotEqual => {
+                    (left.ty == Type::Bool || left.ty.is_numeric()) && e.ty == Type::Bool
+                }
             };
             if !ok {
                 return Err(fail("HIR binary invalid".into()));
             }
         }
         _ => {}
+    }
+    Ok(())
+}
+
+fn verify_place(
+    place: &HirPlace,
+    function: &HirFunction,
+    structs: &[StructInfo],
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let Some(local) = function.locals.get(place.local.0 as usize) else {
+        return Err(fail("HIR place has unknown local".into()));
+    };
+    let mut ty = local.ty;
+    for field_id in &place.projections {
+        let Some(owner) = ty.as_struct() else {
+            return Err(fail("HIR place projects a non-struct".into()));
+        };
+        let Some(field) = structs
+            .get(owner.0 as usize)
+            .and_then(|info| info.fields.iter().find(|field| field.id == *field_id))
+        else {
+            return Err(fail("HIR place field does not belong to struct".into()));
+        };
+        ty = field.ty;
+    }
+    if ty != place.ty {
+        return Err(fail("HIR place cached type is invalid".into()));
     }
     Ok(())
 }
@@ -1825,5 +2449,29 @@ mod tests {
             assert_eq!(check(source).unwrap_err()[0].code, code, "{source}");
         }
         check("int main(){return -9223372036854775808%-1;}").unwrap();
+    }
+
+    #[test]
+    fn nominal_structs_resolve_and_hir_verifies_field_identity() {
+        let hir =
+            check("struct P{int x;float64 y;}alias A=P;int main(){A p=A(1,2.0);p.x=3;return p.x;}")
+                .unwrap();
+        assert_eq!(hir.structs[0].layout, TypeLayout { size: 16, align: 8 });
+        assert!(hir.dump().contains("StructInit"));
+
+        let mut corrupt = hir;
+        let initializer = corrupt.functions[0]
+            .body
+            .statements
+            .iter_mut()
+            .find_map(|statement| match &mut statement.kind {
+                HirStmtKind::Local { initializer, .. } => Some(initializer),
+                _ => None,
+            })
+            .unwrap();
+        if let HirExprKind::StructInit { fields, .. } = &mut initializer.kind {
+            fields[0].0 = FieldId(999);
+        }
+        assert!(verify_hir(&corrupt).is_err());
     }
 }

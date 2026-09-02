@@ -153,6 +153,14 @@ The first vertical compiler represents scalar overflow and division-by-zero as
 structured non-recoverable MIR traps; this intentionally does not choose the
 future recoverable error or exception model.
 
+NEXT-VERTICAL-5 extends that foundation with nominal value structs. Their
+canonical construction is positional application syntax (`Point(x, y)`), with
+arguments mapped in field declaration order. They copy by value, contain no
+implicit identity or heap ownership, and use resolved nominal/field identities
+below HIR. Named-field initializer syntax is not part of this milestone; a
+future named-argument design should apply coherently to functions and aggregate
+construction.
+
 ## Safety and control
 
 Safe and ergonomic behavior is the default.  Value semantics, moves, shared

@@ -5,9 +5,10 @@ use std::collections::VecDeque;
 use std::fmt::Write;
 
 use aether_frontend::{
-    CastKind, CoercionKind, Diagnostic, DiagnosticCategory, FloatValue, FunctionId,
-    FunctionSignature, HirBinaryOp, HirBlock, HirExpr, HirExprKind, HirFunction, HirStmtKind,
-    HirUnaryOp, LocalId, ModuleInfo, Phase, Span, Type, TypedHir,
+    CastKind, CoercionKind, Diagnostic, DiagnosticCategory, FieldId, FloatValue, FunctionId,
+    FunctionSignature, HirBinaryOp, HirBlock, HirExpr, HirExprKind, HirFunction, HirPlace,
+    HirStmtKind, HirUnaryOp, LocalId, ModuleInfo, Phase, Span, StructId, StructInfo, Type,
+    TypedHir,
 };
 
 /// Basic-block identity, equal to its stable vector index.
@@ -32,11 +33,19 @@ pub struct MirLocal {
 pub struct MirParameter {
     /// Function-local identity initialized by the call boundary.
     pub local: LocalId,
-    /// Canonical scalar type.
+    /// Canonical semantic type.
     pub ty: Type,
 }
 
-/// Scalar MIR operand.
+/// Reusable assignable storage path. Future projections can add indexing and
+/// dereference without changing assignment into a special-case operation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Place {
+    pub local: LocalId,
+    pub projections: Vec<FieldId>,
+}
+
+/// MIR operand for scalar or aggregate values.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operand {
     /// Storage read.
@@ -109,6 +118,13 @@ pub enum BinaryOp {
 pub enum Rvalue {
     /// Scalar copy.
     Use(Operand),
+    /// Read a local or nested subobject place.
+    Load(Place),
+    /// Construct a nominal aggregate in declaration/FieldId order.
+    Aggregate {
+        struct_id: StructId,
+        fields: Vec<(FieldId, Operand)>,
+    },
     /// Explicit semantic widening.
     Coerce {
         kind: CoercionKind,
@@ -147,7 +163,7 @@ pub enum Rvalue {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MirInstruction {
     /// Destination storage.
-    pub destination: LocalId,
+    pub destination: Place,
     /// Computed value.
     pub value: Rvalue,
     /// Source provenance.
@@ -205,6 +221,8 @@ pub struct MirFunction {
 pub struct FlowMir {
     /// Resolved program module graph and provenance.
     pub modules: Vec<ModuleInfo>,
+    /// Nominal aggregate and field metadata.
+    pub structs: Vec<StructInfo>,
     /// Program-global signature table.
     pub signatures: Vec<FunctionSignature>,
     /// Function-local CFGs in stable identity order.
@@ -218,8 +236,8 @@ impl FlowMir {
     #[must_use]
     pub fn dump(&self) -> String {
         let mut dump = format!(
-            "entry: {:#?}\nmodules: {:#?}\nsignatures: {:#?}",
-            self.entry, self.modules, self.signatures
+            "entry: {:#?}\nmodules: {:#?}\nstructs: {:#?}\nsignatures: {:#?}",
+            self.entry, self.modules, self.structs, self.signatures
         );
         for module in &self.modules {
             let functions: Vec<_> = self
@@ -259,7 +277,7 @@ impl VerifiedMir {
 /// Lowers typed, resolved HIR into a raw CFG.
 #[must_use]
 pub fn lower_hir(hir: TypedHir) -> FlowMir {
-    let (modules, signatures, functions, entry) = hir.into_parts();
+    let (modules, structs, signatures, functions, entry) = hir.into_parts();
     let functions = functions
         .iter()
         .map(|function| {
@@ -269,6 +287,7 @@ pub fn lower_hir(hir: TypedHir) -> FlowMir {
         .collect();
     FlowMir {
         modules,
+        structs,
         signatures,
         functions,
         entry,
@@ -324,11 +343,18 @@ impl Builder {
             match &statement.kind {
                 HirStmtKind::Local { local, initializer } => {
                     let value = self.lower_expr(initializer);
-                    self.assign(*local, Rvalue::Use(value), statement.span);
+                    self.assign(
+                        Place {
+                            local: *local,
+                            projections: vec![],
+                        },
+                        Rvalue::Use(value),
+                        statement.span,
+                    );
                 }
-                HirStmtKind::Assign { local, value } => {
+                HirStmtKind::Assign { place, value } => {
                     let value = self.lower_expr(value);
-                    self.assign(*local, Rvalue::Use(value), statement.span);
+                    self.assign(lower_place(place), Rvalue::Use(value), statement.span);
                 }
                 HirStmtKind::Return(value) => {
                     let value = self.lower_expr(value);
@@ -419,6 +445,18 @@ impl Builder {
             },
             HirExprKind::Bool(value) => Operand::Bool(*value),
             HirExprKind::Local(local) => Operand::Local(*local),
+            HirExprKind::Load(place) => {
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        local: destination,
+                        projections: vec![],
+                    },
+                    Rvalue::Load(lower_place(place)),
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
             HirExprKind::Call { callee, args } => {
                 let args = args
                     .iter()
@@ -426,10 +464,32 @@ impl Builder {
                     .collect();
                 let destination = self.temporary(expression.ty);
                 self.assign(
-                    destination,
+                    Place {
+                        local: destination,
+                        projections: vec![],
+                    },
                     Rvalue::Call {
                         callee: *callee,
                         args,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::StructInit { struct_id, fields } => {
+                let fields = fields
+                    .iter()
+                    .map(|(field, value)| (*field, self.lower_expr(value)))
+                    .collect();
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        local: destination,
+                        projections: vec![],
+                    },
+                    Rvalue::Aggregate {
+                        struct_id: *struct_id,
+                        fields,
                     },
                     expression.span,
                 );
@@ -440,7 +500,10 @@ impl Builder {
                 let operand = self.lower_expr(operand);
                 let destination = self.temporary(expression.ty);
                 self.assign(
-                    destination,
+                    Place {
+                        local: destination,
+                        projections: vec![],
+                    },
                     Rvalue::Coerce {
                         kind: *kind,
                         operand,
@@ -461,7 +524,10 @@ impl Builder {
                 let trap = cast_can_fail(*source_type, *target_type)
                     .then_some(TrapKind::ConversionOutOfRange);
                 self.assign(
-                    destination,
+                    Place {
+                        local: destination,
+                        projections: vec![],
+                    },
                     Rvalue::Cast {
                         kind: *kind,
                         operand,
@@ -483,7 +549,10 @@ impl Builder {
                     HirUnaryOp::NegateFloat => (UnaryOp::NegateFloat, None),
                 };
                 self.assign(
-                    destination,
+                    Place {
+                        local: destination,
+                        projections: vec![],
+                    },
                     Rvalue::Unary { op, operand, trap },
                     expression.span,
                 );
@@ -541,7 +610,10 @@ impl Builder {
                 };
                 let destination = self.temporary(expression.ty);
                 self.assign(
-                    destination,
+                    Place {
+                        local: destination,
+                        projections: vec![],
+                    },
                     Rvalue::Binary {
                         op,
                         left,
@@ -577,7 +649,7 @@ impl Builder {
         id
     }
 
-    fn assign(&mut self, destination: LocalId, value: Rvalue, span: Span) {
+    fn assign(&mut self, destination: Place, value: Rvalue, span: Span) {
         let block = self
             .current
             .expect("typed HIR has no unreachable statements");
@@ -593,6 +665,13 @@ impl Builder {
     fn terminate(&mut self, terminator: Terminator) {
         let block = self.current.take().expect("current block is open");
         self.function.blocks[block.0 as usize].terminator = Some(terminator);
+    }
+}
+
+fn lower_place(place: &HirPlace) -> Place {
+    Place {
+        local: place.local,
+        projections: place.projections.clone(),
     }
 }
 
@@ -623,7 +702,7 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
         if signature.module.0 as usize >= mir.modules.len() {
             return Err(fail("MIR signature names an unknown module".into()));
         }
-        verify_mir_function(function, signature, &mir.signatures, &fail)?;
+        verify_mir_function(function, signature, &mir.signatures, &mir.structs, &fail)?;
     }
     Ok(VerifiedMir(mir))
 }
@@ -633,6 +712,7 @@ fn verify_mir_function(
     function: &MirFunction,
     signature: &FunctionSignature,
     signatures: &[FunctionSignature],
+    structs: &[StructInfo],
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
     if function.return_type != signature.return_type
@@ -708,7 +788,7 @@ fn verify_mir_function(
             for predecessor in preds {
                 let mut outgoing = initialized_in[predecessor.0 as usize].clone();
                 for instruction in &function.blocks[predecessor.0 as usize].instructions {
-                    outgoing[instruction.destination.0 as usize] = true;
+                    outgoing[instruction.destination.local.0 as usize] = true;
                 }
                 for (slot, pred_value) in incoming.iter_mut().zip(outgoing) {
                     *slot &= pred_value;
@@ -724,21 +804,42 @@ fn verify_mir_function(
     for block in &function.blocks {
         let mut initialized = initialized_in[block.id.0 as usize].clone();
         for instruction in &block.instructions {
-            let Some(destination) = function.locals.get(instruction.destination.0 as usize) else {
+            let Some(destination) = function
+                .locals
+                .get(instruction.destination.local.0 as usize)
+            else {
                 return Err(fail(format!(
                     "assignment destination {:?} does not exist",
                     instruction.destination
                 )));
             };
+            if !instruction.destination.projections.is_empty()
+                && !initialized[instruction.destination.local.0 as usize]
+            {
+                return Err(fail(
+                    "MIR projected store reads an uninitialized aggregate".into(),
+                ));
+            }
+            if !instruction.destination.projections.is_empty()
+                && !matches!(instruction.value, Rvalue::Use(_))
+            {
+                return Err(fail(
+                    "MIR projected store requires a materialized value operand".into(),
+                ));
+            }
+            let destination_ty =
+                place_type(function, &instruction.destination, structs).map_err(&fail)?;
             validate_rvalue(
                 function,
                 signatures,
+                structs,
                 &instruction.value,
-                destination.ty,
+                destination_ty,
                 &initialized,
             )
             .map_err(&fail)?;
-            initialized[instruction.destination.0 as usize] = true;
+            let _ = destination;
+            initialized[instruction.destination.local.0 as usize] = true;
         }
         let terminator = block.terminator.as_ref().expect("checked above");
         match terminator {
@@ -766,9 +867,11 @@ fn verify_mir_function(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn validate_rvalue(
     function: &MirFunction,
     signatures: &[FunctionSignature],
+    structs: &[StructInfo],
     value: &Rvalue,
     destination: Type,
     initialized: &[bool],
@@ -778,6 +881,27 @@ fn validate_rvalue(
             validate_operand(function, operand, initialized)?;
             if operand_type(function, operand)? != destination {
                 return Err("MIR copy type mismatch".into());
+            }
+        }
+        Rvalue::Load(place) => {
+            validate_place_read(function, place, structs, initialized)?;
+            if place_type(function, place, structs)? != destination {
+                return Err("MIR place load type mismatch".into());
+            }
+        }
+        Rvalue::Aggregate { struct_id, fields } => {
+            let info = structs
+                .get(struct_id.0 as usize)
+                .filter(|info| info.id == *struct_id)
+                .ok_or_else(|| "MIR aggregate names unknown struct".to_string())?;
+            if destination != Type::Struct(*struct_id) || fields.len() != info.fields.len() {
+                return Err("MIR aggregate arity/result mismatch".into());
+            }
+            for ((field_id, operand), declared) in fields.iter().zip(&info.fields) {
+                validate_operand(function, operand, initialized)?;
+                if *field_id != declared.id || operand_type(function, operand)? != declared.ty {
+                    return Err("MIR aggregate field identity/type mismatch".into());
+                }
             }
         }
         Rvalue::Coerce {
@@ -868,6 +992,49 @@ fn validate_rvalue(
     Ok(())
 }
 
+fn validate_place_read(
+    function: &MirFunction,
+    place: &Place,
+    structs: &[StructInfo],
+    initialized: &[bool],
+) -> Result<(), String> {
+    place_type(function, place, structs)?;
+    if !initialized
+        .get(place.local.0 as usize)
+        .copied()
+        .unwrap_or(false)
+    {
+        return Err(format!(
+            "MIR local {:?} is read before initialization",
+            place.local
+        ));
+    }
+    Ok(())
+}
+
+fn place_type(
+    function: &MirFunction,
+    place: &Place,
+    structs: &[StructInfo],
+) -> Result<Type, String> {
+    let mut ty = function
+        .locals
+        .get(place.local.0 as usize)
+        .map(|local| local.ty)
+        .ok_or_else(|| format!("unknown MIR place local {:?}", place.local))?;
+    for field_id in &place.projections {
+        let owner = ty
+            .as_struct()
+            .ok_or_else(|| "MIR place projects non-struct type".to_string())?;
+        let field = structs
+            .get(owner.0 as usize)
+            .and_then(|info| info.fields.iter().find(|field| field.id == *field_id))
+            .ok_or_else(|| "MIR place field does not belong to aggregate".to_string())?;
+        ty = field.ty;
+    }
+    Ok(ty)
+}
+
 pub(crate) fn binary_contract(
     op: BinaryOp,
     operand: Type,
@@ -921,7 +1088,9 @@ pub(crate) fn binary_contract(
                 Err("ordered comparison requires numeric operands".into())
             }
         }
-        BinaryOp::Equal | BinaryOp::NotEqual => Ok((operand, Type::Bool, None, None)),
+        BinaryOp::Equal | BinaryOp::NotEqual if operand == Type::Bool || operand.is_numeric() => {
+            Ok((operand, Type::Bool, None, None))
+        }
         _ => Err("MIR numeric opcode/type mismatch".into()),
     }
 }
@@ -1109,6 +1278,7 @@ mod tests {
                 source_name: "<memory>".into(),
                 imports: vec![],
             }],
+            structs: vec![],
             signatures: vec![FunctionSignature {
                 id: FunctionId(0),
                 module: ModuleId(0),
@@ -1208,5 +1378,30 @@ mod tests {
             *secondary_trap = None;
         }
         assert!(verify_mir(division).is_err());
+    }
+
+    #[test]
+    fn aggregate_places_and_field_ids_are_verified() {
+        let mut raw = mir("struct P{int x;}int main(){P p=P(1);p.x=2;return p.x;}");
+        let store = raw.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| !instruction.destination.projections.is_empty())
+            .unwrap();
+        store.destination.projections[0] = aether_frontend::FieldId(999);
+        assert!(verify_mir(raw).is_err());
+
+        let mut raw = mir("struct P{int x;}int main(){P p=P(1);return p.x;}");
+        let aggregate = raw.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| matches!(instruction.value, Rvalue::Aggregate { .. }))
+            .unwrap();
+        if let Rvalue::Aggregate { fields, .. } = &mut aggregate.value {
+            fields[0].0 = aether_frontend::FieldId(999);
+        }
+        assert!(verify_mir(raw).is_err());
     }
 }

@@ -5,8 +5,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 
 use aether_frontend::{
-    CastKind, CoercionKind, Diagnostic, DiagnosticCategory, FloatValue, FunctionId,
-    FunctionSignature, LocalId, ModuleInfo, Phase, Span, Type,
+    CastKind, CoercionKind, Diagnostic, DiagnosticCategory, FieldId, FloatValue, FunctionId,
+    FunctionSignature, LocalId, ModuleInfo, Phase, Span, StructId, StructInfo, Type,
 };
 
 use crate::{
@@ -17,7 +17,7 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ValueId(pub u32);
 
-/// Scalar SSA operand.
+/// SSA operand for scalar or aggregate values.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SsaOperand {
     /// SSA value use.
@@ -50,7 +50,7 @@ pub struct SsaParameter {
     pub local: LocalId,
     /// Entry definition.
     pub value: ValueId,
-    /// Canonical scalar type.
+    /// Canonical semantic type.
     pub ty: Type,
 }
 
@@ -60,6 +60,22 @@ pub struct SsaParameter {
 pub enum SsaOp {
     /// Scalar copy.
     Use(SsaOperand),
+    /// Nominal aggregate construction.
+    Aggregate {
+        struct_id: StructId,
+        fields: Vec<(FieldId, SsaOperand)>,
+    },
+    /// Pure aggregate projection.
+    ExtractField {
+        aggregate: SsaOperand,
+        projections: Vec<FieldId>,
+    },
+    /// Pure functional update used to preserve aggregate SSA after place mutation.
+    InsertField {
+        aggregate: SsaOperand,
+        projections: Vec<FieldId>,
+        value: SsaOperand,
+    },
     /// Explicit widening selected in HIR.
     Coerce {
         kind: CoercionKind,
@@ -158,6 +174,8 @@ pub struct SsaFunction {
 pub struct SsaIr {
     /// Resolved program module graph and provenance.
     pub modules: Vec<ModuleInfo>,
+    /// Nominal aggregate metadata shared with MIR and the backend.
+    pub structs: Vec<StructInfo>,
     /// Source-unit signature table.
     pub signatures: Vec<FunctionSignature>,
     /// Function-local SSA graphs in identity order.
@@ -171,8 +189,8 @@ impl SsaIr {
     #[must_use]
     pub fn dump(&self) -> String {
         let mut dump = format!(
-            "entry: {:#?}\nmodules: {:#?}\nsignatures: {:#?}",
-            self.entry, self.modules, self.signatures
+            "entry: {:#?}\nmodules: {:#?}\nstructs: {:#?}\nsignatures: {:#?}",
+            self.entry, self.modules, self.structs, self.signatures
         );
         for module in &self.modules {
             let functions: Vec<_> = self
@@ -209,12 +227,13 @@ impl VerifiedSsa {
     }
 }
 
-/// Promotes all scalar MIR locals to SSA using dominance-frontier phi placement.
+/// Promotes scalar and aggregate MIR locals using dominance-frontier phi placement.
 #[must_use]
 pub fn build_ssa(mir: &VerifiedMir) -> SsaIr {
     let mir = mir.as_mir();
     SsaIr {
         modules: mir.modules.clone(),
+        structs: mir.structs.clone(),
         signatures: mir.signatures.clone(),
         functions: mir.functions.iter().map(build_function_ssa).collect(),
         entry: mir.entry,
@@ -230,7 +249,7 @@ fn build_function_ssa(function: &MirFunction) -> SsaFunction {
     let mut definitions = vec![BTreeSet::new(); function.locals.len()];
     for block in &function.blocks {
         for instruction in &block.instructions {
-            definitions[instruction.destination.0 as usize].insert(block.id);
+            definitions[instruction.destination.local.0 as usize].insert(block.id);
         }
     }
     for (local_index, blocks) in definitions.iter().enumerate() {
@@ -333,18 +352,34 @@ fn rename_block(
         pushes[local.0 as usize] += 1;
     }
     for instruction in &mir.blocks[block_index].instructions {
-        let op = rename_rvalue(&instruction.value, stacks);
+        let destination_local = instruction.destination.local;
+        let op = if instruction.destination.projections.is_empty() {
+            rename_rvalue(&instruction.value, stacks)
+        } else {
+            let Rvalue::Use(value) = &instruction.value else {
+                unreachable!("verified projected stores use a materialized value")
+            };
+            SsaOp::InsertField {
+                aggregate: SsaOperand::Value(
+                    *stacks[destination_local.0 as usize]
+                        .last()
+                        .expect("projected store base is initialized"),
+                ),
+                projections: instruction.destination.projections.clone(),
+                value: rename_operand(value, stacks),
+            }
+        };
         let result = ValueId(*next_value);
         *next_value += 1;
-        let ty = mir.locals[instruction.destination.0 as usize].ty;
+        let ty = mir.locals[destination_local.0 as usize].ty;
         blocks[block_index].instructions.push(SsaInstruction {
             result,
             ty,
             op,
             span: instruction.span,
         });
-        stacks[instruction.destination.0 as usize].push(result);
-        pushes[instruction.destination.0 as usize] += 1;
+        stacks[destination_local.0 as usize].push(result);
+        pushes[destination_local.0 as usize] += 1;
     }
     blocks[block_index].terminator = rename_terminator(
         mir.blocks[block_index]
@@ -383,6 +418,21 @@ fn rename_block(
 fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>]) -> SsaOp {
     match value {
         Rvalue::Use(operand) => SsaOp::Use(rename_operand(operand, stacks)),
+        Rvalue::Load(place) => SsaOp::ExtractField {
+            aggregate: SsaOperand::Value(
+                *stacks[place.local.0 as usize]
+                    .last()
+                    .expect("verified MIR load has reaching aggregate definition"),
+            ),
+            projections: place.projections.clone(),
+        },
+        Rvalue::Aggregate { struct_id, fields } => SsaOp::Aggregate {
+            struct_id: *struct_id,
+            fields: fields
+                .iter()
+                .map(|(field, operand)| (*field, rename_operand(operand, stacks)))
+                .collect(),
+        },
         Rvalue::Coerce {
             kind,
             operand,
@@ -593,7 +643,12 @@ fn mir_liveness(function: &MirFunction, cfg: &Cfg) -> Vec<BTreeSet<LocalId>> {
                     uses[index].insert(local);
                 }
             }
-            definitions[index].insert(instruction.destination);
+            if !instruction.destination.projections.is_empty()
+                && !definitions[index].contains(&instruction.destination.local)
+            {
+                uses[index].insert(instruction.destination.local);
+            }
+            definitions[index].insert(instruction.destination.local);
         }
         for local in terminator_locals(block.terminator.as_ref().expect("verified MIR")) {
             if !definitions[index].contains(&local) {
@@ -629,6 +684,11 @@ fn rvalue_locals(value: &Rvalue) -> Vec<LocalId> {
         | Rvalue::Coerce { operand, .. }
         | Rvalue::Cast { operand, .. }
         | Rvalue::Unary { operand, .. } => operand_local(operand).into_iter().collect(),
+        Rvalue::Load(place) => vec![place.local],
+        Rvalue::Aggregate { fields, .. } => fields
+            .iter()
+            .filter_map(|(_, operand)| operand_local(operand))
+            .collect(),
         Rvalue::Binary { left, right, .. } => operand_local(left)
             .into_iter()
             .chain(operand_local(right))
@@ -681,7 +741,7 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
         if signature.module.0 as usize >= ssa.modules.len() {
             return Err(fail("SSA signature names an unknown module".into()));
         }
-        verify_ssa_function(function, signature, &ssa.signatures, &fail)?;
+        verify_ssa_function(function, signature, &ssa.signatures, &ssa.structs, &fail)?;
     }
     Ok(VerifiedSsa(ssa))
 }
@@ -691,6 +751,7 @@ fn verify_ssa_function(
     function: &SsaFunction,
     signature: &FunctionSignature,
     signatures: &[FunctionSignature],
+    structs: &[StructInfo],
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
     if function.return_type != signature.return_type
@@ -873,7 +934,14 @@ fn verify_ssa_function(
             for operand in op_operands(&instruction.op) {
                 validate_use(operand, block.id, Some(index)).map_err(&fail)?;
             }
-            verify_op(&instruction.op, instruction.ty, signatures, &operand_ty).map_err(&fail)?;
+            verify_op(
+                &instruction.op,
+                instruction.ty,
+                signatures,
+                structs,
+                &operand_ty,
+            )
+            .map_err(&fail)?;
         }
         match &block.terminator {
             SsaTerminator::Branch { condition, .. } => {
@@ -894,16 +962,56 @@ fn verify_ssa_function(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn verify_op(
     op: &SsaOp,
     result: Type,
     signatures: &[FunctionSignature],
+    structs: &[StructInfo],
     operand_ty: &impl Fn(&SsaOperand) -> Result<Type, String>,
 ) -> Result<(), String> {
     match op {
         SsaOp::Use(operand) => {
             if operand_ty(operand)? != result {
                 return Err("SSA copy type mismatch".into());
+            }
+        }
+        SsaOp::Aggregate { struct_id, fields } => {
+            let info = structs
+                .get(struct_id.0 as usize)
+                .filter(|info| info.id == *struct_id)
+                .ok_or_else(|| "SSA aggregate names unknown struct".to_string())?;
+            if result != Type::Struct(*struct_id) || fields.len() != info.fields.len() {
+                return Err("SSA aggregate arity/result mismatch".into());
+            }
+            for ((field_id, operand), declared) in fields.iter().zip(&info.fields) {
+                if *field_id != declared.id || operand_ty(operand)? != declared.ty {
+                    return Err("SSA aggregate field identity/type mismatch".into());
+                }
+            }
+        }
+        SsaOp::ExtractField {
+            aggregate,
+            projections,
+        } => {
+            if projections.is_empty()
+                || field_path_type(operand_ty(aggregate)?, projections, structs)? != result
+            {
+                return Err("SSA extract-field contract invalid".into());
+            }
+        }
+        SsaOp::InsertField {
+            aggregate,
+            projections,
+            value,
+        } => {
+            let aggregate_ty = operand_ty(aggregate)?;
+            if aggregate_ty != result
+                || result.as_struct().is_none()
+                || projections.is_empty()
+                || field_path_type(aggregate_ty, projections, structs)? != operand_ty(value)?
+            {
+                return Err("SSA insert-field contract invalid".into());
             }
         }
         SsaOp::Coerce {
@@ -984,6 +1092,24 @@ fn verify_op(
     Ok(())
 }
 
+fn field_path_type(
+    mut ty: Type,
+    projections: &[FieldId],
+    structs: &[StructInfo],
+) -> Result<Type, String> {
+    for field_id in projections {
+        let owner = ty
+            .as_struct()
+            .ok_or_else(|| "field path projects non-struct type".to_string())?;
+        let field = structs
+            .get(owner.0 as usize)
+            .and_then(|info| info.fields.iter().find(|field| field.id == *field_id))
+            .ok_or_else(|| "field path identity does not belong to struct".to_string())?;
+        ty = field.ty;
+    }
+    Ok(ty)
+}
+
 fn valid_coercion(kind: CoercionKind, from: Type, to: Type) -> bool {
     match (kind, from, to) {
         (CoercionKind::SignExtend, Type::Integer(a), Type::Integer(b)) => {
@@ -1006,6 +1132,11 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         SsaOp::Use(value)
         | SsaOp::Coerce { operand: value, .. }
         | SsaOp::Cast { operand: value, .. } => vec![value],
+        SsaOp::Aggregate { fields, .. } => fields.iter().map(|(_, value)| value).collect(),
+        SsaOp::ExtractField { aggregate, .. } => vec![aggregate],
+        SsaOp::InsertField {
+            aggregate, value, ..
+        } => vec![aggregate, value],
         SsaOp::Unary { operand, .. } => vec![operand],
         SsaOp::Binary { left, right, .. } => vec![left, right],
         SsaOp::Call { args, .. } => args.iter().collect(),
@@ -1193,5 +1324,22 @@ mod tests {
             *secondary_trap = None;
         }
         assert!(verify_ssa(division).is_err());
+    }
+
+    #[test]
+    fn verifier_rejects_corrupt_aggregate_projection() {
+        let mut ssa = raw_ssa(
+            "struct Inner{int x;}struct Outer{Inner inner;}int main(){Outer o=Outer(Inner(1));o.inner.x=2;return o.inner.x;}",
+        );
+        let insertion = ssa.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| matches!(instruction.op, SsaOp::InsertField { .. }))
+            .unwrap();
+        if let SsaOp::InsertField { projections, .. } = &mut insertion.op {
+            projections.reverse();
+        }
+        assert!(verify_ssa(ssa).is_err());
     }
 }
