@@ -1256,3 +1256,66 @@ dispatch remain future work. The recommended NEXT-VERTICAL-9 is ownership and
 reference/view semantics before introducing generic containers: monomorphized
 value aggregates now provide the type/layout substrate, while container work
 without lifecycle rules would force another representation rewrite.
+
+## 26. NEXT-VERTICAL-9 implementation confirmation
+
+Vertical-9 implements only explicit non-owning references and views; it does
+not implement the general ownership model recommended after Vertical-8. Source
+types are `ref T` and `ref mut T`, with `&place`, `&mut place` and explicit
+`*reference`. `mut` is write capability rather than uniqueness. Overlapping
+mutable references and shared/mutable aliases are legal, and neither MIR nor
+LLVM attaches an exclusivity or `noalias` promise.
+
+The canonical arena adds
+`TypeData::Reference { pointee: TypeId, mutable: bool }`. Reference construction
+interns normally, substitution recurses through the pointee, and shared versus
+mutable capabilities receive distinct IDs. HIR extends `HirPlace` with either a
+local base or typed dereference base, so `(*r).field` and future index/pointer
+projections remain one location abstraction. `Borrow` carries the exact
+reference TypeId and borrow capability. Addressability analysis marks the root
+local whenever it or a nested field is borrowed.
+
+The non-escape implementation is intentionally syntactic and conservative.
+References are admitted as parameters, call arguments and initialized locals;
+reference locals cannot be rebound. Return types containing references,
+struct fields, enum payloads and reference-valued generic arguments are
+rejected before lowering. Since every local requires an initializer, names are
+lexically scoped and references cannot be reassigned or returned, a local
+binding cannot outlive a borrowed root visible at its initializer. This is the
+complete V9 provenance proof; there are no named lifetimes, NLL/region solver,
+borrow exclusivity, ref patterns or temporary lifetime extension.
+
+MIR retains semantic `Borrow`, dereference places and exact capability checks.
+Its verifier validates pointee types, initialized addressable roots, mutable
+stores and non-escape aggregate/signature invariants. The central SSA change is
+a selective memory boundary. Locals not marked address-taken continue through
+the existing scalar/aggregate promotion and functional `InsertField` path.
+Only address-taken roots become `SsaMemoryLocal`; reads, writes and address
+creation are explicit aliasable `Load`, `Store` and `Borrow` effects. A store
+through any reference therefore cannot leave a stale promoted definition of
+its original local. This deliberately avoids whole-program MemorySSA while
+remaining sound for the admitted aliasing model.
+
+LLVM allocates stable stack storage only for those memory locals, stores an
+address-taken incoming parameter at function entry, and lowers projected
+addresses with typed `getelementptr` followed by `load`/`store`. Reference
+parameters and values use opaque LLVM pointers in the internal bootstrap ABI;
+aggregate pointees are not copied at the call boundary. No source null, raw
+pointer, pointer arithmetic, address cast/equality, heap allocation, ARC,
+move-only value, destructor or array feature was added.
+
+Qualification covers scalar and aggregate alias coherence, two mutable aliases,
+shared plus mutable overlap, generic `ref T`, nested field borrows, cross-module
+reference parameters, canonical type identity, all required diagnostic
+families, deterministic dumps and LLVM verifier/native execution. An existing
+V8 fixture still emits no `alloca`; scalar and aggregate V9 timing fixtures
+spill only address-taken roots. The accepted debt is the conservative ban on
+returned/stored/generic-argument references, stack-only stable storage, no
+general effect/MemorySSA framework, and an internal pointer ABI.
+
+For NEXT-VERTICAL-10, close one owning-buffer decision before adding arrays.
+The recommended dependency slice is a fixed-size owning contiguous buffer plus
+non-owning slice/view descriptor built on this Place/reference boundary, with
+explicit reallocation invalidation and return/storage lifetime rules. Do not
+infer uniqueness from `ref mut`; if optimization needs it, design a separate
+unique/restrict capability with its own source and verifier contract.

@@ -56,3 +56,6 @@ float_to_int_runtime	V1_CONTRACT	trap	n/a	programs/v4_float_to_int_trap.ae
 nan_to_int_runtime	V1_CONTRACT	trap	n/a	programs/v4_nan_to_int_trap.ae
 nominal_value_structs	V1_CONTRACT	accept:42	n/a	programs/v5_structs.ae
 nominal_payload_enums	V1_CONTRACT	accept:42	n/a	programs/v6_enums.ae
+non_owning_references	V1_CONTRACT	accept:31	n/a	programs/v9_references.ae
+scalar_reference_aliasing	V1_CONTRACT	accept:2	n/a	programs/v9_scalar_ref.ae
+aggregate_reference_aliasing	V1_CONTRACT	accept:5	n/a	programs/v9_aggregate_ref.ae

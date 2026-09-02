@@ -445,17 +445,52 @@ non-atomic counts and concurrency are **OPEN DECISIONS**.  The compiler MUST
 retain ownership/alias facts through optimization rather than reconstructing
 them from opaque runtime calls.
 
-### 5.3 References and lifetimes — OPEN DECISION
+### 5.3 Non-owning references — NEXT-VERTICAL-9 DECIDED baseline
 
-The language needs at least non-owning read access and mutable access for
-zero-copy slices, matrix views and FFI.  Candidate enforcement ranges from
-lexically scoped borrows to explicit view types with conservative escape
-checks.  A full Rust-style borrow checker is not assumed.
+Vertical-9 admits explicit, non-null, non-owning references:
 
-The decision must cover return of views, storage in aggregates, async/thread
-boundaries, mutation during iteration, reallocation invalidation and
-diagnostics.  The current borrowed `for-in` element rule is evidence that a
-narrow non-escaping model works and is a reusable starting point.
+```aether
+ref T
+ref mut T
+&place
+&mut place
+*reference
+```
+
+`ref T` grants read capability through that reference. `ref mut T` grants read
+and write capability. In this baseline `mut` does **not** mean unique,
+exclusive or `noalias`: multiple mutable references and shared/mutable overlap
+may designate the same storage. Read-only access through one `ref T` proves
+only that writes cannot occur through that capability; another alias may still
+mutate the object. No Rust-style exclusivity checker or LLVM `noalias`
+attribute follows from these types.
+
+Borrow creation requires an existing addressable Place (a local, nested field,
+or dereference projection). Rvalues, calls and aggregate temporaries are not
+borrowable and receive no temporary lifetime extension. Dereference is
+explicit; `*r` reads the pointee and is assignable only when `r : ref mut T`.
+Aggregate field access through a reference is spelled `(*r).field`. Parameters
+and call arguments retain explicit reference syntax, and the bootstrap ABI
+passes an address rather than a copied pointee.
+
+The V9 lifetime rule is deliberately conservative. References may be function
+parameters, temporary call arguments and initialized local bindings. Reference
+locals have one initialization and cannot be rebound. References cannot be
+returned, stored in struct fields or enum payloads, captured or instantiated as
+generic type arguments. A generic parameter may appear underneath `ref` in a
+parameter (`ref T`) and is substituted normally. With mandatory local
+initializers, lexical name visibility and no reference rebinding or return,
+these rules make a dangling local reference inexpressible without general
+region inference. Reference values copy only the non-owning view; they never
+copy, retain, release, move or otherwise own the pointee.
+
+Backend pointers are an internal representation, not raw-pointer source
+semantics. There is no null reference expression, address equality, pointer
+arithmetic, integer/reference cast or address exposure. Returning views,
+storing views, reallocation invalidation, concurrency/async crossings and a
+future unique/restrict capability remain **OPEN DECISIONS**. Vertical-9 is not
+the final Aether ownership model and introduces no heap allocation, ARC,
+destruction or move-only value.
 
 ## 6. Core data abstractions
 

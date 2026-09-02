@@ -1,4 +1,4 @@
-# Aether NEXT-VERTICAL-8
+# Aether NEXT-VERTICAL-9
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. It does not replace the production `aether` CLI or import any legacy
@@ -13,7 +13,7 @@ entry SourceFile
   -> global declaration collection -> parametric resolver/type analysis
   -> deduplicated concrete-instance worklist -> monomorphized TypedHir
   -> CFG lowering -> FlowMir -> VerifiedMir
-  -> scalar and aggregate promotion -> SsaIr -> VerifiedSsa
+  -> selective local promotion + explicit address-taken memory -> SsaIr -> VerifiedSsa
   -> LLVM backend -> textual LLVM
   -> clang toolchain -> Linux x86_64 executable
 ```
@@ -31,7 +31,7 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-8 grammar
+## Vertical-9 grammar
 
 ```text
 program    := import* (alias | struct | enum | function)+ EOF
@@ -45,7 +45,8 @@ function   := type IDENT generic-params? "(" parameters? ")" block
 generic-params := "<" IDENT ("," IDENT)* ">"
 parameters := parameter ("," parameter)*
 parameter  := type IDENT
-type       := (IDENT ".")? ("bool" | integer-type | float-type | IDENT)
+type       := "ref" "mut"? type
+            | (IDENT ".")? ("bool" | integer-type | float-type | IDENT)
               ("<" type ("," type)* ">")?
 block      := "{" statement* "}"
 statement  := type IDENT "=" expression ";"
@@ -57,14 +58,20 @@ statement  := type IDENT "=" expression ";"
 match-arm  := variant-path ("(" IDENT ("," IDENT)* ")")? "=>" block
 expression := integer | float | "true" | "false" | IDENT | apply
             | expression "." IDENT | "(" expression ")" | "-" expression
+            | "&" expression | "&" "mut" expression | "*" expression
             | expression ("*" | "/" | "%" | "+" | "-" | "<" | "<=" | ">" | ">="
                          | "==" | "!=") expression
 apply      := path ("<" type ("," type)* ">")? "(" arguments? ")"
             | type "." IDENT ("(" arguments? ")")?
 variant-path := type "." IDENT
 arguments  := expression ("," expression)*
-place      := IDENT ("." IDENT)*
+place      := IDENT ("." IDENT)* | "*" expression | "(" "*" expression ")" ("." IDENT)*
 ```
+
+The semantic restriction is narrower than the expression-shaped grammar:
+`&` and `&mut` accept only an existing resolved `Place`. No temporary lifetime
+extension exists, so arithmetic, calls and aggregate constructors cannot be
+borrowed.
 
 Application syntax remains neutral in the AST. Semantic analysis resolves its
 source application/path to exactly one of a declaration call plus explicit
@@ -138,8 +145,10 @@ round according to IEEE semantics. Bool has no numeric conversions.
 Canonical semantic types use the compact, copyable, session-local identity
 `TypeId(u32)`. A session-owned `TypeArena` provides the only authoritative
 `TypeId -> TypeData` mapping and interns the reverse `TypeData -> TypeId`
-mapping. Its current data variants are `Bool`, `Integer`, `Float`,
-`Struct(StructId)` and `Enum(EnumId)`. HIR is the first canonical boundary;
+mapping. Its current data variants are `Bool`, `Integer`, `Float`, nominal and
+applied aggregate forms, generic parameters, and
+`Reference { pointee: TypeId, mutable: bool }`. Repeated `ref T` resolution
+reuses one ID, while `ref T` and `ref mut T` remain distinct. HIR is the first canonical boundary;
 HIR, MIR, SSA, signatures, fields and enum payloads transport IDs rather than
 copies of `TypeData`. MIR and SSA share the immutable arena through ordinary
 Rust `Arc` ownership. IDs are never addresses, persistent fingerprints, ABI
@@ -199,15 +208,14 @@ function-local `LocalId` identities and value semantics.
 
 HIR carries the canonical type arena, `StructInfo`/`FieldInfo` and
 `EnumInfo`/`VariantInfo` tables plus
-fully resolved `StructInit`, `EnumInit`, matches and field places. MIR uses the
-reusable `Place { local, projections: FieldId* }`
-model for reads and nested stores. SSA promotes aggregates as ordinary SSA
-values: construction is `Aggregate`, field reads are `ExtractField`, and field
-mutation produces a new aggregate with `InsertField`. This functional update
-strategy makes copy-by-value observable without `alloca`, MemorySSA, sharing or
-ownership machinery. LLVM lowers these operations to named aggregate types,
-`insertvalue` and `extractvalue`; aggregate parameters and results use the
-internal bootstrap ABI by value.
+fully resolved `StructInit`, `EnumInit`, matches and field places. MIR extends
+the reusable `Place` model with a dereference base and represents borrow
+creation semantically. Non-address-taken locals and aggregates retain ordinary
+SSA (`Aggregate`, `ExtractField`, `InsertField`). A local whose address is taken
+crosses a selective memory boundary: SSA retains it as `MemoryLocal` and uses
+explicit aliasable `Load`, `Store` and `Borrow` operations. LLVM lowers only
+those roots to `alloca` plus typed GEP/load/store; ordinary programs remain
+allocation-free aggregate SSA.
 
 MIR lowers enum matching to `EnumDiscriminant` and a reusable multi-way
 `Switch`; arm entries perform explicit `EnumPayload` copies into binding locals.
@@ -274,6 +282,37 @@ add no material regression on this non-generic microbenchmark; the SSA change
 is within the expected noise for such a small input. The cross-module generic
 fixture is intentionally not compared as if it were the same workload.
 
+### Vertical-9 timing snapshot
+
+A warm debug binary was run for 30 full compilations of three versioned
+fixtures. Mean core phase totals (parse, signatures, bodies, MIR lower/verify,
+SSA build/verify and LLVM text emission; excluding file discovery and clang)
+were approximately 941.3 us for the existing generic `v8_smoke.ae`, 462.7 us
+for `v9_scalar_ref.ae`, and 515.3 us for `v9_aggregate_ref.ae`. The fixtures
+have intentionally different sizes, so these are workload snapshots rather
+than a before/after speedup claim. Inspection confirms that the V8 fixture has
+no `alloca`; the two V9 fixtures spill only address-taken roots.
+
+## Vertical-9 non-owning reference contract
+
+`ref T` is a readable, non-null, non-owning view. `ref mut T` additionally
+permits writes through that view. `mut` is a capability, not uniqueness:
+mutable aliases and shared/mutable overlap are allowed, and codegen emits no
+`noalias` or whole-object immutability promise from either reference kind.
+Calls borrow explicitly (`read(&x)`, `write(&mut x)`), dereference is explicit
+(`*r`, `(*r).field`), and reference parameters use the bootstrap pointer ABI
+without copying an aggregate pointee.
+
+V9 deliberately uses conservative non-escape rules instead of a general
+lifetime or ownership system. References may be parameters, temporary call
+arguments and single-initialization locals; reference locals cannot be rebound.
+Functions cannot return references, aggregates cannot store them, and generic
+type arguments cannot themselves be references. These restrictions make a
+dangling lexical reference inexpressible with the current initialized-local
+grammar. There are no null references, raw pointers, pointer arithmetic,
+address comparisons/casts, heap ownership, ARC, moves or destructors in this
+vertical.
+
 ## Bootstrap ABI and deliberate limits
 
 One entry module plus transitively imported source modules and exactly one
@@ -298,6 +337,6 @@ module initializers or initialization order. This is precisely why import
 cycles have no execution-order meaning in this slice. There are also no
 packages, nested/selective/wildcard/aliased imports, reexports, visibility
 keywords, overloads, generic constraints/traits, generic aliases, function values, closures, extern functions,
-heap values, strings, named initializers, methods, ownership, optimization
+heap values, strings, named initializers, methods, general ownership, optimization
 pipeline, public ABI, runtime, or LLVM library binding. Unsupported forms fail
 closed before lowering.

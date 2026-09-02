@@ -1,8 +1,8 @@
-//! Recursive-descent parser for the deliberately closed Vertical-8 grammar.
+//! Recursive-descent parser for the deliberately closed Vertical-9 grammar.
 
 use crate::{
     AstAlias, AstBinaryOp, AstBlock, AstEnum, AstExpr, AstExprKind, AstField, AstFunction,
-    AstGenericParam, AstImport, AstMatchArm, AstParameter, AstPlace, AstStmt, AstStmtKind,
+    AstGenericParam, AstImport, AstMatchArm, AstParameter, AstReferenceType, AstStmt, AstStmtKind,
     AstStruct, AstType, AstUnaryOp, AstVariant, AstVariantPattern, Diagnostic, DiagnosticCategory,
     ParsedAst, Phase, SourceFile, Token, TokenKind,
 };
@@ -222,6 +222,21 @@ impl Parser {
     }
 
     fn ty(&mut self) -> Result<AstType, Diagnostic> {
+        if let Some(reference) = self.consume(TokenKind::KwRef) {
+            let mutable = self.consume(TokenKind::KwMut).is_some();
+            let pointee = self.ty()?;
+            let span = reference.span.through(pointee.span);
+            return Ok(AstType {
+                module: None,
+                name: if mutable { "ref mut" } else { "ref" }.into(),
+                arguments: Vec::new(),
+                reference: Some(AstReferenceType {
+                    pointee: Box::new(pointee),
+                    mutable,
+                }),
+                span,
+            });
+        }
         let token = match self.current().kind {
             TokenKind::KwInt | TokenKind::KwBool | TokenKind::Identifier => self.advance(),
             _ => return Err(self.error("E0100", "expected type name")),
@@ -245,6 +260,7 @@ impl Parser {
             module,
             name,
             arguments,
+            reference: None,
             span,
         })
     }
@@ -300,7 +316,7 @@ impl Parser {
     fn statement(&mut self) -> Result<AstStmt, Diagnostic> {
         let start = self.current().span;
         let kind = match self.current().kind {
-            TokenKind::KwInt | TokenKind::KwBool => {
+            TokenKind::KwInt | TokenKind::KwBool | TokenKind::KwRef => {
                 let ty = self.ty()?;
                 let name = self
                     .expect(TokenKind::Identifier, "expected local name")?
@@ -326,29 +342,14 @@ impl Parser {
                     initializer,
                 }
             }
-            TokenKind::Identifier => {
-                let root = self.advance();
-                let mut fields = Vec::new();
-                let mut end = root.span;
-                while self.consume(TokenKind::Dot).is_some() {
-                    let field =
-                        self.expect(TokenKind::Identifier, "expected field name after `.`")?;
-                    end = field.span;
-                    fields.push((field.lexeme, field.span));
-                }
+            TokenKind::Identifier | TokenKind::Star | TokenKind::LeftParen => {
+                let place = self.expression()?;
                 self.expect(
                     TokenKind::Equal,
                     "only assignment statements are admitted here",
                 )?;
                 let value = self.expression()?;
-                AstStmtKind::Assign {
-                    place: AstPlace {
-                        root: root.lexeme,
-                        fields,
-                        span: root.span.through(end),
-                    },
-                    value,
-                }
+                AstStmtKind::Assign { place, value }
             }
             TokenKind::KwReturn => {
                 self.advance();
@@ -392,7 +393,7 @@ impl Parser {
                 });
             }
             TokenKind::KwMatch => return self.match_statement(start),
-            _ => return Err(self.error("E0102", "expected a Vertical-8 statement")),
+            _ => return Err(self.error("E0102", "expected a Vertical-9 statement")),
         };
         let semicolon = self.expect(TokenKind::Semicolon, "expected `;` after statement")?;
         Ok(AstStmt {
@@ -592,6 +593,31 @@ impl Parser {
             Ok(AstExpr {
                 kind: AstExprKind::Unary {
                     op: AstUnaryOp::Negate,
+                    operand: Box::new(operand),
+                },
+                span,
+            })
+        } else if let Some(star) = self.consume(TokenKind::Star) {
+            let operand = self.unary()?;
+            let span = star.span.through(operand.span);
+            Ok(AstExpr {
+                kind: AstExprKind::Unary {
+                    op: AstUnaryOp::Dereference,
+                    operand: Box::new(operand),
+                },
+                span,
+            })
+        } else if let Some(reference) = self.consume(TokenKind::Ampersand) {
+            let mutable = self.consume(TokenKind::KwMut).is_some();
+            let operand = self.unary()?;
+            let span = reference.span.through(operand.span);
+            Ok(AstExpr {
+                kind: AstExprKind::Unary {
+                    op: if mutable {
+                        AstUnaryOp::BorrowMutable
+                    } else {
+                        AstUnaryOp::BorrowShared
+                    },
                     operand: Box::new(operand),
                 },
                 span,
@@ -797,6 +823,16 @@ impl Parser {
 
     fn looks_like_local_declaration(&self) -> bool {
         fn skip_type(tokens: &[Token], mut index: usize) -> Option<usize> {
+            if tokens.get(index)?.kind == TokenKind::KwRef {
+                index += 1;
+                if tokens
+                    .get(index)
+                    .is_some_and(|token| token.kind == TokenKind::KwMut)
+                {
+                    index += 1;
+                }
+                return skip_type(tokens, index);
+            }
             if !matches!(
                 tokens.get(index)?.kind,
                 TokenKind::Identifier | TokenKind::KwInt | TokenKind::KwBool

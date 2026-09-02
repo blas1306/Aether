@@ -19,3 +19,4 @@ errors/v5_unqualified	reject:E0204	imported structs require qualification
 errors/v5_cross_nominality	reject:E0214	same-layout structs in different modules remain nominally distinct
 v6_enums	accept:42	qualified payload enums, aliases and exhaustive matching
 errors/v6_unqualified	reject:E0204	imported enums require qualification
+v9_references	accept:9	cross-module shared/mutable reference parameters

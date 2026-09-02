@@ -12,7 +12,8 @@ use aether_frontend::{
 };
 
 use crate::{
-    BinaryOp, BlockId, MirFunction, Operand, Rvalue, Terminator, TrapKind, UnaryOp, VerifiedMir,
+    BinaryOp, BlockId, MirFunction, Operand, Place, PlaceBase, Rvalue, Terminator, TrapKind,
+    UnaryOp, VerifiedMir,
 };
 
 /// Fresh SSA value identity.
@@ -56,12 +57,50 @@ pub struct SsaParameter {
     pub ty: TypeId,
 }
 
+/// One address-taken MIR local retained as explicit stack-backed storage.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SsaMemoryLocal {
+    pub local: LocalId,
+    pub ty: TypeId,
+    pub parameter: Option<ValueId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SsaPlace {
+    pub base: SsaPlaceBase,
+    pub projections: Vec<FieldId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SsaPlaceBase {
+    MemoryLocal(LocalId),
+    Dereference {
+        reference: SsaOperand,
+        mutable: bool,
+    },
+}
+
 /// SSA computation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum SsaOp {
     /// Scalar copy.
     Use(SsaOperand),
+    /// Alias-aware memory read from address-taken storage or a dereference.
+    Load {
+        place: SsaPlace,
+    },
+    /// Alias-aware memory write. Its SSA result is an intentionally unused
+    /// copy of `value`; the observable operation is the store effect.
+    Store {
+        place: SsaPlace,
+        value: SsaOperand,
+    },
+    /// Address creation for a typed non-owning reference.
+    Borrow {
+        place: SsaPlace,
+        mutable: bool,
+    },
     /// Nominal aggregate construction.
     Aggregate {
         struct_id: StructId,
@@ -185,6 +224,8 @@ pub struct SsaFunction {
     pub function_id: aether_frontend::FunctionId,
     /// Entry parameter definitions in call order.
     pub parameters: Vec<SsaParameter>,
+    /// Only address-taken locals cross the SSA/memory boundary.
+    pub memory_locals: Vec<SsaMemoryLocal>,
     /// Canonical return type.
     pub return_type: TypeId,
     /// Entry block.
@@ -281,6 +322,7 @@ pub fn build_ssa(mir: &VerifiedMir) -> SsaIr {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn build_function_ssa(function: &MirFunction) -> SsaFunction {
     let cfg = Cfg::new(function);
     let dominance = Dominance::compute(&cfg, function.entry);
@@ -290,7 +332,11 @@ fn build_function_ssa(function: &MirFunction) -> SsaFunction {
     let mut definitions = vec![BTreeSet::new(); function.locals.len()];
     for block in &function.blocks {
         for instruction in &block.instructions {
-            definitions[instruction.destination.local.0 as usize].insert(block.id);
+            if let PlaceBase::Local(local) = &instruction.destination.base
+                && !function.locals[local.0 as usize].address_taken
+            {
+                definitions[local.0 as usize].insert(block.id);
+            }
         }
     }
     for (local_index, blocks) in definitions.iter().enumerate() {
@@ -317,6 +363,19 @@ fn build_function_ssa(function: &MirFunction) -> SsaFunction {
             local: parameter.local,
             value: ValueId(u32::try_from(index).expect("parameter count fits u32")),
             ty: parameter.ty,
+        })
+        .collect();
+    let memory_locals = function
+        .locals
+        .iter()
+        .filter(|local| local.address_taken)
+        .map(|local| SsaMemoryLocal {
+            local: local.id,
+            ty: local.ty,
+            parameter: parameters
+                .iter()
+                .find(|parameter| parameter.local == local.id)
+                .map(|parameter| parameter.value),
         })
         .collect();
     let mut next_value = u32::try_from(parameters.len()).expect("parameter count fits u32");
@@ -370,6 +429,7 @@ fn build_function_ssa(function: &MirFunction) -> SsaFunction {
         id: function.id,
         function_id: function.function_id,
         parameters,
+        memory_locals,
         return_type: function.return_type,
         entry: function.entry,
         blocks,
@@ -394,9 +454,39 @@ fn rename_block(
         pushes[local.0 as usize] += 1;
     }
     for instruction in &mir.blocks[block_index].instructions {
-        let destination_local = instruction.destination.local;
+        let memory_destination = match &instruction.destination.base {
+            PlaceBase::Local(local) => mir.locals[local.0 as usize].address_taken,
+            PlaceBase::Dereference { .. } => true,
+        };
+        if memory_destination {
+            let value_ty = rvalue_result_type(mir, &instruction.destination, &instruction.value);
+            let value_result = ValueId(*next_value);
+            *next_value += 1;
+            blocks[block_index].instructions.push(SsaInstruction {
+                result: value_result,
+                ty: value_ty,
+                op: rename_rvalue(&instruction.value, stacks, mir),
+                span: instruction.span,
+            });
+            let store_result = ValueId(*next_value);
+            *next_value += 1;
+            blocks[block_index].instructions.push(SsaInstruction {
+                result: store_result,
+                ty: value_ty,
+                op: SsaOp::Store {
+                    place: rename_place(&instruction.destination, stacks, mir),
+                    value: SsaOperand::Value(value_result),
+                },
+                span: instruction.span,
+            });
+            continue;
+        }
+        let PlaceBase::Local(destination_local) = &instruction.destination.base else {
+            unreachable!("memory destinations handled above")
+        };
+        let destination_local = *destination_local;
         let op = if instruction.destination.projections.is_empty() {
-            rename_rvalue(&instruction.value, stacks)
+            rename_rvalue(&instruction.value, stacks, mir)
         } else {
             let Rvalue::Use(value) = &instruction.value else {
                 unreachable!("verified projected stores use a materialized value")
@@ -457,16 +547,28 @@ fn rename_block(
     }
 }
 
-fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>]) -> SsaOp {
+#[allow(clippy::too_many_lines)]
+fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> SsaOp {
     match value {
         Rvalue::Use(operand) => SsaOp::Use(rename_operand(operand, stacks)),
-        Rvalue::Load(place) => SsaOp::ExtractField {
-            aggregate: SsaOperand::Value(
-                *stacks[place.local.0 as usize]
-                    .last()
-                    .expect("verified MIR load has reaching aggregate definition"),
-            ),
-            projections: place.projections.clone(),
+        Rvalue::Load(place) => match &place.base {
+            PlaceBase::Local(local) if !mir.locals[local.0 as usize].address_taken => {
+                SsaOp::ExtractField {
+                    aggregate: SsaOperand::Value(
+                        *stacks[local.0 as usize]
+                            .last()
+                            .expect("verified MIR load has reaching aggregate definition"),
+                    ),
+                    projections: place.projections.clone(),
+                }
+            }
+            _ => SsaOp::Load {
+                place: rename_place(place, stacks, mir),
+            },
+        },
+        Rvalue::Borrow { place, mutable } => SsaOp::Borrow {
+            place: rename_place(place, stacks, mir),
+            mutable: *mutable,
         },
         Rvalue::Aggregate { struct_id, fields } => SsaOp::Aggregate {
             struct_id: *struct_id,
@@ -547,6 +649,42 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>]) -> SsaOp {
                 .map(|argument| rename_operand(argument, stacks))
                 .collect(),
         },
+    }
+}
+
+fn rename_place(place: &Place, stacks: &[Vec<ValueId>], mir: &MirFunction) -> SsaPlace {
+    SsaPlace {
+        base: match &place.base {
+            PlaceBase::Local(local) => {
+                debug_assert!(mir.locals[local.0 as usize].address_taken);
+                SsaPlaceBase::MemoryLocal(*local)
+            }
+            PlaceBase::Dereference { reference, mutable } => SsaPlaceBase::Dereference {
+                reference: rename_operand(reference, stacks),
+                mutable: *mutable,
+            },
+        },
+        projections: place.projections.clone(),
+    }
+}
+
+fn rvalue_result_type(function: &MirFunction, destination: &Place, value: &Rvalue) -> TypeId {
+    match value {
+        Rvalue::Use(operand) => mir_operand_type(function, operand),
+        _ => match &destination.base {
+            PlaceBase::Local(local) if destination.projections.is_empty() => {
+                function.locals[local.0 as usize].ty
+            }
+            _ => unreachable!("verified non-copy memory destination is a full local"),
+        },
+    }
+}
+
+fn mir_operand_type(function: &MirFunction, operand: &Operand) -> TypeId {
+    match operand {
+        Operand::Local(local) => function.locals[local.0 as usize].ty,
+        Operand::Int { ty, .. } | Operand::Float { ty, .. } => *ty,
+        Operand::Bool(_) => TypeId::BOOL,
     }
 }
 
@@ -718,17 +856,21 @@ fn mir_liveness(function: &MirFunction, cfg: &Cfg) -> Vec<BTreeSet<LocalId>> {
     for block in &function.blocks {
         let index = block.id.0 as usize;
         for instruction in &block.instructions {
-            for local in rvalue_locals(&instruction.value) {
+            for local in rvalue_locals(function, &instruction.value) {
                 if !definitions[index].contains(&local) {
                     uses[index].insert(local);
                 }
             }
-            if !instruction.destination.projections.is_empty()
-                && !definitions[index].contains(&instruction.destination.local)
+            if let PlaceBase::Local(local) = &instruction.destination.base
+                && !function.locals[local.0 as usize].address_taken
             {
-                uses[index].insert(instruction.destination.local);
+                if !instruction.destination.projections.is_empty()
+                    && !definitions[index].contains(local)
+                {
+                    uses[index].insert(*local);
+                }
+                definitions[index].insert(*local);
             }
-            definitions[index].insert(instruction.destination.local);
         }
         for local in terminator_locals(block.terminator.as_ref().expect("verified MIR")) {
             if !definitions[index].contains(&local) {
@@ -758,13 +900,21 @@ fn mir_liveness(function: &MirFunction, cfg: &Cfg) -> Vec<BTreeSet<LocalId>> {
     live_in
 }
 
-fn rvalue_locals(value: &Rvalue) -> Vec<LocalId> {
+fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
     match value {
         Rvalue::Use(operand)
         | Rvalue::Coerce { operand, .. }
         | Rvalue::Cast { operand, .. }
         | Rvalue::Unary { operand, .. } => operand_local(operand).into_iter().collect(),
-        Rvalue::Load(place) => vec![place.local],
+        Rvalue::Load(place) | Rvalue::Borrow { place, .. } => match &place.base {
+            PlaceBase::Local(local) if !function.locals[local.0 as usize].address_taken => {
+                vec![*local]
+            }
+            PlaceBase::Local(_) => Vec::new(),
+            PlaceBase::Dereference { reference, .. } => {
+                operand_local(reference).into_iter().collect()
+            }
+        },
         Rvalue::Aggregate { fields, .. } => fields
             .iter()
             .filter_map(|(_, operand)| operand_local(operand))
@@ -855,6 +1005,7 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
                         .map(|phi| phi.ty)
                         .chain(block.instructions.iter().map(|instruction| instruction.ty))
                 }))
+                .chain(function.memory_locals.iter().map(|memory| memory.ty))
         }))
     {
         if !ssa.types.is_valid(ty) {
@@ -867,6 +1018,25 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
         }
         if signature.module.0 as usize >= ssa.modules.len() {
             return Err(fail("SSA signature names an unknown module".into()));
+        }
+        if ssa.types.contains_reference(signature.return_type)
+            || ssa.structs.iter().any(|info| {
+                info.fields
+                    .iter()
+                    .any(|field| ssa.types.contains_reference(field.ty))
+            })
+            || ssa.enums.iter().any(|info| {
+                info.variants.iter().any(|variant| {
+                    variant
+                        .payloads
+                        .iter()
+                        .any(|payload| ssa.types.contains_reference(payload.ty))
+                })
+            })
+        {
+            return Err(fail(
+                "SSA violates Vertical-9 reference non-escape storage rules".into(),
+            ));
         }
         if signature
             .parameters
@@ -968,6 +1138,19 @@ fn verify_ssa_function(
             .is_some()
         {
             return Err(fail("SSA parameter value has multiple definitions".into()));
+        }
+    }
+    let mut seen_memory = BTreeSet::new();
+    for memory in &function.memory_locals {
+        if !seen_memory.insert(memory.local)
+            || memory.parameter.is_some_and(|value| {
+                !function
+                    .parameters
+                    .iter()
+                    .any(|parameter| parameter.local == memory.local && parameter.value == value)
+            })
+        {
+            return Err(fail("SSA memory-local metadata is invalid".into()));
         }
     }
     for block in &function.blocks {
@@ -1102,6 +1285,7 @@ fn verify_ssa_function(
                 structs,
                 enums,
                 types,
+                &function.memory_locals,
                 &operand_ty,
             )
             .map_err(&fail)?;
@@ -1178,6 +1362,7 @@ fn verify_ssa_function(
 }
 
 #[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 fn verify_op(
     op: &SsaOp,
     result: TypeId,
@@ -1185,12 +1370,44 @@ fn verify_op(
     structs: &[StructInfo],
     enums: &[EnumInfo],
     types: &TypeArena,
+    memory_locals: &[SsaMemoryLocal],
     operand_ty: &impl Fn(&SsaOperand) -> Result<TypeId, String>,
 ) -> Result<(), String> {
     match op {
         SsaOp::Use(operand) => {
             if operand_ty(operand)? != result {
                 return Err("SSA copy type mismatch".into());
+            }
+        }
+        SsaOp::Load { place } => {
+            if ssa_place_type(place, memory_locals, structs, types, operand_ty)? != result {
+                return Err("SSA memory load type mismatch".into());
+            }
+        }
+        SsaOp::Store { place, value } => {
+            let place_ty = ssa_place_type(place, memory_locals, structs, types, operand_ty)?;
+            if place_ty != operand_ty(value)? || result != operand_ty(value)? {
+                return Err("SSA memory store type mismatch".into());
+            }
+            if matches!(
+                &place.base,
+                SsaPlaceBase::Dereference { mutable: false, .. }
+            ) {
+                return Err("SSA store through shared reference".into());
+            }
+        }
+        SsaOp::Borrow { place, mutable } => {
+            let pointee = ssa_place_type(place, memory_locals, structs, types, operand_ty)?;
+            if types.reference_info(result) != Some((pointee, *mutable)) {
+                return Err("SSA borrow result type mismatch".into());
+            }
+            if *mutable
+                && matches!(
+                    &place.base,
+                    SsaPlaceBase::Dereference { mutable: false, .. }
+                )
+            {
+                return Err("SSA mutable borrow through shared reference".into());
             }
         }
         SsaOp::Aggregate { struct_id, fields } => {
@@ -1367,6 +1584,35 @@ fn verify_op(
     Ok(())
 }
 
+fn ssa_place_type(
+    place: &SsaPlace,
+    memory_locals: &[SsaMemoryLocal],
+    structs: &[StructInfo],
+    types: &TypeArena,
+    operand_ty: &impl Fn(&SsaOperand) -> Result<TypeId, String>,
+) -> Result<TypeId, String> {
+    let mut ty = match &place.base {
+        SsaPlaceBase::MemoryLocal(local) => memory_locals
+            .iter()
+            .find(|memory| memory.local == *local)
+            .map(|memory| memory.ty)
+            .ok_or_else(|| "SSA place names unknown memory local".to_string())?,
+        SsaPlaceBase::Dereference { reference, mutable } => {
+            let (pointee, capability) = types
+                .reference_info(operand_ty(reference)?)
+                .ok_or_else(|| "SSA place dereferences non-reference".to_string())?;
+            if capability != *mutable {
+                return Err("SSA dereference capability cache mismatch".into());
+            }
+            pointee
+        }
+    };
+    for field in &place.projections {
+        ty = field_path_type(ty, &[*field], structs, types)?;
+    }
+    Ok(ty)
+}
+
 fn field_path_type(
     mut ty: TypeId,
     projections: &[FieldId],
@@ -1456,6 +1702,13 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         | SsaOp::Cast { operand: value, .. }
         | SsaOp::EnumDiscriminant { value, .. }
         | SsaOp::EnumPayload { value, .. } => vec![value],
+        SsaOp::Load { place } | SsaOp::Borrow { place, .. } => {
+            place_operand(place).into_iter().collect()
+        }
+        SsaOp::Store { place, value } => place_operand(place)
+            .into_iter()
+            .chain(std::iter::once(value))
+            .collect(),
         SsaOp::Aggregate { fields, .. } => fields.iter().map(|(_, value)| value).collect(),
         SsaOp::EnumConstruct { payloads, .. } => payloads.iter().collect(),
         SsaOp::ExtractField { aggregate, .. } => vec![aggregate],
@@ -1465,6 +1718,13 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         SsaOp::Unary { operand, .. } => vec![operand],
         SsaOp::Binary { left, right, .. } => vec![left, right],
         SsaOp::Call { args, .. } => args.iter().collect(),
+    }
+}
+
+fn place_operand(place: &SsaPlace) -> Option<&SsaOperand> {
+    match &place.base {
+        SsaPlaceBase::MemoryLocal(_) => None,
+        SsaPlaceBase::Dereference { reference, .. } => Some(reference),
     }
 }
 

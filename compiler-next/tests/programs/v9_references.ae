@@ -1,0 +1,70 @@
+struct Point {
+    int x;
+    int y;
+}
+
+struct Segment {
+    Point start;
+    Point end;
+}
+
+enum Number {
+    Integer(int),
+}
+
+T readValue<T>(ref T value) {
+    return *value;
+}
+
+int increment(ref mut int value) {
+    *value = *value + 1;
+    return 0;
+}
+
+int getX(ref Point point) {
+    return (*point).x;
+}
+
+int setX(ref mut Point point, int value) {
+    (*point).x = value;
+    return 0;
+}
+
+int readNumber(ref Number value) {
+    match (*value) {
+        Number.Integer(payload) => {
+            return payload;
+        }
+    }
+}
+
+int main() {
+    int x = 1;
+    ref mut int r = &mut x;
+    int before = x;
+    *r = 2;
+    int after = x;
+
+    ref mut int first = &mut x;
+    ref mut int second = &mut x;
+    *first = 3;
+    *second = *first + 1;
+
+    ref int shared = &x;
+    ref mut int writable = &mut x;
+    *writable = *shared + 1;
+    int ignored = increment(&mut x);
+
+    Point p = Point(10, 20);
+    ref Point point_view = &p;
+    int original_x = getX(point_view);
+    int point_ignored = setX(&mut p, original_x + 1);
+    ref mut int px = &mut p.x;
+    *px = *px + 1;
+
+    Segment segment = Segment(Point(7, 8), Point(9, 10));
+    ref int nested = &segment.start.x;
+    Number number = Number.Integer(3);
+    ref Number number_view = &number;
+    return after + readValue<int>(&x) + p.x + *nested + before + ignored + point_ignored + readNumber(number_view);
+}

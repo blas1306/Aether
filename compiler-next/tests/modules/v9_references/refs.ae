@@ -1,0 +1,8 @@
+int read(ref int value) {
+    return *value;
+}
+
+int write(ref mut int value, int replacement) {
+    *value = replacement;
+    return 0;
+}

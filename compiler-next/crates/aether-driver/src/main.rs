@@ -1,4 +1,4 @@
-//! Internal command-line entry point through NEXT-VERTICAL-8.
+//! Internal command-line entry point through NEXT-VERTICAL-9.
 
 use std::env;
 use std::path::PathBuf;

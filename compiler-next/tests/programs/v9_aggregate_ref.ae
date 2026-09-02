@@ -1,0 +1,11 @@
+struct Point {
+    int x;
+    int y;
+}
+
+int main() {
+    Point point = Point(1, 2);
+    ref mut Point view = &mut point;
+    (*view).x = 5;
+    return point.x;
+}

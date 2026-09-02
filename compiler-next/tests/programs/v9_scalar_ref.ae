@@ -1,0 +1,7 @@
+int main() {
+    int value = 1;
+    ref mut int view = &mut value;
+    int before = value;
+    *view = before + 1;
+    return value;
+}

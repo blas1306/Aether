@@ -13,8 +13,8 @@
     clippy::unused_self
 )]
 use crate::{
-    AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstMatchArm, AstPlace, AstStmtKind,
-    AstType, AstUnaryOp, Diagnostic, DiagnosticCategory, EnumId, FieldId, FloatType, GenericOwner,
+    AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstMatchArm, AstStmtKind, AstType,
+    AstUnaryOp, Diagnostic, DiagnosticCategory, EnumId, FieldId, FloatType, GenericOwner,
     GenericParamId, IntegerType, ParsedAst, Phase, SourceId, Span, StructId, Substitution,
     TargetProperties, TypeArena, TypeData, TypeId, VariantId,
 };
@@ -94,7 +94,7 @@ pub struct TypeLayout {
 /// Aggregate entries are the caches populated once during semantic analysis;
 /// scalar and target-sized integer layouts are computed from `target`. A
 /// compilation session has exactly one target, so no cross-target cache key or
-/// persistent layout identity is needed in Vertical-8.
+/// persistent layout identity is needed in Vertical-9.
 #[must_use]
 pub fn layout_of(
     types: &TypeArena,
@@ -132,6 +132,10 @@ pub fn layout_of(
             let (size, align) = types.cached_layout(ty)?;
             TypeLayout { size, align }
         }
+        TypeData::Reference { .. } => TypeLayout {
+            size: u64::from(target.pointer_width / 8),
+            align: u64::from(target.pointer_width / 8),
+        },
         TypeData::GenericParam(_) => return None,
     })
 }
@@ -178,6 +182,11 @@ pub fn format_type(
                 .join(", ");
             format!("{name}<{arguments}>")
         }
+        Some(TypeData::Reference { pointee, mutable }) => format!(
+            "ref {}{}",
+            if *mutable { "mut " } else { "" },
+            format_type(types, *pointee, structs, enums)
+        ),
         Some(data) => data.to_string(),
         None => types.format(ty),
     }
@@ -276,6 +285,8 @@ pub struct HirLocal {
     pub ty: TypeId,
     pub span: Span,
     pub parameter: bool,
+    /// Requires stable memory because this local, or one of its fields, is borrowed.
+    pub address_taken: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HirParameter {
@@ -477,9 +488,17 @@ pub struct HirMatchBinding {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HirPlace {
-    pub local: LocalId,
+    pub base: HirPlaceBase,
     pub projections: Vec<FieldId>,
     pub ty: TypeId,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HirPlaceBase {
+    Local(LocalId),
+    Dereference {
+        reference: Box<HirExpr>,
+        mutable: bool,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HirExpr {
@@ -499,6 +518,10 @@ pub enum HirExprKind {
     Bool(bool),
     Local(LocalId),
     Load(HirPlace),
+    Borrow {
+        place: HirPlace,
+        mutable: bool,
+    },
     Call {
         callee: HirCallTarget,
         type_arguments: Vec<TypeId>,
@@ -784,6 +807,18 @@ pub fn collect_program_signatures(
                 &enum_arities,
             )
             .map_err(|d| vec![src(d, module)])?;
+            if types.contains_reference(ty) {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0274",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "Vertical-9 references cannot be stored in struct fields",
+                        Some(field.span),
+                    ),
+                    module,
+                )]);
+            }
             let field_id = FieldId(next_field);
             next_field += 1;
             seen.insert(field.name.clone(), field_id);
@@ -873,6 +908,21 @@ pub fn collect_program_signatures(
                 })
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|d| vec![src(d, module)])?;
+            if let Some(payload) = payloads
+                .iter()
+                .find(|payload| types.contains_reference(payload.ty))
+            {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0275",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "Vertical-9 references cannot be stored in enum payloads",
+                        Some(payload.span),
+                    ),
+                    module,
+                )]);
+            }
             variants.push(VariantInfo {
                 id: variant_id,
                 owner: id,
@@ -951,6 +1001,18 @@ pub fn collect_program_signatures(
                 &enum_arities,
             )
             .map_err(|d| vec![src(d, module)])?;
+            if types.contains_reference(return_type) {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0273",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "Vertical-9 references cannot escape through a function return type",
+                        Some(f.return_type.span),
+                    ),
+                    module,
+                )]);
+            }
             signatures.push(FunctionSignature {
                 id,
                 module: module.info.id,
@@ -1108,6 +1170,22 @@ fn resolve_type_in_module(
     struct_arities: &[usize],
     enum_arities: &[usize],
 ) -> Result<TypeId, Diagnostic> {
+    if let Some(reference) = &ty.reference {
+        let pointee = resolve_type_in_module(
+            &reference.pointee,
+            current,
+            aliases,
+            struct_names,
+            enum_names,
+            imports,
+            module_names,
+            types,
+            generic_scope,
+            struct_arities,
+            enum_arities,
+        )?;
+        return Ok(types.intern_reference(pointee, reference.mutable));
+    }
     let target = if let Some(module) = &ty.module {
         let Some(target) = module_names.get(module).copied() else {
             return Err(Diagnostic::new(
@@ -1160,6 +1238,12 @@ fn resolve_type_in_module(
         if arguments.len() != expected {
             return Err(generic_arity(ty, expected));
         }
+        if arguments
+            .iter()
+            .any(|argument| types.contains_reference(*argument))
+        {
+            return Err(reference_generic_argument(ty.span));
+        }
         return if expected == 0 {
             Ok(types
                 .id_of(TypeData::Struct(id))
@@ -1172,6 +1256,12 @@ fn resolve_type_in_module(
         let expected = enum_arities[id.0 as usize];
         if arguments.len() != expected {
             return Err(generic_arity(ty, expected));
+        }
+        if arguments
+            .iter()
+            .any(|argument| types.contains_reference(*argument))
+        {
+            return Err(reference_generic_argument(ty.span));
         }
         return if expected == 0 {
             Ok(types
@@ -1213,6 +1303,16 @@ fn generic_arity(ty: &AstType, expected: usize) -> Diagnostic {
             ty.arguments.len()
         ),
         Some(ty.span),
+    )
+}
+
+fn reference_generic_argument(span: Span) -> Diagnostic {
+    Diagnostic::new(
+        "E0276",
+        Phase::Semantic,
+        DiagnosticCategory::Type,
+        "Vertical-9 references cannot be used as generic type arguments",
+        Some(span),
     )
 }
 
@@ -1287,6 +1387,18 @@ fn infer_generic_arguments(
         return Ok(());
     }
     match (types.get(pattern), types.get(actual)) {
+        (
+            Some(TypeData::Reference {
+                pointee: left,
+                mutable: left_mutable,
+            }),
+            Some(TypeData::Reference {
+                pointee: right,
+                mutable: right_mutable,
+            }),
+        ) if left_mutable == right_mutable => {
+            infer_generic_arguments(types, *left, *right, inferred)
+        }
         (
             Some(TypeData::StructInstance(left, left_args)),
             Some(TypeData::StructInstance(right, right_args)),
@@ -1462,6 +1574,13 @@ fn compute_aggregate_layouts(
                 .map_or(TypeLayout { size: 0, align: 1 }, |(size, align)| {
                     TypeLayout { size, align }
                 }),
+            TypeData::Reference { .. } => {
+                let bytes = u64::from(target.pointer_width / 8);
+                TypeLayout {
+                    size: bytes,
+                    align: bytes,
+                }
+            }
             TypeData::GenericParam(_) => TypeLayout { size: 0, align: 1 },
         }
     }
@@ -1787,7 +1906,7 @@ impl Monomorphizer<'_> {
                 Phase::Semantic,
                 DiagnosticCategory::Type,
                 format!(
-                    "expanding monomorphization of `{}` exceeds the Vertical-8 safety limit",
+                    "expanding monomorphization of `{}` exceeds the Vertical-9 safety limit",
                     signature.name
                 ),
                 Some(span),
@@ -1833,6 +1952,7 @@ impl Monomorphizer<'_> {
                     ty: self.substitute_type(local.ty, &substitution, local.span)?,
                     span: local.span,
                     parameter: local.parameter,
+                    address_taken: local.address_taken,
                 })
             })
             .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?;
@@ -1971,7 +2091,13 @@ impl Monomorphizer<'_> {
         substitution: &Substitution,
     ) -> Result<HirPlace, Vec<Diagnostic>> {
         Ok(HirPlace {
-            local: place.local,
+            base: match &place.base {
+                HirPlaceBase::Local(local) => HirPlaceBase::Local(*local),
+                HirPlaceBase::Dereference { reference, mutable } => HirPlaceBase::Dereference {
+                    reference: Box::new(self.substitute_expr(reference, substitution)?),
+                    mutable: *mutable,
+                },
+            },
             projections: place.projections.clone(),
             ty: self.substitute_type(place.ty, substitution, Span::in_source(SourceId(0), 0, 0))?,
         })
@@ -1991,6 +2117,10 @@ impl Monomorphizer<'_> {
             HirExprKind::Load(place) => {
                 HirExprKind::Load(self.substitute_place(place, substitution)?)
             }
+            HirExprKind::Borrow { place, mutable } => HirExprKind::Borrow {
+                place: self.substitute_place(place, substitution)?,
+                mutable: *mutable,
+            },
             HirExprKind::Call {
                 callee,
                 type_arguments,
@@ -2079,6 +2209,7 @@ impl Monomorphizer<'_> {
 
 fn type_depth(types: &TypeArena, ty: TypeId) -> usize {
     match types.get(ty) {
+        Some(TypeData::Reference { pointee, .. }) => 1 + type_depth(types, *pointee),
         Some(TypeData::StructInstance(_, args) | TypeData::EnumInstance(_, args)) => {
             1 + types
                 .arguments(*args)
@@ -2102,6 +2233,7 @@ fn type_contains(types: &TypeArena, outer: TypeId, needle: TypeId) -> bool {
                         .any(|argument| type_contains(types, *argument, needle))
                 })
             }
+            Some(TypeData::Reference { pointee, .. }) => type_contains(types, *pointee, needle),
             _ => false,
         }
 }
@@ -2145,6 +2277,13 @@ fn compute_concrete_layouts(
             TypeData::Float(FloatType::Float64) => Some(TypeLayout { size: 8, align: 8 }),
             TypeData::Struct(id) => Some(structs[id.0 as usize].layout),
             TypeData::Enum(id) => Some(enums[id.0 as usize].layout),
+            TypeData::Reference { .. } => {
+                let bytes = u64::from(target.pointer_width / 8);
+                Some(TypeLayout {
+                    size: bytes,
+                    align: bytes,
+                })
+            }
             TypeData::GenericParam(_)
             | TypeData::StructInstance(_, _)
             | TypeData::EnumInstance(_, _) => None,
@@ -2306,6 +2445,7 @@ fn analyze_function(
             ty: p.ty,
             span: p.span,
             parameter: true,
+            address_taken: false,
         });
         a.scopes[0].insert(p.name.clone(), local);
         parameters.push(HirParameter {
@@ -2401,6 +2541,12 @@ impl Analyzer<'_> {
         arguments: Vec<TypeId>,
         span: Span,
     ) -> Result<TypeId, Vec<Diagnostic>> {
+        if arguments
+            .iter()
+            .any(|argument| self.types.contains_reference(*argument))
+        {
+            return Err(vec![reference_generic_argument(span)]);
+        }
         let expected = self.struct_arities[id.0 as usize];
         if arguments.len() != expected {
             return Err(vec![generic_call_arity(
@@ -2425,6 +2571,12 @@ impl Analyzer<'_> {
         arguments: Vec<TypeId>,
         span: Span,
     ) -> Result<TypeId, Vec<Diagnostic>> {
+        if arguments
+            .iter()
+            .any(|argument| self.types.contains_reference(*argument))
+        {
+            return Err(vec![reference_generic_argument(span)]);
+        }
         let expected = self.enum_arities[id.0 as usize];
         if arguments.len() != expected {
             return Err(vec![generic_call_arity(
@@ -2538,12 +2690,28 @@ impl Analyzer<'_> {
                         ty,
                         span: s.span,
                         parameter: false,
+                        address_taken: false,
                     });
                     self.scopes.last_mut().unwrap().insert(name.clone(), local);
                     HirStmtKind::Local { local, initializer }
                 }
                 AstStmtKind::Assign { place, value } => {
-                    let place = self.resolve_place(place)?;
+                    let place = self.resolve_expr_place(place, true)?;
+                    if let HirPlaceBase::Local(local) = &place.base
+                        && place.projections.is_empty()
+                        && self
+                            .types
+                            .reference_info(self.locals[local.0 as usize].ty)
+                            .is_some()
+                    {
+                        return Err(vec![Diagnostic::new(
+                            "E0277",
+                            Phase::Semantic,
+                            DiagnosticCategory::Type,
+                            "Vertical-9 reference locals are single-initialization bindings and cannot be rebound",
+                            Some(s.span),
+                        )]);
+                    }
                     let value = self
                         .expression(value, Some(place.ty))
                         .map_err(|mut ds| {
@@ -2622,6 +2790,7 @@ impl Analyzer<'_> {
                 module: arm.pattern.module.clone(),
                 name: arm.pattern.enum_name.clone(),
                 arguments: arm.pattern.type_arguments.clone(),
+                reference: None,
                 span: arm.pattern.span,
             };
             let resolved_ty = resolve_type_in_module(
@@ -2720,6 +2889,7 @@ impl Analyzer<'_> {
                     ty: payload_ty,
                     span: *span,
                     parameter: false,
+                    address_taken: false,
                 });
                 self.scopes.last_mut().unwrap().insert(name.clone(), local);
                 bindings.push(HirMatchBinding {
@@ -2764,31 +2934,55 @@ impl Analyzer<'_> {
         })
     }
 
-    fn resolve_place(&mut self, place: &AstPlace) -> Result<HirPlace, Vec<Diagnostic>> {
-        let Some(local) = self.lookup(&place.root) else {
-            return Err(vec![unknown_name(&place.root, place.span)]);
-        };
-        let mut resolved = HirPlace {
-            local,
-            projections: Vec::new(),
-            ty: self.locals[local.0 as usize].ty,
-        };
-        for (name, span) in &place.fields {
-            self.project_field(&mut resolved, name, *span)?;
-        }
-        Ok(resolved)
-    }
-
-    fn resolve_expr_place(&mut self, expression: &AstExpr) -> Result<HirPlace, Vec<Diagnostic>> {
+    fn resolve_expr_place(
+        &mut self,
+        expression: &AstExpr,
+        writable: bool,
+    ) -> Result<HirPlace, Vec<Diagnostic>> {
         match &expression.kind {
             AstExprKind::Name(name) => {
                 let Some(local) = self.lookup(name) else {
                     return Err(vec![unknown_name(name, expression.span)]);
                 };
                 Ok(HirPlace {
-                    local,
+                    base: HirPlaceBase::Local(local),
                     projections: Vec::new(),
                     ty: self.locals[local.0 as usize].ty,
+                })
+            }
+            AstExprKind::Unary {
+                op: AstUnaryOp::Dereference,
+                operand,
+            } => {
+                let reference = self.expression(operand, None)?.expr;
+                let Some((pointee, mutable)) = self.types.reference_info(reference.ty) else {
+                    return Err(vec![Diagnostic::new(
+                        "E0271",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        format!(
+                            "cannot dereference non-reference type {}",
+                            self.type_name(reference.ty)
+                        ),
+                        Some(expression.span),
+                    )]);
+                };
+                if writable && !mutable {
+                    return Err(vec![Diagnostic::new(
+                        "E0272",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "cannot mutate through a shared `ref T`; `ref mut T` is required",
+                        Some(expression.span),
+                    )]);
+                }
+                Ok(HirPlace {
+                    base: HirPlaceBase::Dereference {
+                        reference: Box::new(reference),
+                        mutable,
+                    },
+                    projections: Vec::new(),
+                    ty: pointee,
                 })
             }
             AstExprKind::Field {
@@ -2807,15 +3001,15 @@ impl Analyzer<'_> {
                         )]);
                     }
                 }
-                let mut place = self.resolve_expr_place(base)?;
+                let mut place = self.resolve_expr_place(base, writable)?;
                 self.project_field(&mut place, name, *name_span)?;
                 Ok(place)
             }
             _ => Err(vec![Diagnostic::new(
-                "E0244",
+                "E0270",
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                "field access requires an addressable local value",
+                "borrow/assignment target must be an existing addressable Place",
                 Some(expression.span),
             )]),
         }
@@ -2995,7 +3189,7 @@ impl Analyzer<'_> {
                         let enum_ty = self.nominal_enum_type(enum_id, Vec::new(), e.span)?;
                         self.enum_init(enum_ty, name, &[], false, e.span)?
                     } else {
-                        let place = self.resolve_expr_place(e)?;
+                        let place = self.resolve_expr_place(e, false)?;
                         Checked {
                             expr: HirExpr {
                                 ty: place.ty,
@@ -3006,7 +3200,7 @@ impl Analyzer<'_> {
                         }
                     }
                 } else {
-                    let place = self.resolve_expr_place(e)?;
+                    let place = self.resolve_expr_place(e, false)?;
                     Checked {
                         expr: HirExpr {
                             ty: place.ty,
@@ -3026,7 +3220,49 @@ impl Analyzer<'_> {
                     Some(e.span),
                 )]);
             }
-            AstExprKind::Unary { operand, .. } => self.negate(operand, e.span)?,
+            AstExprKind::Unary {
+                op: AstUnaryOp::Dereference,
+                ..
+            } => {
+                let place = self.resolve_expr_place(e, false)?;
+                Checked {
+                    expr: HirExpr {
+                        ty: place.ty,
+                        kind: HirExprKind::Load(place),
+                        span: e.span,
+                    },
+                    constant: None,
+                }
+            }
+            AstExprKind::Unary {
+                op: AstUnaryOp::BorrowShared | AstUnaryOp::BorrowMutable,
+                operand,
+            } => {
+                let mutable = matches!(
+                    &e.kind,
+                    AstExprKind::Unary {
+                        op: AstUnaryOp::BorrowMutable,
+                        ..
+                    }
+                );
+                let place = self.resolve_expr_place(operand, mutable)?;
+                if let HirPlaceBase::Local(local) = &place.base {
+                    self.locals[local.0 as usize].address_taken = true;
+                }
+                let ty = self.types.intern_reference(place.ty, mutable);
+                Checked {
+                    expr: HirExpr {
+                        kind: HirExprKind::Borrow { place, mutable },
+                        ty,
+                        span: e.span,
+                    },
+                    constant: None,
+                }
+            }
+            AstExprKind::Unary {
+                op: AstUnaryOp::Negate,
+                operand,
+            } => self.negate(operand, e.span)?,
             AstExprKind::Binary { op, left, right } => {
                 self.binary(*op, left, right, expected, e.span)?
             }
@@ -3151,7 +3387,8 @@ impl Analyzer<'_> {
                 | TypeData::Enum(_)
                 | TypeData::GenericParam(_)
                 | TypeData::StructInstance(_, _)
-                | TypeData::EnumInstance(_, _),
+                | TypeData::EnumInstance(_, _)
+                | TypeData::Reference { .. },
             )
             | None => {
                 return Err(vec![type_error(
@@ -3210,6 +3447,15 @@ impl Analyzer<'_> {
             Err(diagnostics) => return Err(diagnostics),
         };
         let source = operand.expr.ty;
+        if self.types.reference_info(source).is_some() {
+            return Err(vec![Diagnostic::new(
+                "E0278",
+                Phase::Semantic,
+                DiagnosticCategory::Conversion,
+                "references cannot be cast to numeric values or other reference types",
+                Some(span),
+            )]);
+        }
         if source == TypeId::BOOL || target == TypeId::BOOL {
             return Err(vec![Diagnostic::new(
                 "E0232",
@@ -3291,6 +3537,7 @@ impl Analyzer<'_> {
             module: Some(module.into()),
             name: name.into(),
             arguments: arguments.to_vec(),
+            reference: None,
             span,
         };
         let resolved = resolve_type_in_module(
@@ -3574,6 +3821,12 @@ impl Analyzer<'_> {
                 span,
             )]);
         }
+        if type_arguments
+            .iter()
+            .any(|argument| self.types.contains_reference(*argument))
+        {
+            return Err(vec![reference_generic_argument(span)]);
+        }
         let substitution = Substitution::new(
             s.generic_parameters.iter().map(|parameter| parameter.id),
             type_arguments.iter().copied(),
@@ -3648,6 +3901,17 @@ impl Analyzer<'_> {
             (self.expression(la, None)?, self.expression(ra, None)?)
         };
         let equality = matches!(op, AstBinaryOp::Equal | AstBinaryOp::NotEqual);
+        if self.types.reference_info(l.expr.ty).is_some()
+            || self.types.reference_info(r.expr.ty).is_some()
+        {
+            return Err(vec![Diagnostic::new(
+                "E0279",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "reference arithmetic and reference identity comparison are not supported in Vertical-9",
+                Some(span),
+            )]);
+        }
         if l.expr.ty == TypeId::BOOL || r.expr.ty == TypeId::BOOL {
             if l.expr.ty == TypeId::BOOL && r.expr.ty == TypeId::BOOL && equality {
                 return Ok(bin_result(self.types, op, l, r, TypeId::BOOL, None));
@@ -4223,6 +4487,27 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
     if e.name != "main" || e.return_type != TypeId::INT64 || !e.parameters.is_empty() {
         return Err(fail("HIR entry invalid".into()));
     }
+    if h.instances
+        .iter()
+        .any(|signature| h.types.contains_reference(signature.return_type))
+        || h.structs.iter().any(|info| {
+            info.fields
+                .iter()
+                .any(|field| h.types.contains_reference(field.ty))
+        })
+        || h.enums.iter().any(|info| {
+            info.variants.iter().any(|variant| {
+                variant
+                    .payloads
+                    .iter()
+                    .any(|payload| h.types.contains_reference(payload.ty))
+            })
+        })
+    {
+        return Err(fail(
+            "HIR violates Vertical-9 reference non-escape storage rules".into(),
+        ));
+    }
     let mut next_field = 0_u32;
     for (index, info) in h.structs.iter().enumerate() {
         if info.id.0 as usize != index || info.layout.align == 0 {
@@ -4307,9 +4592,12 @@ fn verify_block(
             }
             HirStmtKind::Assign { place, value } => {
                 verify_expr(value, f, sigs, structs, enums, types, fail)?;
-                verify_place(place, f, structs, types, fail)?;
+                verify_place(place, f, sigs, structs, enums, types, fail)?;
                 if place.ty != value.ty {
                     return Err(fail("HIR field assignment mismatch".into()));
+                }
+                if matches!(place.base, HirPlaceBase::Dereference { mutable: false, .. }) {
+                    return Err(fail("HIR writes through a shared reference".into()));
                 }
             }
             HirStmtKind::If {
@@ -4422,9 +4710,25 @@ fn verify_expr(
             return Err(fail("HIR local mismatch".into()));
         }
         HirExprKind::Load(place) => {
-            verify_place(place, f, structs, types, fail)?;
+            verify_place(place, f, sigs, structs, enums, types, fail)?;
             if place.ty != e.ty {
                 return Err(fail("HIR load/place type mismatch".into()));
+            }
+        }
+        HirExprKind::Borrow { place, mutable } => {
+            verify_place(place, f, sigs, structs, enums, types, fail)?;
+            if types.reference_info(e.ty) != Some((place.ty, *mutable)) {
+                return Err(fail("HIR borrow type/capability mismatch".into()));
+            }
+            if *mutable && matches!(place.base, HirPlaceBase::Dereference { mutable: false, .. }) {
+                return Err(fail("HIR mutable borrow through shared reference".into()));
+            }
+            if let HirPlaceBase::Local(local) = &place.base
+                && !f.locals[local.0 as usize].address_taken
+            {
+                return Err(fail(
+                    "HIR borrowed local is not marked address-taken".into(),
+                ));
             }
         }
         HirExprKind::Call { callee, args, .. } => {
@@ -4596,14 +4900,29 @@ fn verify_expr(
 fn verify_place(
     place: &HirPlace,
     function: &HirFunction,
+    sigs: &[FunctionInstanceInfo],
     structs: &[StructInfo],
+    enums: &[EnumInfo],
     types: &TypeArena,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
-    let Some(local) = function.locals.get(place.local.0 as usize) else {
-        return Err(fail("HIR place has unknown local".into()));
+    let mut ty = match &place.base {
+        HirPlaceBase::Local(local) => function
+            .locals
+            .get(local.0 as usize)
+            .map(|local| local.ty)
+            .ok_or_else(|| fail("HIR place has unknown local".into()))?,
+        HirPlaceBase::Dereference { reference, mutable } => {
+            verify_expr(reference, function, sigs, structs, enums, types, fail)?;
+            let Some((pointee, capability)) = types.reference_info(reference.ty) else {
+                return Err(fail("HIR place dereferences a non-reference".into()));
+            };
+            if capability != *mutable {
+                return Err(fail("HIR dereference capability cache is invalid".into()));
+            }
+            pointee
+        }
     };
-    let mut ty = local.ty;
     if !types.is_valid(place.ty) || !types.is_valid(ty) {
         return Err(fail("HIR place references invalid TypeId".into()));
     }
@@ -4733,6 +5052,7 @@ mod tests {
             ty: TypeId(u32::MAX),
             span: Span::new(0, 0),
             parameter: false,
+            address_taken: false,
         });
         assert!(verify_hir(&h).is_err());
     }

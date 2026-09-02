@@ -1,4 +1,4 @@
-//! LLVM backend for verified Vertical-8 program SSA.
+//! LLVM backend for verified Vertical-9 program SSA.
 
 use std::fmt::Write;
 
@@ -8,8 +8,8 @@ use aether_frontend::{
     TypeId,
 };
 use aether_middle::{
-    BinaryOp, BlockId, SsaFunction, SsaOp, SsaOperand, SsaTerminator, TrapKind, UnaryOp,
-    VerifiedSsa,
+    BinaryOp, BlockId, SsaFunction, SsaOp, SsaOperand, SsaPlace, SsaPlaceBase, SsaTerminator,
+    TrapKind, UnaryOp, VerifiedSsa,
 };
 
 /// Minimal explicit target contract for the admitted bootstrap platform.
@@ -22,7 +22,7 @@ pub struct TargetDescriptor {
 }
 
 impl TargetDescriptor {
-    /// The target admitted through NEXT-VERTICAL-8.
+    /// The target admitted through NEXT-VERTICAL-9.
     #[must_use]
     pub const fn linux_x86_64() -> Self {
         Self {
@@ -55,12 +55,13 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let program = ssa.as_ssa();
     let types = &program.types;
     let mut output = String::new();
-    writeln!(output, "; Aether NEXT-VERTICAL-8").unwrap();
+    writeln!(output, "; Aether NEXT-VERTICAL-9").unwrap();
     writeln!(
         output,
         "; Internal bootstrap ABI and symbol mangling; not a public Aether ABI"
     )
     .unwrap();
+
     writeln!(output, "target triple = \"{}\"\n", target.triple).unwrap();
     for bits in [8, 16, 32, 64] {
         for family in ['s', 'u'] {
@@ -199,6 +200,30 @@ fn emit_function(
     )
     .unwrap();
 
+    if !function.memory_locals.is_empty() {
+        writeln!(output, "entry.storage:").unwrap();
+        for memory in &function.memory_locals {
+            writeln!(
+                output,
+                "  %m{} = alloca {}",
+                memory.local.0,
+                llvm_type(types, memory.ty)
+            )
+            .unwrap();
+            if let Some(parameter) = memory.parameter {
+                writeln!(
+                    output,
+                    "  store {} %v{}, ptr %m{}",
+                    llvm_type(types, memory.ty),
+                    parameter.0,
+                    memory.local.0
+                )
+                .unwrap();
+            }
+        }
+        writeln!(output, "  br label %{}", block_label(function.entry)).unwrap();
+    }
+
     let exit_labels: Vec<String> = function
         .blocks
         .iter()
@@ -253,6 +278,66 @@ fn emit_function(
                     llvm_operand(operand)
                 )
                 .unwrap(),
+                SsaOp::Load { place } => {
+                    let pointer = emit_place_pointer(
+                        output,
+                        function,
+                        place,
+                        instruction.result.0,
+                        types,
+                        structs,
+                    );
+                    writeln!(
+                        output,
+                        "  %v{} = load {}, ptr {pointer}",
+                        instruction.result.0,
+                        llvm_type(types, instruction.ty)
+                    )
+                    .unwrap();
+                }
+                SsaOp::Store { place, value } => {
+                    let pointer = emit_place_pointer(
+                        output,
+                        function,
+                        place,
+                        instruction.result.0,
+                        types,
+                        structs,
+                    );
+                    writeln!(
+                        output,
+                        "  store {} {}, ptr {pointer}",
+                        llvm_type(types, instruction.ty),
+                        llvm_operand(value)
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  %v{} = select i1 true, {} {}, {} {}",
+                        instruction.result.0,
+                        llvm_type(types, instruction.ty),
+                        llvm_operand(value),
+                        llvm_type(types, instruction.ty),
+                        llvm_operand(value)
+                    )
+                    .unwrap();
+                }
+                SsaOp::Borrow { place, .. } => {
+                    let pointer = emit_place_pointer(
+                        output,
+                        function,
+                        place,
+                        instruction.result.0,
+                        types,
+                        structs,
+                    );
+                    writeln!(
+                        output,
+                        "  %v{} = getelementptr inbounds i8, ptr {pointer}, i64 0",
+                        instruction.result.0
+                    )
+                    .unwrap();
+                }
                 SsaOp::Aggregate {
                     struct_id: _,
                     fields,
@@ -1248,6 +1333,11 @@ fn mangle_symbol_type(
                     .join("_")
             )
         }
+        TypeData::Reference { pointee, mutable } => format!(
+            "r{}{}",
+            if *mutable { "m" } else { "s" },
+            mangle_symbol_type(types, *pointee, modules, structs, enums)
+        ),
         TypeData::GenericParam(_) => panic!("unresolved generic parameter reached symbol mangling"),
     }
 }
@@ -1283,6 +1373,7 @@ fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
             id.0,
             mangle_type_arguments(types, *args)
         ),
+        TypeData::Reference { .. } => "ptr".into(),
         TypeData::GenericParam(_) => panic!("unresolved generic parameter reached LLVM"),
     }
 }
@@ -1310,6 +1401,11 @@ fn mangle_type(types: &TypeArena, ty: TypeId) -> String {
         TypeData::EnumInstance(id, args) => {
             format!("e{}x{}z", id.0, mangle_type_arguments(types, *args))
         }
+        TypeData::Reference { pointee, mutable } => format!(
+            "r{}{}",
+            if *mutable { "m" } else { "s" },
+            mangle_type(types, *pointee)
+        ),
         TypeData::GenericParam(_) => panic!("unresolved generic parameter reached mangling"),
     }
 }
@@ -1341,6 +1437,49 @@ fn llvm_projection_indices(
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn emit_place_pointer(
+    output: &mut String,
+    function: &SsaFunction,
+    place: &SsaPlace,
+    result: u32,
+    types: &TypeArena,
+    structs: &[StructInfo],
+) -> String {
+    let (base, root_ty) = match &place.base {
+        SsaPlaceBase::MemoryLocal(local) => {
+            let memory = function
+                .memory_locals
+                .iter()
+                .find(|memory| memory.local == *local)
+                .expect("verified memory local");
+            (format!("%m{}", local.0), memory.ty)
+        }
+        SsaPlaceBase::Dereference { reference, .. } => {
+            let reference_ty = operand_type(function, reference);
+            let (pointee, _) = types
+                .reference_info(reference_ty)
+                .expect("verified reference place");
+            (llvm_operand(reference), pointee)
+        }
+    };
+    if place.projections.is_empty() {
+        return base;
+    }
+    let indices = llvm_projection_indices(types, root_ty, &place.projections, structs)
+        .split(", ")
+        .map(|index| format!("i32 {index}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let pointer = format!("%place{result}");
+    writeln!(
+        output,
+        "  {pointer} = getelementptr inbounds {}, ptr {base}, i32 0, {indices}",
+        llvm_type(types, root_ty)
+    )
+    .unwrap();
+    pointer
 }
 
 fn concrete_struct_member(

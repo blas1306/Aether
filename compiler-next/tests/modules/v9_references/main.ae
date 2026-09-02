@@ -1,0 +1,7 @@
+import refs;
+
+int main() {
+    int value = 4;
+    int ignored = refs.write(&mut value, 9);
+    return refs.read(&value) + ignored;
+}

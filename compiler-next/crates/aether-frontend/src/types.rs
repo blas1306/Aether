@@ -229,6 +229,12 @@ pub enum TypeData {
     StructInstance(StructId, TypeArgsId),
     /// Canonical application of a generic enum declaration.
     EnumInstance(EnumId, TypeArgsId),
+    /// Non-owning, non-null reference. `mutable` is write capability only and
+    /// carries no uniqueness/noalias promise.
+    Reference {
+        pointee: TypeId,
+        mutable: bool,
+    },
 }
 
 impl TypeData {
@@ -281,6 +287,9 @@ impl fmt::Display for TypeData {
             Self::GenericParam(id) => write!(f, "param({:?}:{})", id.owner, id.index),
             Self::StructInstance(id, args) => write!(f, "struct#{}<args#{}>", id.0, args.0),
             Self::EnumInstance(id, args) => write!(f, "enum#{}<args#{}>", id.0, args.0),
+            Self::Reference { pointee, mutable } => {
+                write!(f, "ref {}{pointee}", if *mutable { "mut " } else { "" })
+            }
         }
     }
 }
@@ -366,6 +375,11 @@ impl TypeArena {
         self.intern(TypeData::EnumInstance(declaration, args))
     }
 
+    /// Interns a canonical non-owning reference type.
+    pub fn intern_reference(&mut self, pointee: TypeId, mutable: bool) -> TypeId {
+        self.intern(TypeData::Reference { pointee, mutable })
+    }
+
     fn intern_arguments(&mut self, arguments: Vec<TypeId>) -> TypeArgsId {
         if let Some(id) = self.argument_ids.get(&arguments) {
             return *id;
@@ -412,6 +426,7 @@ impl TypeArena {
                         .any(|argument| self.contains_generic(*argument))
                 })
             }
+            Some(TypeData::Reference { pointee, .. }) => self.contains_generic(*pointee),
             _ => false,
         }
     }
@@ -493,6 +508,28 @@ impl TypeArena {
         }
     }
 
+    /// Returns pointee and write capability for a semantic reference type.
+    #[must_use]
+    pub fn reference_info(&self, id: TypeId) -> Option<(TypeId, bool)> {
+        match self.get(id) {
+            Some(TypeData::Reference { pointee, mutable }) => Some((*pointee, *mutable)),
+            _ => None,
+        }
+    }
+
+    /// Whether this type is, or recursively contains as a generic argument, a
+    /// V9 reference that cannot be persisted in an aggregate.
+    #[must_use]
+    pub fn contains_reference(&self, id: TypeId) -> bool {
+        match self.get(id) {
+            Some(TypeData::Reference { .. }) => true,
+            Some(TypeData::StructInstance(_, args) | TypeData::EnumInstance(_, args)) => self
+                .arguments(*args)
+                .is_some_and(|arguments| arguments.iter().any(|ty| self.contains_reference(*ty))),
+            _ => false,
+        }
+    }
+
     /// Readable canonical spelling for diagnostics and deterministic dumps.
     #[must_use]
     pub fn format(&self, id: TypeId) -> String {
@@ -543,6 +580,10 @@ impl TypeArena {
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(self.intern_enum_instance(id, arguments))
             }
+            Some(TypeData::Reference { pointee, mutable }) => {
+                let pointee = self.substitute(pointee, substitution)?;
+                Ok(self.intern_reference(pointee, mutable))
+            }
             Some(_) | None => Ok(ty),
         }
     }
@@ -589,6 +630,13 @@ impl TypeArena {
                     .ids
                     .get(&TypeData::EnumInstance(id, args))
                     .expect("monomorphizer interned substituted enum"))
+            }
+            Some(TypeData::Reference { pointee, mutable }) => {
+                let pointee = self.substituted_existing(pointee, substitution)?;
+                Ok(*self
+                    .ids
+                    .get(&TypeData::Reference { pointee, mutable })
+                    .expect("monomorphizer interned substituted reference"))
             }
             Some(_) | None => Ok(ty),
         }

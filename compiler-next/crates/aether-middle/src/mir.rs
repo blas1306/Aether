@@ -8,9 +8,9 @@ use std::sync::Arc;
 use aether_frontend::{
     CastKind, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId, FloatValue,
     FunctionInstanceInfo, HirBinaryOp, HirBlock, HirCallTarget, HirExpr, HirExprKind, HirFunction,
-    HirMatchArm, HirPlace, HirStmtKind, HirUnaryOp, InstanceId, LocalId, ModuleInfo, Phase, Span,
-    StructId, StructInfo, Substitution, TypeArena, TypeData, TypeId, TypedHir, VariantId,
-    format_type,
+    HirMatchArm, HirPlace, HirPlaceBase, HirStmtKind, HirUnaryOp, InstanceId, LocalId, ModuleInfo,
+    Phase, Span, StructId, StructInfo, Substitution, TypeArena, TypeData, TypeId, TypedHir,
+    VariantId, format_type,
 };
 
 /// Basic-block identity, equal to its stable vector index.
@@ -28,6 +28,8 @@ pub struct MirLocal {
     pub name: Option<String>,
     /// Whether lowering introduced the slot.
     pub temporary: bool,
+    /// Stable memory is required because this local is borrowed.
+    pub address_taken: bool,
 }
 
 /// A parameter's local storage identity and type.
@@ -43,8 +45,14 @@ pub struct MirParameter {
 /// dereference without changing assignment into a special-case operation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Place {
-    pub local: LocalId,
+    pub base: PlaceBase,
     pub projections: Vec<FieldId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PlaceBase {
+    Local(LocalId),
+    Dereference { reference: Operand, mutable: bool },
 }
 
 /// MIR operand for scalar or aggregate values.
@@ -122,6 +130,11 @@ pub enum Rvalue {
     Use(Operand),
     /// Read a local or nested subobject place.
     Load(Place),
+    /// Create an explicit typed non-owning view of stable storage.
+    Borrow {
+        place: Place,
+        mutable: bool,
+    },
     /// Construct a nominal aggregate in declaration/FieldId order.
     Aggregate {
         struct_id: StructId,
@@ -351,6 +364,7 @@ fn lower_function(
             ty: local.ty,
             name: Some(local.name.clone()),
             temporary: false,
+            address_taken: local.address_taken,
         })
         .collect();
     let parameters = function
@@ -398,7 +412,7 @@ impl Builder<'_> {
                     let value = self.lower_expr(initializer);
                     self.assign(
                         Place {
-                            local: *local,
+                            base: PlaceBase::Local(*local),
                             projections: vec![],
                         },
                         Rvalue::Use(value),
@@ -407,7 +421,8 @@ impl Builder<'_> {
                 }
                 HirStmtKind::Assign { place, value } => {
                     let value = self.lower_expr(value);
-                    self.assign(lower_place(place), Rvalue::Use(value), statement.span);
+                    let place = self.lower_place(place);
+                    self.assign(place, Rvalue::Use(value), statement.span);
                 }
                 HirStmtKind::Return(value) => {
                     let value = self.lower_expr(value);
@@ -495,7 +510,7 @@ impl Builder<'_> {
         let tag = self.temporary(TypeId::UINT32);
         self.assign(
             Place {
-                local: tag,
+                base: PlaceBase::Local(tag),
                 projections: vec![],
             },
             Rvalue::EnumDiscriminant {
@@ -526,7 +541,7 @@ impl Builder<'_> {
             for binding in &arm.bindings {
                 self.assign(
                     Place {
-                        local: binding.local,
+                        base: PlaceBase::Local(binding.local),
                         projections: vec![],
                     },
                     Rvalue::EnumPayload {
@@ -567,15 +582,50 @@ impl Builder<'_> {
                 ty: expression.ty,
             },
             HirExprKind::Bool(value) => Operand::Bool(*value),
-            HirExprKind::Local(local) => Operand::Local(*local),
+            HirExprKind::Local(local) => {
+                if self.function.locals[local.0 as usize].address_taken {
+                    let destination = self.temporary(expression.ty);
+                    self.assign(
+                        Place {
+                            base: PlaceBase::Local(destination),
+                            projections: vec![],
+                        },
+                        Rvalue::Load(Place {
+                            base: PlaceBase::Local(*local),
+                            projections: vec![],
+                        }),
+                        expression.span,
+                    );
+                    Operand::Local(destination)
+                } else {
+                    Operand::Local(*local)
+                }
+            }
             HirExprKind::Load(place) => {
+                let destination = self.temporary(expression.ty);
+                let place = self.lower_place(place);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::Load(place),
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::Borrow { place, mutable } => {
+                let place = self.lower_place(place);
                 let destination = self.temporary(expression.ty);
                 self.assign(
                     Place {
-                        local: destination,
+                        base: PlaceBase::Local(destination),
                         projections: vec![],
                     },
-                    Rvalue::Load(lower_place(place)),
+                    Rvalue::Borrow {
+                        place,
+                        mutable: *mutable,
+                    },
                     expression.span,
                 );
                 Operand::Local(destination)
@@ -588,7 +638,7 @@ impl Builder<'_> {
                 let destination = self.temporary(expression.ty);
                 self.assign(
                     Place {
-                        local: destination,
+                        base: PlaceBase::Local(destination),
                         projections: vec![],
                     },
                     Rvalue::Call {
@@ -612,7 +662,7 @@ impl Builder<'_> {
                 let destination = self.temporary(expression.ty);
                 self.assign(
                     Place {
-                        local: destination,
+                        base: PlaceBase::Local(destination),
                         projections: vec![],
                     },
                     Rvalue::Aggregate {
@@ -635,7 +685,7 @@ impl Builder<'_> {
                 let destination = self.temporary(expression.ty);
                 self.assign(
                     Place {
-                        local: destination,
+                        base: PlaceBase::Local(destination),
                         projections: vec![],
                     },
                     Rvalue::EnumConstruct {
@@ -653,7 +703,7 @@ impl Builder<'_> {
                 let destination = self.temporary(expression.ty);
                 self.assign(
                     Place {
-                        local: destination,
+                        base: PlaceBase::Local(destination),
                         projections: vec![],
                     },
                     Rvalue::Coerce {
@@ -677,7 +727,7 @@ impl Builder<'_> {
                     .then_some(TrapKind::ConversionOutOfRange);
                 self.assign(
                     Place {
-                        local: destination,
+                        base: PlaceBase::Local(destination),
                         projections: vec![],
                     },
                     Rvalue::Cast {
@@ -702,7 +752,7 @@ impl Builder<'_> {
                 };
                 self.assign(
                     Place {
-                        local: destination,
+                        base: PlaceBase::Local(destination),
                         projections: vec![],
                     },
                     Rvalue::Unary { op, operand, trap },
@@ -763,7 +813,7 @@ impl Builder<'_> {
                 let destination = self.temporary(expression.ty);
                 self.assign(
                     Place {
-                        local: destination,
+                        base: PlaceBase::Local(destination),
                         projections: vec![],
                     },
                     Rvalue::Binary {
@@ -787,6 +837,7 @@ impl Builder<'_> {
             ty,
             name: None,
             temporary: true,
+            address_taken: false,
         });
         id
     }
@@ -818,12 +869,17 @@ impl Builder<'_> {
         let block = self.current.take().expect("current block is open");
         self.function.blocks[block.0 as usize].terminator = Some(terminator);
     }
-}
-
-fn lower_place(place: &HirPlace) -> Place {
-    Place {
-        local: place.local,
-        projections: place.projections.clone(),
+    fn lower_place(&mut self, place: &HirPlace) -> Place {
+        Place {
+            base: match &place.base {
+                HirPlaceBase::Local(local) => PlaceBase::Local(*local),
+                HirPlaceBase::Dereference { reference, mutable } => PlaceBase::Dereference {
+                    reference: self.lower_expr(reference),
+                    mutable: *mutable,
+                },
+            },
+            projections: place.projections.clone(),
+        }
     }
 }
 
@@ -883,6 +939,25 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
         }
         if signature.module.0 as usize >= mir.modules.len() {
             return Err(fail("MIR signature names an unknown module".into()));
+        }
+        if mir.types.contains_reference(signature.return_type)
+            || mir.structs.iter().any(|info| {
+                info.fields
+                    .iter()
+                    .any(|field| mir.types.contains_reference(field.ty))
+            })
+            || mir.enums.iter().any(|info| {
+                info.variants.iter().any(|variant| {
+                    variant
+                        .payloads
+                        .iter()
+                        .any(|payload| mir.types.contains_reference(payload.ty))
+                })
+            })
+        {
+            return Err(fail(
+                "MIR violates Vertical-9 reference non-escape storage rules".into(),
+            ));
         }
         if signature
             .parameters
@@ -994,7 +1069,9 @@ fn verify_mir_function(
             for predecessor in preds {
                 let mut outgoing = initialized_in[predecessor.0 as usize].clone();
                 for instruction in &function.blocks[predecessor.0 as usize].instructions {
-                    outgoing[instruction.destination.local.0 as usize] = true;
+                    if let Some(local) = place_root_local(&instruction.destination) {
+                        outgoing[local.0 as usize] = true;
+                    }
                 }
                 for (slot, pred_value) in incoming.iter_mut().zip(outgoing) {
                     *slot &= pred_value;
@@ -1010,21 +1087,19 @@ fn verify_mir_function(
     for block in &function.blocks {
         let mut initialized = initialized_in[block.id.0 as usize].clone();
         for instruction in &block.instructions {
-            let Some(destination) = function
-                .locals
-                .get(instruction.destination.local.0 as usize)
-            else {
-                return Err(fail(format!(
-                    "assignment destination {:?} does not exist",
-                    instruction.destination
-                )));
-            };
-            if !instruction.destination.projections.is_empty()
-                && !initialized[instruction.destination.local.0 as usize]
-            {
-                return Err(fail(
-                    "MIR projected store reads an uninitialized aggregate".into(),
-                ));
+            if let Some(local) = place_root_local(&instruction.destination) {
+                if function.locals.get(local.0 as usize).is_none() {
+                    return Err(fail(format!(
+                        "assignment destination {:?} does not exist",
+                        instruction.destination
+                    )));
+                }
+                if !instruction.destination.projections.is_empty() && !initialized[local.0 as usize]
+                {
+                    return Err(fail(
+                        "MIR projected store reads an uninitialized aggregate".into(),
+                    ));
+                }
             }
             if !instruction.destination.projections.is_empty()
                 && !matches!(instruction.value, Rvalue::Use(_))
@@ -1032,6 +1107,12 @@ fn verify_mir_function(
                 return Err(fail(
                     "MIR projected store requires a materialized value operand".into(),
                 ));
+            }
+            if let PlaceBase::Dereference { reference, mutable } = &instruction.destination.base {
+                validate_operand(function, reference, &initialized).map_err(&fail)?;
+                if !*mutable {
+                    return Err(fail("MIR store through shared reference".into()));
+                }
             }
             let destination_ty =
                 place_type(function, &instruction.destination, structs, types).map_err(&fail)?;
@@ -1046,8 +1127,9 @@ fn verify_mir_function(
                 &initialized,
             )
             .map_err(&fail)?;
-            let _ = destination;
-            initialized[instruction.destination.local.0 as usize] = true;
+            if let Some(local) = place_root_local(&instruction.destination) {
+                initialized[local.0 as usize] = true;
+            }
         }
         let terminator = block.terminator.as_ref().expect("checked above");
         match terminator {
@@ -1104,7 +1186,7 @@ fn verify_mir_function(
                         .iter()
                         .flat_map(|candidate| &candidate.instructions)
                         .filter(|instruction| {
-                            instruction.destination.local == *tag_local
+                            place_root_local(&instruction.destination) == Some(*tag_local)
                                 && instruction.destination.projections.is_empty()
                         })
                         .collect::<Vec<_>>();
@@ -1157,6 +1239,21 @@ fn validate_rvalue(
             validate_place_read(function, place, structs, types, initialized)?;
             if place_type(function, place, structs, types)? != destination {
                 return Err("MIR place load type mismatch".into());
+            }
+        }
+        Rvalue::Borrow { place, mutable } => {
+            validate_place_read(function, place, structs, types, initialized)?;
+            let pointee = place_type(function, place, structs, types)?;
+            if types.reference_info(destination) != Some((pointee, *mutable)) {
+                return Err("MIR borrow result type/capability mismatch".into());
+            }
+            if *mutable && matches!(&place.base, PlaceBase::Dereference { mutable: false, .. }) {
+                return Err("MIR mutable borrow through shared reference".into());
+            }
+            if let PlaceBase::Local(local) = &place.base
+                && !function.locals[local.0 as usize].address_taken
+            {
+                return Err("MIR borrowed local is not address-taken".into());
             }
         }
         Rvalue::Aggregate { struct_id, fields } => {
@@ -1334,15 +1431,15 @@ fn validate_place_read(
     initialized: &[bool],
 ) -> Result<(), String> {
     place_type(function, place, structs, types)?;
-    if !initialized
-        .get(place.local.0 as usize)
-        .copied()
-        .unwrap_or(false)
-    {
-        return Err(format!(
-            "MIR local {:?} is read before initialization",
-            place.local
-        ));
+    match &place.base {
+        PlaceBase::Local(local) => {
+            if !initialized.get(local.0 as usize).copied().unwrap_or(false) {
+                return Err(format!("MIR local {local:?} is read before initialization"));
+            }
+        }
+        PlaceBase::Dereference { reference, .. } => {
+            validate_operand(function, reference, initialized)?;
+        }
     }
     Ok(())
 }
@@ -1353,11 +1450,23 @@ fn place_type(
     structs: &[StructInfo],
     types: &TypeArena,
 ) -> Result<TypeId, String> {
-    let mut ty = function
-        .locals
-        .get(place.local.0 as usize)
-        .map(|local| local.ty)
-        .ok_or_else(|| format!("unknown MIR place local {:?}", place.local))?;
+    let mut ty = match &place.base {
+        PlaceBase::Local(local) => function
+            .locals
+            .get(local.0 as usize)
+            .map(|local| local.ty)
+            .ok_or_else(|| format!("unknown MIR place local {local:?}"))?,
+        PlaceBase::Dereference { reference, mutable } => {
+            let reference_ty = operand_type(function, reference)?;
+            let (pointee, capability) = types
+                .reference_info(reference_ty)
+                .ok_or_else(|| "MIR place dereferences non-reference operand".to_string())?;
+            if capability != *mutable {
+                return Err("MIR dereference capability cache mismatch".into());
+            }
+            pointee
+        }
+    };
     for field_id in &place.projections {
         let owner = types
             .struct_id(ty)
@@ -1369,6 +1478,13 @@ fn place_type(
         ty = concrete_struct_member(types, structs, ty, field.ty)?;
     }
     Ok(ty)
+}
+
+fn place_root_local(place: &Place) -> Option<LocalId> {
+    match &place.base {
+        PlaceBase::Local(local) => Some(*local),
+        PlaceBase::Dereference { .. } => None,
+    }
 }
 
 fn concrete_struct_member(
@@ -1492,8 +1608,13 @@ fn validate_operand(
     initialized: &[bool],
 ) -> Result<(), String> {
     if let Operand::Local(local) = operand {
-        if function.locals.get(local.0 as usize).is_none() {
+        let Some(info) = function.locals.get(local.0 as usize) else {
             return Err(format!("MIR operand local {local:?} does not exist"));
+        };
+        if info.address_taken {
+            return Err(format!(
+                "address-taken MIR local {local:?} must be read through a Place load"
+            ));
         }
         if !initialized.get(local.0 as usize).copied().unwrap_or(false) {
             return Err(format!("MIR local {local:?} is read before initialization"));

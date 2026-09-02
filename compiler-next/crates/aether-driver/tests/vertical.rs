@@ -1,4 +1,4 @@
-//! Cross-layer and native qualification through NEXT-VERTICAL-8.
+//! Cross-layer and native qualification through NEXT-VERTICAL-9.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -56,6 +56,9 @@ fn native_programs_execute_with_expected_status() {
         ("parameter_value.ae", 9),
         ("v5_structs.ae", 42),
         ("v6_enums.ae", 42),
+        ("v9_references.ae", 31),
+        ("v9_scalar_ref.ae", 2),
+        ("v9_aggregate_ref.ae", 5),
     ] {
         let (_, status) = run_path(&program(source), &[], &toolchain).unwrap();
         assert_eq!(status.code(), Some(expected), "{source}");
@@ -962,4 +965,139 @@ fn vertical8_cross_module_generics_execute_natively() {
     assert!(compilation.llvm.contains("identity__g"));
     assert!(!compilation.dumps[&Emit::Mir].contains("GenericParam("));
     assert!(!compilation.dumps[&Emit::Ssa].contains("GenericParam("));
+}
+
+#[test]
+fn vertical9_reference_types_are_canonical_and_capabilities_are_distinct() {
+    let hir = analyze(
+        parse_source(&SourceFile::new(
+            "v9-types.ae",
+            "int read(ref int x){return *x;}int main(){int x=1;ref int a=&x;ref int b=&x;ref mut int m=&mut x;return *a+*b+*m;}",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let references = hir
+        .types()
+        .entries()
+        .filter_map(|(ty, data)| matches!(data, TypeData::Reference { .. }).then_some(ty))
+        .collect::<Vec<_>>();
+    assert_eq!(references.len(), 2);
+    let shared = references
+        .iter()
+        .find(|ty| {
+            hir.types().reference_info(**ty) == Some((aether_frontend::TypeId::INT64, false))
+        })
+        .unwrap();
+    let mutable = references
+        .iter()
+        .find(|ty| hir.types().reference_info(**ty) == Some((aether_frontend::TypeId::INT64, true)))
+        .unwrap();
+    assert_ne!(shared, mutable);
+}
+
+#[test]
+fn vertical9_alias_aware_memory_boundary_is_explicit_and_selective() {
+    let text = fs::read_to_string(program("v9_references.ae")).unwrap();
+    let compilation = compile_source(
+        &SourceFile::new("v9_references.ae", text),
+        &[Emit::Ast, Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+    )
+    .unwrap();
+    assert!(compilation.dumps[&Emit::Ast].contains("AstReferenceType"));
+    assert!(compilation.dumps[&Emit::Ast].contains("BorrowMutable"));
+    assert!(compilation.dumps[&Emit::Hir].contains("address_taken: true"));
+    assert!(compilation.dumps[&Emit::Hir].contains("ref mut"));
+    assert!(compilation.dumps[&Emit::Mir].contains("Borrow"));
+    assert!(compilation.dumps[&Emit::Mir].contains("Dereference"));
+    assert!(compilation.dumps[&Emit::Ssa].contains("memory_locals"));
+    assert!(compilation.dumps[&Emit::Ssa].contains("Store"));
+    assert!(compilation.llvm.contains("alloca i64"));
+    assert!(compilation.llvm.contains("load i64, ptr"));
+    assert!(compilation.llvm.contains("store i64"));
+    assert!(compilation.llvm.contains("_f4_getX(ptr %v0)"));
+    assert!(!compilation.llvm.contains("_f4_getX(%aether.struct.0"));
+    assert!(!compilation.llvm.contains("noalias"));
+
+    let ordinary = compile_source(
+        &SourceFile::new(
+            "ordinary.ae",
+            fs::read_to_string(program("v8_smoke.ae")).unwrap(),
+        ),
+        &[Emit::Ssa, Emit::Llvm],
+    )
+    .unwrap();
+    assert!(!ordinary.llvm.contains("alloca"));
+    assert!(!ordinary.dumps[&Emit::Ssa].contains("MemoryLocal("));
+}
+
+#[test]
+fn vertical9_reference_diagnostics_fail_closed() {
+    for (text, code) in [
+        ("int main(){ref int r=&(1+2);return 0;}", "E0270"),
+        ("int main(){int x=1;return *x;}", "E0271"),
+        ("int main(){int x=1;ref int r=&x;*r=2;return x;}", "E0272"),
+        (
+            "ref int bad(ref int x){return x;}int main(){return 0;}",
+            "E0273",
+        ),
+        (
+            "struct Holder{ref int value;}int main(){return 0;}",
+            "E0274",
+        ),
+        ("enum E{Some(ref int)}int main(){return 0;}", "E0275"),
+        (
+            "struct Pair<T,U>{T a;U b;}int main(){int x=1;ref int r=&x;Pair<ref int,int> p=Pair<ref int,int>(r,0);return 0;}",
+            "E0276",
+        ),
+        (
+            "T identity<T>(T x){return x;}int main(){int x=1;ref int r=&x;ref int copy=identity<ref int>(r);return *copy;}",
+            "E0276",
+        ),
+        ("int main(){int x=1;ref int r=&x;r=&x;return 0;}", "E0277"),
+        ("int main(){int x=1;ref int r=&x;return int(r);}", "E0278"),
+        (
+            "int main(){int x=1;ref int a=&x;ref int b=&x;if(a==b){return 1;}return 0;}",
+            "E0279",
+        ),
+        (
+            "int main(){int x=1;ref int s=&x;ref mut int m=&mut *s;return 0;}",
+            "E0272",
+        ),
+        (
+            "struct Point{int x;}int main(){ref Point p=&Point(1);return 0;}",
+            "E0270",
+        ),
+        (
+            "int identity(int x){return x;}int main(){ref int r=&identity(1);return 0;}",
+            "E0270",
+        ),
+        (
+            "int read(ref int x){return *x;}int main(){int x=1;return read(x);}",
+            "E0214",
+        ),
+        ("int main(){ref int r=&missing;return 0;}", "E0202"),
+    ] {
+        let Err(mut diagnostics) = compile_source(&SourceFile::new("v9-error.ae", text), &[])
+        else {
+            panic!("expected reference rejection: {text}");
+        };
+        let diagnostic = diagnostics.remove(0);
+        assert_eq!(diagnostic.code, code, "{text}: {}", diagnostic.message);
+        assert!(diagnostic.span.is_some());
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical9_cross_module_reference_parameters_execute_natively() {
+    let (compilation, status) = run_path(
+        &module_program("v9_references"),
+        &[Emit::Mir, Emit::Ssa, Emit::Llvm],
+        &ClangToolchain::default(),
+    )
+    .unwrap();
+    assert_eq!(status.code(), Some(9));
+    assert!(compilation.llvm.contains("ptr %v"));
+    assert!(!compilation.llvm.contains("noalias"));
 }

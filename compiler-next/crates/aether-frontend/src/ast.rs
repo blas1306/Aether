@@ -153,8 +153,19 @@ pub struct AstType {
     pub name: String,
     /// Recursive generic application arguments.
     pub arguments: Vec<AstType>,
+    /// Reference wrapper when this spelling is `ref T` or `ref mut T`.
+    pub reference: Option<AstReferenceType>,
     /// Type-token provenance.
     pub span: Span,
+}
+
+/// Explicit non-owning source reference type.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AstReferenceType {
+    /// Referenced semantic type spelling.
+    pub pointee: Box<AstType>,
+    /// Write capability; this does not imply uniqueness.
+    pub mutable: bool,
 }
 
 /// Source generic binder. Semantic identity is assigned during declaration
@@ -196,7 +207,7 @@ pub enum AstStmtKind {
         initializer: AstExpr,
     },
     /// Assignment to a local or nested field place.
-    Assign { place: AstPlace, value: AstExpr },
+    Assign { place: AstExpr, value: AstExpr },
     /// Conditional statement.
     If {
         condition: AstExpr,
@@ -316,6 +327,12 @@ pub enum AstExprKind {
 pub enum AstUnaryOp {
     /// Checked signed negation.
     Negate,
+    /// Read through a non-owning reference; also forms a place in place context.
+    Dereference,
+    /// Shared/read-only borrow of an addressable place.
+    BorrowShared,
+    /// Writable borrow of an addressable place. It does not imply exclusivity.
+    BorrowMutable,
 }
 
 /// Infix operators.
