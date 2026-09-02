@@ -656,6 +656,26 @@ cross-module instantiation ownership, recursion limits and cache keys.
 No architecture layer may erase generic identity before constraint checking
 and monomorphization decisions.
 
+### 10.3 Canonical compiler type identity — IMPLEMENTED INFRASTRUCTURE
+
+The reconstruction represents every resolved semantic type from HIR onward by
+a session-local canonical `TypeId`. Equal semantic types in one compilation
+have the same ID. The ID is an implementation identity only: it is not source
+semantics, ABI, serialized metadata or a cross-session stable key.
+
+Transparent aliases resolve to the underlying ID and never create nominal type
+identity. Nominal structs and enums remain distinct because their canonical
+type data refers to distinct declaration IDs, independent of layout equality.
+Architecture-sized integers retain categories distinct from fixed-width
+integers; target layout resolves their width and does not canonicalize `isize`
+to `int64` or `usize` to `uint64`.
+
+Target layout is queried from canonical semantic type plus target properties.
+The current single-target compilation session may cache the result by type ID;
+no cache or ID is persistent across sessions. Future generic parameters and
+applications extend canonical type data and substitution contexts rather than
+reintroducing copied source-type representations in HIR/MIR/SSA.
+
 ## 11. Layout, ABI and FFI
 
 ### 11.1 Layout — DECIDED/OPEN

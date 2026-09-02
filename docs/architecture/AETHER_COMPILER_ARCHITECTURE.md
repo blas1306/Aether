@@ -1134,3 +1134,89 @@ For NEXT-VERTICAL-7, the strongest dependency-closing step is the canonical
 interned `TypeId` arena plus the ownership/view decision needed by arrays and
 generic core enums. If generics come first, preserve ordinary enum semantics
 and monomorphize without making `Result` or `Option` compiler magic.
+
+## 24. NEXT-VERTICAL-7 implementation confirmation
+
+Vertical-7 implements the canonical type-identity boundary without adding a
+source-language feature. `TypeId(u32)` is compact, copyable and cheap to compare.
+It is valid only in the compilation that owns its `TypeArena`; its number is not
+serialized, mangled, exposed as ABI, used as an LLVM type choice, or promised to
+remain stable across compilations. Future incremental compilation requires a
+separate stable declaration/type fingerprint rather than extending this ID's
+lifetime.
+
+`TypeArena` owns both `TypeData -> TypeId` interning and checked
+`TypeId -> TypeData` lookup. It has no global mutable state. Scalar entries are
+preinterned in deterministic order for reproducible debugging; nominal struct
+and enum entries are then interned in deterministic declaration order. MIR and
+SSA share the immutable arena with the program context through ordinary Rust
+`Arc` ownership. Invalid IDs fail verification instead of indexing unchecked.
+
+The baseline `TypeData` variants are `Bool`, `Integer(IntegerType)`,
+`Float(FloatType)`, `Struct(StructId)` and `Enum(EnumId)`. Declaration identity
+and semantic type identity remain intentionally separate:
+
+```text
+StructId(5)              declaration identity
+TypeData::Struct(5)      semantic type data
+TypeId(n)                session-local canonical identity for that data
+```
+
+Thus two same-layout declarations have different `StructId`/`EnumId` values and
+different `TypeId`s. `VariantId` and `FieldId` continue to identify components.
+Transparent source aliases never create `TypeData::Alias`; every alias chain
+stores the final underlying ID. Built-ins obey `int == int64`,
+`float == float32`, `double == float64` and `byte == uint8`. `isize` and `usize`
+retain their own integer categories and IDs even when their current physical
+width equals `int64`/`uint64`.
+
+HIR is the first canonical boundary. Expressions, locals, parameters, returns,
+places, casts, bindings, fields, payloads and function signatures contain
+`TypeId`. MIR and SSA preserve those IDs without source resolution or re-
+interning. Phi verification requires exact ID equality. Aggregate verification
+obtains field/payload IDs from declaration metadata. The LLVM backend queries
+`TypeData` and never derives representation, signedness or nominal identity
+from the numeric ID. Dumps include one deterministic readable ID-to-type table;
+user diagnostics retain canonical scalar spellings and aggregate descriptions.
+
+`layout_of(TypeId, TargetProperties, declarations)` is the layout boundary.
+Fixed and target-sized scalars are resolved from `TypeData` plus target
+properties; struct and enum layout is computed once during semantic analysis
+for the session target and cached in the existing declaration metadata. There
+is no persistent or cross-target cache. Moving the computation to target-aware
+body analysis corrected the earlier accidental x86_64 calculation in target-
+independent declaration collection.
+
+### Vertical-8 generic representation sketch
+
+- A generic declaration receives its normal declaration identity: for example
+  `Pair<T,U>` receives `StructId`, `Option<T>` receives `EnumId`, and
+  `identity<T>` receives `FunctionId`. Generic parameters need stable identity
+  within their owner, such as `GenericParamId { owner, index }`.
+- A generic parameter used as a semantic type becomes an interned future
+  `TypeData::GenericParam(GenericParamId)`. It is not a source spelling or a new
+  nominal declaration.
+- An applied type such as `Pair<int,float64>` becomes an interned future
+  `TypeData::Applied { declaration: StructId, arguments: Vec<TypeId> }` (with an
+  arena-owned compact argument list rather than recursive copied type graphs).
+  `Option<T>` inside a generic body is the corresponding applied type whose
+  argument is the `T` parameter's `TypeId`.
+- Substitutions live in an explicit inference/instantiation context mapping
+  `GenericParamId -> TypeId`. They do not mutate canonical `TypeData`, HIR nodes
+  or declaration tables. Applying a substitution interns the resulting
+  concrete type data in the same session arena.
+- Function signatures may contain parameter/applied `TypeId`s while generic.
+  A concrete call substitutes them before MIR/SSA generation. Monomorphized
+  code needs a separate canonical `InstanceId(FunctionId, type arguments)`;
+  `FunctionId` remains declaration identity and `TypeId` remains type identity.
+  Mangling derives deterministically from declaration metadata and semantic
+  argument structure, never incidental TypeId numbers.
+
+Open decisions for Vertical-8 are constraint representation/coherence,
+inference boundaries, instantiation ownership across modules, recursion and
+code-size limits, deterministic structural mangling/fingerprints, and whether
+generic HIR is verified before or after substitution. Arrays, references,
+ownership and incremental identities remain out of scope. The recommended next
+milestone is parametric generics plus explicit substitution and `InstanceId`,
+qualified first on generic functions and nominal aggregates without traits or
+ownership expansion.

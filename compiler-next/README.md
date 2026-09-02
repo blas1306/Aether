@@ -1,4 +1,4 @@
-# Aether NEXT-VERTICAL-6
+# Aether NEXT-VERTICAL-7
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. It does not replace the production `aether` CLI or import any legacy
@@ -30,7 +30,7 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-6 grammar
+## Vertical-7 grammar
 
 ```text
 program    := import* (alias | struct | enum | function)+ EOF
@@ -115,21 +115,32 @@ not representable; float-to-integer truncates toward zero and traps for NaN,
 infinity or an unrepresentable result. Integer-to-float and float narrowing may
 round according to IEEE semantics. Bool has no numeric conversions.
 
-Canonical semantic types are the small copyable tagged value `Type::{Bool,
-Integer, Float, Struct(StructId), Enum(EnumId)}` rather than strings. Nominal IDs
-supply nominality and keep recursive declaration graphs out of the type value;
-`FieldId` removes field-name lookup below HIR. A universal `TypeId` interner is
-still intentionally deferred: Vertical-6 has no recursively nested semantic
-type expressions or generic instantiations, so an arena would add indirection
-without canonicalization value. References, arrays, function types and generic
-applications are the point at which `Type` should become an interned `TypeId`
-arena rather than grow recursive payloads.
+Canonical semantic types use the compact, copyable, session-local identity
+`TypeId(u32)`. A session-owned `TypeArena` provides the only authoritative
+`TypeId -> TypeData` mapping and interns the reverse `TypeData -> TypeId`
+mapping. Its current data variants are `Bool`, `Integer`, `Float`,
+`Struct(StructId)` and `Enum(EnumId)`. HIR is the first canonical boundary;
+HIR, MIR, SSA, signatures, fields and enum payloads transport IDs rather than
+copies of `TypeData`. MIR and SSA share the immutable arena through ordinary
+Rust `Arc` ownership. IDs are never addresses, persistent fingerprints, ABI
+identities or meaningful outside their owning compilation.
+
+`StructId`, `EnumId`, `VariantId` and `FieldId` remain declaration/component
+identities. Interning `Struct(StructId)` or `Enum(EnumId)` preserves nominality,
+so equal layouts never imply equal `TypeId`s. Transparent built-in and user
+aliases resolve directly to the underlying ID and do not receive a `TypeData`
+variant. In particular `int == int64`, `float == float32`, `double == float64`
+and `byte == uint8`, while `isize != int64` and `usize != uint64` even on
+x86_64.
 
 Struct and enum declarations are collected in all discovered modules before
 aliases, payload/field types and function signatures are resolved. A
 target-aware DFS rejects self and mutual by-value recursion across both
 aggregate kinds, calculates nested size/alignment/padding,
-and preserves source field order as physical bootstrap order. Reordering fields
+and preserves source field order as physical bootstrap order. `layout_of`
+forms the shared `(TypeId, TargetProperties) -> TypeLayout` boundary; aggregate
+results are cached in declaration metadata once per single-target session.
+Reordering fields
 is therefore a source API change. The layout and aggregate calling convention
 are internal bootstrap contracts, not public ABI.
 
@@ -166,7 +177,8 @@ calls, recursion, import cycles and cross-module mutual recursion without
 textual or filesystem order exceptions. Parameters retain ordinary
 function-local `LocalId` identities and value semantics.
 
-HIR carries `StructInfo`/`FieldInfo` and `EnumInfo`/`VariantInfo` tables plus
+HIR carries the canonical type arena, `StructInfo`/`FieldInfo` and
+`EnumInfo`/`VariantInfo` tables plus
 fully resolved `StructInit`, `EnumInit`, matches and field places. MIR uses the
 reusable `Place { local, projections: FieldId* }`
 model for reads and nested stores. SSA promotes aggregates as ordinary SSA
@@ -217,6 +229,20 @@ Legacy-equivalent native cases are separately compared with the legacy CLI in
 qualification environments that contain its Python dependencies.
 `tests/modules/v1-contract.tsv` records the Vertical-2 multi-file contract;
 these cases are not forced through legacy differential semantics.
+
+### Vertical-7 timing snapshot
+
+A warm debug-build comparison against the pre-migration `HEAD`, using 30 full
+compilations of `tests/programs/v6_enums.ae`, measured means in the low
+microseconds: frontend signature+body analysis 195.1 -> 278.6 us, MIR verify
+107.8 -> 112.0 us, and SSA verify 142.8 -> 157.0 us. The frontend phase boundary
+also moved target layout from signature collection into semantic analysis.
+These tiny-input figures are noisy, but they show a real current cost from
+arena construction/property lookup and the new invalid-ID integrity scans.
+`TypeId` itself is 32-bit and comparisons avoid copying/matching `TypeData`;
+MIR/SSA share the arena with `Arc` instead of cloning it. Optimizing the scans or
+property-query hot paths is accepted follow-up debt; no unsafe/global cache or
+weaker verification was introduced to improve this microbenchmark.
 
 ## Bootstrap ABI and deliberate limits
 

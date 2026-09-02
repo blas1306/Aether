@@ -1,10 +1,10 @@
-//! LLVM backend for verified Vertical-6 program SSA.
+//! LLVM backend for verified Vertical-7 program SSA.
 
 use std::fmt::Write;
 
 use aether_frontend::{
     CastKind, CoercionKind, EnumInfo, FieldId, FloatType, FloatValue, FunctionSignature,
-    IntegerType, ModuleInfo, StructInfo, TargetProperties, Type,
+    IntegerType, ModuleInfo, StructInfo, TargetProperties, TypeArena, TypeData, TypeId,
 };
 use aether_middle::{
     BinaryOp, BlockId, SsaFunction, SsaOp, SsaOperand, SsaTerminator, TrapKind, UnaryOp,
@@ -21,7 +21,7 @@ pub struct TargetDescriptor {
 }
 
 impl TargetDescriptor {
-    /// The target admitted through NEXT-VERTICAL-6.
+    /// The target admitted through NEXT-VERTICAL-7.
     #[must_use]
     pub const fn linux_x86_64() -> Self {
         Self {
@@ -51,8 +51,9 @@ impl Backend for LlvmTextBackend {
 #[must_use]
 pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let program = ssa.as_ssa();
+    let types = &program.types;
     let mut output = String::new();
-    writeln!(output, "; Aether NEXT-VERTICAL-6").unwrap();
+    writeln!(output, "; Aether NEXT-VERTICAL-7").unwrap();
     writeln!(
         output,
         "; Internal bootstrap ABI and symbol mangling; not a public Aether ABI"
@@ -72,13 +73,18 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         let fields = info
             .fields
             .iter()
-            .map(|field| llvm_type(field.ty))
+            .map(|field| llvm_type(types, field.ty))
             .collect::<Vec<_>>()
             .join(", ");
         writeln!(
             output,
             "{} = type {{ {fields} }}",
-            llvm_type(Type::Struct(info.id))
+            llvm_type(
+                types,
+                types
+                    .id_of(TypeData::Struct(info.id))
+                    .expect("verified struct type")
+            )
         )
         .unwrap();
     }
@@ -88,7 +94,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             let payloads = variant
                 .payloads
                 .iter()
-                .map(|payload| llvm_type(payload.ty))
+                .map(|payload| llvm_type(types, payload.ty))
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("{{ {payloads} }}")
@@ -96,7 +102,12 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         writeln!(
             output,
             "{} = type {{ {} }}",
-            llvm_type(Type::Enum(info.id)),
+            llvm_type(
+                types,
+                types
+                    .id_of(TypeData::Enum(info.id))
+                    .expect("verified enum type")
+            ),
             fields.join(", ")
         )
         .unwrap();
@@ -115,6 +126,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             &program.modules,
             &program.structs,
             &program.enums,
+            types,
         );
     }
 
@@ -137,7 +149,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     output
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn emit_function(
     output: &mut String,
     function: &SsaFunction,
@@ -146,17 +158,18 @@ fn emit_function(
     modules: &[ModuleInfo],
     structs: &[StructInfo],
     enums: &[EnumInfo],
+    types: &TypeArena,
 ) {
     let parameters = function
         .parameters
         .iter()
-        .map(|parameter| format!("{} %v{}", llvm_type(parameter.ty), parameter.value.0))
+        .map(|parameter| format!("{} %v{}", llvm_type(types, parameter.ty), parameter.value.0))
         .collect::<Vec<_>>()
         .join(", ");
     writeln!(
         output,
         "define {} @{}({parameters}) {{",
-        llvm_type(signature.return_type),
+        llvm_type(types, signature.return_type),
         bootstrap_symbol(signature, modules)
     )
     .unwrap();
@@ -198,7 +211,7 @@ fn emit_function(
                 output,
                 "  %v{} = phi {} {}",
                 phi.result.0,
-                llvm_type(phi.ty),
+                llvm_type(types, phi.ty),
                 incoming
             )
             .unwrap();
@@ -209,21 +222,23 @@ fn emit_function(
                     output,
                     "  %v{} = select i1 true, {} {}, {} {}",
                     instruction.result.0,
-                    llvm_type(instruction.ty),
+                    llvm_type(types, instruction.ty),
                     llvm_operand(operand),
-                    llvm_type(instruction.ty),
+                    llvm_type(types, instruction.ty),
                     llvm_operand(operand)
                 )
                 .unwrap(),
                 SsaOp::Aggregate { struct_id, fields } => {
-                    let aggregate_ty = Type::Struct(*struct_id);
+                    let aggregate_ty = types
+                        .id_of(TypeData::Struct(*struct_id))
+                        .expect("verified struct type");
                     if fields.is_empty() {
                         writeln!(
                             output,
                             "  %v{} = select i1 true, {} zeroinitializer, {} zeroinitializer",
                             instruction.result.0,
-                            llvm_type(aggregate_ty),
-                            llvm_type(aggregate_ty)
+                            llvm_type(types, aggregate_ty),
+                            llvm_type(types, aggregate_ty)
                         )
                         .unwrap();
                     } else {
@@ -242,8 +257,8 @@ fn emit_function(
                             writeln!(
                                 output,
                                 "  {result_name} = insertvalue {} {previous}, {} {}, {}",
-                                llvm_type(aggregate_ty),
-                                llvm_type(field.ty),
+                                llvm_type(types, aggregate_ty),
+                                llvm_type(types, field.ty),
                                 llvm_operand(operand),
                                 field.index
                             )
@@ -258,7 +273,9 @@ fn emit_function(
                 } => {
                     let info = &enums[enum_id.0 as usize];
                     let variant = &info.variants[variant_id.index as usize];
-                    let aggregate_ty = Type::Enum(*enum_id);
+                    let aggregate_ty = types
+                        .id_of(TypeData::Enum(*enum_id))
+                        .expect("verified enum type");
                     let tag_result = if payloads.is_empty() {
                         format!("%v{}", instruction.result.0)
                     } else {
@@ -267,7 +284,7 @@ fn emit_function(
                     writeln!(
                         output,
                         "  {tag_result} = insertvalue {} zeroinitializer, i32 {}, 0",
-                        llvm_type(aggregate_ty),
+                        llvm_type(types, aggregate_ty),
                         variant.discriminant
                     )
                     .unwrap();
@@ -287,8 +304,8 @@ fn emit_function(
                         writeln!(
                             output,
                             "  {result_name} = insertvalue {} {previous}, {} {}, {}, {}",
-                            llvm_type(aggregate_ty),
-                            llvm_type(payload.ty),
+                            llvm_type(types, aggregate_ty),
+                            llvm_type(types, payload.ty),
                             llvm_operand(operand),
                             variant.index + 1,
                             payload.index
@@ -301,7 +318,12 @@ fn emit_function(
                         output,
                         "  %v{} = extractvalue {} {}, 0",
                         instruction.result.0,
-                        llvm_type(Type::Enum(*enum_id)),
+                        llvm_type(
+                            types,
+                            types
+                                .id_of(TypeData::Enum(*enum_id))
+                                .expect("verified enum type")
+                        ),
                         llvm_operand(value)
                     )
                     .unwrap();
@@ -318,7 +340,12 @@ fn emit_function(
                         output,
                         "  %v{} = extractvalue {} {}, {}, {}",
                         instruction.result.0,
-                        llvm_type(Type::Enum(*enum_id)),
+                        llvm_type(
+                            types,
+                            types
+                                .id_of(TypeData::Enum(*enum_id))
+                                .expect("verified enum type")
+                        ),
                         llvm_operand(value),
                         variant.index + 1,
                         index
@@ -330,12 +357,13 @@ fn emit_function(
                     projections,
                 } => {
                     let aggregate_ty = operand_type(function, aggregate);
-                    let indices = llvm_projection_indices(aggregate_ty, projections, structs);
+                    let indices =
+                        llvm_projection_indices(types, aggregate_ty, projections, structs);
                     writeln!(
                         output,
                         "  %v{} = extractvalue {} {}, {indices}",
                         instruction.result.0,
-                        llvm_type(aggregate_ty),
+                        llvm_type(types, aggregate_ty),
                         llvm_operand(aggregate)
                     )
                     .unwrap();
@@ -347,14 +375,15 @@ fn emit_function(
                 } => {
                     let aggregate_ty = operand_type(function, aggregate);
                     let value_ty = operand_type(function, value);
-                    let indices = llvm_projection_indices(aggregate_ty, projections, structs);
+                    let indices =
+                        llvm_projection_indices(types, aggregate_ty, projections, structs);
                     writeln!(
                         output,
                         "  %v{} = insertvalue {} {}, {} {}, {indices}",
                         instruction.result.0,
-                        llvm_type(aggregate_ty),
+                        llvm_type(types, aggregate_ty),
                         llvm_operand(aggregate),
-                        llvm_type(value_ty),
+                        llvm_type(types, value_ty),
                         llvm_operand(value)
                     )
                     .unwrap();
@@ -373,9 +402,9 @@ fn emit_function(
                         output,
                         "  %v{} = {opcode} {} {} to {}",
                         instruction.result.0,
-                        llvm_type(*from),
+                        llvm_type(types, *from),
                         llvm_operand(operand),
-                        llvm_type(instruction.ty)
+                        llvm_type(types, instruction.ty)
                     )
                     .unwrap();
                 }
@@ -390,6 +419,7 @@ fn emit_function(
                     }
                     emit_cast(
                         output,
+                        types,
                         block.id,
                         instruction.result.0,
                         *kind,
@@ -409,8 +439,11 @@ fn emit_function(
                         output,
                         block.id,
                         instruction.result.0,
-                        &format!("llvm.ssub.with.overflow.{}", llvm_type(instruction.ty)),
-                        &llvm_type(instruction.ty),
+                        &format!(
+                            "llvm.ssub.with.overflow.{}",
+                            llvm_type(types, instruction.ty)
+                        ),
+                        &llvm_type(types, instruction.ty),
                         "0",
                         &llvm_operand(operand),
                     );
@@ -424,7 +457,7 @@ fn emit_function(
                         output,
                         "  %v{} = fneg {} {}",
                         instruction.result.0,
-                        llvm_type(instruction.ty),
+                        llvm_type(types, instruction.ty),
                         llvm_operand(operand)
                     )
                     .unwrap();
@@ -442,7 +475,7 @@ fn emit_function(
                     | BinaryOp::MultiplyIntegerChecked => {
                         overflow_trap = true;
                         let operand_ty = operand_type(function, left);
-                        let integer = operand_ty.as_integer().expect("verified integer op");
+                        let integer = types.integer_info(operand_ty).expect("verified integer op");
                         let prefix = if integer.is_signed() { 's' } else { 'u' };
                         let opname = match op {
                             BinaryOp::AddIntegerChecked => "add",
@@ -450,7 +483,7 @@ fn emit_function(
                             BinaryOp::MultiplyIntegerChecked => "mul",
                             _ => unreachable!(),
                         };
-                        let llvm_ty = llvm_type(operand_ty);
+                        let llvm_ty = llvm_type(types, operand_ty);
                         let intrinsic = format!("llvm.{prefix}{opname}.with.overflow.{llvm_ty}");
                         debug_assert_eq!(*trap, Some(TrapKind::IntegerOverflow));
                         emit_checked(
@@ -473,6 +506,7 @@ fn emit_function(
                         }
                         emit_integer_division(
                             output,
+                            types,
                             block.id,
                             instruction.result.0,
                             *op,
@@ -502,7 +536,7 @@ fn emit_function(
                             output,
                             "  %v{} = {opcode} {} {}, {}",
                             instruction.result.0,
-                            llvm_type(operand_type(function, left)),
+                            llvm_type(types, operand_type(function, left)),
                             llvm_operand(left),
                             llvm_operand(right)
                         )
@@ -515,7 +549,7 @@ fn emit_function(
                     | BinaryOp::Equal
                     | BinaryOp::NotEqual => {
                         let operand_ty = operand_type(function, left);
-                        if let Type::Float(_) = operand_ty {
+                        if types.float_info(operand_ty).is_some() {
                             let predicate = match op {
                                 BinaryOp::Less => "olt",
                                 BinaryOp::LessEqual => "ole",
@@ -529,14 +563,15 @@ fn emit_function(
                                 output,
                                 "  %v{} = fcmp {predicate} {} {}, {}",
                                 instruction.result.0,
-                                llvm_type(operand_ty),
+                                llvm_type(types, operand_ty),
                                 llvm_operand(left),
                                 llvm_operand(right)
                             )
                             .unwrap();
                         } else {
-                            let signed =
-                                operand_ty.as_integer().is_some_and(IntegerType::is_signed);
+                            let signed = types
+                                .integer_info(operand_ty)
+                                .is_some_and(IntegerType::is_signed);
                             let predicate = match op {
                                 BinaryOp::Less => {
                                     if signed {
@@ -574,7 +609,7 @@ fn emit_function(
                                 output,
                                 "  %v{} = icmp {predicate} {} {}, {}",
                                 instruction.result.0,
-                                llvm_type(operand_ty),
+                                llvm_type(types, operand_ty),
                                 llvm_operand(left),
                                 llvm_operand(right)
                             )
@@ -588,7 +623,11 @@ fn emit_function(
                         .iter()
                         .zip(&callee_signature.parameters)
                         .map(|(argument, parameter)| {
-                            format!("{} {}", llvm_type(parameter.ty), llvm_operand(argument))
+                            format!(
+                                "{} {}",
+                                llvm_type(types, parameter.ty),
+                                llvm_operand(argument)
+                            )
                         })
                         .collect::<Vec<_>>()
                         .join(", ");
@@ -596,7 +635,7 @@ fn emit_function(
                         output,
                         "  %v{} = call {} @{}({arguments})",
                         instruction.result.0,
-                        llvm_type(callee_signature.return_type),
+                        llvm_type(types, callee_signature.return_type),
                         bootstrap_symbol(callee_signature, modules)
                     )
                     .unwrap();
@@ -646,7 +685,7 @@ fn emit_function(
             SsaTerminator::Return(value) => writeln!(
                 output,
                 "  ret {} {}",
-                llvm_type(signature.return_type),
+                llvm_type(types, signature.return_type),
                 llvm_operand(value)
             )
             .unwrap(),
@@ -735,25 +774,26 @@ fn emit_checked(
 #[allow(clippy::too_many_arguments)]
 fn emit_cast(
     output: &mut String,
+    types: &TypeArena,
     block: BlockId,
     result: u32,
     kind: CastKind,
     operand: &SsaOperand,
-    from: Type,
-    to: Type,
+    from: TypeId,
+    to: TypeId,
     trap: Option<TrapKind>,
 ) {
     let value = llvm_operand(operand);
     match kind {
         CastKind::Identity | CastKind::IntegerReencode => {
-            emit_identity(output, result, to, &value);
+            emit_identity(output, types, result, to, &value);
         }
         CastKind::IntegerExtendSigned => {
             writeln!(
                 output,
                 "  %v{result} = sext {} {value} to {}",
-                llvm_type(from),
-                llvm_type(to)
+                llvm_type(types, from),
+                llvm_type(types, to)
             )
             .unwrap();
         }
@@ -761,16 +801,16 @@ fn emit_cast(
             writeln!(
                 output,
                 "  %v{result} = zext {} {value} to {}",
-                llvm_type(from),
-                llvm_type(to)
+                llvm_type(types, from),
+                llvm_type(types, to)
             )
             .unwrap();
         }
         CastKind::IntegerNarrowChecked | CastKind::IntegerSignednessChecked => {
             if trap == Some(TrapKind::ConversionOutOfRange) {
-                emit_integer_cast_check(output, block, result, &value, from, to);
+                emit_integer_cast_check(output, types, block, result, &value, from, to);
             }
-            emit_integer_cast_value(output, result, &value, from, to);
+            emit_integer_cast_value(output, types, result, &value, from, to);
         }
         CastKind::SignedIntegerToFloat | CastKind::UnsignedIntegerToFloat => {
             let opcode = if kind == CastKind::SignedIntegerToFloat {
@@ -781,13 +821,13 @@ fn emit_cast(
             writeln!(
                 output,
                 "  %v{result} = {opcode} {} {value} to {}",
-                llvm_type(from),
-                llvm_type(to)
+                llvm_type(types, from),
+                llvm_type(types, to)
             )
             .unwrap();
         }
         CastKind::FloatToSignedIntegerChecked | CastKind::FloatToUnsignedIntegerChecked => {
-            emit_float_to_integer_check(output, block, result, &value, from, to);
+            emit_float_to_integer_check(output, types, block, result, &value, from, to);
             let opcode = if kind == CastKind::FloatToSignedIntegerChecked {
                 "fptosi"
             } else {
@@ -796,8 +836,8 @@ fn emit_cast(
             writeln!(
                 output,
                 "  %v{result} = {opcode} {} {value} to {}",
-                llvm_type(from),
-                llvm_type(to)
+                llvm_type(types, from),
+                llvm_type(types, to)
             )
             .unwrap();
         }
@@ -805,8 +845,8 @@ fn emit_cast(
             writeln!(
                 output,
                 "  %v{result} = fpext {} {value} to {}",
-                llvm_type(from),
-                llvm_type(to)
+                llvm_type(types, from),
+                llvm_type(types, to)
             )
             .unwrap();
         }
@@ -814,34 +854,39 @@ fn emit_cast(
             writeln!(
                 output,
                 "  %v{result} = fptrunc {} {value} to {}",
-                llvm_type(from),
-                llvm_type(to)
+                llvm_type(types, from),
+                llvm_type(types, to)
             )
             .unwrap();
         }
     }
 }
 
-fn emit_identity(output: &mut String, result: u32, ty: Type, value: &str) {
+fn emit_identity(output: &mut String, types: &TypeArena, result: u32, ty: TypeId, value: &str) {
     writeln!(
         output,
         "  %v{result} = select i1 true, {} {value}, {} {value}",
-        llvm_type(ty),
-        llvm_type(ty)
+        llvm_type(types, ty),
+        llvm_type(types, ty)
     )
     .unwrap();
 }
 
 fn emit_integer_cast_check(
     output: &mut String,
+    types: &TypeArena,
     block: BlockId,
     result: u32,
     value: &str,
-    from: Type,
-    to: Type,
+    from: TypeId,
+    to: TypeId,
 ) {
-    let source = from.as_integer().expect("verified integer cast source");
-    let target = to.as_integer().expect("verified integer cast target");
+    let source = types
+        .integer_info(from)
+        .expect("verified integer cast source");
+    let target = types
+        .integer_info(to)
+        .expect("verified integer cast target");
     let properties = TargetProperties::LINUX_X86_64;
     let (source_min, source_max) = source.range(properties);
     let (target_min, target_max) = target.range(properties);
@@ -851,7 +896,7 @@ fn emit_integer_cast_check(
         writeln!(
             output,
             "  %cast_lower{result} = icmp {predicate_prefix}ge {} {value}, {target_min}",
-            llvm_type(from)
+            llvm_type(types, from)
         )
         .unwrap();
         conditions.push(format!("%cast_lower{result}"));
@@ -860,7 +905,7 @@ fn emit_integer_cast_check(
         writeln!(
             output,
             "  %cast_upper{result} = icmp {predicate_prefix}le {} {value}, {target_max}",
-            llvm_type(from)
+            llvm_type(types, from)
         )
         .unwrap();
         conditions.push(format!("%cast_upper{result}"));
@@ -882,10 +927,17 @@ fn emit_integer_cast_check(
     writeln!(output, "{}:", continuation_label(block, result)).unwrap();
 }
 
-fn emit_integer_cast_value(output: &mut String, result: u32, value: &str, from: Type, to: Type) {
+fn emit_integer_cast_value(
+    output: &mut String,
+    types: &TypeArena,
+    result: u32,
+    value: &str,
+    from: TypeId,
+    to: TypeId,
+) {
     let properties = TargetProperties::LINUX_X86_64;
-    let source = from.as_integer().unwrap();
-    let target = to.as_integer().unwrap();
+    let source = types.integer_info(from).unwrap();
+    let target = types.integer_info(to).unwrap();
     match source.bits(properties).cmp(&target.bits(properties)) {
         std::cmp::Ordering::Less => {
             let opcode = if source.is_signed() && target.is_signed() {
@@ -896,32 +948,33 @@ fn emit_integer_cast_value(output: &mut String, result: u32, value: &str, from: 
             writeln!(
                 output,
                 "  %v{result} = {opcode} {} {value} to {}",
-                llvm_type(from),
-                llvm_type(to)
+                llvm_type(types, from),
+                llvm_type(types, to)
             )
             .unwrap();
         }
         std::cmp::Ordering::Greater => writeln!(
             output,
             "  %v{result} = trunc {} {value} to {}",
-            llvm_type(from),
-            llvm_type(to)
+            llvm_type(types, from),
+            llvm_type(types, to)
         )
         .unwrap(),
-        std::cmp::Ordering::Equal => emit_identity(output, result, to, value),
+        std::cmp::Ordering::Equal => emit_identity(output, types, result, to, value),
     }
 }
 
 fn emit_float_to_integer_check(
     output: &mut String,
+    types: &TypeArena,
     block: BlockId,
     result: u32,
     value: &str,
-    from: Type,
-    to: Type,
+    from: TypeId,
+    to: TypeId,
 ) {
-    let source = from.as_float().unwrap();
-    let target = to.as_integer().unwrap();
+    let source = types.float_info(from).unwrap();
+    let target = types.integer_info(to).unwrap();
     let (min, max) = target.range(TargetProperties::LINUX_X86_64);
     let (lower_predicate, lower) = if target.is_signed() {
         let minimum = float_boundary(source, min);
@@ -938,14 +991,14 @@ fn emit_float_to_integer_check(
     writeln!(
         output,
         "  %cast_lower{result} = fcmp {lower_predicate} {} {value}, {}",
-        llvm_type(from),
+        llvm_type(types, from),
         float_operand(lower)
     )
     .unwrap();
     writeln!(
         output,
         "  %cast_upper{result} = fcmp olt {} {value}, {}",
-        llvm_type(from),
+        llvm_type(types, from),
         float_operand(upper)
     )
     .unwrap();
@@ -971,16 +1024,18 @@ fn float_boundary(source: FloatType, value: i128) -> FloatValue {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_integer_division(
     output: &mut String,
+    types: &TypeArena,
     block: BlockId,
     result: u32,
     op: BinaryOp,
-    ty: Type,
+    ty: TypeId,
     left: &str,
     right: &str,
 ) {
-    let llvm_ty = llvm_type(ty);
+    let llvm_ty = llvm_type(types, ty);
     writeln!(output, "  %div_zero{result} = icmp eq {llvm_ty} {right}, 0").unwrap();
     let nonzero = if matches!(
         op,
@@ -1006,7 +1061,7 @@ fn emit_integer_division(
             writeln!(output, "  %v{result} = {opcode} {llvm_ty} {left}, {right}").unwrap();
         }
         BinaryOp::DivideIntegerSignedChecked => {
-            let integer = ty.as_integer().unwrap();
+            let integer = types.integer_info(ty).unwrap();
             let min = integer.range(TargetProperties::LINUX_X86_64).0;
             writeln!(
                 output,
@@ -1033,7 +1088,7 @@ fn emit_integer_division(
             writeln!(output, "  %v{result} = sdiv {llvm_ty} {left}, {right}").unwrap();
         }
         BinaryOp::RemainderIntegerSignedChecked => {
-            let integer = ty.as_integer().unwrap();
+            let integer = types.integer_info(ty).unwrap();
             let min = integer.range(TargetProperties::LINUX_X86_64).0;
             let special = format!("bb{}_remainder_min_v{result}", block.0);
             let normal = format!("bb{}_remainder_normal_v{result}", block.0);
@@ -1116,19 +1171,19 @@ fn continuation_label(block: BlockId, result: u32) -> String {
     format!("bb{}_after_v{}", block.0, result)
 }
 
-fn llvm_type(ty: Type) -> String {
-    match ty {
-        Type::Bool => "i1".into(),
-        Type::Integer(IntegerType::Int8 | IntegerType::Uint8) => "i8".into(),
-        Type::Integer(IntegerType::Int16 | IntegerType::Uint16) => "i16".into(),
-        Type::Integer(IntegerType::Int32 | IntegerType::Uint32) => "i32".into(),
-        Type::Integer(
+fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
+    match types.get(ty).expect("verified backend TypeId") {
+        TypeData::Bool => "i1".into(),
+        TypeData::Integer(IntegerType::Int8 | IntegerType::Uint8) => "i8".into(),
+        TypeData::Integer(IntegerType::Int16 | IntegerType::Uint16) => "i16".into(),
+        TypeData::Integer(IntegerType::Int32 | IntegerType::Uint32) => "i32".into(),
+        TypeData::Integer(
             IntegerType::Int64 | IntegerType::Uint64 | IntegerType::Isize | IntegerType::Usize,
         ) => "i64".into(),
-        Type::Float(FloatType::Float32) => "float".into(),
-        Type::Float(FloatType::Float64) => "double".into(),
-        Type::Struct(id) => format!("%aether.struct.{}", id.0),
-        Type::Enum(id) => format!("%aether.enum.{}", id.0),
+        TypeData::Float(FloatType::Float32) => "float".into(),
+        TypeData::Float(FloatType::Float64) => "double".into(),
+        TypeData::Struct(id) => format!("%aether.struct.{}", id.0),
+        TypeData::Enum(id) => format!("%aether.enum.{}", id.0),
     }
 }
 
@@ -1140,14 +1195,15 @@ fn field_info(structs: &[StructInfo], id: FieldId) -> &aether_frontend::FieldInf
 }
 
 fn llvm_projection_indices(
-    mut ty: Type,
+    types: &TypeArena,
+    mut ty: TypeId,
     projections: &[FieldId],
     structs: &[StructInfo],
 ) -> String {
     projections
         .iter()
         .map(|field_id| {
-            let owner = ty.as_struct().expect("verified projection owner");
+            let owner = types.struct_id(ty).expect("verified projection owner");
             let field = structs[owner.0 as usize]
                 .fields
                 .iter()
@@ -1169,10 +1225,10 @@ fn llvm_operand(operand: &SsaOperand) -> String {
     }
 }
 
-fn operand_type(function: &SsaFunction, operand: &SsaOperand) -> Type {
+fn operand_type(function: &SsaFunction, operand: &SsaOperand) -> TypeId {
     match operand {
         SsaOperand::Int { ty, .. } | SsaOperand::Float { ty, .. } => *ty,
-        SsaOperand::Bool(_) => Type::Bool,
+        SsaOperand::Bool(_) => TypeId::BOOL,
         SsaOperand::Value(value) => function
             .parameters
             .iter()

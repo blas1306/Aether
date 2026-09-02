@@ -8,13 +8,15 @@
     clippy::many_single_char_names,
     clippy::float_cmp,
     clippy::semicolon_if_nothing_returned,
+    clippy::too_many_arguments,
     clippy::too_many_lines,
     clippy::unused_self
 )]
 use crate::{
     AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstMatchArm, AstPlace, AstStmtKind,
     AstType, AstUnaryOp, Diagnostic, DiagnosticCategory, EnumId, FieldId, FloatType, IntegerType,
-    ParsedAst, Phase, SourceId, Span, StructId, TargetProperties, Type, VariantId,
+    ParsedAst, Phase, SourceId, Span, StructId, TargetProperties, TypeArena, TypeData, TypeId,
+    VariantId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
@@ -52,7 +54,7 @@ pub struct LocalId(pub u32);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParameterSignature {
     pub name: String,
-    pub ty: Type,
+    pub ty: TypeId,
     pub span: Span,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -61,7 +63,7 @@ pub struct FunctionSignature {
     pub module: ModuleId,
     pub name: String,
     pub parameters: Vec<ParameterSignature>,
-    pub return_type: Type,
+    pub return_type: TypeId,
     pub span: Span,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -69,7 +71,7 @@ pub struct TypeAliasInfo {
     pub module: ModuleId,
     pub name: String,
     pub target_spelling: String,
-    pub canonical: Type,
+    pub canonical: TypeId,
     pub span: Span,
 }
 
@@ -79,13 +81,64 @@ pub struct TypeLayout {
     pub align: u64,
 }
 
+/// Returns the session's target-specific layout for a canonical type.
+///
+/// Aggregate entries are the caches populated once during semantic analysis;
+/// scalar and target-sized integer layouts are computed from `target`. A
+/// compilation session has exactly one target, so no cross-target cache key or
+/// persistent layout identity is needed in Vertical-7.
+#[must_use]
+pub fn layout_of(
+    types: &TypeArena,
+    ty: TypeId,
+    target: TargetProperties,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+) -> Option<TypeLayout> {
+    Some(match types.get(ty)? {
+        TypeData::Bool => TypeLayout { size: 1, align: 1 },
+        TypeData::Integer(integer) => {
+            let bytes = u64::from(integer.bits(target) / 8);
+            TypeLayout {
+                size: bytes,
+                align: bytes,
+            }
+        }
+        TypeData::Float(FloatType::Float32) => TypeLayout { size: 4, align: 4 },
+        TypeData::Float(FloatType::Float64) => TypeLayout { size: 8, align: 8 },
+        TypeData::Struct(id) => structs.get(id.0 as usize)?.layout,
+        TypeData::Enum(id) => enums.get(id.0 as usize)?.layout,
+    })
+}
+
+/// Formats a canonical type for source diagnostics and IR inspection without
+/// exposing a raw arena index as the only description.
+#[must_use]
+pub fn format_type(
+    types: &TypeArena,
+    ty: TypeId,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+) -> String {
+    match types.get(ty) {
+        Some(TypeData::Struct(id)) => structs
+            .get(id.0 as usize)
+            .map_or_else(|| format!("struct#{}", id.0), |info| info.name.clone()),
+        Some(TypeData::Enum(id)) => enums
+            .get(id.0 as usize)
+            .map_or_else(|| format!("enum#{}", id.0), |info| info.name.clone()),
+        Some(data) => data.to_string(),
+        None => types.format(ty),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FieldInfo {
     pub id: FieldId,
     pub owner: StructId,
     pub index: u32,
     pub name: String,
-    pub ty: Type,
+    pub ty: TypeId,
     pub offset: u64,
     pub span: Span,
 }
@@ -103,7 +156,7 @@ pub struct StructInfo {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VariantPayloadInfo {
     pub index: u32,
-    pub ty: Type,
+    pub ty: TypeId,
     /// Absolute byte offset in the bootstrap typed enum envelope.
     pub offset: u64,
     pub span: Span,
@@ -134,12 +187,13 @@ pub struct EnumInfo {
 
 #[derive(Clone, Debug)]
 pub struct DeclaredProgram {
+    types: TypeArena,
     program: ParsedProgram,
     signatures: Vec<FunctionSignature>,
     names: Vec<BTreeMap<String, FunctionId>>,
     imports: Vec<BTreeMap<String, ModuleId>>,
     module_names: BTreeMap<String, ModuleId>,
-    aliases: Vec<BTreeMap<String, Type>>,
+    aliases: Vec<BTreeMap<String, TypeId>>,
     alias_info: Vec<TypeAliasInfo>,
     structs: Vec<StructInfo>,
     enums: Vec<EnumInfo>,
@@ -154,24 +208,29 @@ impl DeclaredProgram {
     pub fn signatures(&self) -> &[FunctionSignature] {
         &self.signatures
     }
+    #[must_use]
+    pub fn types(&self) -> &TypeArena {
+        &self.types
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HirLocal {
     pub id: LocalId,
     pub name: String,
-    pub ty: Type,
+    pub ty: TypeId,
     pub span: Span,
     pub parameter: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HirParameter {
     pub local: LocalId,
-    pub ty: Type,
+    pub ty: TypeId,
     pub span: Span,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypedHir {
+    types: TypeArena,
     modules: Vec<ModuleInfo>,
     aliases: Vec<TypeAliasInfo>,
     structs: Vec<StructInfo>,
@@ -181,6 +240,10 @@ pub struct TypedHir {
     entry: FunctionId,
 }
 impl TypedHir {
+    #[must_use]
+    pub fn types(&self) -> &TypeArena {
+        &self.types
+    }
     #[must_use]
     pub fn signatures(&self) -> &[FunctionSignature] {
         &self.signatures
@@ -211,8 +274,19 @@ impl TypedHir {
     }
     #[must_use]
     pub fn dump(&self) -> String {
+        let type_table = self
+            .types
+            .entries()
+            .map(|(id, _)| {
+                format!(
+                    "  {id:?} = {}",
+                    format_type(&self.types, id, &self.structs, &self.enums)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         let mut d = format!(
-            "entry: {:#?}\nmodules: {:#?}\naliases (transparent -> canonical): {:#?}\nstructs: {:#?}\nenums: {:#?}\nsignatures: {:#?}",
+            "types (session-local):\n{type_table}\nentry: {:#?}\nmodules: {:#?}\naliases (transparent -> canonical): {:#?}\nstructs: {:#?}\nenums: {:#?}\nsignatures: {:#?}",
             self.entry, self.modules, self.aliases, self.structs, self.enums, self.signatures
         );
         for m in &self.modules {
@@ -227,6 +301,7 @@ impl TypedHir {
         self,
     ) -> (
         Vec<ModuleInfo>,
+        TypeArena,
         Vec<StructInfo>,
         Vec<EnumInfo>,
         Vec<FunctionSignature>,
@@ -235,6 +310,7 @@ impl TypedHir {
     ) {
         (
             self.modules,
+            self.types,
             self.structs,
             self.enums,
             self.signatures,
@@ -301,7 +377,7 @@ pub struct HirMatchArm {
 pub struct HirMatchBinding {
     pub local: LocalId,
     pub payload_index: u32,
-    pub ty: Type,
+    pub ty: TypeId,
     pub span: Span,
 }
 
@@ -309,12 +385,12 @@ pub struct HirMatchBinding {
 pub struct HirPlace {
     pub local: LocalId,
     pub projections: Vec<FieldId>,
-    pub ty: Type,
+    pub ty: TypeId,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HirExpr {
     pub kind: HirExprKind,
-    pub ty: Type,
+    pub ty: TypeId,
     pub span: Span,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -348,8 +424,8 @@ pub enum HirExprKind {
     },
     ExplicitCast {
         kind: CastKind,
-        source_type: Type,
-        target_type: Type,
+        source_type: TypeId,
+        target_type: TypeId,
         operand: Box<HirExpr>,
     },
     Unary {
@@ -516,6 +592,16 @@ pub fn collect_program_signatures(
         }
     }
 
+    // Allocation order is deterministic for dumps but has no semantic or ABI
+    // meaning. Declaration identities make nominality explicit in TypeData.
+    let mut types = TypeArena::new();
+    for (id, _, _) in &struct_decls {
+        types.intern(TypeData::Struct(*id));
+    }
+    for (id, _, _) in &enum_decls {
+        types.intern(TypeData::Enum(*id));
+    }
+
     let mut aliases = vec![BTreeMap::new(); program.modules.len()];
     let mut alias_info = vec![];
     for module in &program.modules {
@@ -533,6 +619,7 @@ pub fn collect_program_signatures(
                 &enum_names,
                 &imports,
                 &module_names,
+                &types,
                 &mut state,
                 &mut aliases[module.info.id.0 as usize],
                 &mut alias_info,
@@ -571,6 +658,7 @@ pub fn collect_program_signatures(
                 &enum_names,
                 &imports,
                 &module_names,
+                &types,
             )
             .map_err(|d| vec![src(d, module)])?;
             let field_id = FieldId(next_field);
@@ -637,6 +725,7 @@ pub fn collect_program_signatures(
                         &enum_names,
                         &imports,
                         &module_names,
+                        &types,
                     )
                     .map(|resolved| VariantPayloadInfo {
                         index: payload_index as u32,
@@ -669,31 +758,6 @@ pub fn collect_program_signatures(
             span: declaration.span,
         });
     }
-    compute_aggregate_layouts(&mut structs, &mut enums, TargetProperties::LINUX_X86_64).map_err(
-        |(ty, message)| {
-            let (span, module) = match ty {
-                Type::Struct(id) => (structs[id.0 as usize].span, structs[id.0 as usize].module),
-                Type::Enum(id) => (enums[id.0 as usize].span, enums[id.0 as usize].module),
-                _ => unreachable!(),
-            };
-            let code = if matches!(ty, Type::Struct(_)) {
-                "E0242"
-            } else {
-                "E0259"
-            };
-            vec![
-                Diagnostic::new(
-                    code,
-                    Phase::Semantic,
-                    DiagnosticCategory::Type,
-                    message,
-                    Some(span),
-                )
-                .with_source_name(&program.modules[module.0 as usize].info.source_name),
-            ]
-        },
-    )?;
-
     let mut signatures = vec![];
     let mut names = vec![BTreeMap::new(); program.modules.len()];
     for module in &program.modules {
@@ -712,6 +776,7 @@ pub fn collect_program_signatures(
                         &enum_names,
                         &imports,
                         &module_names,
+                        &types,
                     )
                     .map(|ty| ParameterSignature {
                         name: p.name.clone(),
@@ -729,6 +794,7 @@ pub fn collect_program_signatures(
                 &enum_names,
                 &imports,
                 &module_names,
+                &types,
             )
             .map_err(|d| vec![src(d, module)])?;
             signatures.push(FunctionSignature {
@@ -755,7 +821,7 @@ pub fn collect_program_signatures(
         )]);
     };
     let main = &signatures[entry.0 as usize];
-    if main.return_type != Type::INT64 || !main.parameters.is_empty() {
+    if main.return_type != TypeId::INT64 || !main.parameters.is_empty() {
         return Err(vec![src(
             Diagnostic::new(
                 "E0201",
@@ -768,6 +834,7 @@ pub fn collect_program_signatures(
         )]);
     }
     Ok(DeclaredProgram {
+        types,
         program,
         signatures,
         names,
@@ -798,10 +865,11 @@ fn resolve_alias(
     enum_names: &[BTreeMap<String, EnumId>],
     imports: &[BTreeMap<String, ModuleId>],
     module_names: &BTreeMap<String, ModuleId>,
+    types: &TypeArena,
     state: &mut BTreeMap<String, AliasState>,
-    resolved: &mut BTreeMap<String, Type>,
+    resolved: &mut BTreeMap<String, TypeId>,
     info: &mut Vec<TypeAliasInfo>,
-) -> Result<Type, Vec<Diagnostic>> {
+) -> Result<TypeId, Vec<Diagnostic>> {
     if let Some(t) = resolved.get(name) {
         return Ok(*t);
     }
@@ -829,14 +897,19 @@ fn resolve_alias(
             enum_names,
             imports,
             module_names,
+            types,
         )
         .map_err(|d| vec![src(d, module)])?
     } else if let Some(t) = builtin(&a.target.name) {
         t
     } else if let Some(id) = struct_names[module.info.id.0 as usize].get(&a.target.name) {
-        Type::Struct(*id)
+        types
+            .id_of(TypeData::Struct(*id))
+            .expect("collected struct type")
     } else if let Some(id) = enum_names[module.info.id.0 as usize].get(&a.target.name) {
-        Type::Enum(*id)
+        types
+            .id_of(TypeData::Enum(*id))
+            .expect("collected enum type")
     } else if decl.contains_key(&a.target.name) {
         resolve_alias(
             &a.target.name,
@@ -846,6 +919,7 @@ fn resolve_alias(
             enum_names,
             imports,
             module_names,
+            types,
             state,
             resolved,
             info,
@@ -868,12 +942,13 @@ fn resolve_alias(
 fn resolve_qualified_type(
     ty: &AstType,
     current: ModuleId,
-    aliases: Option<&[BTreeMap<String, Type>]>,
+    aliases: Option<&[BTreeMap<String, TypeId>]>,
     struct_names: &[BTreeMap<String, StructId>],
     enum_names: &[BTreeMap<String, EnumId>],
     imports: &[BTreeMap<String, ModuleId>],
     module_names: &BTreeMap<String, ModuleId>,
-) -> Result<Type, Diagnostic> {
+    types: &TypeArena,
+) -> Result<TypeId, Diagnostic> {
     let module = ty.module.as_ref().expect("qualified type");
     let Some(target) = module_names.get(module).copied() else {
         return Err(Diagnostic::new(
@@ -896,12 +971,12 @@ fn resolve_qualified_type(
     struct_names[target.0 as usize]
         .get(&ty.name)
         .copied()
-        .map(Type::Struct)
+        .and_then(|id| types.id_of(TypeData::Struct(id)))
         .or_else(|| {
             enum_names[target.0 as usize]
                 .get(&ty.name)
                 .copied()
-                .map(Type::Enum)
+                .and_then(|id| types.id_of(TypeData::Enum(id)))
         })
         .or_else(|| aliases.and_then(|maps| maps[target.0 as usize].get(&ty.name).copied()))
         .ok_or_else(|| unknown_type(ty))
@@ -910,12 +985,13 @@ fn resolve_qualified_type(
 fn resolve_type_in_module(
     ty: &AstType,
     current: ModuleId,
-    aliases: &[BTreeMap<String, Type>],
+    aliases: &[BTreeMap<String, TypeId>],
     struct_names: &[BTreeMap<String, StructId>],
     enum_names: &[BTreeMap<String, EnumId>],
     imports: &[BTreeMap<String, ModuleId>],
     module_names: &BTreeMap<String, ModuleId>,
-) -> Result<Type, Diagnostic> {
+    types: &TypeArena,
+) -> Result<TypeId, Diagnostic> {
     if ty.module.is_some() {
         return resolve_qualified_type(
             ty,
@@ -925,6 +1001,7 @@ fn resolve_type_in_module(
             enum_names,
             imports,
             module_names,
+            types,
         );
     }
     builtin(&ty.name)
@@ -933,13 +1010,13 @@ fn resolve_type_in_module(
             struct_names[current.0 as usize]
                 .get(&ty.name)
                 .copied()
-                .map(Type::Struct)
+                .and_then(|id| types.id_of(TypeData::Struct(id)))
         })
         .or_else(|| {
             enum_names[current.0 as usize]
                 .get(&ty.name)
                 .copied()
-                .map(Type::Enum)
+                .and_then(|id| types.id_of(TypeData::Enum(id)))
         })
         .ok_or_else(|| unknown_type(ty))
 }
@@ -950,19 +1027,20 @@ fn align_up(value: u64, align: u64) -> u64 {
 
 #[allow(clippy::items_after_statements)]
 fn compute_aggregate_layouts(
+    types: &TypeArena,
     structs: &mut [StructInfo],
     enums: &mut [EnumInfo],
     target: TargetProperties,
-) -> Result<(), (Type, String)> {
+) -> Result<(), (TypeId, String)> {
     #[derive(Clone, Copy)]
     enum Node {
         Struct(StructId),
         Enum(EnumId),
     }
-    fn node_type(node: Node) -> Type {
+    fn node_type(node: Node, types: &TypeArena) -> TypeId {
         match node {
-            Node::Struct(id) => Type::Struct(id),
-            Node::Enum(id) => Type::Enum(id),
+            Node::Struct(id) => types.id_of(TypeData::Struct(id)).expect("interned struct"),
+            Node::Enum(id) => types.id_of(TypeData::Enum(id)).expect("interned enum"),
         }
     }
     fn node_index(node: Node, struct_count: usize) -> usize {
@@ -975,8 +1053,9 @@ fn compute_aggregate_layouts(
         node: Node,
         structs: &[StructInfo],
         enums: &[EnumInfo],
+        types: &TypeArena,
         state: &mut [u8],
-    ) -> Result<(), (Type, String)> {
+    ) -> Result<(), (TypeId, String)> {
         let index = node_index(node, structs.len());
         if state[index] == 2 {
             return Ok(());
@@ -991,8 +1070,12 @@ fn compute_aggregate_layouts(
                 .enumerate()
                 .find(|(enum_index, _)| state[structs.len() + enum_index] == 1)
                 .map_or_else(
-                    || node_type(node),
-                    |(enum_index, _)| Type::Enum(EnumId(enum_index as u32)),
+                    || node_type(node, types),
+                    |(enum_index, _)| {
+                        types
+                            .id_of(TypeData::Enum(EnumId(enum_index as u32)))
+                            .expect("interned enum")
+                    },
                 );
             return Err((
                 identity,
@@ -1000,7 +1083,7 @@ fn compute_aggregate_layouts(
             ));
         }
         state[index] = 1;
-        let types: Vec<Type> = match node {
+        let child_types: Vec<TypeId> = match node {
             Node::Struct(id) => structs[id.0 as usize]
                 .fields
                 .iter()
@@ -1012,10 +1095,12 @@ fn compute_aggregate_layouts(
                 .flat_map(|variant| variant.payloads.iter().map(|payload| payload.ty))
                 .collect(),
         };
-        for ty in types {
-            match ty {
-                Type::Struct(id) => visit(Node::Struct(id), structs, enums, state)?,
-                Type::Enum(id) => visit(Node::Enum(id), structs, enums, state)?,
+        for ty in child_types {
+            match types.get(ty) {
+                Some(TypeData::Struct(id)) => {
+                    visit(Node::Struct(*id), structs, enums, types, state)?
+                }
+                Some(TypeData::Enum(id)) => visit(Node::Enum(*id), structs, enums, types, state)?,
                 _ => {}
             }
         }
@@ -1028,6 +1113,7 @@ fn compute_aggregate_layouts(
             Node::Struct(StructId(index as u32)),
             structs,
             enums,
+            types,
             &mut cycle_state,
         )?;
     }
@@ -1036,37 +1122,44 @@ fn compute_aggregate_layouts(
             Node::Enum(EnumId(index as u32)),
             structs,
             enums,
+            types,
             &mut cycle_state,
         )?;
     }
 
     fn type_layout(
-        ty: Type,
+        ty: TypeId,
         structs: &mut [StructInfo],
         enums: &mut [EnumInfo],
+        types: &TypeArena,
         struct_state: &mut [u8],
         enum_state: &mut [u8],
         target: TargetProperties,
     ) -> TypeLayout {
-        match ty {
-            Type::Bool => TypeLayout { size: 1, align: 1 },
-            Type::Integer(integer) => {
+        match types.get(ty).expect("layout requires valid TypeId") {
+            TypeData::Bool => TypeLayout { size: 1, align: 1 },
+            TypeData::Integer(integer) => {
                 let bytes = u64::from(integer.bits(target) / 8);
                 TypeLayout {
                     size: bytes,
                     align: bytes,
                 }
             }
-            Type::Float(FloatType::Float32) => TypeLayout { size: 4, align: 4 },
-            Type::Float(FloatType::Float64) => TypeLayout { size: 8, align: 8 },
-            Type::Struct(id) => struct_layout(id, structs, enums, struct_state, enum_state, target),
-            Type::Enum(id) => enum_layout(id, structs, enums, struct_state, enum_state, target),
+            TypeData::Float(FloatType::Float32) => TypeLayout { size: 4, align: 4 },
+            TypeData::Float(FloatType::Float64) => TypeLayout { size: 8, align: 8 },
+            TypeData::Struct(id) => {
+                struct_layout(*id, structs, enums, types, struct_state, enum_state, target)
+            }
+            TypeData::Enum(id) => {
+                enum_layout(*id, structs, enums, types, struct_state, enum_state, target)
+            }
         }
     }
     fn struct_layout(
         id: StructId,
         structs: &mut [StructInfo],
         enums: &mut [EnumInfo],
+        types: &TypeArena,
         struct_state: &mut [u8],
         enum_state: &mut [u8],
         target: TargetProperties,
@@ -1075,7 +1168,7 @@ fn compute_aggregate_layouts(
             return structs[id.0 as usize].layout;
         }
         struct_state[id.0 as usize] = 1;
-        let field_types: Vec<Type> = structs[id.0 as usize]
+        let field_types: Vec<TypeId> = structs[id.0 as usize]
             .fields
             .iter()
             .map(|field| field.ty)
@@ -1084,7 +1177,7 @@ fn compute_aggregate_layouts(
         let mut aggregate_align = 1;
         let mut offsets = Vec::with_capacity(field_types.len());
         for ty in field_types {
-            let layout = type_layout(ty, structs, enums, struct_state, enum_state, target);
+            let layout = type_layout(ty, structs, enums, types, struct_state, enum_state, target);
             offset = align_up(offset, layout.align);
             offsets.push(offset);
             offset += layout.size;
@@ -1105,6 +1198,7 @@ fn compute_aggregate_layouts(
         id: EnumId,
         structs: &mut [StructInfo],
         enums: &mut [EnumInfo],
+        types: &TypeArena,
         struct_state: &mut [u8],
         enum_state: &mut [u8],
         target: TargetProperties,
@@ -1113,7 +1207,7 @@ fn compute_aggregate_layouts(
             return enums[id.0 as usize].layout;
         }
         enum_state[id.0 as usize] = 1;
-        let variant_types: Vec<Vec<Type>> = enums[id.0 as usize]
+        let variant_types: Vec<Vec<TypeId>> = enums[id.0 as usize]
             .variants
             .iter()
             .map(|variant| variant.payloads.iter().map(|payload| payload.ty).collect())
@@ -1126,7 +1220,8 @@ fn compute_aggregate_layouts(
             let mut tuple_align = 1_u64;
             let mut payload_offsets = Vec::new();
             for ty in payload_types {
-                let layout = type_layout(ty, structs, enums, struct_state, enum_state, target);
+                let layout =
+                    type_layout(ty, structs, enums, types, struct_state, enum_state, target);
                 tuple_offset = align_up(tuple_offset, layout.align);
                 payload_offsets.push(tuple_offset);
                 tuple_offset += layout.size;
@@ -1167,6 +1262,7 @@ fn compute_aggregate_layouts(
             StructId(index as u32),
             structs,
             enums,
+            types,
             &mut struct_state,
             &mut enum_state,
             target,
@@ -1177,6 +1273,7 @@ fn compute_aggregate_layouts(
             EnumId(index as u32),
             structs,
             enums,
+            types,
             &mut struct_state,
             &mut enum_state,
             target,
@@ -1193,9 +1290,38 @@ pub fn analyze_bodies(d: DeclaredProgram) -> Result<TypedHir, Vec<Diagnostic>> {
     analyze_bodies_for_target(d, TargetProperties::LINUX_X86_64)
 }
 pub fn analyze_bodies_for_target(
-    d: DeclaredProgram,
+    mut d: DeclaredProgram,
     target: TargetProperties,
 ) -> Result<TypedHir, Vec<Diagnostic>> {
+    compute_aggregate_layouts(&d.types, &mut d.structs, &mut d.enums, target).map_err(
+        |(ty, message)| {
+            let (span, module) = match d.types.get(ty) {
+                Some(TypeData::Struct(id)) => (
+                    d.structs[id.0 as usize].span,
+                    d.structs[id.0 as usize].module,
+                ),
+                Some(TypeData::Enum(id)) => {
+                    (d.enums[id.0 as usize].span, d.enums[id.0 as usize].module)
+                }
+                _ => unreachable!(),
+            };
+            let code = if d.types.struct_id(ty).is_some() {
+                "E0242"
+            } else {
+                "E0259"
+            };
+            vec![
+                Diagnostic::new(
+                    code,
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    message,
+                    Some(span),
+                )
+                .with_source_name(&d.program.modules[module.0 as usize].info.source_name),
+            ]
+        },
+    )?;
     let mut functions = vec![];
     for m in &d.program.modules {
         for f in m.ast.functions() {
@@ -1211,6 +1337,7 @@ pub fn analyze_bodies_for_target(
     }
     let hir = TypedHir {
         modules: d.program.modules.iter().map(|m| m.info.clone()).collect(),
+        types: d.types,
         aliases: d.alias_info,
         structs: d.structs,
         enums: d.enums,
@@ -1240,6 +1367,7 @@ fn analyze_function(
         imports: &d.imports,
         module_names: &d.module_names,
         aliases: &d.aliases,
+        types: &d.types,
         structs: &d.structs,
         enums: &d.enums,
         struct_names: &d.struct_names,
@@ -1300,7 +1428,8 @@ struct Analyzer<'a> {
     names: &'a [BTreeMap<String, FunctionId>],
     imports: &'a [BTreeMap<String, ModuleId>],
     module_names: &'a BTreeMap<String, ModuleId>,
-    aliases: &'a [BTreeMap<String, Type>],
+    aliases: &'a [BTreeMap<String, TypeId>],
+    types: &'a TypeArena,
     structs: &'a [StructInfo],
     enums: &'a [EnumInfo],
     struct_names: &'a [BTreeMap<String, StructId>],
@@ -1308,7 +1437,7 @@ struct Analyzer<'a> {
     variant_names: &'a [BTreeMap<String, VariantId>],
     field_names: &'a [BTreeMap<String, FieldId>],
     module: ModuleId,
-    return_type: Type,
+    return_type: TypeId,
     target: TargetProperties,
 }
 struct Checked {
@@ -1354,6 +1483,7 @@ impl Analyzer<'_> {
                         self.enum_names,
                         self.imports,
                         self.module_names,
+                        self.types,
                     )
                     .map_err(|d| vec![d])?;
                     let initializer = self.expression(initializer, Some(ty))?.expr;
@@ -1378,7 +1508,8 @@ impl Analyzer<'_> {
                                     diagnostic.code = "E0245";
                                     diagnostic.message = format!(
                                         "field assignment requires {}: {}",
-                                        place.ty, diagnostic.message
+                                        self.type_name(place.ty),
+                                        diagnostic.message
                                     );
                                 }
                             }
@@ -1392,7 +1523,7 @@ impl Analyzer<'_> {
                     then_block,
                     else_block,
                 } => HirStmtKind::If {
-                    condition: self.expression(condition, Some(Type::Bool))?.expr,
+                    condition: self.expression(condition, Some(TypeId::BOOL))?.expr,
                     then_block: self.block(then_block, true)?,
                     else_block: else_block
                         .as_ref()
@@ -1400,7 +1531,7 @@ impl Analyzer<'_> {
                         .transpose()?,
                 },
                 AstStmtKind::While { condition, body } => HirStmtKind::While {
-                    condition: self.expression(condition, Some(Type::Bool))?.expr,
+                    condition: self.expression(condition, Some(TypeId::BOOL))?.expr,
                     body: self.block(body, true)?,
                 },
                 AstStmtKind::Match { scrutinee, arms } => self.match_statement(scrutinee, arms)?,
@@ -1427,12 +1558,15 @@ impl Analyzer<'_> {
         arms: &[AstMatchArm],
     ) -> Result<HirStmtKind, Vec<Diagnostic>> {
         let scrutinee = self.expression(scrutinee, None)?.expr;
-        let Some(enum_id) = scrutinee.ty.as_enum() else {
+        let Some(enum_id) = self.types.enum_id(scrutinee.ty) else {
             return Err(vec![Diagnostic::new(
                 "E0255",
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                format!("match scrutinee must be an enum, found {}", scrutinee.ty),
+                format!(
+                    "match scrutinee must be an enum, found {}",
+                    self.type_name(scrutinee.ty)
+                ),
                 Some(scrutinee.span),
             )]);
         };
@@ -1453,9 +1587,10 @@ impl Analyzer<'_> {
                 self.enum_names,
                 self.imports,
                 self.module_names,
+                self.types,
             )
             .map_err(|diagnostic| vec![diagnostic])?;
-            let Some(pattern_enum) = resolved_ty.as_enum() else {
+            let Some(pattern_enum) = self.types.enum_id(resolved_ty) else {
                 return Err(vec![Diagnostic::new(
                     "E0255",
                     Phase::Semantic,
@@ -1643,7 +1778,7 @@ impl Analyzer<'_> {
         name: &str,
         span: Span,
     ) -> Result<(), Vec<Diagnostic>> {
-        let Some(struct_id) = place.ty.as_struct() else {
+        let Some(struct_id) = self.types.struct_id(place.ty) else {
             return Err(vec![Diagnostic::new(
                 "E0244",
                 Phase::Semantic,
@@ -1674,7 +1809,11 @@ impl Analyzer<'_> {
         Ok(())
     }
 
-    fn expression(&self, e: &AstExpr, expected: Option<Type>) -> Result<Checked, Vec<Diagnostic>> {
+    fn expression(
+        &self,
+        e: &AstExpr,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
         if let AstExprKind::Integer(t) = &e.kind {
             return self.integer(t, false, expected, e.span);
         }
@@ -1697,7 +1836,7 @@ impl Analyzer<'_> {
             AstExprKind::Bool(v) => Checked {
                 expr: HirExpr {
                     kind: HirExprKind::Bool(*v),
-                    ty: Type::Bool,
+                    ty: TypeId::BOOL,
                     span: e.span,
                 },
                 constant: None,
@@ -1728,9 +1867,9 @@ impl Analyzer<'_> {
                 if let Some(target) = builtin(callee)
                     .or_else(|| self.aliases[self.module.0 as usize].get(callee).copied())
                 {
-                    if let Type::Struct(id) = target {
+                    if let Some(id) = self.types.struct_id(target) {
                         self.struct_init(id, callee, args, e.span)?
-                    } else if let Type::Enum(_) = target {
+                    } else if self.types.enum_id(target).is_some() {
                         return Err(vec![Diagnostic::new(
                             "E0250",
                             Phase::Semantic,
@@ -1826,22 +1965,22 @@ impl Analyzer<'_> {
         &self,
         text: &str,
         neg: bool,
-        expected: Option<Type>,
+        expected: Option<TypeId>,
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
-        let ty = expected.unwrap_or(Type::INT64);
-        let Some(it) = ty.as_integer() else {
+        let ty = expected.unwrap_or(TypeId::INT64);
+        let Some(it) = self.types.integer_info(ty) else {
             return Err(vec![type_error(
-                format!("integer literal cannot initialize {ty}"),
+                format!("integer literal cannot initialize {}", self.type_name(ty)),
                 span,
             )]);
         };
         let mag = text
             .parse::<u128>()
-            .map_err(|_| vec![range(text, ty, span, self.target)])?;
+            .map_err(|_| vec![range(self.types, text, ty, span, self.target)])?;
         let value = if neg {
             if mag > 1u128 << 127 {
-                return Err(vec![range(text, ty, span, self.target)]);
+                return Err(vec![range(self.types, text, ty, span, self.target)]);
             }
             if mag == 1u128 << 127 {
                 i128::MIN
@@ -1849,11 +1988,12 @@ impl Analyzer<'_> {
                 -(mag as i128)
             }
         } else {
-            i128::try_from(mag).map_err(|_| vec![range(text, ty, span, self.target)])?
+            i128::try_from(mag).map_err(|_| vec![range(self.types, text, ty, span, self.target)])?
         };
         let (min, max) = it.range(self.target);
         if value < min || value > max {
             return Err(vec![range(
+                self.types,
                 if neg { "negative integer" } else { text },
                 ty,
                 span,
@@ -1873,13 +2013,13 @@ impl Analyzer<'_> {
         &self,
         text: &str,
         neg: bool,
-        expected: Option<Type>,
+        expected: Option<TypeId>,
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
-        let ty = expected.unwrap_or(Type::Float(FloatType::Float64));
-        let Some(ft) = ty.as_float() else {
+        let ty = expected.unwrap_or(TypeId::FLOAT64);
+        let Some(ft) = self.types.float_info(ty) else {
             return Err(vec![type_error(
-                format!("floating literal cannot initialize {ty}"),
+                format!("floating literal cannot initialize {}", self.type_name(ty)),
                 span,
             )]);
         };
@@ -1901,7 +2041,10 @@ impl Analyzer<'_> {
                 "E0216",
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                format!("floating literal `{s}` is outside {ty} finite range"),
+                format!(
+                    "floating literal `{s}` is outside {} finite range",
+                    self.type_name(ty)
+                ),
                 Some(span),
             )]
         })?;
@@ -1917,9 +2060,9 @@ impl Analyzer<'_> {
     fn negate(&self, o: &AstExpr, span: Span) -> Result<Checked, Vec<Diagnostic>> {
         let c = self.expression(o, None)?;
         let ty = c.expr.ty;
-        let op = match ty {
-            Type::Integer(i) if i.is_signed() => HirUnaryOp::NegateIntegerChecked,
-            Type::Integer(_) => {
+        let op = match self.types.get(ty) {
+            Some(TypeData::Integer(i)) if i.is_signed() => HirUnaryOp::NegateIntegerChecked,
+            Some(TypeData::Integer(_)) => {
                 return Err(vec![Diagnostic::new(
                     "E0217",
                     Phase::Semantic,
@@ -1928,10 +2071,10 @@ impl Analyzer<'_> {
                     Some(span),
                 )]);
             }
-            Type::Float(_) => HirUnaryOp::NegateFloat,
-            Type::Bool | Type::Struct(_) | Type::Enum(_) => {
+            Some(TypeData::Float(_)) => HirUnaryOp::NegateFloat,
+            Some(TypeData::Bool | TypeData::Struct(_) | TypeData::Enum(_)) | None => {
                 return Err(vec![type_error(
-                    format!("{ty} cannot be used numerically"),
+                    format!("{} cannot be used numerically", self.type_name(ty)),
                     span,
                 )]);
             }
@@ -1962,7 +2105,7 @@ impl Analyzer<'_> {
     fn explicit_cast(
         &self,
         spelling: &str,
-        target: Type,
+        target: TypeId,
         args: &[AstExpr],
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
@@ -1978,7 +2121,7 @@ impl Analyzer<'_> {
         let operand = match self.expression(&args[0], None) {
             Ok(value) => value,
             Err(diagnostics)
-                if target.as_integer().is_some()
+                if self.types.integer_info(target).is_some()
                     && diagnostics.first().is_some_and(|d| d.code == "E0209") =>
             {
                 self.expression(&args[0], Some(target))?
@@ -1986,27 +2129,35 @@ impl Analyzer<'_> {
             Err(diagnostics) => return Err(diagnostics),
         };
         let source = operand.expr.ty;
-        if source == Type::Bool || target == Type::Bool {
+        if source == TypeId::BOOL || target == TypeId::BOOL {
             return Err(vec![Diagnostic::new(
                 "E0232",
                 Phase::Semantic,
                 DiagnosticCategory::Conversion,
-                format!("bool has no numeric conversions ({source} to {target})"),
+                format!(
+                    "bool has no numeric conversions ({} to {})",
+                    self.type_name(source),
+                    self.type_name(target)
+                ),
                 Some(span),
             )]);
         }
-        let kind = select_cast_kind(source, target, self.target).ok_or_else(|| {
+        let kind = select_cast_kind(self.types, source, target, self.target).ok_or_else(|| {
             vec![Diagnostic::new(
                 "E0230",
                 Phase::Semantic,
                 DiagnosticCategory::Conversion,
-                format!("invalid explicit scalar conversion from {source} to {target}"),
+                format!(
+                    "invalid explicit scalar conversion from {} to {}",
+                    self.type_name(source),
+                    self.type_name(target)
+                ),
                 Some(span),
             )]
         })?;
         let constant = operand
             .constant
-            .map(|value| convert_constant(value, target, self.target, span))
+            .map(|value| convert_constant(self.types, value, target, self.target, span))
             .transpose()?;
         Ok(Checked {
             expr: HirExpr {
@@ -2038,7 +2189,7 @@ impl Analyzer<'_> {
         self.aliases[self.module.0 as usize]
             .get(name)
             .copied()
-            .and_then(Type::as_enum)
+            .and_then(|ty| self.types.enum_id(ty))
             .or_else(|| self.enum_names[self.module.0 as usize].get(name).copied())
     }
 
@@ -2061,9 +2212,10 @@ impl Analyzer<'_> {
             self.enum_names,
             self.imports,
             self.module_names,
+            self.types,
         )
         .map_err(|diagnostic| vec![diagnostic])?;
-        resolved.as_enum().ok_or_else(|| {
+        self.types.enum_id(resolved).ok_or_else(|| {
             vec![Diagnostic::new(
                 "E0250",
                 Phase::Semantic,
@@ -2104,7 +2256,11 @@ impl Analyzer<'_> {
         if let Some(id) = self.struct_names[mid.0 as usize].get(f).copied() {
             return self.struct_init(id, &format!("{m}.{f}"), args, span);
         }
-        if let Some(Type::Struct(id)) = self.aliases[mid.0 as usize].get(f).copied() {
+        if let Some(id) = self.aliases[mid.0 as usize]
+            .get(f)
+            .copied()
+            .and_then(|ty| self.types.struct_id(ty))
+        {
             return self.struct_init(id, &format!("{m}.{f}"), args, span);
         }
         Err(vec![Diagnostic::new(
@@ -2148,7 +2304,7 @@ impl Analyzer<'_> {
                             "argument {} for field `{}` of `{spelling}` requires {}: {}",
                             index + 1,
                             field.name,
-                            field.ty,
+                            self.type_name(field.ty),
                             diagnostic.message
                         );
                     }
@@ -2162,7 +2318,10 @@ impl Analyzer<'_> {
                     struct_id: id,
                     fields,
                 },
-                ty: Type::Struct(id),
+                ty: self
+                    .types
+                    .id_of(TypeData::Struct(id))
+                    .expect("interned struct"),
                 span,
             },
             constant: None,
@@ -2233,7 +2392,7 @@ impl Analyzer<'_> {
                             index + 1,
                             info.name,
                             variant.name,
-                            payload.ty,
+                            self.type_name(payload.ty),
                             diagnostic.message
                         );
                     }
@@ -2248,7 +2407,7 @@ impl Analyzer<'_> {
                     variant_id,
                     payloads,
                 },
-                ty: Type::Enum(id),
+                ty: self.types.id_of(TypeData::Enum(id)).expect("interned enum"),
                 span,
             },
             constant: None,
@@ -2285,7 +2444,7 @@ impl Analyzer<'_> {
                         d.message = format!(
                             "argument {} to `{name}` requires {}: {}",
                             index + 1,
-                            p.ty,
+                            self.type_name(p.ty),
                             d.message
                         )
                     }
@@ -2310,7 +2469,7 @@ impl Analyzer<'_> {
         op: AstBinaryOp,
         la: &AstExpr,
         ra: &AstExpr,
-        expected: Option<Type>,
+        expected: Option<TypeId>,
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
         let ll = literal(la);
@@ -2323,32 +2482,40 @@ impl Analyzer<'_> {
             let r = self.expression(ra, Some(l.expr.ty))?;
             (l, r)
         } else if ll && rl {
-            let c = expected.filter(|t| t.is_numeric());
+            let c = expected.filter(|t| self.types.is_numeric(*t));
             (self.expression(la, c)?, self.expression(ra, c)?)
         } else {
             (self.expression(la, None)?, self.expression(ra, None)?)
         };
         let equality = matches!(op, AstBinaryOp::Equal | AstBinaryOp::NotEqual);
-        if l.expr.ty == Type::Bool || r.expr.ty == Type::Bool {
-            if l.expr.ty == Type::Bool && r.expr.ty == Type::Bool && equality {
-                return Ok(bin_result(op, l, r, Type::Bool, None));
+        if l.expr.ty == TypeId::BOOL || r.expr.ty == TypeId::BOOL {
+            if l.expr.ty == TypeId::BOOL && r.expr.ty == TypeId::BOOL && equality {
+                return Ok(bin_result(self.types, op, l, r, TypeId::BOOL, None));
             }
             return Err(vec![type_error(
                 "bool cannot be used numerically or compared with a number",
                 span,
             )]);
         }
-        if l.expr.ty.as_struct().is_some() || r.expr.ty.as_struct().is_some() {
+        if self.types.struct_id(l.expr.ty).is_some() || self.types.struct_id(r.expr.ty).is_some() {
             return Err(vec![type_error(
                 "struct values do not have implicit arithmetic or equality operators in Vertical-5",
                 span,
             )]);
         }
-        let common = common(l.expr.ty, r.expr.ty)
-            .ok_or_else(|| vec![conversion_error(l.expr.ty, r.expr.ty, span)])?;
+        let common = common(self.types, l.expr.ty, r.expr.ty).ok_or_else(|| {
+            vec![conversion_error(
+                self.types,
+                self.structs,
+                self.enums,
+                l.expr.ty,
+                r.expr.ty,
+                span,
+            )]
+        })?;
         let l = self.coerce(l, Some(common))?;
         let r = self.coerce(r, Some(common))?;
-        if matches!(op, AstBinaryOp::Remainder) && common.as_float().is_some() {
+        if matches!(op, AstBinaryOp::Remainder) && self.types.float_info(common).is_some() {
             return Err(vec![Diagnostic::new(
                 "E0235",
                 Phase::Semantic,
@@ -2365,12 +2532,12 @@ impl Analyzer<'_> {
                 | AstBinaryOp::Divide
                 | AstBinaryOp::Remainder
         );
-        let result = if arithmetic { common } else { Type::Bool };
-        let known_integer = common.as_integer().is_some()
+        let result = if arithmetic { common } else { TypeId::BOOL };
+        let known_integer = self.types.integer_info(common).is_some()
             && arithmetic
             && l.constant.is_some()
             && r.constant.is_some();
-        let constant = if let Some(integer) = common.as_integer() {
+        let constant = if let Some(integer) = self.types.integer_info(common) {
             const_bin(op, l.constant, r.constant, integer, span, self.target)?
         } else {
             None
@@ -2385,27 +2552,36 @@ impl Analyzer<'_> {
             )]);
         }
         if let Some(ConstantValue::Integer(v)) = constant {
-            check_value(v, common, span, self.target)?
+            check_value(self.types, v, common, span, self.target)?
         }
-        Ok(bin_result(op, l, r, result, constant))
+        Ok(bin_result(self.types, op, l, r, result, constant))
     }
-    fn coerce(&self, c: Checked, expected: Option<Type>) -> Result<Checked, Vec<Diagnostic>> {
+    fn coerce(&self, c: Checked, expected: Option<TypeId>) -> Result<Checked, Vec<Diagnostic>> {
         let Some(to) = expected else { return Ok(c) };
         if c.expr.ty == to {
             return Ok(c);
         }
-        let kind = match (c.expr.ty, to) {
-            (Type::Integer(a), Type::Integer(b)) if a.can_widen_to(b) => {
+        let kind = match (self.types.get(c.expr.ty), self.types.get(to)) {
+            (Some(TypeData::Integer(a)), Some(TypeData::Integer(b))) if a.can_widen_to(*b) => {
                 if a.is_signed() {
                     CoercionKind::SignExtend
                 } else {
                     CoercionKind::ZeroExtend
                 }
             }
-            (Type::Float(FloatType::Float32), Type::Float(FloatType::Float64)) => {
+            (_, _) if c.expr.ty == TypeId::FLOAT32 && to == TypeId::FLOAT64 => {
                 CoercionKind::FloatExtend
             }
-            _ => return Err(vec![conversion_error(c.expr.ty, to, c.expr.span)]),
+            _ => {
+                return Err(vec![conversion_error(
+                    self.types,
+                    self.structs,
+                    self.enums,
+                    c.expr.ty,
+                    to,
+                    c.expr.span,
+                )]);
+            }
         };
         let span = c.expr.span;
         Ok(Checked {
@@ -2423,71 +2599,89 @@ impl Analyzer<'_> {
     fn lookup(&self, n: &str) -> Option<LocalId> {
         self.scopes.iter().rev().find_map(|s| s.get(n).copied())
     }
+
+    fn type_name(&self, ty: TypeId) -> String {
+        format_type(self.types, ty, self.structs, self.enums)
+    }
 }
 
 fn literal(e: &AstExpr) -> bool {
     matches!(e.kind, AstExprKind::Integer(_) | AstExprKind::Float(_))
         || matches!(&e.kind,AstExprKind::Unary{operand,..}if matches!(operand.kind,AstExprKind::Integer(_)|AstExprKind::Float(_)))
 }
-fn common(a: Type, b: Type) -> Option<Type> {
+fn common(types: &TypeArena, a: TypeId, b: TypeId) -> Option<TypeId> {
     if a == b {
         return Some(a);
     }
-    match (a, b) {
-        (Type::Integer(x), Type::Integer(y)) if x.can_widen_to(y) => Some(b),
-        (Type::Integer(x), Type::Integer(y)) if y.can_widen_to(x) => Some(a),
-        (Type::Float(FloatType::Float32), Type::Float(FloatType::Float64)) => Some(b),
-        (Type::Float(FloatType::Float64), Type::Float(FloatType::Float32)) => Some(a),
+    match (types.get(a), types.get(b)) {
+        (Some(TypeData::Integer(x)), Some(TypeData::Integer(y))) if x.can_widen_to(*y) => Some(b),
+        (Some(TypeData::Integer(x)), Some(TypeData::Integer(y))) if y.can_widen_to(*x) => Some(a),
+        _ if a == TypeId::FLOAT32 && b == TypeId::FLOAT64 => Some(b),
+        _ if a == TypeId::FLOAT64 && b == TypeId::FLOAT32 => Some(a),
         _ => None,
     }
 }
-fn select_cast_kind(from: Type, to: Type, target: TargetProperties) -> Option<CastKind> {
-    Some(match (from, to) {
-        (a, b) if a == b => CastKind::Identity,
-        (Type::Integer(a), Type::Integer(b)) if a.is_signed() != b.is_signed() => {
+fn select_cast_kind(
+    types: &TypeArena,
+    from: TypeId,
+    to: TypeId,
+    target: TargetProperties,
+) -> Option<CastKind> {
+    if from == to {
+        return Some(CastKind::Identity);
+    }
+    Some(match (types.get(from), types.get(to)) {
+        (Some(TypeData::Integer(a)), Some(TypeData::Integer(b)))
+            if a.is_signed() != b.is_signed() =>
+        {
             CastKind::IntegerSignednessChecked
         }
-        (Type::Integer(a), Type::Integer(b)) => match a.bits(target).cmp(&b.bits(target)) {
-            std::cmp::Ordering::Less if a.is_signed() => CastKind::IntegerExtendSigned,
-            std::cmp::Ordering::Less => CastKind::IntegerExtendUnsigned,
-            std::cmp::Ordering::Equal => CastKind::IntegerReencode,
-            std::cmp::Ordering::Greater => CastKind::IntegerNarrowChecked,
-        },
-        (Type::Integer(a), Type::Float(_)) if a.is_signed() => CastKind::SignedIntegerToFloat,
-        (Type::Integer(_), Type::Float(_)) => CastKind::UnsignedIntegerToFloat,
-        (Type::Float(_), Type::Integer(b)) if b.is_signed() => {
+        (Some(TypeData::Integer(a)), Some(TypeData::Integer(b))) => {
+            match a.bits(target).cmp(&b.bits(target)) {
+                std::cmp::Ordering::Less if a.is_signed() => CastKind::IntegerExtendSigned,
+                std::cmp::Ordering::Less => CastKind::IntegerExtendUnsigned,
+                std::cmp::Ordering::Equal => CastKind::IntegerReencode,
+                std::cmp::Ordering::Greater => CastKind::IntegerNarrowChecked,
+            }
+        }
+        (Some(TypeData::Integer(a)), Some(TypeData::Float(_))) if a.is_signed() => {
+            CastKind::SignedIntegerToFloat
+        }
+        (Some(TypeData::Integer(_)), Some(TypeData::Float(_))) => CastKind::UnsignedIntegerToFloat,
+        (Some(TypeData::Float(_)), Some(TypeData::Integer(b))) if b.is_signed() => {
             CastKind::FloatToSignedIntegerChecked
         }
-        (Type::Float(_), Type::Integer(_)) => CastKind::FloatToUnsignedIntegerChecked,
-        (Type::Float(FloatType::Float32), Type::Float(FloatType::Float64)) => CastKind::FloatExtend,
-        (Type::Float(FloatType::Float64), Type::Float(FloatType::Float32)) => {
-            CastKind::FloatTruncate
+        (Some(TypeData::Float(_)), Some(TypeData::Integer(_))) => {
+            CastKind::FloatToUnsignedIntegerChecked
         }
+        _ if from == TypeId::FLOAT32 && to == TypeId::FLOAT64 => CastKind::FloatExtend,
+        _ if from == TypeId::FLOAT64 && to == TypeId::FLOAT32 => CastKind::FloatTruncate,
         _ => return None,
     })
 }
 
 fn convert_constant(
+    types: &TypeArena,
     value: ConstantValue,
-    target: Type,
+    target: TypeId,
     properties: TargetProperties,
     span: Span,
 ) -> Result<ConstantValue, Vec<Diagnostic>> {
-    match (value, target) {
-        (ConstantValue::Integer(value), Type::Integer(integer)) => {
+    match (value, types.get(target)) {
+        (ConstantValue::Integer(value), Some(TypeData::Integer(integer))) => {
             let (min, max) = integer.range(properties);
             if value < min || value > max {
                 return Err(vec![cast_range(value.to_string(), target, span)]);
             }
             Ok(ConstantValue::Integer(value))
         }
-        (ConstantValue::Integer(value), Type::Float(FloatType::Float32)) => Ok(
+        (ConstantValue::Integer(value), _) if target == TypeId::FLOAT32 => Ok(
             ConstantValue::Float(FloatValue::Float32((value as f32).to_bits())),
         ),
-        (ConstantValue::Integer(value), Type::Float(FloatType::Float64)) => Ok(
+        (ConstantValue::Integer(value), _) if target == TypeId::FLOAT64 => Ok(
             ConstantValue::Float(FloatValue::Float64((value as f64).to_bits())),
         ),
-        (ConstantValue::Float(value), Type::Integer(integer)) => {
+        (ConstantValue::Float(value), Some(TypeData::Integer(integer))) => {
             let number = float_as_f64(value);
             let (min, max) = integer.range(properties);
             let lower_ok = if integer.is_signed() {
@@ -2507,10 +2701,10 @@ fn convert_constant(
             }
             Ok(ConstantValue::Integer(number.trunc() as i128))
         }
-        (ConstantValue::Float(value), Type::Float(FloatType::Float32)) => Ok(ConstantValue::Float(
+        (ConstantValue::Float(value), _) if target == TypeId::FLOAT32 => Ok(ConstantValue::Float(
             FloatValue::Float32((float_as_f64(value) as f32).to_bits()),
         )),
-        (ConstantValue::Float(value), Type::Float(FloatType::Float64)) => Ok(ConstantValue::Float(
+        (ConstantValue::Float(value), _) if target == TypeId::FLOAT64 => Ok(ConstantValue::Float(
             FloatValue::Float64(float_as_f64(value).to_bits()),
         )),
         _ => unreachable!("bool conversions are rejected before constant conversion"),
@@ -2538,7 +2732,7 @@ fn format_float(value: FloatValue) -> String {
     }
 }
 
-fn cast_range(value: impl std::fmt::Display, target: Type, span: Span) -> Diagnostic {
+fn cast_range(value: impl std::fmt::Display, target: TypeId, span: Span) -> Diagnostic {
     Diagnostic::new(
         "E0231",
         Phase::Semantic,
@@ -2548,13 +2742,14 @@ fn cast_range(value: impl std::fmt::Display, target: Type, span: Span) -> Diagno
     )
 }
 fn bin_result(
+    types: &TypeArena,
     aop: AstBinaryOp,
     l: Checked,
     r: Checked,
-    ty: Type,
+    ty: TypeId,
     constant: Option<ConstantValue>,
 ) -> Checked {
-    let float = l.expr.ty.as_float().is_some();
+    let float = types.float_info(l.expr.ty).is_some();
     let op = match aop {
         AstBinaryOp::Add if float => HirBinaryOp::AddFloat,
         AstBinaryOp::Subtract if float => HirBinaryOp::SubtractFloat,
@@ -2564,14 +2759,14 @@ fn bin_result(
         AstBinaryOp::Subtract => HirBinaryOp::SubtractIntegerChecked,
         AstBinaryOp::Multiply => HirBinaryOp::MultiplyIntegerChecked,
         AstBinaryOp::Divide => {
-            if l.expr.ty.as_integer().unwrap().is_signed() {
+            if types.integer_info(l.expr.ty).unwrap().is_signed() {
                 HirBinaryOp::DivideIntegerSignedChecked
             } else {
                 HirBinaryOp::DivideIntegerUnsignedChecked
             }
         }
         AstBinaryOp::Remainder => {
-            if l.expr.ty.as_integer().unwrap().is_signed() {
+            if types.integer_info(l.expr.ty).unwrap().is_signed() {
                 HirBinaryOp::RemainderIntegerSignedChecked
             } else {
                 HirBinaryOp::RemainderIntegerUnsignedChecked
@@ -2638,22 +2833,21 @@ fn const_bin(
     };
     Ok(value.map(ConstantValue::Integer))
 }
-fn builtin(n: &str) -> Option<Type> {
-    use IntegerType::*;
+fn builtin(n: &str) -> Option<TypeId> {
     Some(match n {
-        "bool" => Type::Bool,
-        "int8" => Type::Integer(Int8),
-        "int16" => Type::Integer(Int16),
-        "int32" => Type::Integer(Int32),
-        "int64" | "int" => Type::Integer(Int64),
-        "uint8" | "byte" => Type::Integer(Uint8),
-        "uint16" => Type::Integer(Uint16),
-        "uint32" => Type::Integer(Uint32),
-        "uint64" => Type::Integer(Uint64),
-        "isize" => Type::Integer(Isize),
-        "usize" => Type::Integer(Usize),
-        "float32" | "float" => Type::Float(FloatType::Float32),
-        "float64" | "double" => Type::Float(FloatType::Float64),
+        "bool" => TypeId::BOOL,
+        "int8" => TypeId::INT8,
+        "int16" => TypeId::INT16,
+        "int32" => TypeId::INT32,
+        "int64" | "int" => TypeId::INT64,
+        "uint8" | "byte" => TypeId::UINT8,
+        "uint16" => TypeId::UINT16,
+        "uint32" => TypeId::UINT32,
+        "uint64" => TypeId::UINT64,
+        "isize" => TypeId::ISIZE,
+        "usize" => TypeId::USIZE,
+        "float32" | "float" => TypeId::FLOAT32,
+        "float64" | "double" => TypeId::FLOAT64,
         _ => return None,
     })
 }
@@ -2693,18 +2887,26 @@ fn type_error(m: impl Into<String>, s: Span) -> Diagnostic {
         Some(s),
     )
 }
-fn conversion_error(a: Type, b: Type, s: Span) -> Diagnostic {
-    let detail = match (a, b) {
-        (Type::Integer(x), Type::Integer(y)) if x.is_signed() != y.is_signed() => {
+fn conversion_error(
+    types: &TypeArena,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+    a: TypeId,
+    b: TypeId,
+    s: Span,
+) -> Diagnostic {
+    let detail = match (types.get(a), types.get(b)) {
+        (Some(TypeData::Integer(x)), Some(TypeData::Integer(y)))
+            if x.is_signed() != y.is_signed() =>
+        {
             "mixed signed/unsigned operation"
         }
-        (Type::Integer(_), Type::Integer(_)) | (Type::Float(_), Type::Float(_)) => {
-            "unsupported narrowing"
-        }
-        (Type::Bool, _) | (_, Type::Bool) => "bool has no numeric conversions",
+        (Some(TypeData::Integer(_)), Some(TypeData::Integer(_)))
+        | (Some(TypeData::Float(_)), Some(TypeData::Float(_))) => "unsupported narrowing",
+        _ if a == TypeId::BOOL || b == TypeId::BOOL => "bool has no numeric conversions",
         _ => "integer/float conversion is not implicit",
     };
-    let code = if matches!(a, Type::Bool) || matches!(b, Type::Bool) {
+    let code = if matches!(a, TypeId::BOOL) || matches!(b, TypeId::BOOL) {
         "E0205"
     } else {
         "E0218"
@@ -2713,12 +2915,19 @@ fn conversion_error(a: Type, b: Type, s: Span) -> Diagnostic {
         code,
         Phase::Semantic,
         DiagnosticCategory::Type,
-        format!("invalid implicit conversion from {a} to {b}: {detail}"),
+        format!(
+            "invalid implicit conversion from {} to {}: {detail}",
+            format_type(types, a, structs, enums),
+            format_type(types, b, structs, enums)
+        ),
         Some(s),
     )
 }
-fn range(text: &str, ty: Type, s: Span, t: TargetProperties) -> Diagnostic {
-    let (min, max) = ty.as_integer().unwrap_or(IntegerType::Int64).range(t);
+fn range(types: &TypeArena, text: &str, ty: TypeId, s: Span, t: TargetProperties) -> Diagnostic {
+    let (min, max) = types
+        .integer_info(ty)
+        .unwrap_or(IntegerType::Int64)
+        .range(t);
     Diagnostic::new(
         "E0209",
         Phase::Semantic,
@@ -2727,8 +2936,14 @@ fn range(text: &str, ty: Type, s: Span, t: TargetProperties) -> Diagnostic {
         Some(s),
     )
 }
-fn check_value(v: i128, ty: Type, s: Span, t: TargetProperties) -> Result<(), Vec<Diagnostic>> {
-    let (min, max) = ty.as_integer().unwrap().range(t);
+fn check_value(
+    types: &TypeArena,
+    v: i128,
+    ty: TypeId,
+    s: Span,
+    t: TargetProperties,
+) -> Result<(), Vec<Diagnostic>> {
+    let (min, max) = types.integer_info(ty).unwrap().range(t);
     if v < min || v > max {
         Err(vec![Diagnostic::new(
             "E0210",
@@ -2801,8 +3016,40 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
     {
         return Err(fail("HIR cardinality invalid".into()));
     }
+    for ty in h
+        .signatures
+        .iter()
+        .flat_map(|signature| {
+            signature
+                .parameters
+                .iter()
+                .map(|p| p.ty)
+                .chain(std::iter::once(signature.return_type))
+        })
+        .chain(
+            h.structs
+                .iter()
+                .flat_map(|info| info.fields.iter().map(|field| field.ty)),
+        )
+        .chain(h.enums.iter().flat_map(|info| {
+            info.variants
+                .iter()
+                .flat_map(|variant| variant.payloads.iter().map(|payload| payload.ty))
+        }))
+        .chain(h.functions.iter().flat_map(|function| {
+            function
+                .locals
+                .iter()
+                .map(|local| local.ty)
+                .chain(function.parameters.iter().map(|parameter| parameter.ty))
+        }))
+    {
+        if !h.types.is_valid(ty) {
+            return Err(fail(format!("HIR references invalid TypeId({})", ty.0)));
+        }
+    }
     let e = &h.signatures[h.entry.0 as usize];
-    if e.name != "main" || e.return_type != Type::INT64 || !e.parameters.is_empty() {
+    if e.name != "main" || e.return_type != TypeId::INT64 || !e.parameters.is_empty() {
         return Err(fail("HIR entry invalid".into()));
     }
     let mut next_field = 0_u32;
@@ -2859,6 +3106,7 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
             &h.signatures,
             &h.structs,
             &h.enums,
+            &h.types,
             &fail,
         )?
     }
@@ -2867,23 +3115,24 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
 fn verify_block(
     b: &HirBlock,
     f: &HirFunction,
-    ret: Type,
+    ret: TypeId,
     sigs: &[FunctionSignature],
     structs: &[StructInfo],
     enums: &[EnumInfo],
+    types: &TypeArena,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
     for s in &b.statements {
         match &s.kind {
             HirStmtKind::Local { local, initializer } => {
-                verify_expr(initializer, f, sigs, structs, enums, fail)?;
+                verify_expr(initializer, f, sigs, structs, enums, types, fail)?;
                 if f.locals.get(local.0 as usize).map(|l| l.ty) != Some(initializer.ty) {
                     return Err(fail("HIR assignment mismatch".into()));
                 }
             }
             HirStmtKind::Assign { place, value } => {
-                verify_expr(value, f, sigs, structs, enums, fail)?;
-                verify_place(place, f, structs, fail)?;
+                verify_expr(value, f, sigs, structs, enums, types, fail)?;
+                verify_place(place, f, structs, types, fail)?;
                 if place.ty != value.ty {
                     return Err(fail("HIR field assignment mismatch".into()));
                 }
@@ -2893,35 +3142,37 @@ fn verify_block(
                 then_block,
                 else_block,
             } => {
-                verify_expr(condition, f, sigs, structs, enums, fail)?;
-                if condition.ty != Type::Bool {
+                verify_expr(condition, f, sigs, structs, enums, types, fail)?;
+                if condition.ty != TypeId::BOOL {
                     return Err(fail("HIR condition not bool".into()));
                 }
-                verify_block(then_block, f, ret, sigs, structs, enums, fail)?;
+                verify_block(then_block, f, ret, sigs, structs, enums, types, fail)?;
                 if let Some(x) = else_block {
-                    verify_block(x, f, ret, sigs, structs, enums, fail)?
+                    verify_block(x, f, ret, sigs, structs, enums, types, fail)?
                 }
             }
             HirStmtKind::While { condition, body } => {
-                verify_expr(condition, f, sigs, structs, enums, fail)?;
-                if condition.ty != Type::Bool {
+                verify_expr(condition, f, sigs, structs, enums, types, fail)?;
+                if condition.ty != TypeId::BOOL {
                     return Err(fail("HIR condition not bool".into()));
                 }
-                verify_block(body, f, ret, sigs, structs, enums, fail)?
+                verify_block(body, f, ret, sigs, structs, enums, types, fail)?
             }
             HirStmtKind::Match {
                 scrutinee,
                 enum_id,
                 arms,
             } => {
-                verify_expr(scrutinee, f, sigs, structs, enums, fail)?;
+                verify_expr(scrutinee, f, sigs, structs, enums, types, fail)?;
                 let Some(info) = enums
                     .get(enum_id.0 as usize)
                     .filter(|info| info.id == *enum_id)
                 else {
                     return Err(fail("HIR match has unknown enum".into()));
                 };
-                if scrutinee.ty != Type::Enum(*enum_id) || arms.len() != info.variants.len() {
+                if types.enum_id(scrutinee.ty) != Some(*enum_id)
+                    || arms.len() != info.variants.len()
+                {
                     return Err(fail("HIR match type/exhaustiveness invalid".into()));
                 }
                 let mut seen = BTreeSet::new();
@@ -2948,11 +3199,11 @@ fn verify_block(
                             return Err(fail("HIR match payload binding invalid".into()));
                         }
                     }
-                    verify_block(&arm.body, f, ret, sigs, structs, enums, fail)?;
+                    verify_block(&arm.body, f, ret, sigs, structs, enums, types, fail)?;
                 }
             }
             HirStmtKind::Return(v) => {
-                verify_expr(v, f, sigs, structs, enums, fail)?;
+                verify_expr(v, f, sigs, structs, enums, types, fail)?;
                 if v.ty != ret {
                     return Err(fail("HIR return mismatch".into()));
                 }
@@ -2967,24 +3218,33 @@ fn verify_expr(
     sigs: &[FunctionSignature],
     structs: &[StructInfo],
     enums: &[EnumInfo],
+    types: &TypeArena,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
+    if !types.is_valid(e.ty) {
+        return Err(fail(format!(
+            "HIR expression references invalid TypeId({})",
+            e.ty.0
+        )));
+    }
     match &e.kind {
-        HirExprKind::Int(_) if e.ty.as_integer().is_none() => {
+        HirExprKind::Int(_) if types.integer_info(e.ty).is_none() => {
             return Err(fail("HIR integer literal mismatch".into()));
         }
-        HirExprKind::Float(FloatValue::Float32(_)) if e.ty != Type::Float(FloatType::Float32) => {
+        HirExprKind::Float(FloatValue::Float32(_)) if e.ty != TypeId::FLOAT32 => {
             return Err(fail("HIR float32 mismatch".into()));
         }
-        HirExprKind::Float(FloatValue::Float64(_)) if e.ty != Type::Float(FloatType::Float64) => {
+        HirExprKind::Float(FloatValue::Float64(_)) if e.ty != TypeId::FLOAT64 => {
             return Err(fail("HIR float64 mismatch".into()));
         }
-        HirExprKind::Bool(_) if e.ty != Type::Bool => return Err(fail("HIR bool mismatch".into())),
+        HirExprKind::Bool(_) if e.ty != TypeId::BOOL => {
+            return Err(fail("HIR bool mismatch".into()));
+        }
         HirExprKind::Local(l) if f.locals.get(l.0 as usize).map(|x| x.ty) != Some(e.ty) => {
             return Err(fail("HIR local mismatch".into()));
         }
         HirExprKind::Load(place) => {
-            verify_place(place, f, structs, fail)?;
+            verify_place(place, f, structs, types, fail)?;
             if place.ty != e.ty {
                 return Err(fail("HIR load/place type mismatch".into()));
             }
@@ -2997,7 +3257,7 @@ fn verify_expr(
                 return Err(fail("HIR call mismatch".into()));
             }
             for (a, p) in args.iter().zip(&s.parameters) {
-                verify_expr(a, f, sigs, structs, enums, fail)?;
+                verify_expr(a, f, sigs, structs, enums, types, fail)?;
                 if a.ty != p.ty {
                     return Err(fail("HIR argument mismatch".into()));
                 }
@@ -3010,11 +3270,11 @@ fn verify_expr(
             else {
                 return Err(fail("HIR struct initializer has unknown identity".into()));
             };
-            if e.ty != Type::Struct(*struct_id) || fields.len() != info.fields.len() {
+            if types.struct_id(e.ty) != Some(*struct_id) || fields.len() != info.fields.len() {
                 return Err(fail("HIR struct initializer arity/type mismatch".into()));
             }
             for ((field_id, value), declared) in fields.iter().zip(&info.fields) {
-                verify_expr(value, f, sigs, structs, enums, fail)?;
+                verify_expr(value, f, sigs, structs, enums, types, fail)?;
                 if *field_id != declared.id || value.ty != declared.ty {
                     return Err(fail("HIR struct initializer field mismatch".into()));
                 }
@@ -3038,30 +3298,30 @@ fn verify_expr(
             else {
                 return Err(fail("HIR enum initializer variant mismatch".into()));
             };
-            if e.ty != Type::Enum(*enum_id) || payloads.len() != variant.payloads.len() {
+            if types.enum_id(e.ty) != Some(*enum_id) || payloads.len() != variant.payloads.len() {
                 return Err(fail("HIR enum initializer arity/type mismatch".into()));
             }
             for (value, declared) in payloads.iter().zip(&variant.payloads) {
-                verify_expr(value, f, sigs, structs, enums, fail)?;
+                verify_expr(value, f, sigs, structs, enums, types, fail)?;
                 if value.ty != declared.ty {
                     return Err(fail("HIR enum initializer payload mismatch".into()));
                 }
             }
         }
         HirExprKind::Coerce { kind, operand } => {
-            verify_expr(operand, f, sigs, structs, enums, fail)?;
-            let ok = match (kind, operand.ty, e.ty) {
-                (CoercionKind::SignExtend, Type::Integer(a), Type::Integer(b)) => {
-                    a.is_signed() && a.can_widen_to(b)
+            verify_expr(operand, f, sigs, structs, enums, types, fail)?;
+            let ok = match (
+                kind,
+                types.integer_info(operand.ty),
+                types.integer_info(e.ty),
+            ) {
+                (CoercionKind::SignExtend, Some(a), Some(b)) => a.is_signed() && a.can_widen_to(b),
+                (CoercionKind::ZeroExtend, Some(a), Some(b)) => !a.is_signed() && a.can_widen_to(b),
+                (CoercionKind::FloatExtend, _, _)
+                    if operand.ty == TypeId::FLOAT32 && e.ty == TypeId::FLOAT64 =>
+                {
+                    true
                 }
-                (CoercionKind::ZeroExtend, Type::Integer(a), Type::Integer(b)) => {
-                    !a.is_signed() && a.can_widen_to(b)
-                }
-                (
-                    CoercionKind::FloatExtend,
-                    Type::Float(FloatType::Float32),
-                    Type::Float(FloatType::Float64),
-                ) => true,
                 _ => false,
             };
             if !ok {
@@ -3074,30 +3334,34 @@ fn verify_expr(
             target_type,
             operand,
         } => {
-            verify_expr(operand, f, sigs, structs, enums, fail)?;
+            verify_expr(operand, f, sigs, structs, enums, types, fail)?;
             if operand.ty != *source_type
                 || e.ty != *target_type
-                || select_cast_kind(*source_type, *target_type, TargetProperties::LINUX_X86_64)
-                    != Some(*kind)
+                || select_cast_kind(
+                    types,
+                    *source_type,
+                    *target_type,
+                    TargetProperties::LINUX_X86_64,
+                ) != Some(*kind)
             {
                 return Err(fail("HIR explicit cast contract invalid".into()));
             }
         }
         HirExprKind::Unary { op, operand } => {
-            verify_expr(operand, f, sigs, structs, enums, fail)?;
+            verify_expr(operand, f, sigs, structs, enums, types, fail)?;
             let ok = match op {
-                HirUnaryOp::NegateIntegerChecked => {
-                    operand.ty.as_integer().is_some_and(IntegerType::is_signed)
-                }
-                HirUnaryOp::NegateFloat => operand.ty.as_float().is_some(),
+                HirUnaryOp::NegateIntegerChecked => types
+                    .integer_info(operand.ty)
+                    .is_some_and(IntegerType::is_signed),
+                HirUnaryOp::NegateFloat => types.float_info(operand.ty).is_some(),
             } && e.ty == operand.ty;
             if !ok {
                 return Err(fail("HIR unary invalid".into()));
             }
         }
         HirExprKind::Binary { op, left, right } => {
-            verify_expr(left, f, sigs, structs, enums, fail)?;
-            verify_expr(right, f, sigs, structs, enums, fail)?;
+            verify_expr(left, f, sigs, structs, enums, types, fail)?;
+            verify_expr(right, f, sigs, structs, enums, types, fail)?;
             if left.ty != right.ty {
                 return Err(fail("HIR binary operand mismatch".into()));
             }
@@ -3105,29 +3369,34 @@ fn verify_expr(
                 HirBinaryOp::AddIntegerChecked
                 | HirBinaryOp::SubtractIntegerChecked
                 | HirBinaryOp::MultiplyIntegerChecked => {
-                    left.ty.as_integer().is_some() && e.ty == left.ty
+                    types.integer_info(left.ty).is_some() && e.ty == left.ty
                 }
                 HirBinaryOp::DivideIntegerSignedChecked
                 | HirBinaryOp::RemainderIntegerSignedChecked => {
-                    left.ty.as_integer().is_some_and(IntegerType::is_signed) && e.ty == left.ty
+                    types
+                        .integer_info(left.ty)
+                        .is_some_and(IntegerType::is_signed)
+                        && e.ty == left.ty
                 }
                 HirBinaryOp::DivideIntegerUnsignedChecked
                 | HirBinaryOp::RemainderIntegerUnsignedChecked => {
-                    left.ty
-                        .as_integer()
+                    types
+                        .integer_info(left.ty)
                         .is_some_and(|integer| !integer.is_signed())
                         && e.ty == left.ty
                 }
                 HirBinaryOp::AddFloat
                 | HirBinaryOp::SubtractFloat
                 | HirBinaryOp::MultiplyFloat
-                | HirBinaryOp::DivideFloat => left.ty.as_float().is_some() && e.ty == left.ty,
+                | HirBinaryOp::DivideFloat => {
+                    types.float_info(left.ty).is_some() && e.ty == left.ty
+                }
                 HirBinaryOp::Less
                 | HirBinaryOp::LessEqual
                 | HirBinaryOp::Greater
-                | HirBinaryOp::GreaterEqual => left.ty.is_numeric() && e.ty == Type::Bool,
+                | HirBinaryOp::GreaterEqual => types.is_numeric(left.ty) && e.ty == TypeId::BOOL,
                 HirBinaryOp::Equal | HirBinaryOp::NotEqual => {
-                    (left.ty == Type::Bool || left.ty.is_numeric()) && e.ty == Type::Bool
+                    (left.ty == TypeId::BOOL || types.is_numeric(left.ty)) && e.ty == TypeId::BOOL
                 }
             };
             if !ok {
@@ -3143,14 +3412,18 @@ fn verify_place(
     place: &HirPlace,
     function: &HirFunction,
     structs: &[StructInfo],
+    types: &TypeArena,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
     let Some(local) = function.locals.get(place.local.0 as usize) else {
         return Err(fail("HIR place has unknown local".into()));
     };
     let mut ty = local.ty;
+    if !types.is_valid(place.ty) || !types.is_valid(ty) {
+        return Err(fail("HIR place references invalid TypeId".into()));
+    }
     for field_id in &place.projections {
-        let Some(owner) = ty.as_struct() else {
+        let Some(owner) = types.struct_id(ty) else {
             return Err(fail("HIR place projects a non-struct".into()));
         };
         let Some(field) = structs
@@ -3194,7 +3467,89 @@ mod tests {
     #[test]
     fn scalar_aliases() {
         let h=check("alias Small=int8;int64 widen(Small x){return x;}int main(){Small x=-128;uint8 y=255;float32 f=1.5;float64 g=f+2.0;return widen(x);}").unwrap();
-        assert_eq!(h.aliases()[0].canonical, Type::Integer(IntegerType::Int8));
+        assert_eq!(h.aliases()[0].canonical, TypeId::INT8);
+    }
+    #[test]
+    fn type_ids_canonicalize_aliases_and_preserve_nominality_everywhere() {
+        let h = check(
+            "struct A{int x;}struct B{int x;}enum E{V(int)}enum F{V(int)}alias Whole=int64;alias Again=Whole;alias Position=A;int64 cast(Whole x){return int64(x);}int main(){Position p=Position(1);E e=E.V(p.x);return cast(p.x);}",
+        )
+        .unwrap();
+        let types = h.types();
+        assert_eq!(
+            h.aliases
+                .iter()
+                .find(|a| a.name == "Whole")
+                .unwrap()
+                .canonical,
+            TypeId::INT64
+        );
+        assert_eq!(
+            h.aliases
+                .iter()
+                .find(|a| a.name == "Again")
+                .unwrap()
+                .canonical,
+            TypeId::INT64
+        );
+        let a = types.id_of(TypeData::Struct(StructId(0))).unwrap();
+        let b = types.id_of(TypeData::Struct(StructId(1))).unwrap();
+        let e = types.id_of(TypeData::Enum(EnumId(0))).unwrap();
+        let f = types.id_of(TypeData::Enum(EnumId(1))).unwrap();
+        assert_ne!(a, b);
+        assert_ne!(e, f);
+        assert_eq!(
+            h.aliases
+                .iter()
+                .find(|alias| alias.name == "Position")
+                .unwrap()
+                .canonical,
+            a
+        );
+        assert_eq!(h.structs[0].fields[0].ty, TypeId::INT64);
+        assert_eq!(h.enums[0].variants[0].payloads[0].ty, TypeId::INT64);
+        assert_eq!(h.signatures[0].parameters[0].ty, TypeId::INT64);
+        assert_eq!(h.signatures[0].return_type, TypeId::INT64);
+        assert!(h.dump().contains("source_type: TypeId"));
+    }
+
+    #[test]
+    fn verifier_rejects_an_invalid_type_id() {
+        let mut h = check("int main(){return 0;}").unwrap();
+        h.functions[0].locals.push(HirLocal {
+            id: LocalId(0),
+            name: "corrupt".into(),
+            ty: TypeId(u32::MAX),
+            span: Span::new(0, 0),
+            parameter: false,
+        });
+        assert!(verify_hir(&h).is_err());
+    }
+    #[test]
+    fn layout_boundary_uses_target_properties_and_cached_aggregates() {
+        let h =
+            check("struct Pair{int8 a;int64 b;}enum E{A, B(Pair)}int main(){return 0;}").unwrap();
+        assert_eq!(
+            layout_of(
+                h.types(),
+                TypeId::ISIZE,
+                TargetProperties { pointer_width: 32 },
+                h.structs(),
+                h.enums(),
+            ),
+            Some(TypeLayout { size: 4, align: 4 })
+        );
+        let pair = h.types().id_of(TypeData::Struct(StructId(0))).unwrap();
+        assert_eq!(
+            layout_of(
+                h.types(),
+                pair,
+                TargetProperties::LINUX_X86_64,
+                h.structs(),
+                h.enums(),
+            ),
+            Some(TypeLayout { size: 16, align: 8 })
+        );
     }
     #[test]
     fn failures() {

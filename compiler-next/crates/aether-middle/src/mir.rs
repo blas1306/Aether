@@ -3,12 +3,13 @@
 
 use std::collections::VecDeque;
 use std::fmt::Write;
+use std::sync::Arc;
 
 use aether_frontend::{
     CastKind, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId, FloatValue,
     FunctionId, FunctionSignature, HirBinaryOp, HirBlock, HirExpr, HirExprKind, HirFunction,
-    HirMatchArm, HirPlace, HirStmtKind, HirUnaryOp, IntegerType, LocalId, ModuleInfo, Phase, Span,
-    StructId, StructInfo, Type, TypedHir, VariantId,
+    HirMatchArm, HirPlace, HirStmtKind, HirUnaryOp, LocalId, ModuleInfo, Phase, Span, StructId,
+    StructInfo, TypeArena, TypeData, TypeId, TypedHir, VariantId, format_type,
 };
 
 /// Basic-block identity, equal to its stable vector index.
@@ -21,7 +22,7 @@ pub struct MirLocal {
     /// Stable identity.
     pub id: LocalId,
     /// Canonical type.
-    pub ty: Type,
+    pub ty: TypeId,
     /// Source name when this is user storage.
     pub name: Option<String>,
     /// Whether lowering introduced the slot.
@@ -34,7 +35,7 @@ pub struct MirParameter {
     /// Function-local identity initialized by the call boundary.
     pub local: LocalId,
     /// Canonical semantic type.
-    pub ty: Type,
+    pub ty: TypeId,
 }
 
 /// Reusable assignable storage path. Future projections can add indexing and
@@ -51,9 +52,9 @@ pub enum Operand {
     /// Storage read.
     Local(LocalId),
     /// Signed 64-bit constant.
-    Int { value: i128, ty: Type },
+    Int { value: i128, ty: TypeId },
     /// IEEE literal bits and exact canonical type.
-    Float { value: FloatValue, ty: Type },
+    Float { value: FloatValue, ty: TypeId },
     /// Logical constant.
     Bool(bool),
 }
@@ -144,13 +145,13 @@ pub enum Rvalue {
     Coerce {
         kind: CoercionKind,
         operand: Operand,
-        from: Type,
+        from: TypeId,
     },
     /// Explicit value conversion selected and typed in HIR.
     Cast {
         kind: CastKind,
         operand: Operand,
-        from: Type,
+        from: TypeId,
         trap: Option<TrapKind>,
     },
     /// Unary computation, carrying its required trap effect in the opcode.
@@ -230,7 +231,7 @@ pub struct MirFunction {
     /// Parameters in call order.
     pub parameters: Vec<MirParameter>,
     /// Canonical return type.
-    pub return_type: Type,
+    pub return_type: TypeId,
     /// User locals and expression temporaries.
     pub locals: Vec<MirLocal>,
     /// Entry-first blocks.
@@ -242,6 +243,8 @@ pub struct MirFunction {
 /// Unverified flow MIR.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FlowMir {
+    /// Session-local canonical type identity context.
+    pub types: Arc<TypeArena>,
     /// Resolved program module graph and provenance.
     pub modules: Vec<ModuleInfo>,
     /// Nominal aggregate and field metadata.
@@ -260,8 +263,19 @@ impl FlowMir {
     /// Deterministic inspection dump.
     #[must_use]
     pub fn dump(&self) -> String {
+        let type_table = self
+            .types
+            .entries()
+            .map(|(id, _)| {
+                format!(
+                    "  {id:?} = {}",
+                    format_type(&self.types, id, &self.structs, &self.enums)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         let mut dump = format!(
-            "entry: {:#?}\nmodules: {:#?}\nstructs: {:#?}\nenums: {:#?}\nsignatures: {:#?}",
+            "types (session-local):\n{type_table}\nentry: {:#?}\nmodules: {:#?}\nstructs: {:#?}\nenums: {:#?}\nsignatures: {:#?}",
             self.entry, self.modules, self.structs, self.enums, self.signatures
         );
         for module in &self.modules {
@@ -302,16 +316,17 @@ impl VerifiedMir {
 /// Lowers typed, resolved HIR into a raw CFG.
 #[must_use]
 pub fn lower_hir(hir: TypedHir) -> FlowMir {
-    let (modules, structs, enums, signatures, functions, entry) = hir.into_parts();
+    let (modules, types, structs, enums, signatures, functions, entry) = hir.into_parts();
     let functions = functions
         .iter()
         .map(|function| {
             let return_type = signatures[function.id.0 as usize].return_type;
-            lower_function(function, return_type, &enums)
+            lower_function(function, return_type, &enums, &types)
         })
         .collect();
     FlowMir {
         modules,
+        types: Arc::new(types),
         structs,
         enums,
         signatures,
@@ -320,7 +335,12 @@ pub fn lower_hir(hir: TypedHir) -> FlowMir {
     }
 }
 
-fn lower_function(function: &HirFunction, return_type: Type, enums: &[EnumInfo]) -> MirFunction {
+fn lower_function(
+    function: &HirFunction,
+    return_type: TypeId,
+    enums: &[EnumInfo],
+    types: &TypeArena,
+) -> MirFunction {
     let locals = function
         .locals
         .iter()
@@ -354,6 +374,7 @@ fn lower_function(function: &HirFunction, return_type: Type, enums: &[EnumInfo])
         },
         current: Some(BlockId(0)),
         enums,
+        types,
     };
     builder.lower_block(&function.body);
     builder.function
@@ -363,6 +384,7 @@ struct Builder<'a> {
     function: MirFunction,
     current: Option<BlockId>,
     enums: &'a [EnumInfo],
+    types: &'a TypeArena,
 }
 
 impl Builder<'_> {
@@ -467,7 +489,7 @@ impl Builder<'_> {
 
     fn lower_match(&mut self, scrutinee: &HirExpr, enum_id: EnumId, arms: &[HirMatchArm]) {
         let enum_value = self.lower_expr(scrutinee);
-        let tag = self.temporary(Type::Integer(IntegerType::Uint32));
+        let tag = self.temporary(TypeId::UINT32);
         self.assign(
             Place {
                 local: tag,
@@ -643,7 +665,7 @@ impl Builder<'_> {
             } => {
                 let operand = self.lower_expr(operand);
                 let destination = self.temporary(*target_type);
-                let trap = cast_can_fail(*source_type, *target_type)
+                let trap = cast_can_fail(self.types, *source_type, *target_type)
                     .then_some(TrapKind::ConversionOutOfRange);
                 self.assign(
                     Place {
@@ -750,7 +772,7 @@ impl Builder<'_> {
         }
     }
 
-    fn temporary(&mut self, ty: Type) -> LocalId {
+    fn temporary(&mut self, ty: TypeId) -> LocalId {
         let id = LocalId(u32::try_from(self.function.locals.len()).expect("local count fits u32"));
         self.function.locals.push(MirLocal {
             id,
@@ -817,6 +839,36 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
             "MIR function table/body cardinality is invalid".into(),
         ));
     }
+    for ty in mir
+        .signatures
+        .iter()
+        .flat_map(|signature| {
+            signature
+                .parameters
+                .iter()
+                .map(|p| p.ty)
+                .chain(std::iter::once(signature.return_type))
+        })
+        .chain(
+            mir.structs
+                .iter()
+                .flat_map(|info| info.fields.iter().map(|field| field.ty)),
+        )
+        .chain(mir.enums.iter().flat_map(|info| {
+            info.variants
+                .iter()
+                .flat_map(|variant| variant.payloads.iter().map(|payload| payload.ty))
+        }))
+        .chain(
+            mir.functions
+                .iter()
+                .flat_map(|function| function.locals.iter().map(|local| local.ty)),
+        )
+    {
+        if !mir.types.is_valid(ty) {
+            return Err(fail(format!("MIR references invalid TypeId({})", ty.0)));
+        }
+    }
     for (index, (signature, function)) in mir.signatures.iter().zip(&mir.functions).enumerate() {
         if signature.id.0 as usize != index || function.id != signature.id {
             return Err(fail("MIR function identities are not canonical".into()));
@@ -830,6 +882,7 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
             &mir.signatures,
             &mir.structs,
             &mir.enums,
+            &mir.types,
             &fail,
         )?;
     }
@@ -843,6 +896,7 @@ fn verify_mir_function(
     signatures: &[FunctionSignature],
     structs: &[StructInfo],
     enums: &[EnumInfo],
+    types: &TypeArena,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
     if function.return_type != signature.return_type
@@ -958,12 +1012,13 @@ fn verify_mir_function(
                 ));
             }
             let destination_ty =
-                place_type(function, &instruction.destination, structs).map_err(&fail)?;
+                place_type(function, &instruction.destination, structs, types).map_err(&fail)?;
             validate_rvalue(
                 function,
                 signatures,
                 structs,
                 enums,
+                types,
                 &instruction.value,
                 destination_ty,
                 &initialized,
@@ -978,7 +1033,7 @@ fn verify_mir_function(
                 validate_operand(function, condition, &initialized)
                     .map_err(|message| fail(message.clone()))?;
                 if operand_type(function, condition).map_err(|message| fail(message.clone()))?
-                    != Type::Bool
+                    != TypeId::BOOL
                 {
                     return Err(fail("MIR branch condition is not bool".into()));
                 }
@@ -992,7 +1047,7 @@ fn verify_mir_function(
                 validate_operand(function, discriminant, &initialized)
                     .map_err(|message| fail(message.clone()))?;
                 if operand_type(function, discriminant).map_err(|message| fail(message.clone()))?
-                    != Type::Integer(IntegerType::Uint32)
+                    != TypeId::UINT32
                 {
                     return Err(fail("MIR switch discriminant is not uint32".into()));
                 }
@@ -1058,14 +1113,15 @@ fn verify_mir_function(
     Ok(())
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn validate_rvalue(
     function: &MirFunction,
     signatures: &[FunctionSignature],
     structs: &[StructInfo],
     enums: &[EnumInfo],
+    types: &TypeArena,
     value: &Rvalue,
-    destination: Type,
+    destination: TypeId,
     initialized: &[bool],
 ) -> Result<(), String> {
     match value {
@@ -1076,8 +1132,8 @@ fn validate_rvalue(
             }
         }
         Rvalue::Load(place) => {
-            validate_place_read(function, place, structs, initialized)?;
-            if place_type(function, place, structs)? != destination {
+            validate_place_read(function, place, structs, types, initialized)?;
+            if place_type(function, place, structs, types)? != destination {
                 return Err("MIR place load type mismatch".into());
             }
         }
@@ -1086,7 +1142,8 @@ fn validate_rvalue(
                 .get(struct_id.0 as usize)
                 .filter(|info| info.id == *struct_id)
                 .ok_or_else(|| "MIR aggregate names unknown struct".to_string())?;
-            if destination != Type::Struct(*struct_id) || fields.len() != info.fields.len() {
+            if types.struct_id(destination) != Some(*struct_id) || fields.len() != info.fields.len()
+            {
                 return Err("MIR aggregate arity/result mismatch".into());
             }
             for ((field_id, operand), declared) in fields.iter().zip(&info.fields) {
@@ -1110,7 +1167,9 @@ fn validate_rvalue(
                 .get(variant_id.index as usize)
                 .filter(|variant| variant.id == *variant_id)
                 .ok_or_else(|| "MIR enum construction names wrong variant".to_string())?;
-            if destination != Type::Enum(*enum_id) || payloads.len() != variant.payloads.len() {
+            if types.enum_id(destination) != Some(*enum_id)
+                || payloads.len() != variant.payloads.len()
+            {
                 return Err("MIR enum construction arity/result mismatch".into());
             }
             for (operand, declared) in payloads.iter().zip(&variant.payloads) {
@@ -1123,8 +1182,8 @@ fn validate_rvalue(
         Rvalue::EnumDiscriminant { value, enum_id } => {
             validate_operand(function, value, initialized)?;
             if enums.get(enum_id.0 as usize).map(|info| info.id) != Some(*enum_id)
-                || operand_type(function, value)? != Type::Enum(*enum_id)
-                || destination != Type::Integer(IntegerType::Uint32)
+                || types.enum_id(operand_type(function, value)?) != Some(*enum_id)
+                || destination != TypeId::UINT32
             {
                 return Err("MIR enum discriminant contract invalid".into());
             }
@@ -1149,7 +1208,9 @@ fn validate_rvalue(
                 .payloads
                 .get(*index as usize)
                 .ok_or_else(|| "MIR enum payload slot out of bounds".to_string())?;
-            if operand_type(function, value)? != Type::Enum(*enum_id) || destination != payload.ty {
+            if types.enum_id(operand_type(function, value)?) != Some(*enum_id)
+                || destination != payload.ty
+            {
                 return Err("MIR enum payload extraction type mismatch".into());
             }
         }
@@ -1160,7 +1221,7 @@ fn validate_rvalue(
         } => {
             validate_operand(function, operand, initialized)?;
             if operand_type(function, operand)? != *from
-                || !valid_coercion(*kind, *from, destination)
+                || !valid_coercion(types, *kind, *from, destination)
             {
                 return Err("invalid MIR coercion contract".into());
             }
@@ -1173,9 +1234,9 @@ fn validate_rvalue(
         } => {
             validate_operand(function, operand, initialized)?;
             let required_trap =
-                cast_can_fail(*from, destination).then_some(TrapKind::ConversionOutOfRange);
+                cast_can_fail(types, *from, destination).then_some(TrapKind::ConversionOutOfRange);
             if operand_type(function, operand)? != *from
-                || !valid_cast(*kind, *from, destination)
+                || !valid_cast(types, *kind, *from, destination)
                 || *trap != required_trap
             {
                 return Err("invalid MIR explicit-cast contract".into());
@@ -1185,10 +1246,10 @@ fn validate_rvalue(
             validate_operand(function, operand, initialized)?;
             let operand_ty = operand_type(function, operand)?;
             let valid = match op {
-                UnaryOp::NegateIntegerChecked => operand_ty
-                    .as_integer()
+                UnaryOp::NegateIntegerChecked => types
+                    .integer_info(operand_ty)
                     .is_some_and(aether_frontend::IntegerType::is_signed),
-                UnaryOp::NegateFloat => operand_ty.as_float().is_some(),
+                UnaryOp::NegateFloat => types.float_info(operand_ty).is_some(),
             };
             let required_trap =
                 matches!(op, UnaryOp::NegateIntegerChecked).then_some(TrapKind::IntegerOverflow);
@@ -1211,7 +1272,7 @@ fn validate_rvalue(
                 return Err("MIR binary operands have different types".into());
             }
             let (required_operand, result, required_trap, required_secondary) =
-                binary_contract(*op, left_ty)?;
+                binary_contract(types, *op, left_ty)?;
             if left_ty != required_operand
                 || destination != result
                 || *trap != required_trap
@@ -1245,9 +1306,10 @@ fn validate_place_read(
     function: &MirFunction,
     place: &Place,
     structs: &[StructInfo],
+    types: &TypeArena,
     initialized: &[bool],
 ) -> Result<(), String> {
-    place_type(function, place, structs)?;
+    place_type(function, place, structs, types)?;
     if !initialized
         .get(place.local.0 as usize)
         .copied()
@@ -1265,15 +1327,16 @@ fn place_type(
     function: &MirFunction,
     place: &Place,
     structs: &[StructInfo],
-) -> Result<Type, String> {
+    types: &TypeArena,
+) -> Result<TypeId, String> {
     let mut ty = function
         .locals
         .get(place.local.0 as usize)
         .map(|local| local.ty)
         .ok_or_else(|| format!("unknown MIR place local {:?}", place.local))?;
     for field_id in &place.projections {
-        let owner = ty
-            .as_struct()
+        let owner = types
+            .struct_id(ty)
             .ok_or_else(|| "MIR place projects non-struct type".to_string())?;
         let field = structs
             .get(owner.0 as usize)
@@ -1285,20 +1348,21 @@ fn place_type(
 }
 
 pub(crate) fn binary_contract(
+    types: &TypeArena,
     op: BinaryOp,
-    operand: Type,
-) -> Result<(Type, Type, Option<TrapKind>, Option<TrapKind>), String> {
+    operand: TypeId,
+) -> Result<(TypeId, TypeId, Option<TrapKind>, Option<TrapKind>), String> {
     match op {
         BinaryOp::AddIntegerChecked
         | BinaryOp::SubtractIntegerChecked
         | BinaryOp::MultiplyIntegerChecked
-            if operand.as_integer().is_some() =>
+            if types.integer_info(operand).is_some() =>
         {
             Ok((operand, operand, Some(TrapKind::IntegerOverflow), None))
         }
         BinaryOp::DivideIntegerSignedChecked
-            if operand
-                .as_integer()
+            if types
+                .integer_info(operand)
                 .is_some_and(aether_frontend::IntegerType::is_signed) =>
         {
             Ok((
@@ -1309,15 +1373,15 @@ pub(crate) fn binary_contract(
             ))
         }
         BinaryOp::DivideIntegerUnsignedChecked | BinaryOp::RemainderIntegerUnsignedChecked
-            if operand
-                .as_integer()
+            if types
+                .integer_info(operand)
                 .is_some_and(|integer| !integer.is_signed()) =>
         {
             Ok((operand, operand, Some(TrapKind::DivisionByZero), None))
         }
         BinaryOp::RemainderIntegerSignedChecked
-            if operand
-                .as_integer()
+            if types
+                .integer_info(operand)
                 .is_some_and(aether_frontend::IntegerType::is_signed) =>
         {
             Ok((operand, operand, Some(TrapKind::DivisionByZero), None))
@@ -1326,19 +1390,21 @@ pub(crate) fn binary_contract(
         | BinaryOp::SubtractFloat
         | BinaryOp::MultiplyFloat
         | BinaryOp::DivideFloat
-            if operand.as_float().is_some() =>
+            if types.float_info(operand).is_some() =>
         {
             Ok((operand, operand, None, None))
         }
         BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual => {
-            if operand.is_numeric() {
-                Ok((operand, Type::Bool, None, None))
+            if types.is_numeric(operand) {
+                Ok((operand, TypeId::BOOL, None, None))
             } else {
                 Err("ordered comparison requires numeric operands".into())
             }
         }
-        BinaryOp::Equal | BinaryOp::NotEqual if operand == Type::Bool || operand.is_numeric() => {
-            Ok((operand, Type::Bool, None, None))
+        BinaryOp::Equal | BinaryOp::NotEqual
+            if operand == TypeId::BOOL || types.is_numeric(operand) =>
+        {
+            Ok((operand, TypeId::BOOL, None, None))
         }
         _ => Err("MIR numeric opcode/type mismatch".into()),
     }
@@ -1360,7 +1426,7 @@ fn validate_operand(
     Ok(())
 }
 
-fn operand_type(function: &MirFunction, operand: &Operand) -> Result<Type, String> {
+fn operand_type(function: &MirFunction, operand: &Operand) -> Result<TypeId, String> {
     match operand {
         Operand::Local(local) => function
             .locals
@@ -1368,77 +1434,75 @@ fn operand_type(function: &MirFunction, operand: &Operand) -> Result<Type, Strin
             .map(|local| local.ty)
             .ok_or_else(|| format!("unknown MIR local {local:?}")),
         Operand::Int { ty, .. } | Operand::Float { ty, .. } => Ok(*ty),
-        Operand::Bool(_) => Ok(Type::Bool),
+        Operand::Bool(_) => Ok(TypeId::BOOL),
     }
 }
 
-fn valid_coercion(kind: CoercionKind, from: Type, to: Type) -> bool {
-    match (kind, from, to) {
-        (CoercionKind::SignExtend, Type::Integer(a), Type::Integer(b)) => {
-            a.is_signed() && a.can_widen_to(b)
+fn valid_coercion(types: &TypeArena, kind: CoercionKind, from: TypeId, to: TypeId) -> bool {
+    match (kind, types.integer_info(from), types.integer_info(to)) {
+        (CoercionKind::SignExtend, Some(a), Some(b)) => a.is_signed() && a.can_widen_to(b),
+        (CoercionKind::ZeroExtend, Some(a), Some(b)) => !a.is_signed() && a.can_widen_to(b),
+        (CoercionKind::FloatExtend, _, _) if from == TypeId::FLOAT32 && to == TypeId::FLOAT64 => {
+            true
         }
-        (CoercionKind::ZeroExtend, Type::Integer(a), Type::Integer(b)) => {
-            !a.is_signed() && a.can_widen_to(b)
-        }
-        (
-            CoercionKind::FloatExtend,
-            Type::Float(aether_frontend::FloatType::Float32),
-            Type::Float(aether_frontend::FloatType::Float64),
-        ) => true,
         _ => false,
     }
 }
 
-pub(crate) fn valid_cast(kind: CastKind, from: Type, to: Type) -> bool {
-    use aether_frontend::{FloatType, TargetProperties};
+pub(crate) fn valid_cast(types: &TypeArena, kind: CastKind, from: TypeId, to: TypeId) -> bool {
+    use aether_frontend::TargetProperties;
     let target = TargetProperties::LINUX_X86_64;
-    match (kind, from, to) {
-        (CastKind::Identity, a, b) => a == b && a != Type::Bool,
-        (CastKind::IntegerExtendSigned, Type::Integer(a), Type::Integer(b)) => {
+    let from_integer = types.integer_info(from);
+    let to_integer = types.integer_info(to);
+    let from_float = types.float_info(from);
+    let to_float = types.float_info(to);
+    match kind {
+        CastKind::Identity => from == to && from != TypeId::BOOL,
+        CastKind::IntegerExtendSigned if let (Some(a), Some(b)) = (from_integer, to_integer) => {
             a.is_signed() && b.is_signed() && a.bits(target) < b.bits(target)
         }
-        (CastKind::IntegerExtendUnsigned, Type::Integer(a), Type::Integer(b)) => {
+        CastKind::IntegerExtendUnsigned if let (Some(a), Some(b)) = (from_integer, to_integer) => {
             !a.is_signed() && !b.is_signed() && a.bits(target) < b.bits(target)
         }
-        (CastKind::IntegerNarrowChecked, Type::Integer(a), Type::Integer(b)) => {
+        CastKind::IntegerNarrowChecked if let (Some(a), Some(b)) = (from_integer, to_integer) => {
             a.is_signed() == b.is_signed() && a.bits(target) > b.bits(target)
         }
-        (CastKind::IntegerReencode, Type::Integer(a), Type::Integer(b)) => {
+        CastKind::IntegerReencode if let (Some(a), Some(b)) = (from_integer, to_integer) => {
             a != b && a.is_signed() == b.is_signed() && a.bits(target) == b.bits(target)
         }
-        (CastKind::IntegerSignednessChecked, Type::Integer(a), Type::Integer(b)) => {
+        CastKind::IntegerSignednessChecked
+            if let (Some(a), Some(b)) = (from_integer, to_integer) =>
+        {
             a.is_signed() != b.is_signed()
         }
-        (CastKind::SignedIntegerToFloat, Type::Integer(a), Type::Float(_)) => a.is_signed(),
-        (CastKind::UnsignedIntegerToFloat, Type::Integer(a), Type::Float(_)) => !a.is_signed(),
-        (CastKind::FloatToSignedIntegerChecked, Type::Float(_), Type::Integer(b)) => b.is_signed(),
-        (CastKind::FloatToUnsignedIntegerChecked, Type::Float(_), Type::Integer(b)) => {
-            !b.is_signed()
+        CastKind::SignedIntegerToFloat if to_float.is_some() => {
+            from_integer.is_some_and(aether_frontend::IntegerType::is_signed)
         }
-        (
-            CastKind::FloatExtend,
-            Type::Float(FloatType::Float32),
-            Type::Float(FloatType::Float64),
-        )
-        | (
-            CastKind::FloatTruncate,
-            Type::Float(FloatType::Float64),
-            Type::Float(FloatType::Float32),
-        ) => true,
+        CastKind::UnsignedIntegerToFloat if to_float.is_some() => {
+            from_integer.is_some_and(|a| !a.is_signed())
+        }
+        CastKind::FloatToSignedIntegerChecked if from_float.is_some() => {
+            to_integer.is_some_and(aether_frontend::IntegerType::is_signed)
+        }
+        CastKind::FloatToUnsignedIntegerChecked if from_float.is_some() => {
+            to_integer.is_some_and(|b| !b.is_signed())
+        }
+        CastKind::FloatExtend => from == TypeId::FLOAT32 && to == TypeId::FLOAT64,
+        CastKind::FloatTruncate => from == TypeId::FLOAT64 && to == TypeId::FLOAT32,
         _ => false,
     }
 }
 
-pub(crate) fn cast_can_fail(from: Type, to: Type) -> bool {
+pub(crate) fn cast_can_fail(types: &TypeArena, from: TypeId, to: TypeId) -> bool {
     use aether_frontend::TargetProperties;
-    match (from, to) {
-        (Type::Integer(a), Type::Integer(b)) => {
+    match (types.get(from), types.get(to)) {
+        (Some(TypeData::Integer(a)), Some(TypeData::Integer(b))) => {
             let target = TargetProperties::LINUX_X86_64;
             let (source_min, source_max) = a.range(target);
             let (target_min, target_max) = b.range(target);
             source_min < target_min || source_max > target_max
         }
-        (Type::Float(_), Type::Integer(_)) => true,
+        (Some(TypeData::Float(_)), Some(TypeData::Integer(_))) => true,
         _ => false,
     }
 }
@@ -1524,11 +1588,16 @@ mod tests {
         let mut bad = mir("int main(){return 0;}");
         bad.functions[0].blocks[0].terminator = Some(Terminator::Return(Operand::Bool(false)));
         assert!(verify_mir(bad).is_err());
+
+        let mut invalid = mir("int main(){int x=0;return x;}");
+        invalid.functions[0].locals[0].ty = TypeId(u32::MAX);
+        assert!(verify_mir(invalid).is_err());
     }
 
     #[test]
     fn trap_terminator_represents_division_failure() {
         let raw = FlowMir {
+            types: Arc::new(TypeArena::new()),
             modules: vec![ModuleInfo {
                 id: ModuleId(0),
                 name: "main".into(),
@@ -1543,13 +1612,13 @@ mod tests {
                 module: ModuleId(0),
                 name: "main".into(),
                 parameters: vec![],
-                return_type: Type::INT64,
+                return_type: TypeId::INT64,
                 span: Span::new(0, 0),
             }],
             functions: vec![MirFunction {
                 id: FunctionId(0),
                 parameters: vec![],
-                return_type: Type::INT64,
+                return_type: TypeId::INT64,
                 locals: vec![],
                 blocks: vec![BasicBlock {
                     id: BlockId(0),

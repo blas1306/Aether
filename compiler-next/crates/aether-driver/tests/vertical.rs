@@ -1,4 +1,4 @@
-//! Cross-layer and native qualification through NEXT-VERTICAL-6.
+//! Cross-layer and native qualification through NEXT-VERTICAL-7.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -403,7 +403,8 @@ fn vertical6_qualified_alias_construction_and_matching_resolve() {
     assert!(compilation.dumps[&Emit::Ast].contains("VariantCall"));
     let hir = &compilation.dumps[&Emit::Hir];
     assert!(hir.contains("Numeric"));
-    assert!(hir.contains("canonical: Enum"));
+    assert!(hir.contains("TypeId(13) = Number"));
+    assert!(hir.contains("canonical: TypeId(\n            13"));
     assert!(compilation.llvm.contains("switch i32"));
 
     let diagnostic = CompilationSession::discover(&module_program("errors/v6_unqualified"))
@@ -412,6 +413,53 @@ fn vertical6_qualified_alias_construction_and_matching_resolve() {
         .remove(0);
     assert_eq!(diagnostic.code, "E0204");
     assert_eq!(diagnostic.source_name.as_deref(), Some("main.ae"));
+}
+
+#[test]
+fn vertical7_type_id_arena_is_canonical_nominal_and_deterministic() {
+    let source = SourceFile::new(
+        "type_ids.ae",
+        r"
+struct A { int x; }
+struct B { int x; }
+enum E { V(int) }
+enum F { V(int) }
+alias Whole = int64;
+alias WholeAgain = Whole;
+alias Position = A;
+int64 convert(Whole value) { return int64(value); }
+int main() {
+    Position p = Position(1);
+    E e = E.V(p.x);
+    isize target_sized = isize(1);
+    return convert(p.x);
+}
+",
+    );
+    let emits = [Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm];
+    let first = compile_source(&source, &emits).unwrap();
+    let second = compile_source(&source, &emits).unwrap();
+    assert_eq!(first.dumps, second.dumps);
+    assert_eq!(first.llvm, second.llvm);
+
+    for phase in [Emit::Hir, Emit::Mir, Emit::Ssa] {
+        let dump = &first.dumps[&phase];
+        assert!(dump.contains("types (session-local)"), "{phase:?}");
+        assert!(dump.contains("TypeId(4) = int64"), "{phase:?}");
+        assert!(dump.contains("TypeId(9) = isize"), "{phase:?}");
+        assert!(dump.contains("TypeId(13) = A"), "{phase:?}");
+        assert!(dump.contains("TypeId(14) = B"), "{phase:?}");
+        assert!(dump.contains("TypeId(15) = E"), "{phase:?}");
+        assert!(dump.contains("TypeId(16) = F"), "{phase:?}");
+    }
+    let hir = &first.dumps[&Emit::Hir];
+    assert!(hir.contains("WholeAgain"));
+    assert!(hir.contains("Position"));
+    assert!(hir.contains("ExplicitCast"));
+    assert!(first.llvm.contains("%aether.struct.0 = type"));
+    assert!(first.llvm.contains("%aether.struct.1 = type"));
+    assert!(first.llvm.contains("%aether.enum.0 = type"));
+    assert!(first.llvm.contains("%aether.enum.1 = type"));
 }
 
 #[test]
@@ -520,10 +568,8 @@ int main() {
     let result = compile_source(&source, &[Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm]).unwrap();
     let hir = &result.dumps[&Emit::Hir];
     assert!(hir.contains("TinyChain"));
-    assert!(
-        hir.contains("canonical: Integer(\n            Int8")
-            || hir.contains("canonical: Integer(Int8)")
-    );
+    assert!(hir.contains("TypeId(1) = int8"));
+    assert!(hir.contains("canonical: TypeId(\n            1"));
     assert!(hir.contains("SignExtend"));
     assert!(hir.contains("FloatExtend"));
     let llvm = &result.llvm;

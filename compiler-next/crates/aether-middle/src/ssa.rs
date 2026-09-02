@@ -3,11 +3,12 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
+use std::sync::Arc;
 
 use aether_frontend::{
     CastKind, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId, FloatValue,
-    FunctionId, FunctionSignature, IntegerType, LocalId, ModuleInfo, Phase, Span, StructId,
-    StructInfo, Type, VariantId,
+    FunctionId, FunctionSignature, LocalId, ModuleInfo, Phase, Span, StructId, StructInfo,
+    TypeArena, TypeId, VariantId, format_type,
 };
 
 use crate::{
@@ -24,9 +25,9 @@ pub enum SsaOperand {
     /// SSA value use.
     Value(ValueId),
     /// Signed 64-bit constant.
-    Int { value: i128, ty: Type },
+    Int { value: i128, ty: TypeId },
     /// IEEE literal bits and canonical type.
-    Float { value: FloatValue, ty: Type },
+    Float { value: FloatValue, ty: TypeId },
     /// Boolean constant.
     Bool(bool),
 }
@@ -37,7 +38,7 @@ pub struct Phi {
     /// Defined value.
     pub result: ValueId,
     /// Canonical type.
-    pub ty: Type,
+    pub ty: TypeId,
     /// Origin local, retained for inspection only.
     pub local: LocalId,
     /// Exactly one value for every predecessor, sorted by block identity.
@@ -52,7 +53,7 @@ pub struct SsaParameter {
     /// Entry definition.
     pub value: ValueId,
     /// Canonical semantic type.
-    pub ty: Type,
+    pub ty: TypeId,
 }
 
 /// SSA computation.
@@ -96,13 +97,13 @@ pub enum SsaOp {
     Coerce {
         kind: CoercionKind,
         operand: SsaOperand,
-        from: Type,
+        from: TypeId,
     },
     /// Explicit value conversion preserved from HIR/MIR.
     Cast {
         kind: CastKind,
         operand: SsaOperand,
-        from: Type,
+        from: TypeId,
         trap: Option<TrapKind>,
     },
     /// Unary computation with explicit trap effect.
@@ -132,7 +133,7 @@ pub struct SsaInstruction {
     /// Fresh result identity.
     pub result: ValueId,
     /// Result type.
-    pub ty: Type,
+    pub ty: TypeId,
     /// Computation.
     pub op: SsaOp,
     /// Source provenance.
@@ -184,7 +185,7 @@ pub struct SsaFunction {
     /// Entry parameter definitions in call order.
     pub parameters: Vec<SsaParameter>,
     /// Canonical return type.
-    pub return_type: Type,
+    pub return_type: TypeId,
     /// Entry block.
     pub entry: BlockId,
     /// Blocks in stable MIR order.
@@ -194,6 +195,8 @@ pub struct SsaFunction {
 /// Unverified SSA type-state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SsaIr {
+    /// Session-local canonical type identity context.
+    pub types: Arc<TypeArena>,
     /// Resolved program module graph and provenance.
     pub modules: Vec<ModuleInfo>,
     /// Nominal aggregate metadata shared with MIR and the backend.
@@ -212,8 +215,19 @@ impl SsaIr {
     /// Deterministic inspection dump.
     #[must_use]
     pub fn dump(&self) -> String {
+        let type_table = self
+            .types
+            .entries()
+            .map(|(id, _)| {
+                format!(
+                    "  {id:?} = {}",
+                    format_type(&self.types, id, &self.structs, &self.enums)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
         let mut dump = format!(
-            "entry: {:#?}\nmodules: {:#?}\nstructs: {:#?}\nenums: {:#?}\nsignatures: {:#?}",
+            "types (session-local):\n{type_table}\nentry: {:#?}\nmodules: {:#?}\nstructs: {:#?}\nenums: {:#?}\nsignatures: {:#?}",
             self.entry, self.modules, self.structs, self.enums, self.signatures
         );
         for module in &self.modules {
@@ -257,6 +271,7 @@ pub fn build_ssa(mir: &VerifiedMir) -> SsaIr {
     let mir = mir.as_mir();
     SsaIr {
         modules: mir.modules.clone(),
+        types: mir.types.clone(),
         structs: mir.structs.clone(),
         enums: mir.enums.clone(),
         signatures: mir.signatures.clone(),
@@ -806,6 +821,44 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
             "SSA function table/body cardinality is invalid".into(),
         ));
     }
+    for ty in ssa
+        .signatures
+        .iter()
+        .flat_map(|signature| {
+            signature
+                .parameters
+                .iter()
+                .map(|p| p.ty)
+                .chain(std::iter::once(signature.return_type))
+        })
+        .chain(
+            ssa.structs
+                .iter()
+                .flat_map(|info| info.fields.iter().map(|field| field.ty)),
+        )
+        .chain(ssa.enums.iter().flat_map(|info| {
+            info.variants
+                .iter()
+                .flat_map(|variant| variant.payloads.iter().map(|payload| payload.ty))
+        }))
+        .chain(ssa.functions.iter().flat_map(|function| {
+            function
+                .parameters
+                .iter()
+                .map(|parameter| parameter.ty)
+                .chain(function.blocks.iter().flat_map(|block| {
+                    block
+                        .phis
+                        .iter()
+                        .map(|phi| phi.ty)
+                        .chain(block.instructions.iter().map(|instruction| instruction.ty))
+                }))
+        }))
+    {
+        if !ssa.types.is_valid(ty) {
+            return Err(fail(format!("SSA references invalid TypeId({})", ty.0)));
+        }
+    }
     for (index, (signature, function)) in ssa.signatures.iter().zip(&ssa.functions).enumerate() {
         if signature.id.0 as usize != index || function.id != signature.id {
             return Err(fail("SSA function identities are not canonical".into()));
@@ -819,6 +872,7 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
             &ssa.signatures,
             &ssa.structs,
             &ssa.enums,
+            &ssa.types,
             &fail,
         )?;
     }
@@ -832,6 +886,7 @@ fn verify_ssa_function(
     signatures: &[FunctionSignature],
     structs: &[StructInfo],
     enums: &[EnumInfo],
+    types: &TypeArena,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
     if function.return_type != signature.return_type
@@ -868,7 +923,7 @@ fn verify_ssa_function(
     struct Definition {
         block: BlockId,
         position: Position,
-        ty: Type,
+        ty: TypeId,
     }
     let mut definitions: BTreeMap<ValueId, Definition> = BTreeMap::new();
     for (parameter, declared) in function.parameters.iter().zip(&signature.parameters) {
@@ -935,14 +990,14 @@ fn verify_ssa_function(
         }
     }
 
-    let operand_ty = |operand: &SsaOperand| -> Result<Type, String> {
+    let operand_ty = |operand: &SsaOperand| -> Result<TypeId, String> {
         match operand {
             SsaOperand::Value(value) => definitions
                 .get(value)
                 .map(|definition| definition.ty)
                 .ok_or_else(|| format!("SSA use of undefined value {value:?}")),
             SsaOperand::Int { ty, .. } | SsaOperand::Float { ty, .. } => Ok(*ty),
-            SsaOperand::Bool(_) => Ok(Type::Bool),
+            SsaOperand::Bool(_) => Ok(TypeId::BOOL),
         }
     };
     let validate_use = |operand: &SsaOperand,
@@ -1020,6 +1075,7 @@ fn verify_ssa_function(
                 signatures,
                 structs,
                 enums,
+                types,
                 &operand_ty,
             )
             .map_err(&fail)?;
@@ -1027,7 +1083,7 @@ fn verify_ssa_function(
         match &block.terminator {
             SsaTerminator::Branch { condition, .. } => {
                 validate_use(condition, block.id, Some(block.instructions.len())).map_err(&fail)?;
-                if operand_ty(condition).map_err(&fail)? != Type::Bool {
+                if operand_ty(condition).map_err(&fail)? != TypeId::BOOL {
                     return Err(fail("SSA branch condition is not bool".into()));
                 }
             }
@@ -1039,7 +1095,7 @@ fn verify_ssa_function(
             } => {
                 validate_use(discriminant, block.id, Some(block.instructions.len()))
                     .map_err(&fail)?;
-                if operand_ty(discriminant).map_err(&fail)? != Type::Integer(IntegerType::Uint32) {
+                if operand_ty(discriminant).map_err(&fail)? != TypeId::UINT32 {
                     return Err(fail("SSA switch discriminant is not uint32".into()));
                 }
                 let values = cases
@@ -1098,11 +1154,12 @@ fn verify_ssa_function(
 #[allow(clippy::too_many_lines)]
 fn verify_op(
     op: &SsaOp,
-    result: Type,
+    result: TypeId,
     signatures: &[FunctionSignature],
     structs: &[StructInfo],
     enums: &[EnumInfo],
-    operand_ty: &impl Fn(&SsaOperand) -> Result<Type, String>,
+    types: &TypeArena,
+    operand_ty: &impl Fn(&SsaOperand) -> Result<TypeId, String>,
 ) -> Result<(), String> {
     match op {
         SsaOp::Use(operand) => {
@@ -1115,7 +1172,7 @@ fn verify_op(
                 .get(struct_id.0 as usize)
                 .filter(|info| info.id == *struct_id)
                 .ok_or_else(|| "SSA aggregate names unknown struct".to_string())?;
-            if result != Type::Struct(*struct_id) || fields.len() != info.fields.len() {
+            if types.struct_id(result) != Some(*struct_id) || fields.len() != info.fields.len() {
                 return Err("SSA aggregate arity/result mismatch".into());
             }
             for ((field_id, operand), declared) in fields.iter().zip(&info.fields) {
@@ -1138,7 +1195,7 @@ fn verify_op(
                 .get(variant_id.index as usize)
                 .filter(|variant| variant.id == *variant_id)
                 .ok_or_else(|| "SSA enum construction names wrong variant".to_string())?;
-            if result != Type::Enum(*enum_id) || payloads.len() != variant.payloads.len() {
+            if types.enum_id(result) != Some(*enum_id) || payloads.len() != variant.payloads.len() {
                 return Err("SSA enum construction arity/result mismatch".into());
             }
             for (operand, declared) in payloads.iter().zip(&variant.payloads) {
@@ -1149,8 +1206,8 @@ fn verify_op(
         }
         SsaOp::EnumDiscriminant { value, enum_id } => {
             if enums.get(enum_id.0 as usize).map(|info| info.id) != Some(*enum_id)
-                || operand_ty(value)? != Type::Enum(*enum_id)
-                || result != Type::Integer(IntegerType::Uint32)
+                || types.enum_id(operand_ty(value)?) != Some(*enum_id)
+                || result != TypeId::UINT32
             {
                 return Err("SSA enum discriminant contract invalid".into());
             }
@@ -1174,7 +1231,7 @@ fn verify_op(
                 .payloads
                 .get(*index as usize)
                 .ok_or_else(|| "SSA enum payload slot out of bounds".to_string())?;
-            if operand_ty(value)? != Type::Enum(*enum_id) || result != payload.ty {
+            if types.enum_id(operand_ty(value)?) != Some(*enum_id) || result != payload.ty {
                 return Err("SSA enum payload extraction type mismatch".into());
             }
         }
@@ -1183,7 +1240,7 @@ fn verify_op(
             projections,
         } => {
             if projections.is_empty()
-                || field_path_type(operand_ty(aggregate)?, projections, structs)? != result
+                || field_path_type(operand_ty(aggregate)?, projections, structs, types)? != result
             {
                 return Err("SSA extract-field contract invalid".into());
             }
@@ -1195,9 +1252,9 @@ fn verify_op(
         } => {
             let aggregate_ty = operand_ty(aggregate)?;
             if aggregate_ty != result
-                || result.as_struct().is_none()
+                || types.struct_id(result).is_none()
                 || projections.is_empty()
-                || field_path_type(aggregate_ty, projections, structs)? != operand_ty(value)?
+                || field_path_type(aggregate_ty, projections, structs, types)? != operand_ty(value)?
             {
                 return Err("SSA insert-field contract invalid".into());
             }
@@ -1207,7 +1264,7 @@ fn verify_op(
             operand,
             from,
         } => {
-            if operand_ty(operand)? != *from || !valid_coercion(*kind, *from, result) {
+            if operand_ty(operand)? != *from || !valid_coercion(types, *kind, *from, result) {
                 return Err("invalid SSA coercion contract".into());
             }
         }
@@ -1217,10 +1274,10 @@ fn verify_op(
             from,
             trap,
         } => {
-            let required_trap =
-                crate::mir::cast_can_fail(*from, result).then_some(TrapKind::ConversionOutOfRange);
+            let required_trap = crate::mir::cast_can_fail(types, *from, result)
+                .then_some(TrapKind::ConversionOutOfRange);
             if operand_ty(operand)? != *from
-                || !crate::mir::valid_cast(*kind, *from, result)
+                || !crate::mir::valid_cast(types, *kind, *from, result)
                 || *trap != required_trap
             {
                 return Err("invalid SSA explicit-cast contract".into());
@@ -1229,10 +1286,10 @@ fn verify_op(
         SsaOp::Unary { op, operand, trap } => {
             let ty = operand_ty(operand)?;
             let valid = match op {
-                UnaryOp::NegateIntegerChecked => ty
-                    .as_integer()
+                UnaryOp::NegateIntegerChecked => types
+                    .integer_info(ty)
                     .is_some_and(aether_frontend::IntegerType::is_signed),
-                UnaryOp::NegateFloat => ty.as_float().is_some(),
+                UnaryOp::NegateFloat => types.float_info(ty).is_some(),
             };
             let required_trap =
                 matches!(op, UnaryOp::NegateIntegerChecked).then_some(TrapKind::IntegerOverflow);
@@ -1253,7 +1310,7 @@ fn verify_op(
                 return Err("SSA binary operand type mismatch".into());
             }
             let (required, output, required_trap, required_secondary) =
-                crate::mir::binary_contract(*op, left)?;
+                crate::mir::binary_contract(types, *op, left)?;
             if left != required
                 || result != output
                 || *trap != required_trap
@@ -1281,13 +1338,14 @@ fn verify_op(
 }
 
 fn field_path_type(
-    mut ty: Type,
+    mut ty: TypeId,
     projections: &[FieldId],
     structs: &[StructInfo],
-) -> Result<Type, String> {
+    types: &TypeArena,
+) -> Result<TypeId, String> {
     for field_id in projections {
-        let owner = ty
-            .as_struct()
+        let owner = types
+            .struct_id(ty)
             .ok_or_else(|| "field path projects non-struct type".to_string())?;
         let field = structs
             .get(owner.0 as usize)
@@ -1298,19 +1356,13 @@ fn field_path_type(
     Ok(ty)
 }
 
-fn valid_coercion(kind: CoercionKind, from: Type, to: Type) -> bool {
-    match (kind, from, to) {
-        (CoercionKind::SignExtend, Type::Integer(a), Type::Integer(b)) => {
-            a.is_signed() && a.can_widen_to(b)
+fn valid_coercion(types: &TypeArena, kind: CoercionKind, from: TypeId, to: TypeId) -> bool {
+    match (kind, types.integer_info(from), types.integer_info(to)) {
+        (CoercionKind::SignExtend, Some(a), Some(b)) => a.is_signed() && a.can_widen_to(b),
+        (CoercionKind::ZeroExtend, Some(a), Some(b)) => !a.is_signed() && a.can_widen_to(b),
+        (CoercionKind::FloatExtend, _, _) if from == TypeId::FLOAT32 && to == TypeId::FLOAT64 => {
+            true
         }
-        (CoercionKind::ZeroExtend, Type::Integer(a), Type::Integer(b)) => {
-            !a.is_signed() && a.can_widen_to(b)
-        }
-        (
-            CoercionKind::FloatExtend,
-            Type::Float(aether_frontend::FloatType::Float32),
-            Type::Float(aether_frontend::FloatType::Float64),
-        ) => true,
         _ => false,
     }
 }
@@ -1450,6 +1502,15 @@ mod tests {
         phi.incoming.pop();
         assert!(verify_ssa(phi_bad).is_err());
 
+        let mut phi_type_bad = raw_ssa("int main(){int i=0;while(i<2){i=i+1;}return i;}");
+        let phi = phi_type_bad.functions[0]
+            .blocks
+            .iter_mut()
+            .find_map(|block| block.phis.first_mut())
+            .unwrap();
+        phi.ty = TypeId::UINT64;
+        assert!(verify_ssa(phi_type_bad).is_err());
+
         let mut use_bad = raw_ssa("int main(){int x=1;return x;}");
         if let SsaTerminator::Return(value) = &mut use_bad.functions[0].blocks[0].terminator {
             *value = SsaOperand::Value(ValueId(999));
@@ -1462,6 +1523,16 @@ mod tests {
         let mut ssa = raw_ssa("int main(){int x=1;return x;}");
         let duplicate = ssa.functions[0].blocks[0].instructions[0].clone();
         ssa.functions[0].blocks[0].instructions.push(duplicate);
+        assert!(verify_ssa(ssa).is_err());
+    }
+
+    #[test]
+    fn verifier_rejects_invalid_type_identity() {
+        let mut ssa = raw_ssa("int main(){return 0;}");
+        ssa.functions[0].blocks[0].terminator = SsaTerminator::Return(SsaOperand::Int {
+            value: 0,
+            ty: TypeId(u32::MAX),
+        });
         assert!(verify_ssa(ssa).is_err());
     }
 
@@ -1500,7 +1571,7 @@ mod tests {
         if let SsaOp::Call { args, .. } = &mut call.op {
             args[0] = SsaOperand::Int {
                 value: 1,
-                ty: Type::INT64,
+                ty: TypeId::INT64,
             };
         }
         assert!(verify_ssa(ssa).is_err());

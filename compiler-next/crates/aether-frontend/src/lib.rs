@@ -20,12 +20,13 @@ pub use hir::{
     LocalId, ModuleId, ModuleInfo, ParameterSignature, ParsedModule, ParsedProgram, ResolvedImport,
     StructInfo, TypeAliasInfo, TypeLayout, TypedHir, VariantInfo, VariantPayloadInfo, analyze,
     analyze_bodies, analyze_bodies_for_target, collect_program_signatures, collect_signatures,
-    verify_hir,
+    format_type, layout_of, verify_hir,
 };
 pub use lexer::{Token, TokenKind, lex};
 pub use parser::parse;
 pub use types::{
-    EnumId, FieldId, FloatType, IntegerType, StructId, TargetProperties, Type, VariantId,
+    EnumId, FieldId, FloatType, IntegerType, StructId, TargetProperties, TypeArena, TypeData,
+    TypeId, VariantId,
 };
 
 /// Lexes and parses one source file.
