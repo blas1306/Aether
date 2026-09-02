@@ -1,4 +1,4 @@
-//! Recursive-descent parser for the deliberately closed Vertical-9 grammar.
+//! Recursive-descent parser for the deliberately closed Vertical-10 grammar.
 
 use crate::{
     AstAlias, AstBinaryOp, AstBlock, AstEnum, AstExpr, AstExprKind, AstField, AstFunction,
@@ -393,7 +393,7 @@ impl Parser {
                 });
             }
             TokenKind::KwMatch => return self.match_statement(start),
-            _ => return Err(self.error("E0102", "expected a Vertical-9 statement")),
+            _ => return Err(self.error("E0102", "expected a Vertical-10 statement")),
         };
         let semicolon = self.expect(TokenKind::Semicolon, "expected `;` after statement")?;
         Ok(AstStmt {
@@ -668,17 +668,32 @@ impl Parser {
                 ));
             }
         };
-        while self.consume(TokenKind::Dot).is_some() {
-            let member = self.expect(TokenKind::Identifier, "expected field name after `.`")?;
-            let span = expr.span.through(member.span);
-            expr = AstExpr {
-                kind: AstExprKind::Field {
-                    base: Box::new(expr),
-                    name: member.lexeme,
-                    name_span: member.span,
-                },
-                span,
-            };
+        loop {
+            if self.consume(TokenKind::Dot).is_some() {
+                let member = self.expect(TokenKind::Identifier, "expected field name after `.`")?;
+                let span = expr.span.through(member.span);
+                expr = AstExpr {
+                    kind: AstExprKind::Field {
+                        base: Box::new(expr),
+                        name: member.lexeme,
+                        name_span: member.span,
+                    },
+                    span,
+                };
+            } else if self.consume(TokenKind::LeftBracket).is_some() {
+                let index = self.expression()?;
+                let right = self.expect(TokenKind::RightBracket, "expected `]` after index")?;
+                let span = expr.span.through(right.span);
+                expr = AstExpr {
+                    kind: AstExprKind::Index {
+                        base: Box::new(expr),
+                        index: Box::new(index),
+                    },
+                    span,
+                };
+            } else {
+                break;
+            }
         }
         Ok(expr)
     }

@@ -1,15 +1,16 @@
-//! LLVM backend for verified Vertical-9 program SSA.
+//! LLVM backend for verified Vertical-10 program SSA.
 
+use std::collections::BTreeSet;
 use std::fmt::Write;
 
 use aether_frontend::{
     CastKind, CoercionKind, EnumInfo, FieldId, FloatType, FloatValue, FunctionInstanceInfo,
     IntegerType, ModuleInfo, StructInfo, Substitution, TargetProperties, TypeArena, TypeData,
-    TypeId,
+    TypeId, layout_of,
 };
 use aether_middle::{
-    BinaryOp, BlockId, SsaFunction, SsaOp, SsaOperand, SsaPlace, SsaPlaceBase, SsaTerminator,
-    TrapKind, UnaryOp, VerifiedSsa,
+    BinaryOp, BlockId, SsaFunction, SsaOp, SsaOperand, SsaPlace, SsaPlaceBase, SsaPlaceProjection,
+    SsaTerminator, TrapKind, UnaryOp, VerifiedSsa,
 };
 
 /// Minimal explicit target contract for the admitted bootstrap platform.
@@ -22,7 +23,7 @@ pub struct TargetDescriptor {
 }
 
 impl TargetDescriptor {
-    /// The target admitted through NEXT-VERTICAL-9.
+    /// The target admitted through NEXT-VERTICAL-10.
     #[must_use]
     pub const fn linux_x86_64() -> Self {
         Self {
@@ -54,8 +55,27 @@ impl Backend for LlvmTextBackend {
 pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let program = ssa.as_ssa();
     let types = &program.types;
+    let buffer_elements = types
+        .entries()
+        .filter_map(|(ty, data)| match data {
+            TypeData::Buffer { element } if !types.contains_generic(ty) => Some(*element),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    let indexed_elements = types
+        .entries()
+        .filter_map(|(ty, data)| match data {
+            TypeData::Buffer { element } | TypeData::View { element, .. }
+                if !types.contains_generic(ty) =>
+            {
+                Some(*element)
+            }
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    let has_buffers = !buffer_elements.is_empty();
     let mut output = String::new();
-    writeln!(output, "; Aether NEXT-VERTICAL-9").unwrap();
+    writeln!(output, "; Aether NEXT-VERTICAL-10").unwrap();
     writeln!(
         output,
         "; Internal bootstrap ABI and symbol mangling; not a public Aether ABI"
@@ -71,6 +91,9 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         }
     }
     writeln!(output, "declare void @llvm.trap() cold noreturn nounwind\n").unwrap();
+    if has_buffers {
+        emit_runtime_boundary(&mut output);
+    }
 
     for (ty, data) in types.entries() {
         if types.contains_generic(ty) {
@@ -135,6 +158,20 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     if !program.structs.is_empty() || !program.enums.is_empty() {
         writeln!(output).unwrap();
     }
+    for element in buffer_elements {
+        let layout = layout_of(
+            types,
+            element,
+            target.properties,
+            &program.structs,
+            &program.enums,
+        )
+        .expect("verified Buffer element has concrete layout");
+        emit_buffer_allocation_helper(&mut output, types, element, layout.size, layout.align);
+    }
+    for element in indexed_elements {
+        emit_index_helper(&mut output, types, element);
+    }
 
     for function in &program.functions {
         let signature = &program.signatures[function.id.0 as usize];
@@ -170,9 +207,188 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         "  %process_status = trunc i64 %aether_result to i32"
     )
     .unwrap();
-    writeln!(output, "  ret i32 %process_status").unwrap();
+    if has_buffers {
+        writeln!(
+            output,
+            "  %allocation_balance = call i64 @aether_allocation_balance()"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "  %allocation_balanced = icmp eq i64 %allocation_balance, 0"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "  br i1 %allocation_balanced, label %return, label %trap_lifecycle_invariant"
+        )
+        .unwrap();
+        writeln!(output, "return:").unwrap();
+        writeln!(output, "  ret i32 %process_status").unwrap();
+        writeln!(output, "trap_lifecycle_invariant:").unwrap();
+        writeln!(output, "  call void @llvm.trap()").unwrap();
+        writeln!(output, "  unreachable").unwrap();
+    } else {
+        writeln!(output, "  ret i32 %process_status").unwrap();
+    }
     writeln!(output, "}}").unwrap();
     output
+}
+
+fn emit_runtime_boundary(output: &mut String) {
+    output.push_str(
+        "@aether_heap_alloc_count = internal global i64 0\n\
+         @aether_heap_free_count = internal global i64 0\n\
+         declare ptr @malloc(i64)\n\
+         declare void @free(ptr)\n\
+         define internal ptr @aether_alloc(i64 %size, i64 %align) {\n\
+         entry:\n\
+           %alloc_zero = icmp eq i64 %size, 0\n\
+           %alloc_actual = select i1 %alloc_zero, i64 1, i64 %size\n\
+           %alloc_ptr = call ptr @malloc(i64 %alloc_actual)\n\
+           %alloc_failed = icmp eq ptr %alloc_ptr, null\n\
+           br i1 %alloc_failed, label %trap_allocation_failure, label %alloc_success\n\
+         alloc_success:\n\
+           %alloc_count = load i64, ptr @aether_heap_alloc_count\n\
+           %alloc_next = add i64 %alloc_count, 1\n\
+           store i64 %alloc_next, ptr @aether_heap_alloc_count\n\
+           ret ptr %alloc_ptr\n\
+         trap_allocation_failure:\n\
+           ; structured Aether trap: AllocationFailure\n\
+           call void @llvm.trap()\n\
+           unreachable\n\
+         }\n\
+         define internal void @aether_free(ptr %ptr, i64 %size, i64 %align) {\n\
+         entry:\n\
+           %free_count = load i64, ptr @aether_heap_free_count\n\
+           %free_next = add i64 %free_count, 1\n\
+           store i64 %free_next, ptr @aether_heap_free_count\n\
+           call void @free(ptr %ptr)\n\
+           ret void\n\
+         }\n\
+         define internal i64 @aether_allocation_balance() {\n\
+         entry:\n\
+           %balance_allocs = load i64, ptr @aether_heap_alloc_count\n\
+           %balance_frees = load i64, ptr @aether_heap_free_count\n\
+           %balance = sub i64 %balance_allocs, %balance_frees\n\
+           ret i64 %balance\n\
+         }\n\n",
+    );
+}
+
+fn emit_buffer_allocation_helper(
+    output: &mut String,
+    types: &TypeArena,
+    element: TypeId,
+    element_size: u64,
+    element_align: u64,
+) {
+    let suffix = mangle_type(types, element);
+    let element_ty = llvm_type(types, element);
+    writeln!(
+        output,
+        "define internal {{ ptr, i64 }} @aether_buffer_new_{suffix}(i64 %length, {element_ty} %initial) {{"
+    )
+    .unwrap();
+    writeln!(output, "entry:").unwrap();
+    writeln!(
+        output,
+        "  %size_checked = call {{ i64, i1 }} @llvm.umul.with.overflow.i64(i64 %length, i64 {element_size})"
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "  %size = extractvalue {{ i64, i1 }} %size_checked, 0"
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "  %size_overflow = extractvalue {{ i64, i1 }} %size_checked, 1"
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "  br i1 %size_overflow, label %trap_allocation_size_overflow, label %allocate"
+    )
+    .unwrap();
+    writeln!(output, "allocate:").unwrap();
+    writeln!(
+        output,
+        "  %data = call ptr @aether_alloc(i64 %size, i64 {element_align})"
+    )
+    .unwrap();
+    writeln!(output, "  br label %fill_header").unwrap();
+    writeln!(output, "fill_header:").unwrap();
+    writeln!(
+        output,
+        "  %index = phi i64 [ 0, %allocate ], [ %next, %fill_body ]"
+    )
+    .unwrap();
+    writeln!(output, "  %more = icmp ult i64 %index, %length").unwrap();
+    writeln!(output, "  br i1 %more, label %fill_body, label %done").unwrap();
+    writeln!(output, "fill_body:").unwrap();
+    writeln!(
+        output,
+        "  %slot = getelementptr inbounds {element_ty}, ptr %data, i64 %index"
+    )
+    .unwrap();
+    writeln!(output, "  store {element_ty} %initial, ptr %slot").unwrap();
+    writeln!(output, "  %next = add i64 %index, 1").unwrap();
+    writeln!(output, "  br label %fill_header").unwrap();
+    writeln!(output, "done:").unwrap();
+    writeln!(
+        output,
+        "  %descriptor_data = insertvalue {{ ptr, i64 }} poison, ptr %data, 0"
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "  %descriptor = insertvalue {{ ptr, i64 }} %descriptor_data, i64 %length, 1"
+    )
+    .unwrap();
+    writeln!(output, "  ret {{ ptr, i64 }} %descriptor").unwrap();
+    writeln!(output, "trap_allocation_size_overflow:").unwrap();
+    writeln!(output, "  ; structured Aether trap: AllocationSizeOverflow").unwrap();
+    writeln!(output, "  call void @llvm.trap()").unwrap();
+    writeln!(output, "  unreachable\n}}\n").unwrap();
+}
+
+fn emit_index_helper(output: &mut String, types: &TypeArena, element: TypeId) {
+    let suffix = mangle_type(types, element);
+    let element_ty = llvm_type(types, element);
+    writeln!(
+        output,
+        "define internal ptr @aether_index_{suffix}({{ ptr, i64 }} %descriptor, i64 %index) {{"
+    )
+    .unwrap();
+    writeln!(output, "entry:").unwrap();
+    writeln!(
+        output,
+        "  %length = extractvalue {{ ptr, i64 }} %descriptor, 1"
+    )
+    .unwrap();
+    writeln!(output, "  %in_bounds = icmp ult i64 %index, %length").unwrap();
+    writeln!(
+        output,
+        "  br i1 %in_bounds, label %valid, label %trap_index_out_of_bounds"
+    )
+    .unwrap();
+    writeln!(output, "valid:").unwrap();
+    writeln!(
+        output,
+        "  %data = extractvalue {{ ptr, i64 }} %descriptor, 0"
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "  %element = getelementptr inbounds {element_ty}, ptr %data, i64 %index"
+    )
+    .unwrap();
+    writeln!(output, "  ret ptr %element").unwrap();
+    writeln!(output, "trap_index_out_of_bounds:").unwrap();
+    writeln!(output, "  ; structured Aether trap: IndexOutOfBounds").unwrap();
+    writeln!(output, "  call void @llvm.trap()").unwrap();
+    writeln!(output, "  unreachable\n}}\n").unwrap();
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -243,6 +459,9 @@ fn emit_function(
     let mut division_trap = false;
     let mut conversion_trap = false;
     let mut division_overflow_trap = false;
+    let mut allocation_size_trap = false;
+    let mut allocation_failure_trap = false;
+    let mut bounds_trap = false;
     for block in &function.blocks {
         writeln!(output, "{}:", block_label(block.id)).unwrap();
         for phi in &block.phis {
@@ -307,20 +526,31 @@ fn emit_function(
                     writeln!(
                         output,
                         "  store {} {}, ptr {pointer}",
-                        llvm_type(types, instruction.ty),
+                        llvm_type(types, operand_type(function, value)),
                         llvm_operand(value)
                     )
                     .unwrap();
-                    writeln!(
-                        output,
-                        "  %v{} = select i1 true, {} {}, {} {}",
-                        instruction.result.0,
-                        llvm_type(types, instruction.ty),
-                        llvm_operand(value),
-                        llvm_type(types, instruction.ty),
-                        llvm_operand(value)
-                    )
-                    .unwrap();
+                    if instruction.ty == TypeId::BOOL
+                        && operand_type(function, value) != TypeId::BOOL
+                    {
+                        writeln!(
+                            output,
+                            "  %v{} = select i1 true, i1 true, i1 true",
+                            instruction.result.0
+                        )
+                        .unwrap();
+                    } else {
+                        writeln!(
+                            output,
+                            "  %v{} = select i1 true, {} {}, {} {}",
+                            instruction.result.0,
+                            llvm_type(types, instruction.ty),
+                            llvm_operand(value),
+                            llvm_type(types, instruction.ty),
+                            llvm_operand(value)
+                        )
+                        .unwrap();
+                    }
                 }
                 SsaOp::Borrow { place, .. } => {
                     let pointer = emit_place_pointer(
@@ -335,6 +565,83 @@ fn emit_function(
                         output,
                         "  %v{} = getelementptr inbounds i8, ptr {pointer}, i64 0",
                         instruction.result.0
+                    )
+                    .unwrap();
+                }
+                SsaOp::Move { source } | SsaOp::View { source, .. } => {
+                    let (descriptor, _) = emit_descriptor_value(
+                        output,
+                        function,
+                        source,
+                        instruction.result.0,
+                        types,
+                    );
+                    writeln!(
+                        output,
+                        "  %v{} = select i1 true, {{ ptr, i64 }} {descriptor}, {{ ptr, i64 }} {descriptor}",
+                        instruction.result.0
+                    )
+                    .unwrap();
+                }
+                SsaOp::Drop { owner } => {
+                    let (descriptor, owner_ty) =
+                        emit_descriptor_value(output, function, owner, instruction.result.0, types);
+                    let element = types
+                        .buffer_element(owner_ty)
+                        .expect("verified Buffer Drop");
+                    let layout = layout_of(
+                        types,
+                        element,
+                        TargetProperties::LINUX_X86_64,
+                        structs,
+                        enums,
+                    )
+                    .expect("verified Buffer element layout");
+                    writeln!(
+                        output,
+                        "  %drop_data{} = extractvalue {{ ptr, i64 }} {descriptor}, 0",
+                        instruction.result.0
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  %drop_length{} = extractvalue {{ ptr, i64 }} {descriptor}, 1",
+                        instruction.result.0
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  %drop_size{} = mul i64 %drop_length{}, {}",
+                        instruction.result.0, instruction.result.0, layout.size
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  call void @aether_free(ptr %drop_data{}, i64 %drop_size{}, i64 {})",
+                        instruction.result.0, instruction.result.0, layout.align
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  %v{} = select i1 true, i1 true, i1 true",
+                        instruction.result.0
+                    )
+                    .unwrap();
+                }
+                SsaOp::BufferAlloc {
+                    element_type,
+                    length,
+                    initial,
+                    ..
+                } => {
+                    writeln!(
+                        output,
+                        "  %v{} = call {{ ptr, i64 }} @aether_buffer_new_{}(i64 {}, {} {})",
+                        instruction.result.0,
+                        mangle_type(types, *element_type),
+                        llvm_operand(length),
+                        llvm_type(types, *element_type),
+                        llvm_operand(initial)
                     )
                     .unwrap();
                 }
@@ -805,6 +1112,18 @@ fn emit_function(
                 division_overflow_trap = true;
                 writeln!(output, "  br label %trap_division_overflow").unwrap();
             }
+            SsaTerminator::Trap(TrapKind::AllocationSizeOverflow) => {
+                allocation_size_trap = true;
+                writeln!(output, "  br label %trap_allocation_size_overflow").unwrap();
+            }
+            SsaTerminator::Trap(TrapKind::AllocationFailure) => {
+                allocation_failure_trap = true;
+                writeln!(output, "  br label %trap_allocation_failure").unwrap();
+            }
+            SsaTerminator::Trap(TrapKind::IndexOutOfBounds) => {
+                bounds_trap = true;
+                writeln!(output, "  br label %trap_index_out_of_bounds").unwrap();
+            }
         }
     }
     if overflow_trap {
@@ -834,6 +1153,15 @@ fn emit_function(
             "trap_division_overflow:\n  call void @llvm.trap()\n  unreachable"
         )
         .unwrap();
+    }
+    if allocation_size_trap {
+        writeln!(output, "trap_allocation_size_overflow:\n  ; structured Aether trap: AllocationSizeOverflow\n  call void @llvm.trap()\n  unreachable").unwrap();
+    }
+    if allocation_failure_trap {
+        writeln!(output, "trap_allocation_failure:\n  ; structured Aether trap: AllocationFailure\n  call void @llvm.trap()\n  unreachable").unwrap();
+    }
+    if bounds_trap {
+        writeln!(output, "trap_index_out_of_bounds:\n  ; structured Aether trap: IndexOutOfBounds\n  call void @llvm.trap()\n  unreachable").unwrap();
     }
     writeln!(output, "}}\n").unwrap();
 }
@@ -1338,6 +1666,15 @@ fn mangle_symbol_type(
             if *mutable { "m" } else { "s" },
             mangle_symbol_type(types, *pointee, modules, structs, enums)
         ),
+        TypeData::Buffer { element } => format!(
+            "B{}",
+            mangle_symbol_type(types, *element, modules, structs, enums)
+        ),
+        TypeData::View { element, mutable } => format!(
+            "V{}{}",
+            if *mutable { "m" } else { "s" },
+            mangle_symbol_type(types, *element, modules, structs, enums)
+        ),
         TypeData::GenericParam(_) => panic!("unresolved generic parameter reached symbol mangling"),
     }
 }
@@ -1374,6 +1711,7 @@ fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
             mangle_type_arguments(types, *args)
         ),
         TypeData::Reference { .. } => "ptr".into(),
+        TypeData::Buffer { .. } | TypeData::View { .. } => "{ ptr, i64 }".into(),
         TypeData::GenericParam(_) => panic!("unresolved generic parameter reached LLVM"),
     }
 }
@@ -1405,6 +1743,12 @@ fn mangle_type(types: &TypeArena, ty: TypeId) -> String {
             "r{}{}",
             if *mutable { "m" } else { "s" },
             mangle_type(types, *pointee)
+        ),
+        TypeData::Buffer { element } => format!("B{}", mangle_type(types, *element)),
+        TypeData::View { element, mutable } => format!(
+            "V{}{}",
+            if *mutable { "m" } else { "s" },
+            mangle_type(types, *element)
         ),
         TypeData::GenericParam(_) => panic!("unresolved generic parameter reached mangling"),
     }
@@ -1447,6 +1791,63 @@ fn emit_place_pointer(
     types: &TypeArena,
     structs: &[StructInfo],
 ) -> String {
+    if let Some((
+        position,
+        SsaPlaceProjection::Index {
+            index,
+            element_type,
+            ..
+        },
+    )) = place
+        .projections
+        .iter()
+        .enumerate()
+        .find(|(_, projection)| matches!(projection, SsaPlaceProjection::Index { .. }))
+    {
+        debug_assert_eq!(
+            position, 0,
+            "V10 owning aggregates cannot contain Buffer fields"
+        );
+        let descriptor_place = SsaPlace {
+            base: place.base.clone(),
+            projections: Vec::new(),
+        };
+        let (descriptor, _) =
+            emit_descriptor_value(output, function, &descriptor_place, result, types);
+        let mut pointer = format!("%place{result}_index");
+        writeln!(
+            output,
+            "  {pointer} = call ptr @aether_index_{}({{ ptr, i64 }} {descriptor}, i64 {})",
+            mangle_type(types, *element_type),
+            llvm_operand(index)
+        )
+        .unwrap();
+        let mut ty = *element_type;
+        for (field_position, projection) in place.projections[position + 1..].iter().enumerate() {
+            let SsaPlaceProjection::Field(field_id) = projection else {
+                unreachable!("Vertical-10 does not admit multidimensional indexing")
+            };
+            let owner = types
+                .struct_id(ty)
+                .expect("verified indexed field projection");
+            let field = structs[owner.0 as usize]
+                .fields
+                .iter()
+                .find(|field| field.id == *field_id)
+                .expect("verified indexed field identity");
+            let next = format!("%place{result}_field{field_position}");
+            writeln!(
+                output,
+                "  {next} = getelementptr inbounds {}, ptr {pointer}, i32 0, i32 {}",
+                llvm_type(types, ty),
+                field.index
+            )
+            .unwrap();
+            pointer = next;
+            ty = concrete_struct_member(types, structs, ty, field.ty);
+        }
+        return pointer;
+    }
     let (base, root_ty) = match &place.base {
         SsaPlaceBase::MemoryLocal(local) => {
             let memory = function
@@ -1463,11 +1864,20 @@ fn emit_place_pointer(
                 .expect("verified reference place");
             (llvm_operand(reference), pointee)
         }
+        SsaPlaceBase::Value(_) => unreachable!("descriptor value place requires index projection"),
     };
     if place.projections.is_empty() {
         return base;
     }
-    let indices = llvm_projection_indices(types, root_ty, &place.projections, structs)
+    let fields = place
+        .projections
+        .iter()
+        .map(|projection| match projection {
+            SsaPlaceProjection::Field(field) => *field,
+            SsaPlaceProjection::Index { .. } => unreachable!(),
+        })
+        .collect::<Vec<_>>();
+    let indices = llvm_projection_indices(types, root_ty, &fields, structs)
         .split(", ")
         .map(|index| format!("i32 {index}"))
         .collect::<Vec<_>>()
@@ -1480,6 +1890,46 @@ fn emit_place_pointer(
     )
     .unwrap();
     pointer
+}
+
+fn emit_descriptor_value(
+    output: &mut String,
+    function: &SsaFunction,
+    place: &SsaPlace,
+    result: u32,
+    types: &TypeArena,
+) -> (String, TypeId) {
+    assert!(
+        place.projections.is_empty(),
+        "descriptor place must be whole"
+    );
+    match &place.base {
+        SsaPlaceBase::Value(value) => (llvm_operand(value), operand_type(function, value)),
+        SsaPlaceBase::MemoryLocal(local) => {
+            let memory = function
+                .memory_locals
+                .iter()
+                .find(|memory| memory.local == *local)
+                .expect("verified descriptor memory local");
+            let value = format!("%descriptor{result}");
+            writeln!(output, "  {value} = load {{ ptr, i64 }}, ptr %m{}", local.0).unwrap();
+            (value, memory.ty)
+        }
+        SsaPlaceBase::Dereference { reference, .. } => {
+            let reference_ty = operand_type(function, reference);
+            let (pointee, _) = types
+                .reference_info(reference_ty)
+                .expect("verified descriptor reference");
+            let value = format!("%descriptor{result}");
+            writeln!(
+                output,
+                "  {value} = load {{ ptr, i64 }}, ptr {}",
+                llvm_operand(reference)
+            )
+            .unwrap();
+            (value, pointee)
+        }
+    }
 }
 
 fn concrete_struct_member(
@@ -1630,6 +2080,15 @@ mod tests {
         assert!(output.contains("define i1 @__aether_v2_m4_main_f8_positive(i64 %v0)"));
         assert!(output.contains("call i1 @__aether_v2_m4_main_f8_positive(i64 5)"));
         assert!(output.contains("define i32 @main()"));
+    }
+
+    #[test]
+    fn emits_index_support_for_view_only_signatures_without_owner_runtime() {
+        let output = llvm("int read(View<int> values){return values[0];}int main(){return 0;}");
+        assert!(output.contains("define internal ptr @aether_index_iInt64"));
+        assert!(!output.contains("@aether_buffer_new_iInt64"));
+        assert!(!output.contains("@malloc"));
+        assert!(!output.contains("@aether_allocation_balance"));
     }
 
     #[test]

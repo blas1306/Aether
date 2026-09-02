@@ -309,6 +309,12 @@ pub enum AstExprKind {
         name: String,
         name_span: Span,
     },
+    /// Zero-based checked indexing. Semantic analysis resolves the indexed
+    /// container and contextualizes the index to `usize`.
+    Index {
+        base: Box<AstExpr>,
+        index: Box<AstExpr>,
+    },
     /// Prefix operation.
     Unary {
         op: AstUnaryOp,

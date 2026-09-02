@@ -1,4 +1,4 @@
-//! Cross-layer and native qualification through NEXT-VERTICAL-9.
+//! Cross-layer and native qualification through NEXT-VERTICAL-10.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -59,6 +59,8 @@ fn native_programs_execute_with_expected_status() {
         ("v9_references.ae", 31),
         ("v9_scalar_ref.ae", 2),
         ("v9_aggregate_ref.ae", 5),
+        ("v10_element_ref.ae", 11),
+        ("v10_view.ae", 11),
     ] {
         let (_, status) = run_path(&program(source), &[], &toolchain).unwrap();
         assert_eq!(status.code(), Some(expected), "{source}");
@@ -1100,4 +1102,194 @@ fn vertical9_cross_module_reference_parameters_execute_natively() {
     assert_eq!(status.code(), Some(9));
     assert!(compilation.llvm.contains("ptr %v"));
     assert!(!compilation.llvm.contains("noalias"));
+}
+
+#[test]
+fn vertical10_buffer_types_are_canonical_and_lifecycle_properties_are_explicit() {
+    let hir = analyze(
+        parse_source(&SourceFile::new(
+            "v10-types.ae",
+            "int main(){Buffer<int> a=Buffer<int>(1,0);Buffer<int> b=Buffer<int>(2,0);View<int> r=view(a);ViewMut<int> w=view_mut(b);return r[0]+w[0];}",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let buffers = hir
+        .types()
+        .entries()
+        .filter_map(|(ty, data)| matches!(data, TypeData::Buffer { .. }).then_some(ty))
+        .collect::<Vec<_>>();
+    assert_eq!(buffers.len(), 1);
+    assert_eq!(
+        hir.types().buffer_element(buffers[0]),
+        Some(aether_frontend::TypeId::INT64)
+    );
+    assert!(!hir.types().is_copy(buffers[0]));
+    assert!(hir.types().needs_drop(buffers[0]));
+
+    let views = hir
+        .types()
+        .entries()
+        .filter_map(|(ty, data)| matches!(data, TypeData::View { .. }).then_some(ty))
+        .collect::<Vec<_>>();
+    assert_eq!(views.len(), 2);
+    assert!(views.iter().all(|ty| hir.types().is_copy(*ty)));
+    assert!(views.iter().all(|ty| !hir.types().needs_drop(*ty)));
+    assert_ne!(views[0], views[1]);
+}
+
+#[test]
+fn vertical10_dumps_expose_buffers_moves_cleanup_views_and_checked_indexing() {
+    let text = fs::read_to_string(program("v10_buffers.ae")).unwrap();
+    let compilation = compile_source(
+        &SourceFile::new("v10_buffers.ae", text),
+        &[Emit::Ast, Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+    )
+    .unwrap();
+    assert!(compilation.dumps[&Emit::Ast].contains("Index"));
+    assert!(compilation.dumps[&Emit::Hir].contains("Buffer<int64>"));
+    assert!(compilation.dumps[&Emit::Hir].contains("needs_drop: true"));
+    assert!(compilation.dumps[&Emit::Hir].contains("Move"));
+    assert!(compilation.dumps[&Emit::Hir].contains("ViewMut<int64>"));
+    assert!(compilation.dumps[&Emit::Mir].contains("BufferAlloc"));
+    assert!(compilation.dumps[&Emit::Mir].contains("Drop"));
+    assert!(compilation.dumps[&Emit::Mir].contains("Index"));
+    assert!(compilation.dumps[&Emit::Ssa].contains("BufferAlloc"));
+    assert!(compilation.dumps[&Emit::Ssa].contains("bounds_trap: IndexOutOfBounds"));
+    assert!(compilation.llvm.contains("@malloc"));
+    assert!(compilation.llvm.contains("@free"));
+    assert!(compilation.llvm.contains("{ ptr, i64 }"));
+    assert!(compilation.llvm.contains("getelementptr inbounds"));
+    assert!(compilation.llvm.contains("AllocationSizeOverflow"));
+    assert!(compilation.llvm.contains("IndexOutOfBounds"));
+    assert!(compilation.llvm.contains("@aether_allocation_balance"));
+}
+
+#[test]
+fn vertical10_buffer_diagnostics_fail_closed() {
+    for (text, code) in [
+        (
+            "int main(){Buffer<int> a=Buffer<int>(1,0);Buffer<int> b=a;return a[0];}",
+            "E0291",
+        ),
+        (
+            "int main(){Buffer<int> a=Buffer<int>(1,0);Buffer<int> b=a;Buffer<int> c=a;return 0;}",
+            "E0291",
+        ),
+        (
+            "int main(){Buffer<int> a=Buffer<int>(2,0);return a[2];}",
+            "E0296",
+        ),
+        (
+            "int main(){Buffer<int> a=Buffer<int>(2,0);float64 i=1.0;return a[i];}",
+            "E0218",
+        ),
+        (
+            "int main(){Buffer<int> a=Buffer<int>(1.0,0);return 0;}",
+            "E0205",
+        ),
+        (
+            "int main(){Buffer<int> a=Buffer<int>(18446744073709551615,0);return 0;}",
+            "E0282",
+        ),
+        (
+            "int main(){Buffer<Buffer<int>> a=Buffer<Buffer<int>>(1,Buffer<int>(1,0));return 0;}",
+            "E0280",
+        ),
+        (
+            "int main(){int x=0;ref int r=&x;Buffer<ref int> a=Buffer<ref int>(1,r);return 0;}",
+            "E0280",
+        ),
+        (
+            "int main(){Buffer<int> a=Buffer<int>(1,0);View<int> v=view(a);Buffer<View<int>> b=Buffer<View<int>>(1,v);return 0;}",
+            "E0280",
+        ),
+        (
+            "int main(){Buffer<int> a=Buffer<int>(1,0);ref int r=&a[0];Buffer<int> b=a;return *r;}",
+            "E0292",
+        ),
+        (
+            "int main(){Buffer<int> a=Buffer<int>(1,0);View<int> v=view(a);Buffer<int> b=a;return v[0];}",
+            "E0292",
+        ),
+        (
+            "int main(){Buffer<int> a=Buffer<int>(1,0);if(true){Buffer<int> b=a;}return 0;}",
+            "E0294",
+        ),
+        (
+            "int main(){Buffer<int> a=Buffer<int>(1,0);while(false){Buffer<int> b=a;}return 0;}",
+            "E0295",
+        ),
+        (
+            "View<int> bad(ref Buffer<int> a){return view(*a);}int main(){return 0;}",
+            "E0273",
+        ),
+        (
+            "struct Bad{View<int> values;}int main(){return 0;}",
+            "E0285",
+        ),
+        (
+            "struct Bad{Buffer<int> values;}int main(){return 0;}",
+            "E0284",
+        ),
+        ("enum Bad{Some(Buffer<int>)}int main(){return 0;}", "E0286"),
+        (
+            "Buffer<T> bad<T>(usize n,T value){return Buffer<T>(n,value);}int main(){return 0;}",
+            "E0283",
+        ),
+        (
+            "int main(){Buffer<int> a=Buffer<int>(1,0);View<int> v=view(a);v=view(a);return 0;}",
+            "E0277",
+        ),
+        (
+            "int main(){Buffer<int> a=Buffer<int>(1,0);View<int> v=view(a);v[0]=1;return 0;}",
+            "E0288",
+        ),
+    ] {
+        let Err(mut diagnostics) = compile_source(&SourceFile::new("v10-error.ae", text), &[])
+        else {
+            panic!("expected Buffer rejection: {text}");
+        };
+        let diagnostic = diagnostics.remove(0);
+        assert_eq!(diagnostic.code, code, "{text}: {}", diagnostic.message);
+        assert!(diagnostic.span.is_some());
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical10_buffers_views_moves_and_exact_cleanup_execute_natively() {
+    let (compilation, status) = run_path(
+        &program("v10_buffers.ae"),
+        &[Emit::Mir, Emit::Ssa, Emit::Llvm],
+        &ClangToolchain::default(),
+    )
+    .unwrap();
+    assert_eq!(status.code(), Some(78));
+    assert!(compilation.llvm.contains("@aether_heap_alloc_count"));
+    assert!(compilation.llvm.contains("@aether_heap_free_count"));
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical10_runtime_bounds_and_allocation_overflow_trap() {
+    for source in ["v10_dynamic_oob.ae", "v10_allocation_overflow.ae"] {
+        let (_, status) = run_path(&program(source), &[], &ClangToolchain::default()).unwrap();
+        assert!(!status.success(), "{source} must trap");
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical10_cross_module_buffer_transfer_executes_natively() {
+    let (compilation, status) = run_path(
+        &module_program("v10_buffers"),
+        &[Emit::Mir, Emit::Ssa, Emit::Llvm],
+        &ClangToolchain::default(),
+    )
+    .unwrap();
+    assert_eq!(status.code(), Some(33));
+    assert!(compilation.llvm.contains("storage"));
+    assert!(compilation.dumps[&Emit::Mir].contains("Move"));
+    assert!(compilation.dumps[&Emit::Ssa].contains("Drop"));
 }

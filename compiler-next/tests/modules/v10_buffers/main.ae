@@ -1,0 +1,8 @@
+import storage;
+
+int main() {
+    Buffer<int> values = storage.make(3);
+    int borrowed = storage.read(&values);
+    Buffer<int> moved = storage.replace(values);
+    return borrowed + moved[1];
+}

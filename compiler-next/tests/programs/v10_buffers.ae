@@ -1,0 +1,96 @@
+struct Point {
+    int x;
+    int y;
+}
+
+Buffer<int> makeBuffer() {
+    Buffer<int> values = Buffer<int>(3, 4);
+    values[1] = 7;
+    return values;
+}
+
+int consume(Buffer<int> values) {
+    return values[0] + values[1];
+}
+
+int inspect(ref Buffer<int> values) {
+    return (*values)[2];
+}
+
+int elementReferences(ref mut Buffer<int> values) {
+    ref int first = &(*values)[0];
+    ref mut int second = &mut (*values)[1];
+    *second = *first + 5;
+    return (*values)[1];
+}
+
+int readView(ref Buffer<int> values) {
+    View<int> whole = view(*values);
+    return whole[0] + whole[1];
+}
+
+int writeView(ref mut Buffer<int> values) {
+    ViewMut<int> whole = view_mut(*values);
+    whole[2] = whole[0] + 2;
+    return whole[2];
+}
+
+int branchCleanup(bool choose) {
+    Buffer<int> values = Buffer<int>(1, 3);
+    if (choose) {
+        return values[0];
+    } else {
+        return values[0] + 1;
+    }
+}
+
+int branchOwnership(bool choose) {
+    Buffer<int> values = Buffer<int>(1, 2);
+    values = values;
+    if (choose) {
+        values = Buffer<int>(2, 3);
+    } else {
+        values = Buffer<int>(3, 4);
+    }
+    return values[0];
+}
+
+int replaceByMove() {
+    Buffer<int> source = Buffer<int>(1, 5);
+    Buffer<int> destination = Buffer<int>(1, 9);
+    destination = source;
+    return destination[0];
+}
+
+int nestedScopeCleanup() {
+    int result = 0;
+    if (true) {
+        Buffer<int> temporary = Buffer<int>(1, 6);
+        result = temporary[0];
+    }
+    return result;
+}
+
+int loopReplacement() {
+    Buffer<int> values = Buffer<int>(1, 1);
+    int iteration = 0;
+    while (iteration < 2) {
+        values = Buffer<int>(1, iteration + 2);
+        iteration = iteration + 1;
+    }
+    return values[0];
+}
+
+int main() {
+    Buffer<int> empty = Buffer<int>(0, 9);
+    Buffer<Point> points = Buffer<Point>(2, Point(1, 2));
+    points[1].x = 5;
+    Buffer<int> source = makeBuffer();
+    int borrowed = inspect(&source);
+    int references = elementReferences(&mut source);
+    int viewed = readView(&source);
+    int written = writeView(&mut source);
+    Buffer<int> moved = source;
+    int consumed = consume(moved);
+    return points[1].x + borrowed + references + viewed + written + consumed + branchCleanup(true) + branchCleanup(false) + branchOwnership(true) + branchOwnership(false) + replaceByMove() + nestedScopeCleanup() + loopReplacement();
+}

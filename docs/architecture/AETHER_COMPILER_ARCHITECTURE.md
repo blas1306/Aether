@@ -1319,3 +1319,57 @@ non-owning slice/view descriptor built on this Place/reference boundary, with
 explicit reallocation invalidation and return/storage lifetime rules. Do not
 infer uniqueness from `ref mut`; if optimization needs it, design a separate
 unique/restrict capability with its own source and verifier contract.
+
+## 27. NEXT-VERTICAL-10 implementation confirmation
+
+Vertical-10 implements that dependency slice as compiler-known canonical
+`Buffer { element }` and `View { element, mutable }` type data. Resolution,
+substitution, layout, formatting and property queries use `TypeId`; neither
+MIR nor LLVM recognizes source strings. Buffer is non-Copy and needs drop.
+Views are Copy and non-owning. Concrete Buffer elements must themselves be
+Copy/no-drop and contain no borrowed/owning substructure. Symbolic generic
+Buffer elements and Buffer/View storage inside
+user aggregates fail closed, so transitive lifecycle semantics are not faked.
+
+The parser adds postfix bracket indexing without adding Array or slice syntax.
+HIR extends Place with a checked index projection, records `BufferInit`,
+`Move`, `View` and synthesized normal-path drop lists, and runs definite
+ownership/provenance analysis. Buffer locals transition through uninitialized,
+owned, moved and dropped states. By-value calls and returns consume ownership;
+references and views do not. Continuing branches must agree, loop-carried
+moves are deferred, and a lexically live element/container borrow prevents an
+owner move or replacement. Constant known-length failures are semantic
+diagnostics.
+
+MIR contains explicit `BufferAlloc`, `Move`, `Drop`, `View` and indexed Places
+with named traps. Its verifier independently checks ownership dataflow,
+exactly-once normal returns, element/index contracts and non-escape invariants.
+SSA preserves owner transitions as concrete definitions while buffer contents
+remain aliasable memory operations. Indexed stores therefore cross the existing
+memory-effect boundary even when the descriptor itself remains SSA. Dumps show
+type properties, ownership operations, descriptors and bound traps.
+
+LLVM uses the internal descriptor `{ ptr, i64 }` for Buffer and both views.
+Per-element-type helpers checked-multiply allocation size, initialize every
+slot contiguously, and bounds-check before typed GEP. The runtime boundary wraps
+platform `malloc`/`free`; layout size/alignment come from the target-aware
+semantic layout contract. Normal Buffer programs instrument allocation/free
+counts and the generated platform entry traps on imbalance. Allocation-size,
+allocation-failure and bounds traps abort, so V10 requires no exceptional
+cleanup or unwind edges.
+
+Qualification covers construction/fill/zero length, scalar and struct element
+access, mutation, element references, read/write views, local/call/return moves,
+branch cleanup, runtime traps, canonical identities, diagnostics, deterministic
+IR evidence, native execution and cross-module transfer. The accepted debt is
+the Copy/no-drop element restriction, conservative lexical provenance, no view
+return/storage, no owning aggregates, no symbolic generic Buffer body, the
+bootstrap platform allocator/ABI and no cleanup on abort. `Buffer<T>` is
+explicitly storage substrate, not the final `Array<T>` contract.
+
+The closing local qualification recorded 84 passing Rust unit/integration
+tests and zero failures, a warning-free workspace/all-target clippy run with
+warnings denied, and 21 executable legacy differential comparisons with zero
+failures. Native V10 fixtures cover the additional Buffer/View contract cases;
+their manifest entries are v1-contract cases rather than claims of legacy
+equivalence.

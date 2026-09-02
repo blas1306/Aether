@@ -8,9 +8,9 @@ use std::sync::Arc;
 use aether_frontend::{
     CastKind, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId, FloatValue,
     FunctionInstanceInfo, HirBinaryOp, HirBlock, HirCallTarget, HirExpr, HirExprKind, HirFunction,
-    HirMatchArm, HirPlace, HirPlaceBase, HirStmtKind, HirUnaryOp, InstanceId, LocalId, ModuleInfo,
-    Phase, Span, StructId, StructInfo, Substitution, TypeArena, TypeData, TypeId, TypedHir,
-    VariantId, format_type,
+    HirMatchArm, HirPlace, HirPlaceBase, HirPlaceProjection, HirStmtKind, HirUnaryOp, InstanceId,
+    LocalId, ModuleInfo, Phase, Span, StructId, StructInfo, Substitution, TypeArena, TypeData,
+    TypeId, TypedHir, VariantId, format_type,
 };
 
 /// Basic-block identity, equal to its stable vector index.
@@ -46,7 +46,17 @@ pub struct MirParameter {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Place {
     pub base: PlaceBase,
-    pub projections: Vec<FieldId>,
+    pub projections: Vec<PlaceProjection>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PlaceProjection {
+    Field(FieldId),
+    Index {
+        index: Operand,
+        element_type: TypeId,
+        bounds_trap: TrapKind,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -79,6 +89,9 @@ pub enum TrapKind {
     ConversionOutOfRange,
     /// Signed `MIN / -1` cannot be represented.
     DivisionOverflow,
+    AllocationSizeOverflow,
+    AllocationFailure,
+    IndexOutOfBounds,
 }
 
 /// Explicit scalar unary operations.
@@ -133,6 +146,26 @@ pub enum Rvalue {
     /// Create an explicit typed non-owning view of stable storage.
     Borrow {
         place: Place,
+        mutable: bool,
+    },
+    /// Transfer one move-only owner out of an existing place.
+    Move {
+        source: Place,
+    },
+    /// Destroy one currently owned value. The boolean result is an internal
+    /// sequencing token used by the assignment-shaped bootstrap MIR.
+    Drop {
+        owner: Place,
+    },
+    BufferAlloc {
+        element_type: TypeId,
+        length: Operand,
+        initial: Operand,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
+    View {
+        source: Place,
         mutable: bool,
     },
     /// Construct a nominal aggregate in declaration/FieldId order.
@@ -408,24 +441,52 @@ impl Builder<'_> {
     fn lower_block(&mut self, block: &HirBlock) {
         for statement in &block.statements {
             match &statement.kind {
+                HirStmtKind::Nop => {}
                 HirStmtKind::Local { local, initializer } => {
                     let value = self.lower_expr(initializer);
+                    let rvalue = if self.types.needs_drop(initializer.ty) {
+                        Rvalue::Move {
+                            source: operand_place(&value),
+                        }
+                    } else {
+                        Rvalue::Use(value)
+                    };
                     self.assign(
                         Place {
                             base: PlaceBase::Local(*local),
                             projections: vec![],
                         },
-                        Rvalue::Use(value),
+                        rvalue,
                         statement.span,
                     );
                 }
                 HirStmtKind::Assign { place, value } => {
                     let value = self.lower_expr(value);
                     let place = self.lower_place(place);
-                    self.assign(place, Rvalue::Use(value), statement.span);
+                    if self.types.needs_drop(value_type(&self.function, &value)) {
+                        self.emit_drop(place.clone(), statement.span);
+                        self.assign(
+                            place,
+                            Rvalue::Move {
+                                source: operand_place(&value),
+                            },
+                            statement.span,
+                        );
+                    } else {
+                        self.assign(place, Rvalue::Use(value), statement.span);
+                    }
                 }
-                HirStmtKind::Return(value) => {
+                HirStmtKind::Return { value, drops } => {
                     let value = self.lower_expr(value);
+                    for local in drops {
+                        self.emit_drop(
+                            Place {
+                                base: PlaceBase::Local(*local),
+                                projections: vec![],
+                            },
+                            statement.span,
+                        );
+                    }
                     self.terminate(Terminator::Return(value));
                 }
                 HirStmtKind::If {
@@ -439,6 +500,17 @@ impl Builder<'_> {
                     enum_id,
                     arms,
                 } => self.lower_match(scrutinee, *enum_id, arms),
+            }
+        }
+        if self.current.is_some() {
+            for local in &block.exit_drops {
+                self.emit_drop(
+                    Place {
+                        base: PlaceBase::Local(*local),
+                        projections: vec![],
+                    },
+                    block.span,
+                );
             }
         }
     }
@@ -601,6 +673,23 @@ impl Builder<'_> {
                     Operand::Local(*local)
                 }
             }
+            HirExprKind::Move(local) => {
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::Move {
+                        source: Place {
+                            base: PlaceBase::Local(*local),
+                            projections: vec![],
+                        },
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
             HirExprKind::Load(place) => {
                 let destination = self.temporary(expression.ty);
                 let place = self.lower_place(place);
@@ -624,6 +713,46 @@ impl Builder<'_> {
                     },
                     Rvalue::Borrow {
                         place,
+                        mutable: *mutable,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::BufferInit {
+                element_type,
+                length,
+                initial,
+            } => {
+                let length = self.lower_expr(length);
+                let initial = self.lower_expr(initial);
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::BufferAlloc {
+                        element_type: *element_type,
+                        length,
+                        initial,
+                        size_trap: TrapKind::AllocationSizeOverflow,
+                        failure_trap: TrapKind::AllocationFailure,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::View { source, mutable } => {
+                let source = self.lower_place(source);
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::View {
+                        source,
                         mutable: *mutable,
                     },
                     expression.span,
@@ -865,6 +994,18 @@ impl Builder<'_> {
             });
     }
 
+    fn emit_drop(&mut self, owner: Place, span: Span) {
+        let token = self.temporary(TypeId::BOOL);
+        self.assign(
+            Place {
+                base: PlaceBase::Local(token),
+                projections: vec![],
+            },
+            Rvalue::Drop { owner },
+            span,
+        );
+    }
+
     fn terminate(&mut self, terminator: Terminator) {
         let block = self.current.take().expect("current block is open");
         self.function.blocks[block.0 as usize].terminator = Some(terminator);
@@ -878,9 +1019,38 @@ impl Builder<'_> {
                     mutable: *mutable,
                 },
             },
-            projections: place.projections.clone(),
+            projections: place
+                .projections
+                .iter()
+                .map(|projection| match projection {
+                    HirPlaceProjection::Field(field) => PlaceProjection::Field(*field),
+                    HirPlaceProjection::Index {
+                        index,
+                        element_type,
+                        checked: _,
+                    } => PlaceProjection::Index {
+                        index: self.lower_expr(index),
+                        element_type: *element_type,
+                        bounds_trap: TrapKind::IndexOutOfBounds,
+                    },
+                })
+                .collect(),
         }
     }
+}
+
+fn operand_place(operand: &Operand) -> Place {
+    match operand {
+        Operand::Local(local) => Place {
+            base: PlaceBase::Local(*local),
+            projections: vec![],
+        },
+        _ => panic!("move-only values are always materialized in MIR locals"),
+    }
+}
+
+fn value_type(function: &MirFunction, operand: &Operand) -> TypeId {
+    operand_type(function, operand).expect("lowered operand has a valid type")
 }
 
 /// Verifies CFG, type, storage, return, trap and definite-initialization invariants.
@@ -901,6 +1071,16 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
     {
         return Err(fail(
             "MIR function table/body cardinality is invalid".into(),
+        ));
+    }
+    if mir.types.entries().any(|(_, data)| match data {
+        TypeData::Buffer { element } | TypeData::View { element, .. } => {
+            !mir.types.is_admitted_buffer_element(*element)
+        }
+        _ => false,
+    }) {
+        return Err(fail(
+            "MIR contains a Buffer/View with an inadmissible element type".into(),
         ));
     }
     for ty in mir
@@ -941,22 +1121,26 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
             return Err(fail("MIR signature names an unknown module".into()));
         }
         if mir.types.contains_reference(signature.return_type)
+            || mir.types.contains_view(signature.return_type)
             || mir.structs.iter().any(|info| {
-                info.fields
-                    .iter()
-                    .any(|field| mir.types.contains_reference(field.ty))
+                info.fields.iter().any(|field| {
+                    mir.types.contains_reference(field.ty)
+                        || mir.types.contains_view(field.ty)
+                        || mir.types.contains_owning(field.ty)
+                })
             })
             || mir.enums.iter().any(|info| {
                 info.variants.iter().any(|variant| {
-                    variant
-                        .payloads
-                        .iter()
-                        .any(|payload| mir.types.contains_reference(payload.ty))
+                    variant.payloads.iter().any(|payload| {
+                        mir.types.contains_reference(payload.ty)
+                            || mir.types.contains_view(payload.ty)
+                            || mir.types.contains_owning(payload.ty)
+                    })
                 })
             })
         {
             return Err(fail(
-                "MIR violates Vertical-9 reference non-escape storage rules".into(),
+                "MIR violates Vertical-10 owning/borrowed non-escape storage rules".into(),
             ));
         }
         if signature
@@ -1051,6 +1235,7 @@ fn verify_mir_function(
     if reachable.iter().any(|value| !value) {
         return Err(fail("MIR contains an unreachable block".into()));
     }
+    verify_ownership(function, signatures, types, fail)?;
     let all = vec![true; function.locals.len()];
     let mut initialized_in = vec![all.clone(); function.blocks.len()];
     initialized_in[function.entry.0 as usize].fill(false);
@@ -1113,6 +1298,14 @@ fn verify_mir_function(
                 if !*mutable {
                     return Err(fail("MIR store through shared reference".into()));
                 }
+            }
+            if place_has_index(&instruction.destination)
+                && let PlaceBase::Local(local) = &instruction.destination.base
+                && types
+                    .view_info(function.locals[local.0 as usize].ty)
+                    .is_some_and(|(_, mutable)| !mutable)
+            {
+                return Err(fail("MIR store through read-only View".into()));
             }
             let destination_ty =
                 place_type(function, &instruction.destination, structs, types).map_err(&fail)?;
@@ -1217,6 +1410,199 @@ fn verify_mir_function(
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MirOwnerState {
+    Uninitialized,
+    Owned,
+    Moved,
+    Dropped,
+}
+
+#[allow(clippy::too_many_lines)]
+fn verify_ownership(
+    function: &MirFunction,
+    signatures: &[FunctionInstanceInfo],
+    types: &TypeArena,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut entry = vec![MirOwnerState::Uninitialized; function.locals.len()];
+    for parameter in &function.parameters {
+        if types.needs_drop(parameter.ty) {
+            entry[parameter.local.0 as usize] = MirOwnerState::Owned;
+        }
+    }
+    let mut incoming: Vec<Option<Vec<MirOwnerState>>> = vec![None; function.blocks.len()];
+    incoming[function.entry.0 as usize] = Some(entry);
+    let mut queue = VecDeque::from([function.entry]);
+    while let Some(block_id) = queue.pop_front() {
+        let mut state = incoming[block_id.0 as usize]
+            .clone()
+            .expect("queued ownership state");
+        let block = &function.blocks[block_id.0 as usize];
+        for instruction in &block.instructions {
+            let destination = place_root_local(&instruction.destination);
+            match &instruction.value {
+                Rvalue::Move { source } => {
+                    let source = place_root_local(source)
+                        .ok_or_else(|| fail("MIR Move source has no owning local".into()))?;
+                    consume_owner(function, types, &mut state, source, "Move", fail)?;
+                    initialize_owner(function, types, &mut state, destination, fail)?;
+                }
+                Rvalue::Drop { owner } => {
+                    let owner = place_root_local(owner)
+                        .ok_or_else(|| fail("MIR Drop owner has no local".into()))?;
+                    if state[owner.0 as usize] != MirOwnerState::Owned {
+                        return Err(fail(
+                            "MIR Drop is not exactly-once on an owned value".into(),
+                        ));
+                    }
+                    state[owner.0 as usize] = MirOwnerState::Dropped;
+                }
+                Rvalue::BufferAlloc { .. } => {
+                    initialize_owner(function, types, &mut state, destination, fail)?;
+                }
+                Rvalue::Call { callee, args } => {
+                    let signature = signatures
+                        .get(callee.0 as usize)
+                        .filter(|signature| signature.id == *callee)
+                        .ok_or_else(|| {
+                            fail("MIR ownership analysis found unknown call target".into())
+                        })?;
+                    for (argument, parameter) in args.iter().zip(&signature.parameters) {
+                        if types.needs_drop(parameter.ty) {
+                            let local = operand_local_id(argument).ok_or_else(|| {
+                                fail("owned call argument is not materialized".into())
+                            })?;
+                            consume_owner(function, types, &mut state, local, "call", fail)?;
+                        }
+                    }
+                    initialize_owner(function, types, &mut state, destination, fail)?;
+                }
+                Rvalue::Use(operand) => {
+                    if types.needs_drop(operand_type(function, operand).map_err(fail)?) {
+                        return Err(fail("implicit copy of move-only Buffer in MIR".into()));
+                    }
+                }
+                Rvalue::Load(place)
+                | Rvalue::Borrow { place, .. }
+                | Rvalue::View { source: place, .. } => {
+                    require_place_owner(function, types, &state, place, fail)?;
+                }
+                _ => {}
+            }
+            if place_has_index(&instruction.destination) {
+                require_place_owner(function, types, &state, &instruction.destination, fail)?;
+            }
+        }
+        let terminator = block.terminator.as_ref().expect("CFG verified");
+        if let Terminator::Return(value) = terminator {
+            if types.needs_drop(function.return_type) {
+                let local = operand_local_id(value)
+                    .ok_or_else(|| fail("owned return is not materialized".into()))?;
+                consume_owner(function, types, &mut state, local, "return", fail)?;
+            }
+            if function.locals.iter().any(|local| {
+                types.needs_drop(local.ty) && state[local.id.0 as usize] == MirOwnerState::Owned
+            }) {
+                return Err(fail("MIR normal return leaks an owning Buffer".into()));
+            }
+        }
+        for target in targets(terminator) {
+            match incoming[target.0 as usize].clone() {
+                None => {
+                    incoming[target.0 as usize] = Some(state.clone());
+                    queue.push_back(target);
+                }
+                Some(previous) => {
+                    let mut merged = previous.clone();
+                    for ((merged_state, previous_state), incoming_state) in
+                        merged.iter_mut().zip(&previous).zip(&state)
+                    {
+                        if previous_state == incoming_state {
+                            continue;
+                        }
+                        if *previous_state == MirOwnerState::Owned
+                            || *incoming_state == MirOwnerState::Owned
+                        {
+                            return Err(fail(
+                                "MIR ownership states disagree at a control-flow join".into(),
+                            ));
+                        }
+                        *merged_state = MirOwnerState::Moved;
+                    }
+                    if merged != previous {
+                        incoming[target.0 as usize] = Some(merged);
+                        queue.push_back(target);
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn initialize_owner(
+    function: &MirFunction,
+    types: &TypeArena,
+    state: &mut [MirOwnerState],
+    destination: Option<LocalId>,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let Some(local) = destination else {
+        return Ok(());
+    };
+    if !types.needs_drop(function.locals[local.0 as usize].ty) {
+        return Ok(());
+    }
+    if state[local.0 as usize] == MirOwnerState::Owned {
+        return Err(fail("MIR overwrites an owning Buffer without Drop".into()));
+    }
+    state[local.0 as usize] = MirOwnerState::Owned;
+    Ok(())
+}
+
+fn consume_owner(
+    function: &MirFunction,
+    types: &TypeArena,
+    state: &mut [MirOwnerState],
+    local: LocalId,
+    operation: &str,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    if !types.needs_drop(function.locals[local.0 as usize].ty)
+        || state[local.0 as usize] != MirOwnerState::Owned
+    {
+        return Err(fail(format!(
+            "MIR {operation} uses a non-owned or moved value"
+        )));
+    }
+    state[local.0 as usize] = MirOwnerState::Moved;
+    Ok(())
+}
+
+fn require_place_owner(
+    function: &MirFunction,
+    types: &TypeArena,
+    state: &[MirOwnerState],
+    place: &Place,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    if let Some(local) = place_root_local(place)
+        && types.needs_drop(function.locals[local.0 as usize].ty)
+        && state[local.0 as usize] != MirOwnerState::Owned
+    {
+        return Err(fail("MIR place uses moved/dropped Buffer storage".into()));
+    }
+    Ok(())
+}
+
+fn operand_local_id(operand: &Operand) -> Option<LocalId> {
+    match operand {
+        Operand::Local(local) => Some(*local),
+        _ => None,
+    }
+}
+
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn validate_rvalue(
     function: &MirFunction,
@@ -1251,9 +1637,60 @@ fn validate_rvalue(
                 return Err("MIR mutable borrow through shared reference".into());
             }
             if let PlaceBase::Local(local) = &place.base
+                && !place_has_index(place)
                 && !function.locals[local.0 as usize].address_taken
             {
                 return Err("MIR borrowed local is not address-taken".into());
+            }
+        }
+        Rvalue::Move { source } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            let source_ty = place_type(function, source, structs, types)?;
+            if source_ty != destination
+                || types.is_copy(source_ty)
+                || !source.projections.is_empty()
+            {
+                return Err("MIR Move requires one whole move-only owner".into());
+            }
+        }
+        Rvalue::Drop { owner } => {
+            validate_place_read(function, owner, structs, types, initialized)?;
+            let owner_ty = place_type(function, owner, structs, types)?;
+            if destination != TypeId::BOOL
+                || !types.needs_drop(owner_ty)
+                || !owner.projections.is_empty()
+            {
+                return Err("MIR Drop contract invalid".into());
+            }
+        }
+        Rvalue::BufferAlloc {
+            element_type,
+            length,
+            initial,
+            size_trap,
+            failure_trap,
+        } => {
+            validate_operand(function, length, initialized)?;
+            validate_operand(function, initial, initialized)?;
+            if types.buffer_element(destination) != Some(*element_type)
+                || operand_type(function, length)? != TypeId::USIZE
+                || operand_type(function, initial)? != *element_type
+                || !types.is_copy(*element_type)
+                || types.needs_drop(*element_type)
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("MIR Buffer allocation contract invalid".into());
+            }
+        }
+        Rvalue::View { source, mutable } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            let source_ty = place_type(function, source, structs, types)?;
+            let element = types
+                .buffer_element(source_ty)
+                .ok_or_else(|| "MIR View source is not Buffer".to_string())?;
+            if types.view_info(destination) != Some((element, *mutable)) {
+                return Err("MIR View contract invalid".into());
             }
         }
         Rvalue::Aggregate { struct_id, fields } => {
@@ -1441,7 +1878,19 @@ fn validate_place_read(
             validate_operand(function, reference, initialized)?;
         }
     }
+    for projection in &place.projections {
+        if let PlaceProjection::Index { index, .. } = projection {
+            validate_operand(function, index, initialized)?;
+        }
+    }
     Ok(())
+}
+
+fn place_has_index(place: &Place) -> bool {
+    place
+        .projections
+        .iter()
+        .any(|projection| matches!(projection, PlaceProjection::Index { .. }))
 }
 
 fn place_type(
@@ -1467,15 +1916,36 @@ fn place_type(
             pointee
         }
     };
-    for field_id in &place.projections {
-        let owner = types
-            .struct_id(ty)
-            .ok_or_else(|| "MIR place projects non-struct type".to_string())?;
-        let field = structs
-            .get(owner.0 as usize)
-            .and_then(|info| info.fields.iter().find(|field| field.id == *field_id))
-            .ok_or_else(|| "MIR place field does not belong to aggregate".to_string())?;
-        ty = concrete_struct_member(types, structs, ty, field.ty)?;
+    for projection in &place.projections {
+        match projection {
+            PlaceProjection::Field(field_id) => {
+                let owner = types
+                    .struct_id(ty)
+                    .ok_or_else(|| "MIR place projects non-struct type".to_string())?;
+                let field = structs
+                    .get(owner.0 as usize)
+                    .and_then(|info| info.fields.iter().find(|field| field.id == *field_id))
+                    .ok_or_else(|| "MIR place field does not belong to aggregate".to_string())?;
+                ty = concrete_struct_member(types, structs, ty, field.ty)?;
+            }
+            PlaceProjection::Index {
+                index,
+                element_type,
+                bounds_trap,
+            } => {
+                let element = types
+                    .buffer_element(ty)
+                    .or_else(|| types.view_info(ty).map(|(element, _)| element))
+                    .ok_or_else(|| "MIR index projection has non-contiguous base".to_string())?;
+                if operand_type(function, index)? != TypeId::USIZE
+                    || element != *element_type
+                    || *bounds_trap != TrapKind::IndexOutOfBounds
+                {
+                    return Err("MIR index projection contract invalid".into());
+                }
+                ty = element;
+            }
+        }
     }
     Ok(ty)
 }
@@ -1917,7 +2387,7 @@ mod tests {
             .flat_map(|block| &mut block.instructions)
             .find(|instruction| !instruction.destination.projections.is_empty())
             .unwrap();
-        store.destination.projections[0] = aether_frontend::FieldId(999);
+        store.destination.projections[0] = PlaceProjection::Field(aether_frontend::FieldId(999));
         assert!(verify_mir(raw).is_err());
 
         let mut raw = mir("struct P{int x;}int main(){P p=P(1);return p.x;}");
@@ -1931,6 +2401,63 @@ mod tests {
             fields[0].0 = aether_frontend::FieldId(999);
         }
         assert!(verify_mir(raw).is_err());
+    }
+
+    #[test]
+    fn buffer_ownership_and_index_contracts_fail_closed() {
+        let mut leaked = mir("int main(){Buffer<int> values=Buffer<int>(1,7);return values[0];}");
+        for block in &mut leaked.functions[0].blocks {
+            block
+                .instructions
+                .retain(|instruction| !matches!(instruction.value, Rvalue::Drop { .. }));
+        }
+        assert!(verify_mir(leaked).is_err());
+
+        let mut copied = mir(
+            "int main(){Buffer<int> source=Buffer<int>(1,7);Buffer<int> destination=source;return destination[0];}",
+        );
+        let ownership_move = copied.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| matches!(instruction.value, Rvalue::Move { .. }))
+            .unwrap();
+        let Rvalue::Move { source } = &ownership_move.value else {
+            unreachable!()
+        };
+        let PlaceBase::Local(source) = source.base else {
+            unreachable!()
+        };
+        ownership_move.value = Rvalue::Use(Operand::Local(source));
+        assert!(verify_mir(copied).is_err());
+
+        let mut unchecked =
+            mir("int main(){Buffer<int> values=Buffer<int>(1,7);return values[0];}");
+        let index = unchecked.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find_map(|instruction| match &mut instruction.value {
+                Rvalue::Load(place) => {
+                    place
+                        .projections
+                        .iter_mut()
+                        .find_map(|projection| match projection {
+                            PlaceProjection::Index { bounds_trap, .. } => Some(bounds_trap),
+                            PlaceProjection::Field(_) => None,
+                        })
+                }
+                _ => None,
+            })
+            .unwrap();
+        *index = TrapKind::DivisionByZero;
+        assert!(verify_mir(unchecked).is_err());
+
+        let mut invalid_element = mir("int main(){return 0;}");
+        let types = Arc::make_mut(&mut invalid_element.types);
+        let inner = types.intern_buffer(TypeId::INT64);
+        types.intern_buffer(inner);
+        assert!(verify_mir(invalid_element).is_err());
     }
 
     #[test]

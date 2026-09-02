@@ -1,0 +1,12 @@
+Buffer<int> make(usize length) {
+    return Buffer<int>(length, 9);
+}
+
+int read(ref Buffer<int> values) {
+    return (*values)[0];
+}
+
+Buffer<int> replace(Buffer<int> values) {
+    values[1] = 24;
+    return values;
+}

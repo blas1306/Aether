@@ -94,7 +94,7 @@ pub struct TypeLayout {
 /// Aggregate entries are the caches populated once during semantic analysis;
 /// scalar and target-sized integer layouts are computed from `target`. A
 /// compilation session has exactly one target, so no cross-target cache key or
-/// persistent layout identity is needed in Vertical-9.
+/// persistent layout identity is needed in Vertical-10.
 #[must_use]
 pub fn layout_of(
     types: &TypeArena,
@@ -134,6 +134,10 @@ pub fn layout_of(
         }
         TypeData::Reference { .. } => TypeLayout {
             size: u64::from(target.pointer_width / 8),
+            align: u64::from(target.pointer_width / 8),
+        },
+        TypeData::Buffer { .. } | TypeData::View { .. } => TypeLayout {
+            size: u64::from(target.pointer_width / 4),
             align: u64::from(target.pointer_width / 8),
         },
         TypeData::GenericParam(_) => return None,
@@ -186,6 +190,14 @@ pub fn format_type(
             "ref {}{}",
             if *mutable { "mut " } else { "" },
             format_type(types, *pointee, structs, enums)
+        ),
+        Some(TypeData::Buffer { element }) => {
+            format!("Buffer<{}>", format_type(types, *element, structs, enums))
+        }
+        Some(TypeData::View { element, mutable }) => format!(
+            "{}<{}>",
+            if *mutable { "ViewMut" } else { "View" },
+            format_type(types, *element, structs, enums)
         ),
         Some(data) => data.to_string(),
         None => types.format(ty),
@@ -355,8 +367,11 @@ impl TypedHir {
             .entries()
             .map(|(id, _)| {
                 format!(
-                    "  {id:?} = {}",
-                    format_type(&self.types, id, &self.structs, &self.enums)
+                    "  {id:?} = {}; properties={:?}",
+                    format_type(&self.types, id, &self.structs, &self.enums),
+                    self.types
+                        .properties(id)
+                        .expect("canonical type properties")
                 )
             })
             .collect::<Vec<_>>()
@@ -436,6 +451,9 @@ pub struct FunctionInstanceInfo {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HirBlock {
     pub statements: Vec<HirStmt>,
+    /// Owning locals destroyed on the normal lexical exit, in reverse
+    /// declaration order. Early returns carry their own cleanup list.
+    pub exit_drops: Vec<LocalId>,
     pub span: Span,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -445,6 +463,7 @@ pub struct HirStmt {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HirStmtKind {
+    Nop,
     Local {
         local: LocalId,
         initializer: HirExpr,
@@ -467,7 +486,10 @@ pub enum HirStmtKind {
         enum_id: EnumId,
         arms: Vec<HirMatchArm>,
     },
-    Return(HirExpr),
+    Return {
+        value: HirExpr,
+        drops: Vec<LocalId>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -489,8 +511,17 @@ pub struct HirMatchBinding {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HirPlace {
     pub base: HirPlaceBase,
-    pub projections: Vec<FieldId>,
+    pub projections: Vec<HirPlaceProjection>,
     pub ty: TypeId,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HirPlaceProjection {
+    Field(FieldId),
+    Index {
+        index: Box<HirExpr>,
+        element_type: TypeId,
+        checked: bool,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HirPlaceBase {
@@ -517,9 +548,20 @@ pub enum HirExprKind {
     Float(FloatValue),
     Bool(bool),
     Local(LocalId),
+    /// Explicit consuming use of a move-only local.
+    Move(LocalId),
     Load(HirPlace),
     Borrow {
         place: HirPlace,
+        mutable: bool,
+    },
+    BufferInit {
+        element_type: TypeId,
+        length: Box<HirExpr>,
+        initial: Box<HirExpr>,
+    },
+    View {
+        source: HirPlace,
         mutable: bool,
     },
     Call {
@@ -672,7 +714,8 @@ pub fn collect_program_signatures(
             )
         {
             let previous = declarations.insert(name.clone(), kind);
-            if builtin(name).is_some() || previous.is_some() {
+            if builtin(name).is_some() || intrinsic_type_arity(name).is_some() || previous.is_some()
+            {
                 let code = match previous {
                     Some("function") if kind == "function" => "E0211",
                     Some("alias") if kind == "alias" => "E0225",
@@ -807,6 +850,30 @@ pub fn collect_program_signatures(
                 &enum_arities,
             )
             .map_err(|d| vec![src(d, module)])?;
+            if types.contains_owning(ty) {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0284",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "Vertical-10 defers owning Buffer fields in user structs",
+                        Some(field.span),
+                    ),
+                    module,
+                )]);
+            }
+            if types.contains_view(ty) {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0285",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "Vertical-10 views cannot be stored in user structs",
+                        Some(field.span),
+                    ),
+                    module,
+                )]);
+            }
             if types.contains_reference(ty) {
                 return Err(vec![src(
                     Diagnostic::new(
@@ -908,6 +975,20 @@ pub fn collect_program_signatures(
                 })
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|d| vec![src(d, module)])?;
+            if let Some(payload) = payloads.iter().find(|payload| {
+                types.contains_owning(payload.ty) || types.contains_view(payload.ty)
+            }) {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0286",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "Vertical-10 defers owning Buffer/view enum payloads",
+                        Some(payload.span),
+                    ),
+                    module,
+                )]);
+            }
             if let Some(payload) = payloads
                 .iter()
                 .find(|payload| types.contains_reference(payload.ty))
@@ -1001,13 +1082,13 @@ pub fn collect_program_signatures(
                 &enum_arities,
             )
             .map_err(|d| vec![src(d, module)])?;
-            if types.contains_reference(return_type) {
+            if types.contains_reference(return_type) || types.contains_view(return_type) {
                 return Err(vec![src(
                     Diagnostic::new(
                         "E0273",
                         Phase::Semantic,
                         DiagnosticCategory::Type,
-                        "Vertical-9 references cannot escape through a function return type",
+                        "non-owning references/views cannot escape through a function return type in Vertical-10",
                         Some(f.return_type.span),
                     ),
                     module,
@@ -1233,16 +1314,61 @@ fn resolve_type_in_module(
             enum_arities,
         )?);
     }
+    if ty.module.is_none()
+        && let Some(expected) = intrinsic_type_arity(&ty.name)
+    {
+        if arguments.len() != expected {
+            return Err(generic_arity(ty, expected));
+        }
+        let element = arguments[0];
+        if types.contains_generic(element) {
+            return Err(Diagnostic::new(
+                "E0283",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "Vertical-10 Buffer/View element types must be concrete; generic capability constraints are deferred",
+                Some(ty.span),
+            ));
+        }
+        return match ty.name.as_str() {
+            "Buffer" => {
+                if types.is_admitted_buffer_element(element) {
+                    Ok(types.intern_buffer(element))
+                } else {
+                    Err(Diagnostic::new(
+                        "E0280",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "Vertical-10 Buffer elements must be concrete Copy/no-drop values without borrowed or owning substructure",
+                        Some(ty.span),
+                    ))
+                }
+            }
+            "View" | "ViewMut" if !types.is_admitted_buffer_element(element) => {
+                Err(Diagnostic::new(
+                    "E0280",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    "Vertical-10 view elements must be concrete Copy/no-drop values without borrowed or owning substructure",
+                    Some(ty.span),
+                ))
+            }
+            "View" => Ok(types.intern_view(element, false)),
+            "ViewMut" => Ok(types.intern_view(element, true)),
+            _ => unreachable!(),
+        };
+    }
     if let Some(id) = struct_names[target.0 as usize].get(&ty.name).copied() {
         let expected = struct_arities[id.0 as usize];
         if arguments.len() != expected {
             return Err(generic_arity(ty, expected));
         }
-        if arguments
-            .iter()
-            .any(|argument| types.contains_reference(*argument))
-        {
-            return Err(reference_generic_argument(ty.span));
+        if arguments.iter().any(|argument| {
+            types.contains_reference(*argument)
+                || types.contains_view(*argument)
+                || types.contains_owning(*argument)
+        }) {
+            return Err(restricted_generic_argument(ty.span));
         }
         return if expected == 0 {
             Ok(types
@@ -1257,11 +1383,12 @@ fn resolve_type_in_module(
         if arguments.len() != expected {
             return Err(generic_arity(ty, expected));
         }
-        if arguments
-            .iter()
-            .any(|argument| types.contains_reference(*argument))
-        {
-            return Err(reference_generic_argument(ty.span));
+        if arguments.iter().any(|argument| {
+            types.contains_reference(*argument)
+                || types.contains_view(*argument)
+                || types.contains_owning(*argument)
+        }) {
+            return Err(restricted_generic_argument(ty.span));
         }
         return if expected == 0 {
             Ok(types
@@ -1306,12 +1433,16 @@ fn generic_arity(ty: &AstType, expected: usize) -> Diagnostic {
     )
 }
 
-fn reference_generic_argument(span: Span) -> Diagnostic {
+fn intrinsic_type_arity(name: &str) -> Option<usize> {
+    matches!(name, "Buffer" | "View" | "ViewMut").then_some(1)
+}
+
+fn restricted_generic_argument(span: Span) -> Diagnostic {
     Diagnostic::new(
         "E0276",
         Phase::Semantic,
         DiagnosticCategory::Type,
-        "Vertical-9 references cannot be used as generic type arguments",
+        "references, views, and owning Buffers cannot be used as generic type arguments in Vertical-10",
         Some(span),
     )
 }
@@ -1578,6 +1709,13 @@ fn compute_aggregate_layouts(
                 let bytes = u64::from(target.pointer_width / 8);
                 TypeLayout {
                     size: bytes,
+                    align: bytes,
+                }
+            }
+            TypeData::Buffer { .. } | TypeData::View { .. } => {
+                let bytes = u64::from(target.pointer_width / 8);
+                TypeLayout {
+                    size: bytes * 2,
                     align: bytes,
                 }
             }
@@ -1906,7 +2044,7 @@ impl Monomorphizer<'_> {
                 Phase::Semantic,
                 DiagnosticCategory::Type,
                 format!(
-                    "expanding monomorphization of `{}` exceeds the Vertical-9 safety limit",
+                    "expanding monomorphization of `{}` exceeds the Vertical-10 safety limit",
                     signature.name
                 ),
                 Some(span),
@@ -2013,6 +2151,7 @@ impl Monomorphizer<'_> {
                 .iter()
                 .map(|statement| {
                     let kind = match &statement.kind {
+                        HirStmtKind::Nop => HirStmtKind::Nop,
                         HirStmtKind::Local { local, initializer } => HirStmtKind::Local {
                             local: *local,
                             initializer: self.substitute_expr(initializer, substitution)?,
@@ -2071,9 +2210,10 @@ impl Monomorphizer<'_> {
                                 })
                                 .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?,
                         },
-                        HirStmtKind::Return(value) => {
-                            HirStmtKind::Return(self.substitute_expr(value, substitution)?)
-                        }
+                        HirStmtKind::Return { value, drops } => HirStmtKind::Return {
+                            value: self.substitute_expr(value, substitution)?,
+                            drops: drops.clone(),
+                        },
                     };
                     Ok(HirStmt {
                         kind,
@@ -2081,6 +2221,7 @@ impl Monomorphizer<'_> {
                     })
                 })
                 .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?,
+            exit_drops: block.exit_drops.clone(),
             span: block.span,
         })
     }
@@ -2098,7 +2239,26 @@ impl Monomorphizer<'_> {
                     mutable: *mutable,
                 },
             },
-            projections: place.projections.clone(),
+            projections: place
+                .projections
+                .iter()
+                .map(|projection| match projection {
+                    HirPlaceProjection::Field(field) => Ok(HirPlaceProjection::Field(*field)),
+                    HirPlaceProjection::Index {
+                        index,
+                        element_type,
+                        checked,
+                    } => Ok(HirPlaceProjection::Index {
+                        index: Box::new(self.substitute_expr(index, substitution)?),
+                        element_type: self.substitute_type(
+                            *element_type,
+                            substitution,
+                            index.span,
+                        )?,
+                        checked: *checked,
+                    }),
+                })
+                .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?,
             ty: self.substitute_type(place.ty, substitution, Span::in_source(SourceId(0), 0, 0))?,
         })
     }
@@ -2114,11 +2274,25 @@ impl Monomorphizer<'_> {
             HirExprKind::Float(value) => HirExprKind::Float(*value),
             HirExprKind::Bool(value) => HirExprKind::Bool(*value),
             HirExprKind::Local(local) => HirExprKind::Local(*local),
+            HirExprKind::Move(local) => HirExprKind::Move(*local),
             HirExprKind::Load(place) => {
                 HirExprKind::Load(self.substitute_place(place, substitution)?)
             }
             HirExprKind::Borrow { place, mutable } => HirExprKind::Borrow {
                 place: self.substitute_place(place, substitution)?,
+                mutable: *mutable,
+            },
+            HirExprKind::BufferInit {
+                element_type,
+                length,
+                initial,
+            } => HirExprKind::BufferInit {
+                element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+                length: Box::new(self.substitute_expr(length, substitution)?),
+                initial: Box::new(self.substitute_expr(initial, substitution)?),
+            },
+            HirExprKind::View { source, mutable } => HirExprKind::View {
+                source: self.substitute_place(source, substitution)?,
                 mutable: *mutable,
             },
             HirExprKind::Call {
@@ -2210,6 +2384,9 @@ impl Monomorphizer<'_> {
 fn type_depth(types: &TypeArena, ty: TypeId) -> usize {
     match types.get(ty) {
         Some(TypeData::Reference { pointee, .. }) => 1 + type_depth(types, *pointee),
+        Some(TypeData::Buffer { element } | TypeData::View { element, .. }) => {
+            1 + type_depth(types, *element)
+        }
         Some(TypeData::StructInstance(_, args) | TypeData::EnumInstance(_, args)) => {
             1 + types
                 .arguments(*args)
@@ -2234,6 +2411,9 @@ fn type_contains(types: &TypeArena, outer: TypeId, needle: TypeId) -> bool {
                 })
             }
             Some(TypeData::Reference { pointee, .. }) => type_contains(types, *pointee, needle),
+            Some(TypeData::Buffer { element } | TypeData::View { element, .. }) => {
+                type_contains(types, *element, needle)
+            }
             _ => false,
         }
 }
@@ -2281,6 +2461,13 @@ fn compute_concrete_layouts(
                 let bytes = u64::from(target.pointer_width / 8);
                 Some(TypeLayout {
                     size: bytes,
+                    align: bytes,
+                })
+            }
+            TypeData::Buffer { .. } | TypeData::View { .. } => {
+                let bytes = u64::from(target.pointer_width / 8);
+                Some(TypeLayout {
+                    size: bytes * 2,
                     align: bytes,
                 })
             }
@@ -2454,7 +2641,7 @@ fn analyze_function(
             span: p.span,
         });
     }
-    let body = a.block(&f.body, false)?;
+    let mut body = a.block(&f.body, false)?;
     if !definitely_returns(&body) {
         return Err(vec![Diagnostic::new(
             "E0207",
@@ -2467,6 +2654,7 @@ fn analyze_function(
             Some(f.body.span),
         )]);
     }
+    synthesize_ownership(&mut body, &a.locals, &parameters, a.types)?;
     Ok(GenericHirFunction {
         id,
         module,
@@ -2475,6 +2663,397 @@ fn analyze_function(
         body,
         span: f.span,
     })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OwnerState {
+    Uninitialized,
+    Owned,
+    Moved,
+    Dropped,
+}
+
+struct OwnershipAnalysis<'a> {
+    types: &'a TypeArena,
+    locals: &'a [HirLocal],
+    state: Vec<OwnerState>,
+    provenance: Vec<Option<LocalId>>,
+    active: Vec<LocalId>,
+    borrowed: Vec<BTreeSet<LocalId>>,
+    buffer_lengths: Vec<Option<u64>>,
+}
+
+fn synthesize_ownership(
+    body: &mut HirBlock,
+    locals: &[HirLocal],
+    parameters: &[HirParameter],
+    types: &TypeArena,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut analysis = OwnershipAnalysis {
+        types,
+        locals,
+        state: vec![OwnerState::Uninitialized; locals.len()],
+        provenance: vec![None; locals.len()],
+        active: Vec::new(),
+        borrowed: Vec::new(),
+        buffer_lengths: vec![None; locals.len()],
+    };
+    for parameter in parameters {
+        if types.needs_drop(parameter.ty) {
+            analysis.state[parameter.local.0 as usize] = OwnerState::Owned;
+            analysis.active.push(parameter.local);
+        }
+    }
+    analysis.block(body, false)
+}
+
+impl OwnershipAnalysis<'_> {
+    fn error(&self, code: &'static str, message: impl Into<String>, span: Span) -> Vec<Diagnostic> {
+        vec![Diagnostic::new(
+            code,
+            Phase::Semantic,
+            DiagnosticCategory::Type,
+            message,
+            Some(span),
+        )]
+    }
+
+    fn is_borrowed(&self, local: LocalId) -> bool {
+        self.borrowed.iter().any(|scope| scope.contains(&local))
+    }
+
+    fn require_owned(&self, local: LocalId, span: Span) -> Result<(), Vec<Diagnostic>> {
+        if self.state[local.0 as usize] != OwnerState::Owned {
+            return Err(self.error(
+                "E0291",
+                format!(
+                    "use after move of owning Buffer local `{}`",
+                    self.locals[local.0 as usize].name
+                ),
+                span,
+            ));
+        }
+        Ok(())
+    }
+
+    fn move_local(&mut self, local: LocalId, span: Span) -> Result<(), Vec<Diagnostic>> {
+        self.require_owned(local, span)?;
+        if self.is_borrowed(local) {
+            return Err(self.error(
+                "E0292",
+                format!(
+                    "cannot move Buffer `{}` while a derived reference/view remains live",
+                    self.locals[local.0 as usize].name
+                ),
+                span,
+            ));
+        }
+        self.state[local.0 as usize] = OwnerState::Moved;
+        Ok(())
+    }
+
+    fn block(&mut self, block: &mut HirBlock, nested: bool) -> Result<(), Vec<Diagnostic>> {
+        let active_start = self.active.len();
+        self.borrowed.push(BTreeSet::new());
+        for statement in &mut block.statements {
+            match &mut statement.kind {
+                HirStmtKind::Nop => {}
+                HirStmtKind::Local { local, initializer } => {
+                    self.expr(initializer)?;
+                    if let Some(owner) = self.derived_owner(initializer) {
+                        self.provenance[local.0 as usize] = Some(owner);
+                        self.borrowed.last_mut().unwrap().insert(owner);
+                    }
+                    if self.types.needs_drop(self.locals[local.0 as usize].ty) {
+                        self.buffer_lengths[local.0 as usize] = self.known_length(initializer);
+                        self.state[local.0 as usize] = OwnerState::Owned;
+                        self.active.push(*local);
+                    } else if self
+                        .types
+                        .view_info(self.locals[local.0 as usize].ty)
+                        .is_some()
+                    {
+                        self.buffer_lengths[local.0 as usize] = self.known_length(initializer);
+                    }
+                }
+                HirStmtKind::Assign { place, value } => {
+                    self.expr(value)?;
+                    self.place(place, statement.span)?;
+                    if let HirPlaceBase::Local(local) = place.base
+                        && place.projections.is_empty()
+                        && self.types.needs_drop(self.locals[local.0 as usize].ty)
+                    {
+                        if self.is_borrowed(local) {
+                            return Err(self.error(
+                                "E0292",
+                                "cannot replace a Buffer while a derived reference/view remains live",
+                                statement.span,
+                            ));
+                        }
+                        self.state[local.0 as usize] = OwnerState::Owned;
+                        self.buffer_lengths[local.0 as usize] = self.known_length(value);
+                    }
+                }
+                HirStmtKind::Return { value, drops } => {
+                    self.expr(value)?;
+                    *drops = self
+                        .active
+                        .iter()
+                        .rev()
+                        .copied()
+                        .filter(|local| self.state[local.0 as usize] == OwnerState::Owned)
+                        .collect();
+                    for local in drops.iter().copied() {
+                        self.state[local.0 as usize] = OwnerState::Dropped;
+                    }
+                }
+                HirStmtKind::If {
+                    condition,
+                    then_block,
+                    else_block,
+                } => {
+                    self.expr(condition)?;
+                    let before = self.state.clone();
+                    let before_lengths = self.buffer_lengths.clone();
+                    let borrowed = self.borrowed.clone();
+                    self.block(then_block, true)?;
+                    let after_then = self.state.clone();
+                    let after_then_lengths = self.buffer_lengths.clone();
+                    let then_returns = definitely_returns(then_block);
+                    self.state.clone_from(&before);
+                    self.buffer_lengths.clone_from(&before_lengths);
+                    self.borrowed.clone_from(&borrowed);
+                    if let Some(else_block) = else_block {
+                        self.block(else_block, true)?;
+                    }
+                    let after_else = self.state.clone();
+                    let after_else_lengths = self.buffer_lengths.clone();
+                    let else_returns = else_block.as_ref().is_some_and(definitely_returns);
+                    for local in &self.active {
+                        let index = local.0 as usize;
+                        self.state[index] = match (then_returns, else_returns) {
+                            (true, true) => before[index],
+                            (true, false) => after_else[index],
+                            (false, true) => after_then[index],
+                            (false, false) if after_then[index] == after_else[index] => {
+                                after_then[index]
+                            }
+                            (false, false) => {
+                                return Err(self.error(
+                                    "E0294",
+                                    "Buffer ownership state differs across continuing branches",
+                                    statement.span,
+                                ));
+                            }
+                        };
+                        self.buffer_lengths[index] = match (then_returns, else_returns) {
+                            (true, true) => before_lengths[index],
+                            (true, false) => after_else_lengths[index],
+                            (false, true) => after_then_lengths[index],
+                            (false, false)
+                                if after_then_lengths[index] == after_else_lengths[index] =>
+                            {
+                                after_then_lengths[index]
+                            }
+                            (false, false) => None,
+                        };
+                    }
+                    self.borrowed = borrowed;
+                }
+                HirStmtKind::While { condition, body } => {
+                    self.expr(condition)?;
+                    let before = self.state.clone();
+                    let before_lengths = self.buffer_lengths.clone();
+                    self.block(body, true)?;
+                    let after_lengths = self.buffer_lengths.clone();
+                    for local in &self.active {
+                        let index = local.0 as usize;
+                        if self.state[index] != before[index] {
+                            return Err(self.error(
+                                "E0295",
+                                "moving Buffer ownership across loop iterations is deferred in Vertical-10",
+                                statement.span,
+                            ));
+                        }
+                        self.buffer_lengths[index] =
+                            if before_lengths[index] == after_lengths[index] {
+                                before_lengths[index]
+                            } else {
+                                None
+                            };
+                    }
+                    self.state = before;
+                }
+                HirStmtKind::Match {
+                    scrutinee, arms, ..
+                } => {
+                    self.expr(scrutinee)?;
+                    let before = self.state.clone();
+                    let before_lengths = self.buffer_lengths.clone();
+                    let mut continuing: Option<Vec<OwnerState>> = None;
+                    let mut continuing_lengths: Option<Vec<Option<u64>>> = None;
+                    for arm in arms {
+                        self.state.clone_from(&before);
+                        self.buffer_lengths.clone_from(&before_lengths);
+                        self.block(&mut arm.body, true)?;
+                        if !definitely_returns(&arm.body) {
+                            if let Some(previous) = &continuing {
+                                for local in &self.active {
+                                    let index = local.0 as usize;
+                                    if previous[index] != self.state[index] {
+                                        return Err(self.error(
+                                            "E0294",
+                                            "Buffer ownership state differs across match arms",
+                                            statement.span,
+                                        ));
+                                    }
+                                }
+                                if let Some(previous_lengths) = &mut continuing_lengths {
+                                    for local in &self.active {
+                                        let index = local.0 as usize;
+                                        if previous_lengths[index] != self.buffer_lengths[index] {
+                                            previous_lengths[index] = None;
+                                        }
+                                    }
+                                }
+                            } else {
+                                continuing = Some(self.state.clone());
+                                continuing_lengths = Some(self.buffer_lengths.clone());
+                            }
+                        }
+                    }
+                    self.state = continuing.unwrap_or(before);
+                    self.buffer_lengths = continuing_lengths.unwrap_or(before_lengths);
+                }
+            }
+        }
+        block.exit_drops.clear();
+        if !definitely_returns(block) {
+            for local in self.active[active_start..].iter().rev().copied() {
+                if self.state[local.0 as usize] == OwnerState::Owned {
+                    block.exit_drops.push(local);
+                    self.state[local.0 as usize] = OwnerState::Dropped;
+                }
+            }
+        }
+        self.active.truncate(active_start);
+        self.borrowed.pop();
+        if !nested {
+            debug_assert!(self.borrowed.is_empty());
+        }
+        Ok(())
+    }
+
+    fn expr(&mut self, expr: &HirExpr) -> Result<(), Vec<Diagnostic>> {
+        match &expr.kind {
+            HirExprKind::Move(local) => self.move_local(*local, expr.span),
+            HirExprKind::Local(_)
+            | HirExprKind::Int(_)
+            | HirExprKind::Float(_)
+            | HirExprKind::Bool(_) => Ok(()),
+            HirExprKind::Load(place) => self.place(place, expr.span),
+            HirExprKind::Borrow { place, .. } | HirExprKind::View { source: place, .. } => {
+                self.place(place, expr.span)
+            }
+            HirExprKind::BufferInit {
+                length, initial, ..
+            } => {
+                self.expr(length)?;
+                self.expr(initial)
+            }
+            HirExprKind::Call { args, .. } => {
+                for argument in args {
+                    self.expr(argument)?;
+                }
+                Ok(())
+            }
+            HirExprKind::StructInit { fields, .. } => {
+                for (_, value) in fields {
+                    self.expr(value)?;
+                }
+                Ok(())
+            }
+            HirExprKind::EnumInit { payloads, .. } => {
+                for value in payloads {
+                    self.expr(value)?;
+                }
+                Ok(())
+            }
+            HirExprKind::Coerce { operand, .. }
+            | HirExprKind::ExplicitCast { operand, .. }
+            | HirExprKind::Unary { operand, .. } => self.expr(operand),
+            HirExprKind::Binary { left, right, .. } => {
+                self.expr(left)?;
+                self.expr(right)
+            }
+        }
+    }
+
+    fn place(&mut self, place: &HirPlace, span: Span) -> Result<(), Vec<Diagnostic>> {
+        if let Some(owner) = self.owner_of_place(place) {
+            self.require_owned(owner, span)?;
+        }
+        if let HirPlaceBase::Dereference { reference, .. } = &place.base {
+            self.expr(reference)?;
+        }
+        for projection in &place.projections {
+            if let HirPlaceProjection::Index { index, .. } = projection {
+                self.expr(index)?;
+                if let HirExprKind::Int(value) = index.kind
+                    && let HirPlaceBase::Local(local) = place.base
+                    && let Some(length) = self.buffer_lengths[local.0 as usize]
+                    && u64::try_from(value).is_ok_and(|index| index >= length)
+                {
+                    return Err(self.error(
+                        "E0296",
+                        format!("constant index {value} is out of bounds for length {length}"),
+                        index.span,
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn owner_of_place(&self, place: &HirPlace) -> Option<LocalId> {
+        match &place.base {
+            HirPlaceBase::Local(local) => {
+                if self.types.needs_drop(self.locals[local.0 as usize].ty) {
+                    Some(*local)
+                } else {
+                    self.provenance[local.0 as usize]
+                }
+            }
+            HirPlaceBase::Dereference { reference, .. } => self.derived_owner(reference),
+        }
+    }
+
+    fn derived_owner(&self, expr: &HirExpr) -> Option<LocalId> {
+        match &expr.kind {
+            HirExprKind::Borrow { place, .. } | HirExprKind::View { source: place, .. } => {
+                self.owner_of_place(place)
+            }
+            HirExprKind::Local(local) => self.provenance[local.0 as usize],
+            _ => None,
+        }
+    }
+
+    fn known_length(&self, expr: &HirExpr) -> Option<u64> {
+        match &expr.kind {
+            HirExprKind::BufferInit { length, .. } => match length.kind {
+                HirExprKind::Int(value) => u64::try_from(value).ok(),
+                _ => None,
+            },
+            HirExprKind::Move(local) | HirExprKind::Local(local) => {
+                self.buffer_lengths[local.0 as usize]
+            }
+            HirExprKind::View { source, .. } => match source.base {
+                HirPlaceBase::Local(local) => self.buffer_lengths[local.0 as usize],
+                HirPlaceBase::Dereference { .. } => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 struct Analyzer<'a> {
@@ -2541,11 +3120,12 @@ impl Analyzer<'_> {
         arguments: Vec<TypeId>,
         span: Span,
     ) -> Result<TypeId, Vec<Diagnostic>> {
-        if arguments
-            .iter()
-            .any(|argument| self.types.contains_reference(*argument))
-        {
-            return Err(vec![reference_generic_argument(span)]);
+        if arguments.iter().any(|argument| {
+            self.types.contains_reference(*argument)
+                || self.types.contains_view(*argument)
+                || self.types.contains_owning(*argument)
+        }) {
+            return Err(vec![restricted_generic_argument(span)]);
         }
         let expected = self.struct_arities[id.0 as usize];
         if arguments.len() != expected {
@@ -2571,11 +3151,12 @@ impl Analyzer<'_> {
         arguments: Vec<TypeId>,
         span: Span,
     ) -> Result<TypeId, Vec<Diagnostic>> {
-        if arguments
-            .iter()
-            .any(|argument| self.types.contains_reference(*argument))
-        {
-            return Err(vec![reference_generic_argument(span)]);
+        if arguments.iter().any(|argument| {
+            self.types.contains_reference(*argument)
+                || self.types.contains_view(*argument)
+                || self.types.contains_owning(*argument)
+        }) {
+            return Err(vec![restricted_generic_argument(span)]);
         }
         let expected = self.enum_arities[id.0 as usize];
         if arguments.len() != expected {
@@ -2659,6 +3240,19 @@ impl Analyzer<'_> {
                     Some(s.span),
                 )]);
             }
+            if let AstStmtKind::Assign { place, value } = &s.kind
+                && let (AstExprKind::Name(destination), AstExprKind::Name(source)) =
+                    (&place.kind, &value.kind)
+                && destination == source
+                && let Some(local) = self.lookup(destination)
+                && self.types.needs_drop(self.locals[local.0 as usize].ty)
+            {
+                statements.push(HirStmt {
+                    kind: HirStmtKind::Nop,
+                    span: s.span,
+                });
+                continue;
+            }
             let kind = match &s.kind {
                 AstStmtKind::Local {
                     ty,
@@ -2697,18 +3291,34 @@ impl Analyzer<'_> {
                 }
                 AstStmtKind::Assign { place, value } => {
                     let place = self.resolve_expr_place(place, true)?;
+                    if self.types.needs_drop(place.ty)
+                        && (!place.projections.is_empty()
+                            || matches!(place.base, HirPlaceBase::Dereference { .. }))
+                    {
+                        return Err(vec![Diagnostic::new(
+                            "E0297",
+                            Phase::Semantic,
+                            DiagnosticCategory::Type,
+                            "Vertical-10 only permits replacing an owning Buffer local directly",
+                            Some(s.span),
+                        )]);
+                    }
                     if let HirPlaceBase::Local(local) = &place.base
                         && place.projections.is_empty()
-                        && self
+                        && (self
                             .types
                             .reference_info(self.locals[local.0 as usize].ty)
                             .is_some()
+                            || self
+                                .types
+                                .view_info(self.locals[local.0 as usize].ty)
+                                .is_some())
                     {
                         return Err(vec![Diagnostic::new(
                             "E0277",
                             Phase::Semantic,
                             DiagnosticCategory::Type,
-                            "Vertical-9 reference locals are single-initialization bindings and cannot be rebound",
+                            "borrowed reference/view locals are single-initialization bindings and cannot be rebound",
                             Some(s.span),
                         )]);
                     }
@@ -2747,9 +3357,10 @@ impl Analyzer<'_> {
                     body: self.block(body, true)?,
                 },
                 AstStmtKind::Match { scrutinee, arms } => self.match_statement(scrutinee, arms)?,
-                AstStmtKind::Return(v) => {
-                    HirStmtKind::Return(self.expression(v, Some(self.return_type))?.expr)
-                }
+                AstStmtKind::Return(v) => HirStmtKind::Return {
+                    value: self.expression(v, Some(self.return_type))?.expr,
+                    drops: Vec::new(),
+                },
             };
             let hs = HirStmt { kind, span: s.span };
             ended = statement_returns(&hs);
@@ -2760,6 +3371,7 @@ impl Analyzer<'_> {
         }
         Ok(HirBlock {
             statements,
+            exit_drops: Vec::new(),
             span: b.span,
         })
     }
@@ -3005,6 +3617,43 @@ impl Analyzer<'_> {
                 self.project_field(&mut place, name, *name_span)?;
                 Ok(place)
             }
+            AstExprKind::Index { base, index } => {
+                let mut place = self.resolve_expr_place(base, writable)?;
+                let (element_type, mutable) =
+                    if let Some(element) = self.types.buffer_element(place.ty) {
+                        (element, true)
+                    } else if let Some((element, mutable)) = self.types.view_info(place.ty) {
+                        (element, mutable)
+                    } else {
+                        return Err(vec![Diagnostic::new(
+                            "E0287",
+                            Phase::Semantic,
+                            DiagnosticCategory::Type,
+                            format!(
+                                "checked indexing requires Buffer/View, found {}",
+                                self.type_name(place.ty)
+                            ),
+                            Some(expression.span),
+                        )]);
+                    };
+                if writable && !mutable {
+                    return Err(vec![Diagnostic::new(
+                        "E0288",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "cannot mutate through read-only View<T>; ViewMut<T> is required",
+                        Some(expression.span),
+                    )]);
+                }
+                let index = self.expression(index, Some(TypeId::USIZE))?.expr;
+                place.projections.push(HirPlaceProjection::Index {
+                    index: Box::new(index),
+                    element_type,
+                    checked: true,
+                });
+                place.ty = element_type;
+                Ok(place)
+            }
             _ => Err(vec![Diagnostic::new(
                 "E0270",
                 Phase::Semantic,
@@ -3048,7 +3697,7 @@ impl Analyzer<'_> {
             .find(|field| field.id == field_id)
             .expect("field-name index is coherent")
             .clone();
-        place.projections.push(field_id);
+        place.projections.push(HirPlaceProjection::Field(field_id));
         place.ty = self.specialize_member_type(place.ty, field.ty)?;
         Ok(())
     }
@@ -3100,7 +3749,11 @@ impl Analyzer<'_> {
                 };
                 Checked {
                     expr: HirExpr {
-                        kind: HirExprKind::Local(l),
+                        kind: if self.types.is_copy(self.locals[l.0 as usize].ty) {
+                            HirExprKind::Local(l)
+                        } else {
+                            HirExprKind::Move(l)
+                        },
                         ty: self.locals[l.0 as usize].ty,
                         span: e.span,
                     },
@@ -3112,6 +3765,18 @@ impl Analyzer<'_> {
                 type_arguments,
                 args,
             } => {
+                if callee == "Buffer" {
+                    return self.buffer_init(type_arguments, args, e.span, expected);
+                }
+                if callee == "view" || callee == "view_mut" {
+                    return self.view_init(
+                        callee == "view_mut",
+                        type_arguments,
+                        args,
+                        e.span,
+                        expected,
+                    );
+                }
                 let resolved_arguments = self.resolve_type_arguments(type_arguments)?;
                 if let Some(target) = builtin(callee)
                     .or_else(|| self.aliases[self.module.0 as usize].get(callee).copied())
@@ -3211,16 +3876,8 @@ impl Analyzer<'_> {
                     }
                 }
             }
-            AstExprKind::QualifiedName { module, member } => {
-                return Err(vec![Diagnostic::new(
-                    "E0224",
-                    Phase::Semantic,
-                    DiagnosticCategory::Unsupported,
-                    format!("qualified value `{module}.{member}` is not admitted"),
-                    Some(e.span),
-                )]);
-            }
-            AstExprKind::Unary {
+            AstExprKind::Index { .. }
+            | AstExprKind::Unary {
                 op: AstUnaryOp::Dereference,
                 ..
             } => {
@@ -3234,6 +3891,15 @@ impl Analyzer<'_> {
                     constant: None,
                 }
             }
+            AstExprKind::QualifiedName { module, member } => {
+                return Err(vec![Diagnostic::new(
+                    "E0224",
+                    Phase::Semantic,
+                    DiagnosticCategory::Unsupported,
+                    format!("qualified value `{module}.{member}` is not admitted"),
+                    Some(e.span),
+                )]);
+            }
             AstExprKind::Unary {
                 op: AstUnaryOp::BorrowShared | AstUnaryOp::BorrowMutable,
                 operand,
@@ -3246,7 +3912,12 @@ impl Analyzer<'_> {
                     }
                 );
                 let place = self.resolve_expr_place(operand, mutable)?;
-                if let HirPlaceBase::Local(local) = &place.base {
+                if let HirPlaceBase::Local(local) = &place.base
+                    && !place
+                        .projections
+                        .iter()
+                        .any(|projection| matches!(projection, HirPlaceProjection::Index { .. }))
+                {
                     self.locals[local.0 as usize].address_taken = true;
                 }
                 let ty = self.types.intern_reference(place.ty, mutable);
@@ -3388,7 +4059,9 @@ impl Analyzer<'_> {
                 | TypeData::GenericParam(_)
                 | TypeData::StructInstance(_, _)
                 | TypeData::EnumInstance(_, _)
-                | TypeData::Reference { .. },
+                | TypeData::Reference { .. }
+                | TypeData::Buffer { .. }
+                | TypeData::View { .. },
             )
             | None => {
                 return Err(vec![type_error(
@@ -3420,6 +4093,144 @@ impl Analyzer<'_> {
             },
         })
     }
+    fn buffer_init(
+        &mut self,
+        type_arguments: &[AstType],
+        args: &[AstExpr],
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        if type_arguments.len() != 1 {
+            return Err(vec![generic_call_arity(
+                "Buffer",
+                1,
+                type_arguments.len(),
+                span,
+            )]);
+        }
+        if args.len() != 2 {
+            return Err(vec![Diagnostic::new(
+                "E0281",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!(
+                    "Buffer<T> construction expects length and fill value, found {} arguments",
+                    args.len()
+                ),
+                Some(span),
+            )]);
+        }
+        let element = self.resolve_type_arguments(type_arguments)?[0];
+        if self.types.contains_generic(element) {
+            return Err(vec![Diagnostic::new(
+                "E0283",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "Vertical-10 Buffer element type must be concrete",
+                Some(span),
+            )]);
+        }
+        if !self.types.is_admitted_buffer_element(element) {
+            return Err(vec![Diagnostic::new(
+                "E0280",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "Vertical-10 Buffer elements must be concrete Copy/no-drop values without borrowed or owning substructure",
+                Some(span),
+            )]);
+        }
+        let ty = self.types.intern_buffer(element);
+        if expected.is_some_and(|expected| expected != ty) {
+            return Err(vec![type_error(
+                format!(
+                    "Buffer constructor produces {}, not {}",
+                    self.type_name(ty),
+                    self.type_name(expected.unwrap())
+                ),
+                span,
+            )]);
+        }
+        let length = self.expression(&args[0], Some(TypeId::USIZE))?;
+        let initial = self.expression(&args[1], Some(element))?.expr;
+        if let Some(ConstantValue::Integer(length_value)) = length.constant {
+            let layout = layout_of(self.types, element, self.target, self.structs, self.enums)
+                .expect("admitted concrete Buffer element has layout");
+            if u64::try_from(length_value)
+                .ok()
+                .and_then(|length| length.checked_mul(layout.size))
+                .is_none()
+            {
+                return Err(vec![Diagnostic::new(
+                    "E0282",
+                    Phase::Semantic,
+                    DiagnosticCategory::Integer,
+                    "AllocationSizeOverflow: Buffer length times element size exceeds usize",
+                    Some(args[0].span),
+                )]);
+            }
+        }
+        Ok(Checked {
+            expr: HirExpr {
+                kind: HirExprKind::BufferInit {
+                    element_type: element,
+                    length: Box::new(length.expr),
+                    initial: Box::new(initial),
+                },
+                ty,
+                span,
+            },
+            constant: None,
+        })
+    }
+
+    fn view_init(
+        &mut self,
+        mutable: bool,
+        type_arguments: &[AstType],
+        args: &[AstExpr],
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        if !type_arguments.is_empty() || args.len() != 1 {
+            return Err(vec![Diagnostic::new(
+                "E0289",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "view/view_mut expects exactly one Buffer place and no explicit type arguments",
+                Some(span),
+            )]);
+        }
+        let source = self.resolve_expr_place(&args[0], mutable)?;
+        let Some(element) = self.types.buffer_element(source.ty) else {
+            return Err(vec![Diagnostic::new(
+                "E0289",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "view/view_mut source must be a Buffer<T> place",
+                Some(args[0].span),
+            )]);
+        };
+        let ty = self.types.intern_view(element, mutable);
+        if expected.is_some_and(|expected| expected != ty) {
+            return Err(vec![type_error(
+                format!(
+                    "view constructor produces {}, not {}",
+                    self.type_name(ty),
+                    self.type_name(expected.unwrap())
+                ),
+                span,
+            )]);
+        }
+        Ok(Checked {
+            expr: HirExpr {
+                kind: HirExprKind::View { source, mutable },
+                ty,
+                span,
+            },
+            constant: None,
+        })
+    }
+
     fn explicit_cast(
         &mut self,
         spelling: &str,
@@ -3821,11 +4632,12 @@ impl Analyzer<'_> {
                 span,
             )]);
         }
-        if type_arguments
-            .iter()
-            .any(|argument| self.types.contains_reference(*argument))
-        {
-            return Err(vec![reference_generic_argument(span)]);
+        if type_arguments.iter().any(|argument| {
+            self.types.contains_reference(*argument)
+                || self.types.contains_view(*argument)
+                || self.types.contains_owning(*argument)
+        }) {
+            return Err(vec![restricted_generic_argument(span)]);
         }
         let substitution = Substitution::new(
             s.generic_parameters.iter().map(|parameter| parameter.id),
@@ -4451,6 +5263,16 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
     {
         return Err(fail("HIR cardinality invalid".into()));
     }
+    if h.types.entries().any(|(_, data)| match data {
+        TypeData::Buffer { element } | TypeData::View { element, .. } => {
+            !h.types.is_admitted_buffer_element(*element)
+        }
+        _ => false,
+    }) {
+        return Err(fail(
+            "HIR contains a Buffer/View with an inadmissible element type".into(),
+        ));
+    }
     for ty in h
         .instances
         .iter()
@@ -4487,25 +5309,26 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
     if e.name != "main" || e.return_type != TypeId::INT64 || !e.parameters.is_empty() {
         return Err(fail("HIR entry invalid".into()));
     }
-    if h.instances
-        .iter()
-        .any(|signature| h.types.contains_reference(signature.return_type))
-        || h.structs.iter().any(|info| {
-            info.fields
-                .iter()
-                .any(|field| h.types.contains_reference(field.ty))
+    if h.instances.iter().any(|signature| {
+        h.types.contains_reference(signature.return_type)
+            || h.types.contains_view(signature.return_type)
+    }) || h.structs.iter().any(|info| {
+        info.fields.iter().any(|field| {
+            h.types.contains_reference(field.ty)
+                || h.types.contains_view(field.ty)
+                || h.types.contains_owning(field.ty)
         })
-        || h.enums.iter().any(|info| {
-            info.variants.iter().any(|variant| {
-                variant
-                    .payloads
-                    .iter()
-                    .any(|payload| h.types.contains_reference(payload.ty))
+    }) || h.enums.iter().any(|info| {
+        info.variants.iter().any(|variant| {
+            variant.payloads.iter().any(|payload| {
+                h.types.contains_reference(payload.ty)
+                    || h.types.contains_view(payload.ty)
+                    || h.types.contains_owning(payload.ty)
             })
         })
-    {
+    }) {
         return Err(fail(
-            "HIR violates Vertical-9 reference non-escape storage rules".into(),
+            "HIR violates Vertical-10 owning/borrowed non-escape storage rules".into(),
         ));
     }
     let mut next_field = 0_u32;
@@ -4584,6 +5407,7 @@ fn verify_block(
 ) -> Result<(), Vec<Diagnostic>> {
     for s in &b.statements {
         match &s.kind {
+            HirStmtKind::Nop => {}
             HirStmtKind::Local { local, initializer } => {
                 verify_expr(initializer, f, sigs, structs, enums, types, fail)?;
                 if f.locals.get(local.0 as usize).map(|l| l.ty) != Some(initializer.ty) {
@@ -4668,9 +5492,15 @@ fn verify_block(
                     verify_block(&arm.body, f, ret, sigs, structs, enums, types, fail)?;
                 }
             }
-            HirStmtKind::Return(v) => {
-                verify_expr(v, f, sigs, structs, enums, types, fail)?;
-                if v.ty != ret {
+            HirStmtKind::Return { value, drops } => {
+                verify_expr(value, f, sigs, structs, enums, types, fail)?;
+                if value.ty != ret
+                    || drops.iter().any(|local| {
+                        !f.locals
+                            .get(local.0 as usize)
+                            .is_some_and(|info| types.needs_drop(info.ty))
+                    })
+                {
                     return Err(fail("HIR return mismatch".into()));
                 }
             }
@@ -4706,8 +5536,13 @@ fn verify_expr(
         HirExprKind::Bool(_) if e.ty != TypeId::BOOL => {
             return Err(fail("HIR bool mismatch".into()));
         }
-        HirExprKind::Local(l) if f.locals.get(l.0 as usize).map(|x| x.ty) != Some(e.ty) => {
+        HirExprKind::Local(l) | HirExprKind::Move(l)
+            if f.locals.get(l.0 as usize).map(|x| x.ty) != Some(e.ty) =>
+        {
             return Err(fail("HIR local mismatch".into()));
+        }
+        HirExprKind::Move(_) if types.is_copy(e.ty) => {
+            return Err(fail("HIR Move used for a Copy type".into()));
         }
         HirExprKind::Load(place) => {
             verify_place(place, f, sigs, structs, enums, types, fail)?;
@@ -4724,11 +5559,40 @@ fn verify_expr(
                 return Err(fail("HIR mutable borrow through shared reference".into()));
             }
             if let HirPlaceBase::Local(local) = &place.base
+                && !place
+                    .projections
+                    .iter()
+                    .any(|projection| matches!(projection, HirPlaceProjection::Index { .. }))
                 && !f.locals[local.0 as usize].address_taken
             {
                 return Err(fail(
                     "HIR borrowed local is not marked address-taken".into(),
                 ));
+            }
+        }
+        HirExprKind::BufferInit {
+            element_type,
+            length,
+            initial,
+        } => {
+            verify_expr(length, f, sigs, structs, enums, types, fail)?;
+            verify_expr(initial, f, sigs, structs, enums, types, fail)?;
+            if types.buffer_element(e.ty) != Some(*element_type)
+                || length.ty != TypeId::USIZE
+                || initial.ty != *element_type
+                || !types.is_copy(*element_type)
+                || types.needs_drop(*element_type)
+            {
+                return Err(fail("HIR Buffer construction contract invalid".into()));
+            }
+        }
+        HirExprKind::View { source, mutable } => {
+            verify_place(source, f, sigs, structs, enums, types, fail)?;
+            let Some(element) = types.buffer_element(source.ty) else {
+                return Err(fail("HIR View source is not Buffer".into()));
+            };
+            if types.view_info(e.ty) != Some((element, *mutable)) {
+                return Err(fail("HIR View type/capability mismatch".into()));
             }
         }
         HirExprKind::Call { callee, args, .. } => {
@@ -4926,18 +5790,37 @@ fn verify_place(
     if !types.is_valid(place.ty) || !types.is_valid(ty) {
         return Err(fail("HIR place references invalid TypeId".into()));
     }
-    for field_id in &place.projections {
-        let Some(owner) = types.struct_id(ty) else {
-            return Err(fail("HIR place projects a non-struct".into()));
-        };
-        let Some(field) = structs
-            .get(owner.0 as usize)
-            .and_then(|info| info.fields.iter().find(|field| field.id == *field_id))
-        else {
-            return Err(fail("HIR place field does not belong to struct".into()));
-        };
-        ty = concrete_member_type(types, ty, field.ty, structs, &[])
-            .ok_or_else(|| fail("HIR place substitution incomplete".into()))?;
+    for projection in &place.projections {
+        match projection {
+            HirPlaceProjection::Field(field_id) => {
+                let Some(owner) = types.struct_id(ty) else {
+                    return Err(fail("HIR place projects a non-struct".into()));
+                };
+                let Some(field) = structs
+                    .get(owner.0 as usize)
+                    .and_then(|info| info.fields.iter().find(|field| field.id == *field_id))
+                else {
+                    return Err(fail("HIR place field does not belong to struct".into()));
+                };
+                ty = concrete_member_type(types, ty, field.ty, structs, &[])
+                    .ok_or_else(|| fail("HIR place substitution incomplete".into()))?;
+            }
+            HirPlaceProjection::Index {
+                index,
+                element_type,
+                checked,
+            } => {
+                verify_expr(index, function, sigs, structs, enums, types, fail)?;
+                let element = types
+                    .buffer_element(ty)
+                    .or_else(|| types.view_info(ty).map(|(element, _)| element))
+                    .ok_or_else(|| fail("HIR index projection has non-contiguous base".into()))?;
+                if index.ty != TypeId::USIZE || element != *element_type || !*checked {
+                    return Err(fail("HIR index projection contract invalid".into()));
+                }
+                ty = element;
+            }
+        }
     }
     if ty != place.ty {
         return Err(fail("HIR place cached type is invalid".into()));
@@ -4971,7 +5854,7 @@ fn concrete_member_type(
 }
 fn statement_returns(s: &HirStmt) -> bool {
     match &s.kind {
-        HirStmtKind::Return(_) => true,
+        HirStmtKind::Return { .. } => true,
         HirStmtKind::If {
             then_block,
             else_block: Some(e),

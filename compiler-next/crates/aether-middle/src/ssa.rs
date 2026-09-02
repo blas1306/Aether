@@ -12,8 +12,8 @@ use aether_frontend::{
 };
 
 use crate::{
-    BinaryOp, BlockId, MirFunction, Operand, Place, PlaceBase, Rvalue, Terminator, TrapKind,
-    UnaryOp, VerifiedMir,
+    BinaryOp, BlockId, MirFunction, Operand, Place, PlaceBase, PlaceProjection, Rvalue, Terminator,
+    TrapKind, UnaryOp, VerifiedMir,
 };
 
 /// Fresh SSA value identity.
@@ -68,12 +68,25 @@ pub struct SsaMemoryLocal {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SsaPlace {
     pub base: SsaPlaceBase,
-    pub projections: Vec<FieldId>,
+    pub projections: Vec<SsaPlaceProjection>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SsaPlaceProjection {
+    Field(FieldId),
+    Index {
+        index: SsaOperand,
+        element_type: TypeId,
+        bounds_trap: TrapKind,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SsaPlaceBase {
     MemoryLocal(LocalId),
+    /// Descriptor held directly in SSA; index projection turns it into an
+    /// address into contiguous storage.
+    Value(SsaOperand),
     Dereference {
         reference: SsaOperand,
         mutable: bool,
@@ -99,6 +112,23 @@ pub enum SsaOp {
     /// Address creation for a typed non-owning reference.
     Borrow {
         place: SsaPlace,
+        mutable: bool,
+    },
+    Move {
+        source: SsaPlace,
+    },
+    Drop {
+        owner: SsaPlace,
+    },
+    BufferAlloc {
+        element_type: TypeId,
+        length: SsaOperand,
+        initial: SsaOperand,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
+    View {
+        source: SsaPlace,
         mutable: bool,
     },
     /// Nominal aggregate construction.
@@ -317,13 +347,17 @@ pub fn build_ssa(mir: &VerifiedMir) -> SsaIr {
         structs: mir.structs.clone(),
         enums: mir.enums.clone(),
         signatures: mir.signatures.clone(),
-        functions: mir.functions.iter().map(build_function_ssa).collect(),
+        functions: mir
+            .functions
+            .iter()
+            .map(|function| build_function_ssa(function, &mir.types))
+            .collect(),
         entry: mir.entry,
     }
 }
 
 #[allow(clippy::too_many_lines)]
-fn build_function_ssa(function: &MirFunction) -> SsaFunction {
+fn build_function_ssa(function: &MirFunction, types: &TypeArena) -> SsaFunction {
     let cfg = Cfg::new(function);
     let dominance = Dominance::compute(&cfg, function.entry);
     let live_in = mir_liveness(function, &cfg);
@@ -419,6 +453,7 @@ fn build_function_ssa(function: &MirFunction) -> SsaFunction {
         &mut blocks,
         &mut stacks,
         &mut next_value,
+        types,
     );
     for block in &mut blocks {
         for phi in &mut block.phis {
@@ -436,7 +471,7 @@ fn build_function_ssa(function: &MirFunction) -> SsaFunction {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn rename_block(
     block_id: BlockId,
     mir: &MirFunction,
@@ -446,6 +481,7 @@ fn rename_block(
     blocks: &mut [SsaBlock],
     stacks: &mut [Vec<ValueId>],
     next_value: &mut u32,
+    types: &TypeArena,
 ) {
     let block_index = block_id.0 as usize;
     let mut pushes = vec![0_usize; stacks.len()];
@@ -455,7 +491,14 @@ fn rename_block(
     }
     for instruction in &mir.blocks[block_index].instructions {
         let memory_destination = match &instruction.destination.base {
-            PlaceBase::Local(local) => mir.locals[local.0 as usize].address_taken,
+            PlaceBase::Local(local) => {
+                mir.locals[local.0 as usize].address_taken
+                    || instruction
+                        .destination
+                        .projections
+                        .iter()
+                        .any(|projection| matches!(projection, PlaceProjection::Index { .. }))
+            }
             PlaceBase::Dereference { .. } => true,
         };
         if memory_destination {
@@ -470,9 +513,14 @@ fn rename_block(
             });
             let store_result = ValueId(*next_value);
             *next_value += 1;
+            let store_result_ty = if types.needs_drop(value_ty) {
+                TypeId::BOOL
+            } else {
+                value_ty
+            };
             blocks[block_index].instructions.push(SsaInstruction {
                 result: store_result,
-                ty: value_ty,
+                ty: store_result_ty,
                 op: SsaOp::Store {
                     place: rename_place(&instruction.destination, stacks, mir),
                     value: SsaOperand::Value(value_result),
@@ -497,7 +545,17 @@ fn rename_block(
                         .last()
                         .expect("projected store base is initialized"),
                 ),
-                projections: instruction.destination.projections.clone(),
+                projections: instruction
+                    .destination
+                    .projections
+                    .iter()
+                    .map(|projection| match projection {
+                        PlaceProjection::Field(field) => *field,
+                        PlaceProjection::Index { .. } => {
+                            unreachable!("index stores are memory effects")
+                        }
+                    })
+                    .collect(),
                 value: rename_operand(value, stacks),
             }
         };
@@ -539,6 +597,7 @@ fn rename_block(
             blocks,
             stacks,
             next_value,
+            types,
         );
     }
     for (local, count) in pushes.into_iter().enumerate() {
@@ -552,14 +611,27 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
     match value {
         Rvalue::Use(operand) => SsaOp::Use(rename_operand(operand, stacks)),
         Rvalue::Load(place) => match &place.base {
-            PlaceBase::Local(local) if !mir.locals[local.0 as usize].address_taken => {
+            PlaceBase::Local(local)
+                if !mir.locals[local.0 as usize].address_taken
+                    && place
+                        .projections
+                        .iter()
+                        .all(|projection| matches!(projection, PlaceProjection::Field(_))) =>
+            {
                 SsaOp::ExtractField {
                     aggregate: SsaOperand::Value(
                         *stacks[local.0 as usize]
                             .last()
                             .expect("verified MIR load has reaching aggregate definition"),
                     ),
-                    projections: place.projections.clone(),
+                    projections: place
+                        .projections
+                        .iter()
+                        .map(|projection| match projection {
+                            PlaceProjection::Field(field) => *field,
+                            PlaceProjection::Index { .. } => unreachable!(),
+                        })
+                        .collect(),
                 }
             }
             _ => SsaOp::Load {
@@ -568,6 +640,29 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
         },
         Rvalue::Borrow { place, mutable } => SsaOp::Borrow {
             place: rename_place(place, stacks, mir),
+            mutable: *mutable,
+        },
+        Rvalue::Move { source } => SsaOp::Move {
+            source: rename_place(source, stacks, mir),
+        },
+        Rvalue::Drop { owner } => SsaOp::Drop {
+            owner: rename_place(owner, stacks, mir),
+        },
+        Rvalue::BufferAlloc {
+            element_type,
+            length,
+            initial,
+            size_trap,
+            failure_trap,
+        } => SsaOp::BufferAlloc {
+            element_type: *element_type,
+            length: rename_operand(length, stacks),
+            initial: rename_operand(initial, stacks),
+            size_trap: *size_trap,
+            failure_trap: *failure_trap,
+        },
+        Rvalue::View { source, mutable } => SsaOp::View {
+            source: rename_place(source, stacks, mir),
             mutable: *mutable,
         },
         Rvalue::Aggregate { struct_id, fields } => SsaOp::Aggregate {
@@ -656,15 +751,37 @@ fn rename_place(place: &Place, stacks: &[Vec<ValueId>], mir: &MirFunction) -> Ss
     SsaPlace {
         base: match &place.base {
             PlaceBase::Local(local) => {
-                debug_assert!(mir.locals[local.0 as usize].address_taken);
-                SsaPlaceBase::MemoryLocal(*local)
+                if mir.locals[local.0 as usize].address_taken {
+                    SsaPlaceBase::MemoryLocal(*local)
+                } else {
+                    SsaPlaceBase::Value(SsaOperand::Value(
+                        *stacks[local.0 as usize]
+                            .last()
+                            .expect("verified MIR place has reaching definition"),
+                    ))
+                }
             }
             PlaceBase::Dereference { reference, mutable } => SsaPlaceBase::Dereference {
                 reference: rename_operand(reference, stacks),
                 mutable: *mutable,
             },
         },
-        projections: place.projections.clone(),
+        projections: place
+            .projections
+            .iter()
+            .map(|projection| match projection {
+                PlaceProjection::Field(field) => SsaPlaceProjection::Field(*field),
+                PlaceProjection::Index {
+                    index,
+                    element_type,
+                    bounds_trap,
+                } => SsaPlaceProjection::Index {
+                    index: rename_operand(index, stacks),
+                    element_type: *element_type,
+                    bounds_trap: *bounds_trap,
+                },
+            })
+            .collect(),
     }
 }
 
@@ -906,15 +1023,17 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
         | Rvalue::Coerce { operand, .. }
         | Rvalue::Cast { operand, .. }
         | Rvalue::Unary { operand, .. } => operand_local(operand).into_iter().collect(),
-        Rvalue::Load(place) | Rvalue::Borrow { place, .. } => match &place.base {
-            PlaceBase::Local(local) if !function.locals[local.0 as usize].address_taken => {
-                vec![*local]
-            }
-            PlaceBase::Local(_) => Vec::new(),
-            PlaceBase::Dereference { reference, .. } => {
-                operand_local(reference).into_iter().collect()
-            }
-        },
+        Rvalue::Load(place)
+        | Rvalue::Borrow { place, .. }
+        | Rvalue::Move { source: place }
+        | Rvalue::Drop { owner: place }
+        | Rvalue::View { source: place, .. } => place_locals(function, place),
+        Rvalue::BufferAlloc {
+            length, initial, ..
+        } => operand_local(length)
+            .into_iter()
+            .chain(operand_local(initial))
+            .collect(),
         Rvalue::Aggregate { fields, .. } => fields
             .iter()
             .filter_map(|(_, operand)| operand_local(operand))
@@ -931,6 +1050,24 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
             .collect(),
         Rvalue::Call { args, .. } => args.iter().filter_map(operand_local).collect(),
     }
+}
+
+fn place_locals(function: &MirFunction, place: &Place) -> Vec<LocalId> {
+    let mut locals = match &place.base {
+        PlaceBase::Local(local) if !function.locals[local.0 as usize].address_taken => vec![*local],
+        PlaceBase::Local(_) => Vec::new(),
+        PlaceBase::Dereference { reference, .. } => operand_local(reference).into_iter().collect(),
+    };
+    locals.extend(
+        place
+            .projections
+            .iter()
+            .filter_map(|projection| match projection {
+                PlaceProjection::Index { index, .. } => operand_local(index),
+                PlaceProjection::Field(_) => None,
+            }),
+    );
+    locals
 }
 
 fn terminator_locals(terminator: &Terminator) -> Vec<LocalId> {
@@ -971,6 +1108,16 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
     {
         return Err(fail(
             "SSA function table/body cardinality is invalid".into(),
+        ));
+    }
+    if ssa.types.entries().any(|(_, data)| match data {
+        TypeData::Buffer { element } | TypeData::View { element, .. } => {
+            !ssa.types.is_admitted_buffer_element(*element)
+        }
+        _ => false,
+    }) {
+        return Err(fail(
+            "SSA contains a Buffer/View with an inadmissible element type".into(),
         ));
     }
     for ty in ssa
@@ -1020,22 +1167,26 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
             return Err(fail("SSA signature names an unknown module".into()));
         }
         if ssa.types.contains_reference(signature.return_type)
+            || ssa.types.contains_view(signature.return_type)
             || ssa.structs.iter().any(|info| {
-                info.fields
-                    .iter()
-                    .any(|field| ssa.types.contains_reference(field.ty))
+                info.fields.iter().any(|field| {
+                    ssa.types.contains_reference(field.ty)
+                        || ssa.types.contains_view(field.ty)
+                        || ssa.types.contains_owning(field.ty)
+                })
             })
             || ssa.enums.iter().any(|info| {
                 info.variants.iter().any(|variant| {
-                    variant
-                        .payloads
-                        .iter()
-                        .any(|payload| ssa.types.contains_reference(payload.ty))
+                    variant.payloads.iter().any(|payload| {
+                        ssa.types.contains_reference(payload.ty)
+                            || ssa.types.contains_view(payload.ty)
+                            || ssa.types.contains_owning(payload.ty)
+                    })
                 })
             })
         {
             return Err(fail(
-                "SSA violates Vertical-9 reference non-escape storage rules".into(),
+                "SSA violates Vertical-10 owning/borrowed non-escape storage rules".into(),
             ));
         }
         if signature
@@ -1375,7 +1526,7 @@ fn verify_op(
 ) -> Result<(), String> {
     match op {
         SsaOp::Use(operand) => {
-            if operand_ty(operand)? != result {
+            if operand_ty(operand)? != result || types.needs_drop(result) {
                 return Err("SSA copy type mismatch".into());
             }
         }
@@ -1386,7 +1537,10 @@ fn verify_op(
         }
         SsaOp::Store { place, value } => {
             let place_ty = ssa_place_type(place, memory_locals, structs, types, operand_ty)?;
-            if place_ty != operand_ty(value)? || result != operand_ty(value)? {
+            let value_ty = operand_ty(value)?;
+            if place_ty != value_ty
+                || (result != value_ty && !(types.needs_drop(value_ty) && result == TypeId::BOOL))
+            {
                 return Err("SSA memory store type mismatch".into());
             }
             if matches!(
@@ -1394,6 +1548,24 @@ fn verify_op(
                 SsaPlaceBase::Dereference { mutable: false, .. }
             ) {
                 return Err("SSA store through shared reference".into());
+            }
+            let base_ty = match &place.base {
+                SsaPlaceBase::Value(value) => Some(operand_ty(value)?),
+                SsaPlaceBase::MemoryLocal(local) => memory_locals
+                    .iter()
+                    .find(|memory| memory.local == *local)
+                    .map(|memory| memory.ty),
+                SsaPlaceBase::Dereference { .. } => None,
+            };
+            if base_ty
+                .and_then(|ty| types.view_info(ty))
+                .is_some_and(|(_, mutable)| !mutable)
+                && place
+                    .projections
+                    .iter()
+                    .any(|projection| matches!(projection, SsaPlaceProjection::Index { .. }))
+            {
+                return Err("SSA store through read-only View".into());
             }
         }
         SsaOp::Borrow { place, mutable } => {
@@ -1408,6 +1580,48 @@ fn verify_op(
                 )
             {
                 return Err("SSA mutable borrow through shared reference".into());
+            }
+        }
+        SsaOp::Move { source } => {
+            let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
+            if source_ty != result || types.is_copy(source_ty) || !source.projections.is_empty() {
+                return Err("SSA Move contract invalid".into());
+            }
+        }
+        SsaOp::Drop { owner } => {
+            let owner_ty = ssa_place_type(owner, memory_locals, structs, types, operand_ty)?;
+            if result != TypeId::BOOL
+                || !types.needs_drop(owner_ty)
+                || !owner.projections.is_empty()
+            {
+                return Err("SSA Drop contract invalid".into());
+            }
+        }
+        SsaOp::BufferAlloc {
+            element_type,
+            length,
+            initial,
+            size_trap,
+            failure_trap,
+        } => {
+            if types.buffer_element(result) != Some(*element_type)
+                || operand_ty(length)? != TypeId::USIZE
+                || operand_ty(initial)? != *element_type
+                || !types.is_copy(*element_type)
+                || types.needs_drop(*element_type)
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("SSA Buffer allocation contract invalid".into());
+            }
+        }
+        SsaOp::View { source, mutable } => {
+            let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
+            let element = types
+                .buffer_element(source_ty)
+                .ok_or_else(|| "SSA View source is not Buffer".to_string())?;
+            if types.view_info(result) != Some((element, *mutable)) {
+                return Err("SSA View contract invalid".into());
             }
         }
         SsaOp::Aggregate { struct_id, fields } => {
@@ -1606,9 +1820,31 @@ fn ssa_place_type(
             }
             pointee
         }
+        SsaPlaceBase::Value(value) => operand_ty(value)?,
     };
-    for field in &place.projections {
-        ty = field_path_type(ty, &[*field], structs, types)?;
+    for projection in &place.projections {
+        match projection {
+            SsaPlaceProjection::Field(field) => {
+                ty = field_path_type(ty, &[*field], structs, types)?;
+            }
+            SsaPlaceProjection::Index {
+                index,
+                element_type,
+                bounds_trap,
+            } => {
+                let element = types
+                    .buffer_element(ty)
+                    .or_else(|| types.view_info(ty).map(|(element, _)| element))
+                    .ok_or_else(|| "SSA index projection has non-contiguous base".to_string())?;
+                if operand_ty(index)? != TypeId::USIZE
+                    || element != *element_type
+                    || *bounds_trap != TrapKind::IndexOutOfBounds
+                {
+                    return Err("SSA index projection contract invalid".into());
+                }
+                ty = element;
+            }
+        }
     }
     Ok(ty)
 }
@@ -1702,13 +1938,18 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         | SsaOp::Cast { operand: value, .. }
         | SsaOp::EnumDiscriminant { value, .. }
         | SsaOp::EnumPayload { value, .. } => vec![value],
-        SsaOp::Load { place } | SsaOp::Borrow { place, .. } => {
-            place_operand(place).into_iter().collect()
-        }
-        SsaOp::Store { place, value } => place_operand(place)
+        SsaOp::Load { place }
+        | SsaOp::Borrow { place, .. }
+        | SsaOp::Move { source: place }
+        | SsaOp::Drop { owner: place }
+        | SsaOp::View { source: place, .. } => place_operands(place),
+        SsaOp::Store { place, value } => place_operands(place)
             .into_iter()
             .chain(std::iter::once(value))
             .collect(),
+        SsaOp::BufferAlloc {
+            length, initial, ..
+        } => vec![length, initial],
         SsaOp::Aggregate { fields, .. } => fields.iter().map(|(_, value)| value).collect(),
         SsaOp::EnumConstruct { payloads, .. } => payloads.iter().collect(),
         SsaOp::ExtractField { aggregate, .. } => vec![aggregate],
@@ -1721,11 +1962,23 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
     }
 }
 
-fn place_operand(place: &SsaPlace) -> Option<&SsaOperand> {
-    match &place.base {
-        SsaPlaceBase::MemoryLocal(_) => None,
-        SsaPlaceBase::Dereference { reference, .. } => Some(reference),
-    }
+fn place_operands(place: &SsaPlace) -> Vec<&SsaOperand> {
+    let mut operands = match &place.base {
+        SsaPlaceBase::MemoryLocal(_) => Vec::new(),
+        SsaPlaceBase::Dereference { reference, .. } | SsaPlaceBase::Value(reference) => {
+            vec![reference]
+        }
+    };
+    operands.extend(
+        place
+            .projections
+            .iter()
+            .filter_map(|projection| match projection {
+                SsaPlaceProjection::Index { index, .. } => Some(index),
+                SsaPlaceProjection::Field(_) => None,
+            }),
+    );
+    operands
 }
 
 fn mir_targets(terminator: &Terminator) -> Vec<BlockId> {

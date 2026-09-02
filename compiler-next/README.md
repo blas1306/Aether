@@ -1,4 +1,4 @@
-# Aether NEXT-VERTICAL-9
+# Aether NEXT-VERTICAL-10
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. It does not replace the production `aether` CLI or import any legacy
@@ -11,9 +11,10 @@ entry SourceFile
   -> transitive discovery -> CompilationSession(module graph + source table)
   -> lexer/parser once per source -> ParsedProgram
   -> global declaration collection -> parametric resolver/type analysis
+  -> definite Buffer ownership/provenance + cleanup synthesis
   -> deduplicated concrete-instance worklist -> monomorphized TypedHir
-  -> CFG lowering -> FlowMir -> VerifiedMir
-  -> selective local promotion + explicit address-taken memory -> SsaIr -> VerifiedSsa
+  -> CFG/lifecycle lowering -> FlowMir -> VerifiedMir
+  -> selective local promotion + explicit memory/ownership effects -> SsaIr -> VerifiedSsa
   -> LLVM backend -> textual LLVM
   -> clang toolchain -> Linux x86_64 executable
 ```
@@ -31,7 +32,7 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-9 grammar
+## Vertical-10 grammar
 
 ```text
 program    := import* (alias | struct | enum | function)+ EOF
@@ -57,7 +58,8 @@ statement  := type IDENT "=" expression ";"
             | "return" expression ";"
 match-arm  := variant-path ("(" IDENT ("," IDENT)* ")")? "=>" block
 expression := integer | float | "true" | "false" | IDENT | apply
-            | expression "." IDENT | "(" expression ")" | "-" expression
+            | expression "." IDENT | expression "[" expression "]"
+            | "(" expression ")" | "-" expression
             | "&" expression | "&" "mut" expression | "*" expression
             | expression ("*" | "/" | "%" | "+" | "-" | "<" | "<=" | ">" | ">="
                          | "==" | "!=") expression
@@ -65,7 +67,8 @@ apply      := path ("<" type ("," type)* ">")? "(" arguments? ")"
             | type "." IDENT ("(" arguments? ")")?
 variant-path := type "." IDENT
 arguments  := expression ("," expression)*
-place      := IDENT ("." IDENT)* | "*" expression | "(" "*" expression ")" ("." IDENT)*
+place      := IDENT (("." IDENT) | ("[" expression "]"))*
+            | "*" expression | "(" "*" expression ")" (("." IDENT) | ("[" expression "]"))*
 ```
 
 The semantic restriction is narrower than the expression-shaped grammar:
@@ -147,7 +150,8 @@ Canonical semantic types use the compact, copyable, session-local identity
 `TypeId -> TypeData` mapping and interns the reverse `TypeData -> TypeId`
 mapping. Its current data variants are `Bool`, `Integer`, `Float`, nominal and
 applied aggregate forms, generic parameters, and
-`Reference { pointee: TypeId, mutable: bool }`. Repeated `ref T` resolution
+`Reference { pointee: TypeId, mutable: bool }`, `Buffer { element: TypeId }`,
+and `View { element: TypeId, mutable: bool }`. Repeated `ref T` resolution
 reuses one ID, while `ref T` and `ref mut T` remain distinct. HIR is the first canonical boundary;
 HIR, MIR, SSA, signatures, fields and enum payloads transport IDs rather than
 copies of `TypeData`. MIR and SSA share the immutable arena through ordinary
@@ -258,6 +262,12 @@ qualification environments that contain its Python dependencies.
 `tests/modules/v1-contract.tsv` records the Vertical-2 multi-file contract;
 these cases are not forced through legacy differential semantics.
 
+The Vertical-10 qualification run completed with 84 Rust unit/integration
+tests passing, zero failures; clippy passed for the whole workspace/all targets
+with warnings denied; and the executable legacy differential subset completed
+21 comparisons with zero failures. Buffer-native tests additionally compile
+through clang and exercise the generated allocation/free balance guard.
+
 ### Vertical-7 timing baseline
 
 A warm debug-build comparison against the pre-migration `HEAD`, using 30 full
@@ -293,6 +303,18 @@ have intentionally different sizes, so these are workload snapshots rather
 than a before/after speedup claim. Inspection confirms that the V8 fixture has
 no `alloca`; the two V9 fixtures spill only address-taken roots.
 
+### Vertical-10 timing snapshot
+
+A representative warm debug build on Linux x86_64 measured the core compiler
+phases (parse, signatures, bodies, MIR lower/verify, SSA build/verify and LLVM
+text emission; excluding discovery, file load and clang) at approximately
+564.0 us for unchanged `v9_scalar_ref.ae`, 626.9 us for direct
+`v10_element_ref.ae`, 630.7 us for `v10_view.ae`, and 2930.4 us for the much
+larger all-features `v10_buffers.ae`. These are fixture snapshots rather than
+same-workload speed comparisons. The element-reference fixture keeps the
+Buffer descriptor in SSA while taking the stable heap element address; the
+view fixture adds no allocation beyond its owner.
+
 ## Vertical-9 non-owning reference contract
 
 `ref T` is a readable, non-null, non-owning view. `ref mut T` additionally
@@ -312,6 +334,56 @@ dangling lexical reference inexpressible with the current initialized-local
 grammar. There are no null references, raw pointers, pointer arithmetic,
 address comparisons/casts, heap ownership, ARC, moves or destructors in this
 vertical.
+
+## Vertical-10 fixed owning buffer contract
+
+`Buffer<T>` is the first move-only owning value in the reconstruction. It owns
+one fixed-length contiguous allocation, is constructed only as
+`Buffer<T>(length, fill)`, and provides zero-based checked indexing through the
+ordinary Place machinery. The length and every index have type `usize`; a
+constant provably outside a known length is diagnosed, while dynamic failures
+trap as `IndexOutOfBounds`. Allocation byte-size overflow and allocation
+failure are distinct structured aborting traps. A zero-length buffer is valid
+and still follows the same exactly-once allocation/free accounting.
+
+Buffer assignment, by-value argument passing and return transfer ownership.
+There is no implicit deep copy and no ARC. HIR records consuming uses as
+`Move`, synthesizes lexical/return cleanup, and rejects use after move,
+inconsistent ownership at continuing control-flow joins, loop-carried moves,
+or moving/replacing an owner while a local derived reference or view remains
+live. MIR makes `BufferAlloc`, `Move` and `Drop` explicit and independently
+verifies ownership dataflow; SSA retains those transitions and keeps indexed
+contents in memory rather than pretending they are aggregate SSA values.
+
+`View<T>` and `ViewMut<T>` are non-owning contiguous descriptors created by
+`view(buffer-place)` and `view_mut(buffer-place)`. Both carry pointer plus
+length and reuse checked indexing; only `ViewMut<T>` permits stores. Like V9
+references, view locals are single-initialization and cannot escape through a
+return, aggregate field/payload or generic argument. `&buffer[i]` and
+`&mut buffer[i]` borrow the checked element Place and remain valid because V10
+buffers never resize.
+
+V10 bounds ownership deliberately. `T` must be a concrete `Copy` type that
+does not need drop or contain borrowed/owning substructure. Consequently
+nested owning buffers, borrowed descriptor elements, symbolic `Buffer<T>`
+inside generic bodies, and Buffer/View fields or enum payloads are rejected.
+Buffers themselves may be locals, owned parameters, returned values and
+reference pointees, including across modules. This restriction is temporary:
+it avoids pretending user aggregates have transitive move/drop support before
+that support exists.
+
+LLVM represents Buffer/View values internally as `{ ptr, i64 }`, allocates
+through a small runtime boundary backed by `malloc`, fills contiguously, and
+frees through the matching boundary. Element size/alignment come from the
+canonical target layout; current admitted element alignment fits the platform
+`malloc` guarantee. Generated buffer programs count allocations and frees and
+the platform wrapper traps if their normal-path balance is nonzero. Traps abort
+without cleanup in V10; unwinding and exceptional cleanup remain deferred.
+
+`Buffer<T>` is lower-level storage for future collections. It is not the final
+`Array<T>` abstraction and adds no resizing, capacity, append/insert/remove,
+slicing syntax, allocator API, shared ownership, raw pointer surface or general
+ownership system.
 
 ## Bootstrap ABI and deliberate limits
 
@@ -337,6 +409,6 @@ module initializers or initialization order. This is precisely why import
 cycles have no execution-order meaning in this slice. There are also no
 packages, nested/selective/wildcard/aliased imports, reexports, visibility
 keywords, overloads, generic constraints/traits, generic aliases, function values, closures, extern functions,
-heap values, strings, named initializers, methods, general ownership, optimization
-pipeline, public ABI, runtime, or LLVM library binding. Unsupported forms fail
+heap values beyond fixed `Buffer`, strings, named initializers, methods, general
+ownership, optimization pipeline, public ABI/runtime API, or LLVM library binding. Unsupported forms fail
 closed before lowering.

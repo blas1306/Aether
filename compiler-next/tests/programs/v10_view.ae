@@ -1,0 +1,7 @@
+int main() {
+    Buffer<int> values = Buffer<int>(4, 10);
+    ViewMut<int> writable = view_mut(values);
+    writable[2] = 11;
+    View<int> readable = view(values);
+    return readable[2];
+}

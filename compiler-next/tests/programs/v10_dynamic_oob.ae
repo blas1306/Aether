@@ -1,0 +1,6 @@
+int main() {
+    usize length = 2;
+    usize index = length;
+    Buffer<int> values = Buffer<int>(length, 7);
+    return values[index];
+}

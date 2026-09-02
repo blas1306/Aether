@@ -17,17 +17,18 @@ pub use hir::{
     CastKind, CoercionKind, DeclaredProgram, EnumInfo, FieldInfo, FloatValue, FunctionId,
     FunctionInstanceInfo, FunctionSignature, GenericHirFunction, GenericParamInfo, HirBinaryOp,
     HirBlock, HirCallTarget, HirExpr, HirExprKind, HirFunction, HirLocal, HirMatchArm,
-    HirMatchBinding, HirParameter, HirPlace, HirPlaceBase, HirStmt, HirStmtKind, HirUnaryOp,
-    LocalId, ModuleId, ModuleInfo, ParameterSignature, ParsedModule, ParsedProgram, ResolvedImport,
-    StructInfo, TypeAliasInfo, TypeLayout, TypedHir, VariantInfo, VariantPayloadInfo, analyze,
-    analyze_bodies, analyze_bodies_for_target, collect_program_signatures, collect_signatures,
-    format_type, layout_of, verify_hir,
+    HirMatchBinding, HirParameter, HirPlace, HirPlaceBase, HirPlaceProjection, HirStmt,
+    HirStmtKind, HirUnaryOp, LocalId, ModuleId, ModuleInfo, ParameterSignature, ParsedModule,
+    ParsedProgram, ResolvedImport, StructInfo, TypeAliasInfo, TypeLayout, TypedHir, VariantInfo,
+    VariantPayloadInfo, analyze, analyze_bodies, analyze_bodies_for_target,
+    collect_program_signatures, collect_signatures, format_type, layout_of, verify_hir,
 };
 pub use lexer::{Token, TokenKind, lex};
 pub use parser::parse;
 pub use types::{
     EnumId, FieldId, FloatType, GenericOwner, GenericParamId, InstanceId, IntegerType, StructId,
-    Substitution, TargetProperties, TypeArena, TypeArgsId, TypeData, TypeId, VariantId,
+    Substitution, TargetProperties, TypeArena, TypeArgsId, TypeData, TypeId, TypeProperties,
+    VariantId,
 };
 
 /// Lexes and parses one source file.

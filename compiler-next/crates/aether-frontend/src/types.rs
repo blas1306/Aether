@@ -235,6 +235,25 @@ pub enum TypeData {
         pointee: TypeId,
         mutable: bool,
     },
+    /// Fixed-length contiguous owning allocation. This is a compiler-known
+    /// generic form rather than a nominal source declaration.
+    Buffer {
+        element: TypeId,
+    },
+    /// Non-owning contiguous sequence plus length. `mutable` is write
+    /// capability only and carries no uniqueness promise.
+    View {
+        element: TypeId,
+        mutable: bool,
+    },
+}
+
+/// Compiler-internal lifecycle properties. These are deliberately not a
+/// source trait system.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TypeProperties {
+    pub is_copy: bool,
+    pub needs_drop: bool,
 }
 
 impl TypeData {
@@ -290,6 +309,12 @@ impl fmt::Display for TypeData {
             Self::Reference { pointee, mutable } => {
                 write!(f, "ref {}{pointee}", if *mutable { "mut " } else { "" })
             }
+            Self::Buffer { element } => write!(f, "Buffer<{element}>"),
+            Self::View { element, mutable } => write!(
+                f,
+                "{}<{element}>",
+                if *mutable { "ViewMut" } else { "View" }
+            ),
         }
     }
 }
@@ -380,6 +405,14 @@ impl TypeArena {
         self.intern(TypeData::Reference { pointee, mutable })
     }
 
+    pub fn intern_buffer(&mut self, element: TypeId) -> TypeId {
+        self.intern(TypeData::Buffer { element })
+    }
+
+    pub fn intern_view(&mut self, element: TypeId, mutable: bool) -> TypeId {
+        self.intern(TypeData::View { element, mutable })
+    }
+
     fn intern_arguments(&mut self, arguments: Vec<TypeId>) -> TypeArgsId {
         if let Some(id) = self.argument_ids.get(&arguments) {
             return *id;
@@ -427,6 +460,9 @@ impl TypeArena {
                 })
             }
             Some(TypeData::Reference { pointee, .. }) => self.contains_generic(*pointee),
+            Some(TypeData::Buffer { element } | TypeData::View { element, .. }) => {
+                self.contains_generic(*element)
+            }
             _ => false,
         }
     }
@@ -517,8 +553,97 @@ impl TypeArena {
         }
     }
 
+    #[must_use]
+    pub fn buffer_element(&self, id: TypeId) -> Option<TypeId> {
+        match self.get(id) {
+            Some(TypeData::Buffer { element }) => Some(*element),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn view_info(&self, id: TypeId) -> Option<(TypeId, bool)> {
+        match self.get(id) {
+            Some(TypeData::View { element, mutable }) => Some((*element, *mutable)),
+            _ => None,
+        }
+    }
+
+    /// Central lifecycle classification for the V10 admitted type universe.
+    /// User aggregates are Copy because V10 rejects owning fields/payloads;
+    /// references and views copy only their non-owning descriptor.
+    #[must_use]
+    pub fn properties(&self, id: TypeId) -> Option<TypeProperties> {
+        Some(match self.get(id)? {
+            TypeData::Buffer { .. } => TypeProperties {
+                is_copy: false,
+                needs_drop: true,
+            },
+            TypeData::Bool
+            | TypeData::Integer(_)
+            | TypeData::Float(_)
+            | TypeData::Struct(_)
+            | TypeData::Enum(_)
+            | TypeData::GenericParam(_)
+            | TypeData::StructInstance(_, _)
+            | TypeData::EnumInstance(_, _)
+            | TypeData::Reference { .. }
+            | TypeData::View { .. } => TypeProperties {
+                is_copy: true,
+                needs_drop: false,
+            },
+        })
+    }
+
+    #[must_use]
+    pub fn is_copy(&self, id: TypeId) -> bool {
+        self.properties(id)
+            .is_some_and(|properties| properties.is_copy)
+    }
+
+    #[must_use]
+    pub fn needs_drop(&self, id: TypeId) -> bool {
+        self.properties(id)
+            .is_some_and(|properties| properties.needs_drop)
+    }
+
+    /// Whether a concrete element type satisfies the deliberately restricted
+    /// Vertical-10 Buffer/View capability contract.
+    #[must_use]
+    pub fn is_admitted_buffer_element(&self, id: TypeId) -> bool {
+        self.is_valid(id)
+            && !self.contains_generic(id)
+            && self.is_copy(id)
+            && !self.needs_drop(id)
+            && !self.contains_reference(id)
+            && !self.contains_view(id)
+            && !self.contains_owning(id)
+    }
+
+    #[must_use]
+    pub fn contains_owning(&self, id: TypeId) -> bool {
+        match self.get(id) {
+            Some(TypeData::Buffer { .. }) => true,
+            Some(TypeData::StructInstance(_, args) | TypeData::EnumInstance(_, args)) => self
+                .arguments(*args)
+                .is_some_and(|arguments| arguments.iter().any(|ty| self.contains_owning(*ty))),
+            Some(_) | None => false,
+        }
+    }
+
+    #[must_use]
+    pub fn contains_view(&self, id: TypeId) -> bool {
+        match self.get(id) {
+            Some(TypeData::View { .. }) => true,
+            Some(TypeData::StructInstance(_, args) | TypeData::EnumInstance(_, args)) => self
+                .arguments(*args)
+                .is_some_and(|arguments| arguments.iter().any(|ty| self.contains_view(*ty))),
+            _ => false,
+        }
+    }
+
     /// Whether this type is, or recursively contains as a generic argument, a
-    /// V9 reference that cannot be persisted in an aggregate.
+    /// V9 reference that cannot be persisted in a V10 aggregate.
     #[must_use]
     pub fn contains_reference(&self, id: TypeId) -> bool {
         match self.get(id) {
@@ -584,6 +709,14 @@ impl TypeArena {
                 let pointee = self.substitute(pointee, substitution)?;
                 Ok(self.intern_reference(pointee, mutable))
             }
+            Some(TypeData::Buffer { element }) => {
+                let element = self.substitute(element, substitution)?;
+                Ok(self.intern_buffer(element))
+            }
+            Some(TypeData::View { element, mutable }) => {
+                let element = self.substitute(element, substitution)?;
+                Ok(self.intern_view(element, mutable))
+            }
             Some(_) | None => Ok(ty),
         }
     }
@@ -637,6 +770,20 @@ impl TypeArena {
                     .ids
                     .get(&TypeData::Reference { pointee, mutable })
                     .expect("monomorphizer interned substituted reference"))
+            }
+            Some(TypeData::Buffer { element }) => {
+                let element = self.substituted_existing(element, substitution)?;
+                Ok(*self
+                    .ids
+                    .get(&TypeData::Buffer { element })
+                    .expect("monomorphizer interned substituted Buffer"))
+            }
+            Some(TypeData::View { element, mutable }) => {
+                let element = self.substituted_existing(element, substitution)?;
+                Ok(*self
+                    .ids
+                    .get(&TypeData::View { element, mutable })
+                    .expect("monomorphizer interned substituted View"))
             }
             Some(_) | None => Ok(ty),
         }

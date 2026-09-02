@@ -59,3 +59,8 @@ nominal_payload_enums	V1_CONTRACT	accept:42	n/a	programs/v6_enums.ae
 non_owning_references	V1_CONTRACT	accept:31	n/a	programs/v9_references.ae
 scalar_reference_aliasing	V1_CONTRACT	accept:2	n/a	programs/v9_scalar_ref.ae
 aggregate_reference_aliasing	V1_CONTRACT	accept:5	n/a	programs/v9_aggregate_ref.ae
+fixed_owning_buffers	V1_CONTRACT	accept:78	n/a	programs/v10_buffers.ae
+buffer_element_reference	V1_CONTRACT	accept:11	n/a	programs/v10_element_ref.ae
+contiguous_buffer_view	V1_CONTRACT	accept:11	n/a	programs/v10_view.ae
+buffer_dynamic_bounds	V1_CONTRACT	trap	n/a	programs/v10_dynamic_oob.ae
+buffer_allocation_overflow	V1_CONTRACT	trap	n/a	programs/v10_allocation_overflow.ae

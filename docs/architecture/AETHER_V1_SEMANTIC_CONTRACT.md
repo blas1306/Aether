@@ -353,16 +353,27 @@ DECISION** for nontrivial values.  The existing Initial IR lifecycle operations
 and verifier are valuable executable evidence, not automatically the final
 surface model.
 
+NEXT-VERTICAL-10 closes this rule only for `Buffer<T>`: initialization from an
+owning expression, assignment, by-value argument passing and return implicitly
+move the buffer handle. The source becomes unavailable immediately and
+use-after-move is a static error. Replacing a live Buffer destroys its previous
+allocation after the right-hand side succeeds; exact self-assignment is a safe
+no-op. Lexical scope exit and every normal return destroy each still-owned
+Buffer exactly once. This does not settle the eventual general move syntax or
+last-use policy for arbitrary nontrivial values.
+
 ### 4.4 Function calls — DECIDED/OPEN
 
 Arity, parameter and return types are statically checked.  Public/exported
 function signatures are explicit except for narrowly specified local/private
 inference.  Nontrivial return ownership is explicit in semantic IR.
 
-The concrete parameter modes (owned, borrowed read-only, borrowed mutable,
-shared) and their source syntax are an **OPEN DECISION**.  A single implicit
-“borrow everything” convention is insufficient for FFI, buffers and returned
-views.
+Vertical-10 decides that a by-value `Buffer<T>` parameter is owned and consumes
+its argument, while `ref Buffer<T>` and `ref mut Buffer<T>` borrow it. A Buffer
+return transfers ownership to the caller. The complete parameter-mode system
+for other owned/shared values and its dedicated syntax remain an **OPEN
+DECISION**; a single implicit “borrow everything” convention is insufficient
+for FFI, buffers and returned views.
 
 ### 4.5 Nominal value structs — NEXT-VERTICAL-5 DECIDED baseline
 
@@ -488,11 +499,60 @@ Backend pointers are an internal representation, not raw-pointer source
 semantics. There is no null reference expression, address equality, pointer
 arithmetic, integer/reference cast or address exposure. Returning views,
 storing views, reallocation invalidation, concurrency/async crossings and a
-future unique/restrict capability remain **OPEN DECISIONS**. Vertical-9 is not
-the final Aether ownership model and introduces no heap allocation, ARC,
-destruction or move-only value.
+future unique/restrict capability remain **OPEN DECISIONS**. Vertical-9 itself
+introduced no heap allocation, ARC, destruction or move-only value;
+Vertical-10 adds the deliberately bounded Buffer case below without changing
+reference alias capabilities.
+
+### 5.4 Fixed owning buffers and contiguous views — NEXT-VERTICAL-10 DECIDED baseline
+
+`Buffer<T>` owns one fixed-length contiguous allocation. It is move-only,
+needs destruction and has no implicit deep copy, retain/release or shared
+ownership. `T` is restricted in this baseline to a concrete `Copy` type that
+does not need destruction or contain borrowed/owning substructure. Nested
+Buffer or borrowed descriptor elements and symbolic `Buffer<T>` in
+generic bodies are rejected until generic capabilities and recursive cleanup
+are represented explicitly. Buffer fields and enum payloads are also deferred;
+the compiler must not leave a containing aggregate incorrectly Copy.
+
+Definite ownership state is checked across control flow. An owned local may be
+uninitialized, owned, moved or dropped. Continuing branches must agree on the
+ownership state, and loop-carried ownership moves are rejected in this
+baseline. A Buffer cannot move or be replaced while a local reference or view
+derived from it remains live. Cleanup on aborting traps is not required;
+exceptional cleanup depends on the future recoverable-error model.
+
+`View<T>` and `ViewMut<T>` are Copy, non-owning pointer-and-length descriptors.
+They expose contiguous element storage rather than Buffer container identity.
+`View<T>` reads and `ViewMut<T>` additionally writes. They never transfer or
+extend owner lifetime. V10 applies the conservative V9 non-escape rules:
+single-initialization locals and parameters are allowed, but returns, aggregate
+storage and generic arguments are rejected. Buffers never resize, so an element
+reference remains stable while its owner remains alive.
 
 ## 6. Core data abstractions
+
+### 6.0 `Buffer<T>` — NEXT-VERTICAL-10 DECIDED substrate
+
+`Buffer<T>(length, fill)` is the no-uninitialized-memory construction surface.
+Length and zero-based index operands are `usize`; every element is initialized
+from the Copy fill value. Indexing a Buffer or View is checked. A provable
+constant failure is a diagnostic; dynamic failure aborts with
+`IndexOutOfBounds`. Length-times-element-size overflow aborts with
+`AllocationSizeOverflow`, and allocation failure aborts with
+`AllocationFailure`. These traps do not unwind in V10.
+
+Buffer/View physical lowering is an internal `{ data pointer, length }`
+descriptor. Element size and alignment come from canonical target layout.
+Allocation/free happen through a compiler runtime boundary, not through a
+source raw-pointer or allocator API. The bootstrap implementation uses the
+platform allocator and counts normal-path allocation/free balance in generated
+Buffer programs as qualification instrumentation.
+
+This is lower-level storage for future `Array`, `List`, `Vector` and `Matrix`
+work, not the final Array abstraction. V10 adds no capacity, resize,
+append/insert/remove, slicing syntax, raw pointers, allocator selection, ARC or
+general-purpose ownership.
 
 ### 6.1 `Array<T>` — PROVISIONAL
 

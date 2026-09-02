@@ -169,6 +169,18 @@ tags and a typed internal layout do not stabilize public discriminants or ABI,
 and this milestone adds no wildcard patterns, ownership, allocation or special
 error-propagation semantics.
 
+NEXT-VERTICAL-10 adds a deliberately narrow ownership substrate before the
+final collection abstractions: `Buffer<T>` owns fixed-length contiguous
+storage, transfers ownership by move, and is destroyed exactly once on normal
+paths. `View<T>` and `ViewMut<T>` are non-owning pointer-and-length access
+capabilities with checked zero-based indexing. This milestone does not define
+`Array<T>`, resizing, shared ownership or general moves. Buffer elements are
+temporarily restricted to concrete Copy/no-drop types, and storing ownership or
+views inside user aggregates is rejected until transitive lifecycle semantics
+are implemented rather than approximated. Borrowed reference/view descriptors
+are likewise excluded from Buffer elements so allocation ownership cannot
+silently extend their lifetime.
+
 ## Safety and control
 
 Safe and ergonomic behavior is the default.  Value semantics, moves, shared

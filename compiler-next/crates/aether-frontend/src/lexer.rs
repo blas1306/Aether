@@ -49,6 +49,10 @@ pub enum TokenKind {
     LeftBrace,
     /// `}`.
     RightBrace,
+    /// `[`.
+    LeftBracket,
+    /// `]`.
+    RightBracket,
     /// `;`.
     Semicolon,
     /// `,`.
@@ -178,6 +182,8 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
             b')' => single(&mut tokens, TokenKind::RightParen, source, &mut cursor),
             b'{' => single(&mut tokens, TokenKind::LeftBrace, source, &mut cursor),
             b'}' => single(&mut tokens, TokenKind::RightBrace, source, &mut cursor),
+            b'[' => single(&mut tokens, TokenKind::LeftBracket, source, &mut cursor),
+            b']' => single(&mut tokens, TokenKind::RightBracket, source, &mut cursor),
             b';' => single(&mut tokens, TokenKind::Semicolon, source, &mut cursor),
             b',' => single(&mut tokens, TokenKind::Comma, source, &mut cursor),
             b'.' => single(&mut tokens, TokenKind::Dot, source, &mut cursor),
