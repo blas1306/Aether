@@ -1,0 +1,22 @@
+T identity<T>(T value) {
+    return value;
+}
+
+struct Pair<T, U> {
+    T first;
+    U second;
+}
+
+enum Option<T> {
+    None,
+    Some(T),
+}
+
+int main() {
+    Pair<int, float64> pair = Pair<int, float64>(identity<int>(40), 2.0);
+    Option<int> value = Option<int>.Some(pair.first + 2);
+    match (value) {
+        Option<int>.None => { return 1; }
+        Option<int>.Some(result) => { return result; }
+    }
+}

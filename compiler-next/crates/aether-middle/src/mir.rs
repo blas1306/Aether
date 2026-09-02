@@ -7,9 +7,10 @@ use std::sync::Arc;
 
 use aether_frontend::{
     CastKind, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId, FloatValue,
-    FunctionId, FunctionSignature, HirBinaryOp, HirBlock, HirExpr, HirExprKind, HirFunction,
-    HirMatchArm, HirPlace, HirStmtKind, HirUnaryOp, LocalId, ModuleInfo, Phase, Span, StructId,
-    StructInfo, TypeArena, TypeData, TypeId, TypedHir, VariantId, format_type,
+    FunctionInstanceInfo, HirBinaryOp, HirBlock, HirCallTarget, HirExpr, HirExprKind, HirFunction,
+    HirMatchArm, HirPlace, HirStmtKind, HirUnaryOp, InstanceId, LocalId, ModuleInfo, Phase, Span,
+    StructId, StructInfo, Substitution, TypeArena, TypeData, TypeId, TypedHir, VariantId,
+    format_type,
 };
 
 /// Basic-block identity, equal to its stable vector index.
@@ -170,7 +171,7 @@ pub enum Rvalue {
     },
     /// Resolved direct call. The function table, not a source string, is authoritative.
     Call {
-        callee: FunctionId,
+        callee: InstanceId,
         args: Vec<Operand>,
     },
 }
@@ -227,7 +228,8 @@ pub struct BasicBlock {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MirFunction {
     /// Globally unambiguous session-local function identity.
-    pub id: FunctionId,
+    pub id: InstanceId,
+    pub function_id: aether_frontend::FunctionId,
     /// Parameters in call order.
     pub parameters: Vec<MirParameter>,
     /// Canonical return type.
@@ -252,11 +254,11 @@ pub struct FlowMir {
     /// Nominal tagged aggregate and variant metadata.
     pub enums: Vec<EnumInfo>,
     /// Program-global signature table.
-    pub signatures: Vec<FunctionSignature>,
+    pub signatures: Vec<FunctionInstanceInfo>,
     /// Function-local CFGs in stable identity order.
     pub functions: Vec<MirFunction>,
     /// Entry function identity.
-    pub entry: FunctionId,
+    pub entry: InstanceId,
 }
 
 impl FlowMir {
@@ -362,6 +364,7 @@ fn lower_function(
     let mut builder = Builder {
         function: MirFunction {
             id: function.id,
+            function_id: function.function_id,
             parameters,
             return_type,
             locals,
@@ -577,7 +580,7 @@ impl Builder<'_> {
                 );
                 Operand::Local(destination)
             }
-            HirExprKind::Call { callee, args } => {
+            HirExprKind::Call { callee, args, .. } => {
                 let args = args
                     .iter()
                     .map(|argument| self.lower_expr(argument))
@@ -589,7 +592,12 @@ impl Builder<'_> {
                         projections: vec![],
                     },
                     Rvalue::Call {
-                        callee: *callee,
+                        callee: match callee {
+                            HirCallTarget::Instance(instance) => *instance,
+                            HirCallTarget::Declaration(_) => {
+                                unreachable!("verified concrete HIR call")
+                            }
+                        },
                         args,
                     },
                     expression.span,
@@ -876,6 +884,20 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
         if signature.module.0 as usize >= mir.modules.len() {
             return Err(fail("MIR signature names an unknown module".into()));
         }
+        if signature
+            .parameters
+            .iter()
+            .any(|parameter| mir.types.contains_generic(parameter.ty))
+            || mir.types.contains_generic(signature.return_type)
+            || function
+                .locals
+                .iter()
+                .any(|local| mir.types.contains_generic(local.ty))
+        {
+            return Err(fail(
+                "unresolved generic parameter reached MIR codegen".into(),
+            ));
+        }
         verify_mir_function(
             function,
             signature,
@@ -892,8 +914,8 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
 #[allow(clippy::too_many_lines)]
 fn verify_mir_function(
     function: &MirFunction,
-    signature: &FunctionSignature,
-    signatures: &[FunctionSignature],
+    signature: &FunctionInstanceInfo,
+    signatures: &[FunctionInstanceInfo],
     structs: &[StructInfo],
     enums: &[EnumInfo],
     types: &TypeArena,
@@ -1116,7 +1138,7 @@ fn verify_mir_function(
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn validate_rvalue(
     function: &MirFunction,
-    signatures: &[FunctionSignature],
+    signatures: &[FunctionInstanceInfo],
     structs: &[StructInfo],
     enums: &[EnumInfo],
     types: &TypeArena,
@@ -1148,7 +1170,8 @@ fn validate_rvalue(
             }
             for ((field_id, operand), declared) in fields.iter().zip(&info.fields) {
                 validate_operand(function, operand, initialized)?;
-                if *field_id != declared.id || operand_type(function, operand)? != declared.ty {
+                let expected = concrete_struct_member(types, structs, destination, declared.ty)?;
+                if *field_id != declared.id || operand_type(function, operand)? != expected {
                     return Err("MIR aggregate field identity/type mismatch".into());
                 }
             }
@@ -1174,7 +1197,8 @@ fn validate_rvalue(
             }
             for (operand, declared) in payloads.iter().zip(&variant.payloads) {
                 validate_operand(function, operand, initialized)?;
-                if operand_type(function, operand)? != declared.ty {
+                let expected = concrete_enum_member(types, enums, destination, declared.ty)?;
+                if operand_type(function, operand)? != expected {
                     return Err("MIR enum payload type mismatch".into());
                 }
             }
@@ -1208,9 +1232,9 @@ fn validate_rvalue(
                 .payloads
                 .get(*index as usize)
                 .ok_or_else(|| "MIR enum payload slot out of bounds".to_string())?;
-            if types.enum_id(operand_type(function, value)?) != Some(*enum_id)
-                || destination != payload.ty
-            {
+            let enum_ty = operand_type(function, value)?;
+            let expected = concrete_enum_member(types, enums, enum_ty, payload.ty)?;
+            if types.enum_id(enum_ty) != Some(*enum_id) || destination != expected {
                 return Err("MIR enum payload extraction type mismatch".into());
             }
         }
@@ -1342,9 +1366,61 @@ fn place_type(
             .get(owner.0 as usize)
             .and_then(|info| info.fields.iter().find(|field| field.id == *field_id))
             .ok_or_else(|| "MIR place field does not belong to aggregate".to_string())?;
-        ty = field.ty;
+        ty = concrete_struct_member(types, structs, ty, field.ty)?;
     }
     Ok(ty)
+}
+
+fn concrete_struct_member(
+    types: &TypeArena,
+    structs: &[StructInfo],
+    aggregate: TypeId,
+    member: TypeId,
+) -> Result<TypeId, String> {
+    let Some(TypeData::StructInstance(id, args)) = types.get(aggregate) else {
+        return Ok(member);
+    };
+    let parameters = &structs
+        .get(id.0 as usize)
+        .ok_or_else(|| "unknown generic struct".to_string())?
+        .generic_parameters;
+    let substitution = Substitution::new(
+        parameters.iter().map(|parameter| parameter.id),
+        types
+            .arguments(*args)
+            .ok_or_else(|| "invalid struct arguments".to_string())?
+            .iter()
+            .copied(),
+    );
+    types
+        .substituted_existing(member, &substitution)
+        .map_err(|_| "incomplete struct substitution".to_string())
+}
+
+fn concrete_enum_member(
+    types: &TypeArena,
+    enums: &[EnumInfo],
+    aggregate: TypeId,
+    member: TypeId,
+) -> Result<TypeId, String> {
+    let Some(TypeData::EnumInstance(id, args)) = types.get(aggregate) else {
+        return Ok(member);
+    };
+    let parameters = &enums
+        .get(id.0 as usize)
+        .ok_or_else(|| "unknown generic enum".to_string())?
+        .generic_parameters;
+    let substitution = Substitution::new(
+        parameters.iter().map(|parameter| parameter.id),
+        types
+            .arguments(*args)
+            .ok_or_else(|| "invalid enum arguments".to_string())?
+            .iter()
+            .copied(),
+    );
+    types
+        .substituted_existing(member, &substitution)
+        .map_err(|_| "incomplete enum substitution".to_string())
 }
 
 pub(crate) fn binary_contract(
@@ -1546,8 +1622,8 @@ fn reachability(function: &MirFunction) -> Vec<bool> {
 #[cfg(test)]
 mod tests {
     use aether_frontend::{
-        FunctionId, FunctionSignature, ModuleId, ModuleInfo, SourceFile, SourceId, analyze,
-        parse_source,
+        FunctionId, FunctionInstanceInfo, InstanceId, ModuleId, ModuleInfo, SourceFile, SourceId,
+        analyze, parse_source,
     };
 
     use super::*;
@@ -1607,16 +1683,19 @@ mod tests {
             }],
             structs: vec![],
             enums: vec![],
-            signatures: vec![FunctionSignature {
-                id: FunctionId(0),
+            signatures: vec![FunctionInstanceInfo {
+                id: InstanceId(0),
+                function_id: FunctionId(0),
                 module: ModuleId(0),
                 name: "main".into(),
+                type_arguments: vec![],
                 parameters: vec![],
                 return_type: TypeId::INT64,
                 span: Span::new(0, 0),
             }],
             functions: vec![MirFunction {
-                id: FunctionId(0),
+                id: InstanceId(0),
+                function_id: FunctionId(0),
                 parameters: vec![],
                 return_type: TypeId::INT64,
                 locals: vec![],
@@ -1627,7 +1706,7 @@ mod tests {
                 }],
                 entry: BlockId(0),
             }],
-            entry: FunctionId(0),
+            entry: InstanceId(0),
         };
         verify_mir(raw).unwrap();
     }
@@ -1645,7 +1724,7 @@ mod tests {
                 .any(|instruction| matches!(
                     instruction.value,
                     Rvalue::Call {
-                        callee: FunctionId(0),
+                        callee: InstanceId(0),
                         ..
                     }
                 ))
@@ -1663,7 +1742,7 @@ mod tests {
             .find(|instruction| matches!(instruction.value, Rvalue::Call { .. }))
             .unwrap();
         if let Rvalue::Call { callee, .. } = &mut call.value {
-            *callee = FunctionId(99);
+            *callee = InstanceId(99);
         }
         assert!(verify_mir(unknown).is_err());
 

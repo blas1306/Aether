@@ -1193,12 +1193,12 @@ independent declaration collection.
   `Pair<T,U>` receives `StructId`, `Option<T>` receives `EnumId`, and
   `identity<T>` receives `FunctionId`. Generic parameters need stable identity
   within their owner, such as `GenericParamId { owner, index }`.
-- A generic parameter used as a semantic type becomes an interned future
+- A generic parameter used as a semantic type becomes an interned
   `TypeData::GenericParam(GenericParamId)`. It is not a source spelling or a new
   nominal declaration.
-- An applied type such as `Pair<int,float64>` becomes an interned future
-  `TypeData::Applied { declaration: StructId, arguments: Vec<TypeId> }` (with an
-  arena-owned compact argument list rather than recursive copied type graphs).
+- An applied type such as `Pair<int,float64>` becomes an interned
+  `TypeData::StructInstance(StructId, TypeArgsId)` (or the enum equivalent),
+  with an arena-owned canonical argument list rather than copied type graphs.
   `Option<T>` inside a generic body is the corresponding applied type whose
   argument is the `T` parameter's `TypeId`.
 - Substitutions live in an explicit inference/instantiation context mapping
@@ -1212,11 +1212,47 @@ independent declaration collection.
   Mangling derives deterministically from declaration metadata and semantic
   argument structure, never incidental TypeId numbers.
 
-Open decisions for Vertical-8 are constraint representation/coherence,
-inference boundaries, instantiation ownership across modules, recursion and
-code-size limits, deterministic structural mangling/fingerprints, and whether
-generic HIR is verified before or after substitution. Arrays, references,
-ownership and incremental identities remain out of scope. The recommended next
-milestone is parametric generics plus explicit substitution and `InstanceId`,
-qualified first on generic functions and nominal aggregates without traits or
-ownership expansion.
+Remaining decisions after Vertical-8 are constraint representation/coherence,
+separate-compilation instance ownership, production code-size policy and stable
+cross-session fingerprints. Arrays, references, ownership and incremental
+identities remain out of scope for this vertical.
+
+## 25. NEXT-VERTICAL-8 implementation confirmation
+
+Vertical-8 implements the preceding representation with kind-safe
+`GenericOwner`, declaration-local `GenericParamId`, canonical arena-owned
+`TypeArgsId` lists, `StructInstance`/`EnumInstance` type data, and a centralized
+recursive `Substitution`. Declarations are never copied merely because their
+arguments differ: one `FunctionId`, `StructId` or `EnumId` remains authoritative.
+
+The frontend retains parametrically checked generic HIR and separately builds a
+concrete instance table. `InstanceKey { FunctionId, Vec<TypeId> }` is interned
+to `InstanceId` by an ordered worklist. Instantiation clones semantic HIR—not
+source text—and substitutes types throughout signatures, locals, expressions,
+places, match bindings and nested calls. Newly discovered calls enqueue their
+concrete keys. Equal keys reuse an ID. A repeated identical key is ordinary
+runtime recursion; a same-function key that structurally embeds an earlier
+argument is diagnosed as expanding monomorphization, backed by conservative
+depth and instance-count limits.
+
+MIR and SSA now use `InstanceId` for function definitions and call targets and
+verify concrete signatures. Their aggregate verifiers obtain field and payload
+types through the same declaration-parameter substitution contract. The LLVM
+backend skips symbolic generic declaration types, emits every reachable
+concrete nominal application once, and mangles function substitutions from
+logical module/type declaration names and structural scalar/nominal arguments.
+Raw `TypeId`, `FunctionId` and `InstanceId` numbers are not callable symbol
+identity.
+
+Concrete layout is cached by applied `TypeId`; `Pair<int8,int8>` and
+`Pair<int8,float64>` consequently have independent layouts. Symbolic generic
+types fail layout/codegen rather than receiving a fabricated size. Generic
+by-value declaration cycles are rejected by declaration-aware recursion checks,
+and concrete recursion is checked again while layout is materialized.
+
+Simple call inference is deliberately local and exact. Traits, constraints,
+specialization, generic aliases, ownership, references, arrays and dynamic
+dispatch remain future work. The recommended NEXT-VERTICAL-9 is ownership and
+reference/view semantics before introducing generic containers: monomorphized
+value aggregates now provide the type/layout substrate, while container work
+without lifecycle rules would force another representation rewrite.

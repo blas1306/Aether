@@ -58,6 +58,7 @@ impl ParsedAst {
 #[allow(missing_docs)]
 pub struct AstEnum {
     pub name: String,
+    pub generic_parameters: Vec<AstGenericParam>,
     pub variants: Vec<AstVariant>,
     pub span: Span,
 }
@@ -76,6 +77,8 @@ pub struct AstVariant {
 pub struct AstStruct {
     /// Declared nominal name.
     pub name: String,
+    /// Unconstrained type parameters in declaration order.
+    pub generic_parameters: Vec<AstGenericParam>,
     /// Fields in semantically significant declaration order.
     pub fields: Vec<AstField>,
     /// Full declaration provenance.
@@ -120,6 +123,8 @@ pub struct AstFunction {
     pub return_type: AstType,
     /// Written function name.
     pub name: String,
+    /// Unconstrained type parameters in declaration order.
+    pub generic_parameters: Vec<AstGenericParam>,
     /// Scalar parameters in source order.
     pub parameters: Vec<AstParameter>,
     /// Function body.
@@ -146,7 +151,19 @@ pub struct AstType {
     pub module: Option<String>,
     /// Exact final source spelling, resolved and canonicalized during semantics.
     pub name: String,
+    /// Recursive generic application arguments.
+    pub arguments: Vec<AstType>,
     /// Type-token provenance.
+    pub span: Span,
+}
+
+/// Source generic binder. Semantic identity is assigned during declaration
+/// collection and never derives from this spelling.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AstGenericParam {
+    /// Source spelling used for resolution and diagnostics.
+    pub name: String,
+    /// Binder-token provenance.
     pub span: Span,
 }
 
@@ -212,6 +229,7 @@ pub struct AstMatchArm {
 pub struct AstVariantPattern {
     pub module: Option<String>,
     pub enum_name: String,
+    pub type_arguments: Vec<AstType>,
     pub variant: String,
     pub bindings: Vec<(String, Span)>,
     pub span: Span,
@@ -250,12 +268,18 @@ pub enum AstExprKind {
     /// Unresolved name.
     Name(String),
     /// Unresolved direct call.
-    Call { callee: String, args: Vec<AstExpr> },
+    Call {
+        callee: String,
+        type_arguments: Vec<AstType>,
+        args: Vec<AstExpr>,
+    },
     /// Unresolved qualified direct call.
     QualifiedCall {
         module: String,
         function: String,
+        type_arguments: Vec<AstType>,
         args: Vec<AstExpr>,
+        parenthesized: bool,
     },
     /// Qualified value syntax retained so semantic analysis can reject it precisely.
     QualifiedName { module: String, member: String },
@@ -263,8 +287,10 @@ pub enum AstExprKind {
     VariantCall {
         module: String,
         enum_name: String,
+        type_arguments: Vec<AstType>,
         variant: String,
         args: Vec<AstExpr>,
+        parenthesized: bool,
     },
     /// Unresolved field projection.
     Field {

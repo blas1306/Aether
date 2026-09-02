@@ -1,0 +1,18 @@
+import types;
+
+alias IntPair = types.Pair<int, int>;
+
+int main() {
+    types.Pair<int, float64> pair = types.Pair<int, float64>(40, 2.0);
+    IntPair integers = IntPair(1, 2);
+    types.IntPair qualified = types.IntPair(3, 4);
+    types.Option<types.Pair<int, float64>> nested = types.Option<types.Pair<int, float64>>.Some(pair);
+    types.Option<int> value = types.Option<int>.Some(types.first(pair) + integers.first + qualified.first - 2);
+    types.Option<int> empty = types.Option<int>.None;
+    int zero = types.unwrapOr<int>(empty, 0);
+    int repeated = types.identity<int>(0);
+    match (value) {
+        types.Option<int>.None => { return repeated + zero; }
+        types.Option<int>.Some(found) => { return types.unwrapOr<int>(types.Option<int>.Some(found), 0); }
+    }
+}

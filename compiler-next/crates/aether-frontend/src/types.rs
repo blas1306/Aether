@@ -12,6 +12,31 @@ pub struct StructId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EnumId(pub u32);
 
+/// Kind-safe declaration owner of a generic parameter. Function declarations
+/// use their session-local numeric declaration index; nominal owners retain
+/// their dedicated identity types.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum GenericOwner {
+    Function(u32),
+    Struct(StructId),
+    Enum(EnumId),
+}
+
+/// Semantic identity of a generic binder. Source spelling is metadata only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GenericParamId {
+    pub owner: GenericOwner,
+    pub index: u32,
+}
+
+/// Canonical arena-owned type-argument-list identity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TypeArgsId(pub u32);
+
+/// Session-local identity of a concrete callable monomorphization.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InstanceId(pub u32);
+
 /// Session-local semantic identity of one enum variant. Variant names are
 /// metadata after HIR resolution.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -198,6 +223,12 @@ pub enum TypeData {
     Struct(StructId),
     /// Nominal, module-owned tagged value aggregate.
     Enum(EnumId),
+    /// One declaration-owned unconstrained type parameter.
+    GenericParam(GenericParamId),
+    /// Canonical application of a generic struct declaration.
+    StructInstance(StructId, TypeArgsId),
+    /// Canonical application of a generic enum declaration.
+    EnumInstance(EnumId, TypeArgsId),
 }
 
 impl TypeData {
@@ -223,7 +254,7 @@ impl TypeData {
     }
     #[must_use]
     pub const fn as_struct(self) -> Option<StructId> {
-        if let Self::Struct(id) = self {
+        if let Self::Struct(id) | Self::StructInstance(id, _) = self {
             Some(id)
         } else {
             None
@@ -231,7 +262,7 @@ impl TypeData {
     }
     #[must_use]
     pub const fn as_enum(self) -> Option<EnumId> {
-        if let Self::Enum(id) = self {
+        if let Self::Enum(id) | Self::EnumInstance(id, _) = self {
             Some(id)
         } else {
             None
@@ -247,6 +278,9 @@ impl fmt::Display for TypeData {
             Self::Float(v) => v.fmt(f),
             Self::Struct(id) => write!(f, "struct#{}", id.0),
             Self::Enum(id) => write!(f, "enum#{}", id.0),
+            Self::GenericParam(id) => write!(f, "param({:?}:{})", id.owner, id.index),
+            Self::StructInstance(id, args) => write!(f, "struct#{}<args#{}>", id.0, args.0),
+            Self::EnumInstance(id, args) => write!(f, "enum#{}<args#{}>", id.0, args.0),
         }
     }
 }
@@ -260,6 +294,9 @@ impl fmt::Display for TypeData {
 pub struct TypeArena {
     data: Vec<TypeData>,
     ids: HashMap<TypeData, TypeId>,
+    argument_lists: Vec<Vec<TypeId>>,
+    argument_ids: HashMap<Vec<TypeId>, TypeArgsId>,
+    concrete_layouts: HashMap<TypeId, (u64, u64)>,
 }
 
 impl Default for TypeArena {
@@ -276,6 +313,9 @@ impl TypeArena {
         let mut arena = Self {
             data: Vec::new(),
             ids: HashMap::new(),
+            argument_lists: Vec::new(),
+            argument_ids: HashMap::new(),
+            concrete_layouts: HashMap::new(),
         };
         let baseline = [
             TypeData::Bool,
@@ -308,6 +348,81 @@ impl TypeArena {
         self.data.push(data);
         self.ids.insert(data, id);
         id
+    }
+
+    /// Interns a canonical argument list and generic nominal application.
+    pub fn intern_struct_instance(
+        &mut self,
+        declaration: StructId,
+        arguments: Vec<TypeId>,
+    ) -> TypeId {
+        let args = self.intern_arguments(arguments);
+        self.intern(TypeData::StructInstance(declaration, args))
+    }
+
+    /// Interns a canonical argument list and generic nominal application.
+    pub fn intern_enum_instance(&mut self, declaration: EnumId, arguments: Vec<TypeId>) -> TypeId {
+        let args = self.intern_arguments(arguments);
+        self.intern(TypeData::EnumInstance(declaration, args))
+    }
+
+    fn intern_arguments(&mut self, arguments: Vec<TypeId>) -> TypeArgsId {
+        if let Some(id) = self.argument_ids.get(&arguments) {
+            return *id;
+        }
+        let id = TypeArgsId(
+            u32::try_from(self.argument_lists.len()).expect("type argument arena fits u32"),
+        );
+        self.argument_lists.push(arguments.clone());
+        self.argument_ids.insert(arguments, id);
+        id
+    }
+
+    #[must_use]
+    pub fn arguments(&self, id: TypeArgsId) -> Option<&[TypeId]> {
+        self.argument_lists.get(id.0 as usize).map(Vec::as_slice)
+    }
+
+    #[must_use]
+    pub fn type_arguments(&self, ty: TypeId) -> Option<&[TypeId]> {
+        match self.get(ty) {
+            Some(TypeData::StructInstance(_, args) | TypeData::EnumInstance(_, args)) => {
+                self.arguments(*args)
+            }
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn generic_param(&self, ty: TypeId) -> Option<GenericParamId> {
+        match self.get(ty) {
+            Some(TypeData::GenericParam(id)) => Some(*id),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn contains_generic(&self, ty: TypeId) -> bool {
+        match self.get(ty) {
+            Some(TypeData::GenericParam(_)) => true,
+            Some(TypeData::StructInstance(_, args) | TypeData::EnumInstance(_, args)) => {
+                self.arguments(*args).is_some_and(|arguments| {
+                    arguments
+                        .iter()
+                        .any(|argument| self.contains_generic(*argument))
+                })
+            }
+            _ => false,
+        }
+    }
+
+    pub fn cache_layout(&mut self, ty: TypeId, size: u64, align: u64) {
+        self.concrete_layouts.insert(ty, (size, align));
+    }
+
+    #[must_use]
+    pub fn cached_layout(&self, ty: TypeId) -> Option<(u64, u64)> {
+        self.concrete_layouts.get(&ty).copied()
     }
 
     /// Looks up an identity, failing closed for an ID from another/malformed
@@ -365,7 +480,7 @@ impl TypeArena {
     #[must_use]
     pub fn struct_id(&self, id: TypeId) -> Option<StructId> {
         match self.get(id) {
-            Some(TypeData::Struct(value)) => Some(*value),
+            Some(TypeData::Struct(value) | TypeData::StructInstance(value, _)) => Some(*value),
             _ => None,
         }
     }
@@ -373,7 +488,7 @@ impl TypeArena {
     #[must_use]
     pub fn enum_id(&self, id: TypeId) -> Option<EnumId> {
         match self.get(id) {
-            Some(TypeData::Enum(value)) => Some(*value),
+            Some(TypeData::Enum(value) | TypeData::EnumInstance(value, _)) => Some(*value),
             _ => None,
         }
     }
@@ -395,6 +510,111 @@ impl TypeArena {
                 data,
             )
         })
+    }
+
+    /// Applies one explicit substitution recursively and interns every newly
+    /// formed nominal application in this arena.
+    pub fn substitute(
+        &mut self,
+        ty: TypeId,
+        substitution: &Substitution,
+    ) -> Result<TypeId, GenericParamId> {
+        match self.get(ty).copied() {
+            Some(TypeData::GenericParam(param)) => substitution.get(param).ok_or(param),
+            Some(TypeData::StructInstance(id, args)) => {
+                let source = self
+                    .arguments(args)
+                    .expect("valid argument identity")
+                    .to_vec();
+                let arguments = source
+                    .into_iter()
+                    .map(|argument| self.substitute(argument, substitution))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(self.intern_struct_instance(id, arguments))
+            }
+            Some(TypeData::EnumInstance(id, args)) => {
+                let source = self
+                    .arguments(args)
+                    .expect("valid argument identity")
+                    .to_vec();
+                let arguments = source
+                    .into_iter()
+                    .map(|argument| self.substitute(argument, substitution))
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(self.intern_enum_instance(id, arguments))
+            }
+            Some(_) | None => Ok(ty),
+        }
+    }
+
+    /// Read-only substitution used by verifiers after monomorphization. Every
+    /// result must already have been interned by the instantiator.
+    pub fn substituted_existing(
+        &self,
+        ty: TypeId,
+        substitution: &Substitution,
+    ) -> Result<TypeId, GenericParamId> {
+        match self.get(ty).copied() {
+            Some(TypeData::GenericParam(param)) => substitution.get(param).ok_or(param),
+            Some(TypeData::StructInstance(id, args)) => {
+                let arguments = self
+                    .arguments(args)
+                    .expect("valid argument identity")
+                    .iter()
+                    .map(|argument| self.substituted_existing(*argument, substitution))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let args = self
+                    .argument_ids
+                    .get(&arguments)
+                    .copied()
+                    .expect("monomorphizer interned substituted arguments");
+                Ok(*self
+                    .ids
+                    .get(&TypeData::StructInstance(id, args))
+                    .expect("monomorphizer interned substituted struct"))
+            }
+            Some(TypeData::EnumInstance(id, args)) => {
+                let arguments = self
+                    .arguments(args)
+                    .expect("valid argument identity")
+                    .iter()
+                    .map(|argument| self.substituted_existing(*argument, substitution))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let args = self
+                    .argument_ids
+                    .get(&arguments)
+                    .copied()
+                    .expect("monomorphizer interned substituted arguments");
+                Ok(*self
+                    .ids
+                    .get(&TypeData::EnumInstance(id, args))
+                    .expect("monomorphizer interned substituted enum"))
+            }
+            Some(_) | None => Ok(ty),
+        }
+    }
+}
+
+/// Reusable declaration-parameter to canonical-type mapping.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Substitution {
+    entries: HashMap<GenericParamId, TypeId>,
+}
+
+impl Substitution {
+    #[must_use]
+    pub fn new(
+        parameters: impl IntoIterator<Item = GenericParamId>,
+        arguments: impl IntoIterator<Item = TypeId>,
+    ) -> Self {
+        Self {
+            entries: parameters.into_iter().zip(arguments).collect(),
+        }
+    }
+
+    #[must_use]
+    pub fn get(&self, parameter: GenericParamId) -> Option<TypeId> {
+        self.entries.get(&parameter).copied()
     }
 }
 
@@ -441,5 +661,37 @@ mod tests {
         assert!(!types.is_valid(invalid));
         assert_eq!(types.get(invalid), None);
         assert_eq!(types.format(invalid), "<invalid TypeId(4294967295)>");
+    }
+
+    #[test]
+    fn generic_parameters_applications_and_substitution_are_canonical() {
+        let mut types = TypeArena::new();
+        let parameter = GenericParamId {
+            owner: GenericOwner::Struct(StructId(0)),
+            index: 0,
+        };
+        let other_owner = GenericParamId {
+            owner: GenericOwner::Function(0),
+            index: 0,
+        };
+        let parameter_ty = types.intern(TypeData::GenericParam(parameter));
+        let other_parameter_ty = types.intern(TypeData::GenericParam(other_owner));
+        assert_ne!(parameter_ty, other_parameter_ty);
+
+        let pair = types.intern_struct_instance(StructId(0), vec![TypeId::INT64, TypeId::FLOAT64]);
+        let repeated =
+            types.intern_struct_instance(StructId(0), vec![TypeId::INT64, TypeId::FLOAT64]);
+        let reversed =
+            types.intern_struct_instance(StructId(0), vec![TypeId::FLOAT64, TypeId::INT64]);
+        let other_nominal =
+            types.intern_struct_instance(StructId(1), vec![TypeId::INT64, TypeId::FLOAT64]);
+        assert_eq!(pair, repeated);
+        assert_ne!(pair, reversed);
+        assert_ne!(pair, other_nominal);
+
+        let symbolic =
+            types.intern_struct_instance(StructId(0), vec![parameter_ty, TypeId::FLOAT64]);
+        let substitution = Substitution::new([parameter], [TypeId::INT64]);
+        assert_eq!(types.substitute(symbolic, &substitution), Ok(pair));
     }
 }

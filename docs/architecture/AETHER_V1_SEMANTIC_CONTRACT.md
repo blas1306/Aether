@@ -676,6 +676,47 @@ no cache or ID is persistent across sessions. Future generic parameters and
 applications extend canonical type data and substitution contexts rather than
 reintroducing copied source-type representations in HIR/MIR/SSA.
 
+### 10.4 Parametric generics baseline — NEXT-VERTICAL-8 IMPLEMENTED
+
+Functions, structs and enums may declare unconstrained type parameters after
+their declaration name. Binder identity is `GenericParamId { owner, index }`;
+equal spellings owned by different declarations are unrelated. A binder has an
+interned `TypeData::GenericParam` type. Generic nominal applications use the
+kind-safe `StructInstance(StructId, TypeArgsId)` and
+`EnumInstance(EnumId, TypeArgsId)` forms. Their recursively interned argument
+lists make equal applications share a `TypeId` while preserving nominal
+declaration identity.
+
+Generic bodies are resolved and typechecked once under their declared
+parameters. An unconstrained parameter supports copying, binding, storage,
+passing and returning, but supplies no arithmetic, comparison, conversion or
+unknown-field capability. Declared fields of a generic struct and variants of a
+generic enum remain statically known. This is parametric checking, not
+instantiation-dependent template validation.
+
+Calls support explicit type arguments. Limited local inference unifies direct
+parameter patterns against call arguments, including exact nested nominal
+applications; no return-context, global or constraint inference is performed.
+An explicit `Substitution` recursively maps declaration-owned parameters to
+canonical `TypeId`s. Concrete function calls are canonicalized as
+`(FunctionId, type arguments) -> InstanceId`. A deterministic worklist
+substitutes already checked generic HIR, discovers transitive calls and emits
+only concrete MIR/SSA. Ordinary recursion reuses an existing instance;
+structurally growing recursion is rejected, with depth and instance-count
+limits as a safety fallback.
+
+Concrete generic aggregates receive cached target layout by applied `TypeId`.
+Unresolved generic declarations have no codegen layout. LLVM named types and
+function instances are emitted only for concrete applications, and callable
+symbols derive from logical declaration names and structural arguments rather
+than raw session IDs. Cross-module use retains the existing direct-import
+qualification rule. Transparent aliases may name a concrete generic type;
+generic alias declarations are not admitted.
+
+This baseline deliberately adds no constraints, traits, interfaces,
+specialization, ownership, references, pointers, arrays, strings or dynamic
+dispatch. Generic public ABI and separate-compilation ownership remain open.
+
 ## 11. Layout, ABI and FFI
 
 ### 11.1 Layout — DECIDED/OPEN

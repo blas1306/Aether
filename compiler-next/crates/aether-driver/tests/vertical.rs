@@ -1,4 +1,4 @@
-//! Cross-layer and native qualification through NEXT-VERTICAL-7.
+//! Cross-layer and native qualification through NEXT-VERTICAL-8.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,7 +8,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use aether_driver::{
     ClangToolchain, CompilationSession, Emit, build_path, compile_session, compile_source, run_path,
 };
-use aether_frontend::{ModuleId, SourceFile, SourceId};
+use aether_frontend::{
+    ModuleId, SourceFile, SourceId, TargetProperties, TypeData, analyze, layout_of, parse_source,
+};
 
 fn workspace() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -827,4 +829,137 @@ fn vertical4_division_and_remainder_execute_without_backend_ub() {
         let (_, status) = run_path(&program(source), &[], &ClangToolchain::default()).unwrap();
         assert!(!status.success(), "{source}");
     }
+}
+
+#[test]
+fn vertical8_generic_identity_instances_are_canonical_and_inference_is_local() {
+    let source = SourceFile::new(
+        "v8-instances.ae",
+        r"
+T identity<T>(T value){return value;}
+T recurse<T>(T value){return recurse<T>(value);}
+struct Pair<T,U>{T first;U second;}
+int main(){
+    int a=identity<int>(20);int b=identity<int>(21);int inferred=identity(1);
+    float64 f=identity<float64>(2.0);
+    Pair<int8,int8> small=Pair<int8,int8>(1,2);
+    Pair<int8,float64> wide=Pair<int8,float64>(1,2.0);
+    if(false){return recurse<int>(0);}
+    return a+b+inferred;
+}
+",
+    );
+    let hir = analyze(parse_source(&source).unwrap()).unwrap();
+    let identity = hir
+        .signatures()
+        .iter()
+        .find(|signature| signature.name == "identity")
+        .unwrap();
+    let instances = hir
+        .instances()
+        .iter()
+        .filter(|instance| instance.function_id == identity.id)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        instances.len(),
+        2,
+        "repeated and inferred int calls reuse one instance"
+    );
+    assert_ne!(instances[0].id, instances[1].id);
+    let recurse = hir
+        .signatures()
+        .iter()
+        .find(|signature| signature.name == "recurse")
+        .unwrap();
+    assert_eq!(
+        hir.instances()
+            .iter()
+            .filter(|instance| instance.function_id == recurse.id)
+            .count(),
+        1
+    );
+    let applications = hir
+        .types()
+        .entries()
+        .filter_map(|(ty, data)| matches!(data, TypeData::StructInstance(_, _)).then_some(ty))
+        .filter(|ty| !hir.types().contains_generic(*ty))
+        .collect::<Vec<_>>();
+    assert_eq!(applications.len(), 2);
+    assert_ne!(applications[0], applications[1]);
+    let layouts = applications
+        .iter()
+        .map(|ty| {
+            layout_of(
+                hir.types(),
+                *ty,
+                TargetProperties::LINUX_X86_64,
+                hir.structs(),
+                hir.enums(),
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert!(layouts.iter().any(|layout| layout.size == 2));
+    assert!(layouts.iter().any(|layout| layout.size == 16));
+}
+
+#[test]
+fn vertical8_generic_diagnostics_fail_closed() {
+    for (text, code) in [
+        ("T id<T,T>(T x){return x;}int main(){return 0;}", "E0260"),
+        (
+            "T id<T>(T x){return x;}int main(){return id<int,int>(1);}",
+            "E0262",
+        ),
+        (
+            "int id(int x){return x;}int main(){return id<int>(1);}",
+            "E0262",
+        ),
+        (
+            "T make<T>(){T x=make<T>();return x;}int main(){return make();}",
+            "E0263",
+        ),
+        (
+            "T add<T>(T a,T b){return a+b;}int main(){return 0;}",
+            "E0268",
+        ),
+        (
+            "bool same<T>(T a,T b){return a==b;}int main(){return 0;}",
+            "E0268",
+        ),
+        (
+            "struct Pair<T,U>{T a;U b;}int main(){Pair<int> p=Pair<int>(1);return 0;}",
+            "E0261",
+        ),
+        ("struct Bad<T>{Bad<T> next;}int main(){return 0;}", "E0242"),
+        (
+            "struct Pair<T,U>{T a;U b;}int f<T>(){return f<Pair<T,T>>();}int main(){return f<int>();}",
+            "E0265",
+        ),
+    ] {
+        let Err(mut diagnostics) = compile_source(&SourceFile::new("v8-error.ae", text), &[])
+        else {
+            panic!("expected generic rejection: {text}");
+        };
+        let diagnostic = diagnostics.remove(0);
+        assert_eq!(diagnostic.code, code, "{text}: {}", diagnostic.message);
+        assert!(diagnostic.span.is_some() || code == "E0265");
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical8_cross_module_generics_execute_natively() {
+    let (compilation, status) = run_path(
+        &module_program("v8_generics"),
+        &[Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+        &ClangToolchain::default(),
+    )
+    .unwrap();
+    assert_eq!(status.code(), Some(42));
+    assert!(compilation.dumps[&Emit::Hir].contains("GenericParamId"));
+    assert!(compilation.dumps[&Emit::Hir].contains("InstanceId"));
+    assert!(compilation.llvm.contains("identity__g"));
+    assert!(!compilation.dumps[&Emit::Mir].contains("GenericParam("));
+    assert!(!compilation.dumps[&Emit::Ssa].contains("GenericParam("));
 }

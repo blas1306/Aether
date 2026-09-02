@@ -1,0 +1,26 @@
+T identity<T>(T value) {
+    return value;
+}
+
+struct Pair<T, U> {
+    T first;
+    U second;
+}
+
+alias IntPair = Pair<int, int>;
+
+enum Option<T> {
+    None,
+    Some(T),
+}
+
+T first<T, U>(Pair<T, U> value) {
+    return value.first;
+}
+
+T unwrapOr<T>(Option<T> value, T fallback) {
+    match (value) {
+        Option<T>.None => { return fallback; }
+        Option<T>.Some(found) => { return found; }
+    }
+}

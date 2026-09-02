@@ -14,9 +14,9 @@
 )]
 use crate::{
     AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstMatchArm, AstPlace, AstStmtKind,
-    AstType, AstUnaryOp, Diagnostic, DiagnosticCategory, EnumId, FieldId, FloatType, IntegerType,
-    ParsedAst, Phase, SourceId, Span, StructId, TargetProperties, TypeArena, TypeData, TypeId,
-    VariantId,
+    AstType, AstUnaryOp, Diagnostic, DiagnosticCategory, EnumId, FieldId, FloatType, GenericOwner,
+    GenericParamId, IntegerType, ParsedAst, Phase, SourceId, Span, StructId, Substitution,
+    TargetProperties, TypeArena, TypeData, TypeId, VariantId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
@@ -62,8 +62,16 @@ pub struct FunctionSignature {
     pub id: FunctionId,
     pub module: ModuleId,
     pub name: String,
+    pub generic_parameters: Vec<GenericParamInfo>,
     pub parameters: Vec<ParameterSignature>,
     pub return_type: TypeId,
+    pub span: Span,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GenericParamInfo {
+    pub id: GenericParamId,
+    pub name: String,
+    pub ty: TypeId,
     pub span: Span,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,7 +94,7 @@ pub struct TypeLayout {
 /// Aggregate entries are the caches populated once during semantic analysis;
 /// scalar and target-sized integer layouts are computed from `target`. A
 /// compilation session has exactly one target, so no cross-target cache key or
-/// persistent layout identity is needed in Vertical-7.
+/// persistent layout identity is needed in Vertical-8.
 #[must_use]
 pub fn layout_of(
     types: &TypeArena,
@@ -106,8 +114,25 @@ pub fn layout_of(
         }
         TypeData::Float(FloatType::Float32) => TypeLayout { size: 4, align: 4 },
         TypeData::Float(FloatType::Float64) => TypeLayout { size: 8, align: 8 },
-        TypeData::Struct(id) => structs.get(id.0 as usize)?.layout,
-        TypeData::Enum(id) => enums.get(id.0 as usize)?.layout,
+        TypeData::Struct(id) => {
+            let info = structs.get(id.0 as usize)?;
+            if !info.generic_parameters.is_empty() {
+                return None;
+            }
+            info.layout
+        }
+        TypeData::Enum(id) => {
+            let info = enums.get(id.0 as usize)?;
+            if !info.generic_parameters.is_empty() {
+                return None;
+            }
+            info.layout
+        }
+        TypeData::StructInstance(_, _) | TypeData::EnumInstance(_, _) => {
+            let (size, align) = types.cached_layout(ty)?;
+            TypeLayout { size, align }
+        }
+        TypeData::GenericParam(_) => return None,
     })
 }
 
@@ -127,6 +152,32 @@ pub fn format_type(
         Some(TypeData::Enum(id)) => enums
             .get(id.0 as usize)
             .map_or_else(|| format!("enum#{}", id.0), |info| info.name.clone()),
+        Some(TypeData::StructInstance(id, args)) => {
+            let name = structs
+                .get(id.0 as usize)
+                .map_or_else(|| format!("struct#{}", id.0), |info| info.name.clone());
+            let arguments = types
+                .arguments(*args)
+                .unwrap_or(&[])
+                .iter()
+                .map(|argument| format_type(types, *argument, structs, enums))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{name}<{arguments}>")
+        }
+        Some(TypeData::EnumInstance(id, args)) => {
+            let name = enums
+                .get(id.0 as usize)
+                .map_or_else(|| format!("enum#{}", id.0), |info| info.name.clone());
+            let arguments = types
+                .arguments(*args)
+                .unwrap_or(&[])
+                .iter()
+                .map(|argument| format_type(types, *argument, structs, enums))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("{name}<{arguments}>")
+        }
         Some(data) => data.to_string(),
         None => types.format(ty),
     }
@@ -148,6 +199,7 @@ pub struct StructInfo {
     pub id: StructId,
     pub module: ModuleId,
     pub name: String,
+    pub generic_parameters: Vec<GenericParamInfo>,
     pub fields: Vec<FieldInfo>,
     pub layout: TypeLayout,
     pub span: Span,
@@ -180,6 +232,7 @@ pub struct EnumInfo {
     pub id: EnumId,
     pub module: ModuleId,
     pub name: String,
+    pub generic_parameters: Vec<GenericParamInfo>,
     pub variants: Vec<VariantInfo>,
     pub layout: TypeLayout,
     pub span: Span,
@@ -201,6 +254,8 @@ pub struct DeclaredProgram {
     enum_names: Vec<BTreeMap<String, EnumId>>,
     variant_names: Vec<BTreeMap<String, VariantId>>,
     field_names: Vec<BTreeMap<String, FieldId>>,
+    struct_arities: Vec<usize>,
+    enum_arities: Vec<usize>,
     entry: FunctionId,
 }
 impl DeclaredProgram {
@@ -236,8 +291,10 @@ pub struct TypedHir {
     structs: Vec<StructInfo>,
     enums: Vec<EnumInfo>,
     signatures: Vec<FunctionSignature>,
+    instances: Vec<FunctionInstanceInfo>,
+    generic_functions: Vec<GenericHirFunction>,
     functions: Vec<HirFunction>,
-    entry: FunctionId,
+    entry: crate::InstanceId,
 }
 impl TypedHir {
     #[must_use]
@@ -269,7 +326,15 @@ impl TypedHir {
         &self.functions
     }
     #[must_use]
-    pub const fn entry(&self) -> FunctionId {
+    pub fn instances(&self) -> &[FunctionInstanceInfo] {
+        &self.instances
+    }
+    #[must_use]
+    pub fn generic_functions(&self) -> &[GenericHirFunction] {
+        &self.generic_functions
+    }
+    #[must_use]
+    pub const fn entry(&self) -> crate::InstanceId {
         self.entry
     }
     #[must_use]
@@ -286,8 +351,15 @@ impl TypedHir {
             .collect::<Vec<_>>()
             .join("\n");
         let mut d = format!(
-            "types (session-local):\n{type_table}\nentry: {:#?}\nmodules: {:#?}\naliases (transparent -> canonical): {:#?}\nstructs: {:#?}\nenums: {:#?}\nsignatures: {:#?}",
-            self.entry, self.modules, self.aliases, self.structs, self.enums, self.signatures
+            "types (session-local):\n{type_table}\nentry: {:#?}\nmodules: {:#?}\naliases (transparent -> canonical): {:#?}\nstructs: {:#?}\nenums: {:#?}\ndeclarations: {:#?}\ngeneric HIR: {:#?}\ninstances: {:#?}",
+            self.entry,
+            self.modules,
+            self.aliases,
+            self.structs,
+            self.enums,
+            self.signatures,
+            self.generic_functions,
+            self.instances
         );
         for m in &self.modules {
             let f: Vec<_> = self.functions.iter().filter(|f| f.module == m.id).collect();
@@ -304,16 +376,16 @@ impl TypedHir {
         TypeArena,
         Vec<StructInfo>,
         Vec<EnumInfo>,
-        Vec<FunctionSignature>,
+        Vec<FunctionInstanceInfo>,
         Vec<HirFunction>,
-        FunctionId,
+        crate::InstanceId,
     ) {
         (
             self.modules,
             self.types,
             self.structs,
             self.enums,
-            self.signatures,
+            self.instances,
             self.functions,
             self.entry,
         )
@@ -321,11 +393,33 @@ impl TypedHir {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HirFunction {
+    pub id: crate::InstanceId,
+    pub function_id: FunctionId,
+    pub module: ModuleId,
+    pub parameters: Vec<HirParameter>,
+    pub locals: Vec<HirLocal>,
+    pub body: HirBlock,
+    pub span: Span,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GenericHirFunction {
     pub id: FunctionId,
     pub module: ModuleId,
     pub parameters: Vec<HirParameter>,
     pub locals: Vec<HirLocal>,
     pub body: HirBlock,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FunctionInstanceInfo {
+    pub id: crate::InstanceId,
+    pub function_id: FunctionId,
+    pub module: ModuleId,
+    pub name: String,
+    pub type_arguments: Vec<TypeId>,
+    pub parameters: Vec<ParameterSignature>,
+    pub return_type: TypeId,
     pub span: Span,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -406,7 +500,8 @@ pub enum HirExprKind {
     Local(LocalId),
     Load(HirPlace),
     Call {
-        callee: FunctionId,
+        callee: HirCallTarget,
+        type_arguments: Vec<TypeId>,
         args: Vec<HirExpr>,
     },
     StructInit {
@@ -437,6 +532,11 @@ pub enum HirExprKind {
         left: Box<HirExpr>,
         right: Box<HirExpr>,
     },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HirCallTarget {
+    Declaration(FunctionId),
+    Instance(crate::InstanceId),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CoercionKind {
@@ -591,6 +691,14 @@ pub fn collect_program_signatures(
             enum_decls.push((id, module.info.id, declaration));
         }
     }
+    let struct_arities = struct_decls
+        .iter()
+        .map(|(_, _, declaration)| declaration.generic_parameters.len())
+        .collect::<Vec<_>>();
+    let enum_arities = enum_decls
+        .iter()
+        .map(|(_, _, declaration)| declaration.generic_parameters.len())
+        .collect::<Vec<_>>();
 
     // Allocation order is deterministic for dumps but has no semantic or ABI
     // meaning. Declaration identities make nominality explicit in TypeData.
@@ -619,7 +727,9 @@ pub fn collect_program_signatures(
                 &enum_names,
                 &imports,
                 &module_names,
-                &types,
+                &mut types,
+                &struct_arities,
+                &enum_arities,
                 &mut state,
                 &mut aliases[module.info.id.0 as usize],
                 &mut alias_info,
@@ -632,6 +742,16 @@ pub fn collect_program_signatures(
     let mut next_field = 0_u32;
     for (id, module_id, declaration) in struct_decls {
         let module = &program.modules[module_id.0 as usize];
+        let generic_parameters = collect_generic_parameters(
+            GenericOwner::Struct(id),
+            &declaration.generic_parameters,
+            &mut types,
+        )
+        .map_err(|diagnostic| vec![src(diagnostic, module)])?;
+        let generic_scope = generic_parameters
+            .iter()
+            .map(|parameter| (parameter.name.clone(), parameter.ty))
+            .collect::<BTreeMap<_, _>>();
         let mut seen = BTreeMap::new();
         let mut fields = Vec::new();
         for (index, field) in declaration.fields.iter().enumerate() {
@@ -658,7 +778,10 @@ pub fn collect_program_signatures(
                 &enum_names,
                 &imports,
                 &module_names,
-                &types,
+                &mut types,
+                &generic_scope,
+                &struct_arities,
+                &enum_arities,
             )
             .map_err(|d| vec![src(d, module)])?;
             let field_id = FieldId(next_field);
@@ -679,6 +802,7 @@ pub fn collect_program_signatures(
             id,
             module: module_id,
             name: declaration.name.clone(),
+            generic_parameters,
             fields,
             layout: TypeLayout { size: 0, align: 1 },
             span: declaration.span,
@@ -689,6 +813,16 @@ pub fn collect_program_signatures(
     let mut variant_names = Vec::with_capacity(enum_decls.len());
     for (id, module_id, declaration) in enum_decls {
         let module = &program.modules[module_id.0 as usize];
+        let generic_parameters = collect_generic_parameters(
+            GenericOwner::Enum(id),
+            &declaration.generic_parameters,
+            &mut types,
+        )
+        .map_err(|diagnostic| vec![src(diagnostic, module)])?;
+        let generic_scope = generic_parameters
+            .iter()
+            .map(|parameter| (parameter.name.clone(), parameter.ty))
+            .collect::<BTreeMap<_, _>>();
         let mut seen = BTreeMap::new();
         let mut variants = Vec::new();
         for (index, variant) in declaration.variants.iter().enumerate() {
@@ -725,7 +859,10 @@ pub fn collect_program_signatures(
                         &enum_names,
                         &imports,
                         &module_names,
-                        &types,
+                        &mut types,
+                        &generic_scope,
+                        &struct_arities,
+                        &enum_arities,
                     )
                     .map(|resolved| VariantPayloadInfo {
                         index: payload_index as u32,
@@ -753,6 +890,7 @@ pub fn collect_program_signatures(
             id,
             module: module_id,
             name: declaration.name.clone(),
+            generic_parameters,
             variants,
             layout: TypeLayout { size: 0, align: 1 },
             span: declaration.span,
@@ -764,6 +902,16 @@ pub fn collect_program_signatures(
         for f in module.ast.functions() {
             let id = FunctionId(signatures.len() as u32);
             names[module.info.id.0 as usize].insert(f.name.clone(), id);
+            let generic_parameters = collect_generic_parameters(
+                GenericOwner::Function(id.0),
+                &f.generic_parameters,
+                &mut types,
+            )
+            .map_err(|diagnostic| vec![src(diagnostic, module)])?;
+            let generic_scope = generic_parameters
+                .iter()
+                .map(|parameter| (parameter.name.clone(), parameter.ty))
+                .collect::<BTreeMap<_, _>>();
             let parameters = f
                 .parameters
                 .iter()
@@ -776,7 +924,10 @@ pub fn collect_program_signatures(
                         &enum_names,
                         &imports,
                         &module_names,
-                        &types,
+                        &mut types,
+                        &generic_scope,
+                        &struct_arities,
+                        &enum_arities,
                     )
                     .map(|ty| ParameterSignature {
                         name: p.name.clone(),
@@ -794,13 +945,17 @@ pub fn collect_program_signatures(
                 &enum_names,
                 &imports,
                 &module_names,
-                &types,
+                &mut types,
+                &generic_scope,
+                &struct_arities,
+                &enum_arities,
             )
             .map_err(|d| vec![src(d, module)])?;
             signatures.push(FunctionSignature {
                 id,
                 module: module.info.id,
                 name: f.name.clone(),
+                generic_parameters,
                 parameters,
                 return_type,
                 span: f.span,
@@ -848,6 +1003,8 @@ pub fn collect_program_signatures(
         enum_names,
         variant_names,
         field_names,
+        struct_arities,
+        enum_arities,
         entry,
     })
 }
@@ -865,7 +1022,9 @@ fn resolve_alias(
     enum_names: &[BTreeMap<String, EnumId>],
     imports: &[BTreeMap<String, ModuleId>],
     module_names: &BTreeMap<String, ModuleId>,
-    types: &TypeArena,
+    types: &mut TypeArena,
+    struct_arities: &[usize],
+    enum_arities: &[usize],
     state: &mut BTreeMap<String, AliasState>,
     resolved: &mut BTreeMap<String, TypeId>,
     info: &mut Vec<TypeAliasInfo>,
@@ -888,29 +1047,10 @@ fn resolve_alias(
     }
     state.insert(name.into(), AliasState::Visiting);
     let a = decl[name];
-    let ty = if a.target.module.is_some() {
-        resolve_qualified_type(
-            &a.target,
-            module.info.id,
-            None,
-            struct_names,
-            enum_names,
-            imports,
-            module_names,
-            types,
-        )
-        .map_err(|d| vec![src(d, module)])?
-    } else if let Some(t) = builtin(&a.target.name) {
-        t
-    } else if let Some(id) = struct_names[module.info.id.0 as usize].get(&a.target.name) {
-        types
-            .id_of(TypeData::Struct(*id))
-            .expect("collected struct type")
-    } else if let Some(id) = enum_names[module.info.id.0 as usize].get(&a.target.name) {
-        types
-            .id_of(TypeData::Enum(*id))
-            .expect("collected enum type")
-    } else if decl.contains_key(&a.target.name) {
+    let ty = if a.target.module.is_none()
+        && a.target.arguments.is_empty()
+        && decl.contains_key(&a.target.name)
+    {
         resolve_alias(
             &a.target.name,
             module,
@@ -920,12 +1060,28 @@ fn resolve_alias(
             imports,
             module_names,
             types,
+            struct_arities,
+            enum_arities,
             state,
             resolved,
             info,
         )?
     } else {
-        return Err(vec![src(unknown_type(&a.target), module)]);
+        let alias_snapshot = vec![BTreeMap::new(); struct_names.len()];
+        resolve_type_in_module(
+            &a.target,
+            module.info.id,
+            &alias_snapshot,
+            struct_names,
+            enum_names,
+            imports,
+            module_names,
+            types,
+            &BTreeMap::new(),
+            struct_arities,
+            enum_arities,
+        )
+        .map_err(|d| vec![src(d, module)])?
     };
     state.insert(name.into(), AliasState::Done);
     resolved.insert(name.into(), ty);
@@ -939,49 +1095,6 @@ fn resolve_alias(
     Ok(ty)
 }
 
-fn resolve_qualified_type(
-    ty: &AstType,
-    current: ModuleId,
-    aliases: Option<&[BTreeMap<String, TypeId>]>,
-    struct_names: &[BTreeMap<String, StructId>],
-    enum_names: &[BTreeMap<String, EnumId>],
-    imports: &[BTreeMap<String, ModuleId>],
-    module_names: &BTreeMap<String, ModuleId>,
-    types: &TypeArena,
-) -> Result<TypeId, Diagnostic> {
-    let module = ty.module.as_ref().expect("qualified type");
-    let Some(target) = module_names.get(module).copied() else {
-        return Err(Diagnostic::new(
-            "E0221",
-            Phase::Semantic,
-            DiagnosticCategory::Name,
-            format!("unknown module `{module}`"),
-            Some(ty.span),
-        ));
-    };
-    if imports[current.0 as usize].get(module) != Some(&target) {
-        return Err(Diagnostic::new(
-            "E0223",
-            Phase::Semantic,
-            DiagnosticCategory::Name,
-            format!("module `{module}` is not directly imported"),
-            Some(ty.span),
-        ));
-    }
-    struct_names[target.0 as usize]
-        .get(&ty.name)
-        .copied()
-        .and_then(|id| types.id_of(TypeData::Struct(id)))
-        .or_else(|| {
-            enum_names[target.0 as usize]
-                .get(&ty.name)
-                .copied()
-                .and_then(|id| types.id_of(TypeData::Enum(id)))
-        })
-        .or_else(|| aliases.and_then(|maps| maps[target.0 as usize].get(&ty.name).copied()))
-        .ok_or_else(|| unknown_type(ty))
-}
-
 fn resolve_type_in_module(
     ty: &AstType,
     current: ModuleId,
@@ -990,35 +1103,224 @@ fn resolve_type_in_module(
     enum_names: &[BTreeMap<String, EnumId>],
     imports: &[BTreeMap<String, ModuleId>],
     module_names: &BTreeMap<String, ModuleId>,
-    types: &TypeArena,
+    types: &mut TypeArena,
+    generic_scope: &BTreeMap<String, TypeId>,
+    struct_arities: &[usize],
+    enum_arities: &[usize],
 ) -> Result<TypeId, Diagnostic> {
-    if ty.module.is_some() {
-        return resolve_qualified_type(
-            ty,
+    let target = if let Some(module) = &ty.module {
+        let Some(target) = module_names.get(module).copied() else {
+            return Err(Diagnostic::new(
+                "E0221",
+                Phase::Semantic,
+                DiagnosticCategory::Name,
+                format!("unknown module `{module}`"),
+                Some(ty.span),
+            ));
+        };
+        if imports[current.0 as usize].get(module) != Some(&target) {
+            return Err(Diagnostic::new(
+                "E0223",
+                Phase::Semantic,
+                DiagnosticCategory::Name,
+                format!("module `{module}` is not directly imported"),
+                Some(ty.span),
+            ));
+        }
+        target
+    } else {
+        current
+    };
+    if ty.module.is_none()
+        && let Some(parameter) = generic_scope.get(&ty.name).copied()
+    {
+        if !ty.arguments.is_empty() {
+            return Err(generic_arity(ty, 0));
+        }
+        return Ok(parameter);
+    }
+    let mut arguments = Vec::with_capacity(ty.arguments.len());
+    for argument in &ty.arguments {
+        arguments.push(resolve_type_in_module(
+            argument,
             current,
-            Some(aliases),
+            aliases,
             struct_names,
             enum_names,
             imports,
             module_names,
             types,
-        );
+            generic_scope,
+            struct_arities,
+            enum_arities,
+        )?);
     }
-    builtin(&ty.name)
-        .or_else(|| aliases[current.0 as usize].get(&ty.name).copied())
-        .or_else(|| {
-            struct_names[current.0 as usize]
-                .get(&ty.name)
-                .copied()
-                .and_then(|id| types.id_of(TypeData::Struct(id)))
+    if let Some(id) = struct_names[target.0 as usize].get(&ty.name).copied() {
+        let expected = struct_arities[id.0 as usize];
+        if arguments.len() != expected {
+            return Err(generic_arity(ty, expected));
+        }
+        return if expected == 0 {
+            Ok(types
+                .id_of(TypeData::Struct(id))
+                .expect("collected struct type"))
+        } else {
+            Ok(types.intern_struct_instance(id, arguments))
+        };
+    }
+    if let Some(id) = enum_names[target.0 as usize].get(&ty.name).copied() {
+        let expected = enum_arities[id.0 as usize];
+        if arguments.len() != expected {
+            return Err(generic_arity(ty, expected));
+        }
+        return if expected == 0 {
+            Ok(types
+                .id_of(TypeData::Enum(id))
+                .expect("collected enum type"))
+        } else {
+            Ok(types.intern_enum_instance(id, arguments))
+        };
+    }
+    if let Some(alias) = aliases
+        .get(target.0 as usize)
+        .and_then(|map| map.get(&ty.name))
+        .copied()
+    {
+        if !arguments.is_empty() {
+            return Err(generic_arity(ty, 0));
+        }
+        return Ok(alias);
+    }
+    if ty.module.is_none()
+        && let Some(builtin) = builtin(&ty.name)
+    {
+        if !arguments.is_empty() {
+            return Err(generic_arity(ty, 0));
+        }
+        return Ok(builtin);
+    }
+    Err(unknown_type(ty))
+}
+
+fn generic_arity(ty: &AstType, expected: usize) -> Diagnostic {
+    Diagnostic::new(
+        "E0261",
+        Phase::Semantic,
+        DiagnosticCategory::Type,
+        format!(
+            "type `{}` expects {expected} generic arguments, found {}",
+            ty.name,
+            ty.arguments.len()
+        ),
+        Some(ty.span),
+    )
+}
+
+fn collect_generic_parameters(
+    owner: GenericOwner,
+    parameters: &[crate::AstGenericParam],
+    types: &mut TypeArena,
+) -> Result<Vec<GenericParamInfo>, Diagnostic> {
+    let mut seen = BTreeSet::new();
+    parameters
+        .iter()
+        .enumerate()
+        .map(|(index, parameter)| {
+            if !seen.insert(parameter.name.clone()) {
+                return Err(Diagnostic::new(
+                    "E0260",
+                    Phase::Semantic,
+                    DiagnosticCategory::Name,
+                    format!("duplicate generic parameter `{}`", parameter.name),
+                    Some(parameter.span),
+                ));
+            }
+            let id = GenericParamId {
+                owner,
+                index: index as u32,
+            };
+            Ok(GenericParamInfo {
+                id,
+                name: parameter.name.clone(),
+                ty: types.intern(TypeData::GenericParam(id)),
+                span: parameter.span,
+            })
         })
-        .or_else(|| {
-            enum_names[current.0 as usize]
-                .get(&ty.name)
-                .copied()
-                .and_then(|id| types.id_of(TypeData::Enum(id)))
-        })
-        .ok_or_else(|| unknown_type(ty))
+        .collect()
+}
+
+fn generic_call_arity(name: &str, expected: usize, found: usize, span: Span) -> Diagnostic {
+    Diagnostic::new(
+        "E0262",
+        Phase::Semantic,
+        DiagnosticCategory::Type,
+        format!("generic declaration `{name}` expects {expected} type arguments, found {found}"),
+        Some(span),
+    )
+}
+
+fn incomplete_substitution(parameter: GenericParamId, span: Span) -> Diagnostic {
+    Diagnostic::new(
+        "E0264",
+        Phase::Semantic,
+        DiagnosticCategory::Type,
+        format!("incomplete substitution for {parameter:?}"),
+        Some(span),
+    )
+}
+
+fn infer_generic_arguments(
+    types: &TypeArena,
+    pattern: TypeId,
+    actual: TypeId,
+    inferred: &mut BTreeMap<GenericParamId, TypeId>,
+) -> Result<(), Vec<Diagnostic>> {
+    if let Some(parameter) = types.generic_param(pattern) {
+        if let Some(previous) = inferred.insert(parameter, actual)
+            && previous != actual
+        {
+            return Err(vec![type_error(
+                "conflicting inferred generic arguments",
+                Span::in_source(SourceId(0), 0, 0),
+            )]);
+        }
+        return Ok(());
+    }
+    match (types.get(pattern), types.get(actual)) {
+        (
+            Some(TypeData::StructInstance(left, left_args)),
+            Some(TypeData::StructInstance(right, right_args)),
+        ) if left == right => {
+            for (left, right) in types
+                .arguments(*left_args)
+                .unwrap()
+                .iter()
+                .zip(types.arguments(*right_args).unwrap())
+            {
+                infer_generic_arguments(types, *left, *right, inferred)?;
+            }
+            Ok(())
+        }
+        (
+            Some(TypeData::EnumInstance(left, left_args)),
+            Some(TypeData::EnumInstance(right, right_args)),
+        ) if left == right => {
+            for (left, right) in types
+                .arguments(*left_args)
+                .unwrap()
+                .iter()
+                .zip(types.arguments(*right_args).unwrap())
+            {
+                infer_generic_arguments(types, *left, *right, inferred)?;
+            }
+            Ok(())
+        }
+        _ if pattern == actual => Ok(()),
+        _ => Err(vec![type_error(
+            "argument does not match generic parameter pattern",
+            Span::in_source(SourceId(0), 0, 0),
+        )]),
+    }
 }
 
 fn align_up(value: u64, align: u64) -> u64 {
@@ -1097,10 +1399,12 @@ fn compute_aggregate_layouts(
         };
         for ty in child_types {
             match types.get(ty) {
-                Some(TypeData::Struct(id)) => {
+                Some(TypeData::Struct(id) | TypeData::StructInstance(id, _)) => {
                     visit(Node::Struct(*id), structs, enums, types, state)?
                 }
-                Some(TypeData::Enum(id)) => visit(Node::Enum(*id), structs, enums, types, state)?,
+                Some(TypeData::Enum(id) | TypeData::EnumInstance(id, _)) => {
+                    visit(Node::Enum(*id), structs, enums, types, state)?
+                }
                 _ => {}
             }
         }
@@ -1153,6 +1457,12 @@ fn compute_aggregate_layouts(
             TypeData::Enum(id) => {
                 enum_layout(*id, structs, enums, types, struct_state, enum_state, target)
             }
+            TypeData::StructInstance(_, _) | TypeData::EnumInstance(_, _) => types
+                .cached_layout(ty)
+                .map_or(TypeLayout { size: 0, align: 1 }, |(size, align)| {
+                    TypeLayout { size, align }
+                }),
+            TypeData::GenericParam(_) => TypeLayout { size: 0, align: 1 },
         }
     }
     fn struct_layout(
@@ -1323,11 +1633,12 @@ pub fn analyze_bodies_for_target(
         },
     )?;
     let mut functions = vec![];
+    let mut types = std::mem::take(&mut d.types);
     for m in &d.program.modules {
         for f in m.ast.functions() {
             let id = FunctionId(functions.len() as u32);
             functions.push(
-                analyze_function(f, id, m.info.id, &d, target).map_err(|ds| {
+                analyze_function(f, id, m.info.id, &d, &mut types, target).map_err(|ds| {
                     ds.into_iter()
                         .map(|x| x.with_source_name(&m.info.source_name))
                         .collect::<Vec<_>>()
@@ -1335,15 +1646,21 @@ pub fn analyze_bodies_for_target(
             );
         }
     }
+    let generic_functions = functions;
+    let (instances, functions, entry) =
+        monomorphize(&mut types, &d.signatures, &generic_functions, d.entry)?;
+    compute_concrete_layouts(&mut types, &d.structs, &d.enums, target)?;
     let hir = TypedHir {
         modules: d.program.modules.iter().map(|m| m.info.clone()).collect(),
-        types: d.types,
+        types,
         aliases: d.alias_info,
         structs: d.structs,
         enums: d.enums,
         signatures: d.signatures,
+        instances,
+        generic_functions,
         functions,
-        entry: d.entry,
+        entry,
     };
     verify_hir(&hir)?;
     Ok(hir)
@@ -1351,13 +1668,605 @@ pub fn analyze_bodies_for_target(
 pub fn analyze(ast: ParsedAst) -> Result<TypedHir, Vec<Diagnostic>> {
     analyze_bodies(collect_signatures(ast)?)
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct InstanceKey {
+    function: FunctionId,
+    arguments: Vec<TypeId>,
+}
+
+struct Monomorphizer<'a> {
+    types: &'a mut TypeArena,
+    signatures: &'a [FunctionSignature],
+    declarations: &'a [GenericHirFunction],
+    ids: BTreeMap<InstanceKey, crate::InstanceId>,
+    queue: Vec<InstanceKey>,
+    instances: Vec<FunctionInstanceInfo>,
+    functions: Vec<HirFunction>,
+}
+
+fn monomorphize(
+    types: &mut TypeArena,
+    signatures: &[FunctionSignature],
+    declarations: &[GenericHirFunction],
+    entry: FunctionId,
+) -> Result<
+    (
+        Vec<FunctionInstanceInfo>,
+        Vec<HirFunction>,
+        crate::InstanceId,
+    ),
+    Vec<Diagnostic>,
+> {
+    let mut mono = Monomorphizer {
+        types,
+        signatures,
+        declarations,
+        ids: BTreeMap::new(),
+        queue: Vec::new(),
+        instances: Vec::new(),
+        functions: Vec::new(),
+    };
+    for signature in signatures {
+        if signature.generic_parameters.is_empty() {
+            mono.request(
+                InstanceKey {
+                    function: signature.id,
+                    arguments: Vec::new(),
+                },
+                signature.span,
+            )?;
+        }
+    }
+    let entry = *mono
+        .ids
+        .get(&InstanceKey {
+            function: entry,
+            arguments: Vec::new(),
+        })
+        .expect("non-generic entry was seeded");
+    let mut cursor = 0;
+    while cursor < mono.queue.len() {
+        let key = mono.queue[cursor].clone();
+        mono.instantiate(key)?;
+        cursor += 1;
+    }
+    Ok((mono.instances, mono.functions, entry))
+}
+
+impl Monomorphizer<'_> {
+    fn request(
+        &mut self,
+        key: InstanceKey,
+        span: Span,
+    ) -> Result<crate::InstanceId, Vec<Diagnostic>> {
+        if let Some(id) = self.ids.get(&key) {
+            return Ok(*id);
+        }
+        let signature = &self.signatures[key.function.0 as usize];
+        if key.arguments.len() != signature.generic_parameters.len() {
+            return Err(vec![generic_call_arity(
+                &signature.name,
+                signature.generic_parameters.len(),
+                key.arguments.len(),
+                span,
+            )]);
+        }
+        if key
+            .arguments
+            .iter()
+            .any(|argument| self.types.contains_generic(*argument))
+        {
+            return Err(vec![Diagnostic::new(
+                "E0266",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "unresolved generic argument reached monomorphization",
+                Some(span),
+            )]);
+        }
+        let structurally_expands = self.queue.iter().any(|previous| {
+            previous.function == key.function
+                && previous.arguments.len() == key.arguments.len()
+                && key
+                    .arguments
+                    .iter()
+                    .zip(&previous.arguments)
+                    .all(|(new, old)| type_contains(self.types, *new, *old))
+                && key.arguments != previous.arguments
+        });
+        if structurally_expands
+            || self.queue.len() >= 256
+            || key
+                .arguments
+                .iter()
+                .any(|argument| type_depth(self.types, *argument) > 32)
+        {
+            return Err(vec![Diagnostic::new(
+                "E0265",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!(
+                    "expanding monomorphization of `{}` exceeds the Vertical-8 safety limit",
+                    signature.name
+                ),
+                Some(span),
+            )]);
+        }
+        let id = crate::InstanceId(self.queue.len() as u32);
+        self.ids.insert(key.clone(), id);
+        self.queue.push(key);
+        Ok(id)
+    }
+
+    fn instantiate(&mut self, key: InstanceKey) -> Result<(), Vec<Diagnostic>> {
+        let id = self.ids[&key];
+        let signature = self.signatures[key.function.0 as usize].clone();
+        let declaration = self.declarations[key.function.0 as usize].clone();
+        let substitution = Substitution::new(
+            signature
+                .generic_parameters
+                .iter()
+                .map(|parameter| parameter.id),
+            key.arguments.iter().copied(),
+        );
+        let parameters = signature
+            .parameters
+            .iter()
+            .map(|parameter| {
+                Ok(ParameterSignature {
+                    name: parameter.name.clone(),
+                    ty: self.substitute_type(parameter.ty, &substitution, parameter.span)?,
+                    span: parameter.span,
+                })
+            })
+            .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?;
+        let return_type =
+            self.substitute_type(signature.return_type, &substitution, signature.span)?;
+        let locals = declaration
+            .locals
+            .iter()
+            .map(|local| {
+                Ok(HirLocal {
+                    id: local.id,
+                    name: local.name.clone(),
+                    ty: self.substitute_type(local.ty, &substitution, local.span)?,
+                    span: local.span,
+                    parameter: local.parameter,
+                })
+            })
+            .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?;
+        let hir_parameters = declaration
+            .parameters
+            .iter()
+            .map(|parameter| {
+                Ok(HirParameter {
+                    local: parameter.local,
+                    ty: self.substitute_type(parameter.ty, &substitution, parameter.span)?,
+                    span: parameter.span,
+                })
+            })
+            .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?;
+        let body = self.substitute_block(&declaration.body, &substitution)?;
+        debug_assert_eq!(id.0 as usize, self.functions.len());
+        self.instances.push(FunctionInstanceInfo {
+            id,
+            function_id: key.function,
+            module: signature.module,
+            name: signature.name,
+            type_arguments: key.arguments,
+            parameters,
+            return_type,
+            span: signature.span,
+        });
+        self.functions.push(HirFunction {
+            id,
+            function_id: key.function,
+            module: declaration.module,
+            parameters: hir_parameters,
+            locals,
+            body,
+            span: declaration.span,
+        });
+        Ok(())
+    }
+
+    fn substitute_type(
+        &mut self,
+        ty: TypeId,
+        substitution: &Substitution,
+        span: Span,
+    ) -> Result<TypeId, Vec<Diagnostic>> {
+        self.types
+            .substitute(ty, substitution)
+            .map_err(|parameter| vec![incomplete_substitution(parameter, span)])
+    }
+
+    fn substitute_block(
+        &mut self,
+        block: &HirBlock,
+        substitution: &Substitution,
+    ) -> Result<HirBlock, Vec<Diagnostic>> {
+        Ok(HirBlock {
+            statements: block
+                .statements
+                .iter()
+                .map(|statement| {
+                    let kind = match &statement.kind {
+                        HirStmtKind::Local { local, initializer } => HirStmtKind::Local {
+                            local: *local,
+                            initializer: self.substitute_expr(initializer, substitution)?,
+                        },
+                        HirStmtKind::Assign { place, value } => HirStmtKind::Assign {
+                            place: self.substitute_place(place, substitution)?,
+                            value: self.substitute_expr(value, substitution)?,
+                        },
+                        HirStmtKind::If {
+                            condition,
+                            then_block,
+                            else_block,
+                        } => HirStmtKind::If {
+                            condition: self.substitute_expr(condition, substitution)?,
+                            then_block: self.substitute_block(then_block, substitution)?,
+                            else_block: else_block
+                                .as_ref()
+                                .map(|block| self.substitute_block(block, substitution))
+                                .transpose()?,
+                        },
+                        HirStmtKind::While { condition, body } => HirStmtKind::While {
+                            condition: self.substitute_expr(condition, substitution)?,
+                            body: self.substitute_block(body, substitution)?,
+                        },
+                        HirStmtKind::Match {
+                            scrutinee,
+                            enum_id,
+                            arms,
+                        } => HirStmtKind::Match {
+                            scrutinee: self.substitute_expr(scrutinee, substitution)?,
+                            enum_id: *enum_id,
+                            arms: arms
+                                .iter()
+                                .map(|arm| {
+                                    Ok(HirMatchArm {
+                                        variant_id: arm.variant_id,
+                                        bindings: arm
+                                            .bindings
+                                            .iter()
+                                            .map(|binding| {
+                                                Ok(HirMatchBinding {
+                                                    local: binding.local,
+                                                    payload_index: binding.payload_index,
+                                                    ty: self.substitute_type(
+                                                        binding.ty,
+                                                        substitution,
+                                                        binding.span,
+                                                    )?,
+                                                    span: binding.span,
+                                                })
+                                            })
+                                            .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?,
+                                        body: self.substitute_block(&arm.body, substitution)?,
+                                        span: arm.span,
+                                    })
+                                })
+                                .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?,
+                        },
+                        HirStmtKind::Return(value) => {
+                            HirStmtKind::Return(self.substitute_expr(value, substitution)?)
+                        }
+                    };
+                    Ok(HirStmt {
+                        kind,
+                        span: statement.span,
+                    })
+                })
+                .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?,
+            span: block.span,
+        })
+    }
+
+    fn substitute_place(
+        &mut self,
+        place: &HirPlace,
+        substitution: &Substitution,
+    ) -> Result<HirPlace, Vec<Diagnostic>> {
+        Ok(HirPlace {
+            local: place.local,
+            projections: place.projections.clone(),
+            ty: self.substitute_type(place.ty, substitution, Span::in_source(SourceId(0), 0, 0))?,
+        })
+    }
+
+    fn substitute_expr(
+        &mut self,
+        expression: &HirExpr,
+        substitution: &Substitution,
+    ) -> Result<HirExpr, Vec<Diagnostic>> {
+        let ty = self.substitute_type(expression.ty, substitution, expression.span)?;
+        let kind = match &expression.kind {
+            HirExprKind::Int(value) => HirExprKind::Int(*value),
+            HirExprKind::Float(value) => HirExprKind::Float(*value),
+            HirExprKind::Bool(value) => HirExprKind::Bool(*value),
+            HirExprKind::Local(local) => HirExprKind::Local(*local),
+            HirExprKind::Load(place) => {
+                HirExprKind::Load(self.substitute_place(place, substitution)?)
+            }
+            HirExprKind::Call {
+                callee,
+                type_arguments,
+                args,
+            } => {
+                let HirCallTarget::Declaration(function) = callee else {
+                    return Err(vec![Diagnostic::new(
+                        "E0266",
+                        Phase::Semantic,
+                        DiagnosticCategory::Verification,
+                        "generic HIR already contains an instance call",
+                        Some(expression.span),
+                    )]);
+                };
+                let concrete_arguments = type_arguments
+                    .iter()
+                    .map(|argument| self.substitute_type(*argument, substitution, expression.span))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let instance = self.request(
+                    InstanceKey {
+                        function: *function,
+                        arguments: concrete_arguments.clone(),
+                    },
+                    expression.span,
+                )?;
+                HirExprKind::Call {
+                    callee: HirCallTarget::Instance(instance),
+                    type_arguments: concrete_arguments,
+                    args: args
+                        .iter()
+                        .map(|argument| self.substitute_expr(argument, substitution))
+                        .collect::<Result<Vec<_>, _>>()?,
+                }
+            }
+            HirExprKind::StructInit { struct_id, fields } => HirExprKind::StructInit {
+                struct_id: *struct_id,
+                fields: fields
+                    .iter()
+                    .map(|(field, value)| Ok((*field, self.substitute_expr(value, substitution)?)))
+                    .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?,
+            },
+            HirExprKind::EnumInit {
+                enum_id,
+                variant_id,
+                payloads,
+            } => HirExprKind::EnumInit {
+                enum_id: *enum_id,
+                variant_id: *variant_id,
+                payloads: payloads
+                    .iter()
+                    .map(|payload| self.substitute_expr(payload, substitution))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+            HirExprKind::Coerce { kind, operand } => HirExprKind::Coerce {
+                kind: *kind,
+                operand: Box::new(self.substitute_expr(operand, substitution)?),
+            },
+            HirExprKind::ExplicitCast {
+                kind,
+                source_type,
+                target_type,
+                operand,
+            } => HirExprKind::ExplicitCast {
+                kind: *kind,
+                source_type: self.substitute_type(*source_type, substitution, expression.span)?,
+                target_type: self.substitute_type(*target_type, substitution, expression.span)?,
+                operand: Box::new(self.substitute_expr(operand, substitution)?),
+            },
+            HirExprKind::Unary { op, operand } => HirExprKind::Unary {
+                op: *op,
+                operand: Box::new(self.substitute_expr(operand, substitution)?),
+            },
+            HirExprKind::Binary { op, left, right } => HirExprKind::Binary {
+                op: *op,
+                left: Box::new(self.substitute_expr(left, substitution)?),
+                right: Box::new(self.substitute_expr(right, substitution)?),
+            },
+        };
+        Ok(HirExpr {
+            kind,
+            ty,
+            span: expression.span,
+        })
+    }
+}
+
+fn type_depth(types: &TypeArena, ty: TypeId) -> usize {
+    match types.get(ty) {
+        Some(TypeData::StructInstance(_, args) | TypeData::EnumInstance(_, args)) => {
+            1 + types
+                .arguments(*args)
+                .unwrap()
+                .iter()
+                .map(|argument| type_depth(types, *argument))
+                .max()
+                .unwrap_or(0)
+        }
+        _ => 1,
+    }
+}
+
+fn type_contains(types: &TypeArena, outer: TypeId, needle: TypeId) -> bool {
+    outer == needle
+        || match types.get(outer) {
+            Some(TypeData::StructInstance(_, args) | TypeData::EnumInstance(_, args)) => {
+                types.arguments(*args).is_some_and(|arguments| {
+                    arguments
+                        .iter()
+                        .any(|argument| type_contains(types, *argument, needle))
+                })
+            }
+            _ => false,
+        }
+}
+
+fn compute_concrete_layouts(
+    types: &mut TypeArena,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+    target: TargetProperties,
+) -> Result<(), Vec<Diagnostic>> {
+    fn concrete_layout(
+        types: &mut TypeArena,
+        structs: &[StructInfo],
+        enums: &[EnumInfo],
+        target: TargetProperties,
+        ty: TypeId,
+        visiting: &mut BTreeSet<TypeId>,
+    ) -> Result<TypeLayout, Vec<Diagnostic>> {
+        if let Some((size, align)) = types.cached_layout(ty) {
+            return Ok(TypeLayout { size, align });
+        }
+        let data = types.get(ty).copied().ok_or_else(|| {
+            vec![Diagnostic::new(
+                "E0266",
+                Phase::Semantic,
+                DiagnosticCategory::Verification,
+                "layout requested for invalid type",
+                None,
+            )]
+        })?;
+        let scalar = match data {
+            TypeData::Bool => Some(TypeLayout { size: 1, align: 1 }),
+            TypeData::Integer(integer) => {
+                let bytes = u64::from(integer.bits(target) / 8);
+                Some(TypeLayout {
+                    size: bytes,
+                    align: bytes,
+                })
+            }
+            TypeData::Float(FloatType::Float32) => Some(TypeLayout { size: 4, align: 4 }),
+            TypeData::Float(FloatType::Float64) => Some(TypeLayout { size: 8, align: 8 }),
+            TypeData::Struct(id) => Some(structs[id.0 as usize].layout),
+            TypeData::Enum(id) => Some(enums[id.0 as usize].layout),
+            TypeData::GenericParam(_)
+            | TypeData::StructInstance(_, _)
+            | TypeData::EnumInstance(_, _) => None,
+        };
+        if let Some(layout) = scalar {
+            return Ok(layout);
+        }
+        if matches!(data, TypeData::GenericParam(_)) {
+            return Err(vec![Diagnostic::new(
+                "E0266",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "unresolved generic parameter has no concrete layout",
+                None,
+            )]);
+        }
+        if !visiting.insert(ty) {
+            return Err(vec![Diagnostic::new(
+                "E0267",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "generic recursive by-value layout has infinite size",
+                None,
+            )]);
+        }
+        let layout =
+            match data {
+                TypeData::StructInstance(id, args) => {
+                    let info = &structs[id.0 as usize];
+                    let arguments = types
+                        .arguments(args)
+                        .expect("valid struct arguments")
+                        .to_vec();
+                    let substitution = Substitution::new(
+                        info.generic_parameters.iter().map(|parameter| parameter.id),
+                        arguments,
+                    );
+                    let mut offset = 0_u64;
+                    let mut align = 1_u64;
+                    for field in &info.fields {
+                        let field_ty =
+                            types
+                                .substitute(field.ty, &substitution)
+                                .map_err(|parameter| {
+                                    vec![incomplete_substitution(parameter, field.span)]
+                                })?;
+                        let field_layout =
+                            concrete_layout(types, structs, enums, target, field_ty, visiting)?;
+                        offset = align_up(offset, field_layout.align);
+                        offset += field_layout.size;
+                        align = align.max(field_layout.align);
+                    }
+                    TypeLayout {
+                        size: align_up(offset, align),
+                        align,
+                    }
+                }
+                TypeData::EnumInstance(id, args) => {
+                    let info = &enums[id.0 as usize];
+                    let arguments = types
+                        .arguments(args)
+                        .expect("valid enum arguments")
+                        .to_vec();
+                    let substitution = Substitution::new(
+                        info.generic_parameters.iter().map(|parameter| parameter.id),
+                        arguments,
+                    );
+                    let mut offset = 4_u64;
+                    let mut align = 4_u64;
+                    for variant in &info.variants {
+                        let mut tuple_size = 0_u64;
+                        let mut tuple_align = 1_u64;
+                        for payload in &variant.payloads {
+                            let payload_ty = types.substitute(payload.ty, &substitution).map_err(
+                                |parameter| vec![incomplete_substitution(parameter, payload.span)],
+                            )?;
+                            let payload_layout = concrete_layout(
+                                types, structs, enums, target, payload_ty, visiting,
+                            )?;
+                            tuple_size =
+                                align_up(tuple_size, payload_layout.align) + payload_layout.size;
+                            tuple_align = tuple_align.max(payload_layout.align);
+                        }
+                        offset = align_up(offset, tuple_align) + align_up(tuple_size, tuple_align);
+                        align = align.max(tuple_align);
+                    }
+                    TypeLayout {
+                        size: align_up(offset, align),
+                        align,
+                    }
+                }
+                _ => unreachable!(),
+            };
+        visiting.remove(&ty);
+        types.cache_layout(ty, layout.size, layout.align);
+        Ok(layout)
+    }
+
+    let concrete = types
+        .entries()
+        .filter_map(|(ty, data)| {
+            (matches!(
+                data,
+                TypeData::StructInstance(_, _) | TypeData::EnumInstance(_, _)
+            ) && !types.contains_generic(ty))
+            .then_some(ty)
+        })
+        .collect::<Vec<_>>();
+    for ty in concrete {
+        concrete_layout(types, structs, enums, target, ty, &mut BTreeSet::new())?;
+    }
+    Ok(())
+}
+
 fn analyze_function(
     f: &AstFunction,
     id: FunctionId,
     module: ModuleId,
     d: &DeclaredProgram,
+    types: &mut TypeArena,
     target: TargetProperties,
-) -> Result<HirFunction, Vec<Diagnostic>> {
+) -> Result<GenericHirFunction, Vec<Diagnostic>> {
     let sig = &d.signatures[id.0 as usize];
     let mut a = Analyzer {
         scopes: vec![BTreeMap::new()],
@@ -1367,13 +2276,20 @@ fn analyze_function(
         imports: &d.imports,
         module_names: &d.module_names,
         aliases: &d.aliases,
-        types: &d.types,
+        types,
         structs: &d.structs,
         enums: &d.enums,
         struct_names: &d.struct_names,
         enum_names: &d.enum_names,
         variant_names: &d.variant_names,
         field_names: &d.field_names,
+        generic_scope: sig
+            .generic_parameters
+            .iter()
+            .map(|parameter| (parameter.name.clone(), parameter.ty))
+            .collect(),
+        struct_arities: &d.struct_arities,
+        enum_arities: &d.enum_arities,
         module,
         return_type: sig.return_type,
         target,
@@ -1411,7 +2327,7 @@ fn analyze_function(
             Some(f.body.span),
         )]);
     }
-    Ok(HirFunction {
+    Ok(GenericHirFunction {
         id,
         module,
         parameters,
@@ -1429,17 +2345,21 @@ struct Analyzer<'a> {
     imports: &'a [BTreeMap<String, ModuleId>],
     module_names: &'a BTreeMap<String, ModuleId>,
     aliases: &'a [BTreeMap<String, TypeId>],
-    types: &'a TypeArena,
+    types: &'a mut TypeArena,
     structs: &'a [StructInfo],
     enums: &'a [EnumInfo],
     struct_names: &'a [BTreeMap<String, StructId>],
     enum_names: &'a [BTreeMap<String, EnumId>],
     variant_names: &'a [BTreeMap<String, VariantId>],
     field_names: &'a [BTreeMap<String, FieldId>],
+    generic_scope: BTreeMap<String, TypeId>,
+    struct_arities: &'a [usize],
+    enum_arities: &'a [usize],
     module: ModuleId,
     return_type: TypeId,
     target: TargetProperties,
 }
+#[derive(Clone)]
 struct Checked {
     expr: HirExpr,
     constant: Option<ConstantValue>,
@@ -1450,6 +2370,127 @@ enum ConstantValue {
     Float(FloatValue),
 }
 impl Analyzer<'_> {
+    fn resolve_type_arguments(
+        &mut self,
+        arguments: &[AstType],
+    ) -> Result<Vec<TypeId>, Vec<Diagnostic>> {
+        arguments
+            .iter()
+            .map(|argument| {
+                resolve_type_in_module(
+                    argument,
+                    self.module,
+                    self.aliases,
+                    self.struct_names,
+                    self.enum_names,
+                    self.imports,
+                    self.module_names,
+                    self.types,
+                    &self.generic_scope,
+                    self.struct_arities,
+                    self.enum_arities,
+                )
+                .map_err(|diagnostic| vec![diagnostic])
+            })
+            .collect()
+    }
+
+    fn nominal_struct_type(
+        &mut self,
+        id: StructId,
+        arguments: Vec<TypeId>,
+        span: Span,
+    ) -> Result<TypeId, Vec<Diagnostic>> {
+        let expected = self.struct_arities[id.0 as usize];
+        if arguments.len() != expected {
+            return Err(vec![generic_call_arity(
+                &self.structs[id.0 as usize].name,
+                expected,
+                arguments.len(),
+                span,
+            )]);
+        }
+        Ok(if expected == 0 {
+            self.types
+                .id_of(TypeData::Struct(id))
+                .expect("interned struct")
+        } else {
+            self.types.intern_struct_instance(id, arguments)
+        })
+    }
+
+    fn nominal_enum_type(
+        &mut self,
+        id: EnumId,
+        arguments: Vec<TypeId>,
+        span: Span,
+    ) -> Result<TypeId, Vec<Diagnostic>> {
+        let expected = self.enum_arities[id.0 as usize];
+        if arguments.len() != expected {
+            return Err(vec![generic_call_arity(
+                &self.enums[id.0 as usize].name,
+                expected,
+                arguments.len(),
+                span,
+            )]);
+        }
+        Ok(if expected == 0 {
+            self.types.id_of(TypeData::Enum(id)).expect("interned enum")
+        } else {
+            self.types.intern_enum_instance(id, arguments)
+        })
+    }
+
+    fn apply_named_type(
+        &mut self,
+        target: TypeId,
+        arguments: &[TypeId],
+        span: Span,
+    ) -> Result<TypeId, Vec<Diagnostic>> {
+        match self.types.get(target).copied() {
+            Some(TypeData::Struct(id)) => self.nominal_struct_type(id, arguments.to_vec(), span),
+            Some(TypeData::Enum(id)) => self.nominal_enum_type(id, arguments.to_vec(), span),
+            _ if arguments.is_empty() => Ok(target),
+            _ => Err(vec![generic_call_arity("type", 0, arguments.len(), span)]),
+        }
+    }
+
+    fn specialize_member_type(
+        &mut self,
+        aggregate: TypeId,
+        member: TypeId,
+    ) -> Result<TypeId, Vec<Diagnostic>> {
+        let (parameters, arguments) = match self.types.get(aggregate).copied() {
+            Some(TypeData::StructInstance(id, args)) => (
+                self.structs[id.0 as usize].generic_parameters.clone(),
+                self.types
+                    .arguments(args)
+                    .expect("valid struct arguments")
+                    .to_vec(),
+            ),
+            Some(TypeData::EnumInstance(id, args)) => (
+                self.enums[id.0 as usize].generic_parameters.clone(),
+                self.types
+                    .arguments(args)
+                    .expect("valid enum arguments")
+                    .to_vec(),
+            ),
+            _ => return Ok(member),
+        };
+        let substitution =
+            Substitution::new(parameters.iter().map(|parameter| parameter.id), arguments);
+        self.types
+            .substitute(member, &substitution)
+            .map_err(|parameter| {
+                vec![incomplete_substitution(
+                    parameter,
+                    self.structs
+                        .first()
+                        .map_or(Span::in_source(SourceId(0), 0, 0), |info| info.span),
+                )]
+            })
+    }
+
     fn block(&mut self, b: &AstBlock, nested: bool) -> Result<HirBlock, Vec<Diagnostic>> {
         if nested {
             self.scopes.push(BTreeMap::new())
@@ -1484,6 +2525,9 @@ impl Analyzer<'_> {
                         self.imports,
                         self.module_names,
                         self.types,
+                        &self.generic_scope,
+                        self.struct_arities,
+                        self.enum_arities,
                     )
                     .map_err(|d| vec![d])?;
                     let initializer = self.expression(initializer, Some(ty))?.expr;
@@ -1570,13 +2614,14 @@ impl Analyzer<'_> {
                 Some(scrutinee.span),
             )]);
         };
-        let enum_info = &self.enums[enum_id.0 as usize];
+        let enum_info = self.enums[enum_id.0 as usize].clone();
         let mut seen = BTreeSet::new();
         let mut resolved_arms = Vec::new();
         for arm in arms {
             let pattern_ty = AstType {
                 module: arm.pattern.module.clone(),
                 name: arm.pattern.enum_name.clone(),
+                arguments: arm.pattern.type_arguments.clone(),
                 span: arm.pattern.span,
             };
             let resolved_ty = resolve_type_in_module(
@@ -1588,6 +2633,9 @@ impl Analyzer<'_> {
                 self.imports,
                 self.module_names,
                 self.types,
+                &self.generic_scope,
+                self.struct_arities,
+                self.enum_arities,
             )
             .map_err(|diagnostic| vec![diagnostic])?;
             let Some(pattern_enum) = self.types.enum_id(resolved_ty) else {
@@ -1602,7 +2650,7 @@ impl Analyzer<'_> {
                     Some(arm.pattern.span),
                 )]);
             };
-            if pattern_enum != enum_id {
+            if pattern_enum != enum_id || resolved_ty != scrutinee.ty {
                 return Err(vec![Diagnostic::new(
                     "E0257",
                     Phase::Semantic,
@@ -1641,7 +2689,7 @@ impl Analyzer<'_> {
                     Some(arm.pattern.span),
                 )]);
             }
-            let variant = &enum_info.variants[variant_id.index as usize];
+            let variant = enum_info.variants[variant_id.index as usize].clone();
             if arm.pattern.bindings.len() != variant.payloads.len() {
                 return Err(vec![Diagnostic::new(
                     "E0253",
@@ -1664,11 +2712,12 @@ impl Analyzer<'_> {
                     self.scopes.pop();
                     return Err(vec![duplicate("match binding", name, *span)]);
                 }
+                let payload_ty = self.specialize_member_type(scrutinee.ty, payload.ty)?;
                 let local = LocalId(self.locals.len() as u32);
                 self.locals.push(HirLocal {
                     id: local,
                     name: name.clone(),
-                    ty: payload.ty,
+                    ty: payload_ty,
                     span: *span,
                     parameter: false,
                 });
@@ -1676,7 +2725,7 @@ impl Analyzer<'_> {
                 bindings.push(HirMatchBinding {
                     local,
                     payload_index: payload.index,
-                    ty: payload.ty,
+                    ty: payload_ty,
                     span: *span,
                 });
             }
@@ -1715,7 +2764,7 @@ impl Analyzer<'_> {
         })
     }
 
-    fn resolve_place(&self, place: &AstPlace) -> Result<HirPlace, Vec<Diagnostic>> {
+    fn resolve_place(&mut self, place: &AstPlace) -> Result<HirPlace, Vec<Diagnostic>> {
         let Some(local) = self.lookup(&place.root) else {
             return Err(vec![unknown_name(&place.root, place.span)]);
         };
@@ -1730,7 +2779,7 @@ impl Analyzer<'_> {
         Ok(resolved)
     }
 
-    fn resolve_expr_place(&self, expression: &AstExpr) -> Result<HirPlace, Vec<Diagnostic>> {
+    fn resolve_expr_place(&mut self, expression: &AstExpr) -> Result<HirPlace, Vec<Diagnostic>> {
         match &expression.kind {
             AstExprKind::Name(name) => {
                 let Some(local) = self.lookup(name) else {
@@ -1773,7 +2822,7 @@ impl Analyzer<'_> {
     }
 
     fn project_field(
-        &self,
+        &mut self,
         place: &mut HirPlace,
         name: &str,
         span: Span,
@@ -1803,14 +2852,15 @@ impl Analyzer<'_> {
             .fields
             .iter()
             .find(|field| field.id == field_id)
-            .expect("field-name index is coherent");
+            .expect("field-name index is coherent")
+            .clone();
         place.projections.push(field_id);
-        place.ty = field.ty;
+        place.ty = self.specialize_member_type(place.ty, field.ty)?;
         Ok(())
     }
 
     fn expression(
-        &self,
+        &mut self,
         e: &AstExpr,
         expected: Option<TypeId>,
     ) -> Result<Checked, Vec<Diagnostic>> {
@@ -1863,12 +2913,18 @@ impl Analyzer<'_> {
                     constant: None,
                 }
             }
-            AstExprKind::Call { callee, args } => {
+            AstExprKind::Call {
+                callee,
+                type_arguments,
+                args,
+            } => {
+                let resolved_arguments = self.resolve_type_arguments(type_arguments)?;
                 if let Some(target) = builtin(callee)
                     .or_else(|| self.aliases[self.module.0 as usize].get(callee).copied())
                 {
-                    if let Some(id) = self.types.struct_id(target) {
-                        self.struct_init(id, callee, args, e.span)?
+                    if self.types.struct_id(target).is_some() {
+                        let target = self.apply_named_type(target, &resolved_arguments, e.span)?;
+                        self.struct_init(target, callee, args, e.span)?
                     } else if self.types.enum_id(target).is_some() {
                         return Err(vec![Diagnostic::new(
                             "E0250",
@@ -1878,33 +2934,49 @@ impl Analyzer<'_> {
                             Some(e.span),
                         )]);
                     } else {
+                        if !resolved_arguments.is_empty() {
+                            return Err(vec![generic_call_arity(
+                                callee,
+                                0,
+                                resolved_arguments.len(),
+                                e.span,
+                            )]);
+                        }
                         self.explicit_cast(callee, target, args, e.span)?
                     }
                 } else if let Some(id) = self.struct_names[self.module.0 as usize].get(callee) {
-                    self.struct_init(*id, callee, args, e.span)?
+                    let target = self.nominal_struct_type(*id, resolved_arguments, e.span)?;
+                    self.struct_init(target, callee, args, e.span)?
                 } else {
-                    self.call(callee, args, e.span)?
+                    self.call(callee, type_arguments, args, e.span)?
                 }
             }
             AstExprKind::QualifiedCall {
                 module,
                 function,
+                type_arguments,
                 args,
+                parenthesized,
             } => {
+                let resolved_arguments = self.resolve_type_arguments(type_arguments)?;
                 if let Some(enum_id) = self.local_enum_id(module) {
-                    self.enum_init(enum_id, function, args, true, e.span)?
+                    let enum_ty = self.nominal_enum_type(enum_id, resolved_arguments, e.span)?;
+                    self.enum_init(enum_ty, function, args, *parenthesized, e.span)?
                 } else {
-                    self.qualified_apply(module, function, args, e.span)?
+                    self.qualified_apply(module, function, type_arguments, args, e.span)?
                 }
             }
             AstExprKind::VariantCall {
                 module,
                 enum_name,
+                type_arguments,
                 variant,
                 args,
+                parenthesized,
             } => {
-                let enum_id = self.qualified_enum_id(module, enum_name, e.span)?;
-                self.enum_init(enum_id, variant, args, true, e.span)?
+                let enum_ty =
+                    self.qualified_enum_type(module, enum_name, type_arguments, e.span)?;
+                self.enum_init(enum_ty, variant, args, *parenthesized, e.span)?
             }
             AstExprKind::Field { base, name, .. } => {
                 if let AstExprKind::Field {
@@ -1916,11 +2988,12 @@ impl Analyzer<'_> {
                     && self.lookup(module).is_none()
                     && self.module_names.contains_key(module)
                 {
-                    let enum_id = self.qualified_enum_id(module, enum_name, e.span)?;
-                    self.enum_init(enum_id, name, &[], false, e.span)?
+                    let enum_ty = self.qualified_enum_type(module, enum_name, &[], e.span)?;
+                    self.enum_init(enum_ty, name, &[], false, e.span)?
                 } else if let AstExprKind::Name(type_name) = &base.kind {
                     if let Some(enum_id) = self.local_enum_id(type_name) {
-                        self.enum_init(enum_id, name, &[], false, e.span)?
+                        let enum_ty = self.nominal_enum_type(enum_id, Vec::new(), e.span)?;
+                        self.enum_init(enum_ty, name, &[], false, e.span)?
                     } else {
                         let place = self.resolve_expr_place(e)?;
                         Checked {
@@ -2057,7 +3130,7 @@ impl Analyzer<'_> {
             constant: Some(ConstantValue::Float(value)),
         })
     }
-    fn negate(&self, o: &AstExpr, span: Span) -> Result<Checked, Vec<Diagnostic>> {
+    fn negate(&mut self, o: &AstExpr, span: Span) -> Result<Checked, Vec<Diagnostic>> {
         let c = self.expression(o, None)?;
         let ty = c.expr.ty;
         let op = match self.types.get(ty) {
@@ -2072,7 +3145,15 @@ impl Analyzer<'_> {
                 )]);
             }
             Some(TypeData::Float(_)) => HirUnaryOp::NegateFloat,
-            Some(TypeData::Bool | TypeData::Struct(_) | TypeData::Enum(_)) | None => {
+            Some(
+                TypeData::Bool
+                | TypeData::Struct(_)
+                | TypeData::Enum(_)
+                | TypeData::GenericParam(_)
+                | TypeData::StructInstance(_, _)
+                | TypeData::EnumInstance(_, _),
+            )
+            | None => {
                 return Err(vec![type_error(
                     format!("{} cannot be used numerically", self.type_name(ty)),
                     span,
@@ -2103,7 +3184,7 @@ impl Analyzer<'_> {
         })
     }
     fn explicit_cast(
-        &self,
+        &mut self,
         spelling: &str,
         target: TypeId,
         args: &[AstExpr],
@@ -2173,7 +3254,13 @@ impl Analyzer<'_> {
             constant,
         })
     }
-    fn call(&self, n: &str, args: &[AstExpr], span: Span) -> Result<Checked, Vec<Diagnostic>> {
+    fn call(
+        &mut self,
+        n: &str,
+        type_arguments: &[AstType],
+        args: &[AstExpr],
+        span: Span,
+    ) -> Result<Checked, Vec<Diagnostic>> {
         let Some(id) = self.names[self.module.0 as usize].get(n).copied() else {
             return Err(vec![Diagnostic::new(
                 "E0212",
@@ -2183,7 +3270,7 @@ impl Analyzer<'_> {
                 Some(span),
             )]);
         };
-        self.call_id(id, n, args, span)
+        self.call_id(id, n, type_arguments, args, span)
     }
     fn local_enum_id(&self, name: &str) -> Option<EnumId> {
         self.aliases[self.module.0 as usize]
@@ -2193,15 +3280,17 @@ impl Analyzer<'_> {
             .or_else(|| self.enum_names[self.module.0 as usize].get(name).copied())
     }
 
-    fn qualified_enum_id(
-        &self,
+    fn qualified_enum_type(
+        &mut self,
         module: &str,
         name: &str,
+        arguments: &[AstType],
         span: Span,
-    ) -> Result<EnumId, Vec<Diagnostic>> {
+    ) -> Result<TypeId, Vec<Diagnostic>> {
         let ty = AstType {
             module: Some(module.into()),
             name: name.into(),
+            arguments: arguments.to_vec(),
             span,
         };
         let resolved = resolve_type_in_module(
@@ -2213,22 +3302,29 @@ impl Analyzer<'_> {
             self.imports,
             self.module_names,
             self.types,
+            &self.generic_scope,
+            self.struct_arities,
+            self.enum_arities,
         )
         .map_err(|diagnostic| vec![diagnostic])?;
-        self.types.enum_id(resolved).ok_or_else(|| {
-            vec![Diagnostic::new(
-                "E0250",
-                Phase::Semantic,
-                DiagnosticCategory::Type,
-                format!("`{module}.{name}` is not an enum"),
-                Some(span),
-            )]
-        })
+        self.types
+            .enum_id(resolved)
+            .map(|_| resolved)
+            .ok_or_else(|| {
+                vec![Diagnostic::new(
+                    "E0250",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    format!("`{module}.{name}` is not an enum"),
+                    Some(span),
+                )]
+            })
     }
     fn qualified_apply(
-        &self,
+        &mut self,
         m: &str,
         f: &str,
+        type_arguments: &[AstType],
         args: &[AstExpr],
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
@@ -2251,17 +3347,20 @@ impl Analyzer<'_> {
             )]);
         }
         if let Some(id) = self.names[mid.0 as usize].get(f).copied() {
-            return self.call_id(id, &format!("{m}.{f}"), args, span);
+            return self.call_id(id, &format!("{m}.{f}"), type_arguments, args, span);
         }
         if let Some(id) = self.struct_names[mid.0 as usize].get(f).copied() {
-            return self.struct_init(id, &format!("{m}.{f}"), args, span);
+            let resolved = self.resolve_type_arguments(type_arguments)?;
+            let ty = self.nominal_struct_type(id, resolved, span)?;
+            return self.struct_init(ty, &format!("{m}.{f}"), args, span);
         }
-        if let Some(id) = self.aliases[mid.0 as usize]
-            .get(f)
-            .copied()
-            .and_then(|ty| self.types.struct_id(ty))
+        if let Some(ty) = self.aliases[mid.0 as usize].get(f).copied()
+            && self.types.struct_id(ty).is_some()
         {
-            return self.struct_init(id, &format!("{m}.{f}"), args, span);
+            if !type_arguments.is_empty() {
+                return Err(vec![generic_call_arity(f, 0, type_arguments.len(), span)]);
+            }
+            return self.struct_init(ty, &format!("{m}.{f}"), args, span);
         }
         Err(vec![Diagnostic::new(
             "E0222",
@@ -2273,13 +3372,17 @@ impl Analyzer<'_> {
     }
 
     fn struct_init(
-        &self,
-        id: StructId,
+        &mut self,
+        ty: TypeId,
         spelling: &str,
         args: &[AstExpr],
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
-        let info = &self.structs[id.0 as usize];
+        let id = self
+            .types
+            .struct_id(ty)
+            .expect("resolved struct initializer");
+        let info = self.structs[id.0 as usize].clone();
         if args.len() != info.fields.len() {
             return Err(vec![Diagnostic::new(
                 "E0246",
@@ -2295,7 +3398,8 @@ impl Analyzer<'_> {
         }
         let mut fields = Vec::with_capacity(args.len());
         for (index, (argument, field)) in args.iter().zip(&info.fields).enumerate() {
-            match self.expression(argument, Some(field.ty)) {
+            let field_ty = self.specialize_member_type(ty, field.ty)?;
+            match self.expression(argument, Some(field_ty)) {
                 Ok(value) => fields.push((field.id, value.expr)),
                 Err(mut diagnostics) => {
                     if let Some(diagnostic) = diagnostics.first_mut() {
@@ -2304,7 +3408,7 @@ impl Analyzer<'_> {
                             "argument {} for field `{}` of `{spelling}` requires {}: {}",
                             index + 1,
                             field.name,
-                            self.type_name(field.ty),
+                            self.type_name(field_ty),
                             diagnostic.message
                         );
                     }
@@ -2318,24 +3422,22 @@ impl Analyzer<'_> {
                     struct_id: id,
                     fields,
                 },
-                ty: self
-                    .types
-                    .id_of(TypeData::Struct(id))
-                    .expect("interned struct"),
+                ty,
                 span,
             },
             constant: None,
         })
     }
     fn enum_init(
-        &self,
-        id: EnumId,
+        &mut self,
+        ty: TypeId,
         variant_name: &str,
         args: &[AstExpr],
         parenthesized: bool,
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
-        let info = &self.enums[id.0 as usize];
+        let id = self.types.enum_id(ty).expect("resolved enum initializer");
+        let info = self.enums[id.0 as usize].clone();
         let Some(variant_id) = self.variant_names[id.0 as usize].get(variant_name).copied() else {
             return Err(vec![Diagnostic::new(
                 "E0252",
@@ -2382,7 +3484,8 @@ impl Analyzer<'_> {
         }
         let mut payloads = Vec::with_capacity(args.len());
         for (index, (argument, payload)) in args.iter().zip(&variant.payloads).enumerate() {
-            match self.expression(argument, Some(payload.ty)) {
+            let payload_ty = self.specialize_member_type(ty, payload.ty)?;
+            match self.expression(argument, Some(payload_ty)) {
                 Ok(value) => payloads.push(value.expr),
                 Err(mut diagnostics) => {
                     if let Some(diagnostic) = diagnostics.first_mut() {
@@ -2392,7 +3495,7 @@ impl Analyzer<'_> {
                             index + 1,
                             info.name,
                             variant.name,
-                            self.type_name(payload.ty),
+                            self.type_name(payload_ty),
                             diagnostic.message
                         );
                     }
@@ -2407,20 +3510,21 @@ impl Analyzer<'_> {
                     variant_id,
                     payloads,
                 },
-                ty: self.types.id_of(TypeData::Enum(id)).expect("interned enum"),
+                ty,
                 span,
             },
             constant: None,
         })
     }
     fn call_id(
-        &self,
+        &mut self,
         id: FunctionId,
         name: &str,
+        source_type_arguments: &[AstType],
         args: &[AstExpr],
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
-        let s = &self.signatures[id.0 as usize];
+        let s = self.signatures[id.0 as usize].clone();
         if args.len() != s.parameters.len() {
             return Err(vec![Diagnostic::new(
                 "E0213",
@@ -2434,9 +3538,64 @@ impl Analyzer<'_> {
                 Some(span),
             )]);
         }
+        let mut type_arguments = self.resolve_type_arguments(source_type_arguments)?;
+        let mut prechecked = None;
+        if source_type_arguments.is_empty() && !s.generic_parameters.is_empty() {
+            let checked = args
+                .iter()
+                .map(|argument| self.expression(argument, None))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut inferred = BTreeMap::new();
+            for (parameter, argument) in s.parameters.iter().zip(&checked) {
+                infer_generic_arguments(self.types, parameter.ty, argument.expr.ty, &mut inferred)?;
+            }
+            for parameter in &s.generic_parameters {
+                let Some(argument) = inferred.get(&parameter.id).copied() else {
+                    return Err(vec![Diagnostic::new(
+                        "E0263",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        format!(
+                            "cannot infer generic parameter `{}` for `{name}`",
+                            parameter.name
+                        ),
+                        Some(span),
+                    )]);
+                };
+                type_arguments.push(argument);
+            }
+            prechecked = Some(checked);
+        }
+        if type_arguments.len() != s.generic_parameters.len() {
+            return Err(vec![generic_call_arity(
+                name,
+                s.generic_parameters.len(),
+                type_arguments.len(),
+                span,
+            )]);
+        }
+        let substitution = Substitution::new(
+            s.generic_parameters.iter().map(|parameter| parameter.id),
+            type_arguments.iter().copied(),
+        );
+        let concrete_parameters = s
+            .parameters
+            .iter()
+            .map(|parameter| self.types.substitute(parameter.ty, &substitution))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|parameter| vec![incomplete_substitution(parameter, span)])?;
+        let return_type = self
+            .types
+            .substitute(s.return_type, &substitution)
+            .map_err(|parameter| vec![incomplete_substitution(parameter, span)])?;
         let mut out = vec![];
-        for (index, (a, p)) in args.iter().zip(&s.parameters).enumerate() {
-            match self.expression(a, Some(p.ty)) {
+        for (index, (a, concrete_ty)) in args.iter().zip(concrete_parameters).enumerate() {
+            let checked = if let Some(values) = &prechecked {
+                self.coerce(values[index].clone(), Some(concrete_ty))
+            } else {
+                self.expression(a, Some(concrete_ty))
+            };
+            match checked {
                 Ok(x) => out.push(x.expr),
                 Err(mut ds) => {
                     if let Some(d) = ds.first_mut() {
@@ -2444,7 +3603,7 @@ impl Analyzer<'_> {
                         d.message = format!(
                             "argument {} to `{name}` requires {}: {}",
                             index + 1,
-                            self.type_name(p.ty),
+                            self.type_name(concrete_ty),
                             d.message
                         )
                     }
@@ -2455,17 +3614,18 @@ impl Analyzer<'_> {
         Ok(Checked {
             expr: HirExpr {
                 kind: HirExprKind::Call {
-                    callee: id,
+                    callee: HirCallTarget::Declaration(id),
+                    type_arguments,
                     args: out,
                 },
-                ty: s.return_type,
+                ty: return_type,
                 span,
             },
             constant: None,
         })
     }
     fn binary(
-        &self,
+        &mut self,
         op: AstBinaryOp,
         la: &AstExpr,
         ra: &AstExpr,
@@ -2501,6 +3661,17 @@ impl Analyzer<'_> {
             return Err(vec![type_error(
                 "struct values do not have implicit arithmetic or equality operators in Vertical-5",
                 span,
+            )]);
+        }
+        if self.types.generic_param(l.expr.ty).is_some()
+            || self.types.generic_param(r.expr.ty).is_some()
+        {
+            return Err(vec![Diagnostic::new(
+                "E0268",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "operation is unsupported on an unconstrained generic parameter",
+                Some(span),
             )]);
         }
         let common = common(self.types, l.expr.ty, r.expr.ty).ok_or_else(|| {
@@ -3011,13 +4182,13 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
         )]
     };
     if h.modules.is_empty()
-        || h.entry.0 as usize >= h.signatures.len()
-        || h.functions.len() != h.signatures.len()
+        || h.entry.0 as usize >= h.instances.len()
+        || h.functions.len() != h.instances.len()
     {
         return Err(fail("HIR cardinality invalid".into()));
     }
     for ty in h
-        .signatures
+        .instances
         .iter()
         .flat_map(|signature| {
             signature
@@ -3048,7 +4219,7 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
             return Err(fail(format!("HIR references invalid TypeId({})", ty.0)));
         }
     }
-    let e = &h.signatures[h.entry.0 as usize];
+    let e = &h.instances[h.entry.0 as usize];
     if e.name != "main" || e.return_type != TypeId::INT64 || !e.parameters.is_empty() {
         return Err(fail("HIR entry invalid".into()));
     }
@@ -3090,8 +4261,12 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
             }
         }
     }
-    for (i, (s, f)) in h.signatures.iter().zip(&h.functions).enumerate() {
-        if s.id.0 as usize != i || f.id != s.id || f.module != s.module {
+    for (i, (s, f)) in h.instances.iter().zip(&h.functions).enumerate() {
+        if s.id.0 as usize != i
+            || f.id != s.id
+            || f.function_id != s.function_id
+            || f.module != s.module
+        {
             return Err(fail("HIR function identity mismatch".into()));
         }
         for (j, l) in f.locals.iter().enumerate() {
@@ -3103,7 +4278,7 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
             &f.body,
             f,
             s.return_type,
-            &h.signatures,
+            &h.instances,
             &h.structs,
             &h.enums,
             &h.types,
@@ -3116,7 +4291,7 @@ fn verify_block(
     b: &HirBlock,
     f: &HirFunction,
     ret: TypeId,
-    sigs: &[FunctionSignature],
+    sigs: &[FunctionInstanceInfo],
     structs: &[StructInfo],
     enums: &[EnumInfo],
     types: &TypeArena,
@@ -3191,10 +4366,13 @@ fn verify_block(
                         ));
                     }
                     for (binding, payload) in arm.bindings.iter().zip(&variant.payloads) {
+                        let expected =
+                            concrete_member_type(types, scrutinee.ty, payload.ty, structs, enums)
+                                .ok_or_else(|| fail("HIR match substitution incomplete".into()))?;
                         if binding.payload_index != payload.index
-                            || binding.ty != payload.ty
+                            || binding.ty != expected
                             || f.locals.get(binding.local.0 as usize).map(|local| local.ty)
-                                != Some(payload.ty)
+                                != Some(expected)
                         {
                             return Err(fail("HIR match payload binding invalid".into()));
                         }
@@ -3215,7 +4393,7 @@ fn verify_block(
 fn verify_expr(
     e: &HirExpr,
     f: &HirFunction,
-    sigs: &[FunctionSignature],
+    sigs: &[FunctionInstanceInfo],
     structs: &[StructInfo],
     enums: &[EnumInfo],
     types: &TypeArena,
@@ -3249,7 +4427,10 @@ fn verify_expr(
                 return Err(fail("HIR load/place type mismatch".into()));
             }
         }
-        HirExprKind::Call { callee, args } => {
+        HirExprKind::Call { callee, args, .. } => {
+            let HirCallTarget::Instance(callee) = callee else {
+                return Err(fail("concrete HIR contains declaration call".into()));
+            };
             let Some(s) = sigs.get(callee.0 as usize) else {
                 return Err(fail("HIR callee missing".into()));
             };
@@ -3275,7 +4456,9 @@ fn verify_expr(
             }
             for ((field_id, value), declared) in fields.iter().zip(&info.fields) {
                 verify_expr(value, f, sigs, structs, enums, types, fail)?;
-                if *field_id != declared.id || value.ty != declared.ty {
+                let expected = concrete_member_type(types, e.ty, declared.ty, structs, enums)
+                    .ok_or_else(|| fail("HIR struct substitution incomplete".into()))?;
+                if *field_id != declared.id || value.ty != expected {
                     return Err(fail("HIR struct initializer field mismatch".into()));
                 }
             }
@@ -3303,7 +4486,9 @@ fn verify_expr(
             }
             for (value, declared) in payloads.iter().zip(&variant.payloads) {
                 verify_expr(value, f, sigs, structs, enums, types, fail)?;
-                if value.ty != declared.ty {
+                let expected = concrete_member_type(types, e.ty, declared.ty, structs, enums)
+                    .ok_or_else(|| fail("HIR enum substitution incomplete".into()))?;
+                if value.ty != expected {
                     return Err(fail("HIR enum initializer payload mismatch".into()));
                 }
             }
@@ -3432,12 +4617,38 @@ fn verify_place(
         else {
             return Err(fail("HIR place field does not belong to struct".into()));
         };
-        ty = field.ty;
+        ty = concrete_member_type(types, ty, field.ty, structs, &[])
+            .ok_or_else(|| fail("HIR place substitution incomplete".into()))?;
     }
     if ty != place.ty {
         return Err(fail("HIR place cached type is invalid".into()));
     }
     Ok(())
+}
+
+fn concrete_member_type(
+    types: &TypeArena,
+    aggregate: TypeId,
+    member: TypeId,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+) -> Option<TypeId> {
+    let (parameters, arguments) = match types.get(aggregate)? {
+        TypeData::StructInstance(id, args) => (
+            &structs.get(id.0 as usize)?.generic_parameters,
+            types.arguments(*args)?,
+        ),
+        TypeData::EnumInstance(id, args) => (
+            &enums.get(id.0 as usize)?.generic_parameters,
+            types.arguments(*args)?,
+        ),
+        _ => return Some(member),
+    };
+    let substitution = Substitution::new(
+        parameters.iter().map(|parameter| parameter.id),
+        arguments.iter().copied(),
+    );
+    types.substituted_existing(member, &substitution).ok()
 }
 fn statement_returns(s: &HirStmt) -> bool {
     match &s.kind {

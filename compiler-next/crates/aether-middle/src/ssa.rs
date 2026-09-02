@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use aether_frontend::{
     CastKind, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId, FloatValue,
-    FunctionId, FunctionSignature, LocalId, ModuleInfo, Phase, Span, StructId, StructInfo,
-    TypeArena, TypeId, VariantId, format_type,
+    FunctionInstanceInfo, InstanceId, LocalId, ModuleInfo, Phase, Span, StructId, StructInfo,
+    Substitution, TypeArena, TypeData, TypeId, VariantId, format_type,
 };
 
 use crate::{
@@ -122,7 +122,7 @@ pub enum SsaOp {
     },
     /// Resolved direct call.
     Call {
-        callee: FunctionId,
+        callee: InstanceId,
         args: Vec<SsaOperand>,
     },
 }
@@ -181,7 +181,8 @@ pub struct SsaBlock {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SsaFunction {
     /// Globally unambiguous session-local function identity.
-    pub id: FunctionId,
+    pub id: InstanceId,
+    pub function_id: aether_frontend::FunctionId,
     /// Entry parameter definitions in call order.
     pub parameters: Vec<SsaParameter>,
     /// Canonical return type.
@@ -204,11 +205,11 @@ pub struct SsaIr {
     /// Nominal enum metadata shared with MIR and the backend.
     pub enums: Vec<EnumInfo>,
     /// Source-unit signature table.
-    pub signatures: Vec<FunctionSignature>,
+    pub signatures: Vec<FunctionInstanceInfo>,
     /// Function-local SSA graphs in identity order.
     pub functions: Vec<SsaFunction>,
     /// Entry function identity.
-    pub entry: FunctionId,
+    pub entry: InstanceId,
 }
 
 impl SsaIr {
@@ -367,6 +368,7 @@ fn build_function_ssa(function: &MirFunction) -> SsaFunction {
     }
     SsaFunction {
         id: function.id,
+        function_id: function.function_id,
         parameters,
         return_type: function.return_type,
         entry: function.entry,
@@ -866,6 +868,30 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
         if signature.module.0 as usize >= ssa.modules.len() {
             return Err(fail("SSA signature names an unknown module".into()));
         }
+        if signature
+            .parameters
+            .iter()
+            .any(|parameter| ssa.types.contains_generic(parameter.ty))
+            || ssa.types.contains_generic(signature.return_type)
+            || function
+                .parameters
+                .iter()
+                .any(|parameter| ssa.types.contains_generic(parameter.ty))
+            || function.blocks.iter().any(|block| {
+                block
+                    .phis
+                    .iter()
+                    .any(|phi| ssa.types.contains_generic(phi.ty))
+                    || block
+                        .instructions
+                        .iter()
+                        .any(|instruction| ssa.types.contains_generic(instruction.ty))
+            })
+        {
+            return Err(fail(
+                "unresolved generic parameter reached SSA codegen".into(),
+            ));
+        }
         verify_ssa_function(
             function,
             signature,
@@ -882,8 +908,8 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
 #[allow(clippy::too_many_lines, clippy::items_after_statements)]
 fn verify_ssa_function(
     function: &SsaFunction,
-    signature: &FunctionSignature,
-    signatures: &[FunctionSignature],
+    signature: &FunctionInstanceInfo,
+    signatures: &[FunctionInstanceInfo],
     structs: &[StructInfo],
     enums: &[EnumInfo],
     types: &TypeArena,
@@ -1155,7 +1181,7 @@ fn verify_ssa_function(
 fn verify_op(
     op: &SsaOp,
     result: TypeId,
-    signatures: &[FunctionSignature],
+    signatures: &[FunctionInstanceInfo],
     structs: &[StructInfo],
     enums: &[EnumInfo],
     types: &TypeArena,
@@ -1176,7 +1202,8 @@ fn verify_op(
                 return Err("SSA aggregate arity/result mismatch".into());
             }
             for ((field_id, operand), declared) in fields.iter().zip(&info.fields) {
-                if *field_id != declared.id || operand_ty(operand)? != declared.ty {
+                let expected = concrete_struct_member(types, structs, result, declared.ty)?;
+                if *field_id != declared.id || operand_ty(operand)? != expected {
                     return Err("SSA aggregate field identity/type mismatch".into());
                 }
             }
@@ -1199,7 +1226,8 @@ fn verify_op(
                 return Err("SSA enum construction arity/result mismatch".into());
             }
             for (operand, declared) in payloads.iter().zip(&variant.payloads) {
-                if operand_ty(operand)? != declared.ty {
+                let expected = concrete_enum_member(types, enums, result, declared.ty)?;
+                if operand_ty(operand)? != expected {
                     return Err("SSA enum payload type mismatch".into());
                 }
             }
@@ -1231,7 +1259,9 @@ fn verify_op(
                 .payloads
                 .get(*index as usize)
                 .ok_or_else(|| "SSA enum payload slot out of bounds".to_string())?;
-            if types.enum_id(operand_ty(value)?) != Some(*enum_id) || result != payload.ty {
+            let enum_ty = operand_ty(value)?;
+            let expected = concrete_enum_member(types, enums, enum_ty, payload.ty)?;
+            if types.enum_id(enum_ty) != Some(*enum_id) || result != expected {
                 return Err("SSA enum payload extraction type mismatch".into());
             }
         }
@@ -1351,9 +1381,61 @@ fn field_path_type(
             .get(owner.0 as usize)
             .and_then(|info| info.fields.iter().find(|field| field.id == *field_id))
             .ok_or_else(|| "field path identity does not belong to struct".to_string())?;
-        ty = field.ty;
+        ty = concrete_struct_member(types, structs, ty, field.ty)?;
     }
     Ok(ty)
+}
+
+fn concrete_struct_member(
+    types: &TypeArena,
+    structs: &[StructInfo],
+    aggregate: TypeId,
+    member: TypeId,
+) -> Result<TypeId, String> {
+    let Some(TypeData::StructInstance(id, args)) = types.get(aggregate) else {
+        return Ok(member);
+    };
+    let parameters = &structs
+        .get(id.0 as usize)
+        .ok_or_else(|| "unknown generic struct".to_string())?
+        .generic_parameters;
+    let substitution = Substitution::new(
+        parameters.iter().map(|parameter| parameter.id),
+        types
+            .arguments(*args)
+            .ok_or_else(|| "invalid struct arguments".to_string())?
+            .iter()
+            .copied(),
+    );
+    types
+        .substituted_existing(member, &substitution)
+        .map_err(|_| "incomplete struct substitution".to_string())
+}
+
+fn concrete_enum_member(
+    types: &TypeArena,
+    enums: &[EnumInfo],
+    aggregate: TypeId,
+    member: TypeId,
+) -> Result<TypeId, String> {
+    let Some(TypeData::EnumInstance(id, args)) = types.get(aggregate) else {
+        return Ok(member);
+    };
+    let parameters = &enums
+        .get(id.0 as usize)
+        .ok_or_else(|| "unknown generic enum".to_string())?
+        .generic_parameters;
+    let substitution = Substitution::new(
+        parameters.iter().map(|parameter| parameter.id),
+        types
+            .arguments(*args)
+            .ok_or_else(|| "invalid enum arguments".to_string())?
+            .iter()
+            .copied(),
+    );
+    types
+        .substituted_existing(member, &substitution)
+        .map_err(|_| "incomplete enum substitution".to_string())
 }
 
 fn valid_coercion(types: &TypeArena, kind: CoercionKind, from: TypeId, to: TypeId) -> bool {
@@ -1549,7 +1631,7 @@ mod tests {
                 .any(|instruction| matches!(
                     instruction.op,
                     SsaOp::Call {
-                        callee: FunctionId(0),
+                        callee: InstanceId(0),
                         ..
                     }
                 ))

@@ -1,4 +1,4 @@
-# Aether NEXT-VERTICAL-7
+# Aether NEXT-VERTICAL-8
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. It does not replace the production `aether` CLI or import any legacy
@@ -10,7 +10,8 @@ Python object, JSON schema, Initial IR, or SSA representation.
 entry SourceFile
   -> transitive discovery -> CompilationSession(module graph + source table)
   -> lexer/parser once per source -> ParsedProgram
-  -> global declaration collection -> resolver/type analysis -> TypedHir
+  -> global declaration collection -> parametric resolver/type analysis
+  -> deduplicated concrete-instance worklist -> monomorphized TypedHir
   -> CFG lowering -> FlowMir -> VerifiedMir
   -> scalar and aggregate promotion -> SsaIr -> VerifiedSsa
   -> LLVM backend -> textual LLVM
@@ -30,20 +31,22 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-7 grammar
+## Vertical-8 grammar
 
 ```text
 program    := import* (alias | struct | enum | function)+ EOF
 import     := "import" IDENT ";"
 alias      := "alias" IDENT "=" type ";"
-struct     := "struct" IDENT "{" field* "}"
+struct     := "struct" IDENT generic-params? "{" field* "}"
 field      := type IDENT ";"
-enum       := "enum" IDENT "{" variant ("," variant)* ","? "}"
+enum       := "enum" IDENT generic-params? "{" variant ("," variant)* ","? "}"
 variant    := IDENT | IDENT "(" type ("," type)* ")"
-function   := type IDENT "(" parameters? ")" block
+function   := type IDENT generic-params? "(" parameters? ")" block
+generic-params := "<" IDENT ("," IDENT)* ">"
 parameters := parameter ("," parameter)*
 parameter  := type IDENT
 type       := (IDENT ".")? ("bool" | integer-type | float-type | IDENT)
+              ("<" type ("," type)* ">")?
 block      := "{" statement* "}"
 statement  := type IDENT "=" expression ";"
             | place "=" expression ";"
@@ -56,23 +59,40 @@ expression := integer | float | "true" | "false" | IDENT | apply
             | expression "." IDENT | "(" expression ")" | "-" expression
             | expression ("*" | "/" | "%" | "+" | "-" | "<" | "<=" | ">" | ">="
                          | "==" | "!=") expression
-apply      := IDENT "(" arguments? ")"
-            | IDENT "." IDENT "(" arguments? ")"
-            | IDENT "." IDENT "." IDENT "(" arguments? ")"
-variant-path := IDENT "." IDENT | IDENT "." IDENT "." IDENT
+apply      := path ("<" type ("," type)* ">")? "(" arguments? ")"
+            | type "." IDENT ("(" arguments? ")")?
+variant-path := type "." IDENT
 arguments  := expression ("," expression)*
 place      := IDENT ("." IDENT)*
 ```
 
 Application syntax remains neutral in the AST. Semantic analysis resolves its
-source application/path to exactly one of `Call(FunctionId, ...)`, explicit
-scalar conversion, `StructInit(StructId, ...)` or `EnumInit`; no ambiguity
+source application/path to exactly one of a declaration call plus explicit
+type arguments, scalar conversion, `StructInit` or `EnumInit`; no ambiguity
 survives HIR. The
 canonical aggregate construction is positional, for example
 `Point(3.0, 4.0)`. Arguments map to `FieldId`s in declaration order and every
 field is required. This is structural construction, not a function call or a
 user-defined constructor. Named initializers and named arguments are not part
 of Vertical-5.
+
+Generic functions, structs and enums use unconstrained declaration binders.
+`GenericParamId { owner, index }` supplies binder identity independently of
+source spelling. `Pair<int,float64>` and `Option<Pair<int,float64>>` are
+canonical applied `TypeId`s; repeated applications reuse one ID. Explicit call
+arguments (`identity<int>(42)`) are the baseline. Calls without them use only
+exact local parameter/argument matching; an uninferable parameter is rejected.
+Generic bodies are checked parametrically, so arithmetic, comparison and field
+access on an unconstrained `T` are invalid. Declared aggregate fields and enum
+variants remain usable after substitution.
+
+`FunctionId` continues to identify one declaration. A canonical `InstanceId`
+identifies each `(FunctionId, concrete type arguments)` and a deterministic
+worklist lowers only concrete HIR into MIR/SSA. Same-instance runtime recursion
+is permitted. Structurally expanding recursion is rejected early, with depth
+and instance-count limits as a fallback. LLVM sees no unresolved generic
+parameters, and instance symbols mangle logical module/declaration names plus
+structural type arguments rather than session-local IDs.
 
 Structs are nominal, module-owned value types. Same-layout declarations have
 different `StructId`s, including declarations with the same spelling in two
@@ -230,7 +250,7 @@ qualification environments that contain its Python dependencies.
 `tests/modules/v1-contract.tsv` records the Vertical-2 multi-file contract;
 these cases are not forced through legacy differential semantics.
 
-### Vertical-7 timing snapshot
+### Vertical-7 timing baseline
 
 A warm debug-build comparison against the pre-migration `HEAD`, using 30 full
 compilations of `tests/programs/v6_enums.ae`, measured means in the low
@@ -244,6 +264,16 @@ MIR/SSA share the arena with `Arc` instead of cloning it. Optimizing the scans o
 property-query hot paths is accepted follow-up debt; no unsafe/global cache or
 weaker verification was introduced to improve this microbenchmark.
 
+### Vertical-8 timing snapshot
+
+The same warm debug binary and 30-compilation `v6_enums.ae` workload measured
+281.4 us for signature/body semantics, 111.8 us for MIR verification and 130.8
+us for SSA verification. Against the recorded Vertical-7 means (278.6, 112.0
+and 157.0 us), generic-capable type resolution and the concrete-instance table
+add no material regression on this non-generic microbenchmark; the SSA change
+is within the expected noise for such a small input. The cross-module generic
+fixture is intentionally not compared as if it were the same workload.
+
 ## Bootstrap ABI and deliberate limits
 
 One entry module plus transitively imported source modules and exactly one
@@ -252,10 +282,10 @@ spell a function `main`, but it is never selected as process entry. Function
 parameter and result lowering (scalars and LLVM aggregates) is an
 **internal bootstrap ABI**, not a stable Aether ABI and not `extern C`.
 Bootstrap LLVM symbols use deterministic length-delimited logical module and
-function names. They do not depend on discovery-order IDs and cannot collide
+function names plus structural generic substitutions. They do not depend on
+session-local `TypeId`/`InstanceId` numbers and cannot collide
 for the admitted identifiers. The scheme is intentionally temporary, is not a
-public ABI, and still leaves packages, overload signatures and generic
-substitutions for later milestones.
+public ABI, and still leaves packages and overload signatures for later milestones.
 
 A generated platform `main` calls the internal Aether entry, truncates its
 semantic `int64` result to the host `i32` process status, and returns that to
@@ -267,7 +297,7 @@ Modules are declaration-only: there are no globals, top-level statements,
 module initializers or initialization order. This is precisely why import
 cycles have no execution-order meaning in this slice. There are also no
 packages, nested/selective/wildcard/aliased imports, reexports, visibility
-keywords, overloads, generics, function values, closures, extern functions,
+keywords, overloads, generic constraints/traits, generic aliases, function values, closures, extern functions,
 heap values, strings, named initializers, methods, ownership, optimization
 pipeline, public ABI, runtime, or LLVM library binding. Unsupported forms fail
 closed before lowering.

@@ -1,10 +1,11 @@
-//! LLVM backend for verified Vertical-7 program SSA.
+//! LLVM backend for verified Vertical-8 program SSA.
 
 use std::fmt::Write;
 
 use aether_frontend::{
-    CastKind, CoercionKind, EnumInfo, FieldId, FloatType, FloatValue, FunctionSignature,
-    IntegerType, ModuleInfo, StructInfo, TargetProperties, TypeArena, TypeData, TypeId,
+    CastKind, CoercionKind, EnumInfo, FieldId, FloatType, FloatValue, FunctionInstanceInfo,
+    IntegerType, ModuleInfo, StructInfo, Substitution, TargetProperties, TypeArena, TypeData,
+    TypeId,
 };
 use aether_middle::{
     BinaryOp, BlockId, SsaFunction, SsaOp, SsaOperand, SsaTerminator, TrapKind, UnaryOp,
@@ -21,7 +22,7 @@ pub struct TargetDescriptor {
 }
 
 impl TargetDescriptor {
-    /// The target admitted through NEXT-VERTICAL-7.
+    /// The target admitted through NEXT-VERTICAL-8.
     #[must_use]
     pub const fn linux_x86_64() -> Self {
         Self {
@@ -49,11 +50,12 @@ impl Backend for LlvmTextBackend {
 
 /// Lowers verified program SSA to deterministic textual LLVM IR.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let program = ssa.as_ssa();
     let types = &program.types;
     let mut output = String::new();
-    writeln!(output, "; Aether NEXT-VERTICAL-7").unwrap();
+    writeln!(output, "; Aether NEXT-VERTICAL-8").unwrap();
     writeln!(
         output,
         "; Internal bootstrap ABI and symbol mangling; not a public Aether ABI"
@@ -69,32 +71,54 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     }
     writeln!(output, "declare void @llvm.trap() cold noreturn nounwind\n").unwrap();
 
-    for info in &program.structs {
+    for (ty, data) in types.entries() {
+        if types.contains_generic(ty) {
+            continue;
+        }
+        let id = match data {
+            TypeData::Struct(id)
+                if program.structs[id.0 as usize].generic_parameters.is_empty() =>
+            {
+                *id
+            }
+            TypeData::StructInstance(id, _) => *id,
+            _ => continue,
+        };
+        let info = &program.structs[id.0 as usize];
         let fields = info
             .fields
             .iter()
-            .map(|field| llvm_type(types, field.ty))
+            .map(|field| {
+                llvm_type(
+                    types,
+                    concrete_struct_member(types, &program.structs, ty, field.ty),
+                )
+            })
             .collect::<Vec<_>>()
             .join(", ");
-        writeln!(
-            output,
-            "{} = type {{ {fields} }}",
-            llvm_type(
-                types,
-                types
-                    .id_of(TypeData::Struct(info.id))
-                    .expect("verified struct type")
-            )
-        )
-        .unwrap();
+        writeln!(output, "{} = type {{ {fields} }}", llvm_type(types, ty)).unwrap();
     }
-    for info in &program.enums {
+    for (ty, data) in types.entries() {
+        if types.contains_generic(ty) {
+            continue;
+        }
+        let id = match data {
+            TypeData::Enum(id) if program.enums[id.0 as usize].generic_parameters.is_empty() => *id,
+            TypeData::EnumInstance(id, _) => *id,
+            _ => continue,
+        };
+        let info = &program.enums[id.0 as usize];
         let mut fields = vec!["i32".to_string()];
         fields.extend(info.variants.iter().map(|variant| {
             let payloads = variant
                 .payloads
                 .iter()
-                .map(|payload| llvm_type(types, payload.ty))
+                .map(|payload| {
+                    llvm_type(
+                        types,
+                        concrete_enum_member(types, &program.enums, ty, payload.ty),
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("{{ {payloads} }}")
@@ -102,12 +126,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         writeln!(
             output,
             "{} = type {{ {} }}",
-            llvm_type(
-                types,
-                types
-                    .id_of(TypeData::Enum(info.id))
-                    .expect("verified enum type")
-            ),
+            llvm_type(types, ty),
             fields.join(", ")
         )
         .unwrap();
@@ -136,7 +155,13 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     writeln!(
         output,
         "  %aether_result = call i64 @{}()",
-        bootstrap_symbol(entry, &program.modules)
+        bootstrap_symbol(
+            entry,
+            &program.modules,
+            &program.structs,
+            &program.enums,
+            types
+        )
     )
     .unwrap();
     writeln!(
@@ -153,8 +178,8 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
 fn emit_function(
     output: &mut String,
     function: &SsaFunction,
-    signature: &FunctionSignature,
-    signatures: &[FunctionSignature],
+    signature: &FunctionInstanceInfo,
+    signatures: &[FunctionInstanceInfo],
     modules: &[ModuleInfo],
     structs: &[StructInfo],
     enums: &[EnumInfo],
@@ -170,7 +195,7 @@ fn emit_function(
         output,
         "define {} @{}({parameters}) {{",
         llvm_type(types, signature.return_type),
-        bootstrap_symbol(signature, modules)
+        bootstrap_symbol(signature, modules, structs, enums, types)
     )
     .unwrap();
 
@@ -228,10 +253,11 @@ fn emit_function(
                     llvm_operand(operand)
                 )
                 .unwrap(),
-                SsaOp::Aggregate { struct_id, fields } => {
-                    let aggregate_ty = types
-                        .id_of(TypeData::Struct(*struct_id))
-                        .expect("verified struct type");
+                SsaOp::Aggregate {
+                    struct_id: _,
+                    fields,
+                } => {
+                    let aggregate_ty = instruction.ty;
                     if fields.is_empty() {
                         writeln!(
                             output,
@@ -244,6 +270,7 @@ fn emit_function(
                     } else {
                         for (position, (field_id, operand)) in fields.iter().enumerate() {
                             let field = field_info(structs, *field_id);
+                            let field_ty = operand_type(function, operand);
                             let previous = if position == 0 {
                                 "poison".to_string()
                             } else {
@@ -258,7 +285,7 @@ fn emit_function(
                                 output,
                                 "  {result_name} = insertvalue {} {previous}, {} {}, {}",
                                 llvm_type(types, aggregate_ty),
-                                llvm_type(types, field.ty),
+                                llvm_type(types, field_ty),
                                 llvm_operand(operand),
                                 field.index
                             )
@@ -273,9 +300,7 @@ fn emit_function(
                 } => {
                     let info = &enums[enum_id.0 as usize];
                     let variant = &info.variants[variant_id.index as usize];
-                    let aggregate_ty = types
-                        .id_of(TypeData::Enum(*enum_id))
-                        .expect("verified enum type");
+                    let aggregate_ty = instruction.ty;
                     let tag_result = if payloads.is_empty() {
                         format!("%v{}", instruction.result.0)
                     } else {
@@ -305,7 +330,7 @@ fn emit_function(
                             output,
                             "  {result_name} = insertvalue {} {previous}, {} {}, {}, {}",
                             llvm_type(types, aggregate_ty),
-                            llvm_type(types, payload.ty),
+                            llvm_type(types, operand_type(function, operand)),
                             llvm_operand(operand),
                             variant.index + 1,
                             payload.index
@@ -313,17 +338,12 @@ fn emit_function(
                         .unwrap();
                     }
                 }
-                SsaOp::EnumDiscriminant { value, enum_id } => {
+                SsaOp::EnumDiscriminant { value, enum_id: _ } => {
                     writeln!(
                         output,
                         "  %v{} = extractvalue {} {}, 0",
                         instruction.result.0,
-                        llvm_type(
-                            types,
-                            types
-                                .id_of(TypeData::Enum(*enum_id))
-                                .expect("verified enum type")
-                        ),
+                        llvm_type(types, operand_type(function, value)),
                         llvm_operand(value)
                     )
                     .unwrap();
@@ -340,12 +360,7 @@ fn emit_function(
                         output,
                         "  %v{} = extractvalue {} {}, {}, {}",
                         instruction.result.0,
-                        llvm_type(
-                            types,
-                            types
-                                .id_of(TypeData::Enum(*enum_id))
-                                .expect("verified enum type")
-                        ),
+                        llvm_type(types, operand_type(function, value)),
                         llvm_operand(value),
                         variant.index + 1,
                         index
@@ -636,7 +651,7 @@ fn emit_function(
                         "  %v{} = call {} @{}({arguments})",
                         instruction.result.0,
                         llvm_type(types, callee_signature.return_type),
-                        bootstrap_symbol(callee_signature, modules)
+                        bootstrap_symbol(callee_signature, modules, structs, enums, types)
                     )
                     .unwrap();
                 }
@@ -1158,9 +1173,83 @@ fn is_checked(op: &SsaOp) -> bool {
     )
 }
 
-fn bootstrap_symbol(signature: &FunctionSignature, modules: &[ModuleInfo]) -> String {
+fn bootstrap_symbol(
+    signature: &FunctionInstanceInfo,
+    modules: &[ModuleInfo],
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+    types: &TypeArena,
+) -> String {
     let module = &modules[signature.module.0 as usize];
-    bootstrap_symbol_for(&module.name, &signature.name)
+    let base = bootstrap_symbol_for(&module.name, &signature.name);
+    if signature.type_arguments.is_empty() {
+        base
+    } else {
+        format!(
+            "{base}__g{}",
+            signature
+                .type_arguments
+                .iter()
+                .map(|argument| mangle_symbol_type(types, *argument, modules, structs, enums))
+                .collect::<Vec<_>>()
+                .join("_")
+        )
+    }
+}
+
+fn mangle_symbol_type(
+    types: &TypeArena,
+    ty: TypeId,
+    modules: &[ModuleInfo],
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+) -> String {
+    let nominal = |module: aether_frontend::ModuleId, name: &str, prefix: char| {
+        let module = &modules[module.0 as usize].name;
+        format!("{prefix}{}_{module}{}_{name}", module.len(), name.len())
+    };
+    match types.get(ty).expect("verified symbol type") {
+        TypeData::Bool => "b".into(),
+        TypeData::Integer(integer) => format!("i{integer:?}"),
+        TypeData::Float(float) => format!("f{float:?}"),
+        TypeData::Struct(id) => {
+            let info = &structs[id.0 as usize];
+            nominal(info.module, &info.name, 's')
+        }
+        TypeData::Enum(id) => {
+            let info = &enums[id.0 as usize];
+            nominal(info.module, &info.name, 'e')
+        }
+        TypeData::StructInstance(id, args) => {
+            let info = &structs[id.0 as usize];
+            format!(
+                "{}x{}z",
+                nominal(info.module, &info.name, 's'),
+                types
+                    .arguments(*args)
+                    .unwrap()
+                    .iter()
+                    .map(|argument| mangle_symbol_type(types, *argument, modules, structs, enums))
+                    .collect::<Vec<_>>()
+                    .join("_")
+            )
+        }
+        TypeData::EnumInstance(id, args) => {
+            let info = &enums[id.0 as usize];
+            format!(
+                "{}x{}z",
+                nominal(info.module, &info.name, 'e'),
+                types
+                    .arguments(*args)
+                    .unwrap()
+                    .iter()
+                    .map(|argument| mangle_symbol_type(types, *argument, modules, structs, enums))
+                    .collect::<Vec<_>>()
+                    .join("_")
+            )
+        }
+        TypeData::GenericParam(_) => panic!("unresolved generic parameter reached symbol mangling"),
+    }
 }
 
 fn block_label(block: BlockId) -> String {
@@ -1184,6 +1273,44 @@ fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
         TypeData::Float(FloatType::Float64) => "double".into(),
         TypeData::Struct(id) => format!("%aether.struct.{}", id.0),
         TypeData::Enum(id) => format!("%aether.enum.{}", id.0),
+        TypeData::StructInstance(id, args) => format!(
+            "%aether.struct.{}.{}",
+            id.0,
+            mangle_type_arguments(types, *args)
+        ),
+        TypeData::EnumInstance(id, args) => format!(
+            "%aether.enum.{}.{}",
+            id.0,
+            mangle_type_arguments(types, *args)
+        ),
+        TypeData::GenericParam(_) => panic!("unresolved generic parameter reached LLVM"),
+    }
+}
+
+fn mangle_type_arguments(types: &TypeArena, args: aether_frontend::TypeArgsId) -> String {
+    types
+        .arguments(args)
+        .expect("verified type arguments")
+        .iter()
+        .map(|ty| mangle_type(types, *ty))
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+fn mangle_type(types: &TypeArena, ty: TypeId) -> String {
+    match types.get(ty).expect("verified mangle type") {
+        TypeData::Bool => "b".into(),
+        TypeData::Integer(integer) => format!("i{integer:?}"),
+        TypeData::Float(float) => format!("f{float:?}"),
+        TypeData::Struct(id) => format!("s{}", id.0),
+        TypeData::Enum(id) => format!("e{}", id.0),
+        TypeData::StructInstance(id, args) => {
+            format!("s{}x{}z", id.0, mangle_type_arguments(types, *args))
+        }
+        TypeData::EnumInstance(id, args) => {
+            format!("e{}x{}z", id.0, mangle_type_arguments(types, *args))
+        }
+        TypeData::GenericParam(_) => panic!("unresolved generic parameter reached mangling"),
     }
 }
 
@@ -1209,11 +1336,57 @@ fn llvm_projection_indices(
                 .iter()
                 .find(|field| field.id == *field_id)
                 .expect("verified projection field");
-            ty = field.ty;
+            ty = concrete_struct_member(types, structs, ty, field.ty);
             field.index.to_string()
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn concrete_struct_member(
+    types: &TypeArena,
+    structs: &[StructInfo],
+    aggregate: TypeId,
+    member: TypeId,
+) -> TypeId {
+    let Some(TypeData::StructInstance(id, args)) = types.get(aggregate) else {
+        return member;
+    };
+    let parameters = &structs[id.0 as usize].generic_parameters;
+    let substitution = Substitution::new(
+        parameters.iter().map(|parameter| parameter.id),
+        types
+            .arguments(*args)
+            .expect("verified struct arguments")
+            .iter()
+            .copied(),
+    );
+    types
+        .substituted_existing(member, &substitution)
+        .expect("verified concrete struct member")
+}
+
+fn concrete_enum_member(
+    types: &TypeArena,
+    enums: &[EnumInfo],
+    aggregate: TypeId,
+    member: TypeId,
+) -> TypeId {
+    let Some(TypeData::EnumInstance(id, args)) = types.get(aggregate) else {
+        return member;
+    };
+    let parameters = &enums[id.0 as usize].generic_parameters;
+    let substitution = Substitution::new(
+        parameters.iter().map(|parameter| parameter.id),
+        types
+            .arguments(*args)
+            .expect("verified enum arguments")
+            .iter()
+            .copied(),
+    );
+    types
+        .substituted_existing(member, &substitution)
+        .expect("verified concrete enum member")
 }
 
 fn llvm_operand(operand: &SsaOperand) -> String {
