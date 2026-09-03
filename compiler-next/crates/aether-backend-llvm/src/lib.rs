@@ -1,12 +1,12 @@
-//! LLVM backend for verified Vertical-11 program SSA.
+//! LLVM backend for verified Vertical-12 program SSA.
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
 
 use aether_frontend::{
     CastKind, CoercionKind, EnumInfo, FieldId, FloatType, FloatValue, FunctionInstanceInfo,
-    IntegerType, ModuleInfo, StructInfo, Substitution, TargetProperties, TypeArena, TypeData,
-    TypeId, layout_of,
+    IntegerType, MatchMode, ModuleInfo, StructInfo, Substitution, TargetProperties, TypeArena,
+    TypeData, TypeId, layout_of,
 };
 use aether_middle::{
     BinaryOp, BlockId, SsaFunction, SsaOp, SsaOperand, SsaPlace, SsaPlaceBase, SsaPlaceProjection,
@@ -23,7 +23,7 @@ pub struct TargetDescriptor {
 }
 
 impl TargetDescriptor {
-    /// The target admitted through NEXT-VERTICAL-11.
+    /// The target admitted through NEXT-VERTICAL-12.
     #[must_use]
     pub const fn linux_x86_64() -> Self {
         Self {
@@ -75,7 +75,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         .collect::<BTreeSet<_>>();
     let has_buffers = !buffer_elements.is_empty();
     let mut output = String::new();
-    writeln!(output, "; Aether NEXT-VERTICAL-11").unwrap();
+    writeln!(output, "; Aether NEXT-VERTICAL-12").unwrap();
     writeln!(
         output,
         "; Internal bootstrap ABI and symbol mangling; not a public Aether ABI"
@@ -723,32 +723,83 @@ fn emit_function(
                         .unwrap();
                     }
                 }
-                SsaOp::EnumDiscriminant { value, enum_id: _ } => {
-                    writeln!(
-                        output,
-                        "  %v{} = extractvalue {} {}, 0",
-                        instruction.result.0,
-                        llvm_type(types, operand_type(function, value)),
-                        llvm_operand(value)
-                    )
-                    .unwrap();
+                SsaOp::EnumDiscriminant {
+                    value,
+                    enum_id: _,
+                    mode,
+                } => {
+                    if *mode == MatchMode::Value {
+                        writeln!(
+                            output,
+                            "  %v{} = extractvalue {} {}, 0",
+                            instruction.result.0,
+                            llvm_type(types, operand_type(function, value)),
+                            llvm_operand(value)
+                        )
+                        .unwrap();
+                    } else {
+                        let enum_ty = types
+                            .reference_info(operand_type(function, value))
+                            .expect("verified reference match operand")
+                            .0;
+                        writeln!(
+                            output,
+                            "  %match_tag_ptr{} = getelementptr inbounds {}, ptr {}, i32 0, i32 0",
+                            instruction.result.0,
+                            llvm_type(types, enum_ty),
+                            llvm_operand(value)
+                        )
+                        .unwrap();
+                        writeln!(
+                            output,
+                            "  %v{} = load i32, ptr %match_tag_ptr{}",
+                            instruction.result.0, instruction.result.0
+                        )
+                        .unwrap();
+                    }
                 }
                 SsaOp::EnumPayload {
                     value,
                     enum_id,
                     variant_id,
                     index,
+                    mode,
                 } => {
                     let info = &enums[enum_id.0 as usize];
                     let variant = &info.variants[variant_id.index as usize];
+                    if *mode == MatchMode::Value {
+                        writeln!(
+                            output,
+                            "  %v{} = extractvalue {} {}, {}, {}",
+                            instruction.result.0,
+                            llvm_type(types, operand_type(function, value)),
+                            llvm_operand(value),
+                            variant.index + 1,
+                            index
+                        )
+                        .unwrap();
+                    } else {
+                        let enum_ty = types
+                            .reference_info(operand_type(function, value))
+                            .expect("verified reference match payload operand")
+                            .0;
+                        writeln!(
+                            output,
+                            "  %v{} = getelementptr inbounds {}, ptr {}, i32 0, i32 {}, i32 {}",
+                            instruction.result.0,
+                            llvm_type(types, enum_ty),
+                            llvm_operand(value),
+                            variant.index + 1,
+                            index
+                        )
+                        .unwrap();
+                    }
+                }
+                SsaOp::ConsumeEnum { .. } => {
                     writeln!(
                         output,
-                        "  %v{} = extractvalue {} {}, {}, {}",
-                        instruction.result.0,
-                        llvm_type(types, operand_type(function, value)),
-                        llvm_operand(value),
-                        variant.index + 1,
-                        index
+                        "  %v{} = select i1 true, i1 true, i1 true",
+                        instruction.result.0
                     )
                     .unwrap();
                 }

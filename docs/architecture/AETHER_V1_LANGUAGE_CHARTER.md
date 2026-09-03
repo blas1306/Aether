@@ -192,6 +192,20 @@ explicitly deferred. Stored references/views and Buffer elements requiring
 drop remain forbidden; this milestone composes ownership outward rather than
 weakening lifetime or element-destruction rules.
 
+NEXT-VERTICAL-12 makes enum-pattern ownership explicit. A value match consumes
+a non-Copy enum as one whole root and transfers bound payload ownership exactly
+once; `match (ref value)` and `match (ref mut value)` instead bind arm-scoped
+shared or writable references to the selected active payload. Writable remains
+a capability, not an exclusivity or LLVM `noalias` promise. This special enum
+destructure does not admit arbitrary struct/field partial moves.
+
+The same vertical admits the minimal `MaybeMoved` state at control-flow joins.
+It is never usable by ordinary source operations: it exists only so normal-path
+cleanup can choose between one recursive drop and no drop. Compiler-generated
+root-level flags are emitted only for roots that actually need such conditional
+cleanup; uniform ownership and early-return paths stay flag-free. Loop-carried
+ownership ambiguity remains rejected, and aborting traps still do not unwind.
+
 ## Safety and control
 
 Safe and ergonomic behavior is the default.  Value semantics, moves, shared

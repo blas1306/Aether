@@ -1,16 +1,16 @@
 //! Explicit control-flow MIR and fail-closed verification.
 #![allow(missing_docs)]
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 use std::fmt::Write;
 use std::sync::Arc;
 
 use aether_frontend::{
     CastKind, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId, FloatValue,
-    FunctionInstanceInfo, HirBinaryOp, HirBlock, HirCallTarget, HirExpr, HirExprKind, HirFunction,
-    HirMatchArm, HirPlace, HirPlaceBase, HirPlaceProjection, HirStmtKind, HirUnaryOp, InstanceId,
-    LocalId, ModuleInfo, Phase, Span, StructId, StructInfo, Substitution, TypeArena, TypeData,
-    TypeId, TypedHir, VariantId, format_type,
+    FunctionInstanceInfo, HirBinaryOp, HirBlock, HirCallTarget, HirDrop, HirExpr, HirExprKind,
+    HirFunction, HirMatchArm, HirPlace, HirPlaceBase, HirPlaceProjection, HirStmtKind, HirUnaryOp,
+    InstanceId, LocalId, MatchMode, ModuleInfo, Phase, Span, StructId, StructInfo, Substitution,
+    TypeArena, TypeData, TypeId, TypedHir, VariantId, format_type,
 };
 
 /// Basic-block identity, equal to its stable vector index.
@@ -39,6 +39,13 @@ pub struct MirParameter {
     pub local: LocalId,
     /// Canonical semantic type.
     pub ty: TypeId,
+}
+
+/// One compiler-generated root-level conditional ownership flag.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MirDropFlag {
+    pub owner: LocalId,
+    pub flag: LocalId,
 }
 
 /// Reusable assignable storage path. Future projections can add indexing and
@@ -181,12 +188,18 @@ pub enum Rvalue {
     EnumDiscriminant {
         value: Operand,
         enum_id: EnumId,
+        mode: MatchMode,
     },
     EnumPayload {
         value: Operand,
         enum_id: EnumId,
         variant_id: VariantId,
         index: u32,
+        mode: MatchMode,
+    },
+    /// Finish a consuming enum destructure after active payload transfer.
+    ConsumeEnum {
+        owner: Place,
     },
     /// Explicit semantic widening.
     Coerce {
@@ -278,6 +291,8 @@ pub struct MirFunction {
     pub function_id: aether_frontend::FunctionId,
     /// Parameters in call order.
     pub parameters: Vec<MirParameter>,
+    /// Sparse metadata: only roots needing conditional normal cleanup have flags.
+    pub drop_flags: Vec<MirDropFlag>,
     /// Canonical return type.
     pub return_type: TypeId,
     /// User locals and expression temporaries.
@@ -384,6 +399,48 @@ pub fn lower_hir(hir: TypedHir) -> FlowMir {
     }
 }
 
+fn conditional_drop_roots(block: &HirBlock) -> BTreeSet<LocalId> {
+    fn visit(block: &HirBlock, roots: &mut BTreeSet<LocalId>) {
+        for drop in &block.exit_drops {
+            if let HirDrop::Conditional(local) = drop {
+                roots.insert(*local);
+            }
+        }
+        for statement in &block.statements {
+            match &statement.kind {
+                HirStmtKind::If {
+                    then_block,
+                    else_block,
+                    ..
+                } => {
+                    visit(then_block, roots);
+                    if let Some(else_block) = else_block {
+                        visit(else_block, roots);
+                    }
+                }
+                HirStmtKind::While { body, .. } => visit(body, roots),
+                HirStmtKind::Match { arms, .. } => {
+                    for arm in arms {
+                        visit(&arm.body, roots);
+                    }
+                }
+                HirStmtKind::Return { drops, .. } => {
+                    for drop in drops {
+                        if let HirDrop::Conditional(local) = drop {
+                            roots.insert(*local);
+                        }
+                    }
+                }
+                HirStmtKind::Nop | HirStmtKind::Local { .. } | HirStmtKind::Assign { .. } => {}
+            }
+        }
+    }
+
+    let mut roots = BTreeSet::new();
+    visit(block, &mut roots);
+    roots
+}
+
 fn lower_function(
     function: &HirFunction,
     return_type: TypeId,
@@ -409,11 +466,13 @@ fn lower_function(
             ty: parameter.ty,
         })
         .collect();
+    let conditional_roots = conditional_drop_roots(&function.body);
     let mut builder = Builder {
         function: MirFunction {
             id: function.id,
             function_id: function.function_id,
             parameters,
+            drop_flags: Vec::new(),
             return_type,
             locals,
             blocks: vec![BasicBlock {
@@ -426,7 +485,25 @@ fn lower_function(
         current: Some(BlockId(0)),
         enums,
         types,
+        drop_flag_by_owner: vec![None; function.locals.len()],
     };
+    for owner in conditional_roots {
+        let flag = builder.temporary(TypeId::BOOL);
+        builder.drop_flag_by_owner[owner.0 as usize] = Some(flag);
+        builder
+            .function
+            .drop_flags
+            .push(MirDropFlag { owner, flag });
+        let initially_owned = function.locals[owner.0 as usize].parameter;
+        builder.assign(
+            Place {
+                base: PlaceBase::Local(flag),
+                projections: Vec::new(),
+            },
+            Rvalue::Use(Operand::Bool(initially_owned)),
+            function.span,
+        );
+    }
     builder.lower_block(&function.body);
     builder.function
 }
@@ -436,6 +513,7 @@ struct Builder<'a> {
     current: Option<BlockId>,
     enums: &'a [EnumInfo],
     types: &'a TypeArena,
+    drop_flag_by_owner: Vec<Option<LocalId>>,
 }
 
 impl Builder<'_> {
@@ -460,6 +538,9 @@ impl Builder<'_> {
                         rvalue,
                         statement.span,
                     );
+                    if !self.types.is_copy(initializer.ty) {
+                        self.set_drop_flag(*local, true, statement.span);
+                    }
                 }
                 HirStmtKind::Assign { place, value } => {
                     let value = self.lower_expr(value);
@@ -467,6 +548,10 @@ impl Builder<'_> {
                     if self.types.is_copy(value_type(&self.function, &value)) {
                         self.assign(place, Rvalue::Use(value), statement.span);
                     } else {
+                        let destination_owner = match &place.base {
+                            PlaceBase::Local(local) if place.projections.is_empty() => Some(*local),
+                            _ => None,
+                        };
                         if self.types.needs_drop(value_type(&self.function, &value)) {
                             self.emit_drop(place.clone(), statement.span);
                         }
@@ -477,18 +562,15 @@ impl Builder<'_> {
                             },
                             statement.span,
                         );
+                        if let Some(local) = destination_owner {
+                            self.set_drop_flag(local, true, statement.span);
+                        }
                     }
                 }
                 HirStmtKind::Return { value, drops } => {
                     let value = self.lower_expr(value);
-                    for local in drops {
-                        self.emit_drop(
-                            Place {
-                                base: PlaceBase::Local(*local),
-                                projections: vec![],
-                            },
-                            statement.span,
-                        );
+                    for drop in drops {
+                        self.emit_hir_drop(*drop, statement.span);
                     }
                     self.terminate(Terminator::Return(value));
                 }
@@ -499,21 +581,17 @@ impl Builder<'_> {
                 } => self.lower_if(condition, then_block, else_block.as_ref()),
                 HirStmtKind::While { condition, body } => self.lower_while(condition, body),
                 HirStmtKind::Match {
+                    mode,
                     scrutinee,
+                    enum_type,
                     enum_id,
                     arms,
-                } => self.lower_match(scrutinee, *enum_id, arms),
+                } => self.lower_match(*mode, scrutinee, *enum_type, *enum_id, arms),
             }
         }
         if self.current.is_some() {
-            for local in &block.exit_drops {
-                self.emit_drop(
-                    Place {
-                        base: PlaceBase::Local(*local),
-                        projections: vec![],
-                    },
-                    block.span,
-                );
+            for drop in &block.exit_drops {
+                self.emit_hir_drop(*drop, block.span);
             }
         }
     }
@@ -580,7 +658,15 @@ impl Builder<'_> {
         self.current = Some(exit);
     }
 
-    fn lower_match(&mut self, scrutinee: &HirExpr, enum_id: EnumId, arms: &[HirMatchArm]) {
+    #[allow(clippy::too_many_lines)]
+    fn lower_match(
+        &mut self,
+        mode: MatchMode,
+        scrutinee: &HirExpr,
+        enum_type: TypeId,
+        enum_id: EnumId,
+        arms: &[HirMatchArm],
+    ) {
         let enum_value = self.lower_expr(scrutinee);
         let tag = self.temporary(TypeId::UINT32);
         self.assign(
@@ -591,6 +677,7 @@ impl Builder<'_> {
             Rvalue::EnumDiscriminant {
                 value: enum_value.clone(),
                 enum_id,
+                mode,
             },
             scrutinee.span,
         );
@@ -613,20 +700,67 @@ impl Builder<'_> {
         let mut open_ends = Vec::new();
         for (arm, block_id) in arms.iter().zip(arm_blocks) {
             self.current = Some(block_id);
-            for binding in &arm.bindings {
-                self.assign(
-                    Place {
-                        base: PlaceBase::Local(binding.local),
-                        projections: vec![],
-                    },
-                    Rvalue::EnumPayload {
-                        value: enum_value.clone(),
-                        enum_id,
-                        variant_id: arm.variant_id,
-                        index: binding.payload_index,
-                    },
-                    binding.span,
-                );
+            let variant = &info.variants[arm.variant_id.index as usize];
+            let consuming = mode == MatchMode::Value && !self.types.is_copy(enum_type);
+            let mut ignored_owners = Vec::new();
+            for payload in &variant.payloads {
+                let binding = arm
+                    .bindings
+                    .iter()
+                    .find(|binding| binding.payload_index == payload.index);
+                if let Some(binding) = binding {
+                    self.assign(
+                        Place {
+                            base: PlaceBase::Local(binding.local),
+                            projections: vec![],
+                        },
+                        Rvalue::EnumPayload {
+                            value: enum_value.clone(),
+                            enum_id,
+                            variant_id: arm.variant_id,
+                            index: binding.payload_index,
+                            mode,
+                        },
+                        binding.span,
+                    );
+                    if !self.types.is_copy(binding.ty) {
+                        self.set_drop_flag(binding.local, true, binding.span);
+                    }
+                } else if consuming {
+                    let payload_ty =
+                        concrete_enum_member(self.types, self.enums, enum_type, payload.ty)
+                            .expect("verified concrete match payload type");
+                    if self.types.needs_drop(payload_ty) {
+                        let temporary = self.temporary(payload_ty);
+                        self.assign(
+                            Place {
+                                base: PlaceBase::Local(temporary),
+                                projections: Vec::new(),
+                            },
+                            Rvalue::EnumPayload {
+                                value: enum_value.clone(),
+                                enum_id,
+                                variant_id: arm.variant_id,
+                                index: payload.index,
+                                mode,
+                            },
+                            arm.span,
+                        );
+                        ignored_owners.push(temporary);
+                    }
+                }
+            }
+            if consuming {
+                self.emit_consume_enum(operand_place(&enum_value), arm.span);
+                for owner in ignored_owners.into_iter().rev() {
+                    self.emit_drop(
+                        Place {
+                            base: PlaceBase::Local(owner),
+                            projections: Vec::new(),
+                        },
+                        arm.span,
+                    );
+                }
             }
             self.lower_block(&arm.body);
             if let Some(end) = self.current {
@@ -691,6 +825,7 @@ impl Builder<'_> {
                     },
                     expression.span,
                 );
+                self.set_drop_flag(*local, false, expression.span);
                 Operand::Local(destination)
             }
             HirExprKind::Load(place) => {
@@ -998,6 +1133,7 @@ impl Builder<'_> {
     }
 
     fn emit_drop(&mut self, owner: Place, span: Span) {
+        let root = place_root_local(&owner);
         let token = self.temporary(TypeId::BOOL);
         self.assign(
             Place {
@@ -1007,6 +1143,70 @@ impl Builder<'_> {
             Rvalue::Drop { owner },
             span,
         );
+        if let Some(owner) = root {
+            self.set_drop_flag(owner, false, span);
+        }
+    }
+
+    fn emit_consume_enum(&mut self, owner: Place, span: Span) {
+        let root = place_root_local(&owner);
+        let token = self.temporary(TypeId::BOOL);
+        self.assign(
+            Place {
+                base: PlaceBase::Local(token),
+                projections: Vec::new(),
+            },
+            Rvalue::ConsumeEnum { owner },
+            span,
+        );
+        if let Some(owner) = root {
+            self.set_drop_flag(owner, false, span);
+        }
+    }
+
+    fn set_drop_flag(&mut self, owner: LocalId, value: bool, span: Span) {
+        let Some(flag) = self
+            .drop_flag_by_owner
+            .get(owner.0 as usize)
+            .copied()
+            .flatten()
+        else {
+            return;
+        };
+        self.assign(
+            Place {
+                base: PlaceBase::Local(flag),
+                projections: Vec::new(),
+            },
+            Rvalue::Use(Operand::Bool(value)),
+            span,
+        );
+    }
+
+    fn emit_hir_drop(&mut self, drop: HirDrop, span: Span) {
+        let owner = drop.local();
+        let owner_place = || Place {
+            base: PlaceBase::Local(owner),
+            projections: Vec::new(),
+        };
+        match drop {
+            HirDrop::Unconditional(_) => self.emit_drop(owner_place(), span),
+            HirDrop::Conditional(_) => {
+                let flag = self.drop_flag_by_owner[owner.0 as usize]
+                    .expect("conditional HIR cleanup has a generated flag");
+                let drop_block = self.new_block();
+                let continue_block = self.new_block();
+                self.terminate(Terminator::Branch {
+                    condition: Operand::Local(flag),
+                    then_block: drop_block,
+                    else_block: continue_block,
+                });
+                self.current = Some(drop_block);
+                self.emit_drop(owner_place(), span);
+                self.terminate(Terminator::Goto(continue_block));
+                self.current = Some(continue_block);
+            }
+        }
     }
 
     fn terminate(&mut self, terminator: Terminator) {
@@ -1235,6 +1435,7 @@ fn verify_mir_function(
     if reachable.iter().any(|value| !value) {
         return Err(fail("MIR contains an unreachable block".into()));
     }
+    verify_drop_flag_contract(function, signatures, types, fail)?;
     verify_ownership(function, signatures, types, fail)?;
     let all = vec![true; function.locals.len()];
     let mut initialized_in = vec![all.clone(); function.blocks.len()];
@@ -1410,11 +1611,189 @@ fn verify_mir_function(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
+fn verify_drop_flag_contract(
+    function: &MirFunction,
+    signatures: &[FunctionInstanceInfo],
+    types: &TypeArena,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut owners = BTreeSet::new();
+    let mut flags = BTreeSet::new();
+    for entry in &function.drop_flags {
+        let Some(owner) = function.locals.get(entry.owner.0 as usize) else {
+            return Err(fail("MIR drop flag names an unknown owner".into()));
+        };
+        let Some(flag) = function.locals.get(entry.flag.0 as usize) else {
+            return Err(fail("MIR drop flag names an unknown flag local".into()));
+        };
+        if !owners.insert(entry.owner)
+            || !flags.insert(entry.flag)
+            || owner.temporary
+            || types.is_copy(owner.ty)
+            || !types.needs_drop(owner.ty)
+            || flag.ty != TypeId::BOOL
+            || !flag.temporary
+            || flag.address_taken
+        {
+            return Err(fail("MIR root-level drop flag metadata is invalid".into()));
+        }
+    }
+
+    let entry_block = &function.blocks[function.entry.0 as usize];
+    let mut allowed_writes = BTreeSet::new();
+    for (index, entry) in function.drop_flags.iter().enumerate() {
+        let expected = function
+            .parameters
+            .iter()
+            .any(|parameter| parameter.local == entry.owner);
+        let Some(instruction) = entry_block.instructions.get(index) else {
+            return Err(fail(
+                "MIR drop flag is not initialized at function entry".into(),
+            ));
+        };
+        if place_root_local(&instruction.destination) != Some(entry.flag)
+            || !instruction.destination.projections.is_empty()
+            || !matches!(instruction.value, Rvalue::Use(Operand::Bool(value)) if value == expected)
+        {
+            return Err(fail("MIR drop flag has an invalid initial value".into()));
+        }
+        allowed_writes.insert((function.entry, index));
+    }
+
+    let flag_for = |owner: LocalId| {
+        function
+            .drop_flags
+            .iter()
+            .find(|entry| entry.owner == owner)
+            .map(|entry| entry.flag)
+    };
+    for block in &function.blocks {
+        for (index, instruction) in block.instructions.iter().enumerate() {
+            let destination = place_root_local(&instruction.destination);
+            let mut transitions = Vec::new();
+            let consume_operand = |operand: &Operand, transitions: &mut Vec<(LocalId, bool)>| {
+                if let Some(owner) = operand_local_id(operand)
+                    && let Some(flag) = flag_for(owner)
+                {
+                    transitions.push((flag, false));
+                }
+            };
+            match &instruction.value {
+                Rvalue::Move { source } => {
+                    if let Some(owner) = place_root_local(source)
+                        && let Some(flag) = flag_for(owner)
+                    {
+                        transitions.push((flag, false));
+                    }
+                    if let Some(owner) = destination
+                        && let Some(flag) = flag_for(owner)
+                    {
+                        transitions.push((flag, true));
+                    }
+                }
+                Rvalue::Drop { owner } | Rvalue::ConsumeEnum { owner } => {
+                    if let Some(owner) = place_root_local(owner)
+                        && let Some(flag) = flag_for(owner)
+                    {
+                        transitions.push((flag, false));
+                    }
+                }
+                Rvalue::BufferAlloc { .. }
+                | Rvalue::EnumPayload {
+                    mode: MatchMode::Value,
+                    ..
+                } => {
+                    if let Some(owner) = destination
+                        && let Some(flag) = flag_for(owner)
+                    {
+                        transitions.push((flag, true));
+                    }
+                }
+                Rvalue::Call { callee, args } => {
+                    let Some(signature) = signatures
+                        .get(callee.0 as usize)
+                        .filter(|signature| signature.id == *callee)
+                    else {
+                        return Err(fail(
+                            "MIR drop-flag analysis found unknown call target".into(),
+                        ));
+                    };
+                    for (argument, parameter) in args.iter().zip(&signature.parameters) {
+                        if !types.is_copy(parameter.ty) {
+                            consume_operand(argument, &mut transitions);
+                        }
+                    }
+                    if let Some(owner) = destination
+                        && let Some(flag) = flag_for(owner)
+                    {
+                        transitions.push((flag, true));
+                    }
+                }
+                Rvalue::Aggregate { fields, .. } => {
+                    for (_, operand) in fields {
+                        if !types.is_copy(operand_type(function, operand).map_err(fail)?) {
+                            consume_operand(operand, &mut transitions);
+                        }
+                    }
+                    if let Some(owner) = destination
+                        && let Some(flag) = flag_for(owner)
+                    {
+                        transitions.push((flag, true));
+                    }
+                }
+                Rvalue::EnumConstruct { payloads, .. } => {
+                    for operand in payloads {
+                        if !types.is_copy(operand_type(function, operand).map_err(fail)?) {
+                            consume_operand(operand, &mut transitions);
+                        }
+                    }
+                    if let Some(owner) = destination
+                        && let Some(flag) = flag_for(owner)
+                    {
+                        transitions.push((flag, true));
+                    }
+                }
+                _ => {}
+            }
+            for (offset, (flag, value)) in transitions.into_iter().enumerate() {
+                let write_index = index + offset + 1;
+                let Some(write) = block.instructions.get(write_index) else {
+                    return Err(fail(
+                        "MIR ownership transition is missing its drop-flag update".into(),
+                    ));
+                };
+                if place_root_local(&write.destination) != Some(flag)
+                    || !write.destination.projections.is_empty()
+                    || !matches!(write.value, Rvalue::Use(Operand::Bool(actual)) if actual == value)
+                {
+                    return Err(fail(
+                        "MIR ownership transition has a stale drop flag".into(),
+                    ));
+                }
+                allowed_writes.insert((block.id, write_index));
+            }
+        }
+    }
+    for block in &function.blocks {
+        for (index, instruction) in block.instructions.iter().enumerate() {
+            if place_root_local(&instruction.destination)
+                .is_some_and(|local| flags.contains(&local))
+                && !allowed_writes.contains(&(block.id, index))
+            {
+                return Err(fail("MIR contains an unpaired drop-flag transition".into()));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MirOwnerState {
     Uninitialized,
     Owned,
     Moved,
+    MaybeMoved,
     Dropped,
 }
 
@@ -1425,6 +1804,23 @@ fn verify_ownership(
     types: &TypeArena,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
+    let mut predecessors = vec![Vec::new(); function.blocks.len()];
+    for block in &function.blocks {
+        for target in targets(block.terminator.as_ref().expect("verified CFG")) {
+            predecessors[target.0 as usize].push(block.id);
+        }
+    }
+    let has_backedge = predecessors
+        .iter()
+        .enumerate()
+        .map(|(target, incoming)| {
+            let target = BlockId(u32::try_from(target).expect("block count fits u32"));
+            incoming
+                .iter()
+                .any(|source| block_reaches(function, target, *source))
+        })
+        .collect::<Vec<_>>();
+    let mut seen_predecessors = vec![BTreeSet::new(); function.blocks.len()];
     let mut entry = vec![MirOwnerState::Uninitialized; function.locals.len()];
     for parameter in &function.parameters {
         if !types.is_copy(parameter.ty) {
@@ -1457,6 +1853,11 @@ fn verify_ownership(
                         ));
                     }
                     state[owner.0 as usize] = MirOwnerState::Dropped;
+                }
+                Rvalue::ConsumeEnum { owner } => {
+                    let owner = place_root_local(owner)
+                        .ok_or_else(|| fail("MIR consuming match owner has no local".into()))?;
+                    consume_owner(function, types, &mut state, owner, "consuming match", fail)?;
                 }
                 Rvalue::BufferAlloc { .. } => {
                     initialize_owner(function, types, &mut state, destination, fail)?;
@@ -1526,17 +1927,32 @@ fn verify_ownership(
                     }
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
-                Rvalue::EnumDiscriminant { value, .. } | Rvalue::EnumPayload { value, .. } => {
+                Rvalue::EnumDiscriminant { value, mode, .. }
+                | Rvalue::EnumPayload { value, mode, .. } => {
                     if let Some(local) = operand_local_id(value)
+                        && *mode == MatchMode::Value
                         && !types.is_copy(function.locals[local.0 as usize].ty)
                         && matches!(
                             state[local.0 as usize],
-                            MirOwnerState::Moved | MirOwnerState::Dropped
+                            MirOwnerState::Moved
+                                | MirOwnerState::MaybeMoved
+                                | MirOwnerState::Dropped
                         )
                     {
                         return Err(fail(
                             "MIR enum inspection uses a moved/dropped owner".into(),
                         ));
+                    }
+                    if matches!(
+                        instruction.value,
+                        Rvalue::EnumPayload {
+                            mode: MatchMode::Value,
+                            ..
+                        }
+                    ) && !types.is_copy(
+                        function.locals[destination.expect("payload destination").0 as usize].ty,
+                    ) {
+                        initialize_owner(function, types, &mut state, destination, fail)?;
                     }
                 }
                 _ => {}
@@ -1552,40 +1968,70 @@ fn verify_ownership(
                     .ok_or_else(|| fail("owned return is not materialized".into()))?;
                 consume_owner(function, types, &mut state, local, "return", fail)?;
             }
-            if function.locals.iter().any(|local| {
-                types.needs_drop(local.ty) && state[local.id.0 as usize] == MirOwnerState::Owned
+            if let Some(local) = function.locals.iter().find(|local| {
+                types.needs_drop(local.ty)
+                    && matches!(
+                        state[local.id.0 as usize],
+                        MirOwnerState::Owned | MirOwnerState::MaybeMoved
+                    )
             }) {
-                return Err(fail("MIR normal return leaks an owning value".into()));
+                return Err(fail(format!(
+                    "MIR function {:?} normal return leaks owning local {:?} in state {:?}",
+                    function.id, local.id, state[local.id.0 as usize]
+                )));
             }
         }
         for target in targets(terminator) {
+            let mut outgoing = state.clone();
+            if let Terminator::Branch {
+                condition: Operand::Local(flag),
+                then_block,
+                else_block,
+            } = terminator
+                && let Some(drop_flag) =
+                    function.drop_flags.iter().find(|entry| entry.flag == *flag)
+                && state[drop_flag.owner.0 as usize] == MirOwnerState::MaybeMoved
+            {
+                outgoing[drop_flag.owner.0 as usize] = if target == *then_block {
+                    MirOwnerState::Owned
+                } else if target == *else_block {
+                    MirOwnerState::Moved
+                } else {
+                    unreachable!("branch target enumeration is exact")
+                };
+            }
+            let target_index = target.0 as usize;
+            let was_ready = target == function.entry
+                || has_backedge[target_index]
+                || seen_predecessors[target_index].len() == predecessors[target_index].len();
+            seen_predecessors[target_index].insert(block_id);
+            let mut changed_target = false;
             match incoming[target.0 as usize].clone() {
                 None => {
-                    incoming[target.0 as usize] = Some(state.clone());
-                    queue.push_back(target);
+                    incoming[target.0 as usize] = Some(outgoing);
+                    changed_target = true;
                 }
                 Some(previous) => {
                     let mut merged = previous.clone();
                     for ((merged_state, previous_state), incoming_state) in
-                        merged.iter_mut().zip(&previous).zip(&state)
+                        merged.iter_mut().zip(&previous).zip(&outgoing)
                     {
                         if previous_state == incoming_state {
                             continue;
                         }
-                        if *previous_state == MirOwnerState::Owned
-                            || *incoming_state == MirOwnerState::Owned
-                        {
-                            return Err(fail(
-                                "MIR ownership states disagree at a control-flow join".into(),
-                            ));
-                        }
-                        *merged_state = MirOwnerState::Moved;
+                        *merged_state = merge_mir_owner_state(*previous_state, *incoming_state);
                     }
                     if merged != previous {
                         incoming[target.0 as usize] = Some(merged);
-                        queue.push_back(target);
+                        changed_target = true;
                     }
                 }
+            }
+            let ready = target == function.entry
+                || has_backedge[target_index]
+                || seen_predecessors[target_index].len() == predecessors[target_index].len();
+            if ready && (changed_target || !was_ready) {
+                queue.push_back(target);
             }
         }
     }
@@ -1612,6 +2058,22 @@ fn initialize_owner(
     }
     state[local.0 as usize] = MirOwnerState::Owned;
     Ok(())
+}
+
+fn merge_mir_owner_state(left: MirOwnerState, right: MirOwnerState) -> MirOwnerState {
+    use MirOwnerState::{Dropped, MaybeMoved, Moved, Owned, Uninitialized};
+    match (left, right) {
+        (Uninitialized, Uninitialized) => Uninitialized,
+        (Owned, Owned) => Owned,
+        (Moved | Dropped, Moved | Uninitialized)
+        | (Moved, Dropped)
+        | (Uninitialized, Moved | Dropped) => Moved,
+        (Dropped, Dropped) => Dropped,
+        (MaybeMoved, _)
+        | (_, MaybeMoved)
+        | (Owned, Moved | Dropped | Uninitialized)
+        | (Moved | Dropped | Uninitialized, Owned) => MaybeMoved,
+    }
 }
 
 fn consume_owner(
@@ -1790,10 +2252,32 @@ fn validate_rvalue(
                 }
             }
         }
-        Rvalue::EnumDiscriminant { value, enum_id } => {
+        Rvalue::EnumDiscriminant {
+            value,
+            enum_id,
+            mode,
+        } => {
             validate_operand(function, value, initialized)?;
+            let value_ty = operand_type(function, value)?;
+            let enum_ty = match mode {
+                MatchMode::Value => value_ty,
+                MatchMode::SharedRef => types
+                    .reference_info(value_ty)
+                    .filter(|(_, mutable)| !*mutable)
+                    .map(|(pointee, _)| pointee)
+                    .ok_or_else(|| {
+                        "MIR shared-ref match discriminant is not a shared reference".to_string()
+                    })?,
+                MatchMode::MutableRef => types
+                    .reference_info(value_ty)
+                    .filter(|(_, mutable)| *mutable)
+                    .map(|(pointee, _)| pointee)
+                    .ok_or_else(|| {
+                        "MIR ref-mut match discriminant is not a mutable reference".to_string()
+                    })?,
+            };
             if enums.get(enum_id.0 as usize).map(|info| info.id) != Some(*enum_id)
-                || types.enum_id(operand_type(function, value)?) != Some(*enum_id)
+                || types.enum_id(enum_ty) != Some(*enum_id)
                 || destination != TypeId::UINT32
             {
                 return Err("MIR enum discriminant contract invalid".into());
@@ -1804,6 +2288,7 @@ fn validate_rvalue(
             enum_id,
             variant_id,
             index,
+            mode,
         } => {
             validate_operand(function, value, initialized)?;
             let info = enums
@@ -1819,10 +2304,53 @@ fn validate_rvalue(
                 .payloads
                 .get(*index as usize)
                 .ok_or_else(|| "MIR enum payload slot out of bounds".to_string())?;
-            let enum_ty = operand_type(function, value)?;
-            let expected = concrete_enum_member(types, enums, enum_ty, payload.ty)?;
+            let value_ty = operand_type(function, value)?;
+            let enum_ty = match mode {
+                MatchMode::Value => value_ty,
+                MatchMode::SharedRef => types
+                    .reference_info(value_ty)
+                    .filter(|(_, mutable)| !*mutable)
+                    .map(|(pointee, _)| pointee)
+                    .ok_or_else(|| {
+                        "MIR shared payload source is not a shared reference".to_string()
+                    })?,
+                MatchMode::MutableRef => types
+                    .reference_info(value_ty)
+                    .filter(|(_, mutable)| *mutable)
+                    .map(|(pointee, _)| pointee)
+                    .ok_or_else(|| {
+                        "MIR mutable payload source is not a mutable reference".to_string()
+                    })?,
+            };
+            let payload_ty = concrete_enum_member(types, enums, enum_ty, payload.ty)?;
+            let expected = match mode {
+                MatchMode::Value => payload_ty,
+                MatchMode::SharedRef => types
+                    .id_of(TypeData::Reference {
+                        pointee: payload_ty,
+                        mutable: false,
+                    })
+                    .ok_or_else(|| "MIR shared payload reference type missing".to_string())?,
+                MatchMode::MutableRef => types
+                    .id_of(TypeData::Reference {
+                        pointee: payload_ty,
+                        mutable: true,
+                    })
+                    .ok_or_else(|| "MIR mutable payload reference type missing".to_string())?,
+            };
             if types.enum_id(enum_ty) != Some(*enum_id) || destination != expected {
                 return Err("MIR enum payload extraction type mismatch".into());
+            }
+        }
+        Rvalue::ConsumeEnum { owner } => {
+            validate_place_read(function, owner, structs, types, initialized)?;
+            let owner_ty = place_type(function, owner, structs, types)?;
+            if destination != TypeId::BOOL
+                || types.enum_id(owner_ty).is_none()
+                || types.is_copy(owner_ty)
+                || !owner.projections.is_empty()
+            {
+                return Err("MIR consuming enum match contract invalid".into());
             }
         }
         Rvalue::Coerce {
@@ -2263,6 +2791,24 @@ fn reachability(function: &MirFunction) -> Vec<bool> {
     reachable
 }
 
+fn block_reaches(function: &MirFunction, start: BlockId, target: BlockId) -> bool {
+    let mut seen = vec![false; function.blocks.len()];
+    let mut queue = VecDeque::from([start]);
+    while let Some(block) = queue.pop_front() {
+        if block == target {
+            return true;
+        }
+        if seen[block.0 as usize] {
+            continue;
+        }
+        seen[block.0 as usize] = true;
+        if let Some(terminator) = &function.blocks[block.0 as usize].terminator {
+            queue.extend(targets(terminator));
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use aether_frontend::{
@@ -2315,6 +2861,40 @@ mod tests {
     }
 
     #[test]
+    fn conditional_drop_flags_are_sparse_and_transitions_fail_closed() {
+        let source = "int take(Buffer<int> value){return value[0];}int main(){Buffer<int> value=Buffer<int>(1,0);if(true){int used=take(value);}return 0;}";
+        let raw = mir(source);
+        assert_eq!(raw.functions[1].drop_flags.len(), 1);
+        verify_mir(raw.clone()).unwrap();
+
+        let mut stale = raw.clone();
+        let flag = stale.functions[1].drop_flags[0].flag;
+        let block = stale.functions[1]
+            .blocks
+            .iter_mut()
+            .find(|block| {
+                block
+                    .instructions
+                    .iter()
+                    .filter(|instruction| place_root_local(&instruction.destination) == Some(flag))
+                    .count()
+                    > 1
+            })
+            .unwrap();
+        let update = block
+            .instructions
+            .iter()
+            .rposition(|instruction| place_root_local(&instruction.destination) == Some(flag))
+            .unwrap();
+        block.instructions.remove(update);
+        assert!(verify_mir(stale).is_err());
+
+        let mut invalid = raw;
+        invalid.functions[1].drop_flags[0].flag = invalid.functions[1].drop_flags[0].owner;
+        assert!(verify_mir(invalid).is_err());
+    }
+
+    #[test]
     fn trap_terminator_represents_division_failure() {
         let raw = FlowMir {
             types: Arc::new(TypeArena::new()),
@@ -2341,6 +2921,7 @@ mod tests {
                 id: InstanceId(0),
                 function_id: FunctionId(0),
                 parameters: vec![],
+                drop_flags: vec![],
                 return_type: TypeId::INT64,
                 locals: vec![],
                 blocks: vec![BasicBlock {

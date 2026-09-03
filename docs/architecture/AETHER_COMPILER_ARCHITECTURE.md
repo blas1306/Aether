@@ -1373,3 +1373,59 @@ warnings denied, and 21 executable legacy differential comparisons with zero
 failures. Native V10 fixtures cover the additional Buffer/View contract cases;
 their manifest entries are v1-contract cases rather than claims of legacy
 equivalence.
+
+## 28. NEXT-VERTICAL-11 implementation confirmation
+
+Vertical-11 centralizes memoized `is_copy(TypeId)` and `needs_drop(TypeId)`
+properties and makes them structural over concrete nominal/generic aggregates.
+Whole-root calls, returns, assignments and aggregate construction transfer
+non-Copy ownership. HIR synthesizes normal lexical/return cleanup, MIR and SSA
+retain typed `Move`/`Drop`, and LLVM expands recursive glue in reverse field or
+payload order while switching on an enum's active tag. Continuing Owned/Moved
+joins and loop-carried transitions were deliberately rejected. Non-Copy enum
+payload bindings and partial moves remained deferred.
+
+## 29. NEXT-VERTICAL-12 implementation confirmation
+
+The AST parses `match (value)`, `match (ref value)` and
+`match (ref mut value)` into an explicit mode. HIR resolves that mode, retains
+the concrete enum type separately from a reference-typed scrutinee, assigns
+each binding its exact `T`, `ref T` or `ref mut T` TypeId, and marks a non-Copy
+value scrutinee as one consuming use. Reference modes resolve an addressable
+Place, mark its root for stable storage and reuse V9 capability/non-escape
+rules. The owner stays live, and ref-mut still creates no exclusivity/noalias
+fact.
+
+MIR discriminant and payload operations retain `MatchMode`. Value extraction
+of non-Copy payloads initializes new owners in declaration order; a separate
+`ConsumeEnum` ends the transient wrapper's ownership after all active payloads
+have transferred. Unbound owning payloads move to compiler temporaries and are
+dropped in reverse order. Shared/mutable extraction instead takes a typed GEP
+into the already-selected active payload. SSA preserves these operations, and
+LLVM emits aggregate extraction for value mode or arm-local payload addresses
+for reference modes.
+
+The ownership lattice now merges continuing `Owned` and `Moved` paths as
+`MaybeMoved`. HIR rejects every later ordinary use of that state but records a
+conditional cleanup obligation. MIR discovers only roots with such an
+obligation, creates one boolean drop flag per root, emits explicit initialization
+and paired updates, then lowers cleanup into an ordinary flag branch plus the
+existing `Drop`. Its verifier checks sparse root-level metadata, initialization,
+each move/update pair, join states and exactly-once returns. SSA promotes the
+flag normally, retains its root mapping and verifies that the resulting boolean
+phi controls a cleanup branch. The LLVM backend needs no private conditional
+drop mechanism.
+
+This is intentionally not a generalized conditionally initialized or partial
+ownership system. No flags are generated for uniform roots, terminating paths
+do not contaminate continuing state, and ownership-changing loop backedges
+remain fail-closed. The same mechanism applies through `needs_drop` to Buffer,
+struct, enum and concrete generic roots. Traps remain non-unwinding; Array,
+reallocation, user Drop/destructors, ARC and exception cleanup remain outside
+the vertical.
+
+The recommended NEXT-VERTICAL-13 is the first fixed-size `Array<T>` value model
+only after deciding its source construction/index surface and reuse of Buffer
+storage. Reallocation, capacity and growth should remain a later slice so view
+invalidation and allocator effects are designed explicitly rather than hidden
+inside the initial Array admission.

@@ -218,11 +218,23 @@ pub enum AstStmtKind {
     While { condition: AstExpr, body: AstBlock },
     /// Exhaustive enum match with block arms.
     Match {
+        mode: AstMatchMode,
         scrutinee: AstExpr,
         arms: Vec<AstMatchArm>,
     },
     /// Value return.
     Return(AstExpr),
+}
+
+/// Explicit source ownership mode for an enum match.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AstMatchMode {
+    /// Inspect/copy a Copy enum or consume a non-Copy enum as a whole.
+    Value,
+    /// Borrow the active payload read-only for the duration of its arm.
+    SharedRef,
+    /// Borrow the active payload with write capability for the duration of its arm.
+    MutableRef,
 }
 
 /// One source match arm.

@@ -578,6 +578,52 @@ element restriction remains unchanged:
 V11 composes ownership outward and does not add element drop glue inside a
 Buffer. Traps still abort without unwind cleanup.
 
+### 5.6 Ownership-aware matching and conditional cleanup — NEXT-VERTICAL-12 DECIDED baseline
+
+Enum match ownership is selected explicitly for the whole match. Value mode is
+spelled `match (value)`: Copy enums retain value-copy behavior, while a non-Copy
+enum is consumed before control enters any arm. Bound payloads have type `T` and
+non-Copy payload ownership transfers in declaration order. The source root and
+the transient wrapper are not dropped after the whole-root destructure; bound
+payload locals own their values and omitted drop-requiring payloads are still
+destroyed. This is a dedicated consuming enum operation, not permission for
+ordinary field extraction or partial moves.
+
+Shared and writable modes are `match (ref value)` and
+`match (ref mut value)`. They require an existing addressable enum Place and
+bind every written payload as exactly `ref T` or `ref mut T`, independently of
+whether `T` is Copy. The source owner remains valid. A ref-mut binding may
+modify the selected active payload, but carries no uniqueness/noalias meaning.
+Payload addresses are formed only in the tag-selected arm. Match-created
+references obey the conservative V9 non-escape policy and cannot be returned,
+stored, rebound into an outer reference local or otherwise outlive the arm.
+
+Whole-root ownership dataflow has `Owned`, `Moved` and `MaybeMoved` states at
+continuing program points (plus internal initialization/drop states). Equal
+incoming states remain equal; `Owned + Moved` becomes `MaybeMoved`; any merge
+with `MaybeMoved` remains `MaybeMoved`. Terminating branches do not contribute
+to a later join. Every ordinary use, read, borrow, move, match or replacement
+requires `Owned`; `Moved` and `MaybeMoved` are compile-time errors. There is no
+runtime-checked ordinary ownership use.
+
+Cleanup treats `Owned` as an unconditional recursive drop, `Moved` as no drop,
+and `MaybeMoved` as a conditional recursive drop. Only a root that reaches an
+actual conditional cleanup receives a compiler-generated boolean flag. The flag
+is initialized and updated explicitly in MIR, becomes ordinary SSA/phi state,
+and controls a normal CFG branch around the existing typed `Drop`. Flags are
+never source-addressable and never per-field/per-payload. The policy applies to
+every concrete `needs_drop(TypeId)`, including owning structs, active-variant
+enums and concrete generic aggregates; it does not alter `is_copy` or
+`needs_drop` themselves.
+
+Early returns preserve path sensitivity and avoid unnecessary flags. A loop
+backedge whose next iteration could observe a changed ownership state remains
+rejected; conditional flags do not make repeated use safe. Existing lexical
+owner-liveness rejects a conditional move while a derived reference/view is
+live. Traps still abort without unwind cleanup. V12 adds no Array, reallocation,
+general conditional initialization, destructor trait, ARC, exception handling
+or general partial-move state.
+
 ## 6. Core data abstractions
 
 ### 6.0 `Buffer<T>` — NEXT-VERTICAL-10 DECIDED substrate

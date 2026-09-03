@@ -1,4 +1,4 @@
-# Aether NEXT-VERTICAL-11
+# Aether NEXT-VERTICAL-12
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. It does not replace the production `aether` CLI or import any legacy
@@ -32,7 +32,7 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-11 grammar
+## Vertical-12 grammar
 
 ```text
 program    := import* (alias | struct | enum | function)+ EOF
@@ -54,9 +54,10 @@ statement  := type IDENT "=" expression ";"
             | place "=" expression ";"
             | "if" "(" expression ")" block ("else" block)?
             | "while" "(" expression ")" block
-            | "match" "(" expression ")" "{" match-arm+ "}"
+            | "match" "(" match-mode? expression ")" "{" match-arm+ "}"
             | "return" expression ";"
 match-arm  := variant-path ("(" IDENT ("," IDENT)* ")")? "=>" block
+match-mode := "ref" "mut"?
 expression := integer | float | "true" | "false" | IDENT | apply
             | expression "." IDENT | expression "[" expression "]"
             | "(" expression ")" | "-" expression
@@ -221,10 +222,11 @@ explicit aliasable `Load`, `Store` and `Borrow` operations. LLVM lowers only
 those roots to `alloca` plus typed GEP/load/store; ordinary programs remain
 allocation-free aggregate SSA.
 
-MIR lowers enum matching to `EnumDiscriminant` and a reusable multi-way
-`Switch`; arm entries perform explicit `EnumPayload` copies into binding locals.
-SSA retains verified `EnumConstruct`, tag, payload and switch operations. LLVM
-uses a fixed bootstrap `i32` tag and a typed envelope
+MIR lowers enum matching to mode-carrying `EnumDiscriminant`/`EnumPayload`
+operations and a reusable multi-way `Switch`. Consuming matches finish with an
+explicit `ConsumeEnum`; reference matches form payload addresses only after the
+tag selected the active arm. SSA retains these verified distinctions. LLVM uses
+a fixed bootstrap `i32` tag and a typed envelope
 `{ tag, variant-0-tuple, variant-1-tuple, ... }`, initialized from zero. This is
 larger than a byte union but avoids type-punning, stack storage and MemorySSA.
 Tags follow declaration order from zero. Tags, layout and aggregate calling
@@ -430,6 +432,60 @@ the existing `v10_buffers.ae` fixture and 3.359 ms for the larger
 `v11_aggregates.ae` fixture. The latter exercises concrete generic property
 queries, nested struct glue and discriminant-based enum glue; these are
 workload snapshots, not a same-input regression comparison.
+
+## Vertical-12 ownership-aware match and conditional drop contract
+
+Enum matching has one explicit match-level mode. `match (value)` is the default:
+it copies a Copy enum, but consumes a non-Copy enum root as one whole-value
+destructure. Each bound payload receives its declared `T`; non-Copy payloads
+transfer ownership in declaration order and arm cleanup destroys remaining
+bindings in reverse order. An omitted owning payload is extracted into internal
+storage and destroyed, while the consumed wrapper is marked by `ConsumeEnum`
+and is never recursively dropped again. This is a special whole-root operation,
+not general partial-move support.
+
+`match (ref value)` and `match (ref mut value)` require an addressable enum
+Place. Their bindings have exact types `ref T` and `ref mut T`, respectively,
+even when `T` is Copy. The owner remains alive; mutable payload references write
+the active payload in place. As in V9, mutability is capability rather than
+uniqueness and LLVM emits no `noalias`. Pattern references are restricted to the
+arm by the existing no-return/no-storage/single-initialization reference rules.
+Arbitrary temporaries cannot be matched by reference.
+
+Ownership analysis adds `MaybeMoved` at continuing `Owned`/`Moved` joins.
+Ordinary read, borrow, move, match or replacement still requires statically
+`Owned`, so `MaybeMoved` produces a compile-time diagnostic and never a dynamic
+use check. Normal cleanup alone may inspect this state. HIR records a
+`Conditional` cleanup, and MIR allocates one compiler-only boolean flag for that
+root, initializes it explicitly, updates it after every transfer, and lowers
+cleanup to an ordinary branch around `Drop`. MIR verifies root/flag identity,
+initial values and paired transitions; SSA retains the flag and verifies that
+its phi reaches the cleanup branch. Uniform ownership paths receive no flag.
+
+Flags remain root-level and apply through the existing concrete `needs_drop`
+query to Buffer, structs, enums and generic aggregates. No per-field flags or
+general conditionally initialized locals exist. Early-return path sensitivity
+avoids a flag when only one ownership state reaches subsequent code. Loop
+backedges that change ownership remain rejected with E0295; flags do not permit
+repeated maybe-moved use. Traps remain aborting and non-unwinding.
+
+### Vertical-12 qualification and timing snapshot
+
+The local qualification completed with 93 Rust unit/integration tests passing
+and zero failures; whole-workspace/all-target clippy passed with warnings
+denied, and the executable legacy differential subset completed 21 comparisons
+with zero failures. Native V12 fixtures execute value/ref/ref-mut matches,
+multi-payload transfer, generic and cross-module matches, and conditional
+Buffer/struct/enum/generic cleanup under the allocation/free balance guard.
+
+A warm debug binary was run for 20 full compilations per representative
+workload. Mean core time excluding discovery, file I/O and clang was
+approximately 1.347 ms for the unchanged `v11_control_flow.ae`, 0.832 ms for a
+minimal owning value match, 0.919 ms for its ref-match counterpart, and 2.238 ms
+for the larger `v12_conditional_drop.ae` fixture. These are workload snapshots,
+not a same-input optimization claim. MIR inspection reports zero flags for the
+uniform `v12_match_ownership.ae` fixture and four root-level flags across the
+four conditional-cleanup functions in `v12_conditional_drop.ae`.
 
 ## Bootstrap ABI and deliberate limits
 

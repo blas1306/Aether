@@ -1,4 +1,4 @@
-//! Cross-layer and native qualification through NEXT-VERTICAL-11.
+//! Cross-layer and native qualification through NEXT-VERTICAL-12.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1213,10 +1213,6 @@ fn vertical10_buffer_diagnostics_fail_closed() {
             "E0292",
         ),
         (
-            "int main(){Buffer<int> a=Buffer<int>(1,0);if(true){Buffer<int> b=a;}return 0;}",
-            "E0294",
-        ),
-        (
             "int main(){Buffer<int> a=Buffer<int>(1,0);while(false){Buffer<int> b=a;}return 0;}",
             "E0295",
         ),
@@ -1375,16 +1371,8 @@ fn vertical11_aggregate_ownership_diagnostics_fail_closed() {
             "E0292",
         ),
         (
-            "struct S{Buffer<int> b;}int main(){S a=S(Buffer<int>(1,0));if(true){S c=a;}return 0;}",
-            "E0294",
-        ),
-        (
             "struct S{Buffer<int> b;}int main(){S a=S(Buffer<int>(1,0));while(false){S c=a;}return 0;}",
             "E0295",
-        ),
-        (
-            "enum E{None,Some(Buffer<int>)}int main(){E e=E.Some(Buffer<int>(1,0));match(e){E.None=>{return 0;}E.Some(value)=>{return value[0];}}}",
-            "E0299",
         ),
         (
             "enum E{Empty,Owned(Buffer<int>)}int main(){E e=E.Owned(Buffer<int>(1,0));E moved=e;match(e){E.Empty=>{return 0;}E.Owned=>{return 0;}}}",
@@ -1497,4 +1485,130 @@ fn vertical11_cross_module_aggregate_transfer_executes_natively() {
     assert!(compilation.dumps[&Emit::Hir].contains("Packet"));
     assert!(compilation.dumps[&Emit::Mir].contains("Move"));
     assert!(compilation.dumps[&Emit::Ssa].contains("Drop"));
+}
+
+#[test]
+fn vertical12_match_modes_and_conditional_drop_dumps_are_explicit_and_sparse() {
+    let match_source = SourceFile::new(
+        "v12_match_ownership.ae",
+        fs::read_to_string(program("v12_match_ownership.ae")).unwrap(),
+    );
+    let matched = compile_source(
+        &match_source,
+        &[Emit::Ast, Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+    )
+    .unwrap();
+    assert!(matched.dumps[&Emit::Ast].contains("MutableRef"));
+    assert!(matched.dumps[&Emit::Hir].contains("mode: SharedRef"));
+    assert!(matched.dumps[&Emit::Hir].contains("mode: Value"));
+    assert!(matched.dumps[&Emit::Mir].contains("ConsumeEnum"));
+    assert!(matched.dumps[&Emit::Mir].contains("mode: MutableRef"));
+    assert!(matched.dumps[&Emit::Ssa].contains("ConsumeEnum"));
+    assert!(matched.llvm.contains("match_tag_ptr"));
+    assert!(matched.llvm.contains("getelementptr inbounds %aether.enum"));
+    assert!(!matched.llvm.contains("noalias"));
+    assert_eq!(matched.dumps[&Emit::Mir].matches("MirDropFlag").count(), 0);
+
+    let conditional_source = SourceFile::new(
+        "v12_conditional_drop.ae",
+        fs::read_to_string(program("v12_conditional_drop.ae")).unwrap(),
+    );
+    let conditional = compile_source(
+        &conditional_source,
+        &[Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+    )
+    .unwrap();
+    assert!(conditional.dumps[&Emit::Hir].contains("Conditional"));
+    assert_eq!(
+        conditional.dumps[&Emit::Mir].matches("MirDropFlag").count(),
+        4
+    );
+    assert_eq!(
+        conditional.dumps[&Emit::Ssa].matches("MirDropFlag").count(),
+        4
+    );
+    assert!(conditional.llvm.contains("phi i1"));
+
+    let early_return = SourceFile::new(
+        "v12-early-return.ae",
+        "int main(){Buffer<int> value=Buffer<int>(1,42);if(true){Buffer<int> moved=value;return moved[0];}return value[0];}",
+    );
+    let early = compile_source(&early_return, &[Emit::Mir]).unwrap();
+    assert_eq!(early.dumps[&Emit::Mir].matches("MirDropFlag").count(), 0);
+}
+
+#[test]
+fn vertical12_match_and_maybe_moved_diagnostics_fail_closed() {
+    for (text, code) in [
+        (
+            "enum E{None,Some(Buffer<int>)}int main(){E e=E.Some(Buffer<int>(1,0));match(e){E.None=>{}E.Some(value)=>{}}match(ref e){E.None=>{}E.Some(value)=>{}}return 0;}",
+            "E0291",
+        ),
+        (
+            "enum E{None,Some(Buffer<int>)}int main(){match(ref E.Some(Buffer<int>(1,0))){E.None=>{}E.Some(value)=>{}}return 0;}",
+            "E0301",
+        ),
+        (
+            "enum E{None,Some(Buffer<int>)}int main(){E e=E.Some(Buffer<int>(1,0));match(ref e){E.None=>{}E.Some(value)=>{(*value)[0]=1;}}return 0;}",
+            "E0272",
+        ),
+        (
+            "enum E{None,Some(Buffer<int>)}int main(){E e=E.Some(Buffer<int>(1,0));ref E shared=&e;match(ref mut *shared){E.None=>{}E.Some(value)=>{}}return 0;}",
+            "E0302",
+        ),
+        (
+            "int take(Buffer<int> value){return value[0];}int main(){Buffer<int> value=Buffer<int>(1,0);if(true){int used=take(value);}return value[0];}",
+            "E0303",
+        ),
+        (
+            "int take(Buffer<int> value){return value[0];}int main(){Buffer<int> value=Buffer<int>(1,0);if(true){int used=take(value);}Buffer<int> twice=value;return 0;}",
+            "E0303",
+        ),
+        (
+            "int take(Buffer<int> value){return value[0];}int main(){Buffer<int> value=Buffer<int>(1,0);if(true){int used=take(value);}ref Buffer<int> borrowed=&value;return 0;}",
+            "E0303",
+        ),
+        (
+            "int take(Buffer<int> value){return value[0];}int main(){Buffer<int> value=Buffer<int>(1,0);ref int borrowed=&value[0];if(true){int used=take(value);}return *borrowed;}",
+            "E0292",
+        ),
+        (
+            "int take(Buffer<int> value){return value[0];}int main(){Buffer<int> value=Buffer<int>(1,0);while(false){int used=take(value);}return 0;}",
+            "E0295",
+        ),
+    ] {
+        let diagnostics =
+            compile_source(&SourceFile::new("v12-error.ae", text), &[]).expect_err(text);
+        assert_eq!(
+            diagnostics[0].code, code,
+            "{text}: {}",
+            diagnostics[0].message
+        );
+        assert!(diagnostics[0].span.is_some());
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical12_matches_and_conditional_cleanup_execute_exactly_once() {
+    for source in ["v12_match_ownership.ae", "v12_conditional_drop.ae"] {
+        let (compilation, status) = run_path(
+            &program(source),
+            &[Emit::Mir, Emit::Ssa, Emit::Llvm],
+            &ClangToolchain::default(),
+        )
+        .unwrap();
+        assert_eq!(status.code(), Some(42), "{source}");
+        assert!(compilation.llvm.contains("@aether_heap_alloc_count"));
+        assert!(compilation.llvm.contains("@aether_heap_free_count"));
+    }
+    let (compilation, status) = run_path(
+        &module_program("v12_match"),
+        &[Emit::Hir, Emit::Mir, Emit::Ssa],
+        &ClangToolchain::default(),
+    )
+    .unwrap();
+    assert_eq!(status.code(), Some(42));
+    assert!(compilation.dumps[&Emit::Hir].contains("MutableRef"));
+    assert!(compilation.dumps[&Emit::Mir].contains("ConsumeEnum"));
 }

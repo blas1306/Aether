@@ -1,10 +1,10 @@
-//! Recursive-descent parser for the deliberately closed Vertical-11 grammar.
+//! Recursive-descent parser for the deliberately closed Vertical-12 grammar.
 
 use crate::{
     AstAlias, AstBinaryOp, AstBlock, AstEnum, AstExpr, AstExprKind, AstField, AstFunction,
-    AstGenericParam, AstImport, AstMatchArm, AstParameter, AstReferenceType, AstStmt, AstStmtKind,
-    AstStruct, AstType, AstUnaryOp, AstVariant, AstVariantPattern, Diagnostic, DiagnosticCategory,
-    ParsedAst, Phase, SourceFile, Token, TokenKind,
+    AstGenericParam, AstImport, AstMatchArm, AstMatchMode, AstParameter, AstReferenceType, AstStmt,
+    AstStmtKind, AstStruct, AstType, AstUnaryOp, AstVariant, AstVariantPattern, Diagnostic,
+    DiagnosticCategory, ParsedAst, Phase, SourceFile, Token, TokenKind,
 };
 
 /// Parses an already tokenized source file.
@@ -393,7 +393,7 @@ impl Parser {
                 });
             }
             TokenKind::KwMatch => return self.match_statement(start),
-            _ => return Err(self.error("E0102", "expected a Vertical-11 statement")),
+            _ => return Err(self.error("E0102", "expected a Vertical-12 statement")),
         };
         let semicolon = self.expect(TokenKind::Semicolon, "expected `;` after statement")?;
         Ok(AstStmt {
@@ -405,6 +405,15 @@ impl Parser {
     fn match_statement(&mut self, start: crate::Span) -> Result<AstStmt, Diagnostic> {
         self.expect(TokenKind::KwMatch, "expected `match`")?;
         self.expect(TokenKind::LeftParen, "expected `(` after `match`")?;
+        let mode = if self.consume(TokenKind::KwRef).is_some() {
+            if self.consume(TokenKind::KwMut).is_some() {
+                AstMatchMode::MutableRef
+            } else {
+                AstMatchMode::SharedRef
+            }
+        } else {
+            AstMatchMode::Value
+        };
         let scrutinee = self.expression()?;
         self.expect(TokenKind::RightParen, "expected `)` after match scrutinee")?;
         self.expect(TokenKind::LeftBrace, "expected `{` before match arms")?;
@@ -424,7 +433,11 @@ impl Parser {
             .expect(TokenKind::RightBrace, "expected `}` after match arms")?
             .span;
         Ok(AstStmt {
-            kind: AstStmtKind::Match { scrutinee, arms },
+            kind: AstStmtKind::Match {
+                mode,
+                scrutinee,
+                arms,
+            },
             span: start.through(right),
         })
     }

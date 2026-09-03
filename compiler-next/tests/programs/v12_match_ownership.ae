@@ -1,0 +1,72 @@
+enum Storage {
+    Empty,
+    Owned(Buffer<int>),
+    Pair(Buffer<int>, Buffer<int>),
+}
+
+enum Maybe<T> {
+    None,
+    Some(T),
+}
+
+int consume(Buffer<int> value) {
+    return value[0];
+}
+
+int consumeMaybe<T>(Maybe<T> value) {
+    int result = 0;
+    match (value) {
+        Maybe<T>.None => { result = 1; }
+        Maybe<T>.Some(item) => { result = 2; }
+    }
+    return result;
+}
+
+int inspectMaybe<T>(ref Maybe<T> value) {
+    int result = 0;
+    match (ref *value) {
+        Maybe<T>.None => { result = 1; }
+        Maybe<T>.Some(item) => { result = 2; }
+    }
+    return result;
+}
+
+int main() {
+    int total = 0;
+
+    Storage pair = Storage.Pair(Buffer<int>(1, 20), Buffer<int>(1, 22));
+    match (pair) {
+        Storage.Empty => { total = 1; }
+        Storage.Owned(buffer) => { total = consume(buffer); }
+        Storage.Pair(first, second) => {
+            int a = consume(first);
+            int b = consume(second);
+            total = a + b;
+        }
+    }
+
+    Storage borrowed = Storage.Owned(Buffer<int>(1, 40));
+    match (ref mut borrowed) {
+        Storage.Empty => { total = 1; }
+        Storage.Owned(buffer) => { (*buffer)[0] = 42; }
+        Storage.Pair(first, second) => { total = 1; }
+    }
+    match (ref borrowed) {
+        Storage.Empty => { total = 1; }
+        Storage.Owned(buffer) => { total = (*buffer)[0]; }
+        Storage.Pair(first, second) => { total = 1; }
+    }
+
+    Storage ignored = Storage.Owned(Buffer<int>(1, 9));
+    match (ignored) {
+        Storage.Empty => { total = total + 0; }
+        Storage.Owned => { total = total + 0; }
+        Storage.Pair => { total = total + 0; }
+    }
+
+    Maybe<Buffer<int>> genericRef = Maybe<Buffer<int>>.Some(Buffer<int>(1, 5));
+    int present = inspectMaybe<Buffer<int>>(&genericRef);
+    Maybe<Buffer<int>> genericValue = Maybe<Buffer<int>>.Some(Buffer<int>(1, 6));
+    int consumed = consumeMaybe<Buffer<int>>(genericValue);
+    return total + present + consumed - 4;
+}

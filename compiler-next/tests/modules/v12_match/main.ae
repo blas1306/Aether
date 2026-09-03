@@ -1,0 +1,19 @@
+import types;
+
+int consume(Buffer<int> value) {
+    return value[0];
+}
+
+int main() {
+    types.Storage value = types.Storage.Owned(Buffer<int>(1, 40));
+    match (ref mut value) {
+        types.Storage.Empty => { int ignored = 0; }
+        types.Storage.Owned(buffer) => { (*buffer)[0] = 42; }
+    }
+    int result = 0;
+    match (value) {
+        types.Storage.Empty => { result = 1; }
+        types.Storage.Owned(buffer) => { result = consume(buffer); }
+    }
+    return result;
+}

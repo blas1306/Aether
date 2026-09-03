@@ -7,13 +7,13 @@ use std::sync::Arc;
 
 use aether_frontend::{
     CastKind, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId, FloatValue,
-    FunctionInstanceInfo, InstanceId, LocalId, ModuleInfo, Phase, Span, StructId, StructInfo,
-    Substitution, TypeArena, TypeData, TypeId, VariantId, format_type,
+    FunctionInstanceInfo, InstanceId, LocalId, MatchMode, ModuleInfo, Phase, Span, StructId,
+    StructInfo, Substitution, TypeArena, TypeData, TypeId, VariantId, format_type,
 };
 
 use crate::{
-    BinaryOp, BlockId, MirFunction, Operand, Place, PlaceBase, PlaceProjection, Rvalue, Terminator,
-    TrapKind, UnaryOp, VerifiedMir,
+    BinaryOp, BlockId, MirDropFlag, MirFunction, Operand, Place, PlaceBase, PlaceProjection,
+    Rvalue, Terminator, TrapKind, UnaryOp, VerifiedMir,
 };
 
 /// Fresh SSA value identity.
@@ -144,12 +144,17 @@ pub enum SsaOp {
     EnumDiscriminant {
         value: SsaOperand,
         enum_id: EnumId,
+        mode: MatchMode,
     },
     EnumPayload {
         value: SsaOperand,
         enum_id: EnumId,
         variant_id: VariantId,
         index: u32,
+        mode: MatchMode,
+    },
+    ConsumeEnum {
+        owner: SsaPlace,
     },
     /// Pure aggregate projection.
     ExtractField {
@@ -256,6 +261,8 @@ pub struct SsaFunction {
     pub parameters: Vec<SsaParameter>,
     /// Only address-taken locals cross the SSA/memory boundary.
     pub memory_locals: Vec<SsaMemoryLocal>,
+    /// Root-level conditional ownership metadata retained from verified MIR.
+    pub drop_flags: Vec<MirDropFlag>,
     /// Canonical return type.
     pub return_type: TypeId,
     /// Entry block.
@@ -466,6 +473,7 @@ fn build_function_ssa(function: &MirFunction, types: &TypeArena) -> SsaFunction 
         function_id: function.function_id,
         parameters,
         memory_locals,
+        drop_flags: function.drop_flags.clone(),
         return_type: function.return_type,
         entry: function.entry,
         blocks,
@@ -685,20 +693,30 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
                 .map(|operand| rename_operand(operand, stacks))
                 .collect(),
         },
-        Rvalue::EnumDiscriminant { value, enum_id } => SsaOp::EnumDiscriminant {
+        Rvalue::EnumDiscriminant {
+            value,
+            enum_id,
+            mode,
+        } => SsaOp::EnumDiscriminant {
             value: rename_operand(value, stacks),
             enum_id: *enum_id,
+            mode: *mode,
         },
         Rvalue::EnumPayload {
             value,
             enum_id,
             variant_id,
             index,
+            mode,
         } => SsaOp::EnumPayload {
             value: rename_operand(value, stacks),
             enum_id: *enum_id,
             variant_id: *variant_id,
             index: *index,
+            mode: *mode,
+        },
+        Rvalue::ConsumeEnum { owner } => SsaOp::ConsumeEnum {
+            owner: rename_place(owner, stacks, mir),
         },
         Rvalue::Coerce {
             kind,
@@ -1028,6 +1046,7 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
         | Rvalue::Borrow { place, .. }
         | Rvalue::Move { source: place }
         | Rvalue::Drop { owner: place }
+        | Rvalue::ConsumeEnum { owner: place }
         | Rvalue::View { source: place, .. } => place_locals(function, place),
         Rvalue::BufferAlloc {
             length, initial, ..
@@ -1300,6 +1319,47 @@ fn verify_ssa_function(
             })
         {
             return Err(fail("SSA memory-local metadata is invalid".into()));
+        }
+    }
+    let mut drop_flag_owners = BTreeSet::new();
+    let mut drop_flag_locals = BTreeSet::new();
+    for entry in &function.drop_flags {
+        if !drop_flag_owners.insert(entry.owner)
+            || !drop_flag_locals.insert(entry.flag)
+            || entry.owner == entry.flag
+            || function
+                .memory_locals
+                .iter()
+                .any(|memory| memory.local == entry.flag)
+        {
+            return Err(fail("SSA root-level drop-flag metadata is invalid".into()));
+        }
+        let phi_results = function
+            .blocks
+            .iter()
+            .flat_map(|block| &block.phis)
+            .filter(|phi| phi.local == entry.flag)
+            .map(|phi| {
+                if phi.ty != TypeId::BOOL {
+                    return Err(fail("SSA drop-flag phi is not boolean".into()));
+                }
+                Ok(phi.result)
+            })
+            .collect::<Result<BTreeSet<_>, Vec<Diagnostic>>>()?;
+        if phi_results.is_empty()
+            || !function.blocks.iter().any(|block| {
+                matches!(
+                    &block.terminator,
+                    SsaTerminator::Branch {
+                        condition: SsaOperand::Value(value),
+                        ..
+                    } if phi_results.contains(value)
+                )
+            })
+        {
+            return Err(fail(
+                "SSA conditional cleanup is disconnected from its drop flag".into(),
+            ));
         }
     }
     for block in &function.blocks {
@@ -1661,9 +1721,31 @@ fn verify_op(
                 }
             }
         }
-        SsaOp::EnumDiscriminant { value, enum_id } => {
+        SsaOp::EnumDiscriminant {
+            value,
+            enum_id,
+            mode,
+        } => {
+            let value_ty = operand_ty(value)?;
+            let enum_ty = match mode {
+                MatchMode::Value => value_ty,
+                MatchMode::SharedRef => types
+                    .reference_info(value_ty)
+                    .filter(|(_, mutable)| !*mutable)
+                    .map(|(pointee, _)| pointee)
+                    .ok_or_else(|| {
+                        "SSA shared match source is not a shared reference".to_string()
+                    })?,
+                MatchMode::MutableRef => types
+                    .reference_info(value_ty)
+                    .filter(|(_, mutable)| *mutable)
+                    .map(|(pointee, _)| pointee)
+                    .ok_or_else(|| {
+                        "SSA mutable match source is not a mutable reference".to_string()
+                    })?,
+            };
             if enums.get(enum_id.0 as usize).map(|info| info.id) != Some(*enum_id)
-                || types.enum_id(operand_ty(value)?) != Some(*enum_id)
+                || types.enum_id(enum_ty) != Some(*enum_id)
                 || result != TypeId::UINT32
             {
                 return Err("SSA enum discriminant contract invalid".into());
@@ -1674,6 +1756,7 @@ fn verify_op(
             enum_id,
             variant_id,
             index,
+            mode,
         } => {
             let info = enums
                 .get(enum_id.0 as usize)
@@ -1688,10 +1771,52 @@ fn verify_op(
                 .payloads
                 .get(*index as usize)
                 .ok_or_else(|| "SSA enum payload slot out of bounds".to_string())?;
-            let enum_ty = operand_ty(value)?;
-            let expected = concrete_enum_member(types, enums, enum_ty, payload.ty)?;
+            let value_ty = operand_ty(value)?;
+            let enum_ty = match mode {
+                MatchMode::Value => value_ty,
+                MatchMode::SharedRef => types
+                    .reference_info(value_ty)
+                    .filter(|(_, mutable)| !*mutable)
+                    .map(|(pointee, _)| pointee)
+                    .ok_or_else(|| {
+                        "SSA shared payload source is not a shared reference".to_string()
+                    })?,
+                MatchMode::MutableRef => types
+                    .reference_info(value_ty)
+                    .filter(|(_, mutable)| *mutable)
+                    .map(|(pointee, _)| pointee)
+                    .ok_or_else(|| {
+                        "SSA mutable payload source is not a mutable reference".to_string()
+                    })?,
+            };
+            let payload_ty = concrete_enum_member(types, enums, enum_ty, payload.ty)?;
+            let expected = match mode {
+                MatchMode::Value => payload_ty,
+                MatchMode::SharedRef => types
+                    .id_of(TypeData::Reference {
+                        pointee: payload_ty,
+                        mutable: false,
+                    })
+                    .ok_or_else(|| "SSA shared payload reference type missing".to_string())?,
+                MatchMode::MutableRef => types
+                    .id_of(TypeData::Reference {
+                        pointee: payload_ty,
+                        mutable: true,
+                    })
+                    .ok_or_else(|| "SSA mutable payload reference type missing".to_string())?,
+            };
             if types.enum_id(enum_ty) != Some(*enum_id) || result != expected {
                 return Err("SSA enum payload extraction type mismatch".into());
+            }
+        }
+        SsaOp::ConsumeEnum { owner } => {
+            let owner_ty = ssa_place_type(owner, memory_locals, structs, types, operand_ty)?;
+            if result != TypeId::BOOL
+                || types.enum_id(owner_ty).is_none()
+                || types.is_copy(owner_ty)
+                || !owner.projections.is_empty()
+            {
+                return Err("SSA consuming enum match contract invalid".into());
             }
         }
         SsaOp::ExtractField {
@@ -1940,6 +2065,7 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         | SsaOp::Borrow { place, .. }
         | SsaOp::Move { source: place }
         | SsaOp::Drop { owner: place }
+        | SsaOp::ConsumeEnum { owner: place }
         | SsaOp::View { source: place, .. } => place_operands(place),
         SsaOp::Store { place, value } => place_operands(place)
             .into_iter()
@@ -2117,6 +2243,41 @@ mod tests {
         let duplicate = ssa.functions[0].blocks[0].instructions[0].clone();
         ssa.functions[0].blocks[0].instructions.push(duplicate);
         assert!(verify_ssa(ssa).is_err());
+    }
+
+    #[test]
+    fn conditional_drop_flag_ssa_is_connected_to_cleanup_branch() {
+        let source = "int take(Buffer<int> value){return value[0];}int main(){Buffer<int> value=Buffer<int>(1,0);if(true){int used=take(value);}return 0;}";
+        let ssa = raw_ssa(source);
+        assert_eq!(ssa.functions[1].drop_flags.len(), 1);
+        verify_ssa(ssa.clone()).unwrap();
+
+        let mut disconnected = ssa;
+        let flag = disconnected.functions[1].drop_flags[0].flag;
+        let phi_values = disconnected.functions[1]
+            .blocks
+            .iter()
+            .flat_map(|block| &block.phis)
+            .filter(|phi| phi.local == flag)
+            .map(|phi| phi.result)
+            .collect::<BTreeSet<_>>();
+        let branch = disconnected.functions[1]
+            .blocks
+            .iter_mut()
+            .find(|block| {
+                matches!(
+                    block.terminator,
+                    SsaTerminator::Branch {
+                        condition: SsaOperand::Value(value),
+                        ..
+                    } if phi_values.contains(&value)
+                )
+            })
+            .unwrap();
+        if let SsaTerminator::Branch { condition, .. } = &mut branch.terminator {
+            *condition = SsaOperand::Bool(false);
+        }
+        assert!(verify_ssa(disconnected).is_err());
     }
 
     #[test]

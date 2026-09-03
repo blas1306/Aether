@@ -67,3 +67,5 @@ buffer_allocation_overflow	V1_CONTRACT	trap	n/a	programs/v10_allocation_overflow
 transitive_aggregate_ownership	V1_CONTRACT	accept:42	n/a	programs/v11_aggregates.ae
 aggregate_control_flow_cleanup	V1_CONTRACT	accept:43	n/a	programs/v11_control_flow.ae
 aggregate_reassignment_cleanup	V1_CONTRACT	accept:42	n/a	programs/v11_reassignment.ae
+ownership_aware_enum_match	V1_CONTRACT	accept:42	n/a	programs/v12_match_ownership.ae
+conditional_root_cleanup	V1_CONTRACT	accept:42	n/a	programs/v12_conditional_drop.ae

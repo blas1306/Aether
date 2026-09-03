@@ -79,7 +79,7 @@ int main() {
     Storage pair = Storage.Pair(Buffer<int>(1, 10), Buffer<int>(1, 11));
     Storage pairMoved = pair;
     ref Storage storageRef = &owned;
-    match (owned) {
+    match (ref owned) {
         Storage.Empty => { total = total + 100; }
         Storage.Owned => { total = total + 0; }
         Storage.Pair => { total = total + 100; }

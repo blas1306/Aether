@@ -1,0 +1,76 @@
+struct Dataset {
+    Buffer<int> first;
+    Buffer<int> second;
+}
+
+struct Holder<T> {
+    T value;
+}
+
+enum Storage {
+    Empty,
+    Owned(Buffer<int>),
+}
+
+int consumeBuffer(Buffer<int> value) {
+    return value[0];
+}
+
+int consumeDataset(Dataset value) {
+    return value.first[0] + value.second[0];
+}
+
+int consumeHolder(Holder<Buffer<int>> value) {
+    return value.value[0];
+}
+
+int conditionalBuffer(bool take, int seed) {
+    Buffer<int> value = Buffer<int>(1, seed);
+    int result = seed;
+    if (take) {
+        result = consumeBuffer(value);
+    }
+    return result;
+}
+
+int conditionalDataset(bool take) {
+    Dataset value = Dataset(Buffer<int>(1, 10), Buffer<int>(1, 11));
+    int result = 0;
+    if (take) {
+        result = consumeDataset(value);
+    }
+    return result;
+}
+
+int conditionalHolder(bool take) {
+    Holder<Buffer<int>> value = Holder<Buffer<int>>(Buffer<int>(1, 7));
+    int result = 0;
+    if (take) {
+        result = consumeHolder(value);
+    }
+    return result;
+}
+
+int conditionalMatch(bool take) {
+    Storage value = Storage.Owned(Buffer<int>(1, 8));
+    int result = 0;
+    if (take) {
+        match (value) {
+            Storage.Empty => { result = 1; }
+            Storage.Owned(buffer) => { result = consumeBuffer(buffer); }
+        }
+    }
+    return result;
+}
+
+int main() {
+    return conditionalBuffer(true, 1)
+        + conditionalBuffer(false, 2)
+        + conditionalDataset(true)
+        + conditionalDataset(false)
+        + conditionalHolder(true)
+        + conditionalHolder(false)
+        + conditionalMatch(true)
+        + conditionalMatch(false)
+        + 3;
+}

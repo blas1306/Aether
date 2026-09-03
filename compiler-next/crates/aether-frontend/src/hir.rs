@@ -13,10 +13,10 @@
     clippy::unused_self
 )]
 use crate::{
-    AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstMatchArm, AstStmtKind, AstType,
-    AstUnaryOp, Diagnostic, DiagnosticCategory, EnumId, FieldId, FloatType, GenericOwner,
-    GenericParamId, IntegerType, ParsedAst, Phase, SourceId, Span, StructId, Substitution,
-    TargetProperties, TypeArena, TypeData, TypeId, VariantId,
+    AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstMatchArm, AstMatchMode,
+    AstStmtKind, AstType, AstUnaryOp, Diagnostic, DiagnosticCategory, EnumId, FieldId, FloatType,
+    GenericOwner, GenericParamId, IntegerType, ParsedAst, Phase, SourceId, Span, StructId,
+    Substitution, TargetProperties, TypeArena, TypeData, TypeId, VariantId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
@@ -453,7 +453,7 @@ pub struct HirBlock {
     pub statements: Vec<HirStmt>,
     /// Owning locals destroyed on the normal lexical exit, in reverse
     /// declaration order. Early returns carry their own cleanup list.
-    pub exit_drops: Vec<LocalId>,
+    pub exit_drops: Vec<HirDrop>,
     pub span: Span,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -482,14 +482,40 @@ pub enum HirStmtKind {
         body: HirBlock,
     },
     Match {
+        mode: MatchMode,
         scrutinee: HirExpr,
+        enum_type: TypeId,
         enum_id: EnumId,
         arms: Vec<HirMatchArm>,
     },
     Return {
         value: HirExpr,
-        drops: Vec<LocalId>,
+        drops: Vec<HirDrop>,
     },
+}
+
+/// Fully resolved ownership behavior of an enum match.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatchMode {
+    Value,
+    SharedRef,
+    MutableRef,
+}
+
+/// Normal-path cleanup obligation synthesized by ownership analysis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HirDrop {
+    Unconditional(LocalId),
+    Conditional(LocalId),
+}
+
+impl HirDrop {
+    #[must_use]
+    pub const fn local(self) -> LocalId {
+        match self {
+            Self::Unconditional(local) | Self::Conditional(local) => local,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2278,11 +2304,19 @@ impl Monomorphizer<'_> {
                             body: self.substitute_block(body, substitution)?,
                         },
                         HirStmtKind::Match {
+                            mode,
                             scrutinee,
+                            enum_type,
                             enum_id,
                             arms,
                         } => HirStmtKind::Match {
+                            mode: *mode,
                             scrutinee: self.substitute_expr(scrutinee, substitution)?,
+                            enum_type: self.substitute_type(
+                                *enum_type,
+                                substitution,
+                                scrutinee.span,
+                            )?,
                             enum_id: *enum_id,
                             arms: arms
                                 .iter()
@@ -2298,15 +2332,6 @@ impl Monomorphizer<'_> {
                                                     substitution,
                                                     binding.span,
                                                 )?;
-                                                if !self.types.is_copy(ty) {
-                                                    return Err(vec![Diagnostic::new(
-                                                        "E0299",
-                                                        Phase::Semantic,
-                                                        DiagnosticCategory::Type,
-                                                        "binding a non-Copy enum payload by value is unsupported in Vertical-11",
-                                                        Some(binding.span),
-                                                    )]);
-                                                }
                                                 Ok(HirMatchBinding {
                                                     local: binding.local,
                                                     payload_index: binding.payload_index,
@@ -2399,7 +2424,7 @@ impl Monomorphizer<'_> {
                         "E0293",
                         Phase::Semantic,
                         DiagnosticCategory::Type,
-                        "partial move or copy through a place is unsupported for a non-Copy type in Vertical-11",
+                        "partial move or copy through a place is unsupported for a non-Copy type",
                         Some(expression.span),
                     )]);
                 }
@@ -2797,6 +2822,7 @@ enum OwnerState {
     Uninitialized,
     Owned,
     Moved,
+    MaybeMoved,
     Dropped,
 }
 
@@ -2850,6 +2876,16 @@ impl OwnershipAnalysis<'_> {
     }
 
     fn require_owned(&self, local: LocalId, span: Span) -> Result<(), Vec<Diagnostic>> {
+        if self.state[local.0 as usize] == OwnerState::MaybeMoved {
+            return Err(self.error(
+                "E0303",
+                format!(
+                    "use of maybe-moved non-Copy local `{}` after conditional ownership transfer",
+                    self.locals[local.0 as usize].name
+                ),
+                span,
+            ));
+        }
         if self.state[local.0 as usize] != OwnerState::Owned {
             return Err(self.error(
                 "E0291",
@@ -2928,12 +2964,18 @@ impl OwnershipAnalysis<'_> {
                         .iter()
                         .rev()
                         .copied()
-                        .filter(|local| {
-                            self.state[local.0 as usize] == OwnerState::Owned
-                                && self.types.needs_drop(self.locals[local.0 as usize].ty)
+                        .filter_map(|local| {
+                            if !self.types.needs_drop(self.locals[local.0 as usize].ty) {
+                                return None;
+                            }
+                            match self.state[local.0 as usize] {
+                                OwnerState::Owned => Some(HirDrop::Unconditional(local)),
+                                OwnerState::MaybeMoved => Some(HirDrop::Conditional(local)),
+                                _ => None,
+                            }
                         })
                         .collect();
-                    for local in drops.iter().copied() {
+                    for local in drops.iter().copied().map(HirDrop::local) {
                         self.state[local.0 as usize] = OwnerState::Dropped;
                     }
                 }
@@ -2965,15 +3007,8 @@ impl OwnershipAnalysis<'_> {
                             (true, true) => before[index],
                             (true, false) => after_else[index],
                             (false, true) => after_then[index],
-                            (false, false) if after_then[index] == after_else[index] => {
-                                after_then[index]
-                            }
                             (false, false) => {
-                                return Err(self.error(
-                                    "E0294",
-                                    "ownership state differs across continuing branches",
-                                    statement.span,
-                                ));
+                                merge_owner_state(after_then[index], after_else[index])
                             }
                         };
                         self.buffer_lengths[index] = match (then_returns, else_returns) {
@@ -3015,9 +3050,15 @@ impl OwnershipAnalysis<'_> {
                     self.state = before;
                 }
                 HirStmtKind::Match {
-                    scrutinee, arms, ..
+                    mode,
+                    scrutinee,
+                    arms,
+                    ..
                 } => {
                     self.expr(scrutinee)?;
+                    let borrowed_owner = (*mode != MatchMode::Value)
+                        .then(|| self.derived_owner(scrutinee))
+                        .flatten();
                     let before = self.state.clone();
                     let before_lengths = self.buffer_lengths.clone();
                     let mut continuing: Option<Vec<OwnerState>> = None;
@@ -3030,21 +3071,44 @@ impl OwnershipAnalysis<'_> {
                             if !self.types.is_copy(binding.ty) {
                                 self.state[binding.local.0 as usize] = OwnerState::Owned;
                                 self.active.push(binding.local);
+                            } else if let Some(owner) = borrowed_owner {
+                                self.provenance[binding.local.0 as usize] = Some(owner);
                             }
                         }
+                        if let Some(owner) = borrowed_owner {
+                            self.borrowed.last_mut().unwrap().insert(owner);
+                        }
                         self.block(&mut arm.body, true)?;
+                        if !definitely_returns(&arm.body) {
+                            for binding in arm.bindings.iter().rev() {
+                                if !self.types.needs_drop(binding.ty) {
+                                    continue;
+                                }
+                                let state = self.state[binding.local.0 as usize];
+                                match state {
+                                    OwnerState::Owned => arm
+                                        .body
+                                        .exit_drops
+                                        .push(HirDrop::Unconditional(binding.local)),
+                                    OwnerState::MaybeMoved => arm
+                                        .body
+                                        .exit_drops
+                                        .push(HirDrop::Conditional(binding.local)),
+                                    _ => continue,
+                                }
+                                self.state[binding.local.0 as usize] = OwnerState::Dropped;
+                            }
+                        }
+                        if let Some(owner) = borrowed_owner {
+                            self.borrowed.last_mut().unwrap().remove(&owner);
+                        }
                         self.active.truncate(active_start);
                         if !definitely_returns(&arm.body) {
-                            if let Some(previous) = &continuing {
+                            if let Some(previous) = &mut continuing {
                                 for local in &self.active {
                                     let index = local.0 as usize;
-                                    if previous[index] != self.state[index] {
-                                        return Err(self.error(
-                                            "E0294",
-                                            "ownership state differs across match arms",
-                                            statement.span,
-                                        ));
-                                    }
+                                    previous[index] =
+                                        merge_owner_state(previous[index], self.state[index]);
                                 }
                                 if let Some(previous_lengths) = &mut continuing_lengths {
                                     for local in &self.active {
@@ -3068,10 +3132,14 @@ impl OwnershipAnalysis<'_> {
         block.exit_drops.clear();
         if !definitely_returns(block) {
             for local in self.active[active_start..].iter().rev().copied() {
-                if self.state[local.0 as usize] == OwnerState::Owned
-                    && self.types.needs_drop(self.locals[local.0 as usize].ty)
-                {
-                    block.exit_drops.push(local);
+                if self.types.needs_drop(self.locals[local.0 as usize].ty) {
+                    match self.state[local.0 as usize] {
+                        OwnerState::Owned => block.exit_drops.push(HirDrop::Unconditional(local)),
+                        OwnerState::MaybeMoved => {
+                            block.exit_drops.push(HirDrop::Conditional(local))
+                        }
+                        _ => continue,
+                    }
                     self.state[local.0 as usize] = OwnerState::Dropped;
                 }
             }
@@ -3197,6 +3265,22 @@ impl OwnershipAnalysis<'_> {
             },
             _ => None,
         }
+    }
+}
+
+fn merge_owner_state(left: OwnerState, right: OwnerState) -> OwnerState {
+    use OwnerState::{Dropped, MaybeMoved, Moved, Owned, Uninitialized};
+    match (left, right) {
+        (Uninitialized, Uninitialized) => Uninitialized,
+        (Owned, Owned) => Owned,
+        (Moved | Dropped, Moved | Uninitialized)
+        | (Moved, Dropped)
+        | (Uninitialized, Moved | Dropped) => Moved,
+        (Dropped, Dropped) => Dropped,
+        (MaybeMoved, _)
+        | (_, MaybeMoved)
+        | (Owned, Moved | Dropped | Uninitialized)
+        | (Moved | Dropped | Uninitialized, Owned) => MaybeMoved,
     }
 }
 
@@ -3439,7 +3523,7 @@ impl Analyzer<'_> {
                             "E0297",
                             Phase::Semantic,
                             DiagnosticCategory::Type,
-                            "partial replacement of a non-Copy aggregate is unsupported in Vertical-11",
+                            "partial replacement of a non-Copy aggregate is unsupported",
                             Some(s.span),
                         )]);
                     }
@@ -3496,7 +3580,11 @@ impl Analyzer<'_> {
                     condition: self.expression(condition, Some(TypeId::BOOL))?.expr,
                     body: self.block(body, true)?,
                 },
-                AstStmtKind::Match { scrutinee, arms } => self.match_statement(scrutinee, arms)?,
+                AstStmtKind::Match {
+                    mode,
+                    scrutinee,
+                    arms,
+                } => self.match_statement(*mode, scrutinee, arms)?,
                 AstStmtKind::Return(v) => HirStmtKind::Return {
                     value: self.expression(v, Some(self.return_type))?.expr,
                     drops: Vec::new(),
@@ -3518,34 +3606,68 @@ impl Analyzer<'_> {
 
     fn match_statement(
         &mut self,
+        source_mode: AstMatchMode,
         scrutinee: &AstExpr,
         arms: &[AstMatchArm],
     ) -> Result<HirStmtKind, Vec<Diagnostic>> {
-        let mut scrutinee = self.expression(scrutinee, None)?.expr;
-        let Some(enum_id) = self.types.enum_id(scrutinee.ty) else {
+        let mode = match source_mode {
+            AstMatchMode::Value => MatchMode::Value,
+            AstMatchMode::SharedRef => MatchMode::SharedRef,
+            AstMatchMode::MutableRef => MatchMode::MutableRef,
+        };
+        let scrutinee = if mode == MatchMode::Value {
+            self.expression(scrutinee, None)?.expr
+        } else {
+            let mutable = mode == MatchMode::MutableRef;
+            let place =
+                self.resolve_expr_place(scrutinee, mutable)
+                    .map_err(|mut diagnostics| {
+                        if let Some(diagnostic) = diagnostics.first_mut() {
+                            diagnostic.code = if mutable { "E0302" } else { "E0301" };
+                            diagnostic.message = if mutable {
+                                "`match (ref mut ...)` requires a writable addressable enum place"
+                                    .into()
+                            } else {
+                                "`match (ref ...)` requires an addressable enum place".into()
+                            };
+                        }
+                        diagnostics
+                    })?;
+            if let HirPlaceBase::Local(local) = &place.base
+                && !place
+                    .projections
+                    .iter()
+                    .any(|projection| matches!(projection, HirPlaceProjection::Index { .. }))
+            {
+                self.locals[local.0 as usize].address_taken = true;
+            }
+            let ty = self.types.intern_reference(place.ty, mutable);
+            HirExpr {
+                kind: HirExprKind::Borrow { place, mutable },
+                ty,
+                span: scrutinee.span,
+            }
+        };
+        let enum_type = if mode == MatchMode::Value {
+            scrutinee.ty
+        } else {
+            self.types
+                .reference_info(scrutinee.ty)
+                .expect("match-ref scrutinee was just constructed")
+                .0
+        };
+        let Some(enum_id) = self.types.enum_id(enum_type) else {
             return Err(vec![Diagnostic::new(
                 "E0255",
                 Phase::Semantic,
                 DiagnosticCategory::Type,
                 format!(
                     "match scrutinee must be an enum, found {}",
-                    self.type_name(scrutinee.ty)
+                    self.type_name(enum_type)
                 ),
                 Some(scrutinee.span),
             )]);
         };
-        if !self.types.is_copy(scrutinee.ty) {
-            let HirExprKind::Move(local) = scrutinee.kind else {
-                return Err(vec![Diagnostic::new(
-                    "E0298",
-                    Phase::Semantic,
-                    DiagnosticCategory::Type,
-                    "matching a temporary non-Copy enum is unsupported in Vertical-11",
-                    Some(scrutinee.span),
-                )]);
-            };
-            scrutinee.kind = HirExprKind::Local(local);
-        }
         let enum_info = self.enums[enum_id.0 as usize].clone();
         let mut seen = BTreeSet::new();
         let mut resolved_arms = Vec::new();
@@ -3583,7 +3705,7 @@ impl Analyzer<'_> {
                     Some(arm.pattern.span),
                 )]);
             };
-            if pattern_enum != enum_id || resolved_ty != scrutinee.ty {
+            if pattern_enum != enum_id || resolved_ty != enum_type {
                 return Err(vec![Diagnostic::new(
                     "E0257",
                     Phase::Semantic,
@@ -3647,25 +3769,17 @@ impl Analyzer<'_> {
                     self.scopes.pop();
                     return Err(vec![duplicate("match binding", name, *span)]);
                 }
-                let payload_ty = self.specialize_member_type(scrutinee.ty, payload.ty)?;
-                if !self.types.is_copy(payload_ty) && !self.types.contains_generic(payload_ty) {
-                    self.scopes.pop();
-                    return Err(vec![Diagnostic::new(
-                        "E0299",
-                        Phase::Semantic,
-                        DiagnosticCategory::Type,
-                        format!(
-                            "binding non-Copy enum payload `{}` by value is unsupported in Vertical-11",
-                            self.type_name(payload_ty)
-                        ),
-                        Some(*span),
-                    )]);
-                }
+                let payload_ty = self.specialize_member_type(enum_type, payload.ty)?;
+                let binding_ty = match mode {
+                    MatchMode::Value => payload_ty,
+                    MatchMode::SharedRef => self.types.intern_reference(payload_ty, false),
+                    MatchMode::MutableRef => self.types.intern_reference(payload_ty, true),
+                };
                 let local = LocalId(self.locals.len() as u32);
                 self.locals.push(HirLocal {
                     id: local,
                     name: name.clone(),
-                    ty: payload_ty,
+                    ty: binding_ty,
                     span: *span,
                     parameter: false,
                     address_taken: false,
@@ -3674,7 +3788,7 @@ impl Analyzer<'_> {
                 bindings.push(HirMatchBinding {
                     local,
                     payload_index: payload.index,
-                    ty: payload_ty,
+                    ty: binding_ty,
                     span: *span,
                 });
             }
@@ -3707,7 +3821,9 @@ impl Analyzer<'_> {
             )]);
         }
         Ok(HirStmtKind::Match {
+            mode,
             scrutinee,
+            enum_type,
             enum_id,
             arms: resolved_arms,
         })
@@ -4095,7 +4211,7 @@ impl Analyzer<'_> {
                 Phase::Semantic,
                 DiagnosticCategory::Type,
                 format!(
-                    "partial move of non-Copy field `{}` is unsupported in Vertical-11",
+                    "partial move of non-Copy field `{}` is unsupported",
                     self.type_name(place.ty)
                 ),
                 Some(span),
@@ -5569,6 +5685,18 @@ fn verify_block(
     types: &TypeArena,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
+    let mut seen_exit_drops = BTreeSet::new();
+    for drop in &b.exit_drops {
+        let local = drop.local();
+        if !seen_exit_drops.insert(local)
+            || !f
+                .locals
+                .get(local.0 as usize)
+                .is_some_and(|info| !types.is_copy(info.ty) && types.needs_drop(info.ty))
+        {
+            return Err(fail("HIR block cleanup contract is invalid".into()));
+        }
+    }
     for s in &b.statements {
         match &s.kind {
             HirStmtKind::Nop => {}
@@ -5610,7 +5738,9 @@ fn verify_block(
                 verify_block(body, f, ret, sigs, structs, enums, types, fail)?
             }
             HirStmtKind::Match {
+                mode,
                 scrutinee,
+                enum_type,
                 enum_id,
                 arms,
             } => {
@@ -5621,10 +5751,30 @@ fn verify_block(
                 else {
                     return Err(fail("HIR match has unknown enum".into()));
                 };
-                if types.enum_id(scrutinee.ty) != Some(*enum_id)
+                let valid_scrutinee = match mode {
+                    MatchMode::Value => scrutinee.ty == *enum_type,
+                    MatchMode::SharedRef => {
+                        types.reference_info(scrutinee.ty) == Some((*enum_type, false))
+                            && matches!(scrutinee.kind, HirExprKind::Borrow { mutable: false, .. })
+                    }
+                    MatchMode::MutableRef => {
+                        types.reference_info(scrutinee.ty) == Some((*enum_type, true))
+                            && matches!(scrutinee.kind, HirExprKind::Borrow { mutable: true, .. })
+                    }
+                };
+                if types.enum_id(*enum_type) != Some(*enum_id)
+                    || !valid_scrutinee
                     || arms.len() != info.variants.len()
                 {
                     return Err(fail("HIR match type/exhaustiveness invalid".into()));
+                }
+                if *mode == MatchMode::Value
+                    && !types.is_copy(*enum_type)
+                    && matches!(scrutinee.kind, HirExprKind::Local(_) | HirExprKind::Load(_))
+                {
+                    return Err(fail(
+                        "HIR non-Copy value match does not consume its enum root".into(),
+                    ));
                 }
                 let mut seen = BTreeSet::new();
                 for arm in arms {
@@ -5645,8 +5795,23 @@ fn verify_block(
                     }
                     for (binding, payload) in arm.bindings.iter().zip(&variant.payloads) {
                         let expected =
-                            concrete_member_type(types, scrutinee.ty, payload.ty, structs, enums)
+                            concrete_member_type(types, *enum_type, payload.ty, structs, enums)
                                 .ok_or_else(|| fail("HIR match substitution incomplete".into()))?;
+                        let expected = match mode {
+                            MatchMode::Value => expected,
+                            MatchMode::SharedRef => types
+                                .id_of(TypeData::Reference {
+                                    pointee: expected,
+                                    mutable: false,
+                                })
+                                .ok_or_else(|| fail("HIR match shared-ref type missing".into()))?,
+                            MatchMode::MutableRef => types
+                                .id_of(TypeData::Reference {
+                                    pointee: expected,
+                                    mutable: true,
+                                })
+                                .ok_or_else(|| fail("HIR match mutable-ref type missing".into()))?,
+                        };
                         if binding.payload_index != payload.index
                             || binding.ty != expected
                             || f.locals.get(binding.local.0 as usize).map(|local| local.ty)
@@ -5660,11 +5825,14 @@ fn verify_block(
             }
             HirStmtKind::Return { value, drops } => {
                 verify_expr(value, f, sigs, structs, enums, types, fail)?;
+                let mut seen = BTreeSet::new();
                 if value.ty != ret
-                    || drops.iter().any(|local| {
-                        !f.locals
-                            .get(local.0 as usize)
-                            .is_some_and(|info| types.needs_drop(info.ty))
+                    || drops.iter().any(|drop| {
+                        let local = drop.local();
+                        !seen.insert(local)
+                            || !f.locals.get(local.0 as usize).is_some_and(|info| {
+                                !types.is_copy(info.ty) && types.needs_drop(info.ty)
+                            })
                     })
                 {
                     return Err(fail("HIR return mismatch".into()));
