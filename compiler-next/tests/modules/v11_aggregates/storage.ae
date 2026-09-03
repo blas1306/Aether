@@ -1,0 +1,8 @@
+struct Packet {
+    Buffer<int> values;
+    int code;
+}
+
+Packet make() {
+    return Packet(Buffer<int>(1, 20), 22);
+}

@@ -1,4 +1,4 @@
-# Aether NEXT-VERTICAL-10
+# Aether NEXT-VERTICAL-11
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. It does not replace the production `aether` CLI or import any legacy
@@ -11,7 +11,7 @@ entry SourceFile
   -> transitive discovery -> CompilationSession(module graph + source table)
   -> lexer/parser once per source -> ParsedProgram
   -> global declaration collection -> parametric resolver/type analysis
-  -> definite Buffer ownership/provenance + cleanup synthesis
+  -> type-directed ownership/provenance + transitive cleanup synthesis
   -> deduplicated concrete-instance worklist -> monomorphized TypedHir
   -> CFG/lifecycle lowering -> FlowMir -> VerifiedMir
   -> selective local promotion + explicit memory/ownership effects -> SsaIr -> VerifiedSsa
@@ -32,7 +32,7 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-10 grammar
+## Vertical-11 grammar
 
 ```text
 program    := import* (alias | struct | enum | function)+ EOF
@@ -262,7 +262,7 @@ qualification environments that contain its Python dependencies.
 `tests/modules/v1-contract.tsv` records the Vertical-2 multi-file contract;
 these cases are not forced through legacy differential semantics.
 
-The Vertical-10 qualification run completed with 84 Rust unit/integration
+The Vertical-11 qualification run completed with 88 Rust unit/integration
 tests passing, zero failures; clippy passed for the whole workspace/all targets
 with warnings denied; and the executable legacy differential subset completed
 21 comparisons with zero failures. Buffer-native tests additionally compile
@@ -366,11 +366,11 @@ buffers never resize.
 V10 bounds ownership deliberately. `T` must be a concrete `Copy` type that
 does not need drop or contain borrowed/owning substructure. Consequently
 nested owning buffers, borrowed descriptor elements, symbolic `Buffer<T>`
-inside generic bodies, and Buffer/View fields or enum payloads are rejected.
-Buffers themselves may be locals, owned parameters, returned values and
-reference pointees, including across modules. This restriction is temporary:
-it avoids pretending user aggregates have transitive move/drop support before
-that support exists.
+inside generic bodies and borrowed descriptor elements are rejected. Buffers
+themselves may be locals, aggregate fields/payloads, owned parameters, returned
+values and reference pointees, including across modules. `Buffer` element
+destruction remains deliberately deferred even though ownership may now
+compose outward through aggregates.
 
 LLVM represents Buffer/View values internally as `{ ptr, i64 }`, allocates
 through a small runtime boundary backed by `malloc`, fills contiguously, and
@@ -384,6 +384,52 @@ without cleanup in V10; unwinding and exceptional cleanup remain deferred.
 `Array<T>` abstraction and adds no resizing, capacity, append/insert/remove,
 slicing syntax, allocator API, shared ownership, raw pointer surface or general
 ownership system.
+
+## Vertical-11 transitive aggregate ownership contract
+
+`is_copy(TypeId)` and `needs_drop(TypeId)` are independent, centralized,
+memoized lifecycle queries. Scalars, references and views are Copy/no-drop;
+`Buffer<T>` is non-Copy/needs-drop. A concrete struct is Copy only when every
+substituted field is Copy and needs drop when any substituted field does. An
+enum applies the same rules across every payload of every variant. Thus
+`Holder<int>` remains Copy while `Holder<Buffer<int>>` moves and drops.
+Unresolved generic parameters produce `is_known: false` and are conservatively
+non-Copy/potentially drop-requiring during parametric checking;
+monomorphization substitutes the concrete property and re-synthesizes
+ownership cleanup.
+
+Struct and enum construction consume non-Copy arguments from left to right,
+including temporaries, without hidden clone, ARC or a second cleanup. A
+whole-value move invalidates the source root, including access to its Copy
+fields. Directly moving a non-Copy field is rejected as unsupported partial
+move. Whole-local reassignment is supported: the right-hand side is evaluated
+first, the old destination receives recursive drop glue, then ownership is
+transferred. By-value parameters consume and returns transfer; references
+borrow without moving.
+
+One general MIR/SSA `Drop` carries the typed owner place. LLVM expands it as
+compiler-generated glue: struct fields are destroyed in reverse declaration
+order, nested aggregates recurse, and enums switch on the active discriminant
+and destroy only that variant's payloads in reverse order. Physical LLVM
+aggregate copies used to transfer bits do not imply source Copy semantics.
+Normal-path allocation/free balance remains instrumented; traps abort and do
+not unwind.
+
+Non-Copy enum payload bindings in `match` remain rejected. Variant-only arms
+(including payload-bearing variants with no requested binding) and Copy
+payload bindings inspect a live local enum without consuming it.
+References/views are still forbidden transitively in stored aggregates, and
+the V10 `Buffer` element restriction is unchanged. V11 adds no partial moves,
+destructor traits, clone, ARC, resizing or lifetime annotations.
+
+### Vertical-11 timing snapshot
+
+A warm debug build on Linux x86_64 measured one complete core compilation
+(parse through LLVM, excluding discovery/file load and clang) at 3.313 ms for
+the existing `v10_buffers.ae` fixture and 3.359 ms for the larger
+`v11_aggregates.ae` fixture. The latter exercises concrete generic property
+queries, nested struct glue and discriminant-based enum glue; these are
+workload snapshots, not a same-input regression comparison.
 
 ## Bootstrap ABI and deliberate limits
 

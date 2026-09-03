@@ -316,8 +316,9 @@ impl FlowMir {
             .entries()
             .map(|(id, _)| {
                 format!(
-                    "  {id:?} = {}",
-                    format_type(&self.types, id, &self.structs, &self.enums)
+                    "  {id:?} = {}; properties={:?}",
+                    format_type(&self.types, id, &self.structs, &self.enums),
+                    self.types.properties(id).expect("dumped valid TypeId")
                 )
             })
             .collect::<Vec<_>>()
@@ -444,12 +445,12 @@ impl Builder<'_> {
                 HirStmtKind::Nop => {}
                 HirStmtKind::Local { local, initializer } => {
                     let value = self.lower_expr(initializer);
-                    let rvalue = if self.types.needs_drop(initializer.ty) {
+                    let rvalue = if self.types.is_copy(initializer.ty) {
+                        Rvalue::Use(value)
+                    } else {
                         Rvalue::Move {
                             source: operand_place(&value),
                         }
-                    } else {
-                        Rvalue::Use(value)
                     };
                     self.assign(
                         Place {
@@ -463,8 +464,12 @@ impl Builder<'_> {
                 HirStmtKind::Assign { place, value } => {
                     let value = self.lower_expr(value);
                     let place = self.lower_place(place);
-                    if self.types.needs_drop(value_type(&self.function, &value)) {
-                        self.emit_drop(place.clone(), statement.span);
+                    if self.types.is_copy(value_type(&self.function, &value)) {
+                        self.assign(place, Rvalue::Use(value), statement.span);
+                    } else {
+                        if self.types.needs_drop(value_type(&self.function, &value)) {
+                            self.emit_drop(place.clone(), statement.span);
+                        }
                         self.assign(
                             place,
                             Rvalue::Move {
@@ -472,8 +477,6 @@ impl Builder<'_> {
                             },
                             statement.span,
                         );
-                    } else {
-                        self.assign(place, Rvalue::Use(value), statement.span);
                     }
                 }
                 HirStmtKind::Return { value, drops } => {
@@ -1124,9 +1127,7 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
             || mir.types.contains_view(signature.return_type)
             || mir.structs.iter().any(|info| {
                 info.fields.iter().any(|field| {
-                    mir.types.contains_reference(field.ty)
-                        || mir.types.contains_view(field.ty)
-                        || mir.types.contains_owning(field.ty)
+                    mir.types.contains_reference(field.ty) || mir.types.contains_view(field.ty)
                 })
             })
             || mir.enums.iter().any(|info| {
@@ -1134,13 +1135,12 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
                     variant.payloads.iter().any(|payload| {
                         mir.types.contains_reference(payload.ty)
                             || mir.types.contains_view(payload.ty)
-                            || mir.types.contains_owning(payload.ty)
                     })
                 })
             })
         {
             return Err(fail(
-                "MIR violates Vertical-10 owning/borrowed non-escape storage rules".into(),
+                "MIR violates borrowed-value non-escape storage rules".into(),
             ));
         }
         if signature
@@ -1427,7 +1427,7 @@ fn verify_ownership(
 ) -> Result<(), Vec<Diagnostic>> {
     let mut entry = vec![MirOwnerState::Uninitialized; function.locals.len()];
     for parameter in &function.parameters {
-        if types.needs_drop(parameter.ty) {
+        if !types.is_copy(parameter.ty) {
             entry[parameter.local.0 as usize] = MirOwnerState::Owned;
         }
     }
@@ -1469,7 +1469,7 @@ fn verify_ownership(
                             fail("MIR ownership analysis found unknown call target".into())
                         })?;
                     for (argument, parameter) in args.iter().zip(&signature.parameters) {
-                        if types.needs_drop(parameter.ty) {
+                        if !types.is_copy(parameter.ty) {
                             let local = operand_local_id(argument).ok_or_else(|| {
                                 fail("owned call argument is not materialized".into())
                             })?;
@@ -1479,14 +1479,65 @@ fn verify_ownership(
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
                 Rvalue::Use(operand) => {
-                    if types.needs_drop(operand_type(function, operand).map_err(fail)?) {
-                        return Err(fail("implicit copy of move-only Buffer in MIR".into()));
+                    if !types.is_copy(operand_type(function, operand).map_err(fail)?) {
+                        return Err(fail("implicit copy of a non-Copy value in MIR".into()));
                     }
                 }
                 Rvalue::Load(place)
                 | Rvalue::Borrow { place, .. }
                 | Rvalue::View { source: place, .. } => {
                     require_place_owner(function, types, &state, place, fail)?;
+                }
+                Rvalue::Aggregate { fields, .. } => {
+                    for (_, operand) in fields {
+                        let ty = operand_type(function, operand).map_err(fail)?;
+                        if !types.is_copy(ty) {
+                            let local = operand_local_id(operand).ok_or_else(|| {
+                                fail("non-Copy aggregate field is not materialized".into())
+                            })?;
+                            consume_owner(
+                                function,
+                                types,
+                                &mut state,
+                                local,
+                                "aggregate construction",
+                                fail,
+                            )?;
+                        }
+                    }
+                    initialize_owner(function, types, &mut state, destination, fail)?;
+                }
+                Rvalue::EnumConstruct { payloads, .. } => {
+                    for operand in payloads {
+                        let ty = operand_type(function, operand).map_err(fail)?;
+                        if !types.is_copy(ty) {
+                            let local = operand_local_id(operand).ok_or_else(|| {
+                                fail("non-Copy enum payload is not materialized".into())
+                            })?;
+                            consume_owner(
+                                function,
+                                types,
+                                &mut state,
+                                local,
+                                "enum construction",
+                                fail,
+                            )?;
+                        }
+                    }
+                    initialize_owner(function, types, &mut state, destination, fail)?;
+                }
+                Rvalue::EnumDiscriminant { value, .. } | Rvalue::EnumPayload { value, .. } => {
+                    if let Some(local) = operand_local_id(value)
+                        && !types.is_copy(function.locals[local.0 as usize].ty)
+                        && matches!(
+                            state[local.0 as usize],
+                            MirOwnerState::Moved | MirOwnerState::Dropped
+                        )
+                    {
+                        return Err(fail(
+                            "MIR enum inspection uses a moved/dropped owner".into(),
+                        ));
+                    }
                 }
                 _ => {}
             }
@@ -1496,7 +1547,7 @@ fn verify_ownership(
         }
         let terminator = block.terminator.as_ref().expect("CFG verified");
         if let Terminator::Return(value) = terminator {
-            if types.needs_drop(function.return_type) {
+            if !types.is_copy(function.return_type) {
                 let local = operand_local_id(value)
                     .ok_or_else(|| fail("owned return is not materialized".into()))?;
                 consume_owner(function, types, &mut state, local, "return", fail)?;
@@ -1504,7 +1555,7 @@ fn verify_ownership(
             if function.locals.iter().any(|local| {
                 types.needs_drop(local.ty) && state[local.id.0 as usize] == MirOwnerState::Owned
             }) {
-                return Err(fail("MIR normal return leaks an owning Buffer".into()));
+                return Err(fail("MIR normal return leaks an owning value".into()));
             }
         }
         for target in targets(terminator) {
@@ -1551,11 +1602,13 @@ fn initialize_owner(
     let Some(local) = destination else {
         return Ok(());
     };
-    if !types.needs_drop(function.locals[local.0 as usize].ty) {
+    if types.is_copy(function.locals[local.0 as usize].ty) {
         return Ok(());
     }
     if state[local.0 as usize] == MirOwnerState::Owned {
-        return Err(fail("MIR overwrites an owning Buffer without Drop".into()));
+        return Err(fail(
+            "MIR overwrites a live non-Copy value without transfer/drop".into(),
+        ));
     }
     state[local.0 as usize] = MirOwnerState::Owned;
     Ok(())
@@ -1569,7 +1622,7 @@ fn consume_owner(
     operation: &str,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
-    if !types.needs_drop(function.locals[local.0 as usize].ty)
+    if types.is_copy(function.locals[local.0 as usize].ty)
         || state[local.0 as usize] != MirOwnerState::Owned
     {
         return Err(fail(format!(
@@ -1588,10 +1641,10 @@ fn require_place_owner(
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
     if let Some(local) = place_root_local(place)
-        && types.needs_drop(function.locals[local.0 as usize].ty)
+        && !types.is_copy(function.locals[local.0 as usize].ty)
         && state[local.0 as usize] != MirOwnerState::Owned
     {
-        return Err(fail("MIR place uses moved/dropped Buffer storage".into()));
+        return Err(fail("MIR place uses moved/dropped non-Copy storage".into()));
     }
     Ok(())
 }

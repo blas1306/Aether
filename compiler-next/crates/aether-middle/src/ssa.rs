@@ -292,8 +292,9 @@ impl SsaIr {
             .entries()
             .map(|(id, _)| {
                 format!(
-                    "  {id:?} = {}",
-                    format_type(&self.types, id, &self.structs, &self.enums)
+                    "  {id:?} = {}; properties={:?}",
+                    format_type(&self.types, id, &self.structs, &self.enums),
+                    self.types.properties(id).expect("dumped valid TypeId")
                 )
             })
             .collect::<Vec<_>>()
@@ -1170,9 +1171,7 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
             || ssa.types.contains_view(signature.return_type)
             || ssa.structs.iter().any(|info| {
                 info.fields.iter().any(|field| {
-                    ssa.types.contains_reference(field.ty)
-                        || ssa.types.contains_view(field.ty)
-                        || ssa.types.contains_owning(field.ty)
+                    ssa.types.contains_reference(field.ty) || ssa.types.contains_view(field.ty)
                 })
             })
             || ssa.enums.iter().any(|info| {
@@ -1180,13 +1179,12 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
                     variant.payloads.iter().any(|payload| {
                         ssa.types.contains_reference(payload.ty)
                             || ssa.types.contains_view(payload.ty)
-                            || ssa.types.contains_owning(payload.ty)
                     })
                 })
             })
         {
             return Err(fail(
-                "SSA violates Vertical-10 owning/borrowed non-escape storage rules".into(),
+                "SSA violates borrowed-value non-escape storage rules".into(),
             ));
         }
         if signature
@@ -1526,7 +1524,7 @@ fn verify_op(
 ) -> Result<(), String> {
     match op {
         SsaOp::Use(operand) => {
-            if operand_ty(operand)? != result || types.needs_drop(result) {
+            if operand_ty(operand)? != result || !types.is_copy(result) {
                 return Err("SSA copy type mismatch".into());
             }
         }

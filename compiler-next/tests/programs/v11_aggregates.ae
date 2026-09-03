@@ -1,0 +1,94 @@
+struct Dataset {
+    Buffer<int> values;
+    int count;
+}
+
+struct TwoBuffers {
+    Buffer<int> first;
+    Buffer<int> second;
+}
+
+struct Inner {
+    Buffer<int> values;
+}
+
+struct Outer {
+    int id;
+    Inner inner;
+}
+
+struct Holder<T> {
+    T value;
+}
+
+enum Storage {
+    Empty,
+    Owned(Buffer<int>),
+    Pair(Buffer<int>, Buffer<int>),
+}
+
+enum Maybe<T> {
+    None,
+    Some(T),
+}
+
+T identity<T>(T value) {
+    return value;
+}
+
+Dataset makeDataset() {
+    return Dataset(Buffer<int>(1, 8), 4);
+}
+
+int consume(Dataset value) {
+    return value.count + value.values[0];
+}
+
+int inspect(ref Dataset value) {
+    return (*value).count;
+}
+
+int touch(ref mut Dataset value) {
+    ref mut int element = &mut (*value).values[0];
+    *element = 5;
+    return *element;
+}
+
+int main() {
+    Dataset source = Dataset(Buffer<int>(1, 1), 2);
+    Dataset moved = source;
+    int total = inspect(&moved) + touch(&mut moved);
+
+    Buffer<int> local = Buffer<int>(1, 4);
+    Dataset fromLocal = Dataset(local, 3);
+    total = total + consume(fromLocal);
+
+    Outer outer = Outer(1, Inner(Buffer<int>(1, 6)));
+    total = total + outer.id + outer.inner.values[0];
+
+    Holder<int> copy = Holder<int>(4);
+    Holder<int> copied = identity<Holder<int>>(copy);
+    total = total + copied.value;
+
+    Holder<Buffer<int>> owner = Holder<Buffer<int>>(Buffer<int>(1, 5));
+    Holder<Buffer<int>> ownerMoved = identity<Holder<Buffer<int>>>(owner);
+    total = total + ownerMoved.value[0];
+
+    Storage empty = Storage.Empty;
+    Storage owned = Storage.Owned(Buffer<int>(1, 9));
+    Storage pair = Storage.Pair(Buffer<int>(1, 10), Buffer<int>(1, 11));
+    Storage pairMoved = pair;
+    ref Storage storageRef = &owned;
+    match (owned) {
+        Storage.Empty => { total = total + 100; }
+        Storage.Owned => { total = total + 0; }
+        Storage.Pair => { total = total + 100; }
+    }
+    Maybe<int> maybeCopy = Maybe<int>.Some(3);
+    Maybe<int> maybeCopied = maybeCopy;
+    Maybe<Buffer<int>> maybeOwned = Maybe<Buffer<int>>.Some(Buffer<int>(1, 12));
+    TwoBuffers two = TwoBuffers(Buffer<int>(1, 13), Buffer<int>(1, 14));
+
+    Dataset returned = makeDataset();
+    return total + returned.count + returned.values[0];
+}

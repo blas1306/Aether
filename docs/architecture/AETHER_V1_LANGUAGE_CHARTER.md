@@ -181,6 +181,17 @@ are implemented rather than approximated. Borrowed reference/view descriptors
 are likewise excluded from Buffer elements so allocation ownership cannot
 silently extend their lifetime.
 
+NEXT-VERTICAL-11 makes that ownership structural for nominal aggregates.
+Concrete structs and enums inherit Copy and destruction requirements from
+their substituted fields/payloads, so ordinary user types may own Buffer
+without hidden copies or compiler-specific container wrappers. Whole-value
+moves, by-value calls and returns transfer ownership; compiler-generated drop
+glue recursively destroys structs in reverse field order and only the active
+enum variant. Partial moves and non-Copy payload bindings in matches remain
+explicitly deferred. Stored references/views and Buffer elements requiring
+drop remain forbidden; this milestone composes ownership outward rather than
+weakening lifetime or element-destruction rules.
+
 ## Safety and control
 
 Safe and ergonomic behavior is the default.  Value semantics, moves, shared

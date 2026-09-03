@@ -1,0 +1,10 @@
+import storage;
+
+int consume(storage.Packet packet) {
+    return packet.values[0] + packet.code;
+}
+
+int main() {
+    storage.Packet packet = storage.make();
+    return consume(packet);
+}

@@ -1,8 +1,9 @@
 //! Canonical semantic types and the minimal admitted target model.
 #![allow(missing_docs)]
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::fmt;
+use std::sync::RwLock;
 
 /// Session-local nominal identity of a source `struct` declaration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -252,8 +253,17 @@ pub enum TypeData {
 /// source trait system.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TypeProperties {
+    /// False means the booleans below are conservative requirements for a
+    /// symbolic/malformed type rather than a fabricated concrete answer.
+    pub is_known: bool,
     pub is_copy: bool,
     pub needs_drop: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AggregateProperties {
+    parameters: Vec<GenericParamId>,
+    members: Vec<Vec<TypeId>>,
 }
 
 impl TypeData {
@@ -324,14 +334,51 @@ impl fmt::Display for TypeData {
 /// The arena has ordinary Rust ownership, contains no global state and can be
 /// cloned only when an unverified IR is deliberately cloned by tests/tools.
 /// Production phase transitions move it forward with the program context.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct TypeArena {
     data: Vec<TypeData>,
     ids: HashMap<TypeData, TypeId>,
     argument_lists: Vec<Vec<TypeId>>,
     argument_ids: HashMap<Vec<TypeId>, TypeArgsId>,
     concrete_layouts: HashMap<TypeId, (u64, u64)>,
+    struct_properties: HashMap<StructId, AggregateProperties>,
+    enum_properties: HashMap<EnumId, AggregateProperties>,
+    property_cache: RwLock<HashMap<TypeId, TypeProperties>>,
 }
+
+impl Clone for TypeArena {
+    fn clone(&self) -> Self {
+        Self {
+            data: self.data.clone(),
+            ids: self.ids.clone(),
+            argument_lists: self.argument_lists.clone(),
+            argument_ids: self.argument_ids.clone(),
+            concrete_layouts: self.concrete_layouts.clone(),
+            struct_properties: self.struct_properties.clone(),
+            enum_properties: self.enum_properties.clone(),
+            property_cache: RwLock::new(
+                self.property_cache
+                    .read()
+                    .expect("type-property cache lock")
+                    .clone(),
+            ),
+        }
+    }
+}
+
+impl PartialEq for TypeArena {
+    fn eq(&self, other: &Self) -> bool {
+        self.data == other.data
+            && self.ids == other.ids
+            && self.argument_lists == other.argument_lists
+            && self.argument_ids == other.argument_ids
+            && self.concrete_layouts == other.concrete_layouts
+            && self.struct_properties == other.struct_properties
+            && self.enum_properties == other.enum_properties
+    }
+}
+
+impl Eq for TypeArena {}
 
 impl Default for TypeArena {
     fn default() -> Self {
@@ -350,6 +397,9 @@ impl TypeArena {
             argument_lists: Vec::new(),
             argument_ids: HashMap::new(),
             concrete_layouts: HashMap::new(),
+            struct_properties: HashMap::new(),
+            enum_properties: HashMap::new(),
+            property_cache: RwLock::new(HashMap::new()),
         };
         let baseline = [
             TypeData::Bool,
@@ -411,6 +461,46 @@ impl TypeArena {
 
     pub fn intern_view(&mut self, element: TypeId, mutable: bool) -> TypeId {
         self.intern(TypeData::View { element, mutable })
+    }
+
+    /// Registers declaration-owned member types for structural lifecycle
+    /// queries. Later phases can consequently use one TypeId-based API.
+    pub fn register_struct_properties(
+        &mut self,
+        id: StructId,
+        parameters: Vec<GenericParamId>,
+        fields: Vec<TypeId>,
+    ) {
+        self.struct_properties.insert(
+            id,
+            AggregateProperties {
+                parameters,
+                members: vec![fields],
+            },
+        );
+        self.property_cache
+            .write()
+            .expect("type-property cache lock")
+            .clear();
+    }
+
+    pub fn register_enum_properties(
+        &mut self,
+        id: EnumId,
+        parameters: Vec<GenericParamId>,
+        variants: Vec<Vec<TypeId>>,
+    ) {
+        self.enum_properties.insert(
+            id,
+            AggregateProperties {
+                parameters,
+                members: variants,
+            },
+        );
+        self.property_cache
+            .write()
+            .expect("type-property cache lock")
+            .clear();
     }
 
     fn intern_arguments(&mut self, arguments: Vec<TypeId>) -> TypeArgsId {
@@ -569,30 +659,163 @@ impl TypeArena {
         }
     }
 
-    /// Central lifecycle classification for the V10 admitted type universe.
-    /// User aggregates are Copy because V10 rejects owning fields/payloads;
-    /// references and views copy only their non-owning descriptor.
+    /// Central lifecycle classification for a canonical semantic type.
+    /// Aggregate properties are derived transitively after substituting their
+    /// declaration binders. Unresolved parameters are conservatively treated
+    /// as non-Copy and potentially needing drop, so a parametric body cannot
+    /// duplicate or leak an unknown owner.
     #[must_use]
     pub fn properties(&self, id: TypeId) -> Option<TypeProperties> {
-        Some(match self.get(id)? {
-            TypeData::Buffer { .. } => TypeProperties {
-                is_copy: false,
-                needs_drop: true,
-            },
+        self.get(id)?;
+        if !self.contains_generic(id) {
+            let cached = self
+                .property_cache
+                .read()
+                .expect("type-property cache lock")
+                .get(&id)
+                .copied();
+            if let Some(properties) = cached {
+                return Some(properties);
+            }
+        }
+        let properties =
+            self.properties_with_substitution(id, &HashMap::new(), &mut BTreeSet::new());
+        if !self.contains_generic(id) {
+            self.property_cache
+                .write()
+                .expect("type-property cache lock")
+                .insert(id, properties);
+        }
+        Some(properties)
+    }
+
+    fn properties_with_substitution(
+        &self,
+        id: TypeId,
+        substitution: &HashMap<GenericParamId, TypeId>,
+        visiting: &mut BTreeSet<TypeId>,
+    ) -> TypeProperties {
+        let unknown = TypeProperties {
+            is_known: false,
+            is_copy: false,
+            needs_drop: true,
+        };
+        let Some(data) = self.get(id).copied() else {
+            return unknown;
+        };
+        let aggregate_ty = id;
+        match data {
             TypeData::Bool
             | TypeData::Integer(_)
             | TypeData::Float(_)
-            | TypeData::Struct(_)
-            | TypeData::Enum(_)
-            | TypeData::GenericParam(_)
-            | TypeData::StructInstance(_, _)
-            | TypeData::EnumInstance(_, _)
             | TypeData::Reference { .. }
             | TypeData::View { .. } => TypeProperties {
+                is_known: true,
                 is_copy: true,
                 needs_drop: false,
             },
-        })
+            TypeData::Buffer { .. } => TypeProperties {
+                is_known: true,
+                is_copy: false,
+                needs_drop: true,
+            },
+            TypeData::GenericParam(parameter) => {
+                substitution.get(&parameter).map_or(unknown, |ty| {
+                    if *ty == id {
+                        unknown
+                    } else {
+                        self.properties_with_substitution(*ty, substitution, visiting)
+                    }
+                })
+            }
+            TypeData::Struct(id) => {
+                self.aggregate_properties(false, id.0, aggregate_ty, None, substitution, visiting)
+            }
+            TypeData::Enum(id) => {
+                self.aggregate_properties(true, id.0, aggregate_ty, None, substitution, visiting)
+            }
+            TypeData::StructInstance(id, args) => self.aggregate_properties(
+                false,
+                id.0,
+                aggregate_ty,
+                Some(args),
+                substitution,
+                visiting,
+            ),
+            TypeData::EnumInstance(id, args) => self.aggregate_properties(
+                true,
+                id.0,
+                aggregate_ty,
+                Some(args),
+                substitution,
+                visiting,
+            ),
+        }
+    }
+
+    fn aggregate_properties(
+        &self,
+        is_enum: bool,
+        raw_id: u32,
+        aggregate_ty: TypeId,
+        arguments: Option<TypeArgsId>,
+        outer: &HashMap<GenericParamId, TypeId>,
+        visiting: &mut BTreeSet<TypeId>,
+    ) -> TypeProperties {
+        if !visiting.insert(aggregate_ty) {
+            return TypeProperties {
+                is_known: false,
+                is_copy: false,
+                needs_drop: true,
+            };
+        }
+        let definition = if is_enum {
+            self.enum_properties.get(&EnumId(raw_id))
+        } else {
+            self.struct_properties.get(&StructId(raw_id))
+        };
+        let Some(definition) = definition else {
+            visiting.remove(&aggregate_ty);
+            return TypeProperties {
+                is_known: false,
+                is_copy: false,
+                needs_drop: true,
+            };
+        };
+        let mut substitution = outer.clone();
+        if let Some(arguments) = arguments {
+            let Some(arguments) = self.arguments(arguments) else {
+                visiting.remove(&aggregate_ty);
+                return TypeProperties {
+                    is_known: false,
+                    is_copy: false,
+                    needs_drop: true,
+                };
+            };
+            for (parameter, argument) in definition.parameters.iter().zip(arguments) {
+                substitution.insert(*parameter, *argument);
+            }
+        } else if !definition.parameters.is_empty() {
+            visiting.remove(&aggregate_ty);
+            return TypeProperties {
+                is_known: false,
+                is_copy: false,
+                needs_drop: true,
+            };
+        }
+        let mut result = TypeProperties {
+            is_known: true,
+            is_copy: true,
+            needs_drop: false,
+        };
+        for member in definition.members.iter().flatten() {
+            let properties = self.properties_with_substitution(*member, &substitution, visiting);
+            result.is_known &= properties.is_known;
+            result.is_copy &= properties.is_copy;
+            result.needs_drop |= properties.needs_drop;
+        }
+        visiting.remove(&aggregate_ty);
+        result
     }
 
     #[must_use]
@@ -622,37 +845,125 @@ impl TypeArena {
 
     #[must_use]
     pub fn contains_owning(&self, id: TypeId) -> bool {
-        match self.get(id) {
-            Some(TypeData::Buffer { .. }) => true,
-            Some(TypeData::StructInstance(_, args) | TypeData::EnumInstance(_, args)) => self
-                .arguments(*args)
-                .is_some_and(|arguments| arguments.iter().any(|ty| self.contains_owning(*ty))),
-            Some(_) | None => false,
-        }
+        self.contains_capability(id, 2, &HashMap::new(), &mut BTreeSet::new())
     }
 
     #[must_use]
     pub fn contains_view(&self, id: TypeId) -> bool {
-        match self.get(id) {
-            Some(TypeData::View { .. }) => true,
-            Some(TypeData::StructInstance(_, args) | TypeData::EnumInstance(_, args)) => self
-                .arguments(*args)
-                .is_some_and(|arguments| arguments.iter().any(|ty| self.contains_view(*ty))),
-            _ => false,
-        }
+        self.contains_capability(id, 1, &HashMap::new(), &mut BTreeSet::new())
     }
 
     /// Whether this type is, or recursively contains as a generic argument, a
     /// V9 reference that cannot be persisted in a V10 aggregate.
     #[must_use]
     pub fn contains_reference(&self, id: TypeId) -> bool {
-        match self.get(id) {
-            Some(TypeData::Reference { .. }) => true,
-            Some(TypeData::StructInstance(_, args) | TypeData::EnumInstance(_, args)) => self
-                .arguments(*args)
-                .is_some_and(|arguments| arguments.iter().any(|ty| self.contains_reference(*ty))),
-            _ => false,
+        self.contains_capability(id, 0, &HashMap::new(), &mut BTreeSet::new())
+    }
+
+    fn contains_capability(
+        &self,
+        id: TypeId,
+        capability: u8,
+        substitution: &HashMap<GenericParamId, TypeId>,
+        visiting: &mut BTreeSet<(u8, TypeId)>,
+    ) -> bool {
+        let aggregate_ty = id;
+        match self.get(id).copied() {
+            Some(TypeData::Reference { pointee, .. }) => {
+                capability == 0
+                    || self.contains_capability(pointee, capability, substitution, visiting)
+            }
+            Some(TypeData::View { element, .. }) => {
+                capability == 1
+                    || self.contains_capability(element, capability, substitution, visiting)
+            }
+            Some(TypeData::Buffer { element }) => {
+                capability == 2
+                    || self.contains_capability(element, capability, substitution, visiting)
+            }
+            Some(TypeData::GenericParam(parameter)) => {
+                substitution.get(&parameter).is_some_and(|ty| {
+                    *ty != id && self.contains_capability(*ty, capability, substitution, visiting)
+                })
+            }
+            Some(TypeData::Struct(id)) => self.aggregate_contains_capability(
+                false,
+                id.0,
+                aggregate_ty,
+                None,
+                capability,
+                substitution,
+                visiting,
+            ),
+            Some(TypeData::Enum(id)) => self.aggregate_contains_capability(
+                true,
+                id.0,
+                aggregate_ty,
+                None,
+                capability,
+                substitution,
+                visiting,
+            ),
+            Some(TypeData::StructInstance(id, args)) => self.aggregate_contains_capability(
+                false,
+                id.0,
+                aggregate_ty,
+                Some(args),
+                capability,
+                substitution,
+                visiting,
+            ),
+            Some(TypeData::EnumInstance(id, args)) => self.aggregate_contains_capability(
+                true,
+                id.0,
+                aggregate_ty,
+                Some(args),
+                capability,
+                substitution,
+                visiting,
+            ),
+            Some(TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_)) | None => false,
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn aggregate_contains_capability(
+        &self,
+        is_enum: bool,
+        raw_id: u32,
+        aggregate_ty: TypeId,
+        arguments: Option<TypeArgsId>,
+        capability: u8,
+        outer: &HashMap<GenericParamId, TypeId>,
+        visiting: &mut BTreeSet<(u8, TypeId)>,
+    ) -> bool {
+        let key = (capability, aggregate_ty);
+        if !visiting.insert(key) {
+            return false;
+        }
+        let definition = if is_enum {
+            self.enum_properties.get(&EnumId(raw_id))
+        } else {
+            self.struct_properties.get(&StructId(raw_id))
+        };
+        let Some(definition) = definition else {
+            visiting.remove(&key);
+            return false;
+        };
+        let mut substitution = outer.clone();
+        if let Some(arguments) = arguments
+            && let Some(arguments) = self.arguments(arguments)
+        {
+            for (parameter, argument) in definition.parameters.iter().zip(arguments) {
+                substitution.insert(*parameter, *argument);
+            }
+        }
+        let result =
+            definition.members.iter().flatten().any(|member| {
+                self.contains_capability(*member, capability, &substitution, visiting)
+            });
+        visiting.remove(&key);
+        result
     }
 
     /// Readable canonical spelling for diagnostics and deterministic dumps.

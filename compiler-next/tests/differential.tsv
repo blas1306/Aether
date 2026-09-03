@@ -64,3 +64,6 @@ buffer_element_reference	V1_CONTRACT	accept:11	n/a	programs/v10_element_ref.ae
 contiguous_buffer_view	V1_CONTRACT	accept:11	n/a	programs/v10_view.ae
 buffer_dynamic_bounds	V1_CONTRACT	trap	n/a	programs/v10_dynamic_oob.ae
 buffer_allocation_overflow	V1_CONTRACT	trap	n/a	programs/v10_allocation_overflow.ae
+transitive_aggregate_ownership	V1_CONTRACT	accept:42	n/a	programs/v11_aggregates.ae
+aggregate_control_flow_cleanup	V1_CONTRACT	accept:43	n/a	programs/v11_control_flow.ae
+aggregate_reassignment_cleanup	V1_CONTRACT	accept:42	n/a	programs/v11_reassignment.ae

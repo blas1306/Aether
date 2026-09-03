@@ -1,4 +1,4 @@
-//! Cross-layer and native qualification through NEXT-VERTICAL-10.
+//! Cross-layer and native qualification through NEXT-VERTICAL-11.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1229,11 +1229,6 @@ fn vertical10_buffer_diagnostics_fail_closed() {
             "E0285",
         ),
         (
-            "struct Bad{Buffer<int> values;}int main(){return 0;}",
-            "E0284",
-        ),
-        ("enum Bad{Some(Buffer<int>)}int main(){return 0;}", "E0286"),
-        (
             "Buffer<T> bad<T>(usize n,T value){return Buffer<T>(n,value);}int main(){return 0;}",
             "E0283",
         ),
@@ -1290,6 +1285,216 @@ fn vertical10_cross_module_buffer_transfer_executes_natively() {
     .unwrap();
     assert_eq!(status.code(), Some(33));
     assert!(compilation.llvm.contains("storage"));
+    assert!(compilation.dumps[&Emit::Mir].contains("Move"));
+    assert!(compilation.dumps[&Emit::Ssa].contains("Drop"));
+}
+
+#[test]
+fn vertical11_type_properties_are_structural_and_concrete() {
+    let source = SourceFile::new(
+        "v11-properties.ae",
+        "struct Point{int x;} struct Points{Buffer<Point> values;} struct Holder<T>{T value;} enum Maybe<T>{None,Some(T)} int main(){Points points=Points(Buffer<Point>(1,Point(7)));Holder<int> a=Holder<int>(1);Holder<Holder<int>> nested=Holder<Holder<int>>(a);Holder<Buffer<int>> b=Holder<Buffer<int>>(Buffer<int>(1,2));Maybe<int> c=Maybe<int>.Some(3);Maybe<Buffer<int>> d=Maybe<Buffer<int>>.Some(Buffer<int>(1,4));return points.values[0].x+nested.value.value;}",
+    );
+    let hir = analyze(parse_source(&source).unwrap()).unwrap();
+    let mut saw_holder_copy = false;
+    let mut saw_holder_owner = false;
+    let mut saw_nested_copy = false;
+    let mut saw_maybe_copy = false;
+    let mut saw_maybe_owner = false;
+    let mut saw_unknown_parameter = false;
+    for (ty, data) in hir.types().entries() {
+        let properties = hir.types().properties(ty).unwrap();
+        match data {
+            TypeData::GenericParam(_) => {
+                saw_unknown_parameter |= !properties.is_known && !properties.is_copy;
+            }
+            TypeData::StructInstance(_, args) => {
+                let argument = hir.types().arguments(*args).unwrap()[0];
+                if argument == aether_frontend::TypeId::INT64 {
+                    saw_holder_copy |=
+                        properties.is_known && properties.is_copy && !properties.needs_drop;
+                } else if hir.types().buffer_element(argument).is_some() {
+                    saw_holder_owner |=
+                        properties.is_known && !properties.is_copy && properties.needs_drop;
+                } else if matches!(
+                    hir.types().get(argument),
+                    Some(TypeData::StructInstance(..))
+                ) {
+                    saw_nested_copy |=
+                        properties.is_known && properties.is_copy && !properties.needs_drop;
+                }
+            }
+            TypeData::EnumInstance(_, args) => {
+                let argument = hir.types().arguments(*args).unwrap()[0];
+                if argument == aether_frontend::TypeId::INT64 {
+                    saw_maybe_copy |=
+                        properties.is_known && properties.is_copy && !properties.needs_drop;
+                } else if hir.types().buffer_element(argument).is_some() {
+                    saw_maybe_owner |=
+                        properties.is_known && !properties.is_copy && properties.needs_drop;
+                }
+            }
+            _ => {}
+        }
+    }
+    assert!(
+        saw_holder_copy
+            && saw_holder_owner
+            && saw_nested_copy
+            && saw_maybe_copy
+            && saw_maybe_owner
+            && saw_unknown_parameter
+    );
+}
+
+#[test]
+fn vertical11_aggregate_ownership_diagnostics_fail_closed() {
+    for (text, code) in [
+        (
+            "struct S{Buffer<int> b;}int main(){S a=S(Buffer<int>(1,0));S c=a;return a.b[0];}",
+            "E0291",
+        ),
+        (
+            "struct S{Buffer<int> b;}int main(){S a=S(Buffer<int>(1,0));S b=a;S c=a;return 0;}",
+            "E0291",
+        ),
+        (
+            "struct S{Buffer<int> b;}int main(){S a=S(Buffer<int>(1,0));Buffer<int> b=a.b;return 0;}",
+            "E0293",
+        ),
+        (
+            "struct S{Buffer<int> a;Buffer<int> b;}int main(){Buffer<int> x=Buffer<int>(1,0);S s=S(x,x);return 0;}",
+            "E0291",
+        ),
+        (
+            "struct Pair<T>{T a;T b;}Pair<T> duplicate<T>(T x){return Pair<T>(x,x);}int main(){return 0;}",
+            "E0291",
+        ),
+        (
+            "struct S{Buffer<int> b;}int main(){S a=S(Buffer<int>(1,0));ref int r=&a.b[0];S c=a;return *r;}",
+            "E0292",
+        ),
+        (
+            "struct S{Buffer<int> b;}int main(){S a=S(Buffer<int>(1,0));if(true){S c=a;}return 0;}",
+            "E0294",
+        ),
+        (
+            "struct S{Buffer<int> b;}int main(){S a=S(Buffer<int>(1,0));while(false){S c=a;}return 0;}",
+            "E0295",
+        ),
+        (
+            "enum E{None,Some(Buffer<int>)}int main(){E e=E.Some(Buffer<int>(1,0));match(e){E.None=>{return 0;}E.Some(value)=>{return value[0];}}}",
+            "E0299",
+        ),
+        (
+            "enum E{Empty,Owned(Buffer<int>)}int main(){E e=E.Owned(Buffer<int>(1,0));E moved=e;match(e){E.Empty=>{return 0;}E.Owned=>{return 0;}}}",
+            "E0291",
+        ),
+        (
+            "struct H<T>{T value;}int main(){Buffer<H<Buffer<int>>> bad=Buffer<H<Buffer<int>>>(1,H<Buffer<int>>(Buffer<int>(1,0)));return 0;}",
+            "E0280",
+        ),
+        (
+            "struct Borrowed{ref int value;}struct Outer{Borrowed value;}int main(){return 0;}",
+            "E0274",
+        ),
+    ] {
+        let diagnostics =
+            compile_source(&SourceFile::new("v11-error.ae", text), &[]).expect_err(text);
+        assert_eq!(
+            diagnostics[0].code, code,
+            "{text}: {}",
+            diagnostics[0].message
+        );
+        assert!(diagnostics[0].span.is_some(), "{text}");
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical11_owned_aggregates_execute_and_drop_exactly_once() {
+    let (compilation, status) = run_path(
+        &program("v11_aggregates.ae"),
+        &[Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+        &ClangToolchain::default(),
+    )
+    .unwrap();
+    assert_eq!(status.code(), Some(42));
+    assert!(compilation.dumps[&Emit::Hir].contains("is_copy: false"));
+    assert!(compilation.dumps[&Emit::Mir].contains("Drop"));
+    assert!(compilation.dumps[&Emit::Mir].contains("needs_drop: true"));
+    assert!(compilation.dumps[&Emit::Ssa].contains("EnumConstruct"));
+    assert!(compilation.dumps[&Emit::Ssa].contains("is_copy: false"));
+    assert!(compilation.llvm.contains("switch i32 %drop"));
+    assert!(compilation.llvm.contains("@aether_heap_alloc_count"));
+    assert!(compilation.llvm.contains("@aether_heap_free_count"));
+
+    let (_, status) = run_path(
+        &program("v11_control_flow.ae"),
+        &[],
+        &ClangToolchain::default(),
+    )
+    .unwrap();
+    assert_eq!(status.code(), Some(43));
+
+    let (reassignment, status) = run_path(
+        &program("v11_reassignment.ae"),
+        &[Emit::Llvm],
+        &ClangToolchain::default(),
+    )
+    .unwrap();
+    assert_eq!(status.code(), Some(42));
+    assert_eq!(
+        reassignment.llvm.matches("call void @aether_free(").count(),
+        2
+    );
+
+    let one = SourceFile::new(
+        "v11-one.ae",
+        "struct S{Buffer<int> value;}int main(){S value=S(Buffer<int>(1,1));return value.value[0];}",
+    );
+    let compiled = compile_source(&one, &[]).unwrap();
+    assert_eq!(
+        compiled
+            .llvm
+            .matches("call { ptr, i64 } @aether_buffer_new_")
+            .count(),
+        1
+    );
+    assert_eq!(compiled.llvm.matches("call void @aether_free(").count(), 1);
+
+    let two = SourceFile::new(
+        "v11-two.ae",
+        "struct S{Buffer<int> a;Buffer<int> b;}int main(){S value=S(Buffer<int>(1,1),Buffer<int>(1,2));return 0;}",
+    );
+    let compiled = compile_source(&two, &[]).unwrap();
+    assert_eq!(
+        compiled
+            .llvm
+            .matches("call { ptr, i64 } @aether_buffer_new_")
+            .count(),
+        2
+    );
+    assert_eq!(compiled.llvm.matches("call void @aether_free(").count(), 2);
+    let second = compiled.llvm.find("_field1 = extractvalue").unwrap();
+    let first = compiled.llvm.find("_field0 = extractvalue").unwrap();
+    assert!(
+        second < first,
+        "struct fields must drop in reverse declaration order"
+    );
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical11_cross_module_aggregate_transfer_executes_natively() {
+    let (compilation, status) = run_path(
+        &module_program("v11_aggregates"),
+        &[Emit::Hir, Emit::Mir, Emit::Ssa],
+        &ClangToolchain::default(),
+    )
+    .unwrap();
+    assert_eq!(status.code(), Some(42));
+    assert!(compilation.dumps[&Emit::Hir].contains("Packet"));
     assert!(compilation.dumps[&Emit::Mir].contains("Move"));
     assert!(compilation.dumps[&Emit::Ssa].contains("Drop"));
 }

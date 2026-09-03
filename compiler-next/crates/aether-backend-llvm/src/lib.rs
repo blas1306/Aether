@@ -1,4 +1,4 @@
-//! LLVM backend for verified Vertical-10 program SSA.
+//! LLVM backend for verified Vertical-11 program SSA.
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -23,7 +23,7 @@ pub struct TargetDescriptor {
 }
 
 impl TargetDescriptor {
-    /// The target admitted through NEXT-VERTICAL-10.
+    /// The target admitted through NEXT-VERTICAL-11.
     #[must_use]
     pub const fn linux_x86_64() -> Self {
         Self {
@@ -75,7 +75,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         .collect::<BTreeSet<_>>();
     let has_buffers = !buffer_elements.is_empty();
     let mut output = String::new();
-    writeln!(output, "; Aether NEXT-VERTICAL-10").unwrap();
+    writeln!(output, "; Aether NEXT-VERTICAL-11").unwrap();
     writeln!(
         output,
         "; Internal bootstrap ABI and symbol mangling; not a public Aether ABI"
@@ -568,7 +568,25 @@ fn emit_function(
                     )
                     .unwrap();
                 }
-                SsaOp::Move { source } | SsaOp::View { source, .. } => {
+                SsaOp::Move { source } => {
+                    let (value, ty) = emit_place_value(
+                        output,
+                        function,
+                        source,
+                        instruction.result.0,
+                        types,
+                        structs,
+                    );
+                    writeln!(
+                        output,
+                        "  %v{} = select i1 true, {} {value}, {} {value}",
+                        instruction.result.0,
+                        llvm_type(types, ty),
+                        llvm_type(types, ty),
+                    )
+                    .unwrap();
+                }
+                SsaOp::View { source, .. } => {
                     let (descriptor, _) = emit_descriptor_value(
                         output,
                         function,
@@ -576,51 +594,26 @@ fn emit_function(
                         instruction.result.0,
                         types,
                     );
-                    writeln!(
-                        output,
-                        "  %v{} = select i1 true, {{ ptr, i64 }} {descriptor}, {{ ptr, i64 }} {descriptor}",
-                        instruction.result.0
-                    )
-                    .unwrap();
+                    writeln!(output, "  %v{} = select i1 true, {{ ptr, i64 }} {descriptor}, {{ ptr, i64 }} {descriptor}", instruction.result.0).unwrap();
                 }
                 SsaOp::Drop { owner } => {
-                    let (descriptor, owner_ty) =
-                        emit_descriptor_value(output, function, owner, instruction.result.0, types);
-                    let element = types
-                        .buffer_element(owner_ty)
-                        .expect("verified Buffer Drop");
-                    let layout = layout_of(
+                    let (value, owner_ty) = emit_place_value(
+                        output,
+                        function,
+                        owner,
+                        instruction.result.0,
                         types,
-                        element,
-                        TargetProperties::LINUX_X86_64,
+                        structs,
+                    );
+                    emit_drop_value(
+                        output,
+                        &value,
+                        owner_ty,
+                        &format!("drop{}", instruction.result.0),
+                        types,
                         structs,
                         enums,
-                    )
-                    .expect("verified Buffer element layout");
-                    writeln!(
-                        output,
-                        "  %drop_data{} = extractvalue {{ ptr, i64 }} {descriptor}, 0",
-                        instruction.result.0
-                    )
-                    .unwrap();
-                    writeln!(
-                        output,
-                        "  %drop_length{} = extractvalue {{ ptr, i64 }} {descriptor}, 1",
-                        instruction.result.0
-                    )
-                    .unwrap();
-                    writeln!(
-                        output,
-                        "  %drop_size{} = mul i64 %drop_length{}, {}",
-                        instruction.result.0, instruction.result.0, layout.size
-                    )
-                    .unwrap();
-                    writeln!(
-                        output,
-                        "  call void @aether_free(ptr %drop_data{}, i64 %drop_size{}, i64 {})",
-                        instruction.result.0, instruction.result.0, layout.align
-                    )
-                    .unwrap();
+                    );
                     writeln!(
                         output,
                         "  %v{} = select i1 true, i1 true, i1 true",
@@ -1804,16 +1797,16 @@ fn emit_place_pointer(
         .enumerate()
         .find(|(_, projection)| matches!(projection, SsaPlaceProjection::Index { .. }))
     {
-        debug_assert_eq!(
-            position, 0,
-            "V10 owning aggregates cannot contain Buffer fields"
-        );
         let descriptor_place = SsaPlace {
             base: place.base.clone(),
-            projections: Vec::new(),
+            projections: place.projections[..position].to_vec(),
         };
-        let (descriptor, _) =
-            emit_descriptor_value(output, function, &descriptor_place, result, types);
+        let (descriptor, descriptor_ty) =
+            emit_place_value(output, function, &descriptor_place, result, types, structs);
+        debug_assert!(
+            types.buffer_element(descriptor_ty).is_some()
+                || types.view_info(descriptor_ty).is_some()
+        );
         let mut pointer = format!("%place{result}_index");
         writeln!(
             output,
@@ -1890,6 +1883,269 @@ fn emit_place_pointer(
     )
     .unwrap();
     pointer
+}
+
+fn emit_place_value(
+    output: &mut String,
+    function: &SsaFunction,
+    place: &SsaPlace,
+    result: u32,
+    types: &TypeArena,
+    structs: &[StructInfo],
+) -> (String, TypeId) {
+    let (mut value, mut ty) = match &place.base {
+        SsaPlaceBase::Value(value) => (llvm_operand(value), operand_type(function, value)),
+        SsaPlaceBase::MemoryLocal(local) => {
+            let memory = function
+                .memory_locals
+                .iter()
+                .find(|memory| memory.local == *local)
+                .expect("verified value memory local");
+            if place.projections.is_empty() {
+                let value = format!("%place_value{result}");
+                writeln!(
+                    output,
+                    "  {value} = load {}, ptr %m{}",
+                    llvm_type(types, memory.ty),
+                    local.0
+                )
+                .unwrap();
+                return (value, memory.ty);
+            }
+            let address = emit_place_pointer(output, function, place, result, types, structs);
+            let ty = ssa_backend_place_type(function, place, types, structs);
+            let value = format!("%place_value{result}");
+            writeln!(
+                output,
+                "  {value} = load {}, ptr {address}",
+                llvm_type(types, ty)
+            )
+            .unwrap();
+            return (value, ty);
+        }
+        SsaPlaceBase::Dereference { reference, .. } => {
+            let reference_ty = operand_type(function, reference);
+            let (pointee, _) = types
+                .reference_info(reference_ty)
+                .expect("verified value reference");
+            if place.projections.is_empty() {
+                let value = format!("%place_value{result}");
+                writeln!(
+                    output,
+                    "  {value} = load {}, ptr {}",
+                    llvm_type(types, pointee),
+                    llvm_operand(reference)
+                )
+                .unwrap();
+                return (value, pointee);
+            }
+            let address = emit_place_pointer(output, function, place, result, types, structs);
+            let ty = ssa_backend_place_type(function, place, types, structs);
+            let value = format!("%place_value{result}");
+            writeln!(
+                output,
+                "  {value} = load {}, ptr {address}",
+                llvm_type(types, ty)
+            )
+            .unwrap();
+            return (value, ty);
+        }
+    };
+    for (index, projection) in place.projections.iter().enumerate() {
+        let SsaPlaceProjection::Field(field_id) = projection else {
+            unreachable!("indexed SSA values are lowered through pointer access")
+        };
+        let owner = types.struct_id(ty).expect("verified value field owner");
+        let field = structs[owner.0 as usize]
+            .fields
+            .iter()
+            .find(|field| field.id == *field_id)
+            .expect("verified value field");
+        let field_ty = concrete_struct_member(types, structs, ty, field.ty);
+        let extracted = format!("%place_value{result}_{index}");
+        writeln!(
+            output,
+            "  {extracted} = extractvalue {} {value}, {}",
+            llvm_type(types, ty),
+            field.index
+        )
+        .unwrap();
+        value = extracted;
+        ty = field_ty;
+    }
+    (value, ty)
+}
+
+#[allow(clippy::too_many_lines)]
+fn emit_drop_value(
+    output: &mut String,
+    value: &str,
+    ty: TypeId,
+    prefix: &str,
+    types: &TypeArena,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+) {
+    match types.get(ty).expect("verified drop type") {
+        TypeData::Buffer { element } => {
+            let layout = layout_of(
+                types,
+                *element,
+                TargetProperties::LINUX_X86_64,
+                structs,
+                enums,
+            )
+            .expect("verified Buffer element layout");
+            writeln!(
+                output,
+                "  %{prefix}_data = extractvalue {{ ptr, i64 }} {value}, 0"
+            )
+            .unwrap();
+            writeln!(
+                output,
+                "  %{prefix}_length = extractvalue {{ ptr, i64 }} {value}, 1"
+            )
+            .unwrap();
+            writeln!(
+                output,
+                "  %{prefix}_size = mul i64 %{prefix}_length, {}",
+                layout.size
+            )
+            .unwrap();
+            writeln!(
+                output,
+                "  call void @aether_free(ptr %{prefix}_data, i64 %{prefix}_size, i64 {})",
+                layout.align
+            )
+            .unwrap();
+        }
+        TypeData::Struct(id) | TypeData::StructInstance(id, _) => {
+            let info = &structs[id.0 as usize];
+            for field in info.fields.iter().rev() {
+                let field_ty = concrete_struct_member(types, structs, ty, field.ty);
+                if !types.needs_drop(field_ty) {
+                    continue;
+                }
+                let field_value = format!("%{prefix}_field{}", field.index);
+                writeln!(
+                    output,
+                    "  {field_value} = extractvalue {} {value}, {}",
+                    llvm_type(types, ty),
+                    field.index
+                )
+                .unwrap();
+                emit_drop_value(
+                    output,
+                    &field_value,
+                    field_ty,
+                    &format!("{prefix}_f{}", field.index),
+                    types,
+                    structs,
+                    enums,
+                );
+            }
+        }
+        TypeData::Enum(id) | TypeData::EnumInstance(id, _) => {
+            let info = &enums[id.0 as usize];
+            writeln!(
+                output,
+                "  %{prefix}_tag = extractvalue {} {value}, 0",
+                llvm_type(types, ty)
+            )
+            .unwrap();
+            writeln!(
+                output,
+                "  switch i32 %{prefix}_tag, label %{prefix}_invalid ["
+            )
+            .unwrap();
+            for variant in &info.variants {
+                writeln!(
+                    output,
+                    "    i32 {}, label %{prefix}_variant{}",
+                    variant.discriminant, variant.index
+                )
+                .unwrap();
+            }
+            writeln!(output, "  ]").unwrap();
+            writeln!(output, "{prefix}_invalid:\n  unreachable").unwrap();
+            for variant in &info.variants {
+                writeln!(output, "{prefix}_variant{}:", variant.index).unwrap();
+                for payload in variant.payloads.iter().rev() {
+                    let payload_ty = concrete_enum_member(types, enums, ty, payload.ty);
+                    if !types.needs_drop(payload_ty) {
+                        continue;
+                    }
+                    let payload_value =
+                        format!("%{prefix}_v{}_payload{}", variant.index, payload.index);
+                    writeln!(
+                        output,
+                        "  {payload_value} = extractvalue {} {value}, {}, {}",
+                        llvm_type(types, ty),
+                        variant.index + 1,
+                        payload.index
+                    )
+                    .unwrap();
+                    emit_drop_value(
+                        output,
+                        &payload_value,
+                        payload_ty,
+                        &format!("{prefix}_v{}_p{}", variant.index, payload.index),
+                        types,
+                        structs,
+                        enums,
+                    );
+                }
+                writeln!(output, "  br label %{prefix}_done").unwrap();
+            }
+            writeln!(output, "{prefix}_done:").unwrap();
+        }
+        TypeData::Bool
+        | TypeData::Integer(_)
+        | TypeData::Float(_)
+        | TypeData::Reference { .. }
+        | TypeData::View { .. } => {}
+        TypeData::GenericParam(_) => unreachable!("generic drop reached LLVM"),
+    }
+}
+
+fn ssa_backend_place_type(
+    function: &SsaFunction,
+    place: &SsaPlace,
+    types: &TypeArena,
+    structs: &[StructInfo],
+) -> TypeId {
+    let mut ty = match &place.base {
+        SsaPlaceBase::Value(value) => operand_type(function, value),
+        SsaPlaceBase::MemoryLocal(local) => {
+            function
+                .memory_locals
+                .iter()
+                .find(|memory| memory.local == *local)
+                .expect("verified place memory local")
+                .ty
+        }
+        SsaPlaceBase::Dereference { reference, .. } => {
+            types
+                .reference_info(operand_type(function, reference))
+                .expect("verified place reference")
+                .0
+        }
+    };
+    for projection in &place.projections {
+        match projection {
+            SsaPlaceProjection::Field(field_id) => {
+                let owner = types.struct_id(ty).expect("verified place field owner");
+                let field = structs[owner.0 as usize]
+                    .fields
+                    .iter()
+                    .find(|field| field.id == *field_id)
+                    .expect("verified place field");
+                ty = concrete_struct_member(types, structs, ty, field.ty);
+            }
+            SsaPlaceProjection::Index { element_type, .. } => ty = *element_type,
+        }
+    }
+    ty
 }
 
 fn emit_descriptor_value(

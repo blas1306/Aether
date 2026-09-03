@@ -1,0 +1,30 @@
+struct Owned {
+    Buffer<int> values;
+}
+
+int consume(Owned value) {
+    return value.values[0];
+}
+
+int branch(bool take) {
+    Owned value = Owned(Buffer<int>(1, 21));
+    if (take) {
+        return consume(value);
+    }
+    return value.values[0];
+}
+
+int loop() {
+    int index = 0;
+    int total = 0;
+    while (index < 2) {
+        Owned temporary = Owned(Buffer<int>(1, index));
+        total = total + temporary.values[0];
+        index = index + 1;
+    }
+    return total;
+}
+
+int main() {
+    return branch(true) + branch(false) + loop();
+}

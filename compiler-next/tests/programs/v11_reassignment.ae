@@ -1,0 +1,10 @@
+struct Owned {
+    Buffer<int> values;
+}
+
+int main() {
+    Owned source = Owned(Buffer<int>(1, 42));
+    Owned destination = Owned(Buffer<int>(1, 1));
+    destination = source;
+    return destination.values[0];
+}

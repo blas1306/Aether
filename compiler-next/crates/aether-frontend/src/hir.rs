@@ -850,18 +850,6 @@ pub fn collect_program_signatures(
                 &enum_arities,
             )
             .map_err(|d| vec![src(d, module)])?;
-            if types.contains_owning(ty) {
-                return Err(vec![src(
-                    Diagnostic::new(
-                        "E0284",
-                        Phase::Semantic,
-                        DiagnosticCategory::Type,
-                        "Vertical-10 defers owning Buffer fields in user structs",
-                        Some(field.span),
-                    ),
-                    module,
-                )]);
-            }
             if types.contains_view(ty) {
                 return Err(vec![src(
                     Diagnostic::new(
@@ -975,15 +963,16 @@ pub fn collect_program_signatures(
                 })
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|d| vec![src(d, module)])?;
-            if let Some(payload) = payloads.iter().find(|payload| {
-                types.contains_owning(payload.ty) || types.contains_view(payload.ty)
-            }) {
+            if let Some(payload) = payloads
+                .iter()
+                .find(|payload| types.contains_view(payload.ty))
+            {
                 return Err(vec![src(
                     Diagnostic::new(
                         "E0286",
                         Phase::Semantic,
                         DiagnosticCategory::Type,
-                        "Vertical-10 defers owning Buffer/view enum payloads",
+                        "borrowed views cannot be stored in enum payloads",
                         Some(payload.span),
                     ),
                     module,
@@ -1026,6 +1015,108 @@ pub fn collect_program_signatures(
             layout: TypeLayout { size: 0, align: 1 },
             span: declaration.span,
         });
+    }
+    for info in &structs {
+        types.register_struct_properties(
+            info.id,
+            info.generic_parameters
+                .iter()
+                .map(|parameter| parameter.id)
+                .collect(),
+            info.fields.iter().map(|field| field.ty).collect(),
+        );
+    }
+    for info in &enums {
+        types.register_enum_properties(
+            info.id,
+            info.generic_parameters
+                .iter()
+                .map(|parameter| parameter.id)
+                .collect(),
+            info.variants
+                .iter()
+                .map(|variant| variant.payloads.iter().map(|payload| payload.ty).collect())
+                .collect(),
+        );
+    }
+    if let Some((container, element)) = types.entries().find_map(|(container, data)| {
+        let element = match data {
+            TypeData::Buffer { element } | TypeData::View { element, .. } => *element,
+            _ => return None,
+        };
+        (!types.is_admitted_buffer_element(element)).then_some((container, element))
+    }) {
+        let location = structs
+            .iter()
+            .find_map(|info| {
+                info.fields
+                    .iter()
+                    .find(|field| field.ty == container)
+                    .map(|field| (field.span, info.module))
+            })
+            .or_else(|| {
+                enums.iter().find_map(|info| {
+                    info.variants
+                        .iter()
+                        .flat_map(|variant| &variant.payloads)
+                        .find(|payload| payload.ty == container)
+                        .map(|payload| (payload.span, info.module))
+                })
+            });
+        let diagnostic = Diagnostic::new(
+            "E0280",
+            Phase::Semantic,
+            DiagnosticCategory::Type,
+            format!(
+                "{} cannot use non-Copy/drop-requiring element type {}",
+                format_type(&types, container, &structs, &enums),
+                format_type(&types, element, &structs, &enums)
+            ),
+            location.map(|(span, _)| span),
+        );
+        let diagnostic = if let Some((_, module)) = location {
+            src(diagnostic, &program.modules[module.0 as usize])
+        } else {
+            diagnostic
+        };
+        return Err(vec![diagnostic]);
+    }
+    for info in &structs {
+        if let Some(field) = info
+            .fields
+            .iter()
+            .find(|field| types.contains_reference(field.ty) || types.contains_view(field.ty))
+        {
+            return Err(vec![src(
+                Diagnostic::new(
+                    "E0274",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    "references and views cannot be stored transitively in struct fields",
+                    Some(field.span),
+                ),
+                &program.modules[info.module.0 as usize],
+            )]);
+        }
+    }
+    for info in &enums {
+        if let Some(payload) = info
+            .variants
+            .iter()
+            .flat_map(|variant| &variant.payloads)
+            .find(|payload| types.contains_reference(payload.ty) || types.contains_view(payload.ty))
+        {
+            return Err(vec![src(
+                Diagnostic::new(
+                    "E0275",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    "references and views cannot be stored transitively in enum payloads",
+                    Some(payload.span),
+                ),
+                &program.modules[info.module.0 as usize],
+            )]);
+        }
     }
     let mut signatures = vec![];
     let mut names = vec![BTreeMap::new(); program.modules.len()];
@@ -1332,7 +1423,11 @@ fn resolve_type_in_module(
         }
         return match ty.name.as_str() {
             "Buffer" => {
-                if types.is_admitted_buffer_element(element) {
+                let deferred_aggregate = types
+                    .properties(element)
+                    .is_some_and(|properties| !properties.is_known)
+                    && (types.struct_id(element).is_some() || types.enum_id(element).is_some());
+                if types.is_admitted_buffer_element(element) || deferred_aggregate {
                     Ok(types.intern_buffer(element))
                 } else {
                     Err(Diagnostic::new(
@@ -1344,7 +1439,14 @@ fn resolve_type_in_module(
                     ))
                 }
             }
-            "View" | "ViewMut" if !types.is_admitted_buffer_element(element) => {
+            "View" | "ViewMut"
+                if !types.is_admitted_buffer_element(element)
+                    && !(types
+                        .properties(element)
+                        .is_some_and(|properties| !properties.is_known)
+                        && (types.struct_id(element).is_some()
+                            || types.enum_id(element).is_some())) =>
+            {
                 Err(Diagnostic::new(
                     "E0280",
                     Phase::Semantic,
@@ -1363,11 +1465,10 @@ fn resolve_type_in_module(
         if arguments.len() != expected {
             return Err(generic_arity(ty, expected));
         }
-        if arguments.iter().any(|argument| {
-            types.contains_reference(*argument)
-                || types.contains_view(*argument)
-                || types.contains_owning(*argument)
-        }) {
+        if arguments
+            .iter()
+            .any(|argument| types.contains_reference(*argument) || types.contains_view(*argument))
+        {
             return Err(restricted_generic_argument(ty.span));
         }
         return if expected == 0 {
@@ -1383,11 +1484,10 @@ fn resolve_type_in_module(
         if arguments.len() != expected {
             return Err(generic_arity(ty, expected));
         }
-        if arguments.iter().any(|argument| {
-            types.contains_reference(*argument)
-                || types.contains_view(*argument)
-                || types.contains_owning(*argument)
-        }) {
+        if arguments
+            .iter()
+            .any(|argument| types.contains_reference(*argument) || types.contains_view(*argument))
+        {
             return Err(restricted_generic_argument(ty.span));
         }
         return if expected == 0 {
@@ -1442,7 +1542,7 @@ fn restricted_generic_argument(span: Span) -> Diagnostic {
         "E0276",
         Phase::Semantic,
         DiagnosticCategory::Type,
-        "references, views, and owning Buffers cannot be used as generic type arguments in Vertical-10",
+        "references and views cannot be used as generic type arguments",
         Some(span),
     )
 }
@@ -2105,7 +2205,8 @@ impl Monomorphizer<'_> {
                 })
             })
             .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?;
-        let body = self.substitute_block(&declaration.body, &substitution)?;
+        let mut body = self.substitute_block(&declaration.body, &substitution)?;
+        synthesize_ownership(&mut body, &locals, &hir_parameters, self.types)?;
         debug_assert_eq!(id.0 as usize, self.functions.len());
         self.instances.push(FunctionInstanceInfo {
             id,
@@ -2192,14 +2293,24 @@ impl Monomorphizer<'_> {
                                             .bindings
                                             .iter()
                                             .map(|binding| {
+                                                let ty = self.substitute_type(
+                                                    binding.ty,
+                                                    substitution,
+                                                    binding.span,
+                                                )?;
+                                                if !self.types.is_copy(ty) {
+                                                    return Err(vec![Diagnostic::new(
+                                                        "E0299",
+                                                        Phase::Semantic,
+                                                        DiagnosticCategory::Type,
+                                                        "binding a non-Copy enum payload by value is unsupported in Vertical-11",
+                                                        Some(binding.span),
+                                                    )]);
+                                                }
                                                 Ok(HirMatchBinding {
                                                     local: binding.local,
                                                     payload_index: binding.payload_index,
-                                                    ty: self.substitute_type(
-                                                        binding.ty,
-                                                        substitution,
-                                                        binding.span,
-                                                    )?,
+                                                    ty,
                                                     span: binding.span,
                                                 })
                                             })
@@ -2274,9 +2385,25 @@ impl Monomorphizer<'_> {
             HirExprKind::Float(value) => HirExprKind::Float(*value),
             HirExprKind::Bool(value) => HirExprKind::Bool(*value),
             HirExprKind::Local(local) => HirExprKind::Local(*local),
-            HirExprKind::Move(local) => HirExprKind::Move(*local),
+            HirExprKind::Move(local) => {
+                if self.types.is_copy(ty) {
+                    HirExprKind::Local(*local)
+                } else {
+                    HirExprKind::Move(*local)
+                }
+            }
             HirExprKind::Load(place) => {
-                HirExprKind::Load(self.substitute_place(place, substitution)?)
+                let place = self.substitute_place(place, substitution)?;
+                if !self.types.is_copy(place.ty) {
+                    return Err(vec![Diagnostic::new(
+                        "E0293",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "partial move or copy through a place is unsupported for a non-Copy type in Vertical-11",
+                        Some(expression.span),
+                    )]);
+                }
+                HirExprKind::Load(place)
             }
             HirExprKind::Borrow { place, mutable } => HirExprKind::Borrow {
                 place: self.substitute_place(place, substitution)?,
@@ -2699,7 +2826,7 @@ fn synthesize_ownership(
         buffer_lengths: vec![None; locals.len()],
     };
     for parameter in parameters {
-        if types.needs_drop(parameter.ty) {
+        if !types.is_copy(parameter.ty) {
             analysis.state[parameter.local.0 as usize] = OwnerState::Owned;
             analysis.active.push(parameter.local);
         }
@@ -2727,7 +2854,7 @@ impl OwnershipAnalysis<'_> {
             return Err(self.error(
                 "E0291",
                 format!(
-                    "use after move of owning Buffer local `{}`",
+                    "use after move of non-Copy local `{}`",
                     self.locals[local.0 as usize].name
                 ),
                 span,
@@ -2742,7 +2869,7 @@ impl OwnershipAnalysis<'_> {
             return Err(self.error(
                 "E0292",
                 format!(
-                    "cannot move Buffer `{}` while a derived reference/view remains live",
+                    "cannot move `{}` while a derived reference/view remains live",
                     self.locals[local.0 as usize].name
                 ),
                 span,
@@ -2764,7 +2891,7 @@ impl OwnershipAnalysis<'_> {
                         self.provenance[local.0 as usize] = Some(owner);
                         self.borrowed.last_mut().unwrap().insert(owner);
                     }
-                    if self.types.needs_drop(self.locals[local.0 as usize].ty) {
+                    if !self.types.is_copy(self.locals[local.0 as usize].ty) {
                         self.buffer_lengths[local.0 as usize] = self.known_length(initializer);
                         self.state[local.0 as usize] = OwnerState::Owned;
                         self.active.push(*local);
@@ -2781,12 +2908,12 @@ impl OwnershipAnalysis<'_> {
                     self.place(place, statement.span)?;
                     if let HirPlaceBase::Local(local) = place.base
                         && place.projections.is_empty()
-                        && self.types.needs_drop(self.locals[local.0 as usize].ty)
+                        && !self.types.is_copy(self.locals[local.0 as usize].ty)
                     {
                         if self.is_borrowed(local) {
                             return Err(self.error(
                                 "E0292",
-                                "cannot replace a Buffer while a derived reference/view remains live",
+                                "cannot replace a non-Copy value while a derived reference/view remains live",
                                 statement.span,
                             ));
                         }
@@ -2801,7 +2928,10 @@ impl OwnershipAnalysis<'_> {
                         .iter()
                         .rev()
                         .copied()
-                        .filter(|local| self.state[local.0 as usize] == OwnerState::Owned)
+                        .filter(|local| {
+                            self.state[local.0 as usize] == OwnerState::Owned
+                                && self.types.needs_drop(self.locals[local.0 as usize].ty)
+                        })
                         .collect();
                     for local in drops.iter().copied() {
                         self.state[local.0 as usize] = OwnerState::Dropped;
@@ -2841,7 +2971,7 @@ impl OwnershipAnalysis<'_> {
                             (false, false) => {
                                 return Err(self.error(
                                     "E0294",
-                                    "Buffer ownership state differs across continuing branches",
+                                    "ownership state differs across continuing branches",
                                     statement.span,
                                 ));
                             }
@@ -2871,7 +3001,7 @@ impl OwnershipAnalysis<'_> {
                         if self.state[index] != before[index] {
                             return Err(self.error(
                                 "E0295",
-                                "moving Buffer ownership across loop iterations is deferred in Vertical-10",
+                                "ownership state conflicts across a loop backedge",
                                 statement.span,
                             ));
                         }
@@ -2895,7 +3025,15 @@ impl OwnershipAnalysis<'_> {
                     for arm in arms {
                         self.state.clone_from(&before);
                         self.buffer_lengths.clone_from(&before_lengths);
+                        let active_start = self.active.len();
+                        for binding in &arm.bindings {
+                            if !self.types.is_copy(binding.ty) {
+                                self.state[binding.local.0 as usize] = OwnerState::Owned;
+                                self.active.push(binding.local);
+                            }
+                        }
                         self.block(&mut arm.body, true)?;
+                        self.active.truncate(active_start);
                         if !definitely_returns(&arm.body) {
                             if let Some(previous) = &continuing {
                                 for local in &self.active {
@@ -2903,7 +3041,7 @@ impl OwnershipAnalysis<'_> {
                                     if previous[index] != self.state[index] {
                                         return Err(self.error(
                                             "E0294",
-                                            "Buffer ownership state differs across match arms",
+                                            "ownership state differs across match arms",
                                             statement.span,
                                         ));
                                     }
@@ -2930,7 +3068,9 @@ impl OwnershipAnalysis<'_> {
         block.exit_drops.clear();
         if !definitely_returns(block) {
             for local in self.active[active_start..].iter().rev().copied() {
-                if self.state[local.0 as usize] == OwnerState::Owned {
+                if self.state[local.0 as usize] == OwnerState::Owned
+                    && self.types.needs_drop(self.locals[local.0 as usize].ty)
+                {
                     block.exit_drops.push(local);
                     self.state[local.0 as usize] = OwnerState::Dropped;
                 }
@@ -2947,10 +3087,14 @@ impl OwnershipAnalysis<'_> {
     fn expr(&mut self, expr: &HirExpr) -> Result<(), Vec<Diagnostic>> {
         match &expr.kind {
             HirExprKind::Move(local) => self.move_local(*local, expr.span),
-            HirExprKind::Local(_)
-            | HirExprKind::Int(_)
-            | HirExprKind::Float(_)
-            | HirExprKind::Bool(_) => Ok(()),
+            HirExprKind::Local(local) => {
+                if self.types.is_copy(expr.ty) {
+                    Ok(())
+                } else {
+                    self.require_owned(*local, expr.span)
+                }
+            }
+            HirExprKind::Int(_) | HirExprKind::Float(_) | HirExprKind::Bool(_) => Ok(()),
             HirExprKind::Load(place) => self.place(place, expr.span),
             HirExprKind::Borrow { place, .. } | HirExprKind::View { source: place, .. } => {
                 self.place(place, expr.span)
@@ -3018,10 +3162,10 @@ impl OwnershipAnalysis<'_> {
     fn owner_of_place(&self, place: &HirPlace) -> Option<LocalId> {
         match &place.base {
             HirPlaceBase::Local(local) => {
-                if self.types.needs_drop(self.locals[local.0 as usize].ty) {
-                    Some(*local)
-                } else {
+                if self.types.is_copy(self.locals[local.0 as usize].ty) {
                     self.provenance[local.0 as usize]
+                } else {
+                    Some(*local)
                 }
             }
             HirPlaceBase::Dereference { reference, .. } => self.derived_owner(reference),
@@ -3121,9 +3265,7 @@ impl Analyzer<'_> {
         span: Span,
     ) -> Result<TypeId, Vec<Diagnostic>> {
         if arguments.iter().any(|argument| {
-            self.types.contains_reference(*argument)
-                || self.types.contains_view(*argument)
-                || self.types.contains_owning(*argument)
+            self.types.contains_reference(*argument) || self.types.contains_view(*argument)
         }) {
             return Err(vec![restricted_generic_argument(span)]);
         }
@@ -3152,9 +3294,7 @@ impl Analyzer<'_> {
         span: Span,
     ) -> Result<TypeId, Vec<Diagnostic>> {
         if arguments.iter().any(|argument| {
-            self.types.contains_reference(*argument)
-                || self.types.contains_view(*argument)
-                || self.types.contains_owning(*argument)
+            self.types.contains_reference(*argument) || self.types.contains_view(*argument)
         }) {
             return Err(vec![restricted_generic_argument(span)]);
         }
@@ -3245,7 +3385,7 @@ impl Analyzer<'_> {
                     (&place.kind, &value.kind)
                 && destination == source
                 && let Some(local) = self.lookup(destination)
-                && self.types.needs_drop(self.locals[local.0 as usize].ty)
+                && !self.types.is_copy(self.locals[local.0 as usize].ty)
             {
                 statements.push(HirStmt {
                     kind: HirStmtKind::Nop,
@@ -3291,7 +3431,7 @@ impl Analyzer<'_> {
                 }
                 AstStmtKind::Assign { place, value } => {
                     let place = self.resolve_expr_place(place, true)?;
-                    if self.types.needs_drop(place.ty)
+                    if !self.types.is_copy(place.ty)
                         && (!place.projections.is_empty()
                             || matches!(place.base, HirPlaceBase::Dereference { .. }))
                     {
@@ -3299,7 +3439,7 @@ impl Analyzer<'_> {
                             "E0297",
                             Phase::Semantic,
                             DiagnosticCategory::Type,
-                            "Vertical-10 only permits replacing an owning Buffer local directly",
+                            "partial replacement of a non-Copy aggregate is unsupported in Vertical-11",
                             Some(s.span),
                         )]);
                     }
@@ -3381,7 +3521,7 @@ impl Analyzer<'_> {
         scrutinee: &AstExpr,
         arms: &[AstMatchArm],
     ) -> Result<HirStmtKind, Vec<Diagnostic>> {
-        let scrutinee = self.expression(scrutinee, None)?.expr;
+        let mut scrutinee = self.expression(scrutinee, None)?.expr;
         let Some(enum_id) = self.types.enum_id(scrutinee.ty) else {
             return Err(vec![Diagnostic::new(
                 "E0255",
@@ -3394,6 +3534,18 @@ impl Analyzer<'_> {
                 Some(scrutinee.span),
             )]);
         };
+        if !self.types.is_copy(scrutinee.ty) {
+            let HirExprKind::Move(local) = scrutinee.kind else {
+                return Err(vec![Diagnostic::new(
+                    "E0298",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    "matching a temporary non-Copy enum is unsupported in Vertical-11",
+                    Some(scrutinee.span),
+                )]);
+            };
+            scrutinee.kind = HirExprKind::Local(local);
+        }
         let enum_info = self.enums[enum_id.0 as usize].clone();
         let mut seen = BTreeSet::new();
         let mut resolved_arms = Vec::new();
@@ -3471,7 +3623,9 @@ impl Analyzer<'_> {
                 )]);
             }
             let variant = enum_info.variants[variant_id.index as usize].clone();
-            if arm.pattern.bindings.len() != variant.payloads.len() {
+            if !arm.pattern.bindings.is_empty()
+                && arm.pattern.bindings.len() != variant.payloads.len()
+            {
                 return Err(vec![Diagnostic::new(
                     "E0253",
                     Phase::Semantic,
@@ -3494,6 +3648,19 @@ impl Analyzer<'_> {
                     return Err(vec![duplicate("match binding", name, *span)]);
                 }
                 let payload_ty = self.specialize_member_type(scrutinee.ty, payload.ty)?;
+                if !self.types.is_copy(payload_ty) && !self.types.contains_generic(payload_ty) {
+                    self.scopes.pop();
+                    return Err(vec![Diagnostic::new(
+                        "E0299",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        format!(
+                            "binding non-Copy enum payload `{}` by value is unsupported in Vertical-11",
+                            self.type_name(payload_ty)
+                        ),
+                        Some(*span),
+                    )]);
+                }
                 let local = LocalId(self.locals.len() as u32);
                 self.locals.push(HirLocal {
                     id: local,
@@ -3855,25 +4022,11 @@ impl Analyzer<'_> {
                         self.enum_init(enum_ty, name, &[], false, e.span)?
                     } else {
                         let place = self.resolve_expr_place(e, false)?;
-                        Checked {
-                            expr: HirExpr {
-                                ty: place.ty,
-                                kind: HirExprKind::Load(place),
-                                span: e.span,
-                            },
-                            constant: None,
-                        }
+                        self.load_place(place, e.span)?
                     }
                 } else {
                     let place = self.resolve_expr_place(e, false)?;
-                    Checked {
-                        expr: HirExpr {
-                            ty: place.ty,
-                            kind: HirExprKind::Load(place),
-                            span: e.span,
-                        },
-                        constant: None,
-                    }
+                    self.load_place(place, e.span)?
                 }
             }
             AstExprKind::Index { .. }
@@ -3882,14 +4035,7 @@ impl Analyzer<'_> {
                 ..
             } => {
                 let place = self.resolve_expr_place(e, false)?;
-                Checked {
-                    expr: HirExpr {
-                        ty: place.ty,
-                        kind: HirExprKind::Load(place),
-                        span: e.span,
-                    },
-                    constant: None,
-                }
+                self.load_place(place, e.span)?
             }
             AstExprKind::QualifiedName { module, member } => {
                 return Err(vec![Diagnostic::new(
@@ -3941,6 +4087,30 @@ impl Analyzer<'_> {
         };
         self.coerce(c, expected)
     }
+
+    fn load_place(&self, place: HirPlace, span: Span) -> Result<Checked, Vec<Diagnostic>> {
+        if !self.types.is_copy(place.ty) && !self.types.contains_generic(place.ty) {
+            return Err(vec![Diagnostic::new(
+                "E0293",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!(
+                    "partial move of non-Copy field `{}` is unsupported in Vertical-11",
+                    self.type_name(place.ty)
+                ),
+                Some(span),
+            )]);
+        }
+        Ok(Checked {
+            expr: HirExpr {
+                ty: place.ty,
+                kind: HirExprKind::Load(place),
+                span,
+            },
+            constant: None,
+        })
+    }
+
     fn integer(
         &self,
         text: &str,
@@ -4633,9 +4803,7 @@ impl Analyzer<'_> {
             )]);
         }
         if type_arguments.iter().any(|argument| {
-            self.types.contains_reference(*argument)
-                || self.types.contains_view(*argument)
-                || self.types.contains_owning(*argument)
+            self.types.contains_reference(*argument) || self.types.contains_view(*argument)
         }) {
             return Err(vec![restricted_generic_argument(span)]);
         }
@@ -5313,22 +5481,18 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
         h.types.contains_reference(signature.return_type)
             || h.types.contains_view(signature.return_type)
     }) || h.structs.iter().any(|info| {
-        info.fields.iter().any(|field| {
-            h.types.contains_reference(field.ty)
-                || h.types.contains_view(field.ty)
-                || h.types.contains_owning(field.ty)
-        })
+        info.fields
+            .iter()
+            .any(|field| h.types.contains_reference(field.ty) || h.types.contains_view(field.ty))
     }) || h.enums.iter().any(|info| {
         info.variants.iter().any(|variant| {
             variant.payloads.iter().any(|payload| {
-                h.types.contains_reference(payload.ty)
-                    || h.types.contains_view(payload.ty)
-                    || h.types.contains_owning(payload.ty)
+                h.types.contains_reference(payload.ty) || h.types.contains_view(payload.ty)
             })
         })
     }) {
         return Err(fail(
-            "HIR violates Vertical-10 owning/borrowed non-escape storage rules".into(),
+            "HIR violates borrowed-value non-escape storage rules".into(),
         ));
     }
     let mut next_field = 0_u32;
@@ -5471,7 +5635,9 @@ fn verify_block(
                     else {
                         return Err(fail("HIR match variant does not belong to enum".into()));
                     };
-                    if !seen.insert(arm.variant_id) || arm.bindings.len() != variant.payloads.len()
+                    if !seen.insert(arm.variant_id)
+                        || (!arm.bindings.is_empty()
+                            && arm.bindings.len() != variant.payloads.len())
                     {
                         return Err(fail(
                             "HIR match variant duplication/binding arity invalid".into(),

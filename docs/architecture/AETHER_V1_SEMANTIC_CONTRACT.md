@@ -362,18 +362,30 @@ no-op. Lexical scope exit and every normal return destroy each still-owned
 Buffer exactly once. This does not settle the eventual general move syntax or
 last-use policy for arbitrary nontrivial values.
 
+NEXT-VERTICAL-11 generalizes the same implicit consuming use to every concrete
+non-Copy nominal aggregate. Copy and destruction are structural properties of
+canonical concrete `TypeId`, not declaration-wide flags: a struct is Copy iff
+all substituted fields are Copy and needs destruction iff any substituted
+field does; an enum applies those rules across every payload in every variant.
+The properties remain independent; symbolic queries explicitly report that
+their result is not yet concrete. Whole-value moves invalidate the complete
+source root. Moving an owning field out is rejected in V11 because partial-move
+states are not represented. Whole-local replacement is admitted: evaluate the
+new value first, recursively destroy the old destination, then transfer the
+new owner. Exact self-assignment remains a no-op.
+
 ### 4.4 Function calls — DECIDED/OPEN
 
 Arity, parameter and return types are statically checked.  Public/exported
 function signatures are explicit except for narrowly specified local/private
 inference.  Nontrivial return ownership is explicit in semantic IR.
 
-Vertical-10 decides that a by-value `Buffer<T>` parameter is owned and consumes
-its argument, while `ref Buffer<T>` and `ref mut Buffer<T>` borrow it. A Buffer
-return transfers ownership to the caller. The complete parameter-mode system
-for other owned/shared values and its dedicated syntax remain an **OPEN
-DECISION**; a single implicit “borrow everything” convention is insufficient
-for FFI, buffers and returned views.
+Vertical-11 applies the V10 Buffer rule structurally: any non-Copy aggregate
+passed by value consumes its argument, while `ref T`/`ref mut T` parameters
+borrow it. Returning a non-Copy aggregate transfers ownership to the caller.
+The complete parameter-mode syntax remains an **OPEN DECISION**; a single
+implicit “borrow everything” convention is insufficient for FFI, buffers and
+returned views.
 
 ### 4.5 Nominal value structs — NEXT-VERTICAL-5 DECIDED baseline
 
@@ -511,9 +523,9 @@ needs destruction and has no implicit deep copy, retain/release or shared
 ownership. `T` is restricted in this baseline to a concrete `Copy` type that
 does not need destruction or contain borrowed/owning substructure. Nested
 Buffer or borrowed descriptor elements and symbolic `Buffer<T>` in
-generic bodies are rejected until generic capabilities and recursive cleanup
-are represented explicitly. Buffer fields and enum payloads are also deferred;
-the compiler must not leave a containing aggregate incorrectly Copy.
+generic bodies are rejected until generic capabilities for Buffer elements are
+represented explicitly. V11 permits Buffer fields and enum payloads because
+their containing aggregate now receives structural move/drop semantics.
 
 Definite ownership state is checked across control flow. An owned local may be
 uninitialized, owned, moved or dropped. Continuing branches must agree on the
@@ -529,6 +541,42 @@ extend owner lifetime. V10 applies the conservative V9 non-escape rules:
 single-initialization locals and parameters are allowed, but returns, aggregate
 storage and generic arguments are rejected. Buffers never resize, so an element
 reference remains stable while its owner remains alive.
+
+### 5.5 Transitive nominal aggregate ownership — NEXT-VERTICAL-11 DECIDED baseline
+
+The compiler owns one memoized type-property query keyed by canonical concrete
+`TypeId`. Scalars, references and views are Copy/no-drop; Buffer is
+non-Copy/needs-drop. Concrete structs combine every substituted field and
+concrete enums combine every substituted payload in every variant. Recursive
+queries fail closed. An unresolved generic parameter reports `is_known=false`
+and is not guaranteed Copy; parametric bodies may move/pass it through but may
+not duplicate it. Concrete monomorphizations re-synthesize ownership using
+substituted properties, so
+`Holder<int>` and `Maybe<int>` remain Copy while their `Buffer<int>` instances
+are move-only and need destruction.
+
+Aggregate construction consumes each non-Copy field/payload argument. A
+temporary owner transferred into an aggregate is not independently destroyed.
+Moving a whole aggregate invalidates all access through the old root, including
+Copy fields. Partial moves are rejected. Borrow provenance follows nested field
+and index places to the owning root, which cannot move or be replaced while a
+derived local borrow/view is live.
+
+Compiler-generated drop glue recursively destroys struct fields in reverse
+declaration order. Enum glue inspects the active discriminant, destroys only
+the active variant's drop-requiring payloads, and processes multiple payloads
+in reverse declaration order. MIR and SSA retain a general typed owner `Drop`;
+the LLVM bootstrap backend expands that semantic operation. LLVM may bit-copy
+an aggregate representation during a verified move, but this never grants
+source Copy semantics.
+
+Variant-only enum matching (with no payload binding) and Copy payload bindings
+remain supported. Binding a non-Copy payload by value is rejected until
+match-by-value/ref/ref-mut and partial ownership are designed. Stored
+references/views remain forbidden, including transitively. The V10 Buffer
+element restriction remains unchanged:
+V11 composes ownership outward and does not add element drop glue inside a
+Buffer. Traps still abort without unwind cleanup.
 
 ## 6. Core data abstractions
 
