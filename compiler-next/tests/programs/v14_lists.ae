@@ -1,0 +1,47 @@
+int read_length(ref List<int> values) {
+    return int(length(*values));
+}
+
+int main() {
+    List<int> values = {};
+    if (length(values) != 0) { return 1; }
+    if (capacity(values) != 0) { return 2; }
+    push(values, 10);
+    push(values, 20);
+    push(values, 30);
+    push(values, 40);
+    push(values, 50);
+    if (length(values) != 5) { return 3; }
+    if (values[0] != 10) { return 4; }
+    if (values[4] != 50) { return 5; }
+    values[2] = 31;
+    if (values[2] != 31) { return 6; }
+    reserve(values, 32);
+    if (capacity(values) < 32) { return 7; }
+    push(values, 60);
+    if (values[0] != 10) { return 8; }
+    if (values[5] != 60) { return 9; }
+    if (true) {
+        ref int first = &values[0];
+        if (*first != 10) { return 10; }
+    }
+    push(values, 70);
+    if (true) {
+        ref mut int second = &mut values[1];
+        *second = 21;
+    }
+    ref mut List<int> handle = &mut values;
+    push(*handle, 80);
+    if (length(*handle) != 8) { return 13; }
+    View<int> view_values = view(values);
+    if (view_values[1] != 21) { return 11; }
+    ViewMut<int> mut_values = view_mut(values);
+    mut_values[3] = 41;
+    if (values[3] != 41) { return 12; }
+    ref int stable = &values[0];
+    values[1] = 22;
+    if (*stable != 10) { return 14; }
+    int observed = read_length(&values);
+    if (observed != 8) { return 15; }
+    return 0;
+}

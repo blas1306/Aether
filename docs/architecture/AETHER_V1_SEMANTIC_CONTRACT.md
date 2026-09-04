@@ -653,6 +653,23 @@ restricted to concrete Copy/no-drop types, so V13 requires no per-element drop
 loop. Conditional ownership uses the same root-level `MaybeMoved` flags as any
 other owning aggregate.
 
+### 5.8 Dynamic List ownership and storage borrows — NEXT-VERTICAL-14 DECIDED baseline
+
+`List<T>` is non-Copy and needs destruction. Whole-value assignment,
+by-value calls, returns, aggregate composition and conditional cleanup use the
+general V11/V12 ownership lattice; List introduces no container-specific move
+state. Normal drop frees the current allocation exactly once. V14 elements are
+Copy/no-drop, so no per-element destruction loop is required.
+
+References and views derived from List element storage additionally retain the
+owning List root as storage provenance. While such a borrow is lexically live,
+`push` and `reserve` are rejected as potentially invalidating structural
+mutations regardless of runtime capacity. Element assignment is not structural.
+Passing the List through `ref mut List<T>` to an arbitrary call is
+conservatively potentially invalidating; passing `ref List<T>` is not. This
+temporary rule awaits an effect system and adds no alias exclusivity or LLVM
+`noalias` promise.
+
 ## 6. Core data abstractions
 
 ### 6.0 `Buffer<T>` — NEXT-VERTICAL-10 DECIDED substrate
@@ -691,7 +708,7 @@ machinery.
 The canonical literal syntax is `{...}`, including `{}` for length zero. The
 parser records a neutral collection literal, and semantic analysis requires an
 expected `Array<T>` before producing resolved `ArrayInit` HIR. This preserves
-the syntax for future List without making braces an Array-only AST node. Fill
+the syntax now shared with List without making braces an Array-only AST node. Fill
 construction `Array<T>(length, fill)` independently creates a runtime-sized
 fixed Array. Every literal element and fill value is checked with ordinary
 contextual literal/coercion rules. V13 temporarily requires `T` to be concrete,
@@ -705,13 +722,41 @@ MIR and SSA rather than a stringly method call. Desired property syntax such as
 `array.length` awaits a coherent property/method system. Slices/views are
 separate non-owning `View<T>`/`ViewMut<T>` values.
 
-### 6.2 `List<T>` — DECIDED direction / future implementation
+### 6.2 `List<T>` — NEXT-VERTICAL-14 DECIDED baseline
 
-`List<T>` is a growable computational collection built above a buffer
-abstraction. It uses zero-based indexing and the same `{...}` collection
-literal syntax as Array. Growth, push/pop, capacity and reallocation belong to
-List, are observable through cost and view invalidation, and are not Array
-operations. List is not the storage model for matrices.
+`List<T>` is the growable computational collection. It is canonically distinct
+from `Array<T>` and `Buffer<T>`, has no implicit conversion to either, uses
+zero-based indexing and shares the neutral `{...}` collection literal syntax
+with Array. Expected-type resolution produces `ListInit` without parser-level
+List syntax. `{}` has length and capacity zero with no allocation; a nonempty
+literal allocates once, initializes in source order, and begins with length and
+capacity equal to the element count.
+
+The bootstrap descriptor is `{data pointer, length, capacity}` and maintains
+`0 <= length <= capacity`. Only `[0, length)` contains initialized objects.
+`[length, capacity)` is reserved raw storage and is never accessible through
+source indexing or views. Bounds checks compare with length, and a whole-List
+view spans exactly the initialized prefix.
+
+`length(list)` and `capacity(list)` resolve to `ListLength` and `ListCapacity`.
+`push(list, value)` and `reserve(list, requested)` resolve to `ListPush` and
+`ListReserve`; both carry explicit structural-mutation classification through
+HIR, MIR and SSA. Push uses checked arithmetic, ensures capacity, initializes
+`data[length]`, then publishes the new length. Reserve leaves length unchanged
+and guarantees at least the requested capacity. Exact growth factors and spare
+capacity values are implementation details.
+
+Growth is semantically allocate-copy-free-update rather than libc `realloc`:
+allocate checked `capacity * sizeof(T)` storage, copy exactly `[0, length)`,
+free the replaced allocation, then update pointer and capacity. V14 admits only
+concrete Copy/no-drop elements without borrowed or owning substructure;
+symbolic `List<T>` awaits public capability constraints.
+
+Array remains fixed-size and has no capacity, growth, push or reserve. List is
+not the storage model for matrices. `pop` is intended for List but deliberately
+deferred until its empty-result/error semantics are designed. Resize, insert,
+erase, non-Copy elements, public constraints and a general method/property
+surface are also outside V14.
 
 ### 6.3 `Vector` and `Matrix` — DECIDED surface direction / future implementation
 
@@ -738,7 +783,7 @@ two-dimensional construct whose semicolons separate rows:
 Both mathematical types use one-based source indexing; Matrix access is
 `A[i, j]`. Their bracket AST/HIR forms remain structurally distinct from the
 neutral `{...}` collection literal. No Vector or Matrix syntax is implemented
-by V13.
+by V14.
 
 Static dimensions are also open.  Dynamic dimensions must work; optional
 compile-time dimensions may enable specialization without making ordinary
@@ -761,7 +806,7 @@ Safe indexing and slicing check bounds and trap or return the language's
 specified error form.  Optimization may remove a check only with a proof.
 Unchecked indexing requires an explicit low-level operation/region. Index base
 is type-dependent, never a configurable global switch. `Buffer`, `View`,
-`ViewMut`, `Array` and future `List` are zero-based. Future mathematical
+`ViewMut`, `Array` and `List` are zero-based. Future mathematical
 `Vector`, `Matrix` and their mathematical views are one-based.
 
 ## 7. Text
@@ -1019,7 +1064,7 @@ The highest-impact remaining open decisions should close in this order:
 1. numeric conversions beyond contextual literals;
 2. recoverable error model and exceptional cleanup;
 3. ownership parameter modes, moves and non-owning views;
-4. List reallocation invalidation and general slice/view lifetime;
+4. non-lexical/general slice and view lifetime semantics beyond V14 List roots;
 5. string indexing/view semantics;
 6. generic constraints plus orientation/static-dimension policy;
 7. module initialization;

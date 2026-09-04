@@ -1,4 +1,4 @@
-//! Cross-layer and native qualification through NEXT-VERTICAL-13.
+//! Cross-layer and native qualification through NEXT-VERTICAL-14.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -349,7 +349,7 @@ fn vertical6_enum_diagnostics_are_structured() {
             "E0258",
         ),
         (
-            "enum List{Nil,Cons(int,List),}int main(){return 0;}",
+            "enum Chain{Nil,Cons(int,Chain),}int main(){return 0;}",
             "E0259",
         ),
         (
@@ -1778,5 +1778,238 @@ fn vertical13_cross_module_array_transfer_executes_natively() {
     assert_eq!(status.code(), Some(33));
     assert!(compilation.dumps[&Emit::Hir].contains("Array<int64>"));
     assert!(compilation.dumps[&Emit::Mir].contains("Move"));
+    assert!(compilation.dumps[&Emit::Ssa].contains("Drop"));
+}
+
+#[test]
+fn vertical14_list_type_is_canonical_distinct_and_move_owned() {
+    let source = SourceFile::new(
+        "v14-types.ae",
+        "int main(){List<int> a={1};List<int> b={2};Array<int> fixed={3};Buffer<int> raw=Buffer<int>(1,4);return a[0]+b[0]+fixed[0]+raw[0];}",
+    );
+    let hir = analyze(parse_source(&source).unwrap()).unwrap();
+    let lists = hir
+        .types()
+        .entries()
+        .filter_map(|(ty, data)| matches!(data, TypeData::List { .. }).then_some(ty))
+        .collect::<Vec<_>>();
+    let arrays = hir
+        .types()
+        .entries()
+        .filter_map(|(ty, data)| matches!(data, TypeData::Array { .. }).then_some(ty))
+        .collect::<Vec<_>>();
+    let buffers = hir
+        .types()
+        .entries()
+        .filter_map(|(ty, data)| matches!(data, TypeData::Buffer { .. }).then_some(ty))
+        .collect::<Vec<_>>();
+    assert_eq!(lists.len(), 1);
+    assert_eq!(arrays.len(), 1);
+    assert_eq!(buffers.len(), 1);
+    assert_ne!(lists[0], arrays[0]);
+    assert_ne!(lists[0], buffers[0]);
+    assert_eq!(
+        hir.types().list_element(lists[0]),
+        Some(aether_frontend::TypeId::INT64)
+    );
+    assert!(!hir.types().is_copy(lists[0]));
+    assert!(hir.types().needs_drop(lists[0]));
+}
+
+#[test]
+fn vertical14_collection_literal_and_list_operations_survive_every_ir() {
+    let source = SourceFile::new(
+        "v14_lists.ae",
+        fs::read_to_string(program("v14_lists.ae")).unwrap(),
+    );
+    let compilation = compile_source(
+        &source,
+        &[Emit::Ast, Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+    )
+    .unwrap();
+    assert!(compilation.dumps[&Emit::Ast].contains("CollectionLiteral"));
+    assert!(compilation.dumps[&Emit::Hir].contains("List<int64>"));
+    for operation in [
+        "ListInit",
+        "ListLength",
+        "ListCapacity",
+        "ListPush",
+        "ListReserve",
+    ] {
+        assert!(
+            compilation.dumps[&Emit::Hir].contains(operation),
+            "HIR missing {operation}"
+        );
+        assert!(
+            compilation.dumps[&Emit::Mir].contains(operation),
+            "MIR missing {operation}"
+        );
+        assert!(
+            compilation.dumps[&Emit::Ssa].contains(operation),
+            "SSA missing {operation}"
+        );
+    }
+    assert!(compilation.dumps[&Emit::Hir].contains("mutation: Push"));
+    assert!(compilation.llvm.contains("{ ptr, i64, i64 }"));
+    assert!(compilation.llvm.contains("@aether_list_push_"));
+    assert!(compilation.llvm.contains("@aether_list_reserve_"));
+    assert!(compilation.llvm.contains("@aether_list_index_"));
+    assert!(compilation.llvm.contains("@aether_allocation_balance"));
+}
+
+#[test]
+fn vertical14_list_diagnostics_fail_closed() {
+    for (text, code) in [
+        ("int main(){List<Buffer<int>> a={};return 0;}", "E0310"),
+        ("int main(){List<Array<int>> a={};return 0;}", "E0310"),
+        ("int main(){List<List<int>> a={};return 0;}", "E0310"),
+        (
+            "struct Owned{Buffer<int> value;}int main(){List<Owned> a={};return 0;}",
+            "E0310",
+        ),
+        (
+            "List<T> bad<T>(T value){List<T> a={value};return a;}int main(){return 0;}",
+            "E0310",
+        ),
+        ("int main(){List<int> a={true};return 0;}", "E0205"),
+        ("int main(){List<int> a={1,2};return a[2];}", "E0296"),
+        (
+            "int bad(ref List<int> a){push(*a,2);return 0;}int main(){return 0;}",
+            "E0272",
+        ),
+        (
+            "int bad(ref List<int> a){reserve(*a,2);return 0;}int main(){return 0;}",
+            "E0272",
+        ),
+        (
+            "int main(){List<int> a={1};ref int r=&a[0];push(a,2);return *r;}",
+            "E0313",
+        ),
+        (
+            "int main(){List<int> a={1};reserve(a,8);ref int r=&a[0];push(a,2);return *r;}",
+            "E0313",
+        ),
+        (
+            "int main(){List<int> a={1};ref int r=&a[0];reserve(a,1);return *r;}",
+            "E0313",
+        ),
+        (
+            "int main(){List<int> a={1};View<int> v=view(a);push(a,2);return v[0];}",
+            "E0313",
+        ),
+        (
+            "int main(){List<int> a={1};ViewMut<int> v=view_mut(a);reserve(a,4);return v[0];}",
+            "E0313",
+        ),
+        (
+            "int main(){List<int> a={1};ref int r=&a[0];List<int> b=a;return *r;}",
+            "E0292",
+        ),
+        (
+            "int main(){List<int> a={1};List<int> b=a;return a[0];}",
+            "E0291",
+        ),
+        (
+            "int mutate(ref mut List<int> a){push(*a,2);return 0;}int main(){List<int> a={1};ref int r=&a[0];int x=mutate(&mut a);return *r+x;}",
+            "E0313",
+        ),
+        (
+            "int bad(ref mut List<int> a){ref int r=&(*a)[0];push(*a,2);return *r;}int main(){return 0;}",
+            "E0313",
+        ),
+        (
+            "int mutate(ref mut List<int> a){return 0;}int main(){List<int> a={1};ref mut List<int> h=&mut a;ref int r=&a[0];int x=mutate(h);return *r+x;}",
+            "E0313",
+        ),
+        ("int main(){Array<int> a={1};push(a,2);return 0;}", "E0311"),
+        ("int main(){List<int> a={1};return capacity(a,2);}", "E0312"),
+    ] {
+        let diagnostics =
+            compile_source(&SourceFile::new("v14-error.ae", text), &[]).expect_err(text);
+        assert_eq!(
+            diagnostics[0].code, code,
+            "{text}: {}",
+            diagnostics[0].message
+        );
+        assert!(diagnostics[0].span.is_some());
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical14_lists_execute_with_growth_and_balanced_cleanup() {
+    for source in [
+        "v14_lists.ae",
+        "v14_literal_list.ae",
+        "v14_list_ownership.ae",
+        "v14_empty_list.ae",
+        "v14_repeated_push.ae",
+        "v14_reserved_push.ae",
+        "v14_list_view_index.ae",
+    ] {
+        let (compilation, status) = run_path(
+            &program(source),
+            &[Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+            &ClangToolchain::default(),
+        )
+        .unwrap();
+        assert_eq!(status.code(), Some(0), "{source}");
+        assert!(compilation.llvm.contains("@aether_heap_alloc_count"));
+        assert!(compilation.llvm.contains("@aether_heap_free_count"));
+        assert!(compilation.dumps[&Emit::Mir].contains("Drop"));
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical14_exact_allocation_and_free_counts_match_growth_model() {
+    let toolchain = ClangToolchain::default();
+    for (source, expected) in [
+        ("v14_empty_list.ae", 0),
+        ("v14_literal_list.ae", 1),
+        ("v14_repeated_push.ae", 5),
+        ("v14_reserved_push.ae", 1),
+        ("v14_list_ownership.ae", 9),
+    ] {
+        let session = CompilationSession::discover(&program(source)).unwrap();
+        let compilation = compile_session(session, &[]).unwrap();
+        for counter in ["@aether_heap_alloc_count", "@aether_heap_free_count"] {
+            let observed = format!(
+                "  %observed_count = load i64, ptr {counter}\n  %process_status = trunc i64 %observed_count to i32"
+            );
+            let llvm = compilation.llvm.replace(
+                "  %process_status = trunc i64 %aether_result to i32",
+                &observed,
+            );
+            let artifact = temporary("v14-count");
+            toolchain.link_executable(&llvm, &artifact).unwrap();
+            let status = Command::new(&artifact).status().unwrap();
+            let _ = fs::remove_file(&artifact);
+            assert_eq!(status.code(), Some(expected), "{source} {counter}");
+        }
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical14_list_bounds_and_allocation_overflow_trap() {
+    for source in ["v14_list_dynamic_oob.ae", "v14_list_allocation_overflow.ae"] {
+        let (_, status) = run_path(&program(source), &[], &ClangToolchain::default()).unwrap();
+        assert!(!status.success(), "{source} must trap");
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical14_cross_module_list_transfer_executes_natively() {
+    let (compilation, status) = run_path(
+        &module_program("v14_lists"),
+        &[Emit::Hir, Emit::Mir, Emit::Ssa],
+        &ClangToolchain::default(),
+    )
+    .unwrap();
+    assert_eq!(status.code(), Some(40));
+    assert!(compilation.dumps[&Emit::Hir].contains("List<int64>"));
+    assert!(compilation.dumps[&Emit::Mir].contains("ListPush"));
     assert!(compilation.dumps[&Emit::Ssa].contains("Drop"));
 }

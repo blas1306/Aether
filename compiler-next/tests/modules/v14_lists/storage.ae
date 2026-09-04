@@ -1,0 +1,17 @@
+struct Packet {
+    List<int> values;
+}
+
+List<int> make() {
+    List<int> values = {10, 20};
+    push(values, 30);
+    return values;
+}
+
+Packet wrap(List<int> values) {
+    return Packet(values);
+}
+
+int consume(Packet packet) {
+    return packet.values[0] + packet.values[2];
+}

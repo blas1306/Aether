@@ -1,4 +1,4 @@
-# Aether NEXT-VERTICAL-13
+# Aether NEXT-VERTICAL-14
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. It does not replace the production `aether` CLI or import any legacy
@@ -32,7 +32,7 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-13 grammar
+## Vertical-14 grammar
 
 ```text
 program    := import* (alias | struct | enum | function)+ EOF
@@ -52,6 +52,7 @@ type       := "ref" "mut"? type
 block      := "{" statement* "}"
 statement  := type IDENT "=" expression ";"
             | place "=" expression ";"
+            | apply ";"
             | "if" "(" expression ")" block ("else" block)?
             | "while" "(" expression ")" block
             | "match" "(" match-mode? expression ")" "{" match-arm+ "}"
@@ -75,8 +76,10 @@ place      := IDENT (("." IDENT) | ("[" expression "]"))*
 
 Braces in expression position form a neutral `CollectionLiteral`; braces
 required by a statement/declaration remain blocks. Semantic analysis resolves
-the literal from its expected type. Vertical-13 admits only `Array<T>` as that
-expected collection kind, including the canonical empty literal `{}`.
+the literal from its expected type. Vertical-14 admits `Array<T>` and `List<T>`
+as expected collection kinds, including the canonical empty literal `{}`.
+Effect statements are currently restricted semantically to `push(...)` and
+`reserve(...)`; this is not a general void-expression or method system.
 
 The semantic restriction is narrower than the expression-shaped grammar:
 `&` and `&mut` accept only an existing resolved `Place`. No temporary lifetime
@@ -158,7 +161,8 @@ Canonical semantic types use the compact, copyable, session-local identity
 mapping. Its current data variants are `Bool`, `Integer`, `Float`, nominal and
 applied aggregate forms, generic parameters, and
 `Reference { pointee: TypeId, mutable: bool }`, `Buffer { element: TypeId }`,
-`Array { element: TypeId }`, and `View { element: TypeId, mutable: bool }`. Repeated `ref T` resolution
+`Array { element: TypeId }`, `List { element: TypeId }`, and
+`View { element: TypeId, mutable: bool }`. Repeated `ref T` resolution
 reuses one ID, while `ref T` and `ref mut T` remain distinct. HIR is the first canonical boundary;
 HIR, MIR, SSA, signatures, fields and enum payloads transport IDs rather than
 copies of `TypeData`. MIR and SSA share the immutable arena through ordinary
@@ -275,6 +279,12 @@ tests passing, zero failures; clippy passed for the whole workspace/all targets
 with warnings denied; and the executable legacy differential subset completed
 21 comparisons with zero failures. Buffer-native tests additionally compile
 through clang and exercise the generated allocation/free balance guard.
+
+The Vertical-14 qualification run completes 106 Rust unit/integration tests
+with zero failures, passes workspace/all-target clippy with warnings denied,
+and keeps the 21-case executable legacy differential subset green. List-native
+tests compile through clang, verify bounds/overflow traps, exact allocation and
+free counts, aggregate/cross-module ownership and storage-borrow invalidation.
 
 ### Vertical-7 timing baseline
 
@@ -544,9 +554,9 @@ checks `length * sizeof(T)`, literal stores execute in source order, and the
 normal-path allocation/free counters cover empty, literal, fill, moved,
 returned, consumed, aggregate, conditional and borrowed/viewed arrays.
 
-The collection/scientific split is intentional. Future `List<T>` is a dynamic,
-zero-based computational collection using the same `{...}` literal syntax and
-will own growth/capacity operations. Future `Vector<T, Orientation>` and
+The collection/scientific split is intentional. `List<T>` is the distinct
+dynamic, zero-based computational collection using the same `{...}` literal
+syntax and owns growth/capacity operations. Future `Vector<T, Orientation>` and
 `Matrix<T>` are mathematical objects, use bracket literals and one-based
 indexing. Matrix literal syntax is structurally two-dimensional with semicolon
 row separators; Matrix is not a nested Array/List/Vector representation.
@@ -566,6 +576,80 @@ core time was approximately 2.648 ms for unchanged
 `v12_conditional_drop.ae`, 0.536 ms for `v13_empty_array.ae`, 0.600 ms for
 `v13_literal_array.ae`, 0.619 ms for `v13_fill_array.ae`, and 0.803 ms for
 `v13_index_ref_loop.ae`.
+
+## Vertical-14 dynamic List contract
+
+`List<T>` is a move-owned, dynamic contiguous collection distinct from both
+fixed `Array<T>` and lower-level `Buffer<T>`. Its bootstrap representation is
+`{ data pointer, length: usize, capacity: usize }`, with the invariant
+`0 <= length <= capacity`. Only `[0, length)` is initialized and source-visible;
+indexing is checked and zero-based against `length`, never `capacity`.
+
+The existing neutral AST `CollectionLiteral` is reused. Expected `Array<T>`
+produces `ArrayInit`, while expected `List<T>` produces `ListInit`. An empty
+List has length and capacity zero and performs no allocation. A nonempty
+literal allocates exactly once with initial length and capacity equal to the
+literal element count, then initializes elements in source order without
+lowering through repeated pushes. As in V13, `T` is temporarily restricted to
+concrete Copy/no-drop values without borrowed or owning substructure.
+
+The bootstrap semantic operations are:
+
+```aether
+length(list)
+capacity(list)
+push(list, value);
+reserve(list, requested_capacity);
+```
+
+They resolve before HIR to `ListLength`, `ListCapacity`, `ListPush` and
+`ListReserve`; the last two carry explicit `StructuralMutation` classification
+through HIR, MIR and SSA. `push` checks `length + 1`, grows when needed, writes
+the new element and only then exposes the incremented length. `reserve` keeps
+length unchanged and guarantees at least the requested capacity. Growth uses
+a checked internal geometric policy, but its exact factor and resulting spare
+capacity are implementation details, not language semantics.
+
+Reallocation allocates new storage, copies exactly the initialized prefix,
+frees the replaced allocation and updates the descriptor. Capacity-byte and
+growth arithmetic trap as `AllocationSizeOverflow`; allocation failure follows
+the existing bootstrap policy. Drop frees the current allocation once and has
+no per-element loop under the V14 element restriction. Moves, returns,
+conditional ownership and recursive struct/enum/generic cleanup use the
+existing V11/V12 machinery unchanged.
+
+References and views into List element storage record their owning root. A
+lexically live `&list[i]`, `&mut list[i]`, `view(list)` or `view_mut(list)`
+prevents every `push` or `reserve`, even when runtime capacity would make the
+specific operation allocation-free. Element assignment is not structural and
+does not change pointer, length or capacity. Passing the owner to an arbitrary
+call as `ref mut List<T>` is conservatively treated as potentially
+storage-invalidating; shared List references are not. Explicit dereference is
+still required when mutating through `ref mut List<T>`.
+
+Array remains fixed and gains none of these operations. There is no implicit
+Array/List/Buffer conversion. `pop`, resize, insert, erase, non-Copy elements,
+public constraints and general methods are deliberately deferred. Likely
+future forms such as `list.length` and `list.push(x)` remain ergonomic surface
+work over the explicit semantic operations.
+
+### Vertical-14 timing and allocation snapshot
+
+A warm debug driver was sampled over ten complete compilations per fixture,
+excluding discovery, file I/O and clang/link time. Mean core times were about
+0.741 ms for the unchanged V13 literal Array, 0.605 ms for empty List,
+0.880 ms for literal List, 0.794 ms for sixteen repeated pushes, 0.910 ms for
+reserve plus sixteen pushes, and 0.750 ms for the List view/index fixture.
+These are small-fixture snapshots, not benchmark-quality comparisons.
+
+Under the current internal policy, sixteen pushes from an empty List visit
+capacities 1, 2, 4, 8 and 16: five allocations, four replacement frees and one
+final free. Reserving 16 first performs one allocation and the sixteen pushes
+perform no intermediate allocation, followed by one final free. Exact counts
+demonstrate this implementation and its balance instrumentation; the capacity
+sequence and growth factor are not language guarantees.
+The combined move/return/struct/enum/generic/conditional fixture observes nine
+allocations and nine frees, covering recursive and transferred ownership.
 
 ## Bootstrap ABI and deliberate limits
 
@@ -591,6 +675,6 @@ module initializers or initialization order. This is precisely why import
 cycles have no execution-order meaning in this slice. There are also no
 packages, nested/selective/wildcard/aliased imports, reexports, visibility
 keywords, overloads, generic constraints/traits, generic aliases, function values, closures, extern functions,
-heap values beyond fixed `Buffer`/`Array`, strings, named initializers, methods, general
+heap values beyond `Buffer`/`Array`/restricted `List`, strings, named initializers, methods, general
 ownership, optimization pipeline, public ABI/runtime API, or LLVM library binding. Unsupported forms fail
 closed before lowering.

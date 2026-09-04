@@ -8,9 +8,11 @@ use std::sync::Arc;
 use aether_frontend::{
     CastKind, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId, FloatValue,
     FunctionInstanceInfo, InstanceId, LocalId, MatchMode, ModuleInfo, Phase, Span, StructId,
-    StructInfo, Substitution, TypeArena, TypeData, TypeId, VariantId, format_type,
+    StructInfo, StructuralMutation, Substitution, TypeArena, TypeData, TypeId, VariantId,
+    format_type,
 };
 
+use crate::mir::place_type;
 use crate::{
     BinaryOp, BlockId, MirDropFlag, MirFunction, Operand, Place, PlaceBase, PlaceProjection,
     Rvalue, Terminator, TrapKind, UnaryOp, VerifiedMir,
@@ -142,6 +144,32 @@ pub enum SsaOp {
     },
     ArrayLength {
         source: SsaPlace,
+    },
+    ListInit {
+        element_type: TypeId,
+        elements: Vec<SsaOperand>,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
+    ListLength {
+        source: SsaPlace,
+    },
+    ListCapacity {
+        source: SsaPlace,
+    },
+    ListPush {
+        source: SsaPlace,
+        value: SsaOperand,
+        mutation: StructuralMutation,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
+    ListReserve {
+        source: SsaPlace,
+        requested_capacity: SsaOperand,
+        mutation: StructuralMutation,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
     },
     View {
         source: SsaPlace,
@@ -374,14 +402,18 @@ pub fn build_ssa(mir: &VerifiedMir) -> SsaIr {
         functions: mir
             .functions
             .iter()
-            .map(|function| build_function_ssa(function, &mir.types))
+            .map(|function| build_function_ssa(function, &mir.types, &mir.structs))
             .collect(),
         entry: mir.entry,
     }
 }
 
 #[allow(clippy::too_many_lines)]
-fn build_function_ssa(function: &MirFunction, types: &TypeArena) -> SsaFunction {
+fn build_function_ssa(
+    function: &MirFunction,
+    types: &TypeArena,
+    structs: &[StructInfo],
+) -> SsaFunction {
     let cfg = Cfg::new(function);
     let dominance = Dominance::compute(&cfg, function.entry);
     let live_in = mir_liveness(function, &cfg);
@@ -478,6 +510,7 @@ fn build_function_ssa(function: &MirFunction, types: &TypeArena) -> SsaFunction 
         &mut stacks,
         &mut next_value,
         types,
+        structs,
     );
     for block in &mut blocks {
         for phi in &mut block.phis {
@@ -507,6 +540,7 @@ fn rename_block(
     stacks: &mut [Vec<ValueId>],
     next_value: &mut u32,
     types: &TypeArena,
+    structs: &[StructInfo],
 ) {
     let block_index = block_id.0 as usize;
     let mut pushes = vec![0_usize; stacks.len()];
@@ -527,7 +561,13 @@ fn rename_block(
             PlaceBase::Dereference { .. } => true,
         };
         if memory_destination {
-            let value_ty = rvalue_result_type(mir, &instruction.destination, &instruction.value);
+            let value_ty = rvalue_result_type(
+                mir,
+                &instruction.destination,
+                &instruction.value,
+                structs,
+                types,
+            );
             let value_result = ValueId(*next_value);
             *next_value += 1;
             blocks[block_index].instructions.push(SsaInstruction {
@@ -561,8 +601,25 @@ fn rename_block(
         let op = if instruction.destination.projections.is_empty() {
             rename_rvalue(&instruction.value, stacks, mir)
         } else {
-            let Rvalue::Use(value) = &instruction.value else {
-                unreachable!("verified projected stores use a materialized value")
+            let value = if let Rvalue::Use(value) = &instruction.value {
+                rename_operand(value, stacks)
+            } else {
+                let value_ty = rvalue_result_type(
+                    mir,
+                    &instruction.destination,
+                    &instruction.value,
+                    structs,
+                    types,
+                );
+                let value_result = ValueId(*next_value);
+                *next_value += 1;
+                blocks[block_index].instructions.push(SsaInstruction {
+                    result: value_result,
+                    ty: value_ty,
+                    op: rename_rvalue(&instruction.value, stacks, mir),
+                    span: instruction.span,
+                });
+                SsaOperand::Value(value_result)
             };
             SsaOp::InsertField {
                 aggregate: SsaOperand::Value(
@@ -581,7 +638,7 @@ fn rename_block(
                         }
                     })
                     .collect(),
-                value: rename_operand(value, stacks),
+                value,
             }
         };
         let result = ValueId(*next_value);
@@ -623,6 +680,7 @@ fn rename_block(
             stacks,
             next_value,
             types,
+            structs,
         );
     }
     for (local, count) in pushes.into_iter().enumerate() {
@@ -715,6 +773,52 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
         },
         Rvalue::ArrayLength { source } => SsaOp::ArrayLength {
             source: rename_place(source, stacks, mir),
+        },
+        Rvalue::ListInit {
+            element_type,
+            elements,
+            size_trap,
+            failure_trap,
+        } => SsaOp::ListInit {
+            element_type: *element_type,
+            elements: elements
+                .iter()
+                .map(|element| rename_operand(element, stacks))
+                .collect(),
+            size_trap: *size_trap,
+            failure_trap: *failure_trap,
+        },
+        Rvalue::ListLength { source } => SsaOp::ListLength {
+            source: rename_place(source, stacks, mir),
+        },
+        Rvalue::ListCapacity { source } => SsaOp::ListCapacity {
+            source: rename_place(source, stacks, mir),
+        },
+        Rvalue::ListPush {
+            source,
+            value,
+            mutation,
+            size_trap,
+            failure_trap,
+        } => SsaOp::ListPush {
+            source: rename_place(source, stacks, mir),
+            value: rename_operand(value, stacks),
+            mutation: *mutation,
+            size_trap: *size_trap,
+            failure_trap: *failure_trap,
+        },
+        Rvalue::ListReserve {
+            source,
+            requested_capacity,
+            mutation,
+            size_trap,
+            failure_trap,
+        } => SsaOp::ListReserve {
+            source: rename_place(source, stacks, mir),
+            requested_capacity: rename_operand(requested_capacity, stacks),
+            mutation: *mutation,
+            size_trap: *size_trap,
+            failure_trap: *failure_trap,
         },
         Rvalue::View { source, mutable } => SsaOp::View {
             source: rename_place(source, stacks, mir),
@@ -850,14 +954,21 @@ fn rename_place(place: &Place, stacks: &[Vec<ValueId>], mir: &MirFunction) -> Ss
     }
 }
 
-fn rvalue_result_type(function: &MirFunction, destination: &Place, value: &Rvalue) -> TypeId {
+fn rvalue_result_type(
+    function: &MirFunction,
+    destination: &Place,
+    value: &Rvalue,
+    structs: &[StructInfo],
+    types: &TypeArena,
+) -> TypeId {
     match value {
         Rvalue::Use(operand) => mir_operand_type(function, operand),
         _ => match &destination.base {
             PlaceBase::Local(local) if destination.projections.is_empty() => {
                 function.locals[local.0 as usize].ty
             }
-            _ => unreachable!("verified non-copy memory destination is a full local"),
+            _ => place_type(function, destination, structs, types)
+                .expect("verified MIR destination has a type"),
         },
     }
 }
@@ -1094,7 +1205,9 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
         | Rvalue::Drop { owner: place }
         | Rvalue::ConsumeEnum { owner: place }
         | Rvalue::View { source: place, .. }
-        | Rvalue::ArrayLength { source: place } => place_locals(function, place),
+        | Rvalue::ArrayLength { source: place }
+        | Rvalue::ListLength { source: place }
+        | Rvalue::ListCapacity { source: place } => place_locals(function, place),
         Rvalue::BufferAlloc {
             length, initial, ..
         }
@@ -1104,7 +1217,21 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
             .into_iter()
             .chain(operand_local(initial))
             .collect(),
-        Rvalue::ArrayInit { elements, .. } => elements.iter().filter_map(operand_local).collect(),
+        Rvalue::ArrayInit { elements, .. } | Rvalue::ListInit { elements, .. } => {
+            elements.iter().filter_map(operand_local).collect()
+        }
+        Rvalue::ListPush { source, value, .. } => place_locals(function, source)
+            .into_iter()
+            .chain(operand_local(value))
+            .collect(),
+        Rvalue::ListReserve {
+            source,
+            requested_capacity,
+            ..
+        } => place_locals(function, source)
+            .into_iter()
+            .chain(operand_local(requested_capacity))
+            .collect(),
         Rvalue::Aggregate { fields, .. } => fields
             .iter()
             .filter_map(|(_, operand)| operand_local(operand))
@@ -1186,10 +1313,11 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
             !ssa.types.is_admitted_buffer_element(*element)
         }
         TypeData::Array { element } => !ssa.types.is_admitted_array_element(*element),
+        TypeData::List { element } => !ssa.types.is_admitted_list_element(*element),
         _ => false,
     }) {
         return Err(fail(
-            "SSA contains a Buffer/View/Array with an inadmissible element type".into(),
+            "SSA contains a Buffer/View/Array/List with an inadmissible element type".into(),
         ));
     }
     for ty in ssa
@@ -1765,11 +1893,69 @@ fn verify_op(
                 return Err("SSA Array length contract invalid".into());
             }
         }
+        SsaOp::ListInit {
+            element_type,
+            elements,
+            size_trap,
+            failure_trap,
+        } => {
+            if types.list_element(result) != Some(*element_type)
+                || elements
+                    .iter()
+                    .any(|element| operand_ty(element).ok() != Some(*element_type))
+                || !types.is_admitted_list_element(*element_type)
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("SSA List literal allocation contract invalid".into());
+            }
+        }
+        SsaOp::ListLength { source } | SsaOp::ListCapacity { source } => {
+            let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
+            if result != TypeId::USIZE || types.list_element(source_ty).is_none() {
+                return Err("SSA List metadata query contract invalid".into());
+            }
+        }
+        SsaOp::ListPush {
+            source,
+            value,
+            mutation,
+            size_trap,
+            failure_trap,
+        } => {
+            let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
+            if result != source_ty
+                || types.list_element(source_ty) != Some(operand_ty(value)?)
+                || *mutation != StructuralMutation::Push
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("SSA List push contract invalid".into());
+            }
+        }
+        SsaOp::ListReserve {
+            source,
+            requested_capacity,
+            mutation,
+            size_trap,
+            failure_trap,
+        } => {
+            let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
+            if result != source_ty
+                || types.list_element(source_ty).is_none()
+                || operand_ty(requested_capacity)? != TypeId::USIZE
+                || *mutation != StructuralMutation::Reserve
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("SSA List reserve contract invalid".into());
+            }
+        }
         SsaOp::View { source, mutable } => {
             let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
             let element = types
                 .owning_contiguous_element(source_ty)
-                .ok_or_else(|| "SSA View source is not Buffer/Array".to_string())?;
+                .ok_or_else(|| "SSA View source is not Buffer/Array/List".to_string())?;
             if types.view_info(result) != Some((element, *mutable)) {
                 return Err("SSA View contract invalid".into());
             }
@@ -2050,6 +2236,7 @@ fn ssa_place_type(
                 let element = types
                     .buffer_element(ty)
                     .or_else(|| types.array_element(ty))
+                    .or_else(|| types.list_element(ty))
                     .or_else(|| types.view_info(ty).map(|(element, _)| element))
                     .ok_or_else(|| "SSA index projection has non-contiguous base".to_string())?;
                 if operand_ty(index)? != TypeId::USIZE
@@ -2160,7 +2347,9 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         | SsaOp::Drop { owner: place }
         | SsaOp::ConsumeEnum { owner: place }
         | SsaOp::View { source: place, .. }
-        | SsaOp::ArrayLength { source: place } => place_operands(place),
+        | SsaOp::ArrayLength { source: place }
+        | SsaOp::ListLength { source: place }
+        | SsaOp::ListCapacity { source: place } => place_operands(place),
         SsaOp::Store { place, value } => place_operands(place)
             .into_iter()
             .chain(std::iter::once(value))
@@ -2171,7 +2360,21 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         | SsaOp::ArrayFill {
             length, initial, ..
         } => vec![length, initial],
-        SsaOp::ArrayInit { elements, .. } => elements.iter().collect(),
+        SsaOp::ArrayInit { elements, .. } | SsaOp::ListInit { elements, .. } => {
+            elements.iter().collect()
+        }
+        SsaOp::ListPush { source, value, .. } => place_operands(source)
+            .into_iter()
+            .chain(std::iter::once(value))
+            .collect(),
+        SsaOp::ListReserve {
+            source,
+            requested_capacity,
+            ..
+        } => place_operands(source)
+            .into_iter()
+            .chain(std::iter::once(requested_capacity))
+            .collect(),
         SsaOp::Aggregate { fields, .. } => fields.iter().map(|(_, value)| value).collect(),
         SsaOp::EnumConstruct { payloads, .. } => payloads.iter().collect(),
         SsaOp::ExtractField { aggregate, .. } => vec![aggregate],

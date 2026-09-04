@@ -77,3 +77,12 @@ empty_array	V1_CONTRACT	accept:0	n/a	programs/v13_empty_array.ae
 literal_array	V1_CONTRACT	accept:42	n/a	programs/v13_literal_array.ae
 fill_array	V1_CONTRACT	accept:42	n/a	programs/v13_fill_array.ae
 array_index_reference_loop	V1_CONTRACT	accept:42	n/a	programs/v13_index_ref_loop.ae
+dynamic_list_growth	V1_CONTRACT	accept:0	n/a	programs/v14_lists.ae
+literal_list	V1_CONTRACT	accept:0	n/a	programs/v14_literal_list.ae
+list_aggregate_ownership	V1_CONTRACT	accept:0	n/a	programs/v14_list_ownership.ae
+list_dynamic_bounds	V1_CONTRACT	trap	n/a	programs/v14_list_dynamic_oob.ae
+list_allocation_overflow	V1_CONTRACT	trap	n/a	programs/v14_list_allocation_overflow.ae
+empty_list	V1_CONTRACT	accept:0	n/a	programs/v14_empty_list.ae
+repeated_list_push	V1_CONTRACT	accept:0	n/a	programs/v14_repeated_push.ae
+reserved_list_push	V1_CONTRACT	accept:0	n/a	programs/v14_reserved_push.ae
+list_view_index	V1_CONTRACT	accept:0	n/a	programs/v14_list_view_index.ae

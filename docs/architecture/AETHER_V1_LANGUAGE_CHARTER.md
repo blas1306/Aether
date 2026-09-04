@@ -216,7 +216,23 @@ lower-level storage primitive even where physical allocation machinery is
 shared. Elements are temporarily limited to concrete Copy/no-drop types;
 Array itself may compose inside owning structs, enums and concrete generics.
 
-The collection/mathematics distinction is intentional. Future `List<T>` is a
+NEXT-VERTICAL-14 adds the distinct dynamic `List<T>` collection. It shares the
+neutral `{...}` literal syntax and checked zero-based indexing with Array, but
+tracks logical length separately from storage capacity and supports explicit
+`push` and `reserve` structural mutations. Its bootstrap descriptor owns
+contiguous storage and initializes only `[0, length)`; reserved capacity is not
+source-visible. Growth allocates, copies the initialized prefix, frees replaced
+storage and preserves data. Exact capacity growth is implementation policy.
+
+List is non-Copy/needs-drop through the existing structural ownership system.
+V14 retains the concrete Copy/no-drop element restriction. References and
+views into List storage prevent potentially invalidating structural mutations,
+including calls through `ref mut List<T>`, independent of runtime spare
+capacity. Element assignment is not structural. Array remains fixed and gains
+no dynamic operations. `pop`, resize, non-Copy elements, public constraints and
+general method syntax remain deferred.
+
+The collection/mathematics distinction is intentional. `List<T>` is the
 dynamic zero-based computational collection sharing `{...}` literal syntax.
 Future `Vector<T, Orientation>` and `Matrix<T>` are mathematical types using
 bracket literals and one-based indexing. A Matrix literal is one structurally

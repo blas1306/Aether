@@ -1,4 +1,4 @@
-//! LLVM backend for verified Vertical-13 program SSA.
+//! LLVM backend for verified Vertical-14 program SSA.
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -23,7 +23,7 @@ pub struct TargetDescriptor {
 }
 
 impl TargetDescriptor {
-    /// The target admitted through NEXT-VERTICAL-13.
+    /// The target admitted through NEXT-VERTICAL-14.
     #[must_use]
     pub const fn linux_x86_64() -> Self {
         Self {
@@ -69,7 +69,14 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             _ => None,
         })
         .collect::<BTreeSet<_>>();
-    let owning_elements = buffer_elements
+    let list_elements = types
+        .entries()
+        .filter_map(|(ty, data)| match data {
+            TypeData::List { element } if !types.contains_generic(ty) => Some(*element),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    let fixed_elements = buffer_elements
         .union(&array_elements)
         .copied()
         .collect::<BTreeSet<_>>();
@@ -78,6 +85,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         .filter_map(|(ty, data)| match data {
             TypeData::Buffer { element }
             | TypeData::Array { element }
+            | TypeData::List { element }
             | TypeData::View { element, .. }
                 if !types.contains_generic(ty) =>
             {
@@ -86,9 +94,9 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             _ => None,
         })
         .collect::<BTreeSet<_>>();
-    let has_buffers = !owning_elements.is_empty();
+    let has_owners = !fixed_elements.is_empty() || !list_elements.is_empty();
     let mut output = String::new();
-    writeln!(output, "; Aether NEXT-VERTICAL-13").unwrap();
+    writeln!(output, "; Aether NEXT-VERTICAL-14").unwrap();
     writeln!(
         output,
         "; Internal bootstrap ABI and symbol mangling; not a public Aether ABI"
@@ -104,7 +112,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         }
     }
     writeln!(output, "declare void @llvm.trap() cold noreturn nounwind\n").unwrap();
-    if has_buffers {
+    if has_owners {
         emit_runtime_boundary(&mut output);
     }
 
@@ -171,7 +179,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     if !program.structs.is_empty() || !program.enums.is_empty() {
         writeln!(output).unwrap();
     }
-    for element in owning_elements {
+    for element in fixed_elements {
         let layout = layout_of(
             types,
             element,
@@ -186,6 +194,17 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     }
     for element in indexed_elements {
         emit_index_helper(&mut output, types, element);
+    }
+    for element in &list_elements {
+        let layout = layout_of(
+            types,
+            *element,
+            target.properties,
+            &program.structs,
+            &program.enums,
+        )
+        .expect("verified List element has concrete layout");
+        emit_list_helpers(&mut output, types, *element, layout.size, layout.align);
     }
 
     for function in &program.functions {
@@ -222,7 +241,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         "  %process_status = trunc i64 %aether_result to i32"
     )
     .unwrap();
-    if has_buffers {
+    if has_owners {
         writeln!(
             output,
             "  %allocation_balance = call i64 @aether_allocation_balance()"
@@ -275,10 +294,15 @@ fn emit_runtime_boundary(output: &mut String) {
          }\n\
          define internal void @aether_free(ptr %ptr, i64 %size, i64 %align) {\n\
          entry:\n\
+           %free_null = icmp eq ptr %ptr, null\n\
+           br i1 %free_null, label %free_done, label %free_owned\n\
+         free_owned:\n\
            %free_count = load i64, ptr @aether_heap_free_count\n\
            %free_next = add i64 %free_count, 1\n\
            store i64 %free_next, ptr @aether_heap_free_count\n\
            call void @free(ptr %ptr)\n\
+           br label %free_done\n\
+         free_done:\n\
            ret void\n\
          }\n\
          define internal i64 @aether_allocation_balance() {\n\
@@ -442,6 +466,84 @@ fn emit_index_helper(output: &mut String, types: &TypeArena, element: TypeId) {
     writeln!(output, "  ; structured Aether trap: IndexOutOfBounds").unwrap();
     writeln!(output, "  call void @llvm.trap()").unwrap();
     writeln!(output, "  unreachable\n}}\n").unwrap();
+}
+
+fn emit_list_helpers(
+    output: &mut String,
+    types: &TypeArena,
+    element: TypeId,
+    element_size: u64,
+    element_align: u64,
+) {
+    let suffix = mangle_type(types, element);
+    let element_ty = llvm_type(types, element);
+
+    writeln!(
+        output,
+        "define internal {{ ptr, i64, i64 }} @aether_list_new_{suffix}(i64 %length) {{"
+    )
+    .unwrap();
+    output.push_str("entry:\n  %empty = icmp eq i64 %length, 0\n  br i1 %empty, label %empty_result, label %nonempty\nempty_result:\n  ret { ptr, i64, i64 } zeroinitializer\nnonempty:\n");
+    writeln!(output, "  %size_checked = call {{ i64, i1 }} @llvm.umul.with.overflow.i64(i64 %length, i64 {element_size})").unwrap();
+    output.push_str("  %size = extractvalue { i64, i1 } %size_checked, 0\n  %size_overflow = extractvalue { i64, i1 } %size_checked, 1\n  br i1 %size_overflow, label %trap_allocation_size_overflow, label %allocate\nallocate:\n");
+    writeln!(
+        output,
+        "  %data = call ptr @aether_alloc(i64 %size, i64 {element_align})"
+    )
+    .unwrap();
+    output.push_str("  %with_data = insertvalue { ptr, i64, i64 } poison, ptr %data, 0\n  %with_length = insertvalue { ptr, i64, i64 } %with_data, i64 %length, 1\n  %descriptor = insertvalue { ptr, i64, i64 } %with_length, i64 %length, 2\n  ret { ptr, i64, i64 } %descriptor\ntrap_allocation_size_overflow:\n  ; structured Aether trap: AllocationSizeOverflow\n  call void @llvm.trap()\n  unreachable\n}\n\n");
+
+    writeln!(output, "define internal {{ ptr, i64, i64 }} @aether_list_reserve_{suffix}({{ ptr, i64, i64 }} %list, i64 %requested) {{").unwrap();
+    output.push_str("entry:\n  %capacity = extractvalue { ptr, i64, i64 } %list, 2\n  %enough = icmp uge i64 %capacity, %requested\n  br i1 %enough, label %unchanged, label %grow\nunchanged:\n  ret { ptr, i64, i64 } %list\ngrow:\n");
+    writeln!(output, "  %size_checked = call {{ i64, i1 }} @llvm.umul.with.overflow.i64(i64 %requested, i64 {element_size})").unwrap();
+    output.push_str("  %size = extractvalue { i64, i1 } %size_checked, 0\n  %size_overflow = extractvalue { i64, i1 } %size_checked, 1\n  br i1 %size_overflow, label %trap_allocation_size_overflow, label %allocate\nallocate:\n");
+    writeln!(
+        output,
+        "  %new_data = call ptr @aether_alloc(i64 %size, i64 {element_align})"
+    )
+    .unwrap();
+    output.push_str("  %old_data = extractvalue { ptr, i64, i64 } %list, 0\n  %length = extractvalue { ptr, i64, i64 } %list, 1\n  br label %copy_header\ncopy_header:\n  %index = phi i64 [ 0, %allocate ], [ %next, %copy_body ]\n  %more = icmp ult i64 %index, %length\n  br i1 %more, label %copy_body, label %copy_done\ncopy_body:\n");
+    writeln!(
+        output,
+        "  %old_slot = getelementptr inbounds {element_ty}, ptr %old_data, i64 %index"
+    )
+    .unwrap();
+    writeln!(output, "  %element = load {element_ty}, ptr %old_slot").unwrap();
+    writeln!(
+        output,
+        "  %new_slot = getelementptr inbounds {element_ty}, ptr %new_data, i64 %index"
+    )
+    .unwrap();
+    writeln!(output, "  store {element_ty} %element, ptr %new_slot").unwrap();
+    output.push_str("  %next = add i64 %index, 1\n  br label %copy_header\ncopy_done:\n");
+    writeln!(output, "  %old_size = mul i64 %capacity, {element_size}").unwrap();
+    writeln!(
+        output,
+        "  call void @aether_free(ptr %old_data, i64 %old_size, i64 {element_align})"
+    )
+    .unwrap();
+    output.push_str("  %with_data = insertvalue { ptr, i64, i64 } %list, ptr %new_data, 0\n  %grown = insertvalue { ptr, i64, i64 } %with_data, i64 %requested, 2\n  ret { ptr, i64, i64 } %grown\ntrap_allocation_size_overflow:\n  ; structured Aether trap: AllocationSizeOverflow\n  call void @llvm.trap()\n  unreachable\n}\n\n");
+
+    writeln!(output, "define internal {{ ptr, i64, i64 }} @aether_list_push_{suffix}({{ ptr, i64, i64 }} %list, {element_ty} %value) {{").unwrap();
+    output.push_str("entry:\n  %length = extractvalue { ptr, i64, i64 } %list, 1\n  %capacity = extractvalue { ptr, i64, i64 } %list, 2\n  %required_checked = call { i64, i1 } @llvm.uadd.with.overflow.i64(i64 %length, i64 1)\n  %required = extractvalue { i64, i1 } %required_checked, 0\n  %required_overflow = extractvalue { i64, i1 } %required_checked, 1\n  br i1 %required_overflow, label %trap_allocation_size_overflow, label %check_capacity\ncheck_capacity:\n  %grow_needed = icmp ugt i64 %required, %capacity\n  br i1 %grow_needed, label %grow, label %stable\ngrow:\n  %double_checked = call { i64, i1 } @llvm.umul.with.overflow.i64(i64 %capacity, i64 2)\n  %doubled = extractvalue { i64, i1 } %double_checked, 0\n  %double_overflow = extractvalue { i64, i1 } %double_checked, 1\n  br i1 %double_overflow, label %trap_allocation_size_overflow, label %choose_capacity\nchoose_capacity:\n  %was_empty = icmp eq i64 %capacity, 0\n  %candidate = select i1 %was_empty, i64 1, i64 %doubled\n  %candidate_small = icmp ult i64 %candidate, %required\n  %new_capacity = select i1 %candidate_small, i64 %required, i64 %candidate\n");
+    writeln!(output, "  %grown = call {{ ptr, i64, i64 }} @aether_list_reserve_{suffix}({{ ptr, i64, i64 }} %list, i64 %new_capacity)").unwrap();
+    output.push_str("  br label %ready\nstable:\n  br label %ready\nready:\n  %storage = phi { ptr, i64, i64 } [ %list, %stable ], [ %grown, %choose_capacity ]\n  %data = extractvalue { ptr, i64, i64 } %storage, 0\n");
+    writeln!(
+        output,
+        "  %slot = getelementptr inbounds {element_ty}, ptr %data, i64 %length"
+    )
+    .unwrap();
+    writeln!(output, "  store {element_ty} %value, ptr %slot").unwrap();
+    output.push_str("  %result = insertvalue { ptr, i64, i64 } %storage, i64 %required, 1\n  ret { ptr, i64, i64 } %result\ntrap_allocation_size_overflow:\n  ; structured Aether trap: AllocationSizeOverflow\n  call void @llvm.trap()\n  unreachable\n}\n\n");
+
+    writeln!(output, "define internal ptr @aether_list_index_{suffix}({{ ptr, i64, i64 }} %descriptor, i64 %index) {{").unwrap();
+    output.push_str("entry:\n  %length = extractvalue { ptr, i64, i64 } %descriptor, 1\n  %in_bounds = icmp ult i64 %index, %length\n  br i1 %in_bounds, label %valid, label %trap_index_out_of_bounds\nvalid:\n  %data = extractvalue { ptr, i64, i64 } %descriptor, 0\n");
+    writeln!(
+        output,
+        "  %element = getelementptr inbounds {element_ty}, ptr %data, i64 %index"
+    )
+    .unwrap();
+    output.push_str("  ret ptr %element\ntrap_index_out_of_bounds:\n  ; structured Aether trap: IndexOutOfBounds\n  call void @llvm.trap()\n  unreachable\n}\n\n");
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -640,14 +742,32 @@ fn emit_function(
                     .unwrap();
                 }
                 SsaOp::View { source, .. } => {
-                    let (descriptor, _) = emit_descriptor_value(
+                    let (descriptor, source_ty) = emit_place_value(
                         output,
                         function,
                         source,
                         instruction.result.0,
                         types,
+                        structs,
                     );
-                    writeln!(output, "  %v{} = select i1 true, {{ ptr, i64 }} {descriptor}, {{ ptr, i64 }} {descriptor}", instruction.result.0).unwrap();
+                    if types.list_element(source_ty).is_some() {
+                        writeln!(
+                            output,
+                            "  %view{}_data = extractvalue {{ ptr, i64, i64 }} {descriptor}, 0",
+                            instruction.result.0
+                        )
+                        .unwrap();
+                        writeln!(
+                            output,
+                            "  %view{}_length = extractvalue {{ ptr, i64, i64 }} {descriptor}, 1",
+                            instruction.result.0
+                        )
+                        .unwrap();
+                        writeln!(output, "  %view{}_with_data = insertvalue {{ ptr, i64 }} poison, ptr %view{}_data, 0", instruction.result.0, instruction.result.0).unwrap();
+                        writeln!(output, "  %v{} = insertvalue {{ ptr, i64 }} %view{}_with_data, i64 %view{}_length, 1", instruction.result.0, instruction.result.0, instruction.result.0).unwrap();
+                    } else {
+                        writeln!(output, "  %v{} = select i1 true, {{ ptr, i64 }} {descriptor}, {{ ptr, i64 }} {descriptor}", instruction.result.0).unwrap();
+                    }
                 }
                 SsaOp::Drop { owner } => {
                     let (value, owner_ty) = emit_place_value(
@@ -765,6 +885,97 @@ fn emit_function(
                         instruction.result.0
                     )
                     .unwrap();
+                }
+                SsaOp::ListInit {
+                    element_type,
+                    elements,
+                    ..
+                } => {
+                    if elements.is_empty() {
+                        writeln!(output, "  %v{} = select i1 true, {{ ptr, i64, i64 }} zeroinitializer, {{ ptr, i64, i64 }} zeroinitializer", instruction.result.0).unwrap();
+                    } else {
+                        writeln!(
+                            output,
+                            "  %v{} = call {{ ptr, i64, i64 }} @aether_list_new_{}(i64 {})",
+                            instruction.result.0,
+                            mangle_type(types, *element_type),
+                            elements.len()
+                        )
+                        .unwrap();
+                    }
+                    if !elements.is_empty() {
+                        writeln!(
+                            output,
+                            "  %list{}_data = extractvalue {{ ptr, i64, i64 }} %v{}, 0",
+                            instruction.result.0, instruction.result.0
+                        )
+                        .unwrap();
+                    }
+                    for (index, element) in elements.iter().enumerate() {
+                        writeln!(output, "  %list{}_slot{} = getelementptr inbounds {}, ptr %list{}_data, i64 {}", instruction.result.0, index, llvm_type(types, *element_type), instruction.result.0, index).unwrap();
+                        writeln!(
+                            output,
+                            "  store {} {}, ptr %list{}_slot{}",
+                            llvm_type(types, *element_type),
+                            llvm_operand(element),
+                            instruction.result.0,
+                            index
+                        )
+                        .unwrap();
+                    }
+                }
+                SsaOp::ListLength { source } | SsaOp::ListCapacity { source } => {
+                    let (descriptor, _) = emit_place_value(
+                        output,
+                        function,
+                        source,
+                        instruction.result.0,
+                        types,
+                        structs,
+                    );
+                    let field = if matches!(instruction.op, SsaOp::ListLength { .. }) {
+                        1
+                    } else {
+                        2
+                    };
+                    writeln!(
+                        output,
+                        "  %v{} = extractvalue {{ ptr, i64, i64 }} {descriptor}, {field}",
+                        instruction.result.0
+                    )
+                    .unwrap();
+                }
+                SsaOp::ListPush { source, value, .. } => {
+                    let (descriptor, list_ty) = emit_place_value(
+                        output,
+                        function,
+                        source,
+                        instruction.result.0,
+                        types,
+                        structs,
+                    );
+                    let element = types
+                        .list_element(list_ty)
+                        .expect("verified List push source");
+                    writeln!(output, "  %v{} = call {{ ptr, i64, i64 }} @aether_list_push_{}({{ ptr, i64, i64 }} {descriptor}, {} {})", instruction.result.0, mangle_type(types, element), llvm_type(types, element), llvm_operand(value)).unwrap();
+                }
+                SsaOp::ListReserve {
+                    source,
+                    requested_capacity,
+                    ..
+                } => {
+                    let (descriptor, list_ty) = emit_place_value(
+                        output,
+                        function,
+                        source,
+                        instruction.result.0,
+                        types,
+                        structs,
+                    );
+                    let element = types
+                        .list_element(list_ty)
+                        .expect("verified List reserve source");
+                    writeln!(output, "  %v{} = call {{ ptr, i64, i64 }} @aether_list_reserve_{}({{ ptr, i64, i64 }} {descriptor}, i64 {})", instruction.result.0, mangle_type(types, element), llvm_operand(requested_capacity)).unwrap();
                 }
                 SsaOp::Aggregate {
                     struct_id: _,
@@ -1846,6 +2057,10 @@ fn mangle_symbol_type(
             "A{}",
             mangle_symbol_type(types, *element, modules, structs, enums)
         ),
+        TypeData::List { element } => format!(
+            "L{}",
+            mangle_symbol_type(types, *element, modules, structs, enums)
+        ),
         TypeData::View { element, mutable } => format!(
             "V{}{}",
             if *mutable { "m" } else { "s" },
@@ -1890,6 +2105,7 @@ fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
         TypeData::Buffer { .. } | TypeData::Array { .. } | TypeData::View { .. } => {
             "{ ptr, i64 }".into()
         }
+        TypeData::List { .. } => "{ ptr, i64, i64 }".into(),
         TypeData::GenericParam(_) => panic!("unresolved generic parameter reached LLVM"),
     }
 }
@@ -1924,6 +2140,7 @@ fn mangle_type(types: &TypeArena, ty: TypeId) -> String {
         ),
         TypeData::Buffer { element } => format!("B{}", mangle_type(types, *element)),
         TypeData::Array { element } => format!("A{}", mangle_type(types, *element)),
+        TypeData::List { element } => format!("L{}", mangle_type(types, *element)),
         TypeData::View { element, mutable } => format!(
             "V{}{}",
             if *mutable { "m" } else { "s" },
@@ -1962,6 +2179,7 @@ fn llvm_projection_indices(
         .join(", ")
 }
 
+#[allow(clippy::too_many_lines)]
 fn emit_place_pointer(
     output: &mut String,
     function: &SsaFunction,
@@ -1994,13 +2212,23 @@ fn emit_place_pointer(
                 || types.view_info(descriptor_ty).is_some()
         );
         let mut pointer = format!("%place{result}_index");
-        writeln!(
-            output,
-            "  {pointer} = call ptr @aether_index_{}({{ ptr, i64 }} {descriptor}, i64 {})",
-            mangle_type(types, *element_type),
-            llvm_operand(index)
-        )
-        .unwrap();
+        if types.list_element(descriptor_ty).is_some() {
+            writeln!(
+                output,
+                "  {pointer} = call ptr @aether_list_index_{}({{ ptr, i64, i64 }} {descriptor}, i64 {})",
+                mangle_type(types, *element_type),
+                llvm_operand(index)
+            )
+            .unwrap();
+        } else {
+            writeln!(
+                output,
+                "  {pointer} = call ptr @aether_index_{}({{ ptr, i64 }} {descriptor}, i64 {})",
+                mangle_type(types, *element_type),
+                llvm_operand(index)
+            )
+            .unwrap();
+        }
         let mut ty = *element_type;
         for (field_position, projection) in place.projections[position + 1..].iter().enumerate() {
             let SsaPlaceProjection::Field(field_id) = projection else {
@@ -2195,6 +2423,38 @@ fn emit_drop_value(
             writeln!(
                 output,
                 "  %{prefix}_size = mul i64 %{prefix}_length, {}",
+                layout.size
+            )
+            .unwrap();
+            writeln!(
+                output,
+                "  call void @aether_free(ptr %{prefix}_data, i64 %{prefix}_size, i64 {})",
+                layout.align
+            )
+            .unwrap();
+        }
+        TypeData::List { element } => {
+            let layout = layout_of(
+                types,
+                *element,
+                TargetProperties::LINUX_X86_64,
+                structs,
+                enums,
+            )
+            .expect("verified List element layout");
+            writeln!(
+                output,
+                "  %{prefix}_data = extractvalue {{ ptr, i64, i64 }} {value}, 0"
+            )
+            .unwrap();
+            writeln!(
+                output,
+                "  %{prefix}_capacity = extractvalue {{ ptr, i64, i64 }} {value}, 2"
+            )
+            .unwrap();
+            writeln!(
+                output,
+                "  %{prefix}_size = mul i64 %{prefix}_capacity, {}",
                 layout.size
             )
             .unwrap();

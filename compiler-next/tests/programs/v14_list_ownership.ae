@@ -1,0 +1,62 @@
+struct Point {
+    int x;
+    int y;
+}
+
+struct Dataset {
+    List<float64> values;
+    int count;
+}
+
+struct Holder<T> {
+    T value;
+}
+
+enum Data {
+    Empty,
+    Values(List<int>),
+}
+
+List<int> make_values() {
+    List<int> values = {10, 20, 30};
+    return values;
+}
+
+int append(ref mut List<int> values, int value) {
+    push(*values, value);
+    return 0;
+}
+
+int consume(List<int> values) {
+    return values[0] + values[3];
+}
+
+int consume_data(Data data) {
+    match (data) {
+        Data.Empty => { return 0; }
+        Data.Values(values) => { return values[1]; }
+    }
+}
+
+int conditional(bool move_it) {
+    List<int> source = {7};
+    if (move_it) {
+        List<int> destination = source;
+    }
+    return 1;
+}
+
+int main() {
+    List<int> values = make_values();
+    int ignored = append(&mut values, 40);
+    List<int> moved = values;
+    int consumed = consume(moved);
+    Dataset dataset = Dataset({1, 2}, 2);
+    push(dataset.values, 3);
+    Data data = Data.Values({4, 5});
+    int payload = consume_data(data);
+    Holder<List<int>> holder = Holder<List<int>>({6, 7});
+    List<Point> points = {Point(1, 2), Point(3, 4)};
+    return consumed + payload + holder.value[1] + points[1].y + int(dataset.values[2])
+        + conditional(true) + conditional(false) + ignored - 71;
+}

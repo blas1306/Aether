@@ -140,6 +140,10 @@ pub fn layout_of(
             size: u64::from(target.pointer_width / 4),
             align: u64::from(target.pointer_width / 8),
         },
+        TypeData::List { .. } => TypeLayout {
+            size: 3 * u64::from(target.pointer_width / 8),
+            align: u64::from(target.pointer_width / 8),
+        },
         TypeData::GenericParam(_) => return None,
     })
 }
@@ -196,6 +200,9 @@ pub fn format_type(
         }
         Some(TypeData::Array { element }) => {
             format!("Array<{}>", format_type(types, *element, structs, enums))
+        }
+        Some(TypeData::List { element }) => {
+            format!("List<{}>", format_type(types, *element, structs, enums))
         }
         Some(TypeData::View { element, mutable }) => format!(
             "{}<{}>",
@@ -475,6 +482,16 @@ pub enum HirStmtKind {
         place: HirPlace,
         value: HirExpr,
     },
+    ListPush {
+        target: HirPlace,
+        value: HirExpr,
+        mutation: StructuralMutation,
+    },
+    ListReserve {
+        target: HirPlace,
+        requested_capacity: HirExpr,
+        mutation: StructuralMutation,
+    },
     If {
         condition: HirExpr,
         then_block: HirBlock,
@@ -495,6 +512,14 @@ pub enum HirStmtKind {
         value: HirExpr,
         drops: Vec<HirDrop>,
     },
+}
+
+/// Semantic marker for operations that may invalidate addresses into a
+/// List's element storage, independently of its runtime spare capacity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StructuralMutation {
+    Push,
+    Reserve,
 }
 
 /// Fully resolved ownership behavior of an enum match.
@@ -602,6 +627,17 @@ pub enum HirExprKind {
     },
     /// Bootstrap `length(array-place)` query, resolved below HIR.
     ArrayLength {
+        source: HirPlace,
+    },
+    /// Expected-type-resolved dynamic collection construction.
+    ListInit {
+        element_type: TypeId,
+        elements: Vec<HirExpr>,
+    },
+    ListLength {
+        source: HirPlace,
+    },
+    ListCapacity {
         source: HirPlace,
     },
     View {
@@ -1083,18 +1119,19 @@ pub fn collect_program_signatures(
                 .collect(),
         );
     }
-    if let Some((container, element, is_array)) = types.entries().find_map(|(container, data)| {
-        let (element, is_array) = match data {
-            TypeData::Buffer { element } | TypeData::View { element, .. } => (*element, false),
-            TypeData::Array { element } => (*element, true),
+    if let Some((container, element, kind)) = types.entries().find_map(|(container, data)| {
+        let (element, kind) = match data {
+            TypeData::Buffer { element } | TypeData::View { element, .. } => (*element, 0_u8),
+            TypeData::Array { element } => (*element, 1),
+            TypeData::List { element } => (*element, 2),
             _ => return None,
         };
-        let admitted = if is_array {
-            types.is_admitted_array_element(element)
-        } else {
-            types.is_admitted_buffer_element(element)
+        let admitted = match kind {
+            1 => types.is_admitted_array_element(element),
+            2 => types.is_admitted_list_element(element),
+            _ => types.is_admitted_buffer_element(element),
         };
-        (!admitted).then_some((container, element, is_array))
+        (!admitted).then_some((container, element, kind))
     }) {
         let location = structs
             .iter()
@@ -1114,7 +1151,11 @@ pub fn collect_program_signatures(
                 })
             });
         let diagnostic = Diagnostic::new(
-            if is_array { "E0304" } else { "E0280" },
+            match kind {
+                1 => "E0304",
+                2 => "E0310",
+                _ => "E0280",
+            },
             Phase::Semantic,
             DiagnosticCategory::Type,
             format!(
@@ -1464,7 +1505,13 @@ fn resolve_type_in_module(
         let element = arguments[0];
         if types.contains_generic(element) {
             return Err(Diagnostic::new(
-                if ty.name == "Array" { "E0304" } else { "E0283" },
+                if ty.name == "List" {
+                    "E0310"
+                } else if ty.name == "Array" {
+                    "E0304"
+                } else {
+                    "E0283"
+                },
                 Phase::Semantic,
                 DiagnosticCategory::Type,
                 format!(
@@ -1505,6 +1552,23 @@ fn resolve_type_in_module(
                         Phase::Semantic,
                         DiagnosticCategory::Type,
                         "Vertical-13 Array elements must be concrete Copy/no-drop values without borrowed or owning substructure",
+                        Some(ty.span),
+                    ))
+                }
+            }
+            "List" => {
+                let deferred_aggregate = types
+                    .properties(element)
+                    .is_some_and(|properties| !properties.is_known)
+                    && (types.struct_id(element).is_some() || types.enum_id(element).is_some());
+                if types.is_admitted_list_element(element) || deferred_aggregate {
+                    Ok(types.intern_list(element))
+                } else {
+                    Err(Diagnostic::new(
+                        "E0310",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "Vertical-14 List elements must be concrete Copy/no-drop values without borrowed or owning substructure",
                         Some(ty.span),
                     ))
                 }
@@ -1604,7 +1668,7 @@ fn generic_arity(ty: &AstType, expected: usize) -> Diagnostic {
 }
 
 fn intrinsic_type_arity(name: &str) -> Option<usize> {
-    matches!(name, "Buffer" | "Array" | "View" | "ViewMut").then_some(1)
+    matches!(name, "Buffer" | "Array" | "List" | "View" | "ViewMut").then_some(1)
 }
 
 fn restricted_generic_argument(span: Span) -> Diagnostic {
@@ -1886,6 +1950,13 @@ fn compute_aggregate_layouts(
                 let bytes = u64::from(target.pointer_width / 8);
                 TypeLayout {
                     size: bytes * 2,
+                    align: bytes,
+                }
+            }
+            TypeData::List { .. } => {
+                let bytes = u64::from(target.pointer_width / 8);
+                TypeLayout {
+                    size: bytes * 3,
                     align: bytes,
                 }
             }
@@ -2331,6 +2402,25 @@ impl Monomorphizer<'_> {
                             place: self.substitute_place(place, substitution)?,
                             value: self.substitute_expr(value, substitution)?,
                         },
+                        HirStmtKind::ListPush {
+                            target,
+                            value,
+                            mutation,
+                        } => HirStmtKind::ListPush {
+                            target: self.substitute_place(target, substitution)?,
+                            value: self.substitute_expr(value, substitution)?,
+                            mutation: *mutation,
+                        },
+                        HirStmtKind::ListReserve {
+                            target,
+                            requested_capacity,
+                            mutation,
+                        } => HirStmtKind::ListReserve {
+                            target: self.substitute_place(target, substitution)?,
+                            requested_capacity: self
+                                .substitute_expr(requested_capacity, substitution)?,
+                            mutation: *mutation,
+                        },
                         HirStmtKind::If {
                             condition,
                             then_block,
@@ -2509,6 +2599,22 @@ impl Monomorphizer<'_> {
             HirExprKind::ArrayLength { source } => HirExprKind::ArrayLength {
                 source: self.substitute_place(source, substitution)?,
             },
+            HirExprKind::ListInit {
+                element_type,
+                elements,
+            } => HirExprKind::ListInit {
+                element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+                elements: elements
+                    .iter()
+                    .map(|element| self.substitute_expr(element, substitution))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+            HirExprKind::ListLength { source } => HirExprKind::ListLength {
+                source: self.substitute_place(source, substitution)?,
+            },
+            HirExprKind::ListCapacity { source } => HirExprKind::ListCapacity {
+                source: self.substitute_place(source, substitution)?,
+            },
             HirExprKind::View { source, mutable } => HirExprKind::View {
                 source: self.substitute_place(source, substitution)?,
                 mutable: *mutable,
@@ -2605,6 +2711,7 @@ fn type_depth(types: &TypeArena, ty: TypeId) -> usize {
         Some(
             TypeData::Buffer { element }
             | TypeData::Array { element }
+            | TypeData::List { element }
             | TypeData::View { element, .. },
         ) => 1 + type_depth(types, *element),
         Some(TypeData::StructInstance(_, args) | TypeData::EnumInstance(_, args)) => {
@@ -2634,6 +2741,7 @@ fn type_contains(types: &TypeArena, outer: TypeId, needle: TypeId) -> bool {
             Some(
                 TypeData::Buffer { element }
                 | TypeData::Array { element }
+                | TypeData::List { element }
                 | TypeData::View { element, .. },
             ) => type_contains(types, *element, needle),
             _ => false,
@@ -2690,6 +2798,13 @@ fn compute_concrete_layouts(
                 let bytes = u64::from(target.pointer_width / 8);
                 Some(TypeLayout {
                     size: bytes * 2,
+                    align: bytes,
+                })
+            }
+            TypeData::List { .. } => {
+                let bytes = u64::from(target.pointer_width / 8);
+                Some(TypeLayout {
+                    size: bytes * 3,
                     align: bytes,
                 })
             }
@@ -2903,6 +3018,7 @@ struct OwnershipAnalysis<'a> {
     provenance: Vec<Option<LocalId>>,
     active: Vec<LocalId>,
     borrowed: Vec<BTreeSet<LocalId>>,
+    storage_borrowed: Vec<BTreeSet<LocalId>>,
     buffer_lengths: Vec<Option<u64>>,
 }
 
@@ -2919,6 +3035,7 @@ fn synthesize_ownership(
         provenance: vec![None; locals.len()],
         active: Vec::new(),
         borrowed: Vec::new(),
+        storage_borrowed: Vec::new(),
         buffer_lengths: vec![None; locals.len()],
     };
     for parameter in parameters {
@@ -2943,6 +3060,12 @@ impl OwnershipAnalysis<'_> {
 
     fn is_borrowed(&self, local: LocalId) -> bool {
         self.borrowed.iter().any(|scope| scope.contains(&local))
+    }
+
+    fn has_live_storage_borrow(&self, local: LocalId) -> bool {
+        self.storage_borrowed
+            .iter()
+            .any(|scope| scope.contains(&local))
     }
 
     fn require_owned(&self, local: LocalId, span: Span) -> Result<(), Vec<Diagnostic>> {
@@ -2988,6 +3111,7 @@ impl OwnershipAnalysis<'_> {
     fn block(&mut self, block: &mut HirBlock, nested: bool) -> Result<(), Vec<Diagnostic>> {
         let active_start = self.active.len();
         self.borrowed.push(BTreeSet::new());
+        self.storage_borrowed.push(BTreeSet::new());
         for statement in &mut block.statements {
             match &mut statement.kind {
                 HirStmtKind::Nop => {}
@@ -2996,6 +3120,9 @@ impl OwnershipAnalysis<'_> {
                     if let Some(owner) = self.derived_owner(initializer) {
                         self.provenance[local.0 as usize] = Some(owner);
                         self.borrowed.last_mut().unwrap().insert(owner);
+                        if self.is_list_storage_borrow(initializer) {
+                            self.storage_borrowed.last_mut().unwrap().insert(owner);
+                        }
                     }
                     if !self.types.is_copy(self.locals[local.0 as usize].ty) {
                         self.buffer_lengths[local.0 as usize] = self.known_length(initializer);
@@ -3026,6 +3153,21 @@ impl OwnershipAnalysis<'_> {
                         self.state[local.0 as usize] = OwnerState::Owned;
                         self.buffer_lengths[local.0 as usize] = self.known_length(value);
                     }
+                }
+                HirStmtKind::ListPush { target, value, .. } => {
+                    self.expr(value)?;
+                    self.structural_mutation(target, statement.span)?;
+                    if let Some(local) = self.local_root(target) {
+                        self.buffer_lengths[local.0 as usize] = None;
+                    }
+                }
+                HirStmtKind::ListReserve {
+                    target,
+                    requested_capacity,
+                    ..
+                } => {
+                    self.expr(requested_capacity)?;
+                    self.structural_mutation(target, statement.span)?;
                 }
                 HirStmtKind::Return { value, drops } => {
                     self.expr(value)?;
@@ -3216,8 +3358,10 @@ impl OwnershipAnalysis<'_> {
         }
         self.active.truncate(active_start);
         self.borrowed.pop();
+        self.storage_borrowed.pop();
         if !nested {
             debug_assert!(self.borrowed.is_empty());
+            debug_assert!(self.storage_borrowed.is_empty());
         }
         Ok(())
     }
@@ -3246,16 +3390,39 @@ impl OwnershipAnalysis<'_> {
                 self.expr(length)?;
                 self.expr(initial)
             }
-            HirExprKind::ArrayInit { elements, .. } => {
+            HirExprKind::ArrayInit { elements, .. } | HirExprKind::ListInit { elements, .. } => {
                 for element in elements {
                     self.expr(element)?;
                 }
                 Ok(())
             }
-            HirExprKind::ArrayLength { source } => self.place(source, expr.span),
+            HirExprKind::ArrayLength { source }
+            | HirExprKind::ListLength { source }
+            | HirExprKind::ListCapacity { source } => self.place(source, expr.span),
             HirExprKind::Call { args, .. } => {
                 for argument in args {
                     self.expr(argument)?;
+                    if self
+                        .types
+                        .reference_info(argument.ty)
+                        .is_some_and(|(pointee, mutable)| {
+                            mutable && self.types.list_element(pointee).is_some()
+                        })
+                        && let Some(owner) = self.derived_owner(argument).or_else(|| {
+                            if let HirExprKind::Borrow { place, .. } = &argument.kind {
+                                self.owner_of_place(place)
+                            } else {
+                                None
+                            }
+                        })
+                        && self.has_live_storage_borrow(owner)
+                    {
+                        return Err(self.error(
+                            "E0313",
+                            "cannot pass a writable List reference to a call while a derived element reference/view remains live",
+                            argument.span,
+                        ));
+                    }
                 }
                 Ok(())
             }
@@ -3283,7 +3450,9 @@ impl OwnershipAnalysis<'_> {
 
     fn place(&mut self, place: &HirPlace, span: Span) -> Result<(), Vec<Diagnostic>> {
         if let Some(owner) = self.owner_of_place(place) {
-            self.require_owned(owner, span)?;
+            if !self.types.is_copy(self.locals[owner.0 as usize].ty) {
+                self.require_owned(owner, span)?;
+            }
         }
         if let HirPlaceBase::Dereference { reference, .. } = &place.base {
             self.expr(reference)?;
@@ -3316,7 +3485,13 @@ impl OwnershipAnalysis<'_> {
                     Some(*local)
                 }
             }
-            HirPlaceBase::Dereference { reference, .. } => self.derived_owner(reference),
+            HirPlaceBase::Dereference { reference, .. } => self.derived_owner(reference).or({
+                if let HirExprKind::Local(local) = reference.kind {
+                    Some(local)
+                } else {
+                    None
+                }
+            }),
         }
     }
 
@@ -3330,6 +3505,35 @@ impl OwnershipAnalysis<'_> {
         }
     }
 
+    fn local_root(&self, place: &HirPlace) -> Option<LocalId> {
+        self.owner_of_place(place)
+    }
+
+    fn structural_mutation(&mut self, place: &HirPlace, span: Span) -> Result<(), Vec<Diagnostic>> {
+        self.place(place, span)?;
+        if let Some(owner) = self.owner_of_place(place)
+            && self.has_live_storage_borrow(owner)
+        {
+            return Err(self.error(
+                "E0313",
+                "cannot structurally mutate List storage while a derived element reference/view remains live",
+                span,
+            ));
+        }
+        Ok(())
+    }
+
+    fn is_list_storage_borrow(&self, expr: &HirExpr) -> bool {
+        match &expr.kind {
+            HirExprKind::Borrow { place, .. } => place
+                .projections
+                .iter()
+                .any(|projection| matches!(projection, HirPlaceProjection::Index { .. })),
+            HirExprKind::View { source, .. } => self.types.list_element(source.ty).is_some(),
+            _ => false,
+        }
+    }
+
     fn known_length(&self, expr: &HirExpr) -> Option<u64> {
         match &expr.kind {
             HirExprKind::BufferInit { length, .. } | HirExprKind::ArrayFill { length, .. } => {
@@ -3340,6 +3544,9 @@ impl OwnershipAnalysis<'_> {
             }
             HirExprKind::ArrayInit { elements, .. } => {
                 Some(u64::try_from(elements.len()).expect("Array literal length fits u64"))
+            }
+            HirExprKind::ListInit { elements, .. } => {
+                Some(u64::try_from(elements.len()).expect("List literal length fits u64"))
             }
             HirExprKind::Move(local) | HirExprKind::Local(local) => {
                 self.buffer_lengths[local.0 as usize]
@@ -3649,6 +3856,7 @@ impl Analyzer<'_> {
                         .expr;
                     HirStmtKind::Assign { place, value }
                 }
+                AstStmtKind::Expr(expression) => self.effect_statement(expression)?,
                 AstStmtKind::If {
                     condition,
                     then_block,
@@ -3687,6 +3895,60 @@ impl Analyzer<'_> {
             exit_drops: Vec::new(),
             span: b.span,
         })
+    }
+
+    fn effect_statement(&mut self, expression: &AstExpr) -> Result<HirStmtKind, Vec<Diagnostic>> {
+        let AstExprKind::Call {
+            callee,
+            type_arguments,
+            args,
+        } = &expression.kind
+        else {
+            return Err(vec![Diagnostic::new(
+                "E0311",
+                Phase::Semantic,
+                DiagnosticCategory::Unsupported,
+                "only push(...) and reserve(...) are admitted as effect statements",
+                Some(expression.span),
+            )]);
+        };
+        if !type_arguments.is_empty()
+            || args.len() != 2
+            || !matches!(callee.as_str(), "push" | "reserve")
+        {
+            return Err(vec![Diagnostic::new(
+                "E0311",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "push/reserve expect exactly a writable List<T> place and one value, with no type arguments",
+                Some(expression.span),
+            )]);
+        }
+        let target = self.resolve_expr_place(&args[0], true)?;
+        let Some(element) = self.types.list_element(target.ty) else {
+            return Err(vec![Diagnostic::new(
+                "E0311",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!("{callee} target must be a writable List<T> place"),
+                Some(args[0].span),
+            )]);
+        };
+        if callee == "push" {
+            let value = self.expression(&args[1], Some(element))?.expr;
+            Ok(HirStmtKind::ListPush {
+                target,
+                value,
+                mutation: StructuralMutation::Push,
+            })
+        } else {
+            let requested_capacity = self.expression(&args[1], Some(TypeId::USIZE))?.expr;
+            Ok(HirStmtKind::ListReserve {
+                target,
+                requested_capacity,
+                mutation: StructuralMutation::Reserve,
+            })
+        }
     }
 
     fn match_statement(
@@ -3992,6 +4254,8 @@ impl Analyzer<'_> {
                         (element, true)
                     } else if let Some(element) = self.types.array_element(place.ty) {
                         (element, true)
+                    } else if let Some(element) = self.types.list_element(place.ty) {
+                        (element, true)
                     } else if let Some((element, mutable)) = self.types.view_info(place.ty) {
                         (element, mutable)
                     } else {
@@ -4000,7 +4264,7 @@ impl Analyzer<'_> {
                             Phase::Semantic,
                             DiagnosticCategory::Type,
                             format!(
-                                "checked indexing requires Buffer/Array/View, found {}",
+                                "checked indexing requires Buffer/Array/List/View, found {}",
                                 self.type_name(place.ty)
                             ),
                             Some(expression.span),
@@ -4145,7 +4409,10 @@ impl Analyzer<'_> {
                     return self.array_fill(type_arguments, args, e.span, expected);
                 }
                 if callee == "length" {
-                    return self.array_length(type_arguments, args, e.span, expected);
+                    return self.collection_length(type_arguments, args, e.span, expected);
+                }
+                if callee == "capacity" {
+                    return self.list_capacity(type_arguments, args, e.span, expected);
                 }
                 if callee == "view" || callee == "view_mut" {
                     return self.view_init(
@@ -4449,6 +4716,7 @@ impl Analyzer<'_> {
                 | TypeData::Reference { .. }
                 | TypeData::Buffer { .. }
                 | TypeData::Array { .. }
+                | TypeData::List { .. }
                 | TypeData::View { .. },
             )
             | None => {
@@ -4577,38 +4845,50 @@ impl Analyzer<'_> {
         span: Span,
         expected: Option<TypeId>,
     ) -> Result<Checked, Vec<Diagnostic>> {
-        let Some(array_type) = expected else {
+        let Some(collection_type) = expected else {
             return Err(vec![Diagnostic::new(
                 "E0305",
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                "collection literal requires an expected Array<T> type",
+                "collection literal requires an expected Array<T> or List<T> type",
                 Some(span),
             )]);
         };
-        let Some(element_type) = self.types.array_element(array_type) else {
-            return Err(vec![Diagnostic::new(
-                "E0305",
-                Phase::Semantic,
-                DiagnosticCategory::Type,
-                format!(
-                    "collection literal cannot initialize {}; Vertical-13 resolves it only as Array<T>",
-                    self.type_name(array_type)
-                ),
-                Some(span),
-            )]);
-        };
+        let (element_type, is_list) =
+            if let Some(element) = self.types.array_element(collection_type) {
+                (element, false)
+            } else if let Some(element) = self.types.list_element(collection_type) {
+                (element, true)
+            } else {
+                return Err(vec![Diagnostic::new(
+                    "E0305",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    format!(
+                        "collection literal cannot initialize {}; expected Array<T> or List<T>",
+                        self.type_name(collection_type)
+                    ),
+                    Some(span),
+                )]);
+            };
         let mut resolved = Vec::with_capacity(elements.len());
         for element in elements {
             resolved.push(self.expression(element, Some(element_type))?.expr);
         }
         Ok(Checked {
             expr: HirExpr {
-                kind: HirExprKind::ArrayInit {
-                    element_type,
-                    elements: resolved,
+                kind: if is_list {
+                    HirExprKind::ListInit {
+                        element_type,
+                        elements: resolved,
+                    }
+                } else {
+                    HirExprKind::ArrayInit {
+                        element_type,
+                        elements: resolved,
+                    }
                 },
-                ty: array_type,
+                ty: collection_type,
                 span,
             },
             constant: None,
@@ -4689,7 +4969,7 @@ impl Analyzer<'_> {
         })
     }
 
-    fn array_length(
+    fn collection_length(
         &mut self,
         type_arguments: &[AstType],
         args: &[AstExpr],
@@ -4701,29 +4981,73 @@ impl Analyzer<'_> {
                 "E0307",
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                "length expects exactly one Array<T> place and no type arguments",
+                "length expects exactly one Array<T> or List<T> place and no type arguments",
                 Some(span),
             )]);
         }
         let source = self.resolve_expr_place(&args[0], false)?;
-        if self.types.array_element(source.ty).is_none() {
+        let is_list = self.types.list_element(source.ty).is_some();
+        if self.types.array_element(source.ty).is_none() && !is_list {
             return Err(vec![Diagnostic::new(
                 "E0307",
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                "length source must be an Array<T> place",
+                "length source must be an Array<T> or List<T> place",
                 Some(args[0].span),
             )]);
         }
         let checked = Checked {
             expr: HirExpr {
-                kind: HirExprKind::ArrayLength { source },
+                kind: if is_list {
+                    HirExprKind::ListLength { source }
+                } else {
+                    HirExprKind::ArrayLength { source }
+                },
                 ty: TypeId::USIZE,
                 span,
             },
             constant: None,
         };
         self.coerce(checked, expected)
+    }
+
+    fn list_capacity(
+        &mut self,
+        type_arguments: &[AstType],
+        args: &[AstExpr],
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        if !type_arguments.is_empty() || args.len() != 1 {
+            return Err(vec![Diagnostic::new(
+                "E0312",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "capacity expects exactly one List<T> place and no type arguments",
+                Some(span),
+            )]);
+        }
+        let source = self.resolve_expr_place(&args[0], false)?;
+        if self.types.list_element(source.ty).is_none() {
+            return Err(vec![Diagnostic::new(
+                "E0312",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "capacity source must be a List<T> place",
+                Some(args[0].span),
+            )]);
+        }
+        self.coerce(
+            Checked {
+                expr: HirExpr {
+                    kind: HirExprKind::ListCapacity { source },
+                    ty: TypeId::USIZE,
+                    span,
+                },
+                constant: None,
+            },
+            expected,
+        )
     }
 
     fn check_allocation_size(
@@ -4778,7 +5102,7 @@ impl Analyzer<'_> {
                 "E0289",
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                "view/view_mut source must be a Buffer<T> or Array<T> place",
+                "view/view_mut source must be a Buffer<T>, Array<T>, or List<T> place",
                 Some(args[0].span),
             )]);
         };
@@ -5838,10 +6162,11 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
             !h.types.is_admitted_buffer_element(*element)
         }
         TypeData::Array { element } => !h.types.is_admitted_array_element(*element),
+        TypeData::List { element } => !h.types.is_admitted_list_element(*element),
         _ => false,
     }) {
         return Err(fail(
-            "HIR contains a Buffer/View/Array with an inadmissible element type".into(),
+            "HIR contains a Buffer/View/Array/List with an inadmissible element type".into(),
         ));
     }
     for ty in h
@@ -6001,6 +6326,41 @@ fn verify_block(
                 }
                 if matches!(place.base, HirPlaceBase::Dereference { mutable: false, .. }) {
                     return Err(fail("HIR writes through a shared reference".into()));
+                }
+            }
+            HirStmtKind::ListPush {
+                target,
+                value,
+                mutation,
+            } => {
+                verify_place(target, f, sigs, structs, enums, types, fail)?;
+                verify_expr(value, f, sigs, structs, enums, types, fail)?;
+                if *mutation != StructuralMutation::Push
+                    || types.list_element(target.ty) != Some(value.ty)
+                    || matches!(
+                        target.base,
+                        HirPlaceBase::Dereference { mutable: false, .. }
+                    )
+                {
+                    return Err(fail("HIR List push contract invalid".into()));
+                }
+            }
+            HirStmtKind::ListReserve {
+                target,
+                requested_capacity,
+                mutation,
+            } => {
+                verify_place(target, f, sigs, structs, enums, types, fail)?;
+                verify_expr(requested_capacity, f, sigs, structs, enums, types, fail)?;
+                if *mutation != StructuralMutation::Reserve
+                    || types.list_element(target.ty).is_none()
+                    || requested_capacity.ty != TypeId::USIZE
+                    || matches!(
+                        target.base,
+                        HirPlaceBase::Dereference { mutable: false, .. }
+                    )
+                {
+                    return Err(fail("HIR List reserve contract invalid".into()));
                 }
             }
             HirStmtKind::If {
@@ -6244,10 +6604,32 @@ fn verify_expr(
                 return Err(fail("HIR Array length contract invalid".into()));
             }
         }
+        HirExprKind::ListInit {
+            element_type,
+            elements,
+        } => {
+            for element in elements {
+                verify_expr(element, f, sigs, structs, enums, types, fail)?;
+            }
+            if types.list_element(e.ty) != Some(*element_type)
+                || elements.iter().any(|element| element.ty != *element_type)
+                || !types.is_admitted_list_element(*element_type)
+            {
+                return Err(fail(
+                    "HIR List literal construction contract invalid".into(),
+                ));
+            }
+        }
+        HirExprKind::ListLength { source } | HirExprKind::ListCapacity { source } => {
+            verify_place(source, f, sigs, structs, enums, types, fail)?;
+            if types.list_element(source.ty).is_none() || e.ty != TypeId::USIZE {
+                return Err(fail("HIR List metadata query contract invalid".into()));
+            }
+        }
         HirExprKind::View { source, mutable } => {
             verify_place(source, f, sigs, structs, enums, types, fail)?;
             let Some(element) = types.owning_contiguous_element(source.ty) else {
-                return Err(fail("HIR View source is not Buffer/Array".into()));
+                return Err(fail("HIR View source is not Buffer/Array/List".into()));
             };
             if types.view_info(e.ty) != Some((element, *mutable)) {
                 return Err(fail("HIR View type/capability mismatch".into()));
@@ -6472,6 +6854,7 @@ fn verify_place(
                 let element = types
                     .buffer_element(ty)
                     .or_else(|| types.array_element(ty))
+                    .or_else(|| types.list_element(ty))
                     .or_else(|| types.view_info(ty).map(|(element, _)| element))
                     .ok_or_else(|| fail("HIR index projection has non-contiguous base".into()))?;
                 if index.ty != TypeId::USIZE || element != *element_type || !*checked {

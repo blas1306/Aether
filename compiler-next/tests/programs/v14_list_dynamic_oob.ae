@@ -1,0 +1,6 @@
+int main() {
+    List<int> values = {};
+    reserve(values, 8);
+    usize index = 0;
+    return values[index];
+}

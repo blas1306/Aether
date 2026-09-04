@@ -1474,15 +1474,69 @@ empty Array, 0.600 ms for literal Array, 0.619 ms for fill Array and 0.803 ms
 for the indexed-reference loop. These are fixture snapshots, not benchmark-
 quality speed claims.
 
-The language contract now fixes the distinction for future work: Array and
-List are computational collections with `{...}` literals and zero-based
-indexing; List alone will be dynamic. `Vector<T, Orientation>` and `Matrix<T>`
+The language contract fixes the distinction: Array and List are computational
+collections with `{...}` literals and zero-based indexing; List alone is
+dynamic. `Vector<T, Orientation>` and `Matrix<T>`
 are mathematical types with bracket literals and one-based indexing. Matrix is
 one structurally two-dimensional literal/type, never nested collections.
 
-For NEXT-VERTICAL-14, the strongest dependency closure is explicit generic
-capabilities/constraints sufficient to state Copy/no-drop element requirements
-and then lift Array's temporary element restriction with verified per-element
-move/drop construction. Do not add List growth first: reallocation needs a
-clear view-invalidation/lifetime contract, and Vector/Matrix should retain
-distinct mathematical HIR rather than reuse collection literal nodes.
+## 31. NEXT-VERTICAL-14 implementation confirmation
+
+Vertical-14 implements canonical `TypeData::List { element }`, distinct from
+Array and Buffer. List is non-Copy/needs-drop through the general property
+engine and composes inside structs, enums and concrete generic instances. The
+temporary element gate remains concrete Copy/no-drop without reference, view
+or owning substructure; unconstrained symbolic `List<T>` is rejected.
+
+The parser continues to emit neutral `CollectionLiteral`. Expected List type
+produces `ListInit`, while Array still produces `ArrayInit`. HIR also resolves
+`ListLength`, `ListCapacity`, `ListPush` and `ListReserve`, and explicitly marks
+push/reserve as `StructuralMutation`. MIR and SSA retain and verify those
+identities, element consistency, writable places, checked allocation effects
+and metadata results. A mutation returns an updated descriptor to the same
+Place, which keeps promoted locals current and stores through address-taken or
+dereferenced places without a whole-program MemorySSA.
+
+LLVM uses `{ ptr, i64 length, i64 capacity }`. Empty construction is a null,
+zero-length, zero-capacity descriptor without allocation; nonempty literals
+allocate once at exact initial capacity and store elements in source order.
+Typed reserve helpers allocate new storage, copy exactly `[0,length)`, free the
+old pointer and update capacity. Typed push helpers use checked `length + 1`
+and checked geometric growth, reserve as needed, initialize the next slot and
+then update length. Typed List indexing checks length rather than capacity.
+Drop frees by capacity and the shared null-aware allocation boundary preserves
+exact allocation/free accounting, including empty Lists.
+
+Ownership analysis now separates ordinary owner borrows from List element-
+storage borrows. Live element references and whole-List views block push and
+reserve regardless of runtime spare capacity, but ordinary element assignment
+does not. A lexical end releases the restriction. Calls receiving a mutable
+List reference are conservatively potentially invalidating; shared references
+are not. Explicit dereference supports structural mutation through
+`ref mut List<T>` without auto-deref sugar.
+
+Qualification covers empty and literal construction, contextual widening,
+length/capacity, first/last access, element writes, first and repeated pushes,
+reserve plus pushes, data preservation across reallocations, element refs,
+views, borrow end before mutation, moves, calls, return, struct/enum/generic
+composition, conditional cleanup, cross-module transfer, dynamic bounds and
+allocation overflow. Array remains fixed and unchanged. Pop, resize, insert,
+erase, methods, raw pointers and non-Copy elements remain deliberately absent.
+
+Native counter instrumentation observes 0 allocations/frees for empty List,
+1/1 for a literal, 5/5 for sixteen pushes through current capacities
+1/2/4/8/16, and 1/1 for `reserve(16)` followed by sixteen pushes. Only balance
+and the semantic guarantees are contractual; the exact policy is not. The
+combined ownership fixture observes 9/9 across returns, moves, structs, enums,
+concrete generics and conditional cleanup. A warm
+debug-driver sample over ten compilations measured mean core times of about
+0.741 ms for unchanged V13 literal Array, 0.605 ms empty List, 0.880 ms literal
+List, 0.794 ms repeated push, 0.910 ms reserved push and 0.750 ms List
+view/index. These are fixture snapshots, not benchmark claims.
+
+For NEXT-VERTICAL-15, the strongest dependency closure is explicit generic
+capabilities/constraints plus verified element construction, relocation and
+destruction. That can lift Array/List's temporary element restrictions without
+making user-defined Drop or exceptions accidental prerequisites. `pop` should
+wait until an Option/result or other empty-result contract is selected; Vector
+and Matrix must retain their distinct mathematical HIR and one-based surface.

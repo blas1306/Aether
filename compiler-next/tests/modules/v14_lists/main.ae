@@ -1,0 +1,7 @@
+import storage;
+
+int main() {
+    List<int> values = storage.make();
+    storage.Packet packet = storage.wrap(values);
+    return storage.consume(packet);
+}

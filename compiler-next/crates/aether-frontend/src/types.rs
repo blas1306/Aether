@@ -246,6 +246,11 @@ pub enum TypeData {
     Array {
         element: TypeId,
     },
+    /// Dynamic-length language-level collection with owned contiguous
+    /// storage. Only the initialized prefix `[0, length)` contains values.
+    List {
+        element: TypeId,
+    },
     /// Non-owning contiguous sequence plus length. `mutable` is write
     /// capability only and carries no uniqueness promise.
     View {
@@ -326,6 +331,7 @@ impl fmt::Display for TypeData {
             }
             Self::Buffer { element } => write!(f, "Buffer<{element}>"),
             Self::Array { element } => write!(f, "Array<{element}>"),
+            Self::List { element } => write!(f, "List<{element}>"),
             Self::View { element, mutable } => write!(
                 f,
                 "{}<{element}>",
@@ -469,6 +475,10 @@ impl TypeArena {
         self.intern(TypeData::Array { element })
     }
 
+    pub fn intern_list(&mut self, element: TypeId) -> TypeId {
+        self.intern(TypeData::List { element })
+    }
+
     pub fn intern_view(&mut self, element: TypeId, mutable: bool) -> TypeId {
         self.intern(TypeData::View { element, mutable })
     }
@@ -563,6 +573,7 @@ impl TypeArena {
             Some(
                 TypeData::Buffer { element }
                 | TypeData::Array { element }
+                | TypeData::List { element }
                 | TypeData::View { element, .. },
             ) => self.contains_generic(*element),
             _ => false,
@@ -671,10 +682,20 @@ impl TypeArena {
         }
     }
 
+    #[must_use]
+    pub fn list_element(&self, id: TypeId) -> Option<TypeId> {
+        match self.get(id) {
+            Some(TypeData::List { element }) => Some(*element),
+            _ => None,
+        }
+    }
+
     /// Element type for any owning contiguous descriptor.
     #[must_use]
     pub fn owning_contiguous_element(&self, id: TypeId) -> Option<TypeId> {
-        self.buffer_element(id).or_else(|| self.array_element(id))
+        self.buffer_element(id)
+            .or_else(|| self.array_element(id))
+            .or_else(|| self.list_element(id))
     }
 
     #[must_use]
@@ -740,11 +761,13 @@ impl TypeArena {
                 is_copy: true,
                 needs_drop: false,
             },
-            TypeData::Buffer { .. } | TypeData::Array { .. } => TypeProperties {
-                is_known: true,
-                is_copy: false,
-                needs_drop: true,
-            },
+            TypeData::Buffer { .. } | TypeData::Array { .. } | TypeData::List { .. } => {
+                TypeProperties {
+                    is_known: true,
+                    is_copy: false,
+                    needs_drop: true,
+                }
+            }
             TypeData::GenericParam(parameter) => {
                 substitution.get(&parameter).map_or(unknown, |ty| {
                     if *ty == id {
@@ -876,6 +899,13 @@ impl TypeArena {
         self.is_admitted_buffer_element(id)
     }
 
+    /// Temporary Vertical-14 element admission rule. List relocation only
+    /// handles concrete Copy/no-drop values in this milestone.
+    #[must_use]
+    pub fn is_admitted_list_element(&self, id: TypeId) -> bool {
+        self.is_admitted_buffer_element(id)
+    }
+
     #[must_use]
     pub fn contains_owning(&self, id: TypeId) -> bool {
         self.contains_capability(id, 2, &HashMap::new(), &mut BTreeSet::new())
@@ -910,7 +940,11 @@ impl TypeArena {
                 capability == 1
                     || self.contains_capability(element, capability, substitution, visiting)
             }
-            Some(TypeData::Buffer { element } | TypeData::Array { element }) => {
+            Some(
+                TypeData::Buffer { element }
+                | TypeData::Array { element }
+                | TypeData::List { element },
+            ) => {
                 capability == 2
                     || self.contains_capability(element, capability, substitution, visiting)
             }
@@ -1061,6 +1095,10 @@ impl TypeArena {
                 let element = self.substitute(element, substitution)?;
                 Ok(self.intern_array(element))
             }
+            Some(TypeData::List { element }) => {
+                let element = self.substitute(element, substitution)?;
+                Ok(self.intern_list(element))
+            }
             Some(TypeData::View { element, mutable }) => {
                 let element = self.substitute(element, substitution)?;
                 Ok(self.intern_view(element, mutable))
@@ -1132,6 +1170,13 @@ impl TypeArena {
                     .ids
                     .get(&TypeData::Array { element })
                     .expect("monomorphizer interned substituted Array"))
+            }
+            Some(TypeData::List { element }) => {
+                let element = self.substituted_existing(element, substitution)?;
+                Ok(*self
+                    .ids
+                    .get(&TypeData::List { element })
+                    .expect("monomorphizer interned substituted List"))
             }
             Some(TypeData::View { element, mutable }) => {
                 let element = self.substituted_existing(element, substitution)?;

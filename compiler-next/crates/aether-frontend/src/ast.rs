@@ -208,6 +208,9 @@ pub enum AstStmtKind {
     },
     /// Assignment to a local or nested field place.
     Assign { place: AstExpr, value: AstExpr },
+    /// A call used for its effect. Semantic analysis currently admits only
+    /// the bootstrap structural List operations here.
+    Expr(AstExpr),
     /// Conditional statement.
     If {
         condition: AstExpr,

@@ -1,4 +1,4 @@
-//! Recursive-descent parser for the deliberately closed Vertical-13 grammar.
+//! Recursive-descent parser for the deliberately closed Vertical-14 grammar.
 
 use crate::{
     AstAlias, AstBinaryOp, AstBlock, AstEnum, AstExpr, AstExprKind, AstField, AstFunction,
@@ -343,13 +343,16 @@ impl Parser {
                 }
             }
             TokenKind::Identifier | TokenKind::Star | TokenKind::LeftParen => {
-                let place = self.expression()?;
-                self.expect(
-                    TokenKind::Equal,
-                    "only assignment statements are admitted here",
-                )?;
-                let value = self.expression()?;
-                AstStmtKind::Assign { place, value }
+                let expression = self.expression()?;
+                if self.consume(TokenKind::Equal).is_some() {
+                    let value = self.expression()?;
+                    AstStmtKind::Assign {
+                        place: expression,
+                        value,
+                    }
+                } else {
+                    AstStmtKind::Expr(expression)
+                }
             }
             TokenKind::KwReturn => {
                 self.advance();
@@ -393,7 +396,7 @@ impl Parser {
                 });
             }
             TokenKind::KwMatch => return self.match_statement(start),
-            _ => return Err(self.error("E0102", "expected a Vertical-13 statement")),
+            _ => return Err(self.error("E0102", "expected a Vertical-14 statement")),
         };
         let semicolon = self.expect(TokenKind::Semicolon, "expected `;` after statement")?;
         Ok(AstStmt {

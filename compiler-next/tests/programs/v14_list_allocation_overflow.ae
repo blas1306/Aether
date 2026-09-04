@@ -1,0 +1,5 @@
+int main() {
+    List<int> values = {};
+    reserve(values, 18446744073709551615);
+    return 0;
+}

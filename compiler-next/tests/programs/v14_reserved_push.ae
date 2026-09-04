@@ -1,0 +1,23 @@
+int main() {
+    List<int> values = {};
+    reserve(values, 16);
+    push(values, 0);
+    push(values, 1);
+    push(values, 2);
+    push(values, 3);
+    push(values, 4);
+    push(values, 5);
+    push(values, 6);
+    push(values, 7);
+    push(values, 8);
+    push(values, 9);
+    push(values, 10);
+    push(values, 11);
+    push(values, 12);
+    push(values, 13);
+    push(values, 14);
+    push(values, 15);
+    if (length(values) != 16) { return 1; }
+    if (capacity(values) < 16) { return 2; }
+    return values[0] + values[15] - 15;
+}

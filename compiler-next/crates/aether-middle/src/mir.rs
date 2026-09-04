@@ -9,8 +9,9 @@ use aether_frontend::{
     CastKind, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId, FloatValue,
     FunctionInstanceInfo, HirBinaryOp, HirBlock, HirCallTarget, HirDrop, HirExpr, HirExprKind,
     HirFunction, HirMatchArm, HirPlace, HirPlaceBase, HirPlaceProjection, HirStmtKind, HirUnaryOp,
-    InstanceId, LocalId, MatchMode, ModuleInfo, Phase, Span, StructId, StructInfo, Substitution,
-    TypeArena, TypeData, TypeId, TypedHir, VariantId, format_type,
+    InstanceId, LocalId, MatchMode, ModuleInfo, Phase, Span, StructId, StructInfo,
+    StructuralMutation, Substitution, TypeArena, TypeData, TypeId, TypedHir, VariantId,
+    format_type,
 };
 
 /// Basic-block identity, equal to its stable vector index.
@@ -186,6 +187,32 @@ pub enum Rvalue {
     },
     ArrayLength {
         source: Place,
+    },
+    ListInit {
+        element_type: TypeId,
+        elements: Vec<Operand>,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
+    ListLength {
+        source: Place,
+    },
+    ListCapacity {
+        source: Place,
+    },
+    ListPush {
+        source: Place,
+        value: Operand,
+        mutation: StructuralMutation,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
+    ListReserve {
+        source: Place,
+        requested_capacity: Operand,
+        mutation: StructuralMutation,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
     },
     View {
         source: Place,
@@ -447,7 +474,11 @@ fn conditional_drop_roots(block: &HirBlock) -> BTreeSet<LocalId> {
                         }
                     }
                 }
-                HirStmtKind::Nop | HirStmtKind::Local { .. } | HirStmtKind::Assign { .. } => {}
+                HirStmtKind::Nop
+                | HirStmtKind::Local { .. }
+                | HirStmtKind::Assign { .. }
+                | HirStmtKind::ListPush { .. }
+                | HirStmtKind::ListReserve { .. } => {}
             }
         }
     }
@@ -533,6 +564,7 @@ struct Builder<'a> {
 }
 
 impl Builder<'_> {
+    #[allow(clippy::too_many_lines)]
     fn lower_block(&mut self, block: &HirBlock) {
         for statement in &block.statements {
             match &statement.kind {
@@ -582,6 +614,44 @@ impl Builder<'_> {
                             self.set_drop_flag(local, true, statement.span);
                         }
                     }
+                }
+                HirStmtKind::ListPush {
+                    target,
+                    value,
+                    mutation,
+                } => {
+                    let value = self.lower_expr(value);
+                    let target = self.lower_place(target);
+                    self.assign(
+                        target.clone(),
+                        Rvalue::ListPush {
+                            source: target,
+                            value,
+                            mutation: *mutation,
+                            size_trap: TrapKind::AllocationSizeOverflow,
+                            failure_trap: TrapKind::AllocationFailure,
+                        },
+                        statement.span,
+                    );
+                }
+                HirStmtKind::ListReserve {
+                    target,
+                    requested_capacity,
+                    mutation,
+                } => {
+                    let requested_capacity = self.lower_expr(requested_capacity);
+                    let target = self.lower_place(target);
+                    self.assign(
+                        target.clone(),
+                        Rvalue::ListReserve {
+                            source: target,
+                            requested_capacity,
+                            mutation: *mutation,
+                            size_trap: TrapKind::AllocationSizeOverflow,
+                            failure_trap: TrapKind::AllocationFailure,
+                        },
+                        statement.span,
+                    );
                 }
                 HirStmtKind::Return { value, drops } => {
                     let value = self.lower_expr(value);
@@ -954,6 +1024,48 @@ impl Builder<'_> {
                         projections: vec![],
                     },
                     Rvalue::ArrayLength { source },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::ListInit {
+                element_type,
+                elements,
+            } => {
+                let elements = elements
+                    .iter()
+                    .map(|element| self.lower_expr(element))
+                    .collect();
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::ListInit {
+                        element_type: *element_type,
+                        elements,
+                        size_trap: TrapKind::AllocationSizeOverflow,
+                        failure_trap: TrapKind::AllocationFailure,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::ListLength { source } | HirExprKind::ListCapacity { source } => {
+                let source = self.lower_place(source);
+                let destination = self.temporary(TypeId::USIZE);
+                let value = if matches!(expression.kind, HirExprKind::ListLength { .. }) {
+                    Rvalue::ListLength { source }
+                } else {
+                    Rvalue::ListCapacity { source }
+                };
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    value,
                     expression.span,
                 );
                 Operand::Local(destination)
@@ -1358,10 +1470,11 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
             !mir.types.is_admitted_buffer_element(*element)
         }
         TypeData::Array { element } => !mir.types.is_admitted_array_element(*element),
+        TypeData::List { element } => !mir.types.is_admitted_list_element(*element),
         _ => false,
     }) {
         return Err(fail(
-            "MIR contains a Buffer/View/Array with an inadmissible element type".into(),
+            "MIR contains a Buffer/View/Array/List with an inadmissible element type".into(),
         ));
     }
     for ty in mir
@@ -1566,7 +1679,10 @@ fn verify_mir_function(
                 }
             }
             if !instruction.destination.projections.is_empty()
-                && !matches!(instruction.value, Rvalue::Use(_))
+                && !matches!(
+                    instruction.value,
+                    Rvalue::Use(_) | Rvalue::ListPush { .. } | Rvalue::ListReserve { .. }
+                )
             {
                 return Err(fail(
                     "MIR projected store requires a materialized value operand".into(),
@@ -1780,6 +1896,7 @@ fn verify_drop_flag_contract(
                 Rvalue::BufferAlloc { .. }
                 | Rvalue::ArrayInit { .. }
                 | Rvalue::ArrayFill { .. }
+                | Rvalue::ListInit { .. }
                 | Rvalue::EnumPayload {
                     mode: MatchMode::Value,
                     ..
@@ -1941,7 +2058,8 @@ fn verify_ownership(
                 }
                 Rvalue::BufferAlloc { .. }
                 | Rvalue::ArrayInit { .. }
-                | Rvalue::ArrayFill { .. } => {
+                | Rvalue::ArrayFill { .. }
+                | Rvalue::ListInit { .. } => {
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
                 Rvalue::Call { callee, args } => {
@@ -1969,7 +2087,11 @@ fn verify_ownership(
                 Rvalue::Load(place)
                 | Rvalue::Borrow { place, .. }
                 | Rvalue::View { source: place, .. }
-                | Rvalue::ArrayLength { source: place } => {
+                | Rvalue::ArrayLength { source: place }
+                | Rvalue::ListLength { source: place }
+                | Rvalue::ListCapacity { source: place }
+                | Rvalue::ListPush { source: place, .. }
+                | Rvalue::ListReserve { source: place, .. } => {
                     require_place_owner(function, types, &state, place, fail)?;
                 }
                 Rvalue::Aggregate { fields, .. } => {
@@ -2327,12 +2449,78 @@ fn validate_rvalue(
                 return Err("MIR Array length contract invalid".into());
             }
         }
+        Rvalue::ListInit {
+            element_type,
+            elements,
+            size_trap,
+            failure_trap,
+        } => {
+            for element in elements {
+                validate_operand(function, element, initialized)?;
+            }
+            if types.list_element(destination) != Some(*element_type)
+                || elements
+                    .iter()
+                    .any(|element| operand_type(function, element).ok() != Some(*element_type))
+                || !types.is_admitted_list_element(*element_type)
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("MIR List literal allocation contract invalid".into());
+            }
+        }
+        Rvalue::ListLength { source } | Rvalue::ListCapacity { source } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            let source_ty = place_type(function, source, structs, types)?;
+            if destination != TypeId::USIZE || types.list_element(source_ty).is_none() {
+                return Err("MIR List metadata query contract invalid".into());
+            }
+        }
+        Rvalue::ListPush {
+            source,
+            value,
+            mutation,
+            size_trap,
+            failure_trap,
+        } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            validate_operand(function, value, initialized)?;
+            let source_ty = place_type(function, source, structs, types)?;
+            if destination != source_ty
+                || types.list_element(source_ty) != Some(operand_type(function, value)?)
+                || *mutation != StructuralMutation::Push
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("MIR List push contract invalid".into());
+            }
+        }
+        Rvalue::ListReserve {
+            source,
+            requested_capacity,
+            mutation,
+            size_trap,
+            failure_trap,
+        } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            validate_operand(function, requested_capacity, initialized)?;
+            let source_ty = place_type(function, source, structs, types)?;
+            if destination != source_ty
+                || types.list_element(source_ty).is_none()
+                || operand_type(function, requested_capacity)? != TypeId::USIZE
+                || *mutation != StructuralMutation::Reserve
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("MIR List reserve contract invalid".into());
+            }
+        }
         Rvalue::View { source, mutable } => {
             validate_place_read(function, source, structs, types, initialized)?;
             let source_ty = place_type(function, source, structs, types)?;
             let element = types
                 .owning_contiguous_element(source_ty)
-                .ok_or_else(|| "MIR View source is not Buffer/Array".to_string())?;
+                .ok_or_else(|| "MIR View source is not Buffer/Array/List".to_string())?;
             if types.view_info(destination) != Some((element, *mutable)) {
                 return Err("MIR View contract invalid".into());
             }
@@ -2603,7 +2791,7 @@ fn place_has_index(place: &Place) -> bool {
         .any(|projection| matches!(projection, PlaceProjection::Index { .. }))
 }
 
-fn place_type(
+pub(crate) fn place_type(
     function: &MirFunction,
     place: &Place,
     structs: &[StructInfo],
@@ -2646,6 +2834,7 @@ fn place_type(
                 let element = types
                     .buffer_element(ty)
                     .or_else(|| types.array_element(ty))
+                    .or_else(|| types.list_element(ty))
                     .or_else(|| types.view_info(ty).map(|(element, _)| element))
                     .ok_or_else(|| "MIR index projection has non-contiguous base".to_string())?;
                 if operand_type(function, index)? != TypeId::USIZE

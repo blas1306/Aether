@@ -1,0 +1,8 @@
+int main() {
+    List<float64> values = {1, 2, 3};
+    if (length(values) != 3) { return 1; }
+    if (capacity(values) < 3) { return 2; }
+    if (values[0] != 1.0) { return 3; }
+    if (values[2] != 3.0) { return 4; }
+    return 0;
+}
