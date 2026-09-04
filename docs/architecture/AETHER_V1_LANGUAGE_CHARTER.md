@@ -112,6 +112,13 @@ explicit semantic capabilities and normally specialized/monomorphized for
 native code.  Template text substitution, SFINAE-style accidental constraints
 and unbounded compile-time execution are not the model.
 
+NEXT-VERTICAL-15 admits the minimal compiler-derived capabilities `Copy` and
+`Relocatable`, with `Copy => Relocatable`. They describe duplication and
+ownership-preserving physical movement respectively; they are not a general
+trait, interface or operator system and users cannot implement or assert them.
+Constraints are checked on the parametric body and every explicit, inferred or
+forwarded application, then erased before native lowering.
+
 ## Mathematical and scientific ergonomics
 
 Fixed-width scalar types, explicit precision and serious floating-point
@@ -229,8 +236,9 @@ V14 retains the concrete Copy/no-drop element restriction. References and
 views into List storage prevent potentially invalidating structural mutations,
 including calls through `ref mut List<T>`, independent of runtime spare
 capacity. Element assignment is not structural. Array remains fixed and gains
-no dynamic operations. `pop`, resize, non-Copy elements, public constraints and
-general method syntax remain deferred.
+no dynamic operations. V15 adds public Copy/Relocatable constraints but keeps
+the stricter concrete collection-element gate internal. `pop`, resize,
+non-Copy elements and general method syntax remain deferred.
 
 The collection/mathematics distinction is intentional. `List<T>` is the
 dynamic zero-based computational collection sharing `{...}` literal syntax.

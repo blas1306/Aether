@@ -30,6 +30,31 @@ pub struct GenericParamId {
     pub index: u32,
 }
 
+/// Compiler-derived semantic capability available to generic constraints.
+/// This is intentionally a closed set, not a user-implementable trait system.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Capability {
+    Copy,
+    Relocatable,
+}
+
+impl Capability {
+    /// Central V15 implication lattice: `Copy` implies `Relocatable`.
+    #[must_use]
+    pub fn implies(self, required: Self) -> bool {
+        self == required || matches!((self, required), (Self::Copy, Self::Relocatable))
+    }
+}
+
+impl fmt::Display for Capability {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Copy => "Copy",
+            Self::Relocatable => "Relocatable",
+        })
+    }
+}
+
 /// Canonical arena-owned type-argument-list identity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TypeArgsId(pub u32);
@@ -262,11 +287,15 @@ pub enum TypeData {
 /// Compiler-internal lifecycle properties. These are deliberately not a
 /// source trait system.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct TypeProperties {
     /// False means the booleans below are conservative requirements for a
     /// symbolic/malformed type rather than a fabricated concrete answer.
     pub is_known: bool,
     pub is_copy: bool,
+    /// Moving the value to different physical storage preserves its semantic
+    /// value when the old location ceases to be live. This is not duplication.
+    pub is_relocatable: bool,
     pub needs_drop: bool,
 }
 
@@ -355,6 +384,8 @@ pub struct TypeArena {
     concrete_layouts: HashMap<TypeId, (u64, u64)>,
     struct_properties: HashMap<StructId, AggregateProperties>,
     enum_properties: HashMap<EnumId, AggregateProperties>,
+    generic_capabilities: HashMap<GenericParamId, BTreeSet<Capability>>,
+    generic_names: HashMap<GenericParamId, String>,
     property_cache: RwLock<HashMap<TypeId, TypeProperties>>,
 }
 
@@ -368,6 +399,8 @@ impl Clone for TypeArena {
             concrete_layouts: self.concrete_layouts.clone(),
             struct_properties: self.struct_properties.clone(),
             enum_properties: self.enum_properties.clone(),
+            generic_capabilities: self.generic_capabilities.clone(),
+            generic_names: self.generic_names.clone(),
             property_cache: RwLock::new(
                 self.property_cache
                     .read()
@@ -387,6 +420,8 @@ impl PartialEq for TypeArena {
             && self.concrete_layouts == other.concrete_layouts
             && self.struct_properties == other.struct_properties
             && self.enum_properties == other.enum_properties
+            && self.generic_capabilities == other.generic_capabilities
+            && self.generic_names == other.generic_names
     }
 }
 
@@ -411,6 +446,8 @@ impl TypeArena {
             concrete_layouts: HashMap::new(),
             struct_properties: HashMap::new(),
             enum_properties: HashMap::new(),
+            generic_capabilities: HashMap::new(),
+            generic_names: HashMap::new(),
             property_cache: RwLock::new(HashMap::new()),
         };
         let baseline = [
@@ -521,6 +558,29 @@ impl TypeArena {
             .write()
             .expect("type-property cache lock")
             .clear();
+    }
+
+    /// Registers declaration-owned guarantees separately from concrete type
+    /// properties. The generic parameter's canonical `TypeId` remains unchanged.
+    pub fn register_generic_capabilities(
+        &mut self,
+        id: GenericParamId,
+        source_name: String,
+        capabilities: impl IntoIterator<Item = Capability>,
+    ) {
+        self.generic_capabilities
+            .insert(id, capabilities.into_iter().collect());
+        self.generic_names.insert(id, source_name);
+    }
+
+    #[must_use]
+    pub fn generic_capabilities(&self, id: GenericParamId) -> Option<&BTreeSet<Capability>> {
+        self.generic_capabilities.get(&id)
+    }
+
+    #[must_use]
+    pub fn generic_name(&self, id: GenericParamId) -> Option<&str> {
+        self.generic_names.get(&id).map(String::as_str)
     }
 
     fn intern_arguments(&mut self, arguments: Vec<TypeId>) -> TypeArgsId {
@@ -745,6 +805,7 @@ impl TypeArena {
         let unknown = TypeProperties {
             is_known: false,
             is_copy: false,
+            is_relocatable: false,
             needs_drop: true,
         };
         let Some(data) = self.get(id).copied() else {
@@ -759,12 +820,14 @@ impl TypeArena {
             | TypeData::View { .. } => TypeProperties {
                 is_known: true,
                 is_copy: true,
+                is_relocatable: true,
                 needs_drop: false,
             },
             TypeData::Buffer { .. } | TypeData::Array { .. } | TypeData::List { .. } => {
                 TypeProperties {
                     is_known: true,
                     is_copy: false,
+                    is_relocatable: true,
                     needs_drop: true,
                 }
             }
@@ -815,6 +878,7 @@ impl TypeArena {
             return TypeProperties {
                 is_known: false,
                 is_copy: false,
+                is_relocatable: false,
                 needs_drop: true,
             };
         }
@@ -828,6 +892,7 @@ impl TypeArena {
             return TypeProperties {
                 is_known: false,
                 is_copy: false,
+                is_relocatable: false,
                 needs_drop: true,
             };
         };
@@ -838,6 +903,7 @@ impl TypeArena {
                 return TypeProperties {
                     is_known: false,
                     is_copy: false,
+                    is_relocatable: false,
                     needs_drop: true,
                 };
             };
@@ -849,18 +915,21 @@ impl TypeArena {
             return TypeProperties {
                 is_known: false,
                 is_copy: false,
+                is_relocatable: false,
                 needs_drop: true,
             };
         }
         let mut result = TypeProperties {
             is_known: true,
             is_copy: true,
+            is_relocatable: true,
             needs_drop: false,
         };
         for member in definition.members.iter().flatten() {
             let properties = self.properties_with_substitution(*member, &substitution, visiting);
             result.is_known &= properties.is_known;
             result.is_copy &= properties.is_copy;
+            result.is_relocatable &= properties.is_relocatable;
             result.needs_drop |= properties.needs_drop;
         }
         visiting.remove(&aggregate_ty);
@@ -871,6 +940,157 @@ impl TypeArena {
     pub fn is_copy(&self, id: TypeId) -> bool {
         self.properties(id)
             .is_some_and(|properties| properties.is_copy)
+    }
+
+    /// Concrete relocation property. Symbolic code should use
+    /// [`Self::guarantees_capability`] instead.
+    #[must_use]
+    pub fn is_relocatable(&self, id: TypeId) -> bool {
+        self.properties(id)
+            .is_some_and(|properties| properties.is_relocatable)
+    }
+
+    /// Answers whether a concrete or symbolic type is guaranteed to provide
+    /// a capability in its current declaration context.
+    #[must_use]
+    pub fn guarantees_capability(&self, id: TypeId, capability: Capability) -> bool {
+        self.guarantees_capability_with_substitution(
+            id,
+            capability,
+            &HashMap::new(),
+            &mut BTreeSet::new(),
+        )
+    }
+
+    #[must_use]
+    pub fn guarantees_copy(&self, id: TypeId) -> bool {
+        self.guarantees_capability(id, Capability::Copy)
+    }
+
+    #[must_use]
+    pub fn guarantees_relocatable(&self, id: TypeId) -> bool {
+        self.guarantees_capability(id, Capability::Relocatable)
+    }
+
+    fn guarantees_capability_with_substitution(
+        &self,
+        id: TypeId,
+        capability: Capability,
+        substitution: &HashMap<GenericParamId, TypeId>,
+        visiting: &mut BTreeSet<(Capability, TypeId)>,
+    ) -> bool {
+        if !visiting.insert((capability, id)) {
+            return false;
+        }
+        let result = match self.get(id).copied() {
+            Some(TypeData::GenericParam(parameter)) => substitution.get(&parameter).map_or_else(
+                || {
+                    self.generic_capabilities(parameter)
+                        .is_some_and(|provided| {
+                            provided.iter().any(|value| value.implies(capability))
+                        })
+                },
+                |ty| {
+                    *ty != id
+                        && self.guarantees_capability_with_substitution(
+                            *ty,
+                            capability,
+                            substitution,
+                            visiting,
+                        )
+                },
+            ),
+            Some(TypeData::Struct(declaration)) => self.aggregate_guarantees_capability(
+                false,
+                declaration.0,
+                None,
+                capability,
+                substitution,
+                visiting,
+            ),
+            Some(TypeData::Enum(declaration)) => self.aggregate_guarantees_capability(
+                true,
+                declaration.0,
+                None,
+                capability,
+                substitution,
+                visiting,
+            ),
+            Some(TypeData::StructInstance(declaration, arguments)) => self
+                .aggregate_guarantees_capability(
+                    false,
+                    declaration.0,
+                    Some(arguments),
+                    capability,
+                    substitution,
+                    visiting,
+                ),
+            Some(TypeData::EnumInstance(declaration, arguments)) => self
+                .aggregate_guarantees_capability(
+                    true,
+                    declaration.0,
+                    Some(arguments),
+                    capability,
+                    substitution,
+                    visiting,
+                ),
+            Some(
+                TypeData::Bool
+                | TypeData::Integer(_)
+                | TypeData::Float(_)
+                | TypeData::Reference { .. }
+                | TypeData::View { .. },
+            ) => true,
+            Some(TypeData::Buffer { .. } | TypeData::Array { .. } | TypeData::List { .. }) => {
+                capability == Capability::Relocatable
+            }
+            None => false,
+        };
+        visiting.remove(&(capability, id));
+        result
+    }
+
+    fn aggregate_guarantees_capability(
+        &self,
+        is_enum: bool,
+        raw_id: u32,
+        arguments: Option<TypeArgsId>,
+        capability: Capability,
+        outer: &HashMap<GenericParamId, TypeId>,
+        visiting: &mut BTreeSet<(Capability, TypeId)>,
+    ) -> bool {
+        let definition = if is_enum {
+            self.enum_properties.get(&EnumId(raw_id))
+        } else {
+            self.struct_properties.get(&StructId(raw_id))
+        };
+        let Some(definition) = definition else {
+            return false;
+        };
+        let mut substitution = outer.clone();
+        match arguments {
+            Some(arguments) => {
+                let Some(arguments) = self.arguments(arguments) else {
+                    return false;
+                };
+                if arguments.len() != definition.parameters.len() {
+                    return false;
+                }
+                for (parameter, argument) in definition.parameters.iter().zip(arguments) {
+                    substitution.insert(*parameter, *argument);
+                }
+            }
+            None if !definition.parameters.is_empty() => return false,
+            None => {}
+        }
+        definition.members.iter().flatten().all(|member| {
+            self.guarantees_capability_with_substitution(
+                *member,
+                capability,
+                &substitution,
+                visiting,
+            )
+        })
     }
 
     #[must_use]

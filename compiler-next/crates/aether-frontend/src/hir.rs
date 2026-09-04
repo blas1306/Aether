@@ -14,9 +14,9 @@
 )]
 use crate::{
     AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstMatchArm, AstMatchMode,
-    AstStmtKind, AstType, AstUnaryOp, Diagnostic, DiagnosticCategory, EnumId, FieldId, FloatType,
-    GenericOwner, GenericParamId, IntegerType, ParsedAst, Phase, SourceId, Span, StructId,
-    Substitution, TargetProperties, TypeArena, TypeData, TypeId, VariantId,
+    AstStmtKind, AstType, AstUnaryOp, Capability, Diagnostic, DiagnosticCategory, EnumId, FieldId,
+    FloatType, GenericOwner, GenericParamId, IntegerType, ParsedAst, Phase, SourceId, Span,
+    StructId, Substitution, TargetProperties, TypeArena, TypeData, TypeId, VariantId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
@@ -72,6 +72,7 @@ pub struct GenericParamInfo {
     pub id: GenericParamId,
     pub name: String,
     pub ty: TypeId,
+    pub capabilities: BTreeSet<Capability>,
     pub span: Span,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -209,6 +210,9 @@ pub fn format_type(
             if *mutable { "ViewMut" } else { "View" },
             format_type(types, *element, structs, enums)
         ),
+        Some(TypeData::GenericParam(id)) => types
+            .generic_name(*id)
+            .map_or_else(|| format!("{id:?}"), str::to_owned),
         Some(data) => data.to_string(),
         None => types.format(ty),
     }
@@ -376,18 +380,29 @@ impl TypedHir {
             .types
             .entries()
             .map(|(id, _)| {
+                let guarantees = [Capability::Copy, Capability::Relocatable]
+                    .into_iter()
+                    .filter(|capability| self.types.guarantees_capability(id, *capability))
+                    .map(|capability| capability.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" + ");
                 format!(
-                    "  {id:?} = {}; properties={:?}",
+                    "  {id:?} = {}; properties={:?}; guarantees={}",
                     format_type(&self.types, id, &self.structs, &self.enums),
                     self.types
                         .properties(id)
-                        .expect("canonical type properties")
+                        .expect("canonical type properties"),
+                    if guarantees.is_empty() {
+                        "none"
+                    } else {
+                        &guarantees
+                    }
                 )
             })
             .collect::<Vec<_>>()
             .join("\n");
         let mut d = format!(
-            "types (session-local):\n{type_table}\nentry: {:#?}\nmodules: {:#?}\naliases (transparent -> canonical): {:#?}\nstructs: {:#?}\nenums: {:#?}\ndeclarations: {:#?}\ngeneric HIR: {:#?}\ninstances: {:#?}",
+            "types (session-local):\n{type_table}\nentry: {:#?}\nmodules: {:#?}\naliases (transparent -> canonical): {:#?}\nstructs: {:#?}\nenums: {:#?}\ndeclarations: {:#?}\ngeneric HIR: {:#?}\ninstances (constraints validated before allocation): {:#?}",
             self.entry,
             self.modules,
             self.aliases,
@@ -1119,6 +1134,43 @@ pub fn collect_program_signatures(
                 .collect(),
         );
     }
+    // Constraint checking is deferred until every aggregate definition is
+    // registered, allowing structural symbolic reasoning across declaration
+    // order without template-style instantiation semantics.
+    for info in &structs {
+        for field in &info.fields {
+            validate_type_constraints(&types, field.ty, &structs, &enums, field.span).map_err(
+                |diagnostics| {
+                    diagnostics
+                        .into_iter()
+                        .map(|diagnostic| src(diagnostic, &program.modules[info.module.0 as usize]))
+                        .collect::<Vec<_>>()
+                },
+            )?;
+        }
+    }
+    for info in &enums {
+        for payload in info.variants.iter().flat_map(|variant| &variant.payloads) {
+            validate_type_constraints(&types, payload.ty, &structs, &enums, payload.span).map_err(
+                |diagnostics| {
+                    diagnostics
+                        .into_iter()
+                        .map(|diagnostic| src(diagnostic, &program.modules[info.module.0 as usize]))
+                        .collect::<Vec<_>>()
+                },
+            )?;
+        }
+    }
+    for alias in &alias_info {
+        validate_type_constraints(&types, alias.canonical, &structs, &enums, alias.span).map_err(
+            |diagnostics| {
+                diagnostics
+                    .into_iter()
+                    .map(|diagnostic| src(diagnostic, &program.modules[alias.module.0 as usize]))
+                    .collect::<Vec<_>>()
+            },
+        )?;
+    }
     if let Some((container, element, kind)) = types.entries().find_map(|(container, data)| {
         let (element, kind) = match data {
             TypeData::Buffer { element } | TypeData::View { element, .. } => (*element, 0_u8),
@@ -1264,6 +1316,22 @@ pub fn collect_program_signatures(
                 &enum_arities,
             )
             .map_err(|d| vec![src(d, module)])?;
+            for parameter in &parameters {
+                validate_type_constraints(&types, parameter.ty, &structs, &enums, parameter.span)
+                    .map_err(|diagnostics| {
+                    diagnostics
+                        .into_iter()
+                        .map(|diagnostic| src(diagnostic, module))
+                        .collect::<Vec<_>>()
+                })?;
+            }
+            validate_type_constraints(&types, return_type, &structs, &enums, f.return_type.span)
+                .map_err(|diagnostics| {
+                    diagnostics
+                        .into_iter()
+                        .map(|diagnostic| src(diagnostic, module))
+                        .collect::<Vec<_>>()
+                })?;
             if types.contains_reference(return_type) || types.contains_view(return_type) {
                 return Err(vec![src(
                     Diagnostic::new(
@@ -1704,10 +1772,44 @@ fn collect_generic_parameters(
                 owner,
                 index: index as u32,
             };
+            let mut capabilities = BTreeSet::new();
+            for constraint in &parameter.constraints {
+                let capability = match constraint.name.as_str() {
+                    "Copy" => Capability::Copy,
+                    "Relocatable" => Capability::Relocatable,
+                    _ => {
+                        return Err(Diagnostic::new(
+                            "E0314",
+                            Phase::Semantic,
+                            DiagnosticCategory::Name,
+                            format!("unknown generic capability `{}`", constraint.name),
+                            Some(constraint.span),
+                        ));
+                    }
+                };
+                if !capabilities.insert(capability) {
+                    return Err(Diagnostic::new(
+                        "E0315",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        format!(
+                            "duplicate `{capability}` constraint on generic parameter `{}`",
+                            parameter.name
+                        ),
+                        Some(constraint.span),
+                    ));
+                }
+            }
+            types.register_generic_capabilities(
+                id,
+                parameter.name.clone(),
+                capabilities.iter().copied(),
+            );
             Ok(GenericParamInfo {
                 id,
                 name: parameter.name.clone(),
                 ty: types.intern(TypeData::GenericParam(id)),
+                capabilities,
                 span: parameter.span,
             })
         })
@@ -1722,6 +1824,103 @@ fn generic_call_arity(name: &str, expected: usize, found: usize, span: Span) -> 
         format!("generic declaration `{name}` expects {expected} type arguments, found {found}"),
         Some(span),
     )
+}
+
+fn validate_generic_constraints(
+    types: &TypeArena,
+    parameters: &[GenericParamInfo],
+    arguments: &[TypeId],
+    declaration_name: &str,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+    span: Span,
+    inferred: bool,
+) -> Result<(), Vec<Diagnostic>> {
+    for (parameter, argument) in parameters.iter().zip(arguments) {
+        for capability in &parameter.capabilities {
+            if !types.guarantees_capability(*argument, *capability) {
+                let actual = format_type(types, *argument, structs, enums);
+                let symbolic = types.contains_generic(*argument);
+                let detail = if symbolic {
+                    "does not provide the required guarantee"
+                } else {
+                    "does not satisfy"
+                };
+                let available = [Capability::Copy, Capability::Relocatable]
+                    .into_iter()
+                    .filter(|available| types.guarantees_capability(*argument, *available))
+                    .map(|available| available.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" + ");
+                let subject = if inferred {
+                    format!("inference succeeded, but inferred type `{actual}`")
+                } else if symbolic {
+                    format!("symbolic type `{actual}`")
+                } else {
+                    format!("type `{actual}`")
+                };
+                let guarantee_detail = if symbolic {
+                    format!(
+                        "; available guarantees: {}",
+                        if available.is_empty() {
+                            "none"
+                        } else {
+                            &available
+                        }
+                    )
+                } else {
+                    String::new()
+                };
+                return Err(vec![Diagnostic::new(
+                    if inferred { "E0317" } else { "E0316" },
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    format!(
+                        "{subject} {detail} `{capability}`; required by generic parameter `{}` of `{declaration_name}`{}",
+                        parameter.name, guarantee_detail
+                    ),
+                    Some(span),
+                )]);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_type_constraints(
+    types: &TypeArena,
+    ty: TypeId,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+    span: Span,
+) -> Result<(), Vec<Diagnostic>> {
+    let (parameters, arguments, name) = match types.get(ty).copied() {
+        Some(TypeData::StructInstance(id, arguments)) => (
+            &structs[id.0 as usize].generic_parameters,
+            types.arguments(arguments).unwrap_or(&[]),
+            structs[id.0 as usize].name.as_str(),
+        ),
+        Some(TypeData::EnumInstance(id, arguments)) => (
+            &enums[id.0 as usize].generic_parameters,
+            types.arguments(arguments).unwrap_or(&[]),
+            enums[id.0 as usize].name.as_str(),
+        ),
+        Some(
+            TypeData::Reference { pointee: ty, .. }
+            | TypeData::Buffer { element: ty }
+            | TypeData::Array { element: ty }
+            | TypeData::List { element: ty }
+            | TypeData::View { element: ty, .. },
+        ) => return validate_type_constraints(types, ty, structs, enums, span),
+        _ => return Ok(()),
+    };
+    validate_generic_constraints(
+        types, parameters, arguments, name, structs, enums, span, false,
+    )?;
+    for argument in arguments {
+        validate_type_constraints(types, *argument, structs, enums, span)?;
+    }
+    Ok(())
 }
 
 fn incomplete_substitution(parameter: GenericParamId, span: Span) -> Diagnostic {
@@ -2145,8 +2344,14 @@ pub fn analyze_bodies_for_target(
         }
     }
     let generic_functions = functions;
-    let (instances, functions, entry) =
-        monomorphize(&mut types, &d.signatures, &generic_functions, d.entry)?;
+    let (instances, functions, entry) = monomorphize(
+        &mut types,
+        &d.signatures,
+        &generic_functions,
+        &d.structs,
+        &d.enums,
+        d.entry,
+    )?;
     compute_concrete_layouts(&mut types, &d.structs, &d.enums, target)?;
     let hir = TypedHir {
         modules: d.program.modules.iter().map(|m| m.info.clone()).collect(),
@@ -2177,6 +2382,8 @@ struct Monomorphizer<'a> {
     types: &'a mut TypeArena,
     signatures: &'a [FunctionSignature],
     declarations: &'a [GenericHirFunction],
+    structs: &'a [StructInfo],
+    enums: &'a [EnumInfo],
     ids: BTreeMap<InstanceKey, crate::InstanceId>,
     queue: Vec<InstanceKey>,
     instances: Vec<FunctionInstanceInfo>,
@@ -2187,6 +2394,8 @@ fn monomorphize(
     types: &mut TypeArena,
     signatures: &[FunctionSignature],
     declarations: &[GenericHirFunction],
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
     entry: FunctionId,
 ) -> Result<
     (
@@ -2200,6 +2409,8 @@ fn monomorphize(
         types,
         signatures,
         declarations,
+        structs,
+        enums,
         ids: BTreeMap::new(),
         queue: Vec::new(),
         instances: Vec::new(),
@@ -2263,6 +2474,16 @@ impl Monomorphizer<'_> {
                 Some(span),
             )]);
         }
+        validate_generic_constraints(
+            self.types,
+            &signature.generic_parameters,
+            &key.arguments,
+            &signature.name,
+            self.structs,
+            self.enums,
+            span,
+            false,
+        )?;
         let structurally_expands = self.queue.iter().any(|previous| {
             previous.function == key.function
                 && previous.arguments.len() == key.arguments.len()
@@ -2545,7 +2766,7 @@ impl Monomorphizer<'_> {
             HirExprKind::Bool(value) => HirExprKind::Bool(*value),
             HirExprKind::Local(local) => HirExprKind::Local(*local),
             HirExprKind::Move(local) => {
-                if self.types.is_copy(ty) {
+                if self.types.guarantees_copy(ty) {
                     HirExprKind::Local(*local)
                 } else {
                     HirExprKind::Move(*local)
@@ -2553,7 +2774,7 @@ impl Monomorphizer<'_> {
             }
             HirExprKind::Load(place) => {
                 let place = self.substitute_place(place, substitution)?;
-                if !self.types.is_copy(place.ty) {
+                if !self.types.guarantees_copy(place.ty) {
                     return Err(vec![Diagnostic::new(
                         "E0293",
                         Phase::Semantic,
@@ -3039,7 +3260,7 @@ fn synthesize_ownership(
         buffer_lengths: vec![None; locals.len()],
     };
     for parameter in parameters {
-        if !types.is_copy(parameter.ty) {
+        if !types.guarantees_copy(parameter.ty) {
             analysis.state[parameter.local.0 as usize] = OwnerState::Owned;
             analysis.active.push(parameter.local);
         }
@@ -3124,7 +3345,7 @@ impl OwnershipAnalysis<'_> {
                             self.storage_borrowed.last_mut().unwrap().insert(owner);
                         }
                     }
-                    if !self.types.is_copy(self.locals[local.0 as usize].ty) {
+                    if !self.types.guarantees_copy(self.locals[local.0 as usize].ty) {
                         self.buffer_lengths[local.0 as usize] = self.known_length(initializer);
                         self.state[local.0 as usize] = OwnerState::Owned;
                         self.active.push(*local);
@@ -3141,7 +3362,7 @@ impl OwnershipAnalysis<'_> {
                     self.place(place, statement.span)?;
                     if let HirPlaceBase::Local(local) = place.base
                         && place.projections.is_empty()
-                        && !self.types.is_copy(self.locals[local.0 as usize].ty)
+                        && !self.types.guarantees_copy(self.locals[local.0 as usize].ty)
                     {
                         if self.is_borrowed(local) {
                             return Err(self.error(
@@ -3280,7 +3501,7 @@ impl OwnershipAnalysis<'_> {
                         self.buffer_lengths.clone_from(&before_lengths);
                         let active_start = self.active.len();
                         for binding in &arm.bindings {
-                            if !self.types.is_copy(binding.ty) {
+                            if !self.types.guarantees_copy(binding.ty) {
                                 self.state[binding.local.0 as usize] = OwnerState::Owned;
                                 self.active.push(binding.local);
                             } else if let Some(owner) = borrowed_owner {
@@ -3370,7 +3591,7 @@ impl OwnershipAnalysis<'_> {
         match &expr.kind {
             HirExprKind::Move(local) => self.move_local(*local, expr.span),
             HirExprKind::Local(local) => {
-                if self.types.is_copy(expr.ty) {
+                if self.types.guarantees_copy(expr.ty) {
                     Ok(())
                 } else {
                     self.require_owned(*local, expr.span)
@@ -3450,7 +3671,7 @@ impl OwnershipAnalysis<'_> {
 
     fn place(&mut self, place: &HirPlace, span: Span) -> Result<(), Vec<Diagnostic>> {
         if let Some(owner) = self.owner_of_place(place) {
-            if !self.types.is_copy(self.locals[owner.0 as usize].ty) {
+            if !self.types.guarantees_copy(self.locals[owner.0 as usize].ty) {
                 self.require_owned(owner, span)?;
             }
         }
@@ -3479,7 +3700,7 @@ impl OwnershipAnalysis<'_> {
     fn owner_of_place(&self, place: &HirPlace) -> Option<LocalId> {
         match &place.base {
             HirPlaceBase::Local(local) => {
-                if self.types.is_copy(self.locals[local.0 as usize].ty) {
+                if self.types.guarantees_copy(self.locals[local.0 as usize].ty) {
                     self.provenance[local.0 as usize]
                 } else {
                     Some(*local)
@@ -3609,28 +3830,32 @@ enum ConstantValue {
     Float(FloatValue),
 }
 impl Analyzer<'_> {
+    fn resolve_source_type(&mut self, ty: &AstType) -> Result<TypeId, Vec<Diagnostic>> {
+        let resolved = resolve_type_in_module(
+            ty,
+            self.module,
+            self.aliases,
+            self.struct_names,
+            self.enum_names,
+            self.imports,
+            self.module_names,
+            self.types,
+            &self.generic_scope,
+            self.struct_arities,
+            self.enum_arities,
+        )
+        .map_err(|diagnostic| vec![diagnostic])?;
+        validate_type_constraints(self.types, resolved, self.structs, self.enums, ty.span)?;
+        Ok(resolved)
+    }
+
     fn resolve_type_arguments(
         &mut self,
         arguments: &[AstType],
     ) -> Result<Vec<TypeId>, Vec<Diagnostic>> {
         arguments
             .iter()
-            .map(|argument| {
-                resolve_type_in_module(
-                    argument,
-                    self.module,
-                    self.aliases,
-                    self.struct_names,
-                    self.enum_names,
-                    self.imports,
-                    self.module_names,
-                    self.types,
-                    &self.generic_scope,
-                    self.struct_arities,
-                    self.enum_arities,
-                )
-                .map_err(|diagnostic| vec![diagnostic])
-            })
+            .map(|argument| self.resolve_source_type(argument))
             .collect()
     }
 
@@ -3654,6 +3879,16 @@ impl Analyzer<'_> {
                 span,
             )]);
         }
+        validate_generic_constraints(
+            self.types,
+            &self.structs[id.0 as usize].generic_parameters,
+            &arguments,
+            &self.structs[id.0 as usize].name,
+            self.structs,
+            self.enums,
+            span,
+            false,
+        )?;
         Ok(if expected == 0 {
             self.types
                 .id_of(TypeData::Struct(id))
@@ -3683,6 +3918,16 @@ impl Analyzer<'_> {
                 span,
             )]);
         }
+        validate_generic_constraints(
+            self.types,
+            &self.enums[id.0 as usize].generic_parameters,
+            &arguments,
+            &self.enums[id.0 as usize].name,
+            self.structs,
+            self.enums,
+            span,
+            false,
+        )?;
         Ok(if expected == 0 {
             self.types.id_of(TypeData::Enum(id)).expect("interned enum")
         } else {
@@ -3761,7 +4006,7 @@ impl Analyzer<'_> {
                     (&place.kind, &value.kind)
                 && destination == source
                 && let Some(local) = self.lookup(destination)
-                && !self.types.is_copy(self.locals[local.0 as usize].ty)
+                && !self.types.guarantees_copy(self.locals[local.0 as usize].ty)
             {
                 statements.push(HirStmt {
                     kind: HirStmtKind::Nop,
@@ -3778,20 +4023,7 @@ impl Analyzer<'_> {
                     if self.scopes.last().is_some_and(|x| x.contains_key(name)) {
                         return Err(vec![duplicate("local", name, s.span)]);
                     }
-                    let ty = resolve_type_in_module(
-                        ty,
-                        self.module,
-                        self.aliases,
-                        self.struct_names,
-                        self.enum_names,
-                        self.imports,
-                        self.module_names,
-                        self.types,
-                        &self.generic_scope,
-                        self.struct_arities,
-                        self.enum_arities,
-                    )
-                    .map_err(|d| vec![d])?;
+                    let ty = self.resolve_source_type(ty)?;
                     let initializer = self.expression(initializer, Some(ty))?.expr;
                     let local = LocalId(self.locals.len() as u32);
                     self.locals.push(HirLocal {
@@ -3807,7 +4039,7 @@ impl Analyzer<'_> {
                 }
                 AstStmtKind::Assign { place, value } => {
                     let place = self.resolve_expr_place(place, true)?;
-                    if !self.types.is_copy(place.ty)
+                    if !self.types.guarantees_copy(place.ty)
                         && (!place.projections.is_empty()
                             || matches!(place.base, HirPlaceBase::Dereference { .. }))
                     {
@@ -4026,20 +4258,7 @@ impl Analyzer<'_> {
                 reference: None,
                 span: arm.pattern.span,
             };
-            let resolved_ty = resolve_type_in_module(
-                &pattern_ty,
-                self.module,
-                self.aliases,
-                self.struct_names,
-                self.enum_names,
-                self.imports,
-                self.module_names,
-                self.types,
-                &self.generic_scope,
-                self.struct_arities,
-                self.enum_arities,
-            )
-            .map_err(|diagnostic| vec![diagnostic])?;
+            let resolved_ty = self.resolve_source_type(&pattern_ty)?;
             let Some(pattern_enum) = self.types.enum_id(resolved_ty) else {
                 return Err(vec![Diagnostic::new(
                     "E0255",
@@ -4386,7 +4605,7 @@ impl Analyzer<'_> {
                 };
                 Checked {
                     expr: HirExpr {
-                        kind: if self.types.is_copy(self.locals[l.0 as usize].ty) {
+                        kind: if self.types.guarantees_copy(self.locals[l.0 as usize].ty) {
                             HirExprKind::Local(l)
                         } else {
                             HirExprKind::Move(l)
@@ -4568,7 +4787,7 @@ impl Analyzer<'_> {
     }
 
     fn load_place(&self, place: HirPlace, span: Span) -> Result<Checked, Vec<Diagnostic>> {
-        if !self.types.is_copy(place.ty) && !self.types.contains_generic(place.ty) {
+        if !self.types.guarantees_copy(place.ty) {
             return Err(vec![Diagnostic::new(
                 "E0293",
                 Phase::Semantic,
@@ -5247,20 +5466,7 @@ impl Analyzer<'_> {
             reference: None,
             span,
         };
-        let resolved = resolve_type_in_module(
-            &ty,
-            self.module,
-            self.aliases,
-            self.struct_names,
-            self.enum_names,
-            self.imports,
-            self.module_names,
-            self.types,
-            &self.generic_scope,
-            self.struct_arities,
-            self.enum_arities,
-        )
-        .map_err(|diagnostic| vec![diagnostic])?;
+        let resolved = self.resolve_source_type(&ty)?;
         self.types
             .enum_id(resolved)
             .map(|_| resolved)
@@ -5494,7 +5700,9 @@ impl Analyzer<'_> {
         }
         let mut type_arguments = self.resolve_type_arguments(source_type_arguments)?;
         let mut prechecked = None;
-        if source_type_arguments.is_empty() && !s.generic_parameters.is_empty() {
+        let inferred_application =
+            source_type_arguments.is_empty() && !s.generic_parameters.is_empty();
+        if inferred_application {
             let checked = args
                 .iter()
                 .map(|argument| self.expression(argument, None))
@@ -5533,6 +5741,16 @@ impl Analyzer<'_> {
         }) {
             return Err(vec![restricted_generic_argument(span)]);
         }
+        validate_generic_constraints(
+            self.types,
+            &s.generic_parameters,
+            &type_arguments,
+            name,
+            self.structs,
+            self.enums,
+            span,
+            inferred_application,
+        )?;
         let substitution = Substitution::new(
             s.generic_parameters.iter().map(|parameter| parameter.id),
             type_arguments.iter().copied(),
@@ -6304,7 +6522,7 @@ fn verify_block(
             || !f
                 .locals
                 .get(local.0 as usize)
-                .is_some_and(|info| !types.is_copy(info.ty) && types.needs_drop(info.ty))
+                .is_some_and(|info| !types.guarantees_copy(info.ty) && types.needs_drop(info.ty))
         {
             return Err(fail("HIR block cleanup contract is invalid".into()));
         }
@@ -6416,7 +6634,7 @@ fn verify_block(
                     return Err(fail("HIR match type/exhaustiveness invalid".into()));
                 }
                 if *mode == MatchMode::Value
-                    && !types.is_copy(*enum_type)
+                    && !types.guarantees_copy(*enum_type)
                     && matches!(scrutinee.kind, HirExprKind::Local(_) | HirExprKind::Load(_))
                 {
                     return Err(fail(
@@ -6478,7 +6696,7 @@ fn verify_block(
                         let local = drop.local();
                         !seen.insert(local)
                             || !f.locals.get(local.0 as usize).is_some_and(|info| {
-                                !types.is_copy(info.ty) && types.needs_drop(info.ty)
+                                !types.guarantees_copy(info.ty) && types.needs_drop(info.ty)
                             })
                     })
                 {
@@ -6522,7 +6740,7 @@ fn verify_expr(
         {
             return Err(fail("HIR local mismatch".into()));
         }
-        HirExprKind::Move(_) if types.is_copy(e.ty) => {
+        HirExprKind::Move(_) if types.guarantees_copy(e.ty) => {
             return Err(fail("HIR Move used for a Copy type".into()));
         }
         HirExprKind::Load(place) => {
@@ -6561,7 +6779,7 @@ fn verify_expr(
             if types.buffer_element(e.ty) != Some(*element_type)
                 || length.ty != TypeId::USIZE
                 || initial.ty != *element_type
-                || !types.is_copy(*element_type)
+                || !types.guarantees_copy(*element_type)
                 || types.needs_drop(*element_type)
             {
                 return Err(fail("HIR Buffer construction contract invalid".into()));

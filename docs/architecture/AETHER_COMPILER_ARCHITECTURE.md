@@ -1534,9 +1534,38 @@ debug-driver sample over ten compilations measured mean core times of about
 List, 0.794 ms repeated push, 0.910 ms reserved push and 0.750 ms List
 view/index. These are fixture snapshots, not benchmark claims.
 
-For NEXT-VERTICAL-15, the strongest dependency closure is explicit generic
-capabilities/constraints plus verified element construction, relocation and
-destruction. That can lift Array/List's temporary element restrictions without
-making user-defined Drop or exceptions accidental prerequisites. `pop` should
-wait until an Option/result or other empty-result contract is selected; Vector
-and Matrix must retain their distinct mathematical HIR and one-based surface.
+## 32. NEXT-VERTICAL-15 implementation confirmation
+
+Vertical-15 implements a closed semantic `Capability::{Copy, Relocatable}`
+set and the central implication `Copy => Relocatable`. Source constraints are
+retained as unresolved names/spans in AST, resolved during declaration
+collection, and stored on exact `GenericParamId`-owned `GenericParamInfo`.
+Capability sets do not participate in `TypeId` identity.
+
+Concrete `TypeProperties` now includes `is_relocatable` without deriving drop
+from Copy. A separate cycle-protected symbolic query consults generic
+guarantees and structurally evaluates substituted struct fields and enum
+payloads. This separation lets `Holder<T>` be guaranteed Copy in a `T: Copy`
+context while the unresolved parameter's concrete properties remain unknown.
+
+Function calls validate explicit, inferred and forwarded arguments before the
+monomorphizer allocates an `InstanceId`. Generic nominal applications are
+validated before layout/codegen as well. Constraint failures distinguish
+unknown/duplicate names, failed inference results and missing symbolic
+guarantees. MIR, SSA and LLVM remain concrete and contain no capability table,
+dictionary, vtable or metadata.
+
+The concrete capability table makes scalars, references and views Copy plus
+Relocatable; Buffer, Array and List are non-Copy plus Relocatable; aggregate
+properties are structural. Borrow and escape checks remain independent.
+Symbolic Buffer/Array/List elements stay rejected because their existing gate
+also requires concrete no-drop elements without borrowed/owning substructure.
+List growth is not rewritten to relocate non-Copy values.
+
+For NEXT-VERTICAL-16, the strongest dependency closure is verified
+element-wise relocation and destruction during collection construction,
+growth and cleanup. It should introduce an internal element-admission proof
+that precisely models initialization and drop glue before considering owned
+non-Copy Array/List elements. `Relocatable` alone must not bypass those
+obligations. Behavioral/numeric traits and user-defined capabilities should
+remain separate future design work.

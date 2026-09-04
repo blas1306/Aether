@@ -12,7 +12,7 @@ enum Number {
     Integer(int),
 }
 
-T readValue<T>(ref T value) {
+T readValue<T: Copy>(ref T value) {
     return *value;
 }
 

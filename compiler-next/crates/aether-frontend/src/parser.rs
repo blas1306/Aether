@@ -1,10 +1,11 @@
-//! Recursive-descent parser for the deliberately closed Vertical-14 grammar.
+//! Recursive-descent parser for the deliberately closed Vertical-15 grammar.
 
 use crate::{
-    AstAlias, AstBinaryOp, AstBlock, AstEnum, AstExpr, AstExprKind, AstField, AstFunction,
-    AstGenericParam, AstImport, AstMatchArm, AstMatchMode, AstParameter, AstReferenceType, AstStmt,
-    AstStmtKind, AstStruct, AstType, AstUnaryOp, AstVariant, AstVariantPattern, Diagnostic,
-    DiagnosticCategory, ParsedAst, Phase, SourceFile, Token, TokenKind,
+    AstAlias, AstBinaryOp, AstBlock, AstCapabilityConstraint, AstEnum, AstExpr, AstExprKind,
+    AstField, AstFunction, AstGenericParam, AstImport, AstMatchArm, AstMatchMode, AstParameter,
+    AstReferenceType, AstStmt, AstStmtKind, AstStruct, AstType, AstUnaryOp, AstVariant,
+    AstVariantPattern, Diagnostic, DiagnosticCategory, ParsedAst, Phase, SourceFile, Token,
+    TokenKind,
 };
 
 /// Parses an already tokenized source file.
@@ -272,8 +273,23 @@ impl Parser {
         let mut parameters = Vec::new();
         loop {
             let token = self.expect(TokenKind::Identifier, "expected generic parameter")?;
+            let mut constraints = Vec::new();
+            if self.consume(TokenKind::Colon).is_some() {
+                loop {
+                    let capability =
+                        self.expect(TokenKind::Identifier, "expected capability name after `:`")?;
+                    constraints.push(AstCapabilityConstraint {
+                        name: capability.lexeme,
+                        span: capability.span,
+                    });
+                    if self.consume(TokenKind::Plus).is_none() {
+                        break;
+                    }
+                }
+            }
             parameters.push(AstGenericParam {
                 name: token.lexeme,
+                constraints,
                 span: token.span,
             });
             if self.consume(TokenKind::Comma).is_none() {

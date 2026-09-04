@@ -1,4 +1,4 @@
-//! Cross-layer and native qualification through NEXT-VERTICAL-14.
+//! Cross-layer and native qualification through NEXT-VERTICAL-15.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,7 +9,8 @@ use aether_driver::{
     ClangToolchain, CompilationSession, Emit, build_path, compile_session, compile_source, run_path,
 };
 use aether_frontend::{
-    ModuleId, SourceFile, SourceId, TargetProperties, TypeData, analyze, layout_of, parse_source,
+    Capability, ModuleId, SourceFile, SourceId, TargetProperties, TypeData, analyze, layout_of,
+    parse_source,
 };
 
 fn workspace() -> PathBuf {
@@ -2012,4 +2013,192 @@ fn vertical14_cross_module_list_transfer_executes_natively() {
     assert!(compilation.dumps[&Emit::Hir].contains("List<int64>"));
     assert!(compilation.dumps[&Emit::Mir].contains("ListPush"));
     assert!(compilation.dumps[&Emit::Ssa].contains("Drop"));
+}
+
+#[test]
+fn vertical15_constraint_syntax_resolves_to_declaration_owned_capabilities() {
+    let source = SourceFile::new(
+        "v15-syntax.ae",
+        "T select<T: Copy + Relocatable, U: Relocatable>(T value,U other){return value;}int main(){return select<int,Buffer<int>>(42,Buffer<int>(1,0));}",
+    );
+    let ast = parse_source(&source).unwrap();
+    let parameters = &ast.functions()[0].generic_parameters;
+    assert_eq!(parameters[0].constraints.len(), 2);
+    assert_eq!(parameters[0].constraints[0].name, "Copy");
+    assert!(parameters[0].constraints[0].span.start > parameters[0].span.start);
+    let hir = analyze(ast).unwrap();
+    let signature = &hir.signatures()[0];
+    assert_eq!(signature.generic_parameters[0].capabilities.len(), 2);
+    assert!(
+        signature.generic_parameters[0]
+            .capabilities
+            .contains(&Capability::Copy)
+    );
+    assert!(
+        signature.generic_parameters[1]
+            .capabilities
+            .contains(&Capability::Relocatable)
+    );
+    assert!(hir.dump().contains("Relocatable"));
+}
+
+#[test]
+fn vertical15_concrete_and_symbolic_capabilities_are_distinct_and_structural() {
+    let source = SourceFile::new(
+        "v15-properties.ae",
+        "struct Holder<T>{T value;}enum Maybe<T>{None,Some(T)}struct Owner{Buffer<int> value;}Holder<T> copyHolder<T: Copy>(Holder<T> value){Holder<T> other=value;return value;}Maybe<T> moveMaybe<T: Relocatable>(Maybe<T> value){return value;}int main(){Buffer<int> b=Buffer<int>(0,0);Array<int> a={};List<int> l={};return 0;}",
+    );
+    let hir = analyze(parse_source(&source).unwrap()).unwrap();
+    let mut symbolic_holder = false;
+    let mut symbolic_maybe = false;
+    let mut owner_relocatable = false;
+    for (ty, data) in hir.types().entries() {
+        match data {
+            TypeData::GenericParam(parameter) => {
+                let properties = hir.types().properties(ty).unwrap();
+                assert!(!properties.is_known);
+                if hir.types().generic_name(*parameter) == Some("T") {
+                    let capabilities = hir.types().generic_capabilities(*parameter).unwrap();
+                    assert!(
+                        capabilities.is_empty()
+                            || capabilities.contains(&Capability::Copy)
+                            || capabilities.contains(&Capability::Relocatable)
+                    );
+                }
+            }
+            TypeData::StructInstance(_, _) if hir.types().contains_generic(ty) => {
+                symbolic_holder |= hir.types().guarantees_capability(ty, Capability::Copy);
+            }
+            TypeData::EnumInstance(_, _) if hir.types().contains_generic(ty) => {
+                symbolic_maybe |= hir
+                    .types()
+                    .guarantees_capability(ty, Capability::Relocatable);
+            }
+            TypeData::Struct(_) => {
+                let properties = hir.types().properties(ty).unwrap();
+                owner_relocatable |= properties.is_known
+                    && !properties.is_copy
+                    && properties.is_relocatable
+                    && properties.needs_drop;
+            }
+            _ => {}
+        }
+    }
+    assert!(symbolic_holder && symbolic_maybe && owner_relocatable);
+
+    for data in [
+        TypeData::Buffer {
+            element: aether_frontend::TypeId::INT64,
+        },
+        TypeData::Array {
+            element: aether_frontend::TypeId::INT64,
+        },
+        TypeData::List {
+            element: aether_frontend::TypeId::INT64,
+        },
+    ] {
+        let ty = hir
+            .types()
+            .id_of(data)
+            .unwrap_or_else(|| panic!("fixture should intern {data:?}"));
+        assert!(!hir.types().is_copy(ty));
+        assert!(hir.types().is_relocatable(ty));
+    }
+}
+
+#[test]
+fn vertical15_capability_diagnostics_fail_closed() {
+    for (text, code) in [
+        (
+            "T duplicate<T: Copy>(T x){T y=x;return x;}int main(){Buffer<int> a=Buffer<int>(1,0);Buffer<int> b=duplicate<Buffer<int>>(a);return 0;}",
+            "E0316",
+        ),
+        (
+            "T duplicate<T: Copy>(T x){T y=x;return x;}int main(){Array<int> a={1};Array<int> b=duplicate<Array<int>>(a);return 0;}",
+            "E0316",
+        ),
+        (
+            "T duplicate<T: Copy>(T x){T y=x;return x;}int main(){List<int> a={1};List<int> b=duplicate<List<int>>(a);return 0;}",
+            "E0316",
+        ),
+        (
+            "T bad<T>(T x){T y=x;return x;}int main(){return 0;}",
+            "E0291",
+        ),
+        (
+            "T duplicate<T: Copy>(T x){T y=x;return x;}T outer<T>(T x){return duplicate<T>(x);}int main(){return 0;}",
+            "E0316",
+        ),
+        (
+            "T bad<T: Foo>(T x){return x;}int main(){return 0;}",
+            "E0314",
+        ),
+        (
+            "T bad<T: Copy + Copy>(T x){return x;}int main(){return 0;}",
+            "E0315",
+        ),
+        (
+            "struct Box<T: Copy>{T value;}int main(){Box<Buffer<int>> b=Box<Buffer<int>>(Buffer<int>(1,0));return 0;}",
+            "E0316",
+        ),
+        (
+            "enum Maybe<T: Copy>{None,Some(T)}int main(){Maybe<Buffer<int>> b=Maybe<Buffer<int>>.None;return 0;}",
+            "E0316",
+        ),
+        (
+            "T duplicate<T: Copy>(T x){T y=x;return x;}int main(){Buffer<int> a=Buffer<int>(1,0);Buffer<int> b=duplicate(a);return 0;}",
+            "E0317",
+        ),
+        (
+            "T bad<T: Relocatable>(T x){T y=x;return x;}int main(){return 0;}",
+            "E0291",
+        ),
+        (
+            "ref T bad<T: Copy>(ref T x){return x;}int main(){return 0;}",
+            "E0273",
+        ),
+        (
+            "Array<T> bad<T: Copy>(T x){Array<T> a={x};return a;}int main(){return 0;}",
+            "E0304",
+        ),
+        (
+            "List<T> bad<T: Relocatable>(T x){List<T> a={};return a;}int main(){return 0;}",
+            "E0310",
+        ),
+        (
+            "Buffer<T> bad<T: Copy>(usize n,T x){return Buffer<T>(n,x);}int main(){return 0;}",
+            "E0283",
+        ),
+    ] {
+        let diagnostics = compile_source(&SourceFile::new("v15-error.ae", text), &[])
+            .expect_err("expected capability rejection");
+        assert_eq!(
+            diagnostics[0].code, code,
+            "{text}: {}",
+            diagnostics[0].message
+        );
+        assert!(diagnostics[0].span.is_some());
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical15_capability_programs_execute_without_runtime_capability_artifacts() {
+    for (path, expected) in [
+        (program("v15_capabilities.ae"), 42),
+        (module_program("v15_capabilities"), 42),
+    ] {
+        let (compilation, status) = run_path(
+            &path,
+            &[Emit::Ast, Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+            &ClangToolchain::default(),
+        )
+        .unwrap();
+        assert_eq!(status.code(), Some(expected), "{}", path.display());
+        assert!(compilation.dumps[&Emit::Ast].contains("constraints"));
+        assert!(compilation.dumps[&Emit::Hir].contains("Relocatable"));
+        assert!(!compilation.dumps[&Emit::Mir].contains("Capability"));
+        assert!(!compilation.dumps[&Emit::Ssa].contains("Capability"));
+        assert!(!compilation.llvm.contains("capability"));
+    }
 }

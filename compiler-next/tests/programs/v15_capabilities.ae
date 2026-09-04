@@ -1,0 +1,74 @@
+struct Point {
+    int x;
+    int y;
+}
+
+struct Holder<T> {
+    T value;
+}
+
+enum Maybe<T> {
+    None,
+    Some(T),
+}
+
+struct CopyBox<T: Copy> {
+    T value;
+}
+
+enum CopyMaybe<T: Copy> {
+    None,
+    Some(T),
+}
+
+struct Owner {
+    Buffer<int> values;
+}
+
+T duplicate<T: Copy>(T value) {
+    T other = value;
+    return value;
+}
+
+T relocate<T: Relocatable>(T value) {
+    return value;
+}
+
+Holder<T> duplicateHolder<T: Copy>(Holder<T> value) {
+    Holder<T> other = value;
+    return value;
+}
+
+Maybe<T> relocateMaybe<T: Relocatable>(Maybe<T> value) {
+    return value;
+}
+
+T copyImpliesRelocatable<T: Copy>(T value) {
+    return relocate<T>(value);
+}
+
+int main() {
+    Point point = Point(20, 22);
+    Point pointCopy = duplicate<Point>(point);
+    Holder<int> holder = Holder<int>(pointCopy.x);
+    Holder<int> holderCopy = duplicateHolder<int>(holder);
+    CopyBox<int> box = CopyBox<int>(holderCopy.value);
+    CopyMaybe<int> choice = CopyMaybe<int>.Some(box.value);
+    int inferred = duplicate(pointCopy.y);
+    int implied = copyImpliesRelocatable<int>(inferred);
+    Buffer<int> buffer = Buffer<int>(1, implied);
+    Buffer<int> movedBuffer = relocate<Buffer<int>>(buffer);
+    Owner owner = Owner(Buffer<int>(1, movedBuffer[0]));
+    Owner movedOwner = relocate<Owner>(owner);
+    Maybe<Buffer<int>> maybe = Maybe<Buffer<int>>.Some(Buffer<int>(1, movedOwner.values[0]));
+    Maybe<Buffer<int>> movedMaybe = relocateMaybe<Buffer<int>>(maybe);
+    match (choice) {
+        CopyMaybe<int>.None => { return 1; }
+        CopyMaybe<int>.Some(value) => {
+            match (movedMaybe) {
+                Maybe<Buffer<int>>.None => { return 1; }
+                Maybe<Buffer<int>>.Some(values) => { return value + values[0]; }
+            }
+        }
+    }
+}

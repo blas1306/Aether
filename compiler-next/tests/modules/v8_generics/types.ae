@@ -14,7 +14,7 @@ enum Option<T> {
     Some(T),
 }
 
-T first<T, U>(Pair<T, U> value) {
+T first<T: Copy, U>(Pair<T, U> value) {
     return value.first;
 }
 

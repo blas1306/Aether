@@ -57,6 +57,8 @@ pub enum TokenKind {
     Semicolon,
     /// `,`.
     Comma,
+    /// `:`.
+    Colon,
     /// `.`.
     Dot,
     /// `+`.
@@ -186,6 +188,7 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
             b']' => single(&mut tokens, TokenKind::RightBracket, source, &mut cursor),
             b';' => single(&mut tokens, TokenKind::Semicolon, source, &mut cursor),
             b',' => single(&mut tokens, TokenKind::Comma, source, &mut cursor),
+            b':' => single(&mut tokens, TokenKind::Colon, source, &mut cursor),
             b'.' => single(&mut tokens, TokenKind::Dot, source, &mut cursor),
             b'+' => single(&mut tokens, TokenKind::Plus, source, &mut cursor),
             b'-' => single(&mut tokens, TokenKind::Minus, source, &mut cursor),

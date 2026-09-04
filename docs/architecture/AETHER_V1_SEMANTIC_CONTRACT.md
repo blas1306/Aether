@@ -713,7 +713,8 @@ construction `Array<T>(length, fill)` independently creates a runtime-sized
 fixed Array. Every literal element and fill value is checked with ordinary
 contextual literal/coercion rules. V13 temporarily requires `T` to be concrete,
 Copy and no-drop without borrowed or owning substructure; symbolic `Array<T>`
-awaits public generic constraints.
+remains rejected in V15 because public Copy/Relocatable constraints do not
+express the full internal admission predicate.
 
 Index operands have semantic type `usize`, indexing is checked and zero-based,
 and a dynamic failure is `IndexOutOfBounds`. `length(array_place)` is the
@@ -750,12 +751,13 @@ Growth is semantically allocate-copy-free-update rather than libc `realloc`:
 allocate checked `capacity * sizeof(T)` storage, copy exactly `[0, length)`,
 free the replaced allocation, then update pointer and capacity. V14 admits only
 concrete Copy/no-drop elements without borrowed or owning substructure;
-symbolic `List<T>` awaits public capability constraints.
+symbolic `List<T>` remains rejected in V15 because reallocation still copies
+elements and has no element drop glue.
 
 Array remains fixed-size and has no capacity, growth, push or reserve. List is
 not the storage model for matrices. `pop` is intended for List but deliberately
 deferred until its empty-result/error semantics are designed. Resize, insert,
-erase, non-Copy elements, public constraints and a general method/property
+erase, non-Copy elements and a general method/property
 surface are also outside V14.
 
 ### 6.3 `Vector` and `Matrix` — DECIDED surface direction / future implementation
@@ -981,8 +983,9 @@ lists make equal applications share a `TypeId` while preserving nominal
 declaration identity.
 
 Generic bodies are resolved and typechecked once under their declared
-parameters. An unconstrained parameter supports copying, binding, storage,
-passing and returning, but supplies no arithmetic, comparison, conversion or
+parameters. An unconstrained parameter supports ownership-moving binding,
+storage, passing and returning, but supplies no implicit duplication,
+arithmetic, comparison, conversion or
 unknown-field capability. Declared fields of a generic struct and variants of a
 generic enum remain statically known. This is parametric checking, not
 instantiation-dependent template validation.
@@ -1006,9 +1009,42 @@ than raw session IDs. Cross-module use retains the existing direct-import
 qualification rule. Transparent aliases may name a concrete generic type;
 generic alias declarations are not admitted.
 
-This baseline deliberately adds no constraints, traits, interfaces,
-specialization, ownership, references, pointers, arrays, strings or dynamic
-dispatch. Generic public ABI and separate-compilation ownership remain open.
+This baseline deliberately added no constraints, traits, interfaces or
+specialization. Generic public ABI and separate-compilation ownership remain
+open.
+
+### 10.5 Compiler-derived generic capabilities — NEXT-VERTICAL-15 IMPLEMENTED
+
+V15 adds the inline forms `T: Copy`, `T: Relocatable` and
+`T: Copy + Relocatable`. These are a closed set of compiler-derived semantic
+capabilities, not traits/interfaces/typeclasses: source code cannot implement,
+derive or assert them, and there are no methods, associated types, behavioral
+operator predicates, specialization, dictionaries, vtables or dynamic
+dispatch.
+
+`Copy` means implicit duplication leaves both values valid. `Relocatable`
+means physical movement preserves value and ownership when the old location
+ceases to be live under the move rules. They are not synonyms. The central
+implication lattice is `Copy => Relocatable`. Scalars, references and views
+provide both. Buffer, Array and List are non-Copy but Relocatable under their
+descriptor/owned-allocation representation. Structs derive each capability
+iff every substituted field provides it; enums do so iff every substituted
+payload provides it.
+
+Resolved guarantees belong to `GenericParamInfo` keyed by exact
+`GenericParamId`. They are not encoded into `TypeId` and do not turn a symbolic
+parameter's concrete `TypeProperties` into fabricated facts. A separate
+cycle-protected symbolic query evaluates parameters and applied structs/enums
+recursively. Generic bodies and forwarding calls are checked parametrically.
+Explicit and inferred applications validate constraints before creating a
+function `InstanceId`; inference failure and post-inference constraint failure
+remain distinct diagnostics.
+
+Constraints erase before MIR and introduce no LLVM/runtime artifact. Borrow,
+provenance and escape restrictions remain independent. Symbolic Buffer, Array
+and List elements remain rejected because their current admission also needs
+concreteness, no-drop and absence of borrowed/owning substructure; V15 does not
+expose those internal facts or generalize non-Copy collection elements.
 
 ## 11. Layout, ABI and FFI
 

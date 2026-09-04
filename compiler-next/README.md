@@ -1,4 +1,4 @@
-# Aether NEXT-VERTICAL-14
+# Aether NEXT-VERTICAL-15
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. It does not replace the production `aether` CLI or import any legacy
@@ -32,7 +32,7 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-14 grammar
+## Vertical-15 grammar
 
 ```text
 program    := import* (alias | struct | enum | function)+ EOF
@@ -43,7 +43,9 @@ field      := type IDENT ";"
 enum       := "enum" IDENT generic-params? "{" variant ("," variant)* ","? "}"
 variant    := IDENT | IDENT "(" type ("," type)* ")"
 function   := type IDENT generic-params? "(" parameters? ")" block
-generic-params := "<" IDENT ("," IDENT)* ">"
+generic-params := "<" generic-param ("," generic-param)* ">"
+generic-param  := IDENT (":" capability ("+" capability)*)?
+capability     := "Copy" | "Relocatable"
 parameters := parameter ("," parameter)*
 parameter  := type IDENT
 type       := "ref" "mut"? type
@@ -96,7 +98,8 @@ field is required. This is structural construction, not a function call or a
 user-defined constructor. Named initializers and named arguments are not part
 of Vertical-5.
 
-Generic functions, structs and enums use unconstrained declaration binders.
+Generic functions, structs and enums use declaration binders with optional
+compiler-known capability constraints.
 `GenericParamId { owner, index }` supplies binder identity independently of
 source spelling. `Pair<int,float64>` and `Option<Pair<int,float64>>` are
 canonical applied `TypeId`s; repeated applications reuse one ID. Explicit call
@@ -105,6 +108,21 @@ exact local parameter/argument matching; an uninferable parameter is rejected.
 Generic bodies are checked parametrically, so arithmetic, comparison and field
 access on an unconstrained `T` are invalid. Declared aggregate fields and enum
 variants remain usable after substitution.
+
+Vertical-15 capabilities are not general traits. `Copy` permits implicit
+duplication; `Relocatable` permits an ownership-preserving physical move after
+the old location ceases to be live. `Copy` centrally implies `Relocatable`, but
+the reverse does not hold. Capabilities are derived by the compiler only:
+there are no user implementations, methods, associated types, operator
+constraints, dictionaries, vtables or runtime dispatch.
+
+`GenericParamInfo` owns the resolved capability set for its exact
+`GenericParamId`; `TypeData::GenericParam` identity does not include it.
+Concrete `TypeProperties` remain actual facts, while a separate symbolic query
+uses declaration guarantees and recursively substituted struct fields or enum
+payloads. Calls and nominal applications validate inferred, explicit and
+forwarded arguments before an `InstanceId` is requested. Constraints disappear
+before MIR/SSA/LLVM.
 
 `FunctionId` continues to identify one declaration. A canonical `InstanceId`
 identifies each `(FunctionId, concrete type arguments)` and a deterministic
@@ -286,6 +304,13 @@ and keeps the 21-case executable legacy differential subset green. List-native
 tests compile through clang, verify bounds/overflow traps, exact allocation and
 free counts, aggregate/cross-module ownership and storage-borrow invalidation.
 
+The Vertical-15 qualification run completes 110 Rust unit/integration tests
+with zero failures, passes workspace/all-target clippy with warnings denied,
+and keeps the executable legacy differential comparisons green. Capability
+fixtures cover syntax/resolution, concrete and symbolic properties,
+implication, explicit and inferred calls, forwarding, constrained
+structs/enums, cross-module use, diagnostics and native erasure.
+
 ### Vertical-7 timing baseline
 
 A warm debug-build comparison against the pre-migration `HEAD`, using 30 full
@@ -405,14 +430,16 @@ ownership system.
 
 ## Vertical-11 transitive aggregate ownership contract
 
-`is_copy(TypeId)` and `needs_drop(TypeId)` are independent, centralized,
+`is_copy(TypeId)`, `is_relocatable(TypeId)` and `needs_drop(TypeId)` are
+independent, centralized,
 memoized lifecycle queries. Scalars, references and views are Copy/no-drop;
 `Buffer<T>` is non-Copy/needs-drop. A concrete struct is Copy only when every
 substituted field is Copy and needs drop when any substituted field does. An
 enum applies the same rules across every payload of every variant. Thus
 `Holder<int>` remains Copy while `Holder<Buffer<int>>` moves and drops.
 Unresolved generic parameters produce `is_known: false` and are conservatively
-non-Copy/potentially drop-requiring during parametric checking;
+non-Copy/non-relocatable/potentially drop-requiring as concrete properties.
+Their separately declared guarantees drive parametric checking;
 monomorphization substitutes the concrete property and re-synthesizes
 ownership cleanup.
 
@@ -528,7 +555,8 @@ spellings may directly select a floating contextual literal type, so
 The temporary V13 element restriction requires concrete Copy/no-drop values
 without borrowed or owning substructure. `Array<Buffer<int>>`, nested Array,
 owning aggregate elements and symbolic `Array<T>` are therefore rejected until
-generic constraints and element drop loops exist. Array may itself be a
+an exact internal no-drop/storage-admission proof and element drop loops exist.
+Public Copy/Relocatable constraints alone are intentionally insufficient. Array may itself be a
 struct field, enum payload or concrete generic argument.
 
 Fill construction is independent of literals:
@@ -629,7 +657,7 @@ still required when mutating through `ref mut List<T>`.
 
 Array remains fixed and gains none of these operations. There is no implicit
 Array/List/Buffer conversion. `pop`, resize, insert, erase, non-Copy elements,
-public constraints and general methods are deliberately deferred. Likely
+general methods are deliberately deferred. Likely
 future forms such as `list.length` and `list.push(x)` remain ergonomic surface
 work over the explicit semantic operations.
 
@@ -650,6 +678,40 @@ demonstrate this implementation and its balance instrumentation; the capacity
 sequence and growth factor are not language guarantees.
 The combined move/return/struct/enum/generic/conditional fixture observes nine
 allocations and nine frees, covering recursive and transferred ownership.
+
+## Vertical-15 generic capability contract
+
+Inline constraints support `T: Copy`, `T: Relocatable` and conjunction with
+`+`, including multiple independently identified parameters. Unknown and
+duplicate capability names are structured semantic errors. Generic bodies are
+checked once using only declared guarantees; forwarding requires the caller's
+symbolic argument to imply every callee constraint. Local inference still uses
+exact type matching, then reports constraint failure separately from inference
+failure.
+
+The concrete table is: scalar integers/floats/bool, references, `View` and
+`ViewMut` are Copy and Relocatable; `Buffer`, `Array` and `List` are non-Copy,
+Relocatable owners requiring drop; structs are Copy/Relocatable iff all fields
+are, and enums iff all payloads are. Reference/view escape and borrow rules are
+independent and are never bypassed by capabilities.
+
+V15 intentionally keeps symbolic `Buffer<T>`, `Array<T>` and `List<T>`
+rejected. Their current admission contract additionally requires concrete,
+no-drop elements without borrowed or owning substructure, and those internal
+facts are not exposed as public constraints. List growth still copies elements
+and does not run element drop glue. Relocatable therefore prepares a future
+generalization without admitting `Array<Buffer<int>>` or `List<Buffer<int>>`.
+
+### Vertical-15 timing snapshot
+
+A warm debug driver was sampled over 30 complete compilations per versioned
+fixture. Mean signature-collection plus semantic-body time was approximately
+602.0 us for the V14 all-List baseline, 1060.9 us for the larger constrained
+definition/use fixture, and 389.6 us for the compact symbolic aggregate
+fixture. Corresponding mean core phase totals were 3203.6, 2314.7 and 658.6 us.
+These fixtures intentionally differ in size and generated runtime helpers, so
+the figures are snapshots rather than a same-workload regression claim. The
+constraints add no runtime representation or dispatch.
 
 ## Bootstrap ABI and deliberate limits
 
@@ -674,7 +736,7 @@ Modules are declaration-only: there are no globals, top-level statements,
 module initializers or initialization order. This is precisely why import
 cycles have no execution-order meaning in this slice. There are also no
 packages, nested/selective/wildcard/aliased imports, reexports, visibility
-keywords, overloads, generic constraints/traits, generic aliases, function values, closures, extern functions,
+keywords, overloads, behavioral traits, generic aliases, function values, closures, extern functions,
 heap values beyond `Buffer`/`Array`/restricted `List`, strings, named initializers, methods, general
 ownership, optimization pipeline, public ABI/runtime API, or LLVM library binding. Unsupported forms fail
 closed before lowering.

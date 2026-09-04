@@ -1,0 +1,12 @@
+import types;
+
+int main() {
+    types.CopyBox<int> box = types.CopyBox<int>(20);
+    types.CopyMaybe<int> maybe = types.CopyMaybe<int>.Some(types.duplicate(box.value));
+    Buffer<int> buffer = Buffer<int>(1, 22);
+    Buffer<int> moved = types.relocate<Buffer<int>>(buffer);
+    match (maybe) {
+        types.CopyMaybe<int>.None => { return 1; }
+        types.CopyMaybe<int>.Some(value) => { return value + moved[0]; }
+    }
+}

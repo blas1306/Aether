@@ -1,0 +1,17 @@
+struct CopyBox<T: Copy> {
+    T value;
+}
+
+enum CopyMaybe<T: Copy> {
+    None,
+    Some(T),
+}
+
+T duplicate<T: Copy>(T value) {
+    T other = value;
+    return value;
+}
+
+T relocate<T: Relocatable>(T value) {
+    return value;
+}

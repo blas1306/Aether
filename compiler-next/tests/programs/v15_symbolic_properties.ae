@@ -1,0 +1,21 @@
+struct Holder<T> {
+    T value;
+}
+
+enum Maybe<T> {
+    None,
+    Some(T),
+}
+
+Holder<T> duplicateHolder<T: Copy>(Holder<T> value) {
+    Holder<T> other = value;
+    return value;
+}
+
+Maybe<T> relocateMaybe<T: Relocatable>(Maybe<T> value) {
+    return value;
+}
+
+int main() {
+    return 0;
+}

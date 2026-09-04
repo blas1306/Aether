@@ -86,3 +86,5 @@ empty_list	V1_CONTRACT	accept:0	n/a	programs/v14_empty_list.ae
 repeated_list_push	V1_CONTRACT	accept:0	n/a	programs/v14_repeated_push.ae
 reserved_list_push	V1_CONTRACT	accept:0	n/a	programs/v14_reserved_push.ae
 list_view_index	V1_CONTRACT	accept:0	n/a	programs/v14_list_view_index.ae
+generic_capabilities	V1_CONTRACT	accept:42	n/a	programs/v15_capabilities.ae
+symbolic_type_properties	V1_CONTRACT	accept:0	n/a	programs/v15_symbolic_properties.ae

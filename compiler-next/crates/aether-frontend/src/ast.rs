@@ -174,7 +174,18 @@ pub struct AstReferenceType {
 pub struct AstGenericParam {
     /// Source spelling used for resolution and diagnostics.
     pub name: String,
+    /// Compiler-known capability spellings retained unresolved in the AST.
+    pub constraints: Vec<AstCapabilityConstraint>,
     /// Binder-token provenance.
+    pub span: Span,
+}
+
+/// One unresolved source-level capability constraint.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AstCapabilityConstraint {
+    /// Exact source spelling, such as `Copy` or `Relocatable`.
+    pub name: String,
+    /// Capability-name provenance.
     pub span: Span,
 }
 
