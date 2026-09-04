@@ -127,6 +127,22 @@ pub enum SsaOp {
         size_trap: TrapKind,
         failure_trap: TrapKind,
     },
+    ArrayInit {
+        element_type: TypeId,
+        elements: Vec<SsaOperand>,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
+    ArrayFill {
+        element_type: TypeId,
+        length: SsaOperand,
+        initial: SsaOperand,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
+    ArrayLength {
+        source: SsaPlace,
+    },
     View {
         source: SsaPlace,
         mutable: bool,
@@ -670,6 +686,36 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             size_trap: *size_trap,
             failure_trap: *failure_trap,
         },
+        Rvalue::ArrayInit {
+            element_type,
+            elements,
+            size_trap,
+            failure_trap,
+        } => SsaOp::ArrayInit {
+            element_type: *element_type,
+            elements: elements
+                .iter()
+                .map(|element| rename_operand(element, stacks))
+                .collect(),
+            size_trap: *size_trap,
+            failure_trap: *failure_trap,
+        },
+        Rvalue::ArrayFill {
+            element_type,
+            length,
+            initial,
+            size_trap,
+            failure_trap,
+        } => SsaOp::ArrayFill {
+            element_type: *element_type,
+            length: rename_operand(length, stacks),
+            initial: rename_operand(initial, stacks),
+            size_trap: *size_trap,
+            failure_trap: *failure_trap,
+        },
+        Rvalue::ArrayLength { source } => SsaOp::ArrayLength {
+            source: rename_place(source, stacks, mir),
+        },
         Rvalue::View { source, mutable } => SsaOp::View {
             source: rename_place(source, stacks, mir),
             mutable: *mutable,
@@ -1047,13 +1093,18 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
         | Rvalue::Move { source: place }
         | Rvalue::Drop { owner: place }
         | Rvalue::ConsumeEnum { owner: place }
-        | Rvalue::View { source: place, .. } => place_locals(function, place),
+        | Rvalue::View { source: place, .. }
+        | Rvalue::ArrayLength { source: place } => place_locals(function, place),
         Rvalue::BufferAlloc {
+            length, initial, ..
+        }
+        | Rvalue::ArrayFill {
             length, initial, ..
         } => operand_local(length)
             .into_iter()
             .chain(operand_local(initial))
             .collect(),
+        Rvalue::ArrayInit { elements, .. } => elements.iter().filter_map(operand_local).collect(),
         Rvalue::Aggregate { fields, .. } => fields
             .iter()
             .filter_map(|(_, operand)| operand_local(operand))
@@ -1134,10 +1185,11 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
         TypeData::Buffer { element } | TypeData::View { element, .. } => {
             !ssa.types.is_admitted_buffer_element(*element)
         }
+        TypeData::Array { element } => !ssa.types.is_admitted_array_element(*element),
         _ => false,
     }) {
         return Err(fail(
-            "SSA contains a Buffer/View with an inadmissible element type".into(),
+            "SSA contains a Buffer/View/Array with an inadmissible element type".into(),
         ));
     }
     for ty in ssa
@@ -1673,11 +1725,51 @@ fn verify_op(
                 return Err("SSA Buffer allocation contract invalid".into());
             }
         }
+        SsaOp::ArrayInit {
+            element_type,
+            elements,
+            size_trap,
+            failure_trap,
+        } => {
+            if types.array_element(result) != Some(*element_type)
+                || elements
+                    .iter()
+                    .any(|element| operand_ty(element).ok() != Some(*element_type))
+                || !types.is_admitted_array_element(*element_type)
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("SSA Array literal allocation contract invalid".into());
+            }
+        }
+        SsaOp::ArrayFill {
+            element_type,
+            length,
+            initial,
+            size_trap,
+            failure_trap,
+        } => {
+            if types.array_element(result) != Some(*element_type)
+                || operand_ty(length)? != TypeId::USIZE
+                || operand_ty(initial)? != *element_type
+                || !types.is_admitted_array_element(*element_type)
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("SSA Array fill allocation contract invalid".into());
+            }
+        }
+        SsaOp::ArrayLength { source } => {
+            let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
+            if result != TypeId::USIZE || types.array_element(source_ty).is_none() {
+                return Err("SSA Array length contract invalid".into());
+            }
+        }
         SsaOp::View { source, mutable } => {
             let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
             let element = types
-                .buffer_element(source_ty)
-                .ok_or_else(|| "SSA View source is not Buffer".to_string())?;
+                .owning_contiguous_element(source_ty)
+                .ok_or_else(|| "SSA View source is not Buffer/Array".to_string())?;
             if types.view_info(result) != Some((element, *mutable)) {
                 return Err("SSA View contract invalid".into());
             }
@@ -1957,6 +2049,7 @@ fn ssa_place_type(
             } => {
                 let element = types
                     .buffer_element(ty)
+                    .or_else(|| types.array_element(ty))
                     .or_else(|| types.view_info(ty).map(|(element, _)| element))
                     .ok_or_else(|| "SSA index projection has non-contiguous base".to_string())?;
                 if operand_ty(index)? != TypeId::USIZE
@@ -2066,14 +2159,19 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         | SsaOp::Move { source: place }
         | SsaOp::Drop { owner: place }
         | SsaOp::ConsumeEnum { owner: place }
-        | SsaOp::View { source: place, .. } => place_operands(place),
+        | SsaOp::View { source: place, .. }
+        | SsaOp::ArrayLength { source: place } => place_operands(place),
         SsaOp::Store { place, value } => place_operands(place)
             .into_iter()
             .chain(std::iter::once(value))
             .collect(),
         SsaOp::BufferAlloc {
             length, initial, ..
+        }
+        | SsaOp::ArrayFill {
+            length, initial, ..
         } => vec![length, initial],
+        SsaOp::ArrayInit { elements, .. } => elements.iter().collect(),
         SsaOp::Aggregate { fields, .. } => fields.iter().map(|(_, value)| value).collect(),
         SsaOp::EnumConstruct { payloads, .. } => payloads.iter().collect(),
         SsaOp::ExtractField { aggregate, .. } => vec![aggregate],

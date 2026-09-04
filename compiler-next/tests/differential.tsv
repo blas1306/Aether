@@ -69,3 +69,11 @@ aggregate_control_flow_cleanup	V1_CONTRACT	accept:43	n/a	programs/v11_control_fl
 aggregate_reassignment_cleanup	V1_CONTRACT	accept:42	n/a	programs/v11_reassignment.ae
 ownership_aware_enum_match	V1_CONTRACT	accept:42	n/a	programs/v12_match_ownership.ae
 conditional_root_cleanup	V1_CONTRACT	accept:42	n/a	programs/v12_conditional_drop.ae
+fixed_array_literals	V1_CONTRACT	accept:45	n/a	programs/v13_arrays.ae
+array_aggregate_ownership	V1_CONTRACT	accept:18	n/a	programs/v13_array_ownership.ae
+empty_array_dynamic_bounds	V1_CONTRACT	trap	n/a	programs/v13_empty_oob.ae
+array_allocation_overflow	V1_CONTRACT	trap	n/a	programs/v13_allocation_overflow.ae
+empty_array	V1_CONTRACT	accept:0	n/a	programs/v13_empty_array.ae
+literal_array	V1_CONTRACT	accept:42	n/a	programs/v13_literal_array.ae
+fill_array	V1_CONTRACT	accept:42	n/a	programs/v13_fill_array.ae
+array_index_reference_loop	V1_CONTRACT	accept:42	n/a	programs/v13_index_ref_loop.ae

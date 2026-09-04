@@ -1429,3 +1429,60 @@ only after deciding its source construction/index surface and reuse of Buffer
 storage. Reallocation, capacity and growth should remain a later slice so view
 invalidation and allocator effects are designed explicitly rather than hidden
 inside the initial Array admission.
+
+## 30. NEXT-VERTICAL-13 implementation confirmation
+
+Vertical-13 implements `Array<T>` as a canonical `TypeData::Array { element }`
+distinct from `Buffer<T>`. Repeated applications share one session-local
+`TypeId`; Array is non-Copy/needs-drop and inherits whole-root move,
+`MaybeMoved`, aggregate composition and recursive cleanup without a container-
+specific ownership analysis. Its V13 element is concrete Copy/no-drop and may
+not contain references, views or owning data. This permits Array as an owning
+field, enum payload and concrete generic argument while rejecting nested Array
+elements and symbolic `Array<T>` until constraints exist.
+
+The parser treats braces in expression position as a neutral
+`CollectionLiteral`, distinct from statement/declaration blocks and reserved
+future bracket-based mathematical literal forms. Expected-type analysis
+requires `Array<T>` and emits typed `ArrayInit`; `{}` consequently creates
+length zero without a synthetic call. `Array<T>(length, fill)` emits
+`ArrayFill`, and the provisional `length(array_place)` surface emits
+`ArrayLength`. MIR and SSA retain and independently verify these operations.
+Indexing continues through the checked Place projection with a `usize` operand
+and zero-based `IndexOutOfBounds` behavior.
+
+LLVM represents Array and Buffer with the same internal `{ ptr, i64 }`
+descriptor while retaining their distinct semantic and mangled identities.
+The factored `aether_fixed_new_*` helper performs checked exact-size allocation;
+Buffer and Array fill reuse one fill helper, while Array literals store every
+element in source order. General typed Drop frees either owning descriptor once
+and the existing generated allocation/free counters guard normal-path balance.
+Array has no capacity field, resizing or realloc path. References and whole
+Array views reuse existing stable-place and owner-liveness rules.
+
+Qualification covers empty/literal/fill/runtime-length construction, length,
+first/last checked access, writes, element references, views, moves, by-value
+parameters, returns, struct/enum/generic ownership, conditional cleanup,
+cross-module transfer and dynamic empty indexing. Dumps expose neutral AST and
+resolved HIR/MIR/SSA operations. Legacy compiler/runtime/CLI files remain
+unchanged.
+
+A warm debug-driver snapshot over 20 complete compilations per fixture measured
+mean core time (parse through LLVM, excluding discovery, file I/O and clang) of
+approximately 2.648 ms for unchanged `v12_conditional_drop.ae`, 0.536 ms for
+empty Array, 0.600 ms for literal Array, 0.619 ms for fill Array and 0.803 ms
+for the indexed-reference loop. These are fixture snapshots, not benchmark-
+quality speed claims.
+
+The language contract now fixes the distinction for future work: Array and
+List are computational collections with `{...}` literals and zero-based
+indexing; List alone will be dynamic. `Vector<T, Orientation>` and `Matrix<T>`
+are mathematical types with bracket literals and one-based indexing. Matrix is
+one structurally two-dimensional literal/type, never nested collections.
+
+For NEXT-VERTICAL-14, the strongest dependency closure is explicit generic
+capabilities/constraints sufficient to state Copy/no-drop element requirements
+and then lift Array's temporary element restriction with verified per-element
+move/drop construction. Do not add List growth first: reallocation needs a
+clear view-invalidation/lifetime contract, and Vector/Matrix should retain
+distinct mathematical HIR rather than reuse collection literal nodes.

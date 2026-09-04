@@ -1,4 +1,4 @@
-//! Recursive-descent parser for the deliberately closed Vertical-12 grammar.
+//! Recursive-descent parser for the deliberately closed Vertical-13 grammar.
 
 use crate::{
     AstAlias, AstBinaryOp, AstBlock, AstEnum, AstExpr, AstExprKind, AstField, AstFunction,
@@ -393,7 +393,7 @@ impl Parser {
                 });
             }
             TokenKind::KwMatch => return self.match_statement(start),
-            _ => return Err(self.error("E0102", "expected a Vertical-12 statement")),
+            _ => return Err(self.error("E0102", "expected a Vertical-13 statement")),
         };
         let semicolon = self.expect(TokenKind::Semicolon, "expected `;` after statement")?;
         Ok(AstStmt {
@@ -660,6 +660,28 @@ impl Parser {
                 kind: AstExprKind::Bool(false),
                 span: token.span,
             },
+            TokenKind::LeftBrace => {
+                let mut elements = Vec::new();
+                if !self.at(TokenKind::RightBrace) {
+                    loop {
+                        elements.push(self.expression()?);
+                        if self.consume(TokenKind::Comma).is_none() {
+                            break;
+                        }
+                        if self.at(TokenKind::RightBrace) {
+                            break;
+                        }
+                    }
+                }
+                let right = self.expect(
+                    TokenKind::RightBrace,
+                    "expected `}` after collection literal",
+                )?;
+                AstExpr {
+                    kind: AstExprKind::CollectionLiteral(elements),
+                    span: token.span.through(right.span),
+                }
+            }
             TokenKind::Identifier | TokenKind::KwInt | TokenKind::KwBool => {
                 self.identifier_primary(token)?
             }

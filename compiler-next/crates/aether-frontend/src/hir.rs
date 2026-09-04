@@ -136,7 +136,7 @@ pub fn layout_of(
             size: u64::from(target.pointer_width / 8),
             align: u64::from(target.pointer_width / 8),
         },
-        TypeData::Buffer { .. } | TypeData::View { .. } => TypeLayout {
+        TypeData::Buffer { .. } | TypeData::Array { .. } | TypeData::View { .. } => TypeLayout {
             size: u64::from(target.pointer_width / 4),
             align: u64::from(target.pointer_width / 8),
         },
@@ -193,6 +193,9 @@ pub fn format_type(
         ),
         Some(TypeData::Buffer { element }) => {
             format!("Buffer<{}>", format_type(types, *element, structs, enums))
+        }
+        Some(TypeData::Array { element }) => {
+            format!("Array<{}>", format_type(types, *element, structs, enums))
         }
         Some(TypeData::View { element, mutable }) => format!(
             "{}<{}>",
@@ -585,6 +588,21 @@ pub enum HirExprKind {
         element_type: TypeId,
         length: Box<HirExpr>,
         initial: Box<HirExpr>,
+    },
+    /// Expected-type-resolved `{...}` collection construction.
+    ArrayInit {
+        element_type: TypeId,
+        elements: Vec<HirExpr>,
+    },
+    /// Fixed-length fill construction `Array<T>(length, fill)`.
+    ArrayFill {
+        element_type: TypeId,
+        length: Box<HirExpr>,
+        initial: Box<HirExpr>,
+    },
+    /// Bootstrap `length(array-place)` query, resolved below HIR.
+    ArrayLength {
+        source: HirPlace,
     },
     View {
         source: HirPlace,
@@ -1065,12 +1083,18 @@ pub fn collect_program_signatures(
                 .collect(),
         );
     }
-    if let Some((container, element)) = types.entries().find_map(|(container, data)| {
-        let element = match data {
-            TypeData::Buffer { element } | TypeData::View { element, .. } => *element,
+    if let Some((container, element, is_array)) = types.entries().find_map(|(container, data)| {
+        let (element, is_array) = match data {
+            TypeData::Buffer { element } | TypeData::View { element, .. } => (*element, false),
+            TypeData::Array { element } => (*element, true),
             _ => return None,
         };
-        (!types.is_admitted_buffer_element(element)).then_some((container, element))
+        let admitted = if is_array {
+            types.is_admitted_array_element(element)
+        } else {
+            types.is_admitted_buffer_element(element)
+        };
+        (!admitted).then_some((container, element, is_array))
     }) {
         let location = structs
             .iter()
@@ -1090,7 +1114,7 @@ pub fn collect_program_signatures(
                 })
             });
         let diagnostic = Diagnostic::new(
-            "E0280",
+            if is_array { "E0304" } else { "E0280" },
             Phase::Semantic,
             DiagnosticCategory::Type,
             format!(
@@ -1440,10 +1464,13 @@ fn resolve_type_in_module(
         let element = arguments[0];
         if types.contains_generic(element) {
             return Err(Diagnostic::new(
-                "E0283",
+                if ty.name == "Array" { "E0304" } else { "E0283" },
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                "Vertical-10 Buffer/View element types must be concrete; generic capability constraints are deferred",
+                format!(
+                    "{} element types must be concrete; generic capability constraints are deferred",
+                    ty.name
+                ),
                 Some(ty.span),
             ));
         }
@@ -1461,6 +1488,23 @@ fn resolve_type_in_module(
                         Phase::Semantic,
                         DiagnosticCategory::Type,
                         "Vertical-10 Buffer elements must be concrete Copy/no-drop values without borrowed or owning substructure",
+                        Some(ty.span),
+                    ))
+                }
+            }
+            "Array" => {
+                let deferred_aggregate = types
+                    .properties(element)
+                    .is_some_and(|properties| !properties.is_known)
+                    && (types.struct_id(element).is_some() || types.enum_id(element).is_some());
+                if types.is_admitted_array_element(element) || deferred_aggregate {
+                    Ok(types.intern_array(element))
+                } else {
+                    Err(Diagnostic::new(
+                        "E0304",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "Vertical-13 Array elements must be concrete Copy/no-drop values without borrowed or owning substructure",
                         Some(ty.span),
                     ))
                 }
@@ -1560,7 +1604,7 @@ fn generic_arity(ty: &AstType, expected: usize) -> Diagnostic {
 }
 
 fn intrinsic_type_arity(name: &str) -> Option<usize> {
-    matches!(name, "Buffer" | "View" | "ViewMut").then_some(1)
+    matches!(name, "Buffer" | "Array" | "View" | "ViewMut").then_some(1)
 }
 
 fn restricted_generic_argument(span: Span) -> Diagnostic {
@@ -1838,7 +1882,7 @@ fn compute_aggregate_layouts(
                     align: bytes,
                 }
             }
-            TypeData::Buffer { .. } | TypeData::View { .. } => {
+            TypeData::Buffer { .. } | TypeData::Array { .. } | TypeData::View { .. } => {
                 let bytes = u64::from(target.pointer_width / 8);
                 TypeLayout {
                     size: bytes * 2,
@@ -2443,6 +2487,28 @@ impl Monomorphizer<'_> {
                 length: Box::new(self.substitute_expr(length, substitution)?),
                 initial: Box::new(self.substitute_expr(initial, substitution)?),
             },
+            HirExprKind::ArrayInit {
+                element_type,
+                elements,
+            } => HirExprKind::ArrayInit {
+                element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+                elements: elements
+                    .iter()
+                    .map(|element| self.substitute_expr(element, substitution))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+            HirExprKind::ArrayFill {
+                element_type,
+                length,
+                initial,
+            } => HirExprKind::ArrayFill {
+                element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+                length: Box::new(self.substitute_expr(length, substitution)?),
+                initial: Box::new(self.substitute_expr(initial, substitution)?),
+            },
+            HirExprKind::ArrayLength { source } => HirExprKind::ArrayLength {
+                source: self.substitute_place(source, substitution)?,
+            },
             HirExprKind::View { source, mutable } => HirExprKind::View {
                 source: self.substitute_place(source, substitution)?,
                 mutable: *mutable,
@@ -2536,9 +2602,11 @@ impl Monomorphizer<'_> {
 fn type_depth(types: &TypeArena, ty: TypeId) -> usize {
     match types.get(ty) {
         Some(TypeData::Reference { pointee, .. }) => 1 + type_depth(types, *pointee),
-        Some(TypeData::Buffer { element } | TypeData::View { element, .. }) => {
-            1 + type_depth(types, *element)
-        }
+        Some(
+            TypeData::Buffer { element }
+            | TypeData::Array { element }
+            | TypeData::View { element, .. },
+        ) => 1 + type_depth(types, *element),
         Some(TypeData::StructInstance(_, args) | TypeData::EnumInstance(_, args)) => {
             1 + types
                 .arguments(*args)
@@ -2563,9 +2631,11 @@ fn type_contains(types: &TypeArena, outer: TypeId, needle: TypeId) -> bool {
                 })
             }
             Some(TypeData::Reference { pointee, .. }) => type_contains(types, *pointee, needle),
-            Some(TypeData::Buffer { element } | TypeData::View { element, .. }) => {
-                type_contains(types, *element, needle)
-            }
+            Some(
+                TypeData::Buffer { element }
+                | TypeData::Array { element }
+                | TypeData::View { element, .. },
+            ) => type_contains(types, *element, needle),
             _ => false,
         }
 }
@@ -2616,7 +2686,7 @@ fn compute_concrete_layouts(
                     align: bytes,
                 })
             }
-            TypeData::Buffer { .. } | TypeData::View { .. } => {
+            TypeData::Buffer { .. } | TypeData::Array { .. } | TypeData::View { .. } => {
                 let bytes = u64::from(target.pointer_width / 8);
                 Some(TypeLayout {
                     size: bytes * 2,
@@ -3169,10 +3239,20 @@ impl OwnershipAnalysis<'_> {
             }
             HirExprKind::BufferInit {
                 length, initial, ..
+            }
+            | HirExprKind::ArrayFill {
+                length, initial, ..
             } => {
                 self.expr(length)?;
                 self.expr(initial)
             }
+            HirExprKind::ArrayInit { elements, .. } => {
+                for element in elements {
+                    self.expr(element)?;
+                }
+                Ok(())
+            }
+            HirExprKind::ArrayLength { source } => self.place(source, expr.span),
             HirExprKind::Call { args, .. } => {
                 for argument in args {
                     self.expr(argument)?;
@@ -3252,10 +3332,15 @@ impl OwnershipAnalysis<'_> {
 
     fn known_length(&self, expr: &HirExpr) -> Option<u64> {
         match &expr.kind {
-            HirExprKind::BufferInit { length, .. } => match length.kind {
-                HirExprKind::Int(value) => u64::try_from(value).ok(),
-                _ => None,
-            },
+            HirExprKind::BufferInit { length, .. } | HirExprKind::ArrayFill { length, .. } => {
+                match length.kind {
+                    HirExprKind::Int(value) => u64::try_from(value).ok(),
+                    _ => None,
+                }
+            }
+            HirExprKind::ArrayInit { elements, .. } => {
+                Some(u64::try_from(elements.len()).expect("Array literal length fits u64"))
+            }
             HirExprKind::Move(local) | HirExprKind::Local(local) => {
                 self.buffer_lengths[local.0 as usize]
             }
@@ -3905,6 +3990,8 @@ impl Analyzer<'_> {
                 let (element_type, mutable) =
                     if let Some(element) = self.types.buffer_element(place.ty) {
                         (element, true)
+                    } else if let Some(element) = self.types.array_element(place.ty) {
+                        (element, true)
                     } else if let Some((element, mutable)) = self.types.view_info(place.ty) {
                         (element, mutable)
                     } else {
@@ -3913,7 +4000,7 @@ impl Analyzer<'_> {
                             Phase::Semantic,
                             DiagnosticCategory::Type,
                             format!(
-                                "checked indexing requires Buffer/View, found {}",
+                                "checked indexing requires Buffer/Array/View, found {}",
                                 self.type_name(place.ty)
                             ),
                             Some(expression.span),
@@ -3990,6 +4077,9 @@ impl Analyzer<'_> {
         e: &AstExpr,
         expected: Option<TypeId>,
     ) -> Result<Checked, Vec<Diagnostic>> {
+        if let AstExprKind::CollectionLiteral(elements) = &e.kind {
+            return self.collection_literal(elements, e.span, expected);
+        }
         if let AstExprKind::Integer(t) = &e.kind {
             return self.integer(t, false, expected, e.span);
         }
@@ -4050,6 +4140,12 @@ impl Analyzer<'_> {
             } => {
                 if callee == "Buffer" {
                     return self.buffer_init(type_arguments, args, e.span, expected);
+                }
+                if callee == "Array" {
+                    return self.array_fill(type_arguments, args, e.span, expected);
+                }
+                if callee == "length" {
+                    return self.array_length(type_arguments, args, e.span, expected);
                 }
                 if callee == "view" || callee == "view_mut" {
                     return self.view_init(
@@ -4235,6 +4331,11 @@ impl Analyzer<'_> {
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
         let ty = expected.unwrap_or(TypeId::INT64);
+        // Contextual numeric literals are selected directly in their target
+        // type. This is literal typing, not a runtime integer-to-float cast.
+        if self.types.float_info(ty).is_some() {
+            return self.float(text, neg, Some(ty), span);
+        }
         let Some(it) = self.types.integer_info(ty) else {
             return Err(vec![type_error(
                 format!("integer literal cannot initialize {}", self.type_name(ty)),
@@ -4347,6 +4448,7 @@ impl Analyzer<'_> {
                 | TypeData::EnumInstance(_, _)
                 | TypeData::Reference { .. }
                 | TypeData::Buffer { .. }
+                | TypeData::Array { .. }
                 | TypeData::View { .. },
             )
             | None => {
@@ -4469,6 +4571,190 @@ impl Analyzer<'_> {
         })
     }
 
+    fn collection_literal(
+        &mut self,
+        elements: &[AstExpr],
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        let Some(array_type) = expected else {
+            return Err(vec![Diagnostic::new(
+                "E0305",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "collection literal requires an expected Array<T> type",
+                Some(span),
+            )]);
+        };
+        let Some(element_type) = self.types.array_element(array_type) else {
+            return Err(vec![Diagnostic::new(
+                "E0305",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!(
+                    "collection literal cannot initialize {}; Vertical-13 resolves it only as Array<T>",
+                    self.type_name(array_type)
+                ),
+                Some(span),
+            )]);
+        };
+        let mut resolved = Vec::with_capacity(elements.len());
+        for element in elements {
+            resolved.push(self.expression(element, Some(element_type))?.expr);
+        }
+        Ok(Checked {
+            expr: HirExpr {
+                kind: HirExprKind::ArrayInit {
+                    element_type,
+                    elements: resolved,
+                },
+                ty: array_type,
+                span,
+            },
+            constant: None,
+        })
+    }
+
+    fn array_fill(
+        &mut self,
+        type_arguments: &[AstType],
+        args: &[AstExpr],
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        if type_arguments.len() != 1 {
+            return Err(vec![generic_call_arity(
+                "Array",
+                1,
+                type_arguments.len(),
+                span,
+            )]);
+        }
+        if args.len() != 2 {
+            return Err(vec![Diagnostic::new(
+                "E0306",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!(
+                    "Array<T> fill construction expects length and fill value, found {} arguments",
+                    args.len()
+                ),
+                Some(span),
+            )]);
+        }
+        let element = self.resolve_type_arguments(type_arguments)?[0];
+        if self.types.contains_generic(element) {
+            return Err(vec![Diagnostic::new(
+                "E0304",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "Vertical-13 Array element type must be concrete; constraints are deferred",
+                Some(span),
+            )]);
+        }
+        if !self.types.is_admitted_array_element(element) {
+            return Err(vec![Diagnostic::new(
+                "E0304",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "Vertical-13 Array elements must be concrete Copy/no-drop values without borrowed or owning substructure",
+                Some(span),
+            )]);
+        }
+        let ty = self.types.intern_array(element);
+        if expected.is_some_and(|expected| expected != ty) {
+            return Err(vec![type_error(
+                format!(
+                    "Array constructor produces {}, not {}",
+                    self.type_name(ty),
+                    self.type_name(expected.unwrap())
+                ),
+                span,
+            )]);
+        }
+        let length = self.expression(&args[0], Some(TypeId::USIZE))?;
+        let initial = self.expression(&args[1], Some(element))?.expr;
+        self.check_allocation_size(&length, element, args[0].span, "Array")?;
+        Ok(Checked {
+            expr: HirExpr {
+                kind: HirExprKind::ArrayFill {
+                    element_type: element,
+                    length: Box::new(length.expr),
+                    initial: Box::new(initial),
+                },
+                ty,
+                span,
+            },
+            constant: None,
+        })
+    }
+
+    fn array_length(
+        &mut self,
+        type_arguments: &[AstType],
+        args: &[AstExpr],
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        if !type_arguments.is_empty() || args.len() != 1 {
+            return Err(vec![Diagnostic::new(
+                "E0307",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "length expects exactly one Array<T> place and no type arguments",
+                Some(span),
+            )]);
+        }
+        let source = self.resolve_expr_place(&args[0], false)?;
+        if self.types.array_element(source.ty).is_none() {
+            return Err(vec![Diagnostic::new(
+                "E0307",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "length source must be an Array<T> place",
+                Some(args[0].span),
+            )]);
+        }
+        let checked = Checked {
+            expr: HirExpr {
+                kind: HirExprKind::ArrayLength { source },
+                ty: TypeId::USIZE,
+                span,
+            },
+            constant: None,
+        };
+        self.coerce(checked, expected)
+    }
+
+    fn check_allocation_size(
+        &self,
+        length: &Checked,
+        element: TypeId,
+        span: Span,
+        collection: &str,
+    ) -> Result<(), Vec<Diagnostic>> {
+        if let Some(ConstantValue::Integer(length_value)) = length.constant {
+            let layout = layout_of(self.types, element, self.target, self.structs, self.enums)
+                .expect("admitted concrete contiguous element has layout");
+            if u64::try_from(length_value)
+                .ok()
+                .and_then(|length| length.checked_mul(layout.size))
+                .is_none()
+            {
+                return Err(vec![Diagnostic::new(
+                    "E0282",
+                    Phase::Semantic,
+                    DiagnosticCategory::Integer,
+                    format!(
+                        "AllocationSizeOverflow: {collection} length times element size exceeds usize"
+                    ),
+                    Some(span),
+                )]);
+            }
+        }
+        Ok(())
+    }
+
     fn view_init(
         &mut self,
         mutable: bool,
@@ -4487,12 +4773,12 @@ impl Analyzer<'_> {
             )]);
         }
         let source = self.resolve_expr_place(&args[0], mutable)?;
-        let Some(element) = self.types.buffer_element(source.ty) else {
+        let Some(element) = self.types.owning_contiguous_element(source.ty) else {
             return Err(vec![Diagnostic::new(
                 "E0289",
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                "view/view_mut source must be a Buffer<T> place",
+                "view/view_mut source must be a Buffer<T> or Array<T> place",
                 Some(args[0].span),
             )]);
         };
@@ -5551,10 +5837,11 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
         TypeData::Buffer { element } | TypeData::View { element, .. } => {
             !h.types.is_admitted_buffer_element(*element)
         }
+        TypeData::Array { element } => !h.types.is_admitted_array_element(*element),
         _ => false,
     }) {
         return Err(fail(
-            "HIR contains a Buffer/View with an inadmissible element type".into(),
+            "HIR contains a Buffer/View/Array with an inadmissible element type".into(),
         ));
     }
     for ty in h
@@ -5920,10 +6207,47 @@ fn verify_expr(
                 return Err(fail("HIR Buffer construction contract invalid".into()));
             }
         }
+        HirExprKind::ArrayInit {
+            element_type,
+            elements,
+        } => {
+            for element in elements {
+                verify_expr(element, f, sigs, structs, enums, types, fail)?;
+            }
+            if types.array_element(e.ty) != Some(*element_type)
+                || elements.iter().any(|element| element.ty != *element_type)
+                || !types.is_admitted_array_element(*element_type)
+            {
+                return Err(fail(
+                    "HIR Array literal construction contract invalid".into(),
+                ));
+            }
+        }
+        HirExprKind::ArrayFill {
+            element_type,
+            length,
+            initial,
+        } => {
+            verify_expr(length, f, sigs, structs, enums, types, fail)?;
+            verify_expr(initial, f, sigs, structs, enums, types, fail)?;
+            if types.array_element(e.ty) != Some(*element_type)
+                || length.ty != TypeId::USIZE
+                || initial.ty != *element_type
+                || !types.is_admitted_array_element(*element_type)
+            {
+                return Err(fail("HIR Array fill construction contract invalid".into()));
+            }
+        }
+        HirExprKind::ArrayLength { source } => {
+            verify_place(source, f, sigs, structs, enums, types, fail)?;
+            if types.array_element(source.ty).is_none() || e.ty != TypeId::USIZE {
+                return Err(fail("HIR Array length contract invalid".into()));
+            }
+        }
         HirExprKind::View { source, mutable } => {
             verify_place(source, f, sigs, structs, enums, types, fail)?;
-            let Some(element) = types.buffer_element(source.ty) else {
-                return Err(fail("HIR View source is not Buffer".into()));
+            let Some(element) = types.owning_contiguous_element(source.ty) else {
+                return Err(fail("HIR View source is not Buffer/Array".into()));
             };
             if types.view_info(e.ty) != Some((element, *mutable)) {
                 return Err(fail("HIR View type/capability mismatch".into()));
@@ -6147,6 +6471,7 @@ fn verify_place(
                 verify_expr(index, function, sigs, structs, enums, types, fail)?;
                 let element = types
                     .buffer_element(ty)
+                    .or_else(|| types.array_element(ty))
                     .or_else(|| types.view_info(ty).map(|(element, _)| element))
                     .ok_or_else(|| fail("HIR index projection has non-contiguous base".into()))?;
                 if index.ty != TypeId::USIZE || element != *element_type || !*checked {

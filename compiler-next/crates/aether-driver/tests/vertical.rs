@@ -1,4 +1,4 @@
-//! Cross-layer and native qualification through NEXT-VERTICAL-12.
+//! Cross-layer and native qualification through NEXT-VERTICAL-13.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1611,4 +1611,172 @@ fn vertical12_matches_and_conditional_cleanup_execute_exactly_once() {
     assert_eq!(status.code(), Some(42));
     assert!(compilation.dumps[&Emit::Hir].contains("MutableRef"));
     assert!(compilation.dumps[&Emit::Mir].contains("ConsumeEnum"));
+}
+
+#[test]
+fn vertical13_array_type_is_canonical_distinct_and_move_owned() {
+    let source = SourceFile::new(
+        "v13-types.ae",
+        "int main(){Array<int> a={1};Array<int> b={2};Buffer<int> raw=Buffer<int>(1,3);return a[0]+b[0]+raw[0];}",
+    );
+    let hir = analyze(parse_source(&source).unwrap()).unwrap();
+    let arrays = hir
+        .types()
+        .entries()
+        .filter_map(|(ty, data)| matches!(data, TypeData::Array { .. }).then_some(ty))
+        .collect::<Vec<_>>();
+    let buffers = hir
+        .types()
+        .entries()
+        .filter_map(|(ty, data)| matches!(data, TypeData::Buffer { .. }).then_some(ty))
+        .collect::<Vec<_>>();
+    assert_eq!(arrays.len(), 1);
+    assert_eq!(buffers.len(), 1);
+    assert_ne!(arrays[0], buffers[0]);
+    assert_eq!(
+        hir.types().array_element(arrays[0]),
+        Some(aether_frontend::TypeId::INT64)
+    );
+    assert!(!hir.types().is_copy(arrays[0]));
+    assert!(hir.types().needs_drop(arrays[0]));
+}
+
+#[test]
+fn vertical13_collection_literal_and_array_operations_survive_every_ir() {
+    let source = SourceFile::new(
+        "v13_arrays.ae",
+        fs::read_to_string(program("v13_arrays.ae")).unwrap(),
+    );
+    let compilation = compile_source(
+        &source,
+        &[Emit::Ast, Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+    )
+    .unwrap();
+    assert!(compilation.dumps[&Emit::Ast].contains("CollectionLiteral"));
+    assert!(compilation.dumps[&Emit::Hir].contains("Array<int64>"));
+    assert!(compilation.dumps[&Emit::Hir].contains("ArrayInit"));
+    assert!(compilation.dumps[&Emit::Hir].contains("ArrayFill"));
+    assert!(compilation.dumps[&Emit::Hir].contains("ArrayLength"));
+    assert!(compilation.dumps[&Emit::Mir].contains("ArrayInit"));
+    assert!(compilation.dumps[&Emit::Mir].contains("ArrayFill"));
+    assert!(compilation.dumps[&Emit::Mir].contains("ArrayLength"));
+    assert!(compilation.dumps[&Emit::Ssa].contains("ArrayInit"));
+    assert!(compilation.dumps[&Emit::Ssa].contains("ArrayFill"));
+    assert!(compilation.dumps[&Emit::Ssa].contains("ArrayLength"));
+    assert!(compilation.llvm.contains("@aether_fixed_new_"));
+    assert!(compilation.llvm.contains("extractvalue { ptr, i64 }"));
+    assert!(compilation.llvm.contains("IndexOutOfBounds"));
+    assert!(compilation.llvm.contains("@aether_allocation_balance"));
+}
+
+#[test]
+fn vertical13_array_diagnostics_fail_closed() {
+    for (text, code) in [
+        ("int main(){Array<int> a={1,2};return a[2];}", "E0296"),
+        ("int main(){Array<int> a={1};int i=0;return a[i];}", "E0218"),
+        ("int main(){Array<int> a={true};return 0;}", "E0205"),
+        (
+            "int main(){int x=1;Array<float64> a={x};return 0;}",
+            "E0218",
+        ),
+        ("int main(){int value={1};return value;}", "E0305"),
+        ("int main(){Array<Buffer<int>> a={};return 0;}", "E0304"),
+        ("int main(){Array<Array<int>> a={};return 0;}", "E0304"),
+        (
+            "int main(){Array<int> a=Array<int>(18446744073709551615,0);return 0;}",
+            "E0282",
+        ),
+        (
+            "struct Owned{Buffer<int> value;}int main(){Array<Owned> a={};return 0;}",
+            "E0304",
+        ),
+        (
+            "Array<T> bad<T>(T value){Array<T> a={value};return a;}int main(){return 0;}",
+            "E0304",
+        ),
+        (
+            "int main(){Array<int> a={1};Array<int> b=a;return a[0];}",
+            "E0291",
+        ),
+        (
+            "int main(){Array<int> a={1};ref int r=&a[0];Array<int> b=a;return *r;}",
+            "E0292",
+        ),
+        (
+            "int main(){Array<int> a={1};View<int> v=view(a);Array<int> b=a;return v[0];}",
+            "E0292",
+        ),
+        ("int main(){Array<int> a={1};return push(a,2);}", "E0212"),
+        ("int main(){Array<int> a={1};return pop(a);}", "E0212"),
+        ("int main(){Array<int> a={1};return reserve(a,2);}", "E0212"),
+        ("int main(){Array<int> a={1};return resize(a,2);}", "E0212"),
+        (
+            "int main(){Array<int> a=Buffer<int>(1,0);return 0;}",
+            "E0205",
+        ),
+        ("int main(){Array<int> a={1};return length(a,2);}", "E0307"),
+        ("int main(){int x=1;return length(x);}", "E0307"),
+    ] {
+        let diagnostics =
+            compile_source(&SourceFile::new("v13-error.ae", text), &[]).expect_err(text);
+        assert_eq!(
+            diagnostics[0].code, code,
+            "{text}: {}",
+            diagnostics[0].message
+        );
+        assert!(diagnostics[0].span.is_some());
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical13_arrays_execute_with_balanced_exact_cleanup() {
+    for (source, expected) in [
+        ("v13_arrays.ae", 45),
+        ("v13_array_ownership.ae", 18),
+        ("v13_empty_array.ae", 0),
+        ("v13_literal_array.ae", 42),
+        ("v13_fill_array.ae", 42),
+        ("v13_index_ref_loop.ae", 42),
+    ] {
+        let (compilation, status) = run_path(
+            &program(source),
+            &[Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+            &ClangToolchain::default(),
+        )
+        .unwrap();
+        assert_eq!(status.code(), Some(expected), "{source}");
+        assert!(compilation.llvm.contains("@aether_heap_alloc_count"));
+        assert!(compilation.llvm.contains("@aether_heap_free_count"));
+        assert!(compilation.dumps[&Emit::Mir].contains("Drop"));
+        if source == "v13_array_ownership.ae" {
+            assert!(compilation.dumps[&Emit::Hir].contains("Conditional"));
+            assert!(compilation.dumps[&Emit::Mir].contains("MirDropFlag"));
+            assert!(compilation.dumps[&Emit::Ssa].contains("MirDropFlag"));
+        }
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical13_empty_array_dynamic_index_traps() {
+    for source in ["v13_empty_oob.ae", "v13_allocation_overflow.ae"] {
+        let (_, status) = run_path(&program(source), &[], &ClangToolchain::default()).unwrap();
+        assert!(!status.success(), "{source} must trap");
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical13_cross_module_array_transfer_executes_natively() {
+    let (compilation, status) = run_path(
+        &module_program("v13_arrays"),
+        &[Emit::Hir, Emit::Mir, Emit::Ssa],
+        &ClangToolchain::default(),
+    )
+    .unwrap();
+    assert_eq!(status.code(), Some(33));
+    assert!(compilation.dumps[&Emit::Hir].contains("Array<int64>"));
+    assert!(compilation.dumps[&Emit::Mir].contains("Move"));
+    assert!(compilation.dumps[&Emit::Ssa].contains("Drop"));
 }

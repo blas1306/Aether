@@ -1,0 +1,5 @@
+int main() {
+    usize count = 3;
+    Array<int> values = Array<int>(count, 14);
+    return values[0] + values[1] + values[2];
+}

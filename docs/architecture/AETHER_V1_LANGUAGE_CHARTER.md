@@ -206,6 +206,23 @@ root-level flags are emitted only for roots that actually need such conditional
 cleanup; uniform ownership and early-return paths stay flag-free. Loop-carried
 ownership ambiguity remains rejected, and aborting traps still do not unwind.
 
+NEXT-VERTICAL-13 adds `Array<T>` as the normal fixed-size computational
+collection. It owns one exact contiguous allocation, is non-Copy/needs-drop,
+uses checked zero-based indexing, and is constructed either by the neutral
+collection literal `{...}` (including empty `{}`) or by `Array<T>(length,
+fill)`. Its length never changes and it has no capacity, growth, push/pop,
+reserve, resize or reallocation behavior. `Buffer<T>` remains a distinct
+lower-level storage primitive even where physical allocation machinery is
+shared. Elements are temporarily limited to concrete Copy/no-drop types;
+Array itself may compose inside owning structs, enums and concrete generics.
+
+The collection/mathematics distinction is intentional. Future `List<T>` is a
+dynamic zero-based computational collection sharing `{...}` literal syntax.
+Future `Vector<T, Orientation>` and `Matrix<T>` are mathematical types using
+bracket literals and one-based indexing. A Matrix literal is one structurally
+two-dimensional construct with semicolon-separated rows; Matrix is not
+semantically a nested Array, List or Vector.
+
 ## Safety and control
 
 Safe and ergonomic behavior is the default.  Value semantics, moves, shared

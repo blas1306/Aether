@@ -288,6 +288,9 @@ pub enum AstExprKind {
     Float(String),
     /// Boolean literal.
     Bool(bool),
+    /// Collection literal. Its concrete collection kind is selected only from
+    /// the expected semantic type; future `List<T>` can reuse this node.
+    CollectionLiteral(Vec<AstExpr>),
     /// Unresolved name.
     Name(String),
     /// Unresolved direct call.

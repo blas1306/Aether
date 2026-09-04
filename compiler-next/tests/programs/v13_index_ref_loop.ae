@@ -1,0 +1,11 @@
+int main() {
+    Array<int> values = {10, 20, 12};
+    usize index = 0;
+    int total = 0;
+    while (index < length(values)) {
+        ref int element = &values[index];
+        total = total + *element;
+        index = index + 1;
+    }
+    return total;
+}

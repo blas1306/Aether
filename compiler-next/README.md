@@ -1,4 +1,4 @@
-# Aether NEXT-VERTICAL-12
+# Aether NEXT-VERTICAL-13
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. It does not replace the production `aether` CLI or import any legacy
@@ -32,7 +32,7 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-12 grammar
+## Vertical-13 grammar
 
 ```text
 program    := import* (alias | struct | enum | function)+ EOF
@@ -59,6 +59,7 @@ statement  := type IDENT "=" expression ";"
 match-arm  := variant-path ("(" IDENT ("," IDENT)* ")")? "=>" block
 match-mode := "ref" "mut"?
 expression := integer | float | "true" | "false" | IDENT | apply
+            | "{" (expression ("," expression)* ","?)? "}"
             | expression "." IDENT | expression "[" expression "]"
             | "(" expression ")" | "-" expression
             | "&" expression | "&" "mut" expression | "*" expression
@@ -71,6 +72,11 @@ arguments  := expression ("," expression)*
 place      := IDENT (("." IDENT) | ("[" expression "]"))*
             | "*" expression | "(" "*" expression ")" (("." IDENT) | ("[" expression "]"))*
 ```
+
+Braces in expression position form a neutral `CollectionLiteral`; braces
+required by a statement/declaration remain blocks. Semantic analysis resolves
+the literal from its expected type. Vertical-13 admits only `Array<T>` as that
+expected collection kind, including the canonical empty literal `{}`.
 
 The semantic restriction is narrower than the expression-shaped grammar:
 `&` and `&mut` accept only an existing resolved `Place`. No temporary lifetime
@@ -152,7 +158,7 @@ Canonical semantic types use the compact, copyable, session-local identity
 mapping. Its current data variants are `Bool`, `Integer`, `Float`, nominal and
 applied aggregate forms, generic parameters, and
 `Reference { pointee: TypeId, mutable: bool }`, `Buffer { element: TypeId }`,
-and `View { element: TypeId, mutable: bool }`. Repeated `ref T` resolution
+`Array { element: TypeId }`, and `View { element: TypeId, mutable: bool }`. Repeated `ref T` resolution
 reuses one ID, while `ref T` and `ref mut T` remain distinct. HIR is the first canonical boundary;
 HIR, MIR, SSA, signatures, fields and enum payloads transport IDs rather than
 copies of `TypeData`. MIR and SSA share the immutable arena through ordinary
@@ -264,7 +270,7 @@ qualification environments that contain its Python dependencies.
 `tests/modules/v1-contract.tsv` records the Vertical-2 multi-file contract;
 these cases are not forced through legacy differential semantics.
 
-The Vertical-11 qualification run completed with 88 Rust unit/integration
+The Vertical-13 qualification run completed with 99 Rust unit/integration
 tests passing, zero failures; clippy passed for the whole workspace/all targets
 with warnings denied; and the executable legacy differential subset completed
 21 comparisons with zero failures. Buffer-native tests additionally compile
@@ -487,6 +493,80 @@ not a same-input optimization claim. MIR inspection reports zero flags for the
 uniform `v12_match_ownership.ae` fixture and four root-level flags across the
 four conditional-cleanup functions in `v12_conditional_drop.ae`.
 
+## Vertical-13 fixed Array contract
+
+`Array<T>` is the normal fixed-size owning collection. Its length is fixed at
+construction, its initialized elements are contiguous, and indexing is checked
+and zero-based. It has no capacity distinct from length and no `push`, `pop`,
+`reserve`, `resize` or reallocation operation. `Buffer<T>` remains the distinct
+lower-level storage primitive; the two types have different canonical
+`TypeData`/`TypeId` identities and no implicit conversion, even though LLVM
+uses the same internal `{ ptr, i64 }` descriptor and allocation boundary.
+
+Collection literals are source AST `CollectionLiteral` nodes:
+
+```aether
+Array<int> values = {10, 20, 30};
+Array<int> empty = {};
+```
+
+They require an expected `Array<T>` in this vertical. HIR resolves them to
+`ArrayInit { element_type, elements }`; no unresolved braces reach MIR.
+Elements use ordinary contextual scalar literal typing and coercion. Integer
+spellings may directly select a floating contextual literal type, so
+`Array<float64> values = {1, 2, 3};` has no runtime integer-to-float casts.
+The temporary V13 element restriction requires concrete Copy/no-drop values
+without borrowed or owning substructure. `Array<Buffer<int>>`, nested Array,
+owning aggregate elements and symbolic `Array<T>` are therefore rejected until
+generic constraints and element drop loops exist. Array may itself be a
+struct field, enum payload or concrete generic argument.
+
+Fill construction is independent of literals:
+
+```aether
+Array<int> values = Array<int>(count, 0);
+```
+
+The bootstrap length surface is `length(array_place)`. This is intentionally
+not a general method/property system: it resolves to `ArrayLength` in HIR, MIR
+and SSA. Literal construction, fill and length remain explicit as `ArrayInit`,
+`ArrayFill` and `ArrayLength`; checked element access continues through the
+shared Place index projection and `IndexOutOfBounds` trap. `&a[i]`,
+`&mut a[i]`, `view(a)` and `view_mut(a)` reuse existing provenance rules.
+Stable element addresses need only owner-liveness checks because Array never
+relocates.
+
+Array is non-Copy and needs drop. Whole-value assignment, calls and returns
+move it through the general V11/V12 ownership lattice, including `MaybeMoved`
+conditional cleanup. General recursive aggregate drop glue frees its allocation
+exactly once; V13 elements themselves require no destructor loop. Allocation
+checks `length * sizeof(T)`, literal stores execute in source order, and the
+normal-path allocation/free counters cover empty, literal, fill, moved,
+returned, consumed, aggregate, conditional and borrowed/viewed arrays.
+
+The collection/scientific split is intentional. Future `List<T>` is a dynamic,
+zero-based computational collection using the same `{...}` literal syntax and
+will own growth/capacity operations. Future `Vector<T, Orientation>` and
+`Matrix<T>` are mathematical objects, use bracket literals and one-based
+indexing. Matrix literal syntax is structurally two-dimensional with semicolon
+row separators; Matrix is not a nested Array/List/Vector representation.
+
+`int main()` continues to return the process exit status. Nonzero results such
+as 42 in bootstrap fixtures are a test harness technique for observing native
+computation, not idiomatic successful application termination; canonical
+success returns 0.
+
+### Vertical-13 timing snapshot
+
+A warm debug driver was sampled on the unchanged V12 fixture and on the V13
+empty, literal, fill and indexed-reference-loop fixtures. These are small
+workload snapshots, not benchmark-quality comparisons; discovery, file I/O and
+clang/link time are excluded. Over 20 complete compilations per fixture, mean
+core time was approximately 2.648 ms for unchanged
+`v12_conditional_drop.ae`, 0.536 ms for `v13_empty_array.ae`, 0.600 ms for
+`v13_literal_array.ae`, 0.619 ms for `v13_fill_array.ae`, and 0.803 ms for
+`v13_index_ref_loop.ae`.
+
 ## Bootstrap ABI and deliberate limits
 
 One entry module plus transitively imported source modules and exactly one
@@ -511,6 +591,6 @@ module initializers or initialization order. This is precisely why import
 cycles have no execution-order meaning in this slice. There are also no
 packages, nested/selective/wildcard/aliased imports, reexports, visibility
 keywords, overloads, generic constraints/traits, generic aliases, function values, closures, extern functions,
-heap values beyond fixed `Buffer`, strings, named initializers, methods, general
+heap values beyond fixed `Buffer`/`Array`, strings, named initializers, methods, general
 ownership, optimization pipeline, public ABI/runtime API, or LLVM library binding. Unsupported forms fail
 closed before lowering.

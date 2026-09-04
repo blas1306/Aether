@@ -171,6 +171,22 @@ pub enum Rvalue {
         size_trap: TrapKind,
         failure_trap: TrapKind,
     },
+    ArrayInit {
+        element_type: TypeId,
+        elements: Vec<Operand>,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
+    ArrayFill {
+        element_type: TypeId,
+        length: Operand,
+        initial: Operand,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
+    ArrayLength {
+        source: Place,
+    },
     View {
         source: Place,
         mutable: bool,
@@ -881,6 +897,67 @@ impl Builder<'_> {
                 );
                 Operand::Local(destination)
             }
+            HirExprKind::ArrayInit {
+                element_type,
+                elements,
+            } => {
+                let elements = elements
+                    .iter()
+                    .map(|element| self.lower_expr(element))
+                    .collect();
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::ArrayInit {
+                        element_type: *element_type,
+                        elements,
+                        size_trap: TrapKind::AllocationSizeOverflow,
+                        failure_trap: TrapKind::AllocationFailure,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::ArrayFill {
+                element_type,
+                length,
+                initial,
+            } => {
+                let length = self.lower_expr(length);
+                let initial = self.lower_expr(initial);
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::ArrayFill {
+                        element_type: *element_type,
+                        length,
+                        initial,
+                        size_trap: TrapKind::AllocationSizeOverflow,
+                        failure_trap: TrapKind::AllocationFailure,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::ArrayLength { source } => {
+                let source = self.lower_place(source);
+                let destination = self.temporary(TypeId::USIZE);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::ArrayLength { source },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
             HirExprKind::View { source, mutable } => {
                 let source = self.lower_place(source);
                 let destination = self.temporary(expression.ty);
@@ -1280,10 +1357,11 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
         TypeData::Buffer { element } | TypeData::View { element, .. } => {
             !mir.types.is_admitted_buffer_element(*element)
         }
+        TypeData::Array { element } => !mir.types.is_admitted_array_element(*element),
         _ => false,
     }) {
         return Err(fail(
-            "MIR contains a Buffer/View with an inadmissible element type".into(),
+            "MIR contains a Buffer/View/Array with an inadmissible element type".into(),
         ));
     }
     for ty in mir
@@ -1700,6 +1778,8 @@ fn verify_drop_flag_contract(
                     }
                 }
                 Rvalue::BufferAlloc { .. }
+                | Rvalue::ArrayInit { .. }
+                | Rvalue::ArrayFill { .. }
                 | Rvalue::EnumPayload {
                     mode: MatchMode::Value,
                     ..
@@ -1859,7 +1939,9 @@ fn verify_ownership(
                         .ok_or_else(|| fail("MIR consuming match owner has no local".into()))?;
                     consume_owner(function, types, &mut state, owner, "consuming match", fail)?;
                 }
-                Rvalue::BufferAlloc { .. } => {
+                Rvalue::BufferAlloc { .. }
+                | Rvalue::ArrayInit { .. }
+                | Rvalue::ArrayFill { .. } => {
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
                 Rvalue::Call { callee, args } => {
@@ -1886,7 +1968,8 @@ fn verify_ownership(
                 }
                 Rvalue::Load(place)
                 | Rvalue::Borrow { place, .. }
-                | Rvalue::View { source: place, .. } => {
+                | Rvalue::View { source: place, .. }
+                | Rvalue::ArrayLength { source: place } => {
                     require_place_owner(function, types, &state, place, fail)?;
                 }
                 Rvalue::Aggregate { fields, .. } => {
@@ -2198,12 +2281,58 @@ fn validate_rvalue(
                 return Err("MIR Buffer allocation contract invalid".into());
             }
         }
+        Rvalue::ArrayInit {
+            element_type,
+            elements,
+            size_trap,
+            failure_trap,
+        } => {
+            for element in elements {
+                validate_operand(function, element, initialized)?;
+            }
+            if types.array_element(destination) != Some(*element_type)
+                || elements
+                    .iter()
+                    .any(|element| operand_type(function, element).ok() != Some(*element_type))
+                || !types.is_admitted_array_element(*element_type)
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("MIR Array literal allocation contract invalid".into());
+            }
+        }
+        Rvalue::ArrayFill {
+            element_type,
+            length,
+            initial,
+            size_trap,
+            failure_trap,
+        } => {
+            validate_operand(function, length, initialized)?;
+            validate_operand(function, initial, initialized)?;
+            if types.array_element(destination) != Some(*element_type)
+                || operand_type(function, length)? != TypeId::USIZE
+                || operand_type(function, initial)? != *element_type
+                || !types.is_admitted_array_element(*element_type)
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("MIR Array fill allocation contract invalid".into());
+            }
+        }
+        Rvalue::ArrayLength { source } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            let source_ty = place_type(function, source, structs, types)?;
+            if destination != TypeId::USIZE || types.array_element(source_ty).is_none() {
+                return Err("MIR Array length contract invalid".into());
+            }
+        }
         Rvalue::View { source, mutable } => {
             validate_place_read(function, source, structs, types, initialized)?;
             let source_ty = place_type(function, source, structs, types)?;
             let element = types
-                .buffer_element(source_ty)
-                .ok_or_else(|| "MIR View source is not Buffer".to_string())?;
+                .owning_contiguous_element(source_ty)
+                .ok_or_else(|| "MIR View source is not Buffer/Array".to_string())?;
             if types.view_info(destination) != Some((element, *mutable)) {
                 return Err("MIR View contract invalid".into());
             }
@@ -2516,6 +2645,7 @@ fn place_type(
             } => {
                 let element = types
                     .buffer_element(ty)
+                    .or_else(|| types.array_element(ty))
                     .or_else(|| types.view_info(ty).map(|(element, _)| element))
                     .ok_or_else(|| "MIR index projection has non-contiguous base".to_string())?;
                 if operand_type(function, index)? != TypeId::USIZE

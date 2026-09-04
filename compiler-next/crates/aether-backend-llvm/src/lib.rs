@@ -1,4 +1,4 @@
-//! LLVM backend for verified Vertical-12 program SSA.
+//! LLVM backend for verified Vertical-13 program SSA.
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -23,7 +23,7 @@ pub struct TargetDescriptor {
 }
 
 impl TargetDescriptor {
-    /// The target admitted through NEXT-VERTICAL-12.
+    /// The target admitted through NEXT-VERTICAL-13.
     #[must_use]
     pub const fn linux_x86_64() -> Self {
         Self {
@@ -62,10 +62,23 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             _ => None,
         })
         .collect::<BTreeSet<_>>();
+    let array_elements = types
+        .entries()
+        .filter_map(|(ty, data)| match data {
+            TypeData::Array { element } if !types.contains_generic(ty) => Some(*element),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    let owning_elements = buffer_elements
+        .union(&array_elements)
+        .copied()
+        .collect::<BTreeSet<_>>();
     let indexed_elements = types
         .entries()
         .filter_map(|(ty, data)| match data {
-            TypeData::Buffer { element } | TypeData::View { element, .. }
+            TypeData::Buffer { element }
+            | TypeData::Array { element }
+            | TypeData::View { element, .. }
                 if !types.contains_generic(ty) =>
             {
                 Some(*element)
@@ -73,9 +86,9 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             _ => None,
         })
         .collect::<BTreeSet<_>>();
-    let has_buffers = !buffer_elements.is_empty();
+    let has_buffers = !owning_elements.is_empty();
     let mut output = String::new();
-    writeln!(output, "; Aether NEXT-VERTICAL-12").unwrap();
+    writeln!(output, "; Aether NEXT-VERTICAL-13").unwrap();
     writeln!(
         output,
         "; Internal bootstrap ABI and symbol mangling; not a public Aether ABI"
@@ -158,7 +171,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     if !program.structs.is_empty() || !program.enums.is_empty() {
         writeln!(output).unwrap();
     }
-    for element in buffer_elements {
+    for element in owning_elements {
         let layout = layout_of(
             types,
             element,
@@ -166,8 +179,10 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             &program.structs,
             &program.enums,
         )
-        .expect("verified Buffer element has concrete layout");
-        emit_buffer_allocation_helper(&mut output, types, element, layout.size, layout.align);
+        .expect("verified contiguous element has concrete layout");
+        emit_fixed_allocation_helper(&mut output, types, element, layout.size, layout.align);
+        emit_fixed_fill_helper(&mut output, types, element);
+        emit_buffer_allocation_wrapper(&mut output, types, element);
     }
     for element in indexed_elements {
         emit_index_helper(&mut output, types, element);
@@ -276,7 +291,7 @@ fn emit_runtime_boundary(output: &mut String) {
     );
 }
 
-fn emit_buffer_allocation_helper(
+fn emit_fixed_allocation_helper(
     output: &mut String,
     types: &TypeArena,
     element: TypeId,
@@ -284,10 +299,9 @@ fn emit_buffer_allocation_helper(
     element_align: u64,
 ) {
     let suffix = mangle_type(types, element);
-    let element_ty = llvm_type(types, element);
     writeln!(
         output,
-        "define internal {{ ptr, i64 }} @aether_buffer_new_{suffix}(i64 %length, {element_ty} %initial) {{"
+        "define internal {{ ptr, i64 }} @aether_fixed_new_{suffix}(i64 %length) {{"
     )
     .unwrap();
     writeln!(output, "entry:").unwrap();
@@ -317,25 +331,6 @@ fn emit_buffer_allocation_helper(
         "  %data = call ptr @aether_alloc(i64 %size, i64 {element_align})"
     )
     .unwrap();
-    writeln!(output, "  br label %fill_header").unwrap();
-    writeln!(output, "fill_header:").unwrap();
-    writeln!(
-        output,
-        "  %index = phi i64 [ 0, %allocate ], [ %next, %fill_body ]"
-    )
-    .unwrap();
-    writeln!(output, "  %more = icmp ult i64 %index, %length").unwrap();
-    writeln!(output, "  br i1 %more, label %fill_body, label %done").unwrap();
-    writeln!(output, "fill_body:").unwrap();
-    writeln!(
-        output,
-        "  %slot = getelementptr inbounds {element_ty}, ptr %data, i64 %index"
-    )
-    .unwrap();
-    writeln!(output, "  store {element_ty} %initial, ptr %slot").unwrap();
-    writeln!(output, "  %next = add i64 %index, 1").unwrap();
-    writeln!(output, "  br label %fill_header").unwrap();
-    writeln!(output, "done:").unwrap();
     writeln!(
         output,
         "  %descriptor_data = insertvalue {{ ptr, i64 }} poison, ptr %data, 0"
@@ -351,6 +346,64 @@ fn emit_buffer_allocation_helper(
     writeln!(output, "  ; structured Aether trap: AllocationSizeOverflow").unwrap();
     writeln!(output, "  call void @llvm.trap()").unwrap();
     writeln!(output, "  unreachable\n}}\n").unwrap();
+}
+
+fn emit_fixed_fill_helper(output: &mut String, types: &TypeArena, element: TypeId) {
+    let suffix = mangle_type(types, element);
+    let element_ty = llvm_type(types, element);
+    writeln!(
+        output,
+        "define internal {{ ptr, i64 }} @aether_fixed_fill_{suffix}(i64 %length, {element_ty} %initial) {{"
+    )
+    .unwrap();
+    writeln!(output, "entry:").unwrap();
+    writeln!(
+        output,
+        "  %descriptor = call {{ ptr, i64 }} @aether_fixed_new_{suffix}(i64 %length)"
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "  %data = extractvalue {{ ptr, i64 }} %descriptor, 0"
+    )
+    .unwrap();
+    writeln!(output, "  br label %fill_header").unwrap();
+    writeln!(output, "fill_header:").unwrap();
+    writeln!(
+        output,
+        "  %index = phi i64 [ 0, %entry ], [ %next, %fill_body ]"
+    )
+    .unwrap();
+    writeln!(output, "  %more = icmp ult i64 %index, %length").unwrap();
+    writeln!(output, "  br i1 %more, label %fill_body, label %done").unwrap();
+    writeln!(output, "fill_body:").unwrap();
+    writeln!(
+        output,
+        "  %slot = getelementptr inbounds {element_ty}, ptr %data, i64 %index"
+    )
+    .unwrap();
+    writeln!(output, "  store {element_ty} %initial, ptr %slot").unwrap();
+    writeln!(output, "  %next = add i64 %index, 1").unwrap();
+    writeln!(output, "  br label %fill_header").unwrap();
+    writeln!(output, "done:").unwrap();
+    writeln!(output, "  ret {{ ptr, i64 }} %descriptor\n}}\n").unwrap();
+}
+
+fn emit_buffer_allocation_wrapper(output: &mut String, types: &TypeArena, element: TypeId) {
+    let suffix = mangle_type(types, element);
+    let element_ty = llvm_type(types, element);
+    writeln!(
+        output,
+        "define internal {{ ptr, i64 }} @aether_buffer_new_{suffix}(i64 %length, {element_ty} %initial) {{"
+    )
+    .unwrap();
+    writeln!(output, "entry:").unwrap();
+    writeln!(
+        output,
+        "  %descriptor = call {{ ptr, i64 }} @aether_fixed_fill_{suffix}(i64 %length, {element_ty} %initial)"
+    )
+    .unwrap();
+    writeln!(output, "  ret {{ ptr, i64 }} %descriptor\n}}\n").unwrap();
 }
 
 fn emit_index_helper(output: &mut String, types: &TypeArena, element: TypeId) {
@@ -635,6 +688,81 @@ fn emit_function(
                         llvm_operand(length),
                         llvm_type(types, *element_type),
                         llvm_operand(initial)
+                    )
+                    .unwrap();
+                }
+                SsaOp::ArrayFill {
+                    element_type,
+                    length,
+                    initial,
+                    ..
+                } => {
+                    writeln!(
+                        output,
+                        "  %v{} = call {{ ptr, i64 }} @aether_fixed_fill_{}(i64 {}, {} {})",
+                        instruction.result.0,
+                        mangle_type(types, *element_type),
+                        llvm_operand(length),
+                        llvm_type(types, *element_type),
+                        llvm_operand(initial)
+                    )
+                    .unwrap();
+                }
+                SsaOp::ArrayInit {
+                    element_type,
+                    elements,
+                    ..
+                } => {
+                    writeln!(
+                        output,
+                        "  %v{} = call {{ ptr, i64 }} @aether_fixed_new_{}(i64 {})",
+                        instruction.result.0,
+                        mangle_type(types, *element_type),
+                        elements.len()
+                    )
+                    .unwrap();
+                    if !elements.is_empty() {
+                        writeln!(
+                            output,
+                            "  %array{}_data = extractvalue {{ ptr, i64 }} %v{}, 0",
+                            instruction.result.0, instruction.result.0
+                        )
+                        .unwrap();
+                    }
+                    for (index, element) in elements.iter().enumerate() {
+                        writeln!(
+                            output,
+                            "  %array{}_slot{} = getelementptr inbounds {}, ptr %array{}_data, i64 {}",
+                            instruction.result.0,
+                            index,
+                            llvm_type(types, *element_type),
+                            instruction.result.0,
+                            index
+                        )
+                        .unwrap();
+                        writeln!(
+                            output,
+                            "  store {} {}, ptr %array{}_slot{}",
+                            llvm_type(types, *element_type),
+                            llvm_operand(element),
+                            instruction.result.0,
+                            index
+                        )
+                        .unwrap();
+                    }
+                }
+                SsaOp::ArrayLength { source } => {
+                    let (descriptor, _) = emit_descriptor_value(
+                        output,
+                        function,
+                        source,
+                        instruction.result.0,
+                        types,
+                    );
+                    writeln!(
+                        output,
+                        "  %v{} = extractvalue {{ ptr, i64 }} {descriptor}, 1",
+                        instruction.result.0
                     )
                     .unwrap();
                 }
@@ -1714,6 +1842,10 @@ fn mangle_symbol_type(
             "B{}",
             mangle_symbol_type(types, *element, modules, structs, enums)
         ),
+        TypeData::Array { element } => format!(
+            "A{}",
+            mangle_symbol_type(types, *element, modules, structs, enums)
+        ),
         TypeData::View { element, mutable } => format!(
             "V{}{}",
             if *mutable { "m" } else { "s" },
@@ -1755,7 +1887,9 @@ fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
             mangle_type_arguments(types, *args)
         ),
         TypeData::Reference { .. } => "ptr".into(),
-        TypeData::Buffer { .. } | TypeData::View { .. } => "{ ptr, i64 }".into(),
+        TypeData::Buffer { .. } | TypeData::Array { .. } | TypeData::View { .. } => {
+            "{ ptr, i64 }".into()
+        }
         TypeData::GenericParam(_) => panic!("unresolved generic parameter reached LLVM"),
     }
 }
@@ -1789,6 +1923,7 @@ fn mangle_type(types: &TypeArena, ty: TypeId) -> String {
             mangle_type(types, *pointee)
         ),
         TypeData::Buffer { element } => format!("B{}", mangle_type(types, *element)),
+        TypeData::Array { element } => format!("A{}", mangle_type(types, *element)),
         TypeData::View { element, mutable } => format!(
             "V{}{}",
             if *mutable { "m" } else { "s" },
@@ -1855,7 +1990,7 @@ fn emit_place_pointer(
         let (descriptor, descriptor_ty) =
             emit_place_value(output, function, &descriptor_place, result, types, structs);
         debug_assert!(
-            types.buffer_element(descriptor_ty).is_some()
+            types.owning_contiguous_element(descriptor_ty).is_some()
                 || types.view_info(descriptor_ty).is_some()
         );
         let mut pointer = format!("%place{result}_index");
@@ -2038,7 +2173,7 @@ fn emit_drop_value(
     enums: &[EnumInfo],
 ) {
     match types.get(ty).expect("verified drop type") {
-        TypeData::Buffer { element } => {
+        TypeData::Buffer { element } | TypeData::Array { element } => {
             let layout = layout_of(
                 types,
                 *element,

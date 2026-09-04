@@ -1,0 +1,45 @@
+struct Dataset {
+    Array<float64> values;
+    int count;
+}
+
+struct Holder<T> {
+    T value;
+}
+
+enum Data {
+    Empty,
+    Values(Array<int>),
+}
+
+int consume_dataset(Dataset dataset) {
+    return int(dataset.values[1]) + dataset.count;
+}
+
+int consume_data(Data data) {
+    match (data) {
+        Data.Empty => {
+            return 0;
+        }
+        Data.Values(values) => {
+            return values[0];
+        }
+    }
+}
+
+int conditional(bool move_it) {
+    Array<int> source = {7};
+    if (move_it) {
+        Array<int> destination = source;
+    }
+    return 1;
+}
+
+int main() {
+    Dataset dataset = Dataset({1, 2}, 3);
+    int a = consume_dataset(dataset);
+    Data data = Data.Values({4, 5});
+    int b = consume_data(data);
+    Holder<Array<int>> holder = Holder<Array<int>>({6, 7});
+    return a + b + holder.value[1] + conditional(true) + conditional(false);
+}

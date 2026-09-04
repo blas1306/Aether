@@ -1,0 +1,5 @@
+int main() {
+    usize length = 18446744073709551615;
+    Array<int> values = Array<int>(length, 0);
+    return int(length(values));
+}

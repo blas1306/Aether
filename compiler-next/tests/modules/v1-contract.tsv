@@ -21,3 +21,4 @@ v6_enums	accept:42	qualified payload enums, aliases and exhaustive matching
 errors/v6_unqualified	reject:E0204	imported enums require qualification
 v9_references	accept:9	cross-module shared/mutable reference parameters
 v12_match	accept:42	cross-module ownership-aware enum matching
+v13_arrays	accept:33	cross-module fixed Array ownership transfer

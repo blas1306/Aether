@@ -1,0 +1,16 @@
+struct Packet {
+    Array<int> values;
+}
+
+Array<int> make() {
+    Array<int> values = {10, 20, 3};
+    return values;
+}
+
+Packet wrap(Array<int> values) {
+    return Packet(values);
+}
+
+int consume(Packet packet) {
+    return packet.values[0] + packet.values[1] + packet.values[2];
+}

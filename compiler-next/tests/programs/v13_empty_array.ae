@@ -1,0 +1,4 @@
+int main() {
+    Array<int> values = {};
+    return int(length(values));
+}

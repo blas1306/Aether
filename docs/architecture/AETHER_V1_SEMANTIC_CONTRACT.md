@@ -144,6 +144,12 @@ Without a constraining context, an integer literal resolves to `int`, hence
 `float64`.  This defaulting happens after the exact literal has been parsed;
 the compiler does not first coerce through a host integer or host float.
 
+Vertical-13 confirms that an integer literal spelling may be selected directly
+as a contextual floating literal when the expected type is `float32` or
+`float64`, including inside Array literals. This is compile-time literal
+typing, not an implicit conversion from an already typed integer value; the
+ordinary integer-to-floating conversion rule in section 2.2 remains explicit.
+
 Range errors are compile-time diagnostics:
 
 - when context chooses a concrete integer type, reject a value below its
@@ -387,6 +393,12 @@ The complete parameter-mode syntax remains an **OPEN DECISION**; a single
 implicit “borrow everything” convention is insufficient for FFI, buffers and
 returned views.
 
+The bootstrap `int main()` return is the process exit status; successful
+applications conventionally return 0. Tests that return observable values such
+as 42 use the native process status as a bootstrap computation probe. Those
+nonzero fixtures are qualification technique, not idiomatic successful
+application examples, and V13 does not change this entry-point contract.
+
 ### 4.5 Nominal value structs — NEXT-VERTICAL-5 DECIDED baseline
 
 Vertical-5 admits nominal, module-owned structs whose fields are recursively
@@ -624,6 +636,23 @@ live. Traps still abort without unwind cleanup. V12 adds no Array, reallocation,
 general conditional initialization, destructor trait, ARC, exception handling
 or general partial-move state.
 
+### 5.7 Fixed-size Array ownership — NEXT-VERTICAL-13 DECIDED baseline
+
+`Array<T>` is non-Copy and needs destruction. Initialization, whole-value
+assignment, by-value arguments and return transfer its unique allocation using
+the general V11/V12 ownership machinery; there is no Array-specific move
+analysis, implicit deep copy, ARC or Buffer conversion. It may be stored in
+struct fields, enum payloads and concrete generic aggregates, whose existing
+structural type-property and recursive drop rules apply unchanged.
+
+Because Array never changes length or relocates, references and views derived
+from an element stay address-stable. Existing conservative owner-liveness rules
+still prevent moving or replacing the owner while such a borrow remains live.
+Normal cleanup frees the allocation exactly once. Elements are temporarily
+restricted to concrete Copy/no-drop types, so V13 requires no per-element drop
+loop. Conditional ownership uses the same root-level `MaybeMoved` flags as any
+other owning aggregate.
+
 ## 6. Core data abstractions
 
 ### 6.0 `Buffer<T>` — NEXT-VERTICAL-10 DECIDED substrate
@@ -648,38 +677,68 @@ work, not the final Array abstraction. V10 adds no capacity, resize,
 append/insert/remove, slicing syntax, raw pointers, allocator selection, ARC or
 general-purpose ownership.
 
-### 6.1 `Array<T>` — PROVISIONAL
+### 6.1 `Array<T>` — NEXT-VERTICAL-13 DECIDED baseline
 
-`Array<T>` is a contiguous, fixed-length, owning sequence with zero-based
-indexing.  It is generic over representable `T`.  Whether assignment moves,
-copies the buffer or shares an object is an **OPEN DECISION**; the current
-compiler shares a mutable ARC handle, which is convenient but weakens value
-reasoning and parallel alias analysis.
+`Array<T>` is the ordinary fixed-size computational collection. It owns exactly
+`length` initialized contiguous elements; length never changes after
+construction and allocated element count equals logical length. It has no
+capacity concept, growth, `push`, `pop`, `reserve`, `resize` or reallocation.
+It is semantically and canonically distinct from `Buffer<T>`, which remains the
+lower-level explicit storage primitive. No implicit conversion exists between
+them, although the bootstrap backend shares allocation and descriptor
+machinery.
 
-The design MUST support explicit alignment, allocator choice and FFI-safe data
-access without exposing the runtime header.  Slices/views are separate
-non-owning values, not secretly allocated arrays.
+The canonical literal syntax is `{...}`, including `{}` for length zero. The
+parser records a neutral collection literal, and semantic analysis requires an
+expected `Array<T>` before producing resolved `ArrayInit` HIR. This preserves
+the syntax for future List without making braces an Array-only AST node. Fill
+construction `Array<T>(length, fill)` independently creates a runtime-sized
+fixed Array. Every literal element and fill value is checked with ordinary
+contextual literal/coercion rules. V13 temporarily requires `T` to be concrete,
+Copy and no-drop without borrowed or owning substructure; symbolic `Array<T>`
+awaits public generic constraints.
 
-### 6.2 `List<T>` — PROVISIONAL
+Index operands have semantic type `usize`, indexing is checked and zero-based,
+and a dynamic failure is `IndexOutOfBounds`. `length(array_place)` is the
+provisional bootstrap query surface and resolves to semantic `ArrayLength` HIR,
+MIR and SSA rather than a stringly method call. Desired property syntax such as
+`array.length` awaits a coherent property/method system. Slices/views are
+separate non-owning `View<T>`/`ViewMut<T>` values.
 
-`List<T>` is a growable sequence built above a buffer abstraction.  Growth,
-capacity and reallocation are observable through cost and view invalidation,
-not through an unstable ABI header.  It is a general collection and is not the
-storage model for matrices.
+### 6.2 `List<T>` — DECIDED direction / future implementation
 
-### 6.3 `Vector` and `Matrix` — PROVISIONAL/OPEN
+`List<T>` is a growable computational collection built above a buffer
+abstraction. It uses zero-based indexing and the same `{...}` collection
+literal syntax as Array. Growth, push/pop, capacity and reallocation belong to
+List, are observable through cost and view invalidation, and are not Array
+operations. List is not the storage model for matrices.
+
+### 6.3 `Vector` and `Matrix` — DECIDED surface direction / future implementation
 
 `Matrix<T>` has contiguous dense storage by default with dimensions, strides,
-layout and ownership represented explicitly in semantic IR.  It is not
-`Array<Array<T>>`.  A future sparse matrix is a different type/family.
+layout and ownership represented explicitly in semantic IR. It is not
+`Array<Array<T>>`, `List<List<T>>` or nested Vector literals. A future sparse
+matrix is a different type/family.
 
-`Vector<T, Row>` and `Vector<T, Column>` are provisionally distinct static
-types because orientation changes multiplication validity and result type.  A
-type-level orientation parameter avoids two unrelated nominal implementations.
-However, this remains an **OPEN DECISION** until inference and generic
-diagnostics are prototyped; orientation on every vector can burden non-linear-
-algebra APIs.  A possible resolution is an unoriented one-dimensional
-`Vector<T>` plus oriented row/column views used by linear algebra.
+`Vector<T, Orientation>` carries Row/Column orientation in its mathematical
+semantics and type because orientation changes multiplication validity and
+result type. The exact type-level argument mechanics still await generic
+constraint work.
+
+Vector literal syntax is `[a, b, c]`. Matrix literal syntax is one
+two-dimensional construct whose semicolons separate rows:
+
+```aether
+[
+    a, b;
+    c, d
+]
+```
+
+Both mathematical types use one-based source indexing; Matrix access is
+`A[i, j]`. Their bracket AST/HIR forms remain structurally distinct from the
+neutral `{...}` collection literal. No Vector or Matrix syntax is implemented
+by V13.
 
 Static dimensions are also open.  Dynamic dimensions must work; optional
 compile-time dimensions may enable specialization without making ordinary
@@ -688,8 +747,9 @@ matrix types unwieldy.
 Natural operations—shape queries, element access, addition/subtraction,
 multiplication and transpose—belong to the core type/operator model.
 Factorizations, solvers, eigensystems and decompositions belong to libraries.
-The spelling `A[i, j]` is the preferred multidimensional model, but indexing
-grammar and whether indexes are a tuple are an **OPEN DECISION**.
+The exact multidimensional indexing grammar representation below the source
+form remains an implementation decision; it must not turn Matrix into nested
+collections.
 
 All core scientific operations MUST remain recognizable before lowering to
 loops/runtime calls so the compiler can later select fusion, buffer reuse,
@@ -699,11 +759,10 @@ SIMD or BLAS.
 
 Safe indexing and slicing check bounds and trap or return the language's
 specified error form.  Optimization may remove a check only with a proof.
-Unchecked indexing requires an explicit low-level operation/region.  Index
-base is zero for general collections.  Whether mathematical Vector/Matrix
-retain the current one-based source indexes is an **OPEN DECISION**; mixed
-index bases impose teaching, generic-code and FFI costs and require strong
-evidence to retain.
+Unchecked indexing requires an explicit low-level operation/region. Index base
+is type-dependent, never a configurable global switch. `Buffer`, `View`,
+`ViewMut`, `Array` and future `List` are zero-based. Future mathematical
+`Vector`, `Matrix` and their mathematical views are one-based.
 
 ## 7. Text
 
@@ -960,7 +1019,7 @@ The highest-impact remaining open decisions should close in this order:
 1. numeric conversions beyond contextual literals;
 2. recoverable error model and exceptional cleanup;
 3. ownership parameter modes, moves and non-owning views;
-4. Array assignment/value model and slice/view lifetime;
+4. List reallocation invalidation and general slice/view lifetime;
 5. string indexing/view semantics;
 6. generic constraints plus orientation/static-dimension policy;
 7. module initialization;

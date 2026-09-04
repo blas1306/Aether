@@ -1,0 +1,34 @@
+struct Point {
+    int x;
+    int y;
+}
+
+Array<int> make_values() {
+    Array<int> values = {10, 20, 30};
+    return values;
+}
+
+int consume(Array<int> values) {
+    return values[0] + values[2];
+}
+
+int main() {
+    Array<int> empty = {};
+    Array<int> values = make_values();
+    Array<int> consumed = {10, 0, 12};
+    int result = consume(consumed);
+    values[1] = 5;
+    ref int first = &values[0];
+    ref mut int last = &mut values[2];
+    *last = *first + 2;
+    View<int> readable = view(values);
+    ViewMut<int> writable = view_mut(values);
+    writable[1] = readable[0] - 5;
+    Array<float64> widened = {1, 2, 3};
+    Array<Point> points = {Point(1, 2), Point(3, 4)};
+    Array<int> fixed = Array<int>(2, 8);
+    Array<int> filled = Array<int>(length(values), 1);
+    Array<int> replaced = {99};
+    replaced = {8, 9};
+    return result + filled[2] + fixed[0] + replaced[1] + points[1].y + int(widened[0]) + int(length(empty));
+}
