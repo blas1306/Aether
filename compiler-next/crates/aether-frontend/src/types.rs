@@ -299,6 +299,19 @@ pub struct TypeProperties {
     pub needs_drop: bool,
 }
 
+/// Result of the single semantic admission query used by owning collections.
+/// Storage legality deliberately remains independent from public capabilities:
+/// a borrowed descriptor can be `Relocatable` without being persistently
+/// storable in an `Array` or `List`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CollectionElementAdmission {
+    Admitted,
+    InvalidType,
+    MissingRelocatable,
+    ForbiddenBorrow,
+    SymbolicStorageUnknown,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct AggregateProperties {
     parameters: Vec<GenericParamId>,
@@ -1112,18 +1125,43 @@ impl TypeArena {
             && !self.contains_owning(id)
     }
 
-    /// Temporary Vertical-13 element admission rule. Kept as a separate API
-    /// so Array can evolve independently from the storage primitive.
+    /// Central Vertical-16 admission proof for owning collection elements.
+    ///
+    /// Concrete values are admitted exactly when relocation glue is available
+    /// and current lifetime rules prove that no reference or view is stored.
+    /// A symbolic capability alone cannot prove the latter because references
+    /// themselves are Relocatable, so unresolved element types remain
+    /// conservatively rejected without adding a public negative capability.
     #[must_use]
-    pub fn is_admitted_array_element(&self, id: TypeId) -> bool {
-        self.is_admitted_buffer_element(id)
+    pub fn collection_element_admission(&self, id: TypeId) -> CollectionElementAdmission {
+        if !self.is_valid(id) {
+            return CollectionElementAdmission::InvalidType;
+        }
+        if self.contains_generic(id) {
+            return if self.guarantees_relocatable(id) {
+                CollectionElementAdmission::SymbolicStorageUnknown
+            } else {
+                CollectionElementAdmission::MissingRelocatable
+            };
+        }
+        if self.contains_reference(id) || self.contains_view(id) {
+            return CollectionElementAdmission::ForbiddenBorrow;
+        }
+        if !self.is_relocatable(id) {
+            return CollectionElementAdmission::MissingRelocatable;
+        }
+        CollectionElementAdmission::Admitted
     }
 
-    /// Temporary Vertical-14 element admission rule. List relocation only
-    /// handles concrete Copy/no-drop values in this milestone.
+    /// Array and List deliberately share one V16 storage predicate.
+    #[must_use]
+    pub fn is_admitted_array_element(&self, id: TypeId) -> bool {
+        self.collection_element_admission(id) == CollectionElementAdmission::Admitted
+    }
+
     #[must_use]
     pub fn is_admitted_list_element(&self, id: TypeId) -> bool {
-        self.is_admitted_buffer_element(id)
+        self.collection_element_admission(id) == CollectionElementAdmission::Admitted
     }
 
     #[must_use]

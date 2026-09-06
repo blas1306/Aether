@@ -240,6 +240,17 @@ no dynamic operations. V15 adds public Copy/Relocatable constraints but keeps
 the stricter concrete collection-element gate internal. `pop`, resize,
 non-Copy elements and general method syntax remain deferred.
 
+NEXT-VERTICAL-16 replaces that temporary gate for `Array<T>` and `List<T>`.
+Concrete elements must be Relocatable and storable without embedded references
+or views; Copy and destruction requirements are independent and no longer
+exclude owning elements. Literals and push consume non-Copy values, List growth
+relocates the initialized prefix into fresh uninitialized storage without
+duplicating ownership, and generated collection drop glue destroys elements in
+reverse index order before freeing storage. Fill construction still requires
+Copy. Buffer keeps its narrower V10 element policy. Symbolic collection
+elements remain conservative when stored-borrow freedom cannot be proven from
+the public capability vocabulary.
+
 The collection/mathematics distinction is intentional. `List<T>` is the
 dynamic zero-based computational collection sharing `{...}` literal syntax.
 Future `Vector<T, Orientation>` and `Matrix<T>` are mathematical types using

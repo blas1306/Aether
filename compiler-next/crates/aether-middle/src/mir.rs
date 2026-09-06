@@ -18,6 +18,47 @@ use aether_frontend::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BlockId(pub u32);
 
+/// Compiler-internal initialization state for physical collection slots.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ElementInitialization {
+    Initialized,
+    Uninitialized,
+}
+
+/// Range authority for a generated relocation operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RelocationRange {
+    /// Exactly the runtime prefix `[0, length)` of a List descriptor.
+    ListInitializedPrefix,
+}
+
+/// Verified physical ownership transfer performed by collection storage code.
+/// This remains distinct from source-language `Move`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Relocate {
+    pub type_id: TypeId,
+    pub range: RelocationRange,
+    pub source_before: ElementInitialization,
+    pub destination_before: ElementInitialization,
+    pub source_after: ElementInitialization,
+    pub increasing_order: bool,
+    pub non_trapping: bool,
+}
+
+impl Relocate {
+    fn list_initialized_prefix(type_id: TypeId) -> Self {
+        Self {
+            type_id,
+            range: RelocationRange::ListInitializedPrefix,
+            source_before: ElementInitialization::Initialized,
+            destination_before: ElementInitialization::Uninitialized,
+            source_after: ElementInitialization::Uninitialized,
+            increasing_order: true,
+            non_trapping: true,
+        }
+    }
+}
+
 /// A MIR storage slot or compiler temporary.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MirLocal {
@@ -204,6 +245,7 @@ pub enum Rvalue {
         source: Place,
         value: Operand,
         mutation: StructuralMutation,
+        relocation: Relocate,
         size_trap: TrapKind,
         failure_trap: TrapKind,
     },
@@ -211,6 +253,7 @@ pub enum Rvalue {
         source: Place,
         requested_capacity: Operand,
         mutation: StructuralMutation,
+        relocation: Relocate,
         size_trap: TrapKind,
         failure_trap: TrapKind,
     },
@@ -621,6 +664,10 @@ impl Builder<'_> {
                     mutation,
                 } => {
                     let value = self.lower_expr(value);
+                    let element_type = self
+                        .types
+                        .list_element(target.ty)
+                        .expect("typed HIR List push target");
                     let target = self.lower_place(target);
                     self.assign(
                         target.clone(),
@@ -628,6 +675,7 @@ impl Builder<'_> {
                             source: target,
                             value,
                             mutation: *mutation,
+                            relocation: Relocate::list_initialized_prefix(element_type),
                             size_trap: TrapKind::AllocationSizeOverflow,
                             failure_trap: TrapKind::AllocationFailure,
                         },
@@ -640,6 +688,10 @@ impl Builder<'_> {
                     mutation,
                 } => {
                     let requested_capacity = self.lower_expr(requested_capacity);
+                    let element_type = self
+                        .types
+                        .list_element(target.ty)
+                        .expect("typed HIR List reserve target");
                     let target = self.lower_place(target);
                     self.assign(
                         target.clone(),
@@ -647,6 +699,7 @@ impl Builder<'_> {
                             source: target,
                             requested_capacity,
                             mutation: *mutation,
+                            relocation: Relocate::list_initialized_prefix(element_type),
                             size_trap: TrapKind::AllocationSizeOverflow,
                             failure_trap: TrapKind::AllocationFailure,
                         },
@@ -2056,10 +2109,18 @@ fn verify_ownership(
                         .ok_or_else(|| fail("MIR consuming match owner has no local".into()))?;
                     consume_owner(function, types, &mut state, owner, "consuming match", fail)?;
                 }
-                Rvalue::BufferAlloc { .. }
-                | Rvalue::ArrayInit { .. }
-                | Rvalue::ArrayFill { .. }
-                | Rvalue::ListInit { .. } => {
+                Rvalue::BufferAlloc { .. } | Rvalue::ArrayFill { .. } => {
+                    initialize_owner(function, types, &mut state, destination, fail)?;
+                }
+                Rvalue::ArrayInit { elements, .. } | Rvalue::ListInit { elements, .. } => {
+                    consume_owned_operands(
+                        function,
+                        types,
+                        &mut state,
+                        elements,
+                        "collection literal initialization",
+                        fail,
+                    )?;
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
                 Rvalue::Call { callee, args } => {
@@ -2090,9 +2151,22 @@ fn verify_ownership(
                 | Rvalue::ArrayLength { source: place }
                 | Rvalue::ListLength { source: place }
                 | Rvalue::ListCapacity { source: place }
-                | Rvalue::ListPush { source: place, .. }
                 | Rvalue::ListReserve { source: place, .. } => {
                     require_place_owner(function, types, &state, place, fail)?;
+                }
+                Rvalue::ListPush {
+                    source: place,
+                    value,
+                    ..
+                } => {
+                    require_place_owner(function, types, &state, place, fail)?;
+                    let value_ty = operand_type(function, value).map_err(fail)?;
+                    if !types.is_copy(value_ty) {
+                        let local = operand_local_id(value).ok_or_else(|| {
+                            fail("non-Copy List push value is not materialized".into())
+                        })?;
+                        consume_owner(function, types, &mut state, local, "List push", fail)?;
+                    }
                 }
                 Rvalue::Aggregate { fields, .. } => {
                     for (_, operand) in fields {
@@ -2238,6 +2312,25 @@ fn verify_ownership(
             if ready && (changed_target || !was_ready) {
                 queue.push_back(target);
             }
+        }
+    }
+    Ok(())
+}
+
+fn consume_owned_operands(
+    function: &MirFunction,
+    types: &TypeArena,
+    state: &mut [MirOwnerState],
+    operands: &[Operand],
+    operation: &str,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    for operand in operands {
+        let ty = operand_type(function, operand).map_err(fail)?;
+        if !types.is_copy(ty) {
+            let local = operand_local_id(operand)
+                .ok_or_else(|| fail(format!("non-Copy {operation} operand is not materialized")))?;
+            consume_owner(function, types, state, local, operation, fail)?;
         }
     }
     Ok(())
@@ -2436,6 +2529,7 @@ fn validate_rvalue(
                 || operand_type(function, length)? != TypeId::USIZE
                 || operand_type(function, initial)? != *element_type
                 || !types.is_admitted_array_element(*element_type)
+                || !types.is_copy(*element_type)
                 || *size_trap != TrapKind::AllocationSizeOverflow
                 || *failure_trap != TrapKind::AllocationFailure
             {
@@ -2480,6 +2574,7 @@ fn validate_rvalue(
             source,
             value,
             mutation,
+            relocation,
             size_trap,
             failure_trap,
         } => {
@@ -2488,6 +2583,7 @@ fn validate_rvalue(
             let source_ty = place_type(function, source, structs, types)?;
             if destination != source_ty
                 || types.list_element(source_ty) != Some(operand_type(function, value)?)
+                || !valid_list_relocation(types, relocation, types.list_element(source_ty))
                 || *mutation != StructuralMutation::Push
                 || *size_trap != TrapKind::AllocationSizeOverflow
                 || *failure_trap != TrapKind::AllocationFailure
@@ -2499,6 +2595,7 @@ fn validate_rvalue(
             source,
             requested_capacity,
             mutation,
+            relocation,
             size_trap,
             failure_trap,
         } => {
@@ -2507,6 +2604,7 @@ fn validate_rvalue(
             let source_ty = place_type(function, source, structs, types)?;
             if destination != source_ty
                 || types.list_element(source_ty).is_none()
+                || !valid_list_relocation(types, relocation, types.list_element(source_ty))
                 || operand_type(function, requested_capacity)? != TypeId::USIZE
                 || *mutation != StructuralMutation::Reserve
                 || *size_trap != TrapKind::AllocationSizeOverflow
@@ -2756,6 +2854,22 @@ fn validate_rvalue(
         }
     }
     Ok(())
+}
+
+fn valid_list_relocation(
+    types: &TypeArena,
+    relocation: &Relocate,
+    expected_element: Option<TypeId>,
+) -> bool {
+    expected_element == Some(relocation.type_id)
+        && types.is_admitted_list_element(relocation.type_id)
+        && types.is_relocatable(relocation.type_id)
+        && relocation.range == RelocationRange::ListInitializedPrefix
+        && relocation.source_before == ElementInitialization::Initialized
+        && relocation.destination_before == ElementInitialization::Uninitialized
+        && relocation.source_after == ElementInitialization::Uninitialized
+        && relocation.increasing_order
+        && relocation.non_trapping
 }
 
 fn validate_place_read(
@@ -3452,5 +3566,46 @@ mod tests {
             *index = 99;
         }
         assert!(verify_mir(bad_payload).is_err());
+    }
+
+    #[test]
+    fn list_relocation_and_owned_element_consumption_fail_closed() {
+        let source = "int main(){List<Buffer<int>> values={Buffer<int>(1,1)};push(values,Buffer<int>(1,2));return values[1][0]-2;}";
+        let corrupt_relocation = |program: &mut FlowMir, corrupt: fn(&mut Relocate)| {
+            let relocation = program.functions[0]
+                .blocks
+                .iter_mut()
+                .flat_map(|block| &mut block.instructions)
+                .find_map(|instruction| match &mut instruction.value {
+                    Rvalue::ListPush { relocation, .. } => Some(relocation),
+                    _ => None,
+                })
+                .unwrap();
+            corrupt(relocation);
+        };
+
+        let mut invalid_source = mir(source);
+        corrupt_relocation(&mut invalid_source, |relocation| {
+            relocation.source_before = ElementInitialization::Uninitialized;
+        });
+        assert!(verify_mir(invalid_source).is_err());
+
+        let mut invalid_destination = mir(source);
+        corrupt_relocation(&mut invalid_destination, |relocation| {
+            relocation.destination_before = ElementInitialization::Initialized;
+        });
+        assert!(verify_mir(invalid_destination).is_err());
+
+        let mut trapping = mir(source);
+        corrupt_relocation(&mut trapping, |relocation| {
+            relocation.non_trapping = false;
+        });
+        assert!(verify_mir(trapping).is_err());
+
+        let mut wrong_state = mir(source);
+        corrupt_relocation(&mut wrong_state, |relocation| {
+            relocation.source_after = ElementInitialization::Initialized;
+        });
+        assert!(verify_mir(wrong_state).is_err());
     }
 }

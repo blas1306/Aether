@@ -1,0 +1,11 @@
+struct Dataset {
+    Buffer<int> data;
+    int count;
+}
+
+int main() {
+    List<Dataset> values = {};
+    push(values, Dataset(Buffer<int>(1, 10), 1));
+    push(values, Dataset(Buffer<int>(1, 20), 1));
+    return values[0].data[0] + values[1].data[0] - 30;
+}

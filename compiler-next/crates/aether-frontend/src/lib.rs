@@ -28,9 +28,9 @@ pub use hir::{
 pub use lexer::{Token, TokenKind, lex};
 pub use parser::parse;
 pub use types::{
-    Capability, EnumId, FieldId, FloatType, GenericOwner, GenericParamId, InstanceId, IntegerType,
-    StructId, Substitution, TargetProperties, TypeArena, TypeArgsId, TypeData, TypeId,
-    TypeProperties, VariantId,
+    Capability, CollectionElementAdmission, EnumId, FieldId, FloatType, GenericOwner,
+    GenericParamId, InstanceId, IntegerType, StructId, Substitution, TargetProperties, TypeArena,
+    TypeArgsId, TypeData, TypeId, TypeProperties, VariantId,
 };
 
 /// Lexes and parses one source file.

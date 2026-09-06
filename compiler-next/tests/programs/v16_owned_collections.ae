@@ -1,0 +1,65 @@
+struct Dataset {
+    Buffer<int> data;
+    int count;
+}
+
+struct Holder<T> {
+    T value;
+}
+
+enum Storage {
+    Empty,
+    Data(Buffer<int>),
+}
+
+Array<Buffer<int>> make_array() {
+    Array<Buffer<int>> values = {
+        Buffer<int>(1, 10),
+        Buffer<int>(1, 20),
+    };
+    return values;
+}
+
+int conditional_owner(bool move_it) {
+    List<Buffer<int>> source = {Buffer<int>(1, 1)};
+    if (move_it) {
+        List<Buffer<int>> destination = source;
+    }
+    return 0;
+}
+
+int main() {
+    Array<Buffer<int>> array = make_array();
+
+    List<Buffer<int>> buffers = {Buffer<int>(1, 30), Buffer<int>(1, 40)};
+    Buffer<int> existing = Buffer<int>(1, 50);
+    push(buffers, existing);
+    push(buffers, Buffer<int>(1, 60));
+    push(buffers, Buffer<int>(1, 70));
+
+    Array<Array<int>> arrays = {{1, 2}, {3, 4}};
+    Array<List<int>> array_lists = {{5, 6}, {7, 8}};
+    List<Array<int>> list_arrays = {{9, 10}, {11, 12}};
+    List<List<int>> lists = {{13, 14}, {15, 16}};
+    push(lists, {17, 18});
+
+    List<Dataset> datasets = {Dataset(Buffer<int>(1, 19), 1)};
+    push(datasets, Dataset(Buffer<int>(1, 20), 1));
+
+    List<Storage> storage = {Storage.Empty, Storage.Data(Buffer<int>(1, 21))};
+    push(storage, Storage.Data(Buffer<int>(1, 22)));
+
+    List<Holder<Buffer<int>>> holders = {
+        Holder<Buffer<int>>(Buffer<int>(1, 23)),
+    };
+    push(holders, Holder<Buffer<int>>(Buffer<int>(1, 24)));
+    Array<Holder<List<int>>> held_lists = {Holder<List<int>>({25})};
+
+    int result = array[0][0] + array[1][0] + buffers[0][0] + buffers[4][0]
+        + arrays[1][1] + array_lists[0][1] + list_arrays[1][0]
+        + lists[2][1] + datasets[1].data[0] + holders[0].value[0]
+        + holders[1].value[0] + held_lists[0].value[0] - 261;
+    Array<Buffer<int>> moved_array = array;
+    List<Buffer<int>> moved_buffers = buffers;
+    return result + conditional_owner(true) + conditional_owner(false);
+}

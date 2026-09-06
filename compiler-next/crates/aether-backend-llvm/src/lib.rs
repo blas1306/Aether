@@ -1,4 +1,4 @@
-//! LLVM backend for verified Vertical-14 program SSA.
+//! LLVM backend for verified Vertical-16 program SSA.
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -23,7 +23,7 @@ pub struct TargetDescriptor {
 }
 
 impl TargetDescriptor {
-    /// The target admitted through NEXT-VERTICAL-14.
+    /// The target admitted through NEXT-VERTICAL-16.
     #[must_use]
     pub const fn linux_x86_64() -> Self {
         Self {
@@ -80,6 +80,11 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         .union(&array_elements)
         .copied()
         .collect::<BTreeSet<_>>();
+    let fill_elements = fixed_elements
+        .iter()
+        .copied()
+        .filter(|element| types.is_copy(*element))
+        .collect::<BTreeSet<_>>();
     let indexed_elements = types
         .entries()
         .filter_map(|(ty, data)| match data {
@@ -96,7 +101,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         .collect::<BTreeSet<_>>();
     let has_owners = !fixed_elements.is_empty() || !list_elements.is_empty();
     let mut output = String::new();
-    writeln!(output, "; Aether NEXT-VERTICAL-14").unwrap();
+    writeln!(output, "; Aether NEXT-VERTICAL-16").unwrap();
     writeln!(
         output,
         "; Internal bootstrap ABI and symbol mangling; not a public Aether ABI"
@@ -179,6 +184,18 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     if !program.structs.is_empty() || !program.enums.is_empty() {
         writeln!(output).unwrap();
     }
+    for (ty, _) in types.entries().filter(|(ty, _)| {
+        is_codegen_concrete_type(types, *ty, &program.structs, &program.enums)
+            && types.is_relocatable(*ty)
+    }) {
+        emit_relocation_glue(&mut output, types, ty, &program.structs, &program.enums);
+    }
+    for (ty, _) in types.entries().filter(|(ty, _)| {
+        is_codegen_concrete_type(types, *ty, &program.structs, &program.enums)
+            && types.needs_drop(*ty)
+    }) {
+        emit_drop_glue(&mut output, types, ty, &program.structs, &program.enums);
+    }
     for element in fixed_elements {
         let layout = layout_of(
             types,
@@ -189,7 +206,11 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         )
         .expect("verified contiguous element has concrete layout");
         emit_fixed_allocation_helper(&mut output, types, element, layout.size, layout.align);
+    }
+    for element in fill_elements {
         emit_fixed_fill_helper(&mut output, types, element);
+    }
+    for element in buffer_elements {
         emit_buffer_allocation_wrapper(&mut output, types, element);
     }
     for element in indexed_elements {
@@ -273,6 +294,7 @@ fn emit_runtime_boundary(output: &mut String) {
     output.push_str(
         "@aether_heap_alloc_count = internal global i64 0\n\
          @aether_heap_free_count = internal global i64 0\n\
+         @aether_relocation_count = internal global i64 0\n\
          declare ptr @malloc(i64)\n\
          declare void @free(ptr)\n\
          define internal ptr @aether_alloc(i64 %size, i64 %align) {\n\
@@ -311,8 +333,308 @@ fn emit_runtime_boundary(output: &mut String) {
            %balance_frees = load i64, ptr @aether_heap_free_count\n\
            %balance = sub i64 %balance_allocs, %balance_frees\n\
            ret i64 %balance\n\
+         }\n\
+         define internal i64 @aether_relocations() {\n\
+         entry:\n\
+           %count = load i64, ptr @aether_relocation_count\n\
+           ret i64 %count\n\
          }\n\n",
     );
+}
+
+/// Emit non-trapping physical relocation glue. The source pointer denotes one
+/// initialized object and the destination one uninitialized slot. Successful
+/// return transfers the unique semantic value and leaves the source dead even
+/// though its old bits need not be overwritten.
+fn emit_relocation_glue(
+    output: &mut String,
+    types: &TypeArena,
+    ty: TypeId,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+) {
+    let suffix = mangle_type(types, ty);
+    let value_ty = llvm_type(types, ty);
+    writeln!(
+        output,
+        "define internal void @aether_relocate_{suffix}(ptr %source, ptr %destination) nounwind {{"
+    )
+    .unwrap();
+    writeln!(output, "entry:").unwrap();
+    match types.get(ty).expect("concrete relocation type") {
+        TypeData::Bool
+        | TypeData::Integer(_)
+        | TypeData::Float(_)
+        | TypeData::Reference { .. }
+        | TypeData::View { .. }
+        | TypeData::Buffer { .. }
+        | TypeData::Array { .. }
+        | TypeData::List { .. } => {
+            writeln!(output, "  %value = load {value_ty}, ptr %source").unwrap();
+            writeln!(output, "  store {value_ty} %value, ptr %destination").unwrap();
+            writeln!(output, "  ret void\n}}\n").unwrap();
+        }
+        TypeData::Struct(id) | TypeData::StructInstance(id, _) => {
+            for field in &structs[id.0 as usize].fields {
+                let field_ty = concrete_struct_member(types, structs, ty, field.ty);
+                writeln!(output, "  %source_field{} = getelementptr inbounds {value_ty}, ptr %source, i32 0, i32 {}", field.index, field.index).unwrap();
+                writeln!(output, "  %destination_field{} = getelementptr inbounds {value_ty}, ptr %destination, i32 0, i32 {}", field.index, field.index).unwrap();
+                writeln!(output, "  call void @aether_relocate_{}(ptr %source_field{}, ptr %destination_field{})", mangle_type(types, field_ty), field.index, field.index).unwrap();
+            }
+            writeln!(output, "  ret void\n}}\n").unwrap();
+        }
+        TypeData::Enum(id) | TypeData::EnumInstance(id, _) => {
+            let info = &enums[id.0 as usize];
+            writeln!(output, "  %tag = load i32, ptr %source").unwrap();
+            writeln!(output, "  store i32 %tag, ptr %destination").unwrap();
+            writeln!(output, "  switch i32 %tag, label %invalid [").unwrap();
+            for variant in &info.variants {
+                writeln!(
+                    output,
+                    "    i32 {}, label %variant{}",
+                    variant.discriminant, variant.index
+                )
+                .unwrap();
+            }
+            writeln!(output, "  ]").unwrap();
+            writeln!(output, "invalid:\n  unreachable").unwrap();
+            for variant in &info.variants {
+                writeln!(output, "variant{}:", variant.index).unwrap();
+                for payload in &variant.payloads {
+                    let payload_ty = concrete_enum_member(types, enums, ty, payload.ty);
+                    writeln!(output, "  %source_v{}_payload{} = getelementptr inbounds {value_ty}, ptr %source, i32 0, i32 {}, i32 {}", variant.index, payload.index, variant.index + 1, payload.index).unwrap();
+                    writeln!(output, "  %destination_v{}_payload{} = getelementptr inbounds {value_ty}, ptr %destination, i32 0, i32 {}, i32 {}", variant.index, payload.index, variant.index + 1, payload.index).unwrap();
+                    writeln!(output, "  call void @aether_relocate_{}(ptr %source_v{}_payload{}, ptr %destination_v{}_payload{})", mangle_type(types, payload_ty), variant.index, payload.index, variant.index, payload.index).unwrap();
+                }
+                writeln!(output, "  ret void").unwrap();
+            }
+            writeln!(output, "}}\n").unwrap();
+        }
+        TypeData::GenericParam(_) => unreachable!("generic relocation reached LLVM"),
+    }
+}
+
+/// Emit centralized recursive destruction glue. Collection elements are
+/// destroyed in reverse index order and only the initialized prefix is read.
+fn emit_drop_glue(
+    output: &mut String,
+    types: &TypeArena,
+    ty: TypeId,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+) {
+    let suffix = mangle_type(types, ty);
+    let value_ty = llvm_type(types, ty);
+    writeln!(
+        output,
+        "define internal void @aether_drop_{suffix}({value_ty} %value) {{"
+    )
+    .unwrap();
+    writeln!(output, "entry:").unwrap();
+    match types.get(ty).expect("concrete drop type") {
+        TypeData::Buffer { element } => {
+            emit_descriptor_free(output, types, *element, false, structs, enums);
+        }
+        TypeData::Array { element } => {
+            emit_collection_drop(output, types, *element, false, structs, enums);
+        }
+        TypeData::List { element } => {
+            emit_collection_drop(output, types, *element, true, structs, enums);
+        }
+        TypeData::Struct(id) | TypeData::StructInstance(id, _) => {
+            for field in structs[id.0 as usize].fields.iter().rev() {
+                let field_ty = concrete_struct_member(types, structs, ty, field.ty);
+                if !types.needs_drop(field_ty) {
+                    continue;
+                }
+                writeln!(
+                    output,
+                    "  %field{} = extractvalue {value_ty} %value, {}",
+                    field.index, field.index
+                )
+                .unwrap();
+                writeln!(
+                    output,
+                    "  call void @aether_drop_{}({} %field{})",
+                    mangle_type(types, field_ty),
+                    llvm_type(types, field_ty),
+                    field.index
+                )
+                .unwrap();
+            }
+            writeln!(output, "  ret void\n}}\n").unwrap();
+        }
+        TypeData::Enum(id) | TypeData::EnumInstance(id, _) => {
+            let info = &enums[id.0 as usize];
+            writeln!(output, "  %tag = extractvalue {value_ty} %value, 0").unwrap();
+            writeln!(output, "  switch i32 %tag, label %invalid [").unwrap();
+            for variant in &info.variants {
+                writeln!(
+                    output,
+                    "    i32 {}, label %variant{}",
+                    variant.discriminant, variant.index
+                )
+                .unwrap();
+            }
+            writeln!(output, "  ]").unwrap();
+            writeln!(output, "invalid:\n  unreachable").unwrap();
+            for variant in &info.variants {
+                writeln!(output, "variant{}:", variant.index).unwrap();
+                for payload in variant.payloads.iter().rev() {
+                    let payload_ty = concrete_enum_member(types, enums, ty, payload.ty);
+                    if !types.needs_drop(payload_ty) {
+                        continue;
+                    }
+                    writeln!(
+                        output,
+                        "  %v{}_payload{} = extractvalue {value_ty} %value, {}, {}",
+                        variant.index,
+                        payload.index,
+                        variant.index + 1,
+                        payload.index
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  call void @aether_drop_{}({} %v{}_payload{})",
+                        mangle_type(types, payload_ty),
+                        llvm_type(types, payload_ty),
+                        variant.index,
+                        payload.index
+                    )
+                    .unwrap();
+                }
+                writeln!(output, "  ret void").unwrap();
+            }
+            writeln!(output, "}}\n").unwrap();
+        }
+        TypeData::Bool
+        | TypeData::Integer(_)
+        | TypeData::Float(_)
+        | TypeData::Reference { .. }
+        | TypeData::View { .. }
+        | TypeData::GenericParam(_) => unreachable!("non-dropping type requested drop glue"),
+    }
+}
+
+fn emit_descriptor_free(
+    output: &mut String,
+    types: &TypeArena,
+    element: TypeId,
+    is_list: bool,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+) {
+    let descriptor = if is_list {
+        "{ ptr, i64, i64 }"
+    } else {
+        "{ ptr, i64 }"
+    };
+    let count_field = if is_list { 2 } else { 1 };
+    let layout = layout_of(
+        types,
+        element,
+        TargetProperties::LINUX_X86_64,
+        structs,
+        enums,
+    )
+    .expect("verified collection element layout");
+    writeln!(output, "  %data = extractvalue {descriptor} %value, 0").unwrap();
+    writeln!(
+        output,
+        "  %count = extractvalue {descriptor} %value, {count_field}"
+    )
+    .unwrap();
+    writeln!(output, "  %size = mul i64 %count, {}", layout.size).unwrap();
+    writeln!(
+        output,
+        "  call void @aether_free(ptr %data, i64 %size, i64 {})",
+        layout.align
+    )
+    .unwrap();
+    writeln!(output, "  ret void\n}}\n").unwrap();
+}
+
+fn emit_collection_drop(
+    output: &mut String,
+    types: &TypeArena,
+    element: TypeId,
+    is_list: bool,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+) {
+    let descriptor = if is_list {
+        "{ ptr, i64, i64 }"
+    } else {
+        "{ ptr, i64 }"
+    };
+    let allocation_count_field = if is_list { 2 } else { 1 };
+    let layout = layout_of(
+        types,
+        element,
+        TargetProperties::LINUX_X86_64,
+        structs,
+        enums,
+    )
+    .expect("verified collection element layout");
+    writeln!(output, "  %data = extractvalue {descriptor} %value, 0").unwrap();
+    writeln!(output, "  %length = extractvalue {descriptor} %value, 1").unwrap();
+    if types.needs_drop(element) {
+        writeln!(output, "  br label %drop_header").unwrap();
+        writeln!(output, "drop_header:").unwrap();
+        writeln!(
+            output,
+            "  %index = phi i64 [ %length, %entry ], [ %previous, %drop_body ]"
+        )
+        .unwrap();
+        writeln!(output, "  %more = icmp ugt i64 %index, 0").unwrap();
+        writeln!(
+            output,
+            "  br i1 %more, label %drop_body, label %free_storage"
+        )
+        .unwrap();
+        writeln!(output, "drop_body:").unwrap();
+        writeln!(output, "  %previous = sub i64 %index, 1").unwrap();
+        writeln!(
+            output,
+            "  %slot = getelementptr inbounds {}, ptr %data, i64 %previous",
+            llvm_type(types, element)
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "  %element = load {}, ptr %slot",
+            llvm_type(types, element)
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "  call void @aether_drop_{}({} %element)",
+            mangle_type(types, element),
+            llvm_type(types, element)
+        )
+        .unwrap();
+        writeln!(output, "  br label %drop_header").unwrap();
+        writeln!(output, "free_storage:").unwrap();
+    }
+    writeln!(
+        output,
+        "  %allocation_count = extractvalue {descriptor} %value, {allocation_count_field}"
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "  %size = mul i64 %allocation_count, {}",
+        layout.size
+    )
+    .unwrap();
+    writeln!(
+        output,
+        "  call void @aether_free(ptr %data, i64 %size, i64 {})",
+        layout.align
+    )
+    .unwrap();
+    writeln!(output, "  ret void\n}}\n").unwrap();
 }
 
 fn emit_fixed_allocation_helper(
@@ -502,20 +824,23 @@ fn emit_list_helpers(
         "  %new_data = call ptr @aether_alloc(i64 %size, i64 {element_align})"
     )
     .unwrap();
-    output.push_str("  %old_data = extractvalue { ptr, i64, i64 } %list, 0\n  %length = extractvalue { ptr, i64, i64 } %list, 1\n  br label %copy_header\ncopy_header:\n  %index = phi i64 [ 0, %allocate ], [ %next, %copy_body ]\n  %more = icmp ult i64 %index, %length\n  br i1 %more, label %copy_body, label %copy_done\ncopy_body:\n");
+    output.push_str("  %old_data = extractvalue { ptr, i64, i64 } %list, 0\n  %length = extractvalue { ptr, i64, i64 } %list, 1\n  br label %relocate_header\nrelocate_header:\n  %index = phi i64 [ 0, %allocate ], [ %next, %relocate_body ]\n  %more = icmp ult i64 %index, %length\n  br i1 %more, label %relocate_body, label %relocate_done\nrelocate_body:\n");
     writeln!(
         output,
         "  %old_slot = getelementptr inbounds {element_ty}, ptr %old_data, i64 %index"
     )
     .unwrap();
-    writeln!(output, "  %element = load {element_ty}, ptr %old_slot").unwrap();
     writeln!(
         output,
         "  %new_slot = getelementptr inbounds {element_ty}, ptr %new_data, i64 %index"
     )
     .unwrap();
-    writeln!(output, "  store {element_ty} %element, ptr %new_slot").unwrap();
-    output.push_str("  %next = add i64 %index, 1\n  br label %copy_header\ncopy_done:\n");
+    writeln!(
+        output,
+        "  call void @aether_relocate_{suffix}(ptr %old_slot, ptr %new_slot)"
+    )
+    .unwrap();
+    output.push_str("  %relocation_count = load i64, ptr @aether_relocation_count\n  %relocation_next = add i64 %relocation_count, 1\n  store i64 %relocation_next, ptr @aether_relocation_count\n  %next = add i64 %index, 1\n  br label %relocate_header\nrelocate_done:\n");
     writeln!(output, "  %old_size = mul i64 %capacity, {element_size}").unwrap();
     writeln!(
         output,
@@ -2078,6 +2403,23 @@ fn continuation_label(block: BlockId, result: u32) -> String {
     format!("bb{}_after_v{}", block.0, result)
 }
 
+fn is_codegen_concrete_type(
+    types: &TypeArena,
+    ty: TypeId,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+) -> bool {
+    if types.contains_generic(ty) {
+        return false;
+    }
+    match types.get(ty) {
+        Some(TypeData::Struct(id)) => structs[id.0 as usize].generic_parameters.is_empty(),
+        Some(TypeData::Enum(id)) => enums[id.0 as usize].generic_parameters.is_empty(),
+        Some(TypeData::GenericParam(_)) | None => false,
+        Some(_) => true,
+    }
+}
+
 fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
     match types.get(ty).expect("verified backend TypeId") {
         TypeData::Bool => "i1".into(),
@@ -2230,28 +2572,52 @@ fn emit_place_pointer(
             .unwrap();
         }
         let mut ty = *element_type;
-        for (field_position, projection) in place.projections[position + 1..].iter().enumerate() {
-            let SsaPlaceProjection::Field(field_id) = projection else {
-                unreachable!("Vertical-10 does not admit multidimensional indexing")
-            };
-            let owner = types
-                .struct_id(ty)
-                .expect("verified indexed field projection");
-            let field = structs[owner.0 as usize]
-                .fields
-                .iter()
-                .find(|field| field.id == *field_id)
-                .expect("verified indexed field identity");
-            let next = format!("%place{result}_field{field_position}");
-            writeln!(
-                output,
-                "  {next} = getelementptr inbounds {}, ptr {pointer}, i32 0, i32 {}",
-                llvm_type(types, ty),
-                field.index
-            )
-            .unwrap();
-            pointer = next;
-            ty = concrete_struct_member(types, structs, ty, field.ty);
+        for (projection_position, projection) in
+            place.projections[position + 1..].iter().enumerate()
+        {
+            match projection {
+                SsaPlaceProjection::Field(field_id) => {
+                    let owner = types
+                        .struct_id(ty)
+                        .expect("verified indexed field projection");
+                    let field = structs[owner.0 as usize]
+                        .fields
+                        .iter()
+                        .find(|field| field.id == *field_id)
+                        .expect("verified indexed field identity");
+                    let next = format!("%place{result}_field{projection_position}");
+                    writeln!(
+                        output,
+                        "  {next} = getelementptr inbounds {}, ptr {pointer}, i32 0, i32 {}",
+                        llvm_type(types, ty),
+                        field.index
+                    )
+                    .unwrap();
+                    pointer = next;
+                    ty = concrete_struct_member(types, structs, ty, field.ty);
+                }
+                SsaPlaceProjection::Index {
+                    index,
+                    element_type,
+                    ..
+                } => {
+                    let descriptor = format!("%place{result}_descriptor{projection_position}");
+                    writeln!(
+                        output,
+                        "  {descriptor} = load {}, ptr {pointer}",
+                        llvm_type(types, ty)
+                    )
+                    .unwrap();
+                    let next = format!("%place{result}_index{projection_position}");
+                    if types.list_element(ty).is_some() {
+                        writeln!(output, "  {next} = call ptr @aether_list_index_{}({{ ptr, i64, i64 }} {descriptor}, i64 {})", mangle_type(types, *element_type), llvm_operand(index)).unwrap();
+                    } else {
+                        writeln!(output, "  {next} = call ptr @aether_index_{}({{ ptr, i64 }} {descriptor}, i64 {})", mangle_type(types, *element_type), llvm_operand(index)).unwrap();
+                    }
+                    pointer = next;
+                    ty = *element_type;
+                }
+            }
         }
         return pointer;
     }
@@ -2390,168 +2756,23 @@ fn emit_place_value(
     (value, ty)
 }
 
-#[allow(clippy::too_many_lines)]
 fn emit_drop_value(
     output: &mut String,
     value: &str,
     ty: TypeId,
-    prefix: &str,
+    _prefix: &str,
     types: &TypeArena,
-    structs: &[StructInfo],
-    enums: &[EnumInfo],
+    _structs: &[StructInfo],
+    _enums: &[EnumInfo],
 ) {
-    match types.get(ty).expect("verified drop type") {
-        TypeData::Buffer { element } | TypeData::Array { element } => {
-            let layout = layout_of(
-                types,
-                *element,
-                TargetProperties::LINUX_X86_64,
-                structs,
-                enums,
-            )
-            .expect("verified Buffer element layout");
-            writeln!(
-                output,
-                "  %{prefix}_data = extractvalue {{ ptr, i64 }} {value}, 0"
-            )
-            .unwrap();
-            writeln!(
-                output,
-                "  %{prefix}_length = extractvalue {{ ptr, i64 }} {value}, 1"
-            )
-            .unwrap();
-            writeln!(
-                output,
-                "  %{prefix}_size = mul i64 %{prefix}_length, {}",
-                layout.size
-            )
-            .unwrap();
-            writeln!(
-                output,
-                "  call void @aether_free(ptr %{prefix}_data, i64 %{prefix}_size, i64 {})",
-                layout.align
-            )
-            .unwrap();
-        }
-        TypeData::List { element } => {
-            let layout = layout_of(
-                types,
-                *element,
-                TargetProperties::LINUX_X86_64,
-                structs,
-                enums,
-            )
-            .expect("verified List element layout");
-            writeln!(
-                output,
-                "  %{prefix}_data = extractvalue {{ ptr, i64, i64 }} {value}, 0"
-            )
-            .unwrap();
-            writeln!(
-                output,
-                "  %{prefix}_capacity = extractvalue {{ ptr, i64, i64 }} {value}, 2"
-            )
-            .unwrap();
-            writeln!(
-                output,
-                "  %{prefix}_size = mul i64 %{prefix}_capacity, {}",
-                layout.size
-            )
-            .unwrap();
-            writeln!(
-                output,
-                "  call void @aether_free(ptr %{prefix}_data, i64 %{prefix}_size, i64 {})",
-                layout.align
-            )
-            .unwrap();
-        }
-        TypeData::Struct(id) | TypeData::StructInstance(id, _) => {
-            let info = &structs[id.0 as usize];
-            for field in info.fields.iter().rev() {
-                let field_ty = concrete_struct_member(types, structs, ty, field.ty);
-                if !types.needs_drop(field_ty) {
-                    continue;
-                }
-                let field_value = format!("%{prefix}_field{}", field.index);
-                writeln!(
-                    output,
-                    "  {field_value} = extractvalue {} {value}, {}",
-                    llvm_type(types, ty),
-                    field.index
-                )
-                .unwrap();
-                emit_drop_value(
-                    output,
-                    &field_value,
-                    field_ty,
-                    &format!("{prefix}_f{}", field.index),
-                    types,
-                    structs,
-                    enums,
-                );
-            }
-        }
-        TypeData::Enum(id) | TypeData::EnumInstance(id, _) => {
-            let info = &enums[id.0 as usize];
-            writeln!(
-                output,
-                "  %{prefix}_tag = extractvalue {} {value}, 0",
-                llvm_type(types, ty)
-            )
-            .unwrap();
-            writeln!(
-                output,
-                "  switch i32 %{prefix}_tag, label %{prefix}_invalid ["
-            )
-            .unwrap();
-            for variant in &info.variants {
-                writeln!(
-                    output,
-                    "    i32 {}, label %{prefix}_variant{}",
-                    variant.discriminant, variant.index
-                )
-                .unwrap();
-            }
-            writeln!(output, "  ]").unwrap();
-            writeln!(output, "{prefix}_invalid:\n  unreachable").unwrap();
-            for variant in &info.variants {
-                writeln!(output, "{prefix}_variant{}:", variant.index).unwrap();
-                for payload in variant.payloads.iter().rev() {
-                    let payload_ty = concrete_enum_member(types, enums, ty, payload.ty);
-                    if !types.needs_drop(payload_ty) {
-                        continue;
-                    }
-                    let payload_value =
-                        format!("%{prefix}_v{}_payload{}", variant.index, payload.index);
-                    writeln!(
-                        output,
-                        "  {payload_value} = extractvalue {} {value}, {}, {}",
-                        llvm_type(types, ty),
-                        variant.index + 1,
-                        payload.index
-                    )
-                    .unwrap();
-                    emit_drop_value(
-                        output,
-                        &payload_value,
-                        payload_ty,
-                        &format!("{prefix}_v{}_p{}", variant.index, payload.index),
-                        types,
-                        structs,
-                        enums,
-                    );
-                }
-                writeln!(output, "  br label %{prefix}_done").unwrap();
-            }
-            writeln!(output, "{prefix}_done:").unwrap();
-        }
-        TypeData::Bool
-        | TypeData::Integer(_)
-        | TypeData::Float(_)
-        | TypeData::Reference { .. }
-        | TypeData::View { .. } => {}
-        TypeData::GenericParam(_) => unreachable!("generic drop reached LLVM"),
-    }
+    debug_assert!(types.needs_drop(ty));
+    writeln!(
+        output,
+        "  call void @aether_drop_{}({} {value})",
+        mangle_type(types, ty),
+        llvm_type(types, ty)
+    )
+    .unwrap();
 }
 
 fn ssa_backend_place_type(

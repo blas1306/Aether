@@ -1569,3 +1569,69 @@ that precisely models initialization and drop glue before considering owned
 non-Copy Array/List elements. `Relocatable` alone must not bypass those
 obligations. Behavioral/numeric traits and user-defined capabilities should
 remain separate future design work.
+
+## 33. NEXT-VERTICAL-16 implementation confirmation
+
+Vertical-16 replaces the V13/V14 mixed Copy/no-drop/ownership gate for Array
+and List with `collection_element_admission(TypeId)`. Its result distinguishes
+invalid identity, missing Relocatable, forbidden stored borrow/view, unknown
+symbolic storage legality and admission. Concrete owning aggregates and nested
+collections now pass; Buffer retains the V10 fill-oriented restriction.
+
+HIR collection literals retain source-order typed operands, and ordinary
+ownership analysis marks non-Copy locals moved in literals and push. Array fill
+adds an independent Copy proof and structured diagnostic. Symbolic
+`T: Relocatable` remains insufficient for collection storage because the
+current public capability set cannot prove absence of borrowed descriptors;
+concrete generic instances are re-evaluated normally.
+
+MIR introduces `Relocate` metadata on List push/reserve with the element
+`TypeId`, exact initialized-prefix range, initialized source state,
+uninitialized destination state, uninitialized source post-state, increasing
+order and non-trapping flag. MIR ownership dataflow consumes non-Copy literal
+and push operands exactly once. Both MIR and SSA verify the relocation contract
+and reject corrupt type, state, order or trapping metadata. This is distinct
+from source `Move`, which transfers a source-language root rather than moving
+container storage.
+
+The LLVM backend generates centralized typed `aether_relocate_*` functions.
+Scalars perform typed load/store; Buffer/Array/List copy only their descriptors;
+structs recurse in declaration order; enums transfer the tag and recurse only
+through the selected active payload. These helpers are `nounwind` and contain
+no allocation, arithmetic check, free, drop or trap. List reserve completes
+capacity multiplication and allocation before relocating elements in the
+order `0..length`, counts one root element relocation, frees only the old
+backing allocation, and installs the new pointer/capacity. The old initialized
+slots are semantically dead and are never dropped.
+
+Generated `aether_drop_*` functions now centralize recursive collection and
+aggregate cleanup. Array uses length and List uses only `[0,length)` for
+reverse-index element destruction; backing storage is then freed using length
+or capacity respectively. Struct fields and active enum payloads remain
+reverse declaration order. Nested descriptor indexing was generalized so
+observable values survive outer storage relocation.
+
+The combined native fixture covers Array/List of Buffer, nested Array/List,
+List of an owning struct and enum, concrete generic aggregate elements,
+existing-owner and temporary push, multiple growths, returns, whole-root moves
+and conditional cleanup. It observes 43
+allocations, 43 frees and 12 List element relocations. The generated IR also
+provides deterministic evidence of increasing relocation and reverse drop
+loops. Buffer broadening, symbolic stored-borrow proofs, more precise layered
+provenance, exception cleanup, pop/remove and partial moves remain accepted
+debt.
+
+A five-run warm debug-driver snapshot (core parse-through-LLVM time, excluding
+discovery, file I/O and clang) measured about 37.5 ms for the larger V15
+capability fixture, 6.8 ms for Array of Buffer, 7.8 ms for growing List of
+Buffer, 7.3 ms for nested Lists and 9.2 ms for List of owning Dataset. The V15
+fixture's signature collection and semantic-body phases averaged 2.75 ms and
+10.46 ms in a separate sample. Existing timers do not independently attribute
+constraint resolution, symbolic property derivation and nominal second-pass
+validation; that finer attribution remains accepted instrumentation debt.
+
+NEXT-VERTICAL-17 should address element extraction/removal only after choosing
+an empty-result contract and representing the newly uninitialized tail slot in
+MIR. A separate internal positive storable/lifetime guarantee should precede
+any attempt to admit symbolic `List<T>`; it should not be approximated by a
+public negative capability.

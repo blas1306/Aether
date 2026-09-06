@@ -1,4 +1,4 @@
-# Aether NEXT-VERTICAL-15
+# Aether NEXT-VERTICAL-16
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. It does not replace the production `aether` CLI or import any legacy
@@ -32,7 +32,7 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-15 grammar
+## Vertical-16 grammar
 
 ```text
 program    := import* (alias | struct | enum | function)+ EOF
@@ -310,6 +310,13 @@ and keeps the executable legacy differential comparisons green. Capability
 fixtures cover syntax/resolution, concrete and symbolic properties,
 implication, explicit and inferred calls, forwarding, constrained
 structs/enums, cross-module use, diagnostics and native erasure.
+
+The Vertical-16 qualification run completes 114 Rust unit/integration tests
+with zero failures and keeps workspace/all-target clippy warning-free. Native
+coverage includes owned and nested Array/List literals, consuming push,
+multiple List growths, returned and conditionally moved containers, structural
+and active-variant cleanup, 43/43 allocation balance, and 12 observed element
+relocations in the combined fixture.
 
 ### Vertical-7 timing baseline
 
@@ -713,6 +720,70 @@ These fixtures intentionally differ in size and generated runtime helpers, so
 the figures are snapshots rather than a same-workload regression claim. The
 constraints add no runtime representation or dispatch.
 
+## Vertical-16 owned collection element contract
+
+`Array<T>` and `List<T>` now use the single
+`collection_element_admission(TypeId)` query. A concrete element is admitted
+when it is `Relocatable` and contains no stored reference or view under the
+current lifetime rules. `Copy` and `needs_drop` are independent: the important
+non-Copy + Relocatable + needs-drop combination is accepted. `Buffer<T>` keeps
+its V10 fill-based Copy/no-drop element policy; broadening that lower-level
+storage primitive is not necessary for owned Array/List composition.
+
+Symbolic `T: Relocatable` proves physical transfer but not storage legality,
+because references and views are themselves Relocatable. With no public
+negative `NoBorrow` capability, symbolic Array/List element use remains
+conservatively rejected. Concrete generic aggregates such as
+`Holder<Buffer<int>>` and `Holder<List<int>>` are admitted after substitution.
+
+Collection literals initialize one owner per slot in source order. A non-Copy
+local used as an Array/List literal element or push argument is consumed by the
+ordinary ownership analysis; a temporary transfers directly and receives no
+second cleanup. `Array<T>(length, fill)` remains distinct and requires `T:
+Copy`, since it duplicates one value into every element.
+
+MIR and SSA attach a verified `Relocate` contract to List growth. It names the
+element `TypeId`, exact initialized prefix `[0,length)`, initialized source,
+uninitialized destination, uninitialized/dead source after transfer,
+increasing order and a non-trapping guarantee. This internal storage operation
+is not source `Move`: Move transfers a source-language value between owners,
+while Relocate changes the physical location of one existing logical owner.
+
+LLVM emits centralized typed relocation glue. Scalars use typed load/store;
+Buffer, Array and List transfer descriptors without copying pointees; structs
+relocate fields in declaration order; enums copy the discriminant and relocate
+only the active payload in declaration order. The glue performs no allocation,
+checked arithmetic, drop or trap. List reserve completes checked size
+calculation and allocation before invoking it for elements `0..length`, then
+frees only the old backing allocation and installs the new descriptor. A debug
+counter records one relocation per moved List element.
+
+Central generated drop glue recursively destroys Array/List elements from
+`length-1` down to zero, then frees backing storage. List never reads reserved
+slots `[length,capacity)`. Struct fields and active enum payloads retain reverse
+declaration order. Nested indexing lowers through each descriptor layer;
+borrow provenance remains conservative and continues to block structural List
+mutation when a derived element path is live.
+
+There is still no pop/remove, partial move, Clone, user Drop/Relocate, stored
+borrow lifetime system, unwind cleanup, ARC/GC, raw pointer surface or
+Vector/Matrix implementation. Nested Array/List values remain nested owners;
+they are not Matrix semantics.
+
+### Vertical-16 timing snapshot
+
+A five-run warm debug-driver sample measured mean core compiler time (parse
+through LLVM, excluding discovery, file I/O and clang) of approximately 37.5 ms
+for the larger V15 capability fixture, 6.8 ms for `Array<Buffer<int>>`, 7.8 ms
+for growing `List<Buffer<int>>`, 7.3 ms for nested `List<List<int>>`, and 9.2 ms
+for `List<Dataset>` owning Buffer. These small-fixture wall-clock samples are
+not benchmark-quality comparisons. In a separate five-run attribution sample,
+V15 capability signature collection averaged 2.75 ms and semantic bodies
+10.46 ms; the current phase timers do not split constraint resolution,
+symbolic derivation and nominal second-pass validation further, which remains
+measurement debt rather than a reason to speculate about their individual
+costs.
+
 ## Bootstrap ABI and deliberate limits
 
 One entry module plus transitively imported source modules and exactly one
@@ -737,6 +808,6 @@ module initializers or initialization order. This is precisely why import
 cycles have no execution-order meaning in this slice. There are also no
 packages, nested/selective/wildcard/aliased imports, reexports, visibility
 keywords, overloads, behavioral traits, generic aliases, function values, closures, extern functions,
-heap values beyond `Buffer`/`Array`/restricted `List`, strings, named initializers, methods, general
+heap values beyond `Buffer`/`Array`/`List`, strings, named initializers, methods, general
 ownership, optimization pipeline, public ABI/runtime API, or LLVM library binding. Unsupported forms fail
 closed before lowering.

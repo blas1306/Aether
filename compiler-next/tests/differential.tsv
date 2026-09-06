@@ -88,3 +88,8 @@ reserved_list_push	V1_CONTRACT	accept:0	n/a	programs/v14_reserved_push.ae
 list_view_index	V1_CONTRACT	accept:0	n/a	programs/v14_list_view_index.ae
 generic_capabilities	V1_CONTRACT	accept:42	n/a	programs/v15_capabilities.ae
 symbolic_type_properties	V1_CONTRACT	accept:0	n/a	programs/v15_symbolic_properties.ae
+owned_collection_elements	V1_CONTRACT	accept:0	n/a	programs/v16_owned_collections.ae
+owned_array_elements	V1_CONTRACT	accept:0	n/a	programs/v16_array_buffer.ae
+owned_list_growth	V1_CONTRACT	accept:0	n/a	programs/v16_list_buffer_growth.ae
+nested_owned_lists	V1_CONTRACT	accept:0	n/a	programs/v16_nested_lists.ae
+owned_struct_list	V1_CONTRACT	accept:0	n/a	programs/v16_owned_struct_list.ae

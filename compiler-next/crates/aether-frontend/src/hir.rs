@@ -14,9 +14,10 @@
 )]
 use crate::{
     AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstMatchArm, AstMatchMode,
-    AstStmtKind, AstType, AstUnaryOp, Capability, Diagnostic, DiagnosticCategory, EnumId, FieldId,
-    FloatType, GenericOwner, GenericParamId, IntegerType, ParsedAst, Phase, SourceId, Span,
-    StructId, Substitution, TargetProperties, TypeArena, TypeData, TypeId, VariantId,
+    AstStmtKind, AstType, AstUnaryOp, Capability, CollectionElementAdmission, Diagnostic,
+    DiagnosticCategory, EnumId, FieldId, FloatType, GenericOwner, GenericParamId, IntegerType,
+    ParsedAst, Phase, SourceId, Span, StructId, Substitution, TargetProperties, TypeArena,
+    TypeData, TypeId, VariantId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
@@ -1179,8 +1180,9 @@ pub fn collect_program_signatures(
             _ => return None,
         };
         let admitted = match kind {
-            1 => types.is_admitted_array_element(element),
-            2 => types.is_admitted_list_element(element),
+            1 | 2 => {
+                types.collection_element_admission(element) == CollectionElementAdmission::Admitted
+            }
             _ => types.is_admitted_buffer_element(element),
         };
         (!admitted).then_some((container, element, kind))
@@ -1210,11 +1212,19 @@ pub fn collect_program_signatures(
             },
             Phase::Semantic,
             DiagnosticCategory::Type,
-            format!(
-                "{} cannot use non-Copy/drop-requiring element type {}",
-                format_type(&types, container, &structs, &enums),
-                format_type(&types, element, &structs, &enums)
-            ),
+            if kind == 0 {
+                format!(
+                    "{} cannot use a non-Copy/drop-requiring, borrowed, or owning element type {}",
+                    format_type(&types, container, &structs, &enums),
+                    format_type(&types, element, &structs, &enums)
+                )
+            } else {
+                collection_admission_message(
+                    if kind == 1 { "Array" } else { "List" },
+                    format_type(&types, element, &structs, &enums),
+                    types.collection_element_admission(element),
+                )
+            },
             location.map(|(span, _)| span),
         );
         let diagnostic = if let Some((_, module)) = location {
@@ -1582,10 +1592,18 @@ fn resolve_type_in_module(
                 },
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                format!(
-                    "{} element types must be concrete; generic capability constraints are deferred",
-                    ty.name
-                ),
+                if matches!(ty.name.as_str(), "Array" | "List") {
+                    collection_admission_message(
+                        &ty.name,
+                        element,
+                        types.collection_element_admission(element),
+                    )
+                } else {
+                    format!(
+                        "{} element types must be concrete; generic capability constraints are deferred",
+                        ty.name
+                    )
+                },
                 Some(ty.span),
             ));
         }
@@ -1619,7 +1637,11 @@ fn resolve_type_in_module(
                         "E0304",
                         Phase::Semantic,
                         DiagnosticCategory::Type,
-                        "Vertical-13 Array elements must be concrete Copy/no-drop values without borrowed or owning substructure",
+                        collection_admission_message(
+                            "Array",
+                            element,
+                            types.collection_element_admission(element),
+                        ),
                         Some(ty.span),
                     ))
                 }
@@ -1636,7 +1658,11 @@ fn resolve_type_in_module(
                         "E0310",
                         Phase::Semantic,
                         DiagnosticCategory::Type,
-                        "Vertical-14 List elements must be concrete Copy/no-drop values without borrowed or owning substructure",
+                        collection_admission_message(
+                            "List",
+                            element,
+                            types.collection_element_admission(element),
+                        ),
                         Some(ty.span),
                     ))
                 }
@@ -5147,7 +5173,7 @@ impl Analyzer<'_> {
                 "E0304",
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                "Vertical-13 Array element type must be concrete; constraints are deferred",
+                "Vertical-16 Array fill element type must be concrete; stored-borrow freedom cannot yet be proven symbolically",
                 Some(span),
             )]);
         }
@@ -5156,7 +5182,23 @@ impl Analyzer<'_> {
                 "E0304",
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                "Vertical-13 Array elements must be concrete Copy/no-drop values without borrowed or owning substructure",
+                collection_admission_message(
+                    "Array",
+                    self.type_name(element),
+                    self.types.collection_element_admission(element),
+                ),
+                Some(span),
+            )]);
+        }
+        if !self.types.guarantees_copy(element) {
+            return Err(vec![Diagnostic::new(
+                "E0314",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!(
+                    "Array fill construction duplicates its fill value and therefore requires Copy; {} is non-Copy",
+                    self.type_name(element)
+                ),
                 Some(span),
             )]);
         }
@@ -6246,6 +6288,30 @@ fn type_error(m: impl Into<String>, s: Span) -> Diagnostic {
         Some(s),
     )
 }
+
+fn collection_admission_message(
+    collection: &str,
+    element: impl std::fmt::Display,
+    admission: CollectionElementAdmission,
+) -> String {
+    match admission {
+        CollectionElementAdmission::ForbiddenBorrow => format!(
+            "{collection} cannot persist borrowed element type {element}; stored references and views require lifetime support not available in Vertical-16"
+        ),
+        CollectionElementAdmission::SymbolicStorageUnknown => format!(
+            "{collection} element type {element} is symbolically Relocatable, but its stored-borrow freedom cannot be proven; Vertical-16 keeps symbolic collection storage conservative"
+        ),
+        CollectionElementAdmission::MissingRelocatable => format!(
+            "{collection} element type {element} does not provide the Relocatable capability required for owning collection storage"
+        ),
+        CollectionElementAdmission::InvalidType => {
+            format!("{collection} element type {element} is invalid")
+        }
+        CollectionElementAdmission::Admitted => {
+            format!("{collection} element type {element} is admitted")
+        }
+    }
+}
 fn conversion_error(
     types: &TypeArena,
     structs: &[StructInfo],
@@ -6812,6 +6878,7 @@ fn verify_expr(
                 || length.ty != TypeId::USIZE
                 || initial.ty != *element_type
                 || !types.is_admitted_array_element(*element_type)
+                || !types.guarantees_copy(*element_type)
             {
                 return Err(fail("HIR Array fill construction contract invalid".into()));
             }

@@ -14,8 +14,8 @@ use aether_frontend::{
 
 use crate::mir::place_type;
 use crate::{
-    BinaryOp, BlockId, MirDropFlag, MirFunction, Operand, Place, PlaceBase, PlaceProjection,
-    Rvalue, Terminator, TrapKind, UnaryOp, VerifiedMir,
+    BinaryOp, BlockId, ElementInitialization, MirDropFlag, MirFunction, Operand, Place, PlaceBase,
+    PlaceProjection, Relocate, RelocationRange, Rvalue, Terminator, TrapKind, UnaryOp, VerifiedMir,
 };
 
 /// Fresh SSA value identity.
@@ -161,6 +161,7 @@ pub enum SsaOp {
         source: SsaPlace,
         value: SsaOperand,
         mutation: StructuralMutation,
+        relocation: Relocate,
         size_trap: TrapKind,
         failure_trap: TrapKind,
     },
@@ -168,6 +169,7 @@ pub enum SsaOp {
         source: SsaPlace,
         requested_capacity: SsaOperand,
         mutation: StructuralMutation,
+        relocation: Relocate,
         size_trap: TrapKind,
         failure_trap: TrapKind,
     },
@@ -798,12 +800,14 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             source,
             value,
             mutation,
+            relocation,
             size_trap,
             failure_trap,
         } => SsaOp::ListPush {
             source: rename_place(source, stacks, mir),
             value: rename_operand(value, stacks),
             mutation: *mutation,
+            relocation: *relocation,
             size_trap: *size_trap,
             failure_trap: *failure_trap,
         },
@@ -811,12 +815,14 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             source,
             requested_capacity,
             mutation,
+            relocation,
             size_trap,
             failure_trap,
         } => SsaOp::ListReserve {
             source: rename_place(source, stacks, mir),
             requested_capacity: rename_operand(requested_capacity, stacks),
             mutation: *mutation,
+            relocation: *relocation,
             size_trap: *size_trap,
             failure_trap: *failure_trap,
         },
@@ -1881,6 +1887,7 @@ fn verify_op(
                 || operand_ty(length)? != TypeId::USIZE
                 || operand_ty(initial)? != *element_type
                 || !types.is_admitted_array_element(*element_type)
+                || !types.is_copy(*element_type)
                 || *size_trap != TrapKind::AllocationSizeOverflow
                 || *failure_trap != TrapKind::AllocationFailure
             {
@@ -1920,12 +1927,14 @@ fn verify_op(
             source,
             value,
             mutation,
+            relocation,
             size_trap,
             failure_trap,
         } => {
             let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
             if result != source_ty
                 || types.list_element(source_ty) != Some(operand_ty(value)?)
+                || !valid_list_relocation(types, relocation, types.list_element(source_ty))
                 || *mutation != StructuralMutation::Push
                 || *size_trap != TrapKind::AllocationSizeOverflow
                 || *failure_trap != TrapKind::AllocationFailure
@@ -1937,12 +1946,14 @@ fn verify_op(
             source,
             requested_capacity,
             mutation,
+            relocation,
             size_trap,
             failure_trap,
         } => {
             let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
             if result != source_ty
                 || types.list_element(source_ty).is_none()
+                || !valid_list_relocation(types, relocation, types.list_element(source_ty))
                 || operand_ty(requested_capacity)? != TypeId::USIZE
                 || *mutation != StructuralMutation::Reserve
                 || *size_trap != TrapKind::AllocationSizeOverflow
@@ -2197,6 +2208,22 @@ fn verify_op(
         }
     }
     Ok(())
+}
+
+fn valid_list_relocation(
+    types: &TypeArena,
+    relocation: &Relocate,
+    expected_element: Option<TypeId>,
+) -> bool {
+    expected_element == Some(relocation.type_id)
+        && types.is_admitted_list_element(relocation.type_id)
+        && types.is_relocatable(relocation.type_id)
+        && relocation.range == RelocationRange::ListInitializedPrefix
+        && relocation.source_before == ElementInitialization::Initialized
+        && relocation.destination_before == ElementInitialization::Uninitialized
+        && relocation.source_after == ElementInitialization::Uninitialized
+        && relocation.increasing_order
+        && relocation.non_trapping
 }
 
 fn ssa_place_type(
@@ -2704,6 +2731,24 @@ mod tests {
         if let SsaOp::InsertField { projections, .. } = &mut insertion.op {
             projections.reverse();
         }
+        assert!(verify_ssa(ssa).is_err());
+    }
+
+    #[test]
+    fn verifier_rejects_corrupt_list_relocation_contract() {
+        let mut ssa = raw_ssa(
+            "int main(){List<Buffer<int>> values={Buffer<int>(1,1)};push(values,Buffer<int>(1,2));return values[1][0]-2;}",
+        );
+        let relocation = ssa.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find_map(|instruction| match &mut instruction.op {
+                SsaOp::ListPush { relocation, .. } => Some(relocation),
+                _ => None,
+            })
+            .unwrap();
+        relocation.increasing_order = false;
         assert!(verify_ssa(ssa).is_err());
     }
 }

@@ -1,4 +1,4 @@
-//! Cross-layer and native qualification through NEXT-VERTICAL-15.
+//! Cross-layer and native qualification through NEXT-VERTICAL-16.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1414,7 +1414,12 @@ fn vertical11_owned_aggregates_execute_and_drop_exactly_once() {
     assert!(compilation.dumps[&Emit::Mir].contains("needs_drop: true"));
     assert!(compilation.dumps[&Emit::Ssa].contains("EnumConstruct"));
     assert!(compilation.dumps[&Emit::Ssa].contains("is_copy: false"));
-    assert!(compilation.llvm.contains("switch i32 %drop"));
+    assert!(
+        compilation
+            .llvm
+            .contains("define internal void @aether_drop_e")
+    );
+    assert!(compilation.llvm.contains("switch i32 %tag"));
     assert!(compilation.llvm.contains("@aether_heap_alloc_count"));
     assert!(compilation.llvm.contains("@aether_heap_free_count"));
 
@@ -1434,8 +1439,15 @@ fn vertical11_owned_aggregates_execute_and_drop_exactly_once() {
     .unwrap();
     assert_eq!(status.code(), Some(42));
     assert_eq!(
-        reassignment.llvm.matches("call void @aether_free(").count(),
+        reassignment
+            .llvm
+            .matches("call void @aether_drop_s0(")
+            .count(),
         2
+    );
+    assert_eq!(
+        reassignment.llvm.matches("call void @aether_free(").count(),
+        1
     );
 
     let one = SourceFile::new(
@@ -1464,9 +1476,9 @@ fn vertical11_owned_aggregates_execute_and_drop_exactly_once() {
             .count(),
         2
     );
-    assert_eq!(compiled.llvm.matches("call void @aether_free(").count(), 2);
-    let second = compiled.llvm.find("_field1 = extractvalue").unwrap();
-    let first = compiled.llvm.find("_field0 = extractvalue").unwrap();
+    assert_eq!(compiled.llvm.matches("call void @aether_free(").count(), 1);
+    let second = compiled.llvm.find("%field1 = extractvalue").unwrap();
+    let first = compiled.llvm.find("%field0 = extractvalue").unwrap();
     assert!(
         second < first,
         "struct fields must drop in reverse declaration order"
@@ -1681,15 +1693,13 @@ fn vertical13_array_diagnostics_fail_closed() {
             "E0218",
         ),
         ("int main(){int value={1};return value;}", "E0305"),
-        ("int main(){Array<Buffer<int>> a={};return 0;}", "E0304"),
-        ("int main(){Array<Array<int>> a={};return 0;}", "E0304"),
         (
             "int main(){Array<int> a=Array<int>(18446744073709551615,0);return 0;}",
             "E0282",
         ),
         (
-            "struct Owned{Buffer<int> value;}int main(){Array<Owned> a={};return 0;}",
-            "E0304",
+            "int main(){Buffer<int> b=Buffer<int>(1,0);Array<Buffer<int>> a=Array<Buffer<int>>(2,b);return 0;}",
+            "E0314",
         ),
         (
             "Array<T> bad<T>(T value){Array<T> a={value};return a;}int main(){return 0;}",
@@ -1861,13 +1871,6 @@ fn vertical14_collection_literal_and_list_operations_survive_every_ir() {
 #[test]
 fn vertical14_list_diagnostics_fail_closed() {
     for (text, code) in [
-        ("int main(){List<Buffer<int>> a={};return 0;}", "E0310"),
-        ("int main(){List<Array<int>> a={};return 0;}", "E0310"),
-        ("int main(){List<List<int>> a={};return 0;}", "E0310"),
-        (
-            "struct Owned{Buffer<int> value;}int main(){List<Owned> a={};return 0;}",
-            "E0310",
-        ),
         (
             "List<T> bad<T>(T value){List<T> a={value};return a;}int main(){return 0;}",
             "E0310",
@@ -2200,5 +2203,93 @@ fn vertical15_capability_programs_execute_without_runtime_capability_artifacts()
         assert!(!compilation.dumps[&Emit::Mir].contains("Capability"));
         assert!(!compilation.dumps[&Emit::Ssa].contains("Capability"));
         assert!(!compilation.llvm.contains("capability"));
+    }
+}
+
+#[test]
+fn vertical16_owned_collection_ir_and_diagnostics_are_explicit() {
+    let session = CompilationSession::discover(&program("v16_owned_collections.ae")).unwrap();
+    let compilation =
+        compile_session(session, &[Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm]).unwrap();
+    assert!(compilation.dumps[&Emit::Hir].contains("Array<Buffer<int64>>"));
+    assert!(compilation.dumps[&Emit::Hir].contains("List<List<int64>>"));
+    assert!(compilation.dumps[&Emit::Mir].contains("Relocate"));
+    assert!(compilation.dumps[&Emit::Mir].contains("ListInitializedPrefix"));
+    assert!(compilation.dumps[&Emit::Ssa].contains("source_after: Uninitialized"));
+    assert!(compilation.llvm.contains("@aether_relocate_BiInt64"));
+    assert!(compilation.llvm.contains("@aether_drop_LBiInt64"));
+    assert!(compilation.llvm.contains("@aether_relocation_count"));
+    assert!(compilation.llvm.contains("%relocate_header"));
+    assert!(compilation.llvm.contains("%previous = sub i64 %index, 1"));
+    assert!(!compilation.llvm.contains("@aether_fixed_fill_BiInt64"));
+
+    for (text, code, detail) in [
+        (
+            "int main(){Buffer<int> b=Buffer<int>(1,1);Array<Buffer<int>> a={b};return b[0];}",
+            "E0291",
+            "use after move",
+        ),
+        (
+            "int main(){List<Buffer<int>> a={};Buffer<int> b=Buffer<int>(1,1);push(a,b);return b[0];}",
+            "E0291",
+            "use after move",
+        ),
+        (
+            "int main(){Buffer<int> b=Buffer<int>(1,1);Array<Buffer<int>> a=Array<Buffer<int>>(2,b);return 0;}",
+            "E0314",
+            "requires Copy",
+        ),
+        (
+            "int main(){int x=1;Array<ref int> a={&x};return 0;}",
+            "E0304",
+            "stored references and views",
+        ),
+        (
+            "List<T> bad<T: Relocatable>(T x){List<T> a={};return a;}int main(){return 0;}",
+            "E0310",
+            "cannot be proven",
+        ),
+    ] {
+        let diagnostics = compile_source(&SourceFile::new("v16-error.ae", text), &[])
+            .expect_err("expected Vertical-16 rejection");
+        assert_eq!(diagnostics[0].code, code, "{text}");
+        assert!(
+            diagnostics[0].message.contains(detail),
+            "{text}: {}",
+            diagnostics[0].message
+        );
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical16_owned_collections_relocate_and_drop_exactly_once() {
+    let source = program("v16_owned_collections.ae");
+    let (compilation, status) = run_path(
+        &source,
+        &[Emit::Mir, Emit::Ssa, Emit::Llvm],
+        &ClangToolchain::default(),
+    )
+    .unwrap();
+    assert_eq!(status.code(), Some(0));
+
+    let toolchain = ClangToolchain::default();
+    for (counter, expected) in [
+        ("@aether_heap_alloc_count", 43),
+        ("@aether_heap_free_count", 43),
+        ("@aether_relocation_count", 12),
+    ] {
+        let observed = format!(
+            "  %observed_count = load i64, ptr {counter}\n  %process_status = trunc i64 %observed_count to i32"
+        );
+        let llvm = compilation.llvm.replace(
+            "  %process_status = trunc i64 %aether_result to i32",
+            &observed,
+        );
+        let artifact = temporary("v16-count");
+        toolchain.link_executable(&llvm, &artifact).unwrap();
+        let status = Command::new(&artifact).status().unwrap();
+        let _ = fs::remove_file(&artifact);
+        assert_eq!(status.code(), Some(expected), "{counter}");
     }
 }

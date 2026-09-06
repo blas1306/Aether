@@ -1,4 +1,4 @@
-//! Recursive-descent parser for the deliberately closed Vertical-15 grammar.
+//! Recursive-descent parser for the deliberately closed Vertical-16 grammar.
 
 use crate::{
     AstAlias, AstBinaryOp, AstBlock, AstCapabilityConstraint, AstEnum, AstExpr, AstExprKind,
@@ -412,7 +412,7 @@ impl Parser {
                 });
             }
             TokenKind::KwMatch => return self.match_statement(start),
-            _ => return Err(self.error("E0102", "expected a Vertical-14 statement")),
+            _ => return Err(self.error("E0102", "expected a Vertical-16 statement")),
         };
         let semicolon = self.expect(TokenKind::Semicolon, "expected `;` after statement")?;
         Ok(AstStmt {

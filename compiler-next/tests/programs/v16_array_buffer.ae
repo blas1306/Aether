@@ -1,0 +1,4 @@
+int main() {
+    Array<Buffer<int>> values = {Buffer<int>(1, 10), Buffer<int>(1, 20)};
+    return values[0][0] + values[1][0] - 30;
+}

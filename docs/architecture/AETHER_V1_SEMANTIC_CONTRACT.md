@@ -670,6 +670,38 @@ conservatively potentially invalidating; passing `ref List<T>` is not. This
 temporary rule awaits an effect system and adds no alias exclusivity or LLVM
 `noalias` promise.
 
+### 5.9 Owned collection elements and relocation — NEXT-VERTICAL-16 DECIDED
+
+Array/List element admission is the centralized conjunction: a concrete `T`
+is Relocatable, current storage/lifetime analysis proves it storable, and it
+contains no forbidden reference or view. Neither non-Copy nor `needs_drop` is a
+rejection reason. Buffer retains its V10 element restriction because its only
+constructor repeats one fill value and V16 does not add uninitialized Buffer
+storage or an owned-element literal.
+
+An Array/List literal evaluates elements in source order and transfers one
+semantic owner into each destination slot. A non-Copy local is moved and may
+not subsequently be used; a non-Copy temporary has exactly one cleanup
+destination. Push applies the same type-property-driven rule. In contrast,
+`Array<T>(length, fill)` duplicates its fill value and therefore requires
+`T: Copy` even when `Array<T>` itself is otherwise a legal type.
+
+Relocate is a compiler-internal physical transfer distinct from source Move.
+Its verified contract is one initialized source object, one uninitialized
+destination slot, the same `TypeId`, a Relocatable type, and an uninitialized/
+dead source after success. List growth applies this operation in increasing
+index order to exactly `[0,length)`. Generated relocation glue cannot trap:
+capacity arithmetic and allocation complete first. Descriptor owners transfer
+their handles without pointee copies or frees; structs relocate fields in
+declaration order and enums relocate the discriminant plus only active payloads.
+
+Array/List drop glue visits initialized elements in reverse index order and
+then frees backing storage. List does not inspect `[length,capacity)`. Struct
+fields and active enum payloads retain reverse declaration order. Relocated old
+List slots receive no Drop before the old backing allocation alone is freed.
+Nested Array/List values remain separate owners, never a Matrix
+representation.
+
 ## 6. Core data abstractions
 
 ### 6.0 `Buffer<T>` — NEXT-VERTICAL-10 DECIDED substrate
@@ -1045,6 +1077,17 @@ provenance and escape restrictions remain independent. Symbolic Buffer, Array
 and List elements remain rejected because their current admission also needs
 concreteness, no-drop and absence of borrowed/owning substructure; V15 does not
 expose those internal facts or generalize non-Copy collection elements.
+
+### 10.6 Symbolic storage interaction — NEXT-VERTICAL-16 DECIDED
+
+V16 operationalizes concrete Relocatable collection elements but does not
+equate capability satisfaction with lifetime legality. `T: Relocatable` is
+sufficient to derive Relocatable for `Holder<T>`, but not to prove that an
+unknown `T` lacks a stored reference or view: those borrowed descriptors also
+provide Relocatable. No public negative `NoBorrow` constraint is introduced.
+Consequently symbolic Array/List element applications remain rejected with a
+storage-proof diagnostic, while concrete substituted generic aggregates are
+admitted when the central collection predicate succeeds.
 
 ## 11. Layout, ABI and FFI
 
