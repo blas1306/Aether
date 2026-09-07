@@ -1,0 +1,13 @@
+int main() {
+    List<int> values = {10,20,30};
+    ref int first = &values[0];
+    int removed = swap_remove(values,2);
+    if (*first != 10) { return 1; }
+    if (removed != 30) { return 2; }
+    if (values[1] != 20) { return 3; }
+    List<Buffer<int>> buffers = {Buffer<int>(1,42)};
+    Buffer<int> b = swap_remove(buffers,0);
+    if (b[0] != 42) { return 4; }
+    if (length(buffers) != 0) { return 5; }
+    return 0;
+}

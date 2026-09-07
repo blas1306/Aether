@@ -1,7 +1,7 @@
-# Aether NEXT-VERTICAL-18
+# Aether NEXT-VERTICAL-19
 
 This directory is the isolated Rust implementation of the first reconstruction
-slice. The current storage/extraction contract is Vertical-18; the numbered
+slice. The current storage/extraction contract is Vertical-19; the numbered
 Vertical-9..17 sections below retain historical qualification context.
 It does not replace the production `aether` CLI or import any legacy
 Python object, JSON schema, Initial IR, or SSA representation.
@@ -34,7 +34,7 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-18 grammar
+## Vertical-19 grammar
 
 ```text
 program    := import* (alias | struct | enum | function)+ EOF
@@ -996,6 +996,72 @@ Qualification, exact counts, accepted debt and all 37 report items are in
 `tests/measure-v18.py --runs 10` uses the unchanged V17 eight-phase core timing
 methodology, with an optional `--baseline-binary` built from V17. The checked-in
 `tests/timings/v18-debug.json` records both versions and all phase statistics.
+
+## Vertical-19 indexed owning extraction with swap_remove
+
+```aether
+T takeAt<T: Storable + Relocatable>(ref mut List<T> list, usize i) {
+    return swap_remove(*list, i);
+}
+int main() {
+    List<int> values = {10,20,30,40};
+    ref int first = &values[0];
+    int removed = swap_remove(values, 1);
+    // removed == 20; values == {10,40,30}; *first == 10
+    return 0;
+}
+```
+
+`swap_remove` accepts a writable List Place and one ordinary zero-based usize
+index. It returns the removed T, supporting Copy values, owning handles, nested
+collections, structs and enums. Order is **not preserved**: the previous tail
+replaces the removed slot. Intended complexity is O(1), modulo element relocation
+glue cost. Out-of-bounds (including an empty List) traps with IndexOutOfBounds
+before subtraction or mutation. The index is evaluated exactly once.
+
+The verified CFG reads fresh length, checks bounds, computes tail, Takes the
+requested slot and branches on index == tail. The tail edge performs no relocation;
+the non-tail edge invokes one element Relocate into the hole. The common commit
+updates length only after both paths establish `[0,N-1)` Initialized and the old
+tail Uninitialized. Sharing the non-trapping Take before the tail decision avoids
+duplicating extracted ownership or merging it through a phi. MIR and SSA verify
+this bounded diamond independently in addition to the unchanged V18 pop shape.
+Relocate reuses V16 state metadata and recursive glue, adding SingleSlot range
+and an explicit destination Initialized post-state. No runtime bitmap is used.
+
+HIR records ListSwapRemove, StableStructuralMutation and IndexAndTail invalidation.
+Backing pointer and capacity never change; the operation allocates/frees nothing.
+Aliases, projected descriptors, subsequent indexing/push/length, owner returns
+and cleanup read the committed descriptor. Drop visits reverse final indices,
+including the former tail at its new slot. A reserved swap_remove + push transfers
+slot → result, tail → hole, result → new tail without additional allocations.
+
+A live ref/ref mut to the removed slot or old tail blocks extraction. Direct
+constant references outside `{index,tail}` survive when length is known; tail
+removal affects only the tail. Unknown/dynamic indices and nested relationships
+remain conservative. Whole-list View/ViewMut blocks mutation while in scope.
+E0320 diagnoses invalid/read-only targets or intrinsic arguments; E0321 diagnoses
+maybe affected live borrows/views. Index type errors use ordinary numeric/type
+diagnostics. Generic helpers check parametrically, and concrete parameters such
+as usize provide context to literals even during generic argument inference.
+
+The native suite checks eleven fixtures with exact cleanup and relocation counts,
+per-operation pointer/capacity/heap probes, reverse final drop order, aliases,
+scopes, generic cross-module helpers and structured bounds traps. MIR and SSA
+each reject 23 transaction corruptions. See
+[NEXT_VERTICAL_19_REPORT.md](../docs/architecture/NEXT_VERTICAL_19_REPORT.md).
+Timing uses the unchanged eight V17/V18 core phase boundaries, excluding clang:
+
+```bash
+cargo build -p aether-driver --bin aether-next
+python3 tests/measure-v19.py --runs 10
+# Optional: --baseline-binary <separately-built-v18-driver> --baseline-revision <rev>
+```
+
+`tests/timings/v19-debug.json` records mean/median for a V18 pop baseline and
+swap_remove int, Buffer, nested owning and reuse fixtures. These are debug
+snapshots, not optimizer claims. Order-preserving remove, insert, drain, methods,
+Option, Array extraction, Buffer broadening and lifetimes remain outside V19.
 
 ## Bootstrap ABI and deliberate limits
 

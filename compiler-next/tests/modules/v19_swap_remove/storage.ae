@@ -1,0 +1,1 @@
+T takeAt<T: Storable + Relocatable>(ref mut List<T> values, usize i) { return swap_remove(*values,i); }

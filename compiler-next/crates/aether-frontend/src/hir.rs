@@ -559,6 +559,7 @@ pub enum StructuralMutation {
     Push,
     Reserve,
     Pop,
+    SwapRemove,
 }
 
 /// Small collection effect vocabulary; writable does not imply reallocation.
@@ -569,11 +570,18 @@ pub enum MutationEffect {
     PotentiallyRelocatingMutation,
 }
 
+/// Logical slots invalidated independently of backing-storage stability.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InvalidationShape {
+    /// The requested element and the previous tail (one slot when equal).
+    IndexAndTail,
+}
+
 impl StructuralMutation {
     #[must_use]
     pub const fn effect(self) -> MutationEffect {
         match self {
-            Self::Pop => MutationEffect::StableStructuralMutation,
+            Self::Pop | Self::SwapRemove => MutationEffect::StableStructuralMutation,
             Self::Push | Self::Reserve => MutationEffect::PotentiallyRelocatingMutation,
         }
     }
@@ -718,6 +726,13 @@ pub enum HirExprKind {
     },
     ListCapacity {
         source: HirPlace,
+    },
+    ListSwapRemove {
+        source: HirPlace,
+        index: Box<HirExpr>,
+        element_type: TypeId,
+        effect: MutationEffect,
+        invalidation: InvalidationShape,
     },
     ListPop {
         source: HirPlace,
@@ -2962,6 +2977,19 @@ impl Monomorphizer<'_> {
             HirExprKind::ListLength { source } => HirExprKind::ListLength {
                 source: self.substitute_place(source, substitution)?,
             },
+            HirExprKind::ListSwapRemove {
+                source,
+                index,
+                element_type,
+                effect,
+                invalidation,
+            } => HirExprKind::ListSwapRemove {
+                source: self.substitute_place(source, substitution)?,
+                index: Box::new(self.substitute_expr(index, substitution)?),
+                element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+                effect: *effect,
+                invalidation: *invalidation,
+            },
             HirExprKind::ListPop {
                 source,
                 element_type,
@@ -3756,6 +3784,35 @@ impl OwnershipAnalysis<'_> {
             }
             HirExprKind::Int(_) | HirExprKind::Float(_) | HirExprKind::Bool(_) => Ok(()),
             HirExprKind::Load(place) => self.place(place, expr.span),
+            HirExprKind::ListSwapRemove { source, index, .. } => {
+                self.place(source, expr.span)?;
+                self.expr(index)?;
+                if let Some(owner) = self.owner_of_place(source) {
+                    let direct = source.projections.is_empty();
+                    let tail = self.buffer_lengths[owner.0 as usize].and_then(|n| n.checked_sub(1));
+                    let removed = match index.kind {
+                        HirExprKind::Int(i) => u64::try_from(i).ok(),
+                        _ => None,
+                    };
+                    if self
+                        .storage_ranges
+                        .iter()
+                        .flatten()
+                        .any(|(root, borrowed)| {
+                            *root == owner
+                                && !(direct
+                                    && borrowed
+                                        .zip(tail)
+                                        .zip(removed)
+                                        .is_some_and(|((i, t), r)| i < t && i != r))
+                        })
+                    {
+                        return Err(self.error("E0321", "swap_remove invalidates a live reference/view to the removed slot or old tail, or an unknown/maybe affected index or whole-list range", expr.span));
+                    }
+                    self.buffer_lengths[owner.0 as usize] = if direct { tail } else { None };
+                }
+                Ok(())
+            }
             HirExprKind::ListPop { source, .. } => {
                 self.place(source, expr.span)?;
                 if let Some(owner) = self.owner_of_place(source) {
@@ -4791,14 +4848,19 @@ impl Analyzer<'_> {
             type_arguments,
             args,
         } = &e.kind
-            && callee == "pop"
+            && (callee == "pop" || callee == "swap_remove")
         {
-            if !type_arguments.is_empty() || args.len() != 1 {
+            let indexed = callee == "swap_remove";
+            let code = if indexed { "E0320" } else { "E0318" };
+            if !type_arguments.is_empty() || args.len() != if indexed { 2 } else { 1 } {
                 return Err(vec![Diagnostic::new(
-                    "E0318",
+                    code,
                     Phase::Semantic,
                     DiagnosticCategory::Type,
-                    "pop expects exactly one writable List<T> place and no type arguments",
+                    format!(
+                        "{callee} expects a writable List<T> place{} and no type arguments",
+                        if indexed { " and a usize index" } else { "" }
+                    ),
                     Some(e.span),
                 )]);
             }
@@ -4806,16 +4868,16 @@ impl Analyzer<'_> {
                 .resolve_expr_place(&args[0], true)
                 .map_err(|mut errors| {
                     for error in &mut errors {
-                        error.code = "E0318";
+                        error.code = code;
                     }
                     errors
                 })?;
             let Some(element_type) = self.types.list_element(source.ty) else {
                 return Err(vec![Diagnostic::new(
-                    "E0318",
+                    code,
                     Phase::Semantic,
                     DiagnosticCategory::Type,
-                    "pop requires a writable List<T> place",
+                    format!("{callee} requires a writable List<T> place"),
                     Some(e.span),
                 )]);
             };
@@ -4824,14 +4886,26 @@ impl Analyzer<'_> {
             if let HirPlaceBase::Local(local) = source.base {
                 self.locals[local.0 as usize].address_taken = true;
             }
+            let kind = if indexed {
+                let index = self.expression(&args[1], Some(TypeId::USIZE))?.expr;
+                HirExprKind::ListSwapRemove {
+                    source,
+                    index: Box::new(index),
+                    element_type,
+                    effect: MutationEffect::StableStructuralMutation,
+                    invalidation: InvalidationShape::IndexAndTail,
+                }
+            } else {
+                HirExprKind::ListPop {
+                    source,
+                    element_type,
+                    effect: MutationEffect::StableStructuralMutation,
+                }
+            };
             return self.coerce(
                 Checked {
                     expr: HirExpr {
-                        kind: HirExprKind::ListPop {
-                            source,
-                            element_type,
-                            effect: MutationEffect::StableStructuralMutation,
-                        },
+                        kind,
                         ty: element_type,
                         span: e.span,
                     },
@@ -5995,7 +6069,12 @@ impl Analyzer<'_> {
         if inferred_application {
             let checked = args
                 .iter()
-                .map(|argument| self.expression(argument, None))
+                .zip(&s.parameters)
+                .map(|(argument, parameter)| {
+                    let expected =
+                        (!self.types.contains_generic(parameter.ty)).then_some(parameter.ty);
+                    self.expression(argument, expected)
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             let mut inferred = BTreeMap::new();
             for (parameter, argument) in s.parameters.iter().zip(&checked) {
@@ -7142,6 +7221,30 @@ fn verify_expr(
             {
                 return Err(fail(
                     "HIR List literal construction contract invalid".into(),
+                ));
+            }
+        }
+        HirExprKind::ListSwapRemove {
+            source,
+            index,
+            element_type,
+            effect,
+            invalidation,
+        } => {
+            verify_place(source, f, sigs, structs, enums, types, fail)?;
+            verify_expr(index, f, sigs, structs, enums, types, fail)?;
+            if types.list_element(source.ty) != Some(*element_type)
+                || e.ty != *element_type
+                || index.ty != TypeId::USIZE
+                || *effect != MutationEffect::StableStructuralMutation
+                || *invalidation != InvalidationShape::IndexAndTail
+                || matches!(
+                    source.base,
+                    HirPlaceBase::Dereference { mutable: false, .. }
+                )
+            {
+                return Err(fail(
+                    "HIR ListSwapRemove writable/index/type/effect contract invalid".into(),
                 ));
             }
         }

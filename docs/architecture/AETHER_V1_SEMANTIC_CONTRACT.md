@@ -894,6 +894,61 @@ Array keeps fixed, fully initialized storage. V18 adds no Array take, general
 field partial move, remove/insert/swap_remove/drain/pop_front, methods, Option,
 Buffer expansion, named lifetimes, Vector or Matrix.
 
+### 6.6 Indexed owning extraction — NEXT-VERTICAL-19 DECIDED
+
+`T removed = swap_remove(list_place, index);` removes one element without
+preserving List order. The target MUST be a writable List Place; explicit
+`swap_remove(*list, i)` supports `ref mut List<T>`. The index follows ordinary
+List rules: usize, zero-based, no implicit signed conversion. The result is T,
+including owning non-Copy T, and may be returned or consumed directly.
+
+The operation MUST evaluate the requested index once and check it against a
+fresh descriptor length N. Failure (`index >= N`, including N = 0) takes the
+normal structured `IndexOutOfBounds` trap before Take, relocation, tail
+subtraction or length mutation. No Option or boolean failure result is added.
+
+After the check, `tail = N-1` is safe. Take transfers slot[index] to the ordinary
+result and changes that slot from Initialized to Uninitialized. If index equals
+tail, no Relocate occurs. Otherwise exactly one element Relocate transfers the
+initialized tail to the uninitialized removed slot: the hole becomes Initialized
+and the old tail becomes Uninitialized, without source Drop or duplication.
+Only after these transitions complete may length commit to tail. Take,
+Relocate and commit are non-trapping for admitted elements.
+
+The final initialized prefix MUST be exactly `[0,N-1)`, with no interior hole.
+For `[10,20,30,40]`, removing index 1 returns 20 and leaves `[10,40,30]`.
+Copy elements obey the same slot liveness transitions. Owning descriptors move
+without deep copying their pointees; aggregates use recursive relocation glue.
+Intended time complexity is O(1), modulo element relocation glue cost.
+
+Pointer and capacity MUST remain unchanged. The operation performs zero heap
+allocations and frees, including element ownership. All later queries, indexing,
+push, moves, returns and drop observe the new descriptor length. Drop destroys
+survivors in reverse FINAL index order; the relocated tail is destroyed at its
+replacement index, and the extracted result has its ordinary separate owner.
+Push may reuse the raw old tail without allocating when capacity suffices.
+
+The effect is `StableStructuralMutation` at the List backing level. Its logical
+invalidation shape is `{index, tail}`, reduced to one slot in the tail case.
+Live shared/mutable borrows that may cover either slot block extraction. Direct
+constant references provably outside that set survive; unknown borrow/removal
+indices or length facts fail closed where distinctness cannot be proved.
+Whole-list View/ViewMut covers the old sequence and blocks extraction until
+scope exit. Writable descriptor aliases retain underlying root identity.
+Nested provenance remains conservative, without runtime pointer comparisons.
+
+MIR and SSA MUST independently verify the bounded Take/optional-Relocate/commit
+transaction, actual bounds and tail branch edges, fresh operands, exact typed
+slot identities and unique extracted ownership. Length continues to represent
+the runtime initialized prefix; no per-slot bitmap, general partial initialization
+or rollback mechanism is introduced. Existing pop retains its V18 transaction.
+
+Generic bodies require the existing `T: Storable + Relocatable` guarantees
+before monomorphization; there are no runtime capabilities. Order-preserving
+`remove(i)` remains a future separate operation. V19 adds no remove, insert,
+range erasure, drain, methods, try_swap_remove/Option, Array extraction, Buffer
+changes, lifetimes, traits, Vector or Matrix.
+
 ## 7. Text
 
 ### 7.1 `byte`, `char` and `string` — DECIDED

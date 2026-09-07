@@ -165,6 +165,11 @@ pub enum SsaOp {
         slot: SlotPlace<SsaPlace, SsaOperand>,
         state: TakeState,
     },
+    Relocate {
+        source: SlotPlace<SsaPlace, SsaOperand>,
+        destination: SlotPlace<SsaPlace, SsaOperand>,
+        relocation: Relocate,
+    },
     ListSetLength {
         source: SsaPlace,
         length: SsaOperand,
@@ -820,6 +825,23 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             },
             state: *state,
         },
+        Rvalue::Relocate {
+            source,
+            destination,
+            relocation,
+        } => SsaOp::Relocate {
+            source: SlotPlace {
+                root: rename_place(&source.root, stacks, mir),
+                index: rename_operand(&source.index, stacks),
+                type_id: source.type_id,
+            },
+            destination: SlotPlace {
+                root: rename_place(&destination.root, stacks, mir),
+                index: rename_operand(&destination.index, stacks),
+                type_id: destination.type_id,
+            },
+            relocation: *relocation,
+        },
         Rvalue::ListSetLength { source, length } => SsaOp::ListSetLength {
             source: rename_place(source, stacks, mir),
             length: rename_operand(length, stacks),
@@ -1260,6 +1282,18 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
         Rvalue::Take { slot, .. } => place_locals(function, &slot.root)
             .into_iter()
             .chain(operand_local(&slot.index))
+            .collect(),
+        Rvalue::Relocate {
+            source,
+            destination,
+            ..
+        } => [source, destination]
+            .into_iter()
+            .flat_map(|slot| {
+                place_locals(function, &slot.root)
+                    .into_iter()
+                    .chain(operand_local(&slot.index))
+            })
             .collect(),
         Rvalue::ListSetLength { source, length } => place_locals(function, source)
             .into_iter()
@@ -1986,6 +2020,27 @@ fn verify_op(
                 return Err("SSA invalid Take initialization/type contract".into());
             }
         }
+        SsaOp::Relocate {
+            source,
+            destination,
+            relocation,
+        } => {
+            for slot in [source, destination] {
+                let ty = ssa_place_type(&slot.root, memory_locals, structs, types, operand_ty)?;
+                if operand_ty(&slot.index)? != TypeId::USIZE
+                    || types.list_element(ty) != Some(slot.type_id)
+                    || !types.is_admitted_list_element(slot.type_id)
+                {
+                    return Err("SSA invalid Relocate slot type".into());
+                }
+            }
+            if result != TypeId::BOOL
+                || source.type_id != destination.type_id
+                || *relocation != Relocate::single_slot(source.type_id)
+            {
+                return Err("SSA invalid Relocate initialization contract".into());
+            }
+        }
         SsaOp::ListSetLength { source, length } => {
             let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
             let root = SsaPlace {
@@ -2304,6 +2359,7 @@ fn valid_list_relocation(
     expected_element == Some(relocation.type_id)
         && types.is_admitted_list_element(relocation.type_id)
         && types.is_relocatable(relocation.type_id)
+        && relocation.destination_after == ElementInitialization::Initialized
         && relocation.range == RelocationRange::ListInitializedPrefix
         && relocation.source_before == ElementInitialization::Initialized
         && relocation.destination_before == ElementInitialization::Uninitialized
@@ -2481,6 +2537,14 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
             .into_iter()
             .chain(std::iter::once(&slot.index))
             .collect(),
+        SsaOp::Relocate {
+            source,
+            destination,
+            ..
+        } => [source, destination]
+            .into_iter()
+            .flat_map(|slot| place_operands(&slot.root).into_iter().chain([&slot.index]))
+            .collect(),
         SsaOp::ListSetLength { source, length } => place_operands(source)
             .into_iter()
             .chain(std::iter::once(length))
@@ -2606,6 +2670,190 @@ fn reachable_ssa(function: &SsaFunction) -> Vec<bool> {
     reachable
 }
 
+/// Recognize only the bounded indexed extraction diamond. The two outgoing
+/// states join with the same initialized prefix; no arbitrary slot dataflow.
+#[allow(clippy::too_many_lines)]
+fn verify_swap_remove_protocol(
+    function: &SsaFunction,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<BTreeSet<(BlockId, usize)>, Vec<Diagnostic>> {
+    let mut covered = BTreeSet::new();
+    let predecessors = |id| {
+        function
+            .blocks
+            .iter()
+            .filter(|b| ssa_targets(&b.terminator).contains(&id))
+            .map(|b| b.id)
+            .collect::<BTreeSet<_>>()
+    };
+    let value = |i: &SsaInstruction| -> Result<SsaOperand, Vec<Diagnostic>> {
+        Ok(SsaOperand::Value(i.result))
+    };
+    for block in &function.blocks {
+        let [tail, take, decision] = block.instructions.as_slice() else {
+            continue;
+        };
+        let SsaOp::TailIndex { length: old_length } = &tail.op else {
+            continue;
+        };
+        let SsaOp::Binary {
+            op: BinaryOp::Equal,
+            left: requested,
+            right: compared_tail,
+            trap: None,
+            secondary_trap: None,
+        } = &decision.op
+        else {
+            continue;
+        };
+        let SsaOp::Take { slot, state } = &take.op else {
+            return Err(fail("invalid indexed transaction: missing Take".into()));
+        };
+        let tail_value = value(tail)?;
+        if *compared_tail != tail_value
+            || slot.index != *requested
+            || *state != TakeState::INITIALIZED_TO_UNINITIALIZED
+        {
+            return Err(fail(
+                "invalid indexed transaction: removed slot or tail identity".into(),
+            ));
+        }
+        value(take)?;
+        let SsaTerminator::Branch {
+            condition,
+            then_block,
+            else_block,
+        } = &block.terminator
+        else {
+            return Err(fail(
+                "invalid indexed transaction: missing tail decision".into(),
+            ));
+        };
+        if *condition != value(decision)? || then_block == else_block {
+            return Err(fail("invalid indexed transaction: aliased paths".into()));
+        }
+        let tail_path = &function.blocks[then_block.0 as usize];
+        let non_tail = &function.blocks[else_block.0 as usize];
+        if !tail_path.instructions.is_empty()
+            || predecessors(*then_block) != BTreeSet::from([block.id])
+            || predecessors(*else_block) != BTreeSet::from([block.id])
+        {
+            return Err(fail(
+                "invalid indexed transaction: relocation in tail path or foreign predecessor"
+                    .into(),
+            ));
+        }
+        let [transfer] = non_tail.instructions.as_slice() else {
+            return Err(fail(
+                "invalid indexed transaction: missing/double relocation".into(),
+            ));
+        };
+        let SsaOp::Relocate {
+            source,
+            destination,
+            relocation,
+        } = &transfer.op
+        else {
+            return Err(fail(
+                "invalid indexed transaction: missing relocation".into(),
+            ));
+        };
+        if source.root != slot.root
+            || source.type_id != slot.type_id
+            || source.index != tail_value
+            || destination != slot
+            || *relocation != Relocate::single_slot(slot.type_id)
+        {
+            return Err(fail("invalid indexed transaction: relocation must initialize exactly the hole and end tail liveness".into()));
+        }
+        value(transfer)?;
+        let SsaTerminator::Goto(commit_id) = &tail_path.terminator else {
+            return Err(fail(
+                "invalid indexed transaction: missing commit edge".into(),
+            ));
+        };
+        if non_tail.terminator != SsaTerminator::Goto(*commit_id)
+            || predecessors(*commit_id) != BTreeSet::from([*then_block, *else_block])
+        {
+            return Err(fail(
+                "invalid indexed transaction: incomplete states at commit".into(),
+            ));
+        }
+        let commit_block = &function.blocks[commit_id.0 as usize];
+        let Some(commit) = commit_block.instructions.first() else {
+            return Err(fail(
+                "invalid indexed transaction: missing length commit".into(),
+            ));
+        };
+        if !matches!(&commit.op, SsaOp::ListSetLength { source, length } if *source == slot.root && *length == tail_value)
+        {
+            return Err(fail(
+                "invalid indexed transaction: hole or old tail within committed prefix".into(),
+            ));
+        }
+        value(commit)?;
+        let parents = predecessors(block.id);
+        if parents.len() != 1 {
+            return Err(fail(
+                "invalid indexed transaction: missing unique bounds edge".into(),
+            ));
+        }
+        let guard = &function.blocks[parents.first().unwrap().0 as usize];
+        let SsaTerminator::Branch {
+            condition,
+            then_block: success,
+            else_block: trap,
+        } = &guard.terminator
+        else {
+            return Err(fail(
+                "invalid indexed transaction: missing bounds guard".into(),
+            ));
+        };
+        let trap_block = &function.blocks[trap.0 as usize];
+        if *success != block.id
+            || !trap_block.instructions.is_empty()
+            || trap_block.terminator != SsaTerminator::Trap(TrapKind::IndexOutOfBounds)
+        {
+            return Err(fail(
+                "invalid indexed transaction: bounds must trap before tail subtraction and Take"
+                    .into(),
+            ));
+        }
+        let [.., index, read, check] = guard.instructions.as_slice() else {
+            return Err(fail(
+                "invalid indexed transaction: missing fresh operands".into(),
+            ));
+        };
+        if !matches!(index.op, SsaOp::Use(_))
+            || value(index)? != *requested
+            || !matches!(&read.op, SsaOp::ListLength { source } if *source == slot.root)
+            || value(read)? != *old_length
+            || value(check)? != *condition
+            || !matches!(&check.op, SsaOp::Binary { op: BinaryOp::Less, left, right, trap: None, secondary_trap: None } if left == requested && right == old_length)
+        {
+            return Err(fail(
+                "invalid indexed transaction: stale index/length/root in bounds check".into(),
+            ));
+        }
+        if [block, tail_path, non_tail, commit_block]
+            .iter()
+            .any(|b| !b.phis.is_empty())
+        {
+            return Err(fail(
+                "invalid indexed transaction: slot states cannot be merged by phi".into(),
+            ));
+        }
+        covered.extend([
+            (block.id, 0),
+            (block.id, 1),
+            (block.id, 2),
+            (non_tail.id, 0),
+            (*commit_id, 0),
+        ]);
+    }
+    Ok(covered)
+}
+
 /// Validate the initialized-prefix transaction on the actual CFG. Every Take
 /// must be the single extraction between a fresh nonempty check and an
 /// immediate boundary commit. No slot handle can escape this three-op region.
@@ -2615,9 +2863,47 @@ fn verify_take_protocol(
     types: &TypeArena,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
+    let indexed = verify_swap_remove_protocol(function, fail)?;
+    // Check extracted ownership directly in SSA, including the indexed diamond.
+    for take in function.blocks.iter().flat_map(|b| &b.instructions) {
+        if let SsaOp::Take { slot, .. } = &take.op {
+            if types.is_copy(slot.type_id) {
+                continue;
+            }
+            let value = SsaOperand::Value(take.result);
+            let mut uses = 0;
+            for b in &function.blocks {
+                for i in &b.instructions {
+                    uses += op_operands(&i.op).iter().filter(|v| ***v == value).count();
+                }
+                if matches!(&b.terminator, SsaTerminator::Return(v) if *v == value) {
+                    uses += 1;
+                }
+                if b.phis
+                    .iter()
+                    .any(|p| p.incoming.iter().any(|(_, v)| *v == take.result))
+                {
+                    return Err(fail(
+                        "invalid Take: extracted temporary must transfer before a phi".into(),
+                    ));
+                }
+            }
+            if uses != 1 {
+                return Err(fail(
+                    "invalid Take: extracted owner must transfer exactly once".into(),
+                ));
+            }
+        }
+    }
     for block in &function.blocks {
         for (position, instruction) in block.instructions.iter().enumerate() {
+            if indexed.contains(&(block.id, position)) {
+                continue;
+            }
             match &instruction.op {
+                SsaOp::Relocate { .. } => {
+                    return Err(fail("Relocate outside verified slot transaction".into()));
+                }
                 SsaOp::TailIndex { .. } if position != 0 => {
                     return Err(fail(
                         "invalid Take: tail selection outside checked transaction".into(),
@@ -2710,35 +2996,6 @@ fn verify_take_protocol(
                 return Err(fail(
                     "invalid Take: transaction cannot merge storage states".into(),
                 ));
-            }
-            if !types.is_copy(slot.type_id) && position == 1 {
-                let value = SsaOperand::Value(take.result);
-                let mut uses = 0;
-                for candidate in &function.blocks {
-                    for user in &candidate.instructions {
-                        uses += op_operands(&user.op)
-                            .iter()
-                            .filter(|operand| ***operand == value)
-                            .count();
-                    }
-                    if matches!(&candidate.terminator, SsaTerminator::Return(v) if *v == value) {
-                        uses += 1;
-                    }
-                    if candidate
-                        .phis
-                        .iter()
-                        .any(|phi| phi.incoming.iter().any(|(_, v)| *v == take.result))
-                    {
-                        return Err(fail(
-                            "invalid Take: extracted temporary must transfer before a phi".into(),
-                        ));
-                    }
-                }
-                if uses != 1 {
-                    return Err(fail(
-                        "invalid Take: extracted owner must transfer exactly once".into(),
-                    ));
-                }
             }
         }
     }

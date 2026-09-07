@@ -298,6 +298,17 @@ rejected. Whole-list views cover the old prefix, and nested provenance remains
 conservative. A future optional library API remains independent; this milestone
 adds no Option magic, remove/insert, methods, stored lifetimes or Array extraction.
 
+NEXT-VERTICAL-19 adds `swap_remove(list, index)` for indexed owning extraction.
+It uses zero-based usize indexing and traps with IndexOutOfBounds before any
+mutation when out of range. The old tail replaces the removed slot, unless the
+removed slot is itself the tail. Order is not preserved; intended complexity is
+O(1), modulo element relocation glue cost. Take plus optional Relocate completes
+before length changes, leaving a fully initialized final prefix. Backing pointer
+and capacity are stable, and the operation allocates/frees nothing. Borrows to
+`{index, tail}` and whole-list views block it; provably unaffected direct element
+references survive. Existing generic storage guarantees suffice. Order-preserving
+remove and insert remain future work; no methods or lifetime system is added.
+
 ## Performance and predictability
 
 Execution performance and compilation performance are independent product

@@ -1,0 +1,2 @@
+import storage;
+int main() { List<Buffer<int>> values={Buffer<int>(1,42),Buffer<int>(1,30)}; Buffer<int> b=storage.takeAt(&mut values,0); if(values[0][0]!=30){return 1;} return b[0]; }

@@ -1,0 +1,10 @@
+enum Owned { Empty, Data(Buffer<int>) }
+int payload(Owned value) { match(value) { Owned.Empty => { return 0; } Owned.Data(b) => { return b[0]; } } }
+int main() {
+    List<Owned> values = {Owned.Data(Buffer<int>(1,10)),Owned.Empty,Owned.Data(Buffer<int>(1,30))};
+    Owned removed = swap_remove(values,0);
+    if (payload(removed) != 10) { return 1; }
+    if (payload(swap_remove(values,0)) != 30) { return 2; }
+    if (payload(swap_remove(values,0)) != 0) { return 3; }
+    return 0;
+}

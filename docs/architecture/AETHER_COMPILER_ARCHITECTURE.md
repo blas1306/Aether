@@ -1723,3 +1723,40 @@ counts, and per-pop pointer/capacity/allocation/free stability. V0..V17 and the
 legacy executable comparison remain covered. See
 [NEXT_VERTICAL_18_REPORT.md](NEXT_VERTICAL_18_REPORT.md) for exact tests,
 measurements, limits and the next vertical recommendation.
+
+## 36. NEXT-VERTICAL-19 implementation confirmation
+
+V19 resolves `swap_remove(list_place, index)` to ListSwapRemove with canonical
+element TypeId, StableStructuralMutation and IndexAndTail invalidation. The
+provenance checker reuses direct known-length/constant-index facts and lexical
+borrow ranges, excluding both the removed slot and previous tail. Whole-list
+views and unresolved nested relationships remain conservative; writable descriptor
+aliases preserve root identity. Concrete generic parameters now contextualize
+arguments during inference, fixing usize literals in `takeAt<T>(..., usize i)`.
+
+MIR freezes the requested usize operand, reads fresh length and branches on
+index < length to IndexOutOfBounds or the transaction. The successful block
+computes TailIndex, shares one Take and compares index == tail. An empty tail
+edge and a one-Relocate non-tail edge join at ListSetLength. The shared Take
+avoids owner duplication/phis while each complete path implements its exact slot
+protocol. Relocate retains the existing type/state/non-trapping contract, adds
+SingleSlot range and explicit destination_after Initialized, and carries two
+SlotPlaces. The same recursive glue handles scalar, descriptor, struct and active
+enum payload transfers. Only non-tail increments the element relocation counter.
+
+Both MIR and SSA independently check actual CFG edges, fresh index/length,
+roots, TypeIds, source/destination identities, before/after states, no relocation
+on the equal edge, one relocation on the unequal edge, and final prefix commit.
+Unpaired operations fail closed. MIR also requires unique non-aliasable transaction
+temporaries; SSA requires each non-Copy Take result to transfer exactly once
+before a phi. V18 pop remains separate and green. No generalized partial-slot
+analysis, runtime bitmap or MemorySSA is added.
+
+LLVM emits typed storage transfer, conditional existing relocation glue and a
+store to descriptor length. It performs no allocation/free or source Drop.
+Selective memory roots preserve descriptor freshness through aliases, projections,
+moves/returns, subsequent pushes and cleanup. Drop remains reverse FINAL index
+order. Executable instrumentation verifies per-operation storage and heap
+stability, tail/non-tail relocation counts, payload preservation and drop order.
+See [NEXT_VERTICAL_19_REPORT.md](NEXT_VERTICAL_19_REPORT.md) for exact coverage,
+timing snapshots, architectural limits and the next vertical recommendation.

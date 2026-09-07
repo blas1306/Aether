@@ -74,6 +74,8 @@ impl PushInit {
 pub enum RelocationRange {
     /// Exactly the runtime prefix `[0, length)` of a List descriptor.
     ListInitializedPrefix,
+    /// One initialized element transferred into a verified hole.
+    SingleSlot,
 }
 
 /// Verified physical ownership transfer performed by collection storage code.
@@ -85,11 +87,19 @@ pub struct Relocate {
     pub source_before: ElementInitialization,
     pub destination_before: ElementInitialization,
     pub source_after: ElementInitialization,
+    pub destination_after: ElementInitialization,
     pub increasing_order: bool,
     pub non_trapping: bool,
 }
 
 impl Relocate {
+    pub(crate) fn single_slot(type_id: TypeId) -> Self {
+        Self {
+            range: RelocationRange::SingleSlot,
+            ..Self::list_initialized_prefix(type_id)
+        }
+    }
+
     fn list_initialized_prefix(type_id: TypeId) -> Self {
         Self {
             type_id,
@@ -97,6 +107,7 @@ impl Relocate {
             source_before: ElementInitialization::Initialized,
             destination_before: ElementInitialization::Uninitialized,
             source_after: ElementInitialization::Uninitialized,
+            destination_after: ElementInitialization::Initialized,
             increasing_order: true,
             non_trapping: true,
         }
@@ -295,6 +306,11 @@ pub enum Rvalue {
         state: TakeState,
     },
     /// Commit the taken tail boundary; pointer and capacity are unchanged.
+    Relocate {
+        source: SlotPlace<Place, Operand>,
+        destination: SlotPlace<Place, Operand>,
+        relocation: Relocate,
+    },
     ListSetLength {
         source: Place,
         length: Operand,
@@ -1164,6 +1180,121 @@ impl Builder<'_> {
                     expression.span,
                 );
                 Operand::Local(destination)
+            }
+            HirExprKind::ListSwapRemove {
+                source,
+                index,
+                element_type,
+                ..
+            } => {
+                let source = self.lower_place(source);
+                let requested = self.lower_expr(index);
+                // Freeze the requested index before reading the current descriptor.
+                let index = Operand::Local(self.temporary(TypeId::USIZE));
+                self.assign(
+                    operand_place(&index),
+                    Rvalue::Use(requested),
+                    expression.span,
+                );
+                let length = Operand::Local(self.temporary(TypeId::USIZE));
+                self.assign(
+                    operand_place(&length),
+                    Rvalue::ListLength {
+                        source: source.clone(),
+                    },
+                    expression.span,
+                );
+                let valid = Operand::Local(self.temporary(TypeId::BOOL));
+                self.assign(
+                    operand_place(&valid),
+                    Rvalue::Binary {
+                        op: BinaryOp::Less,
+                        left: index.clone(),
+                        right: length.clone(),
+                        trap: None,
+                        secondary_trap: None,
+                    },
+                    expression.span,
+                );
+                let transaction = self.new_block();
+                let trap = self.new_block();
+                self.terminate(Terminator::Branch {
+                    condition: valid,
+                    then_block: transaction,
+                    else_block: trap,
+                });
+                self.current = Some(trap);
+                self.terminate(Terminator::Trap(TrapKind::IndexOutOfBounds));
+                self.current = Some(transaction);
+                let tail = Operand::Local(self.temporary(TypeId::USIZE));
+                self.assign(
+                    operand_place(&tail),
+                    Rvalue::TailIndex { length },
+                    expression.span,
+                );
+                let removed = SlotPlace {
+                    root: source.clone(),
+                    index: index.clone(),
+                    type_id: *element_type,
+                };
+                let result = Operand::Local(self.temporary(*element_type));
+                self.assign(
+                    operand_place(&result),
+                    Rvalue::Take {
+                        slot: removed.clone(),
+                        state: TakeState::INITIALIZED_TO_UNINITIALIZED,
+                    },
+                    expression.span,
+                );
+                let is_tail = Operand::Local(self.temporary(TypeId::BOOL));
+                self.assign(
+                    operand_place(&is_tail),
+                    Rvalue::Binary {
+                        op: BinaryOp::Equal,
+                        left: index,
+                        right: tail.clone(),
+                        trap: None,
+                        secondary_trap: None,
+                    },
+                    expression.span,
+                );
+                let tail_path = self.new_block();
+                let non_tail = self.new_block();
+                let commit = self.new_block();
+                self.terminate(Terminator::Branch {
+                    condition: is_tail,
+                    then_block: tail_path,
+                    else_block: non_tail,
+                });
+                self.current = Some(tail_path);
+                self.terminate(Terminator::Goto(commit));
+                self.current = Some(non_tail);
+                let token = Operand::Local(self.temporary(TypeId::BOOL));
+                self.assign(
+                    operand_place(&token),
+                    Rvalue::Relocate {
+                        source: SlotPlace {
+                            root: source.clone(),
+                            index: tail.clone(),
+                            type_id: *element_type,
+                        },
+                        destination: removed,
+                        relocation: Relocate::single_slot(*element_type),
+                    },
+                    expression.span,
+                );
+                self.terminate(Terminator::Goto(commit));
+                self.current = Some(commit);
+                let token = Operand::Local(self.temporary(TypeId::BOOL));
+                self.assign(
+                    operand_place(&token),
+                    Rvalue::ListSetLength {
+                        source,
+                        length: tail,
+                    },
+                    expression.span,
+                );
+                result
             }
             HirExprKind::ListPop {
                 source,
@@ -2295,6 +2426,9 @@ fn verify_ownership(
                     require_place_owner(function, types, &state, &slot.root, fail)?;
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
+                Rvalue::Relocate { source, .. } => {
+                    require_place_owner(function, types, &state, &source.root, fail)?;
+                }
                 Rvalue::ListSetLength { source, .. } => {
                     require_place_owner(function, types, &state, source, fail)?;
                 }
@@ -2733,6 +2867,29 @@ fn validate_rvalue(
                 return Err("MIR invalid Take initialization/type contract".into());
             }
         }
+        Rvalue::Relocate {
+            source,
+            destination: slot_destination,
+            relocation,
+        } => {
+            for slot in [source, slot_destination] {
+                validate_place_read(function, &slot.root, structs, types, initialized)?;
+                validate_operand(function, &slot.index, initialized)?;
+                if operand_type(function, &slot.index)? != TypeId::USIZE
+                    || types.list_element(place_type(function, &slot.root, structs, types)?)
+                        != Some(slot.type_id)
+                    || !types.is_admitted_list_element(slot.type_id)
+                {
+                    return Err("MIR invalid Relocate slot type".into());
+                }
+            }
+            if destination != TypeId::BOOL
+                || source.type_id != slot_destination.type_id
+                || *relocation != Relocate::single_slot(source.type_id)
+            {
+                return Err("MIR invalid Relocate initialization contract".into());
+            }
+        }
         Rvalue::ListSetLength { source, length } => {
             validate_place_read(function, source, structs, types, initialized)?;
             validate_operand(function, length, initialized)?;
@@ -3055,6 +3212,7 @@ fn valid_list_relocation(
     expected_element == Some(relocation.type_id)
         && types.is_admitted_list_element(relocation.type_id)
         && types.is_relocatable(relocation.type_id)
+        && relocation.destination_after == ElementInitialization::Initialized
         && relocation.range == RelocationRange::ListInitializedPrefix
         && relocation.source_before == ElementInitialization::Initialized
         && relocation.destination_before == ElementInitialization::Uninitialized
@@ -3433,6 +3591,200 @@ fn block_reaches(function: &MirFunction, start: BlockId, target: BlockId) -> boo
     false
 }
 
+/// Recognize only the bounded indexed extraction diamond. The two outgoing
+/// states join with the same initialized prefix; no arbitrary slot dataflow.
+#[allow(clippy::too_many_lines)]
+fn verify_swap_remove_protocol(
+    function: &MirFunction,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<BTreeSet<(BlockId, usize)>, Vec<Diagnostic>> {
+    let mut covered = BTreeSet::new();
+    let predecessors = |id| {
+        function
+            .blocks
+            .iter()
+            .filter(|b| targets(b.terminator.as_ref().expect("verified CFG")).contains(&id))
+            .map(|b| b.id)
+            .collect::<BTreeSet<_>>()
+    };
+    let value = |i: &MirInstruction| -> Result<Operand, Vec<Diagnostic>> {
+        let local = place_root_local(&i.destination)
+            .ok_or_else(|| fail("invalid slot transaction temporary".into()))?;
+        if !i.destination.projections.is_empty()
+            || !function.locals[local.0 as usize].temporary
+            || function.locals[local.0 as usize].address_taken
+            || function
+                .blocks
+                .iter()
+                .flat_map(|b| &b.instructions)
+                .filter(|def| place_root_local(&def.destination) == Some(local))
+                .count()
+                != 1
+        {
+            return Err(fail(
+                "invalid slot transaction: stale or aliased temporary".into(),
+            ));
+        }
+        Ok(Operand::Local(local))
+    };
+    for block in &function.blocks {
+        let [tail, take, decision] = block.instructions.as_slice() else {
+            continue;
+        };
+        let Rvalue::TailIndex { length: old_length } = &tail.value else {
+            continue;
+        };
+        let Rvalue::Binary {
+            op: BinaryOp::Equal,
+            left: requested,
+            right: compared_tail,
+            trap: None,
+            secondary_trap: None,
+        } = &decision.value
+        else {
+            continue;
+        };
+        let Rvalue::Take { slot, state } = &take.value else {
+            return Err(fail("invalid indexed transaction: missing Take".into()));
+        };
+        let tail_value = value(tail)?;
+        if *compared_tail != tail_value
+            || slot.index != *requested
+            || *state != TakeState::INITIALIZED_TO_UNINITIALIZED
+        {
+            return Err(fail(
+                "invalid indexed transaction: removed slot or tail identity".into(),
+            ));
+        }
+        value(take)?;
+        let Terminator::Branch {
+            condition,
+            then_block,
+            else_block,
+        } = block.terminator.as_ref().expect("verified CFG")
+        else {
+            return Err(fail(
+                "invalid indexed transaction: missing tail decision".into(),
+            ));
+        };
+        if *condition != value(decision)? || then_block == else_block {
+            return Err(fail("invalid indexed transaction: aliased paths".into()));
+        }
+        let tail_path = &function.blocks[then_block.0 as usize];
+        let non_tail = &function.blocks[else_block.0 as usize];
+        if !tail_path.instructions.is_empty()
+            || predecessors(*then_block) != BTreeSet::from([block.id])
+            || predecessors(*else_block) != BTreeSet::from([block.id])
+        {
+            return Err(fail(
+                "invalid indexed transaction: relocation in tail path or foreign predecessor"
+                    .into(),
+            ));
+        }
+        let [transfer] = non_tail.instructions.as_slice() else {
+            return Err(fail(
+                "invalid indexed transaction: missing/double relocation".into(),
+            ));
+        };
+        let Rvalue::Relocate {
+            source,
+            destination,
+            relocation,
+        } = &transfer.value
+        else {
+            return Err(fail(
+                "invalid indexed transaction: missing relocation".into(),
+            ));
+        };
+        if source.root != slot.root
+            || source.type_id != slot.type_id
+            || source.index != tail_value
+            || destination != slot
+            || *relocation != Relocate::single_slot(slot.type_id)
+        {
+            return Err(fail("invalid indexed transaction: relocation must initialize exactly the hole and end tail liveness".into()));
+        }
+        value(transfer)?;
+        let Terminator::Goto(commit_id) = tail_path.terminator.as_ref().expect("verified CFG")
+        else {
+            return Err(fail(
+                "invalid indexed transaction: missing commit edge".into(),
+            ));
+        };
+        if non_tail.terminator.as_ref() != Some(&Terminator::Goto(*commit_id))
+            || predecessors(*commit_id) != BTreeSet::from([*then_block, *else_block])
+        {
+            return Err(fail(
+                "invalid indexed transaction: incomplete states at commit".into(),
+            ));
+        }
+        let commit_block = &function.blocks[commit_id.0 as usize];
+        let Some(commit) = commit_block.instructions.first() else {
+            return Err(fail(
+                "invalid indexed transaction: missing length commit".into(),
+            ));
+        };
+        if !matches!(&commit.value, Rvalue::ListSetLength { source, length } if *source == slot.root && *length == tail_value)
+        {
+            return Err(fail(
+                "invalid indexed transaction: hole or old tail within committed prefix".into(),
+            ));
+        }
+        value(commit)?;
+        let parents = predecessors(block.id);
+        if parents.len() != 1 {
+            return Err(fail(
+                "invalid indexed transaction: missing unique bounds edge".into(),
+            ));
+        }
+        let guard = &function.blocks[parents.first().unwrap().0 as usize];
+        let Terminator::Branch {
+            condition,
+            then_block: success,
+            else_block: trap,
+        } = guard.terminator.as_ref().expect("verified CFG")
+        else {
+            return Err(fail(
+                "invalid indexed transaction: missing bounds guard".into(),
+            ));
+        };
+        let trap_block = &function.blocks[trap.0 as usize];
+        if *success != block.id
+            || !trap_block.instructions.is_empty()
+            || trap_block.terminator.as_ref() != Some(&Terminator::Trap(TrapKind::IndexOutOfBounds))
+        {
+            return Err(fail(
+                "invalid indexed transaction: bounds must trap before tail subtraction and Take"
+                    .into(),
+            ));
+        }
+        let [.., index, read, check] = guard.instructions.as_slice() else {
+            return Err(fail(
+                "invalid indexed transaction: missing fresh operands".into(),
+            ));
+        };
+        if !matches!(index.value, Rvalue::Use(_))
+            || value(index)? != *requested
+            || !matches!(&read.value, Rvalue::ListLength { source } if *source == slot.root)
+            || value(read)? != *old_length
+            || value(check)? != *condition
+            || !matches!(&check.value, Rvalue::Binary { op: BinaryOp::Less, left, right, trap: None, secondary_trap: None } if left == requested && right == old_length)
+        {
+            return Err(fail(
+                "invalid indexed transaction: stale index/length/root in bounds check".into(),
+            ));
+        }
+        covered.extend([
+            (block.id, 0),
+            (block.id, 1),
+            (block.id, 2),
+            (non_tail.id, 0),
+            (*commit_id, 0),
+        ]);
+    }
+    Ok(covered)
+}
+
 /// Validate the initialized-prefix transaction on the actual CFG. Every Take
 /// must be the single extraction between a fresh nonempty check and an
 /// immediate boundary commit. No slot handle can escape this three-op region.
@@ -3441,9 +3793,16 @@ fn verify_take_protocol(
     function: &MirFunction,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
+    let indexed = verify_swap_remove_protocol(function, fail)?;
     for block in &function.blocks {
         for (position, instruction) in block.instructions.iter().enumerate() {
+            if indexed.contains(&(block.id, position)) {
+                continue;
+            }
             match &instruction.value {
+                Rvalue::Relocate { .. } => {
+                    return Err(fail("Relocate outside verified slot transaction".into()));
+                }
                 Rvalue::TailIndex { .. } if position != 0 => {
                     return Err(fail(
                         "invalid Take: tail selection outside checked transaction".into(),

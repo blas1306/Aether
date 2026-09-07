@@ -1317,6 +1317,40 @@ fn emit_function(
                         writeln!(output, "  %v{id} = load {element}, ptr %take{id}_slot ; Take: source slot Uninitialized").unwrap();
                     }
                 }
+                SsaOp::Relocate {
+                    source,
+                    destination,
+                    ..
+                } => {
+                    let id = instruction.result.0;
+                    let (descriptor, _) =
+                        emit_place_value(output, function, &source.root, id, types, structs);
+                    let element = llvm_type(types, source.type_id);
+                    writeln!(
+                        output,
+                        "  %relocate{id}_data = extractvalue {{ ptr, i64, i64 }} {descriptor}, 0"
+                    )
+                    .unwrap();
+                    writeln!(output, "  %relocate{id}_source = getelementptr inbounds {element}, ptr %relocate{id}_data, i64 {}", llvm_operand(&source.index)).unwrap();
+                    writeln!(output, "  %relocate{id}_hole = getelementptr inbounds {element}, ptr %relocate{id}_data, i64 {}", llvm_operand(&destination.index)).unwrap();
+                    writeln!(output, "  call void @aether_relocate_{}(ptr %relocate{id}_source, ptr %relocate{id}_hole) ; Relocate: tail Uninitialized, hole Initialized", mangle_type(types, source.type_id)).unwrap();
+                    writeln!(
+                        output,
+                        "  %relocate{id}_count = load i64, ptr @aether_relocation_count"
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  %relocate{id}_next = add i64 %relocate{id}_count, 1"
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  store i64 %relocate{id}_next, ptr @aether_relocation_count"
+                    )
+                    .unwrap();
+                    writeln!(output, "  %v{id} = select i1 true, i1 true, i1 true").unwrap();
+                }
                 SsaOp::ListSetLength { source, length } => {
                     let id = instruction.result.0;
                     let pointer = emit_place_pointer(output, function, source, id, types, structs);

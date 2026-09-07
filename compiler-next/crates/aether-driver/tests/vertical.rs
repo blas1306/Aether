@@ -3142,3 +3142,792 @@ fn vertical18_push_reinitialization_and_effect_contracts() {
     initialization.after = ElementInitialization::Uninitialized;
     assert!(verify_ssa(ssa).is_err());
 }
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical19_swap_remove_native_owners_and_exact_counts() {
+    for (fixture, count, relocations) in [
+        ("v19_swap_remove_int.ae", 1, 1),
+        ("v19_swap_remove_buffer.ae", 5, 1),
+        ("v19_swap_remove_nested.ae", 5, 2),
+        ("v19_swap_remove_reuse.ae", 5, 4),
+        ("v19_swap_remove_dataset.ae", 4, 1),
+        ("v19_swap_remove_enum.ae", 3, 2),
+        ("v19_swap_remove_array.ae", 4, 1),
+        ("v19_swap_remove_return.ae", 3, 1),
+        ("v19_swap_remove_consume.ae", 3, 1),
+        ("v19_swap_remove_conditional.ae", 10, 4),
+        ("v19_swap_remove_tail.ae", 3, 0),
+    ] {
+        let compilation = compile_session(
+            CompilationSession::discover(&program(fixture)).unwrap(),
+            &[],
+        )
+        .unwrap();
+        for (counter, expected) in [
+            (None, 0),
+            (Some("@aether_heap_alloc_count"), count),
+            (Some("@aether_heap_free_count"), count),
+            (Some("@aether_relocation_count"), relocations),
+        ] {
+            let llvm = counter.map_or_else(|| compilation.llvm.clone(), |counter| compilation.llvm.replace(
+                "  %process_status = trunc i64 %aether_result to i32",
+                &format!("  %observed_count = load i64, ptr {counter}\n  %process_status = trunc i64 %observed_count to i32"),
+            ));
+            let artifact = temporary("v19-count");
+            ClangToolchain::default()
+                .link_executable(&llvm, &artifact)
+                .unwrap();
+            let status = Command::new(&artifact).status().unwrap();
+            let _ = fs::remove_file(artifact);
+            assert_eq!(status.code(), Some(expected), "{fixture}: {counter:?}");
+        }
+    }
+    let (_, status) = run_path(
+        &module_program("v19_swap_remove"),
+        &[],
+        &ClangToolchain::default(),
+    )
+    .unwrap();
+    assert_eq!(status.code(), Some(42));
+}
+
+#[test]
+fn vertical19_swap_remove_diagnostics() {
+    for source in [
+        "int main(){int x=1;return swap_remove(x,0);}",
+        "int main(){Array<int>x={1};return swap_remove(x,0);}",
+        "int main(){List<int>x={1};return swap_remove(x);}",
+        "int f(ref List<int>x){return swap_remove(*x,0);}int main(){List<int>x={1};return f(&x);}",
+    ] {
+        let errors = compile_source(&SourceFile::new("v19-target.ae", source), &[]).unwrap_err();
+        assert_eq!(errors[0].code, "E0320", "{source}: {errors:?}");
+    }
+    for source in [
+        "int main(){List<int>x={10,20,30,40};ref int r=&x[1];int v=swap_remove(x,1);return *r;}",
+        "int main(){List<int>x={10,20,30,40};ref mut int r=&mut x[1];int v=swap_remove(x,1);return *r;}",
+        "int main(){List<int>x={10,20,30,40};ref int r=&x[3];int v=swap_remove(x,1);return *r;}",
+        "int main(){List<int>x={10,20,30,40};usize i=0;ref int r=&x[i];int v=swap_remove(x,1);return *r;}",
+        "int main(){List<int>x={10,20,30,40};usize i=1;ref int r=&x[0];int v=swap_remove(x,i);return *r;}",
+        "int main(){List<int>x={10,20,30,40};View<int>v=view(x);int r=swap_remove(x,1);return v[0];}",
+        "int main(){List<int>x={10,20,30,40};ViewMut<int>v=view_mut(x);int r=swap_remove(x,1);return v[0];}",
+        "int main(){List<Buffer<int>>x={Buffer<int>(1,1),Buffer<int>(1,2),Buffer<int>(1,3)};ref int r=&x[0][0];Buffer<int>v=swap_remove(x,1);return *r;}",
+        "int main(){List<int>x={10,20,30,40};ref mut List<int>a=&mut x;ref int r=&x[3];int v=swap_remove(*a,1);return *r;}",
+        "int main(){List<int>x={10,20,30};ref int r=&x[1];int a=swap_remove(x,2);int b=swap_remove(x,0);return *r;}",
+        "int main(){List<int>x={10,20,30};ref int r=&x[0];while(length(x)>1){int a=swap_remove(x,1);}return *r;}",
+    ] {
+        let errors = compile_source(&SourceFile::new("v19-borrow.ae", source), &[]).unwrap_err();
+        assert_eq!(errors[0].code, "E0321", "{source}: {errors:?}");
+    }
+    for source in [
+        "int main(){List<int>x={1};int i=0;return swap_remove(x,i);}",
+        "int main(){List<int>x={1};return swap_remove(x,true);}",
+        "int main(){List<int>x={1};return swap_remove(x,-1);}",
+        "T f<T: Storable>(ref mut List<T>x,usize i){return swap_remove(*x,i);}int main(){return 0;}",
+        "T f<T: Relocatable>(ref mut List<T>x,usize i){return swap_remove(*x,i);}int main(){return 0;}",
+        "int f(ref int r,int x){return *r;}int main(){List<int>x={1,2,3};return f(&x[1],swap_remove(x,1));}",
+    ] {
+        assert!(
+            compile_source(&SourceFile::new("v19-type.ae", source), &[]).is_err(),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical19_scopes_aliases_and_descriptor_freshness() {
+    for source in [
+        "int main(){List<int>x={10,20,30,40};if(true){ref int r=&x[1];if(*r!=20){return 1;}}int v=swap_remove(x,1);return x[1]-40;}",
+        "int main(){List<int>x={10,20,30,40};if(true){View<int>v=view(x);if(v[1]!=20){return 1;}}int v=swap_remove(x,1);return x[1]-40;}",
+        "int main(){List<int>x={10,20,30,40};if(true){ViewMut<int>v=view_mut(x);v[1]=21;}int v=swap_remove(x,1);return v-21;}",
+        "int main(){List<int>x={10,20,30,40};ref mut List<int>a=&mut x;ref int r=&x[0];int v=swap_remove(*a,1);if(*r!=10){return 1;}if(length(*a)!=3){return 2;}return x[1]-40;}",
+        "List<int> f(){List<int>x={10,20,30};int v=swap_remove(x,0);return x;}int main(){List<int>x=f();if(length(x)!=2){return 1;}return x[0]-30;}",
+        "int main(){List<List<int>>x={{10,20,30},{40}};int v=swap_remove(x[0],0);if(length(x[0])!=2){return 1;}push(x[0],v);return x[0][2]-10;}",
+        "int pick(ref mut int calls){*calls=*calls+1;return 1;}int main(){int calls=0;List<int>x={10,20,30};int v=swap_remove(x,usize(pick(&mut calls)));if(calls!=1){return 1;}return v-20;}",
+    ] {
+        let compilation = compile_source(&SourceFile::new("v19-scope.ae", source), &[]).unwrap();
+        let artifact = temporary("v19-scope");
+        ClangToolchain::default()
+            .link_executable(&compilation.llvm, &artifact)
+            .unwrap();
+        let status = Command::new(&artifact).status().unwrap();
+        let _ = fs::remove_file(artifact);
+        assert_eq!(status.code(), Some(0), "{source}");
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical19_bounds_trap_before_transaction() {
+    for source in [
+        "int f(ref mut List<int>x,usize i){return swap_remove(*x,i);}int main(){List<int>x={};return f(&mut x,0);}",
+        "int main(){List<int>x={1,2};return swap_remove(x,2);}",
+        "int main(){List<Buffer<int>>x={};Buffer<int>b=swap_remove(x,0);return b[0];}",
+        "int main(){List<int>x={1};usize i=18446744073709551615;return swap_remove(x,i);}",
+    ] {
+        let compilation = compile_source(
+            &SourceFile::new("v19-bounds.ae", source),
+            &[Emit::Mir, Emit::Ssa],
+        )
+        .unwrap();
+        for phase in [Emit::Mir, Emit::Ssa] {
+            assert!(compilation.dumps[&phase].contains("IndexOutOfBounds"));
+        }
+        let artifact = temporary("v19-bounds");
+        ClangToolchain::default()
+            .link_executable(&compilation.llvm, &artifact)
+            .unwrap();
+        let status = Command::new(&artifact).status().unwrap();
+        let _ = fs::remove_file(artifact);
+        assert!(!status.success(), "{source}");
+    }
+}
+
+#[test]
+fn vertical19_deterministic_semantic_dumps() {
+    let source = SourceFile::new(
+        "v19-dump.ae",
+        "int main(){List<Buffer<int>>x={Buffer<int>(1,10),Buffer<int>(1,20)};Buffer<int>b=swap_remove(x,0);return b[0];}",
+    );
+    let phases = [Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm];
+    let compilation = compile_source(&source, &phases).unwrap();
+    assert_eq!(
+        compilation.dumps,
+        compile_source(&source, &phases).unwrap().dumps
+    );
+    for text in ["ListSwapRemove", "StableStructuralMutation", "IndexAndTail"] {
+        assert!(compilation.dumps[&Emit::Hir].contains(text), "{text}");
+    }
+    for phase in [Emit::Mir, Emit::Ssa] {
+        for text in [
+            "Take",
+            "Relocate",
+            "SingleSlot",
+            "TailIndex",
+            "IndexOutOfBounds",
+            "ListSetLength",
+            "destination_after: Initialized",
+            "source_after: Uninitialized",
+        ] {
+            assert!(
+                compilation.dumps[&phase].contains(text),
+                "{phase:?}: {text}"
+            );
+        }
+    }
+    assert!(compilation.llvm.contains("hole Initialized"));
+    assert!(compilation.llvm.contains("icmp eq i64"));
+    assert_eq!(
+        aether_frontend::StructuralMutation::SwapRemove.effect(),
+        aether_frontend::MutationEffect::StableStructuralMutation
+    );
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+#[allow(clippy::too_many_lines)]
+fn vertical19_each_swap_remove_preserves_storage_heap_and_relocation_counts() {
+    for fixture in [
+        "v19_swap_remove_int.ae",
+        "v19_swap_remove_buffer.ae",
+        "v19_swap_remove_nested.ae",
+        "v19_swap_remove_reuse.ae",
+        "v19_swap_remove_dataset.ae",
+        "v19_swap_remove_enum.ae",
+        "v19_swap_remove_array.ae",
+        "v19_swap_remove_return.ae",
+        "v19_swap_remove_consume.ae",
+        "v19_swap_remove_conditional.ae",
+        "v19_swap_remove_tail.ae",
+    ] {
+        let compilation = compile_session(
+            CompilationSession::discover(&program(fixture)).unwrap(),
+            &[],
+        )
+        .unwrap();
+        let mut llvm = String::new();
+        let mut pending = None;
+        let mut probes = 0;
+        for line in compilation.llvm.lines() {
+            if line.starts_with("  %take") && line.contains("_data = extractvalue") {
+                let id = line
+                    .trim()
+                    .strip_prefix("%take")
+                    .unwrap()
+                    .split('_')
+                    .next()
+                    .unwrap();
+                let descriptor = line
+                    .split_once("} ")
+                    .unwrap()
+                    .1
+                    .strip_suffix(", 0")
+                    .unwrap();
+                write!(llvm, "  %probe{id}_alloc = load i64, ptr @aether_heap_alloc_count\n  %probe{id}_free = load i64, ptr @aether_heap_free_count\n  %probe{id}_cap = extractvalue {{ ptr, i64, i64 }} {descriptor}, 2\n").unwrap();
+                pending = Some(id.to_string());
+            }
+            if line.starts_with("  %take") && line.contains("_slot = getelementptr") {
+                let id = pending.as_ref().unwrap();
+                let index = line.rsplit_once("i64 ").unwrap().1;
+                writeln!(
+                    llvm,
+                    "  %probe{id}_reloc = load i64, ptr @aether_relocation_count"
+                )
+                .unwrap();
+                writeln!(llvm, "  %probe{id}_index = add i64 {index}, 0").unwrap();
+            }
+            llvm.push_str(line);
+            llvm.push('\n');
+            if line.contains("; commit initialized prefix") {
+                let id = pending.take().expect("Take precedes every length commit");
+                let length_pointer = line
+                    .split_once("ptr ")
+                    .unwrap()
+                    .1
+                    .split(" ;")
+                    .next()
+                    .unwrap();
+                writeln!(llvm, "  call void @v19_assert_pop(ptr %take{id}_data, i64 %probe{id}_cap, i64 %probe{id}_alloc, i64 %probe{id}_free, i64 %probe{id}_reloc, i64 %probe{id}_index, ptr {length_pointer})").unwrap();
+                probes += 1;
+            }
+        }
+        assert!(probes > 0);
+        assert!(pending.is_none());
+        llvm.push_str(r"
+define internal void @v19_assert_pop(ptr %old_data, i64 %old_cap, i64 %old_alloc, i64 %old_free, i64 %old_reloc, i64 %removed_index, ptr %length_field) {
+entry:
+  %data_field = getelementptr i64, ptr %length_field, i64 -1
+  %capacity_field = getelementptr i64, ptr %length_field, i64 1
+  %data = load ptr, ptr %data_field
+  %capacity = load i64, ptr %capacity_field
+  %allocs = load i64, ptr @aether_heap_alloc_count
+  %frees = load i64, ptr @aether_heap_free_count
+  %same_data = icmp eq ptr %data, %old_data
+  %same_capacity = icmp eq i64 %capacity, %old_cap
+  %same_allocs = icmp eq i64 %allocs, %old_alloc
+  %same_frees = icmp eq i64 %frees, %old_free
+  %storage_ok = and i1 %same_data, %same_capacity
+  %heap_ok = and i1 %same_allocs, %same_frees
+  %new_length = load i64, ptr %length_field
+  %non_tail = icmp ne i64 %removed_index, %new_length
+  %expected_reloc = zext i1 %non_tail to i64
+  %relocs = load i64, ptr @aether_relocation_count
+  %delta_reloc = sub i64 %relocs, %old_reloc
+  %reloc_ok = icmp eq i64 %delta_reloc, %expected_reloc
+  %stable = and i1 %storage_ok, %heap_ok
+  %ok = and i1 %stable, %reloc_ok
+  br i1 %ok, label %done, label %failed
+failed:
+  call void @llvm.trap()
+  unreachable
+done:
+  ret void
+}
+");
+        let artifact = temporary("v19-stable-storage");
+        ClangToolchain::default()
+            .link_executable(&llvm, &artifact)
+            .unwrap();
+        let status = Command::new(&artifact).status().unwrap();
+        let _ = fs::remove_file(artifact);
+        assert_eq!(status.code(), Some(0), "{fixture}");
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn vertical19_mir_rejects_corrupt_slot_transactions() {
+    use aether_middle::{
+        ElementInitialization, Operand, PlaceProjection, Rvalue, Terminator, TrapKind, lower_hir,
+        verify_mir,
+    };
+    let source = SourceFile::new(
+        "v19-corrupt.ae",
+        "int main(){List<Buffer<int>>other={Buffer<int>(1,9)};List<Buffer<int>>x={Buffer<int>(1,10),Buffer<int>(1,20),Buffer<int>(1,30)};Buffer<int>b=swap_remove(x,1);return b[0];}",
+    );
+    let raw = lower_hir(analyze(parse_source(&source).unwrap()).unwrap());
+    verify_mir(raw.clone()).unwrap();
+    let function = &raw.functions[0];
+    let transaction = function
+        .blocks
+        .iter()
+        .position(|b| {
+            b.instructions
+                .iter()
+                .any(|i| matches!(i.value, Rvalue::Take { .. }))
+        })
+        .unwrap();
+    let transfer = function
+        .blocks
+        .iter()
+        .position(|b| {
+            b.instructions
+                .iter()
+                .any(|i| matches!(i.value, Rvalue::Relocate { .. }))
+        })
+        .unwrap();
+    let commit = function
+        .blocks
+        .iter()
+        .position(|b| {
+            b.instructions
+                .iter()
+                .any(|i| matches!(i.value, Rvalue::ListSetLength { .. }))
+        })
+        .unwrap();
+    let Terminator::Branch { then_block, .. } =
+        function.blocks[transaction].terminator.as_ref().unwrap()
+    else {
+        panic!()
+    };
+    let tail_path = then_block.0 as usize;
+    let guard=function.blocks.iter().position(|b|matches!(&b.terminator,Some(Terminator::Branch{then_block,..}) if then_block.0 as usize==transaction)).unwrap();
+    let Rvalue::Take { slot, .. } = &function.blocks[transaction].instructions[1].value else {
+        panic!()
+    };
+    let removed = slot.clone();
+    let Rvalue::Relocate { source: tail, .. } = &function.blocks[transfer].instructions[0].value
+    else {
+        panic!()
+    };
+    let tail = tail.clone();
+    let wrong_root = function.blocks[0]
+        .instructions
+        .iter()
+        .find(|i| matches!(i.value, Rvalue::ListInit { .. }))
+        .unwrap()
+        .destination
+        .clone();
+    for mutation in 0..23 {
+        let mut corrupt = raw.clone();
+        let blocks = &mut corrupt.functions[0].blocks;
+        match mutation {
+            0 => {
+                if let Rvalue::Take { slot, .. } = &mut blocks[transaction].instructions[1].value {
+                    slot.root = wrong_root.clone();
+                }
+            }
+            1 => {
+                if let Rvalue::Take { slot, .. } = &mut blocks[transaction].instructions[1].value {
+                    slot.index = tail.index.clone();
+                }
+            }
+            2 => {
+                if let Rvalue::Take { state, .. } = &mut blocks[transaction].instructions[1].value {
+                    state.before = ElementInitialization::Uninitialized;
+                }
+            }
+            3 => {
+                let i = blocks[transfer].instructions.remove(0);
+                blocks[transaction].instructions.insert(1, i);
+            }
+            4 => {
+                if let Rvalue::Relocate { source, .. } = &mut blocks[transfer].instructions[0].value
+                {
+                    source.index = removed.index.clone();
+                }
+            }
+            5 => {
+                if let Rvalue::Relocate { destination, .. } =
+                    &mut blocks[transfer].instructions[0].value
+                {
+                    destination.index = tail.index.clone();
+                }
+            }
+            6 => {
+                let i = blocks[transfer].instructions.remove(0);
+                blocks[tail_path].instructions.push(i);
+            }
+            7 => {
+                blocks[transfer].instructions.clear();
+            }
+            8 => {
+                let i = blocks[transfer].instructions[0].clone();
+                blocks[transfer].instructions.push(i);
+            }
+            9 => {
+                if let Rvalue::Relocate { relocation, .. } =
+                    &mut blocks[transfer].instructions[0].value
+                {
+                    relocation.source_after = ElementInitialization::Initialized;
+                }
+            }
+            10 => {
+                if let Rvalue::Relocate { relocation, .. } =
+                    &mut blocks[transfer].instructions[0].value
+                {
+                    relocation.destination_after = ElementInitialization::Uninitialized;
+                }
+            }
+            11 => {
+                if let Rvalue::ListSetLength { length, .. } =
+                    &mut blocks[commit].instructions[0].value
+                {
+                    *length = removed.index.clone();
+                }
+            }
+            12 => {
+                let i = blocks[commit].instructions.remove(0);
+                blocks[transfer].instructions.insert(0, i);
+            }
+            13 => {
+                if let Rvalue::TailIndex { length } = &mut blocks[transaction].instructions[0].value
+                {
+                    *length = Operand::Int {
+                        value: 3,
+                        ty: aether_frontend::TypeId::USIZE,
+                    };
+                }
+            }
+            14 => {
+                if let Rvalue::Binary { left, .. } =
+                    &mut blocks[guard].instructions.last_mut().unwrap().value
+                {
+                    *left = Operand::Int {
+                        value: 0,
+                        ty: aether_frontend::TypeId::USIZE,
+                    };
+                }
+            }
+            15 => {
+                let mut owner = tail.root.clone();
+                owner.projections.push(PlaceProjection::Index {
+                    index: tail.index.clone(),
+                    element_type: tail.type_id,
+                    bounds_trap: TrapKind::IndexOutOfBounds,
+                });
+                let mut i = blocks[transfer].instructions[0].clone();
+                i.value = Rvalue::Drop { owner };
+                blocks[transfer].instructions.push(i);
+            }
+            16 => {
+                let operand =
+                    Operand::Local(match blocks[transaction].instructions[1].destination.base {
+                        aether_middle::PlaceBase::Local(l) => l,
+                        aether_middle::PlaceBase::Dereference { .. } => panic!(),
+                    });
+                let i = blocks[commit]
+                    .instructions
+                    .iter_mut()
+                    .find(|i| matches!(i.value, Rvalue::Move { .. }))
+                    .unwrap();
+                i.value = Rvalue::Use(operand);
+            }
+            17 => {
+                if let Rvalue::Relocate { source, .. } = &mut blocks[transfer].instructions[0].value
+                {
+                    source.type_id = aether_frontend::TypeId::BOOL;
+                }
+            }
+            18 => {
+                if let Rvalue::Relocate { relocation, .. } =
+                    &mut blocks[transfer].instructions[0].value
+                {
+                    relocation.non_trapping = false;
+                }
+            }
+            19 => {
+                if let Some(Terminator::Branch {
+                    then_block,
+                    else_block,
+                    ..
+                }) = &mut blocks[transaction].terminator
+                {
+                    std::mem::swap(then_block, else_block);
+                }
+            }
+            20 => {
+                let mut i = blocks[commit].instructions[0].clone();
+                i.value = Rvalue::Use(Operand::Bool(true));
+                let n = blocks[guard].instructions.len();
+                blocks[guard].instructions.insert(n - 1, i);
+            }
+            21 => {
+                blocks[tail_path].terminator = Some(Terminator::Return(Operand::Int {
+                    value: 0,
+                    ty: aether_frontend::TypeId::INT64,
+                }));
+            }
+            22 => {
+                if let Rvalue::Take { state, .. } = &mut blocks[transaction].instructions[1].value {
+                    state.after = ElementInitialization::Initialized;
+                }
+            }
+            _ => unreachable!(),
+        }
+        let errors = verify_mir(corrupt).unwrap_err();
+        assert_eq!(
+            errors[0].phase,
+            aether_frontend::Phase::Mir,
+            "mutation {mutation}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn vertical19_ssa_rejects_corrupt_slot_transactions() {
+    use aether_middle::{
+        ElementInitialization, SsaOp, SsaOperand, SsaPlaceProjection, SsaTerminator, TrapKind,
+        build_ssa, lower_hir, verify_mir, verify_ssa,
+    };
+    let source = SourceFile::new(
+        "v19-corrupt.ae",
+        "int main(){List<Buffer<int>>other={Buffer<int>(1,9)};List<Buffer<int>>x={Buffer<int>(1,10),Buffer<int>(1,20),Buffer<int>(1,30)};Buffer<int>b=swap_remove(x,1);return b[0];}",
+    );
+    let raw = build_ssa(
+        &verify_mir(lower_hir(analyze(parse_source(&source).unwrap()).unwrap())).unwrap(),
+    );
+    verify_ssa(raw.clone()).unwrap();
+    let function = &raw.functions[0];
+    let transaction = function
+        .blocks
+        .iter()
+        .position(|b| {
+            b.instructions
+                .iter()
+                .any(|i| matches!(i.op, SsaOp::Take { .. }))
+        })
+        .unwrap();
+    let transfer = function
+        .blocks
+        .iter()
+        .position(|b| {
+            b.instructions
+                .iter()
+                .any(|i| matches!(i.op, SsaOp::Relocate { .. }))
+        })
+        .unwrap();
+    let commit = function
+        .blocks
+        .iter()
+        .position(|b| {
+            b.instructions
+                .iter()
+                .any(|i| matches!(i.op, SsaOp::ListSetLength { .. }))
+        })
+        .unwrap();
+    let SsaTerminator::Branch { then_block, .. } = &function.blocks[transaction].terminator else {
+        panic!()
+    };
+    let tail_path = then_block.0 as usize;
+    let guard=function.blocks.iter().position(|b|matches!(&b.terminator,SsaTerminator::Branch{then_block,..} if then_block.0 as usize==transaction)).unwrap();
+    let SsaOp::Take { slot, .. } = &function.blocks[transaction].instructions[1].op else {
+        panic!()
+    };
+    let removed = slot.clone();
+    let SsaOp::Relocate { source: tail, .. } = &function.blocks[transfer].instructions[0].op else {
+        panic!()
+    };
+    let tail = tail.clone();
+    let wrong_root = aether_middle::SsaPlace {
+        base: aether_middle::SsaPlaceBase::Value(SsaOperand::Value(
+            function.blocks[0]
+                .instructions
+                .iter()
+                .find(|i| matches!(i.op, SsaOp::ListInit { .. }))
+                .unwrap()
+                .result,
+        )),
+        projections: vec![],
+    };
+    for mutation in 0..23 {
+        let mut corrupt = raw.clone();
+        let blocks = &mut corrupt.functions[0].blocks;
+        match mutation {
+            0 => {
+                if let SsaOp::Take { slot, .. } = &mut blocks[transaction].instructions[1].op {
+                    slot.root = wrong_root.clone();
+                }
+            }
+            1 => {
+                if let SsaOp::Take { slot, .. } = &mut blocks[transaction].instructions[1].op {
+                    slot.index = tail.index.clone();
+                }
+            }
+            2 => {
+                if let SsaOp::Take { state, .. } = &mut blocks[transaction].instructions[1].op {
+                    state.before = ElementInitialization::Uninitialized;
+                }
+            }
+            3 => {
+                let i = blocks[transfer].instructions.remove(0);
+                blocks[transaction].instructions.insert(1, i);
+            }
+            4 => {
+                if let SsaOp::Relocate { source, .. } = &mut blocks[transfer].instructions[0].op {
+                    source.index = removed.index.clone();
+                }
+            }
+            5 => {
+                if let SsaOp::Relocate { destination, .. } =
+                    &mut blocks[transfer].instructions[0].op
+                {
+                    destination.index = tail.index.clone();
+                }
+            }
+            6 => {
+                let i = blocks[transfer].instructions.remove(0);
+                blocks[tail_path].instructions.push(i);
+            }
+            7 => {
+                blocks[transfer].instructions.clear();
+            }
+            8 => {
+                let i = blocks[transfer].instructions[0].clone();
+                blocks[transfer].instructions.push(i);
+            }
+            9 => {
+                if let SsaOp::Relocate { relocation, .. } = &mut blocks[transfer].instructions[0].op
+                {
+                    relocation.source_after = ElementInitialization::Initialized;
+                }
+            }
+            10 => {
+                if let SsaOp::Relocate { relocation, .. } = &mut blocks[transfer].instructions[0].op
+                {
+                    relocation.destination_after = ElementInitialization::Uninitialized;
+                }
+            }
+            11 => {
+                if let SsaOp::ListSetLength { length, .. } = &mut blocks[commit].instructions[0].op
+                {
+                    *length = removed.index.clone();
+                }
+            }
+            12 => {
+                let i = blocks[commit].instructions.remove(0);
+                blocks[transfer].instructions.insert(0, i);
+            }
+            13 => {
+                if let SsaOp::TailIndex { length } = &mut blocks[transaction].instructions[0].op {
+                    *length = SsaOperand::Int {
+                        value: 3,
+                        ty: aether_frontend::TypeId::USIZE,
+                    };
+                }
+            }
+            14 => {
+                if let SsaOp::Binary { left, .. } =
+                    &mut blocks[guard].instructions.last_mut().unwrap().op
+                {
+                    *left = SsaOperand::Int {
+                        value: 0,
+                        ty: aether_frontend::TypeId::USIZE,
+                    };
+                }
+            }
+            15 => {
+                let mut owner = tail.root.clone();
+                owner.projections.push(SsaPlaceProjection::Index {
+                    index: tail.index.clone(),
+                    element_type: tail.type_id,
+                    bounds_trap: TrapKind::IndexOutOfBounds,
+                });
+                let mut i = blocks[transfer].instructions[0].clone();
+                i.op = SsaOp::Drop { owner };
+                blocks[transfer].instructions.push(i);
+            }
+            16 => {
+                let operand = SsaOperand::Value(blocks[transaction].instructions[1].result);
+                let i = blocks[commit]
+                    .instructions
+                    .iter_mut()
+                    .find(|i| matches!(i.op, SsaOp::Move { .. }))
+                    .unwrap();
+                i.op = SsaOp::Use(operand);
+            }
+            17 => {
+                if let SsaOp::Relocate { source, .. } = &mut blocks[transfer].instructions[0].op {
+                    source.type_id = aether_frontend::TypeId::BOOL;
+                }
+            }
+            18 => {
+                if let SsaOp::Relocate { relocation, .. } = &mut blocks[transfer].instructions[0].op
+                {
+                    relocation.non_trapping = false;
+                }
+            }
+            19 => {
+                if let SsaTerminator::Branch {
+                    then_block,
+                    else_block,
+                    ..
+                } = &mut blocks[transaction].terminator
+                {
+                    std::mem::swap(then_block, else_block);
+                }
+            }
+            20 => {
+                let mut i = blocks[commit].instructions[0].clone();
+                i.op = SsaOp::Use(SsaOperand::Bool(true));
+                let n = blocks[guard].instructions.len();
+                blocks[guard].instructions.insert(n - 1, i);
+            }
+            21 => {
+                blocks[tail_path].terminator = SsaTerminator::Return(SsaOperand::Int {
+                    value: 0,
+                    ty: aether_frontend::TypeId::INT64,
+                });
+            }
+            22 => {
+                if let SsaOp::Take { state, .. } = &mut blocks[transaction].instructions[1].op {
+                    state.after = ElementInitialization::Initialized;
+                }
+            }
+            _ => unreachable!(),
+        }
+        let errors = verify_ssa(corrupt).unwrap_err();
+        assert_eq!(
+            errors[0].phase,
+            aether_frontend::Phase::Ssa,
+            "mutation {mutation}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical19_drop_order_uses_reverse_final_indices() {
+    let compilation = compile_session(
+        CompilationSession::discover(&program("v19_swap_remove_buffer.ae")).unwrap(),
+        &[],
+    )
+    .unwrap();
+    let mut llvm = compilation.llvm.replace(
+        "call void @free(ptr %ptr)",
+        "call void @v19_note_free(ptr %ptr, i64 %size)\n  call void @free(ptr %ptr)",
+    ).replace(
+        "  %process_status = trunc i64 %aether_result to i32",
+        "  %trace = load i64, ptr @v19_drop_trace\n  %ordered = icmp eq i64 %trace, 20304010\n  %process_status = select i1 %ordered, i32 0, i32 99",
+    );
+    // The extracted 20 drops first. The final List [10,40,30] drops 30,40,10.
+    // Only the four one-int Buffer allocations have size 8.
+    llvm.push_str(
+        r"
+@v19_drop_trace = internal global i64 0
+define internal void @v19_note_free(ptr %data, i64 %size) {
+entry:
+  %buffer = icmp eq i64 %size, 8
+  br i1 %buffer, label %record, label %done
+record:
+  %payload = load i64, ptr %data
+  %old = load i64, ptr @v19_drop_trace
+  %shift = mul i64 %old, 100
+  %next = add i64 %shift, %payload
+  store i64 %next, ptr @v19_drop_trace
+  br label %done
+done:
+  ret void
+}
+",
+    );
+    let artifact = temporary("v19-drop-order");
+    ClangToolchain::default()
+        .link_executable(&llvm, &artifact)
+        .unwrap();
+    let status = Command::new(&artifact).status().unwrap();
+    let _ = fs::remove_file(artifact);
+    assert_eq!(status.code(), Some(0));
+}

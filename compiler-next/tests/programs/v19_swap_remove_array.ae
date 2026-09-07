@@ -1,0 +1,7 @@
+int main() {
+    List<Array<int>> values = {{10},{20,21},{30,31}};
+    Array<int> removed = swap_remove(values,1);
+    if (removed[0] + removed[1] != 41) { return 1; }
+    if (values[1][0] + values[1][1] != 61) { return 2; }
+    return 0;
+}

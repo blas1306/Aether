@@ -26,3 +26,4 @@ v14_lists	accept:40	cross-module dynamic List growth and ownership transfer
 v15_capabilities	accept:42	cross-module constrained generic function and nominal types
 v17_storable	accept:42	cross-module Storable Array and Storable+Relocatable List with owning elements
 v18_pop	accept:42	cross-module generic whole-element List extraction
+v19_swap_remove	accept:42	V19 cross-module generic indexed owning extraction

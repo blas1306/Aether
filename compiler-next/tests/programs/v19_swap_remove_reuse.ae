@@ -1,0 +1,13 @@
+int main() {
+    List<Buffer<int>> values = {Buffer<int>(1,10),Buffer<int>(1,20),Buffer<int>(1,30)};
+    reserve(values,8);
+    usize cap = capacity(values);
+    Buffer<int> removed = swap_remove(values,1);
+    push(values,removed);
+    if (capacity(values) != cap) { return 1; }
+    if (length(values) != 3) { return 2; }
+    if (values[0][0] != 10) { return 3; }
+    if (values[1][0] != 30) { return 4; }
+    if (values[2][0] != 20) { return 5; }
+    return 0;
+}
