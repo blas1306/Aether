@@ -1,8 +1,8 @@
-# Aether NEXT-VERTICAL-17
+# Aether NEXT-VERTICAL-18
 
 This directory is the isolated Rust implementation of the first reconstruction
-slice. The current storage/capability contract is Vertical-17; the numbered
-Vertical-9..16 sections below retain historical qualification context.
+slice. The current storage/extraction contract is Vertical-18; the numbered
+Vertical-9..17 sections below retain historical qualification context.
 It does not replace the production `aether` CLI or import any legacy
 Python object, JSON schema, Initial IR, or SSA representation.
 
@@ -34,7 +34,7 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-17 grammar
+## Vertical-18 grammar
 
 ```text
 program    := import* (alias | struct | enum | function)+ EOF
@@ -919,6 +919,83 @@ Clang runs for each build but is outside core timings. Fixture contents and
 compiler build/profile matter; earlier V13..16 numbers are historical snapshots,
 not comparable before/after measurements. Raw results and summarized values are
 linked from the V17 report.
+
+## Vertical-18 initialized slots and owning List pop
+
+`T last = pop(list);` extracts a whole final element from a writable `List<T>`
+place. Through a reference, use `pop(*list)` with `ref mut List<T>`. The same
+operation works parametrically under `T: Storable + Relocatable`; Copy is not
+required. Its result can initialize a local or aggregate, be consumed by a call,
+or be returned directly.
+
+```aether
+T popLast<T: Storable + Relocatable>(ref mut List<T> values) {
+    return pop(*values);
+}
+```
+
+The initialized prefix changes from `[0,N)` to `[0,N-1)`. The tail's lifetime
+ends in storage and ownership passes to the ordinary result, including when T
+is Copy. Capacity and backing pointer stay unchanged; pop performs no heap
+allocation, reallocation, free or surviving-element relocation. Subsequent push
+can initialize that raw tail slot again without growing when capacity suffices.
+List cleanup reads the new length and destroys only the remaining prefix.
+
+An empty List takes a structured `ListEmpty` trap before subtraction or storage
+access. There is no unwind, Option magic or `try_pop`. A future library optional
+API can be designed separately. The result is currently required in an expression;
+`pop(list);` is not a new discard/effect statement form.
+
+`SlotPlace<Place, Operand>` (and its SSA specialization) is a compiler-internal
+typed storage address with owning root, element index and TypeId. Ordinary
+`PlaceProjection::Index` always checks logical length. Take uses SlotPlace,
+which has its own initialization authority; push's raw slot at old length is
+represented by `PushInit`, never by unchecked source indexing.
+
+| Operation | Ownership/initialization transition |
+|---|---|
+| Move | source-language root Owned → Moved; ordinary destination owns the value |
+| Relocate | initialized storage A → raw storage B; A becomes Uninitialized |
+| Take | initialized storage slot → ordinary owned result; slot becomes Uninitialized |
+| PushInit | raw tail at old length → Initialized; incremented prefix includes it |
+
+HIR carries `ListPop`, the element type and `StableStructuralMutation`. The
+small effect API distinguishes element assignment, stable structural mutation
+(pop), and potentially relocating mutation (push/reserve). MIR and SSA carry a
+real nonempty-check branch, `TailIndex`, `Take` with explicit before/after states,
+and `ListSetLength`. Both verifiers require a fresh checked length and exactly
+one contiguous extraction/commit transaction; they reject missing commits,
+double Take, wrong state/index/root, misplaced operations and trapping transfers.
+An extracted non-Copy SSA temporary must transfer exactly once before a phi.
+No per-element runtime bitmap or drop flag is added: length is the prefix boundary.
+
+Pop descriptor roots use the existing selective memory boundary so aliases,
+subsequent queries, whole-root moves and cleanup see the committed length.
+Unrelated locals remain promoted. Scalars and owning handles transfer by load;
+aggregates reuse recursive relocation glue into one entry-block stack temporary.
+No pointee is copied or freed. This bootstrap choice deliberately defers promotion
+of pop-mutated descriptors and generalized storage dataflow/MemorySSA.
+
+A direct constant-index element reference survives pop when the compiler knows
+`index < old_length-1`. A definite tail, unknown index, unknown length or live
+whole-list View/ViewMut fails closed with E0319. Scope exit ends the restriction.
+Proofs track direct literal lengths and successful pops; push, differing branch lengths,
+List loops and arbitrary writable calls invalidate constant length knowledge.
+Nested provenance remains conservative, even for an inner Buffer whose allocation
+might survive. Calls with writable access to List-containing types remain potentially
+invalidating; calls that only mutate scalar/Copy elements preserve the prefix. Borrowed
+arguments also remain live during evaluation of subsequent arguments.
+
+E0318 reports invalid/read-only pop targets or intrinsic arguments. Symbolic
+collection capability errors retain V17's diagnostics. Array extraction, Buffer
+broadening, arbitrary partial moves, remove/insert/drain, ranged slices, methods,
+Option, named lifetimes and mathematical containers are outside V18.
+
+Qualification, exact counts, accepted debt and all 37 report items are in
+[NEXT_VERTICAL_18_REPORT.md](../docs/architecture/NEXT_VERTICAL_18_REPORT.md).
+`tests/measure-v18.py --runs 10` uses the unchanged V17 eight-phase core timing
+methodology, with an optional `--baseline-binary` built from V17. The checked-in
+`tests/timings/v18-debug.json` records both versions and all phase statistics.
 
 ## Bootstrap ABI and deliberate limits
 

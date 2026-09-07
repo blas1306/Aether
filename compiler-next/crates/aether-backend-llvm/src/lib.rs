@@ -23,7 +23,7 @@ pub struct TargetDescriptor {
 }
 
 impl TargetDescriptor {
-    /// The target admitted through NEXT-VERTICAL-16.
+    /// The target admitted through NEXT-VERTICAL-18.
     #[must_use]
     pub const fn linux_x86_64() -> Self {
         Self {
@@ -101,7 +101,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         .collect::<BTreeSet<_>>();
     let has_owners = !fixed_elements.is_empty() || !list_elements.is_empty();
     let mut output = String::new();
-    writeln!(output, "; Aether NEXT-VERTICAL-16").unwrap();
+    writeln!(output, "; Aether NEXT-VERTICAL-18").unwrap();
     writeln!(
         output,
         "; Internal bootstrap ABI and symbol mangling; not a public Aether ABI"
@@ -896,7 +896,10 @@ fn emit_function(
     )
     .unwrap();
 
-    if !function.memory_locals.is_empty() {
+    let take_storage = function.blocks.iter().flat_map(|b| &b.instructions).filter(|instruction| {
+        matches!(&instruction.op, SsaOp::Take { slot, .. } if types.struct_id(slot.type_id).is_some() || types.enum_id(slot.type_id).is_some())
+    }).collect::<Vec<_>>();
+    if !function.memory_locals.is_empty() || !take_storage.is_empty() {
         writeln!(output, "entry.storage:").unwrap();
         for memory in &function.memory_locals {
             writeln!(
@@ -916,6 +919,15 @@ fn emit_function(
                 )
                 .unwrap();
             }
+        }
+        for instruction in take_storage {
+            writeln!(
+                output,
+                "  %take{}_result = alloca {}",
+                instruction.result.0,
+                llvm_type(types, instruction.ty)
+            )
+            .unwrap();
         }
         writeln!(output, "  br label %{}", block_label(function.entry)).unwrap();
     }
@@ -1269,6 +1281,53 @@ fn emit_function(
                         instruction.result.0
                     )
                     .unwrap();
+                }
+                SsaOp::TailIndex { length } => {
+                    writeln!(
+                        output,
+                        "  %v{} = sub i64 {}, 1 ; checked nonempty tail",
+                        instruction.result.0,
+                        llvm_operand(length)
+                    )
+                    .unwrap();
+                }
+                SsaOp::Take { slot, .. } => {
+                    let id = instruction.result.0;
+                    let (descriptor, _) =
+                        emit_place_value(output, function, &slot.root, id, types, structs);
+                    let element = llvm_type(types, slot.type_id);
+                    writeln!(
+                        output,
+                        "  %take{id}_data = extractvalue {{ ptr, i64, i64 }} {descriptor}, 0"
+                    )
+                    .unwrap();
+                    writeln!(output, "  %take{id}_slot = getelementptr inbounds {element}, ptr %take{id}_data, i64 {}", llvm_operand(&slot.index)).unwrap();
+                    if types.struct_id(slot.type_id).is_some()
+                        || types.enum_id(slot.type_id).is_some()
+                    {
+                        // Use recursive relocation for aggregate/active payload transfer.
+                        writeln!(
+                            output,
+                            "  store {element} zeroinitializer, ptr %take{id}_result"
+                        )
+                        .unwrap();
+                        writeln!(output, "  call void @aether_relocate_{}(ptr %take{id}_slot, ptr %take{id}_result)", mangle_type(types, slot.type_id)).unwrap();
+                        writeln!(output, "  %v{id} = load {element}, ptr %take{id}_result ; Take: source slot Uninitialized").unwrap();
+                    } else {
+                        writeln!(output, "  %v{id} = load {element}, ptr %take{id}_slot ; Take: source slot Uninitialized").unwrap();
+                    }
+                }
+                SsaOp::ListSetLength { source, length } => {
+                    let id = instruction.result.0;
+                    let pointer = emit_place_pointer(output, function, source, id, types, structs);
+                    writeln!(output, "  %take{id}_length = getelementptr inbounds {{ ptr, i64, i64 }}, ptr {pointer}, i32 0, i32 1").unwrap();
+                    writeln!(
+                        output,
+                        "  store i64 {}, ptr %take{id}_length ; commit initialized prefix",
+                        llvm_operand(length)
+                    )
+                    .unwrap();
+                    writeln!(output, "  %v{id} = select i1 true, i1 true, i1 true").unwrap();
                 }
                 SsaOp::ListPush { source, value, .. } => {
                     let (descriptor, list_ty) = emit_place_value(
@@ -1827,6 +1886,13 @@ fn emit_function(
             SsaTerminator::Trap(TrapKind::AllocationFailure) => {
                 allocation_failure_trap = true;
                 writeln!(output, "  br label %trap_allocation_failure").unwrap();
+            }
+            SsaTerminator::Trap(TrapKind::ListEmpty) => {
+                writeln!(
+                    output,
+                    "  ; structured trap: ListEmpty\n  call void @llvm.trap()\n  unreachable"
+                )
+                .unwrap();
             }
             SsaTerminator::Trap(TrapKind::IndexOutOfBounds) => {
                 bounds_trap = true;
@@ -2694,7 +2760,9 @@ fn emit_place_value(
             }
             let address = emit_place_pointer(output, function, place, result, types, structs);
             let ty = ssa_backend_place_type(function, place, types, structs);
-            let value = format!("%place_value{result}");
+            // The address builder can itself load a prefix descriptor with
+            // this instruction id. Include projection depth in the final load.
+            let value = format!("%place_value{result}_loaded{}", place.projections.len());
             writeln!(
                 output,
                 "  {value} = load {}, ptr {address}",
@@ -2721,7 +2789,9 @@ fn emit_place_value(
             }
             let address = emit_place_pointer(output, function, place, result, types, structs);
             let ty = ssa_backend_place_type(function, place, types, structs);
-            let value = format!("%place_value{result}");
+            // The address builder can itself load a prefix descriptor with
+            // this instruction id. Include projection depth in the final load.
+            let value = format!("%place_value{result}_loaded{}", place.projections.len());
             writeln!(
                 output,
                 "  {value} = load {}, ptr {address}",

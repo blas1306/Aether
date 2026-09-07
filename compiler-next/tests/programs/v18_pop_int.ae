@@ -1,0 +1,11 @@
+int main() {
+    List<int> values = {10, 20, 30};
+    usize before = capacity(values);
+    ref int first = &values[0];
+    int last = pop(values);
+    if (last != 30) { return 1; }
+    if (length(values) != 2) { return 2; }
+    if (capacity(values) != before) { return 3; }
+    if (*first + values[1] != 30) { return 4; }
+    return 0;
+}

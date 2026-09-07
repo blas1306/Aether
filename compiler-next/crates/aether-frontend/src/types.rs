@@ -1295,6 +1295,14 @@ impl TypeArena {
             == CollectionElementAdmission::Admitted
     }
 
+    /// Conservative topology query for calls that can mutate a List through
+    /// a writable aggregate/container reference. This is not a capability.
+    #[must_use]
+    pub fn may_contain_list(&self, id: TypeId) -> bool {
+        self.contains_generic(id)
+            || self.contains_capability(id, 3, &HashMap::new(), &mut BTreeSet::new())
+    }
+
     #[must_use]
     pub fn contains_owning(&self, id: TypeId) -> bool {
         self.contains_capability(id, 2, &HashMap::new(), &mut BTreeSet::new())
@@ -1335,6 +1343,7 @@ impl TypeArena {
                 | TypeData::List { element },
             ) => {
                 capability == 2
+                    || (capability == 3 && matches!(self.get(id), Some(TypeData::List { .. })))
                     || self.contains_capability(element, capability, substitution, visiting)
             }
             Some(TypeData::GenericParam(parameter)) => {

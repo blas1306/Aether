@@ -25,6 +25,50 @@ pub enum ElementInitialization {
     Uninitialized,
 }
 
+/// Typed internal storage address. Unlike source `Place::Index` this can name
+/// raw storage; the operation's protocol supplies initialization authority.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SlotPlace<P, O> {
+    pub root: P,
+    pub index: O,
+    pub type_id: TypeId,
+}
+
+/// Whole element extraction. No destination storage slot and no source Move.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TakeState {
+    pub before: ElementInitialization,
+    pub after: ElementInitialization,
+    pub non_trapping: bool,
+}
+
+impl TakeState {
+    pub const INITIALIZED_TO_UNINITIALIZED: Self = Self {
+        before: ElementInitialization::Initialized,
+        after: ElementInitialization::Uninitialized,
+        non_trapping: true,
+    };
+}
+
+/// Initialization of the raw slot at the old length, after any growth.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PushInit {
+    pub type_id: TypeId,
+    pub before: ElementInitialization,
+    pub after: ElementInitialization,
+}
+
+impl PushInit {
+    #[must_use]
+    pub const fn tail(type_id: TypeId) -> Self {
+        Self {
+            type_id,
+            before: ElementInitialization::Uninitialized,
+            after: ElementInitialization::Initialized,
+        }
+    }
+}
+
 /// Range authority for a generated relocation operation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RelocationRange {
@@ -141,6 +185,7 @@ pub enum TrapKind {
     AllocationSizeOverflow,
     AllocationFailure,
     IndexOutOfBounds,
+    ListEmpty,
 }
 
 /// Explicit scalar unary operations.
@@ -241,10 +286,24 @@ pub enum Rvalue {
     ListCapacity {
         source: Place,
     },
+    /// Non-trapping subtraction authorized only by the nonempty CFG edge.
+    TailIndex {
+        length: Operand,
+    },
+    Take {
+        slot: SlotPlace<Place, Operand>,
+        state: TakeState,
+    },
+    /// Commit the taken tail boundary; pointer and capacity are unchanged.
+    ListSetLength {
+        source: Place,
+        length: Operand,
+    },
     ListPush {
         source: Place,
         value: Operand,
         mutation: StructuralMutation,
+        initialization: PushInit,
         relocation: Relocate,
         size_trap: TrapKind,
         failure_trap: TrapKind,
@@ -675,6 +734,7 @@ impl Builder<'_> {
                             source: target,
                             value,
                             mutation: *mutation,
+                            initialization: PushInit::tail(element_type),
                             relocation: Relocate::list_initialized_prefix(element_type),
                             size_trap: TrapKind::AllocationSizeOverflow,
                             failure_trap: TrapKind::AllocationFailure,
@@ -1104,6 +1164,75 @@ impl Builder<'_> {
                     expression.span,
                 );
                 Operand::Local(destination)
+            }
+            HirExprKind::ListPop {
+                source,
+                element_type,
+                ..
+            } => {
+                let source = self.lower_place(source);
+                let length = Operand::Local(self.temporary(TypeId::USIZE));
+                self.assign(
+                    operand_place(&length),
+                    Rvalue::ListLength {
+                        source: source.clone(),
+                    },
+                    expression.span,
+                );
+                let condition = Operand::Local(self.temporary(TypeId::BOOL));
+                self.assign(
+                    operand_place(&condition),
+                    Rvalue::Binary {
+                        op: BinaryOp::NotEqual,
+                        left: length.clone(),
+                        right: Operand::Int {
+                            value: 0,
+                            ty: TypeId::USIZE,
+                        },
+                        trap: None,
+                        secondary_trap: None,
+                    },
+                    expression.span,
+                );
+                let success = self.new_block();
+                let empty = self.new_block();
+                self.terminate(Terminator::Branch {
+                    condition,
+                    then_block: success,
+                    else_block: empty,
+                });
+                self.current = Some(empty);
+                self.terminate(Terminator::Trap(TrapKind::ListEmpty));
+                self.current = Some(success);
+                let index = Operand::Local(self.temporary(TypeId::USIZE));
+                self.assign(
+                    operand_place(&index),
+                    Rvalue::TailIndex { length },
+                    expression.span,
+                );
+                let result = Operand::Local(self.temporary(*element_type));
+                self.assign(
+                    operand_place(&result),
+                    Rvalue::Take {
+                        slot: SlotPlace {
+                            root: source.clone(),
+                            index: index.clone(),
+                            type_id: *element_type,
+                        },
+                        state: TakeState::INITIALIZED_TO_UNINITIALIZED,
+                    },
+                    expression.span,
+                );
+                let token = Operand::Local(self.temporary(TypeId::BOOL));
+                self.assign(
+                    operand_place(&token),
+                    Rvalue::ListSetLength {
+                        source,
+                        length: index,
+                    },
+                    expression.span,
+                );
+                result
             }
             HirExprKind::ListLength { source } | HirExprKind::ListCapacity { source } => {
                 let source = self.lower_place(source);
@@ -1862,6 +1991,7 @@ fn verify_mir_function(
             Terminator::Goto(_) | Terminator::Trap(_) => {}
         }
     }
+    verify_take_protocol(function, fail)?;
     Ok(())
 }
 
@@ -2160,6 +2290,13 @@ fn verify_ownership(
                 | Rvalue::ListCapacity { source: place }
                 | Rvalue::ListReserve { source: place, .. } => {
                     require_place_owner(function, types, &state, place, fail)?;
+                }
+                Rvalue::Take { slot, .. } => {
+                    require_place_owner(function, types, &state, &slot.root, fail)?;
+                    initialize_owner(function, types, &mut state, destination, fail)?;
+                }
+                Rvalue::ListSetLength { source, .. } => {
+                    require_place_owner(function, types, &state, source, fail)?;
                 }
                 Rvalue::ListPush {
                     source: place,
@@ -2577,10 +2714,56 @@ fn validate_rvalue(
                 return Err("MIR List metadata query contract invalid".into());
             }
         }
+        Rvalue::TailIndex { length } => {
+            validate_operand(function, length, initialized)?;
+            if destination != TypeId::USIZE || operand_type(function, length)? != TypeId::USIZE {
+                return Err("MIR invalid Take tail index type".into());
+            }
+        }
+        Rvalue::Take { slot, state } => {
+            validate_place_read(function, &slot.root, structs, types, initialized)?;
+            validate_operand(function, &slot.index, initialized)?;
+            if destination != slot.type_id
+                || operand_type(function, &slot.index)? != TypeId::USIZE
+                || types.list_element(place_type(function, &slot.root, structs, types)?)
+                    != Some(slot.type_id)
+                || !types.is_admitted_list_element(slot.type_id)
+                || *state != TakeState::INITIALIZED_TO_UNINITIALIZED
+            {
+                return Err("MIR invalid Take initialization/type contract".into());
+            }
+        }
+        Rvalue::ListSetLength { source, length } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            validate_operand(function, length, initialized)?;
+            let root_ty = match &source.base {
+                PlaceBase::Local(local) => function.locals[local.0 as usize].ty,
+                PlaceBase::Dereference { reference, .. } => {
+                    types
+                        .reference_info(operand_type(function, reference)?)
+                        .ok_or_else(|| "invalid Take reference root".to_string())?
+                        .0
+                }
+            };
+            if types
+                .view_info(root_ty)
+                .is_some_and(|(_, mutable)| !mutable)
+                || destination != TypeId::BOOL
+                || operand_type(function, length)? != TypeId::USIZE
+                || types
+                    .list_element(place_type(function, source, structs, types)?)
+                    .is_none()
+                || matches!(source.base, PlaceBase::Dereference { mutable: false, .. })
+                || matches!(source.base, PlaceBase::Local(local) if !function.locals[local.0 as usize].address_taken)
+            {
+                return Err("MIR invalid Take length commit / writable storage root".into());
+            }
+        }
         Rvalue::ListPush {
             source,
             value,
             mutation,
+            initialization,
             relocation,
             size_trap,
             failure_trap,
@@ -2591,6 +2774,7 @@ fn validate_rvalue(
             if destination != source_ty
                 || types.list_element(source_ty) != Some(operand_type(function, value)?)
                 || !valid_list_relocation(types, relocation, types.list_element(source_ty))
+                || *initialization != PushInit::tail(operand_type(function, value)?)
                 || *mutation != StructuralMutation::Push
                 || *size_trap != TrapKind::AllocationSizeOverflow
                 || *failure_trap != TrapKind::AllocationFailure
@@ -3247,6 +3431,147 @@ fn block_reaches(function: &MirFunction, start: BlockId, target: BlockId) -> boo
         }
     }
     false
+}
+
+/// Validate the initialized-prefix transaction on the actual CFG. Every Take
+/// must be the single extraction between a fresh nonempty check and an
+/// immediate boundary commit. No slot handle can escape this three-op region.
+#[allow(clippy::too_many_lines)]
+fn verify_take_protocol(
+    function: &MirFunction,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    for block in &function.blocks {
+        for (position, instruction) in block.instructions.iter().enumerate() {
+            match &instruction.value {
+                Rvalue::TailIndex { .. } if position != 0 => {
+                    return Err(fail(
+                        "invalid Take: tail selection outside checked transaction".into(),
+                    ));
+                }
+                Rvalue::Take { .. } if position != 1 => {
+                    return Err(fail(
+                        "invalid Take: uninitialized/stale slot or double Take".into(),
+                    ));
+                }
+                Rvalue::ListSetLength { .. } if position != 2 => {
+                    return Err(fail(
+                        "invalid Take: unpaired initialized-prefix commit".into(),
+                    ));
+                }
+                Rvalue::TailIndex { .. } | Rvalue::Take { .. } | Rvalue::ListSetLength { .. } => {}
+                _ => continue,
+            }
+            let [tail, take, commit, ..] = block.instructions.as_slice() else {
+                return Err(fail(
+                    "invalid Take: missing initialization transition or length commit".into(),
+                ));
+            };
+            let Rvalue::TailIndex { length: old_length } = &tail.value else {
+                return Err(fail("invalid Take: no tail authority".into()));
+            };
+            let Rvalue::Take { slot, state } = &take.value else {
+                return Err(fail(
+                    "invalid Take: tail must be extracted exactly once".into(),
+                ));
+            };
+            let Rvalue::ListSetLength { source, length } = &commit.value else {
+                return Err(fail(
+                    "invalid Take: length still includes uninitialized tail".into(),
+                ));
+            };
+            if slot.root != *source
+                || slot.index
+                    != Operand::Local(
+                        place_root_local(&tail.destination).ok_or_else(|| {
+                            fail("MIR Take protocol needs a temporary root".into())
+                        })?,
+                    )
+                || *length != slot.index
+                || *state != TakeState::INITIALIZED_TO_UNINITIALIZED
+            {
+                return Err(fail(
+                    "invalid Take: stale slot, initialization transition or prefix boundary".into(),
+                ));
+            }
+            let predecessors = function
+                .blocks
+                .iter()
+                .filter(|candidate| {
+                    targets(candidate.terminator.as_ref().expect("verified CFG"))
+                        .contains(&block.id)
+                })
+                .collect::<Vec<_>>();
+            let [guard] = predecessors.as_slice() else {
+                return Err(fail(
+                    "invalid Take: slot lacks a unique nonempty edge".into(),
+                ));
+            };
+            let Terminator::Branch {
+                condition,
+                then_block,
+                else_block,
+            } = guard.terminator.as_ref().expect("verified CFG")
+            else {
+                return Err(fail("invalid Take: missing empty check".into()));
+            };
+            if *then_block != block.id
+                || !matches!(
+                    function.blocks[else_block.0 as usize]
+                        .terminator
+                        .as_ref()
+                        .expect("verified CFG"),
+                    Terminator::Trap(TrapKind::ListEmpty)
+                )
+                || !function.blocks[else_block.0 as usize]
+                    .instructions
+                    .is_empty()
+            {
+                return Err(fail(
+                    "invalid Take: empty path must trap before storage changes".into(),
+                ));
+            }
+            let [.., read, check] = guard.instructions.as_slice() else {
+                return Err(fail("invalid Take: missing length check".into()));
+            };
+            if !matches!(&read.value, Rvalue::ListLength { source: root } if root == source)
+                || Operand::Local(
+                    place_root_local(&read.destination)
+                        .ok_or_else(|| fail("MIR Take protocol needs a temporary root".into()))?,
+                ) != *old_length
+                || Operand::Local(
+                    place_root_local(&check.destination)
+                        .ok_or_else(|| fail("MIR Take protocol needs a temporary root".into()))?,
+                ) != *condition
+                || !matches!(&check.value, Rvalue::Binary { op: BinaryOp::NotEqual, left, right: Operand::Int { value: 0, ty: TypeId::USIZE }, trap: None, secondary_trap: None } if left == old_length)
+            {
+                return Err(fail(
+                    "invalid Take: check must use the fresh owning descriptor length".into(),
+                ));
+            }
+            for temporary in [read, check, tail, take, commit] {
+                let local = place_root_local(&temporary.destination)
+                    .ok_or_else(|| fail("invalid Take temporary".into()))?;
+                if !temporary.destination.projections.is_empty()
+                    || !function.locals[local.0 as usize].temporary
+                    || function.locals[local.0 as usize].address_taken
+                    || function
+                        .blocks
+                        .iter()
+                        .flat_map(|b| &b.instructions)
+                        .filter(|i| place_root_local(&i.destination) == Some(local))
+                        .count()
+                        != 1
+                {
+                    return Err(fail(
+                        "invalid Take: slot transaction temporaries must have unique definitions"
+                            .into(),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

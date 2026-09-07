@@ -1,0 +1,41 @@
+struct Dataset { Buffer<int> values; int count; }
+enum Owned { Empty, Data(Buffer<int>) }
+struct Lists { List<Dataset> values; }
+T popLast<T: Storable + Relocatable>(ref mut List<T> values) { return pop(*values); }
+int consume(List<int> values) { return values[0]; }
+List<int> remaining(ref mut List<List<int>> lists) {
+    List<int> last = pop(*lists);
+    return last;
+}
+int main() {
+    List<Array<int>> arrays = {{1}, {2, 3}};
+    Array<int> array = popLast(&mut arrays);
+    if (array[1] != 3) { return 1; }
+    List<Dataset> datasets = {Dataset(Buffer<int>(1, 4), 1), Dataset(Buffer<int>(1, 5), 1)};
+    Dataset dataset = pop(datasets);
+    if (dataset.values[0] != 5) { return 2; }
+    Lists aggregate = Lists(datasets);
+    Dataset first = pop(aggregate.values);
+    if (first.values[0] != 4) { return 3; }
+    List<Owned> enums = {Owned.Data(Buffer<int>(1, 6)), Owned.Empty, Owned.Data(Buffer<int>(1, 7))};
+    Owned owned = pop(enums);
+    match (owned) {
+        Owned.Empty => { return 4; }
+        Owned.Data(value) => { if (value[0] != 7) { return 5; } }
+    }
+    Owned empty = pop(enums);
+    match (empty) {
+        Owned.Empty => { }
+        Owned.Data(value) => { return 6; }
+    }
+    List<List<int>> nested = {{8}, {9}};
+    List<int> tail = remaining(&mut nested);
+    if (consume(tail) != 9) { return 7; }
+    List<Buffer<int>> buffers = {Buffer<int>(1, 10)};
+    Dataset wrapped = Dataset(pop(buffers), 1);
+    if (wrapped.values[0] != 10) { return 8; }
+    List<List<int>> moved = nested;
+    List<int> inner = pop(moved);
+    if (inner[0] != 8) { return 9; }
+    return 0;
+}

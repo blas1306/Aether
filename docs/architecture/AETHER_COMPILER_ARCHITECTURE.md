@@ -1680,3 +1680,46 @@ self-references, pop/remove and traits remain outside V17.
 
 See [NEXT_VERTICAL_17_REPORT.md](NEXT_VERTICAL_17_REPORT.md) for exact tests,
 measurements, accepted debt and the NEXT-VERTICAL-18 recommendation.
+
+## 35. NEXT-VERTICAL-18 implementation confirmation
+
+V18 resolves `pop(list_place)` to typed `HirExprKind::ListPop` with
+`StableStructuralMutation`. Generic element substitution and ordinary ownership
+flow handle Copy, owning handles, nested collections, structs and enums. The
+mutation vocabulary separates element changes, stable range changes and
+potential backing relocation. Provenance records lexical element indices when
+known, retains whole/unknown ranges conservatively and invalidates length facts
+across List loop backedges and calls with writable access to List-containing
+types. A structural type query preserves element-only mutations. Argument evaluation now preserves
+earlier borrows and checks aliasing at the complete call boundary.
+
+MIR adds `SlotPlace<P,O>`, `TakeState`, `TailIndex`, `Take`, `ListSetLength`,
+`ListEmpty` and explicit `PushInit` metadata. A source Index continues to check
+logical length; internal tail storage never masquerades as an ordinary moved
+source element. The actual CFG checks a freshly read length before entering
+one contiguous tail-selection/extraction/commit transaction. MIR and SSA
+independently verify that shape, state, type, index, root, empty edge and exact
+prefix boundary. Normal owner dataflow handles the extracted result; SSA also
+requires its non-Copy temporary to transfer once before a phi. The transaction
+is deliberately bounded, not general partial-initialization dataflow or MemorySSA.
+
+Pop roots cross the existing selective memory boundary. LLVM loads/checks
+length, subtracts one, addresses the tail, transfers its value and stores only
+the new length. Handles transfer descriptors; structs/enums reuse non-trapping
+relocation glue with entry-block temporary storage. All aliases, queries, moves
+and drop read the current descriptor. Ordinary source/local Move and root drop
+flags remain separate; no runtime slot bitmap is generated. PushInit verifies
+raw-to-initialized tail reuse after pop, and existing growth still relocates only
+the current initialized prefix.
+
+Nested descriptor queries exposed an LLVM local-name collision between a prefix
+load and its final projected load. The projected load now includes projection
+depth in its name. Nested source extraction remains conservative for borrowing;
+this fixes code generation without inventing layered lifetime proofs.
+
+Native qualification checks return/consume/aggregate ownership, generic and
+cross-module helpers, loops and conditional cleanup, empty traps, exact heap
+counts, and per-pop pointer/capacity/allocation/free stability. V0..V17 and the
+legacy executable comparison remain covered. See
+[NEXT_VERTICAL_18_REPORT.md](NEXT_VERTICAL_18_REPORT.md) for exact tests,
+measurements, limits and the next vertical recommendation.

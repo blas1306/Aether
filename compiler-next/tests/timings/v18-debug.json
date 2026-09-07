@@ -1,0 +1,398 @@
+{
+  "binary": "/home/blasm/proyectos/Aether/compiler-next/target/debug/aether-next",
+  "clang": "clang version 22.1.8",
+  "core_phases": [
+    "frontend.parse",
+    "frontend.signature_collection",
+    "frontend.semantic_bodies",
+    "middle.mir_lower",
+    "middle.mir_verify",
+    "middle.ssa_build",
+    "middle.ssa_verify",
+    "backend.llvm"
+  ],
+  "fixtures": {
+    "v17_storable.ae": {
+      "backend.llvm": {
+        "mean": 0.9607921,
+        "median": 0.9584225
+      },
+      "core": {
+        "mean": 7.3099442,
+        "median": 7.170617999999999
+      },
+      "frontend.detail.collection_admission": {
+        "mean": 0.1244787,
+        "median": 0.123235
+      },
+      "frontend.detail.constraint_resolution": {
+        "mean": 0.0729326,
+        "median": 0.072377
+      },
+      "frontend.detail.nominal_second_pass": {
+        "mean": 0.0154892,
+        "median": 0.0155145
+      },
+      "frontend.detail.symbolic_property_derivation": {
+        "mean": 0.1177758,
+        "median": 0.11730650000000001
+      },
+      "frontend.parse": {
+        "mean": 0.5564365,
+        "median": 0.5085795
+      },
+      "frontend.semantic_bodies": {
+        "mean": 1.8740124,
+        "median": 1.8022740000000002
+      },
+      "frontend.signature_collection": {
+        "mean": 0.3652706,
+        "median": 0.3661155
+      },
+      "middle.mir_lower": {
+        "mean": 0.1666282,
+        "median": 0.1535845
+      },
+      "middle.mir_verify": {
+        "mean": 1.5729465,
+        "median": 1.5125125000000001
+      },
+      "middle.ssa_build": {
+        "mean": 1.0790861,
+        "median": 1.071626
+      },
+      "middle.ssa_verify": {
+        "mean": 0.7347718,
+        "median": 0.728048
+      },
+      "module.discovery": {
+        "mean": 0.6058117,
+        "median": 0.5537745000000001
+      },
+      "module.file_load": {
+        "mean": 0.0154223,
+        "median": 0.0149935
+      }
+    },
+    "v18_pop_buffer.ae": {
+      "backend.llvm": {
+        "mean": 0.1864577,
+        "median": 0.186201
+      },
+      "core": {
+        "mean": 1.4085263000000001,
+        "median": 1.318759
+      },
+      "frontend.detail.collection_admission": {
+        "mean": 0.0053778,
+        "median": 0.004413500000000001
+      },
+      "frontend.detail.constraint_resolution": {
+        "mean": 0.0024118,
+        "median": 0.002359
+      },
+      "frontend.detail.nominal_second_pass": {
+        "mean": 0.0029445,
+        "median": 0.0027
+      },
+      "frontend.detail.symbolic_property_derivation": {
+        "mean": 0.0,
+        "median": 0.0
+      },
+      "frontend.parse": {
+        "mean": 0.165947,
+        "median": 0.1391975
+      },
+      "frontend.semantic_bodies": {
+        "mean": 0.3077072,
+        "median": 0.2628555
+      },
+      "frontend.signature_collection": {
+        "mean": 0.1661482,
+        "median": 0.145294
+      },
+      "middle.mir_lower": {
+        "mean": 0.0536703,
+        "median": 0.0514575
+      },
+      "middle.mir_verify": {
+        "mean": 0.2072679,
+        "median": 0.203579
+      },
+      "middle.ssa_build": {
+        "mean": 0.1816687,
+        "median": 0.1761625
+      },
+      "middle.ssa_verify": {
+        "mean": 0.13965930000000001,
+        "median": 0.138486
+      },
+      "module.discovery": {
+        "mean": 0.2156015,
+        "median": 0.1785465
+      },
+      "module.file_load": {
+        "mean": 0.0119418,
+        "median": 0.010555
+      }
+    },
+    "v18_pop_int.ae": {
+      "backend.llvm": {
+        "mean": 0.1568187,
+        "median": 0.1487055
+      },
+      "core": {
+        "mean": 1.2155974999999999,
+        "median": 1.140692
+      },
+      "frontend.detail.collection_admission": {
+        "mean": 0.0042838,
+        "median": 0.0036515000000000002
+      },
+      "frontend.detail.constraint_resolution": {
+        "mean": 0.0021603,
+        "median": 0.002139
+      },
+      "frontend.detail.nominal_second_pass": {
+        "mean": 0.0027536,
+        "median": 0.00258
+      },
+      "frontend.detail.symbolic_property_derivation": {
+        "mean": 0.0,
+        "median": 0.0
+      },
+      "frontend.parse": {
+        "mean": 0.1256618,
+        "median": 0.102488
+      },
+      "frontend.semantic_bodies": {
+        "mean": 0.25984820000000003,
+        "median": 0.2173
+      },
+      "frontend.signature_collection": {
+        "mean": 0.1159386,
+        "median": 0.103109
+      },
+      "middle.mir_lower": {
+        "mean": 0.0565034,
+        "median": 0.0486515
+      },
+      "middle.mir_verify": {
+        "mean": 0.1989514,
+        "median": 0.15801349999999997
+      },
+      "middle.ssa_build": {
+        "mean": 0.1691822,
+        "median": 0.1444475
+      },
+      "middle.ssa_verify": {
+        "mean": 0.1326932,
+        "median": 0.10332
+      },
+      "module.discovery": {
+        "mean": 0.1724171,
+        "median": 0.149798
+      },
+      "module.file_load": {
+        "mean": 0.0128162,
+        "median": 0.011181
+      }
+    },
+    "v18_pop_nested.ae": {
+      "backend.llvm": {
+        "mean": 0.1771683,
+        "median": 0.1767185
+      },
+      "core": {
+        "mean": 1.1877996,
+        "median": 1.1471485
+      },
+      "frontend.detail.collection_admission": {
+        "mean": 0.0246376,
+        "median": 0.022387
+      },
+      "frontend.detail.constraint_resolution": {
+        "mean": 0.0169107,
+        "median": 0.0163955
+      },
+      "frontend.detail.nominal_second_pass": {
+        "mean": 0.0025956,
+        "median": 0.002524
+      },
+      "frontend.detail.symbolic_property_derivation": {
+        "mean": 0.0142828,
+        "median": 0.0130745
+      },
+      "frontend.parse": {
+        "mean": 0.1181831,
+        "median": 0.1102785
+      },
+      "frontend.semantic_bodies": {
+        "mean": 0.2786486,
+        "median": 0.275219
+      },
+      "frontend.signature_collection": {
+        "mean": 0.1522042,
+        "median": 0.147148
+      },
+      "middle.mir_lower": {
+        "mean": 0.0569873,
+        "median": 0.054081500000000005
+      },
+      "middle.mir_verify": {
+        "mean": 0.1634001,
+        "median": 0.1514155
+      },
+      "middle.ssa_build": {
+        "mean": 0.1398568,
+        "median": 0.1333315
+      },
+      "middle.ssa_verify": {
+        "mean": 0.1013512,
+        "median": 0.10067
+      },
+      "module.discovery": {
+        "mean": 0.1604215,
+        "median": 0.147538
+      },
+      "module.file_load": {
+        "mean": 0.0123961,
+        "median": 0.011380999999999999
+      }
+    },
+    "v18_pop_reuse.ae": {
+      "backend.llvm": {
+        "mean": 0.1804951,
+        "median": 0.1635885
+      },
+      "core": {
+        "mean": 1.2159306,
+        "median": 1.056295
+      },
+      "frontend.detail.collection_admission": {
+        "mean": 0.0037965,
+        "median": 0.0030759999999999997
+      },
+      "frontend.detail.constraint_resolution": {
+        "mean": 0.0021041,
+        "median": 0.002039
+      },
+      "frontend.detail.nominal_second_pass": {
+        "mean": 0.0028213,
+        "median": 0.002665
+      },
+      "frontend.detail.symbolic_property_derivation": {
+        "mean": 0.0,
+        "median": 0.0
+      },
+      "frontend.parse": {
+        "mean": 0.138993,
+        "median": 0.1233425
+      },
+      "frontend.semantic_bodies": {
+        "mean": 0.2660297,
+        "median": 0.221047
+      },
+      "frontend.signature_collection": {
+        "mean": 0.1200663,
+        "median": 0.104858
+      },
+      "middle.mir_lower": {
+        "mean": 0.0563263,
+        "median": 0.0504855
+      },
+      "middle.mir_verify": {
+        "mean": 0.1950107,
+        "median": 0.1504035
+      },
+      "middle.ssa_build": {
+        "mean": 0.1397726,
+        "median": 0.1124975
+      },
+      "middle.ssa_verify": {
+        "mean": 0.11923689999999999,
+        "median": 0.104106
+      },
+      "module.discovery": {
+        "mean": 0.1871871,
+        "median": 0.1663945
+      },
+      "module.file_load": {
+        "mean": 0.013198,
+        "median": 0.012524
+      }
+    }
+  },
+  "platform": "Linux-7.2.0-1-cachyos-x86_64-with-glibc2.44",
+  "runs_per_fixture": 10,
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "unit": "milliseconds",
+  "v17_baseline": {
+    "binary": "/tmp/aether-v18-baseline/compiler-next/target/debug/aether-next",
+    "fixture": "v17_storable.ae",
+    "revision": "1f8077d767e3d9310f09a84759aca300c8f2daf3",
+    "timings": {
+      "backend.llvm": {
+        "mean": 1.1354396,
+        "median": 0.9395015
+      },
+      "core": {
+        "mean": 8.9590753,
+        "median": 8.0783965
+      },
+      "frontend.detail.collection_admission": {
+        "mean": 0.181692,
+        "median": 0.1598735
+      },
+      "frontend.detail.constraint_resolution": {
+        "mean": 0.10325,
+        "median": 0.0931005
+      },
+      "frontend.detail.nominal_second_pass": {
+        "mean": 0.0355521,
+        "median": 0.020108
+      },
+      "frontend.detail.symbolic_property_derivation": {
+        "mean": 0.1598871,
+        "median": 0.15078550000000002
+      },
+      "frontend.parse": {
+        "mean": 0.6676413,
+        "median": 0.690833
+      },
+      "frontend.semantic_bodies": {
+        "mean": 2.2595176,
+        "median": 2.1429215
+      },
+      "frontend.signature_collection": {
+        "mean": 0.5071826,
+        "median": 0.44820550000000003
+      },
+      "middle.mir_lower": {
+        "mean": 0.191515,
+        "median": 0.1591505
+      },
+      "middle.mir_verify": {
+        "mean": 1.9458138,
+        "median": 1.4939425000000002
+      },
+      "middle.ssa_build": {
+        "mean": 1.3075522,
+        "median": 1.103361
+      },
+      "middle.ssa_verify": {
+        "mean": 0.9444132000000001,
+        "median": 0.923487
+      },
+      "module.discovery": {
+        "mean": 0.7269303,
+        "median": 0.75007
+      },
+      "module.file_load": {
+        "mean": 0.0188635,
+        "median": 0.019081
+      }
+    }
+  },
+  "warmups_per_fixture": 1
+}

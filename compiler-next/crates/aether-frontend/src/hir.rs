@@ -552,12 +552,53 @@ pub enum HirStmtKind {
     },
 }
 
-/// Semantic marker for operations that may invalidate addresses into a
-/// List's element storage, independently of its runtime spare capacity.
+/// Semantic collection mutation identity. `effect()` distinguishes backing
+/// relocation from initialized-range invalidation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StructuralMutation {
     Push,
     Reserve,
+    Pop,
+}
+
+/// Small collection effect vocabulary; writable does not imply reallocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MutationEffect {
+    ElementMutation,
+    StableStructuralMutation,
+    PotentiallyRelocatingMutation,
+}
+
+impl StructuralMutation {
+    #[must_use]
+    pub const fn effect(self) -> MutationEffect {
+        match self {
+            Self::Pop => MutationEffect::StableStructuralMutation,
+            Self::Push | Self::Reserve => MutationEffect::PotentiallyRelocatingMutation,
+        }
+    }
+}
+
+impl HirStmtKind {
+    /// Collection effects describe storage stability. Whole-root replacement
+    /// remains an ownership operation, outside this collection effect API.
+    #[must_use]
+    pub fn mutation_effect(&self) -> Option<MutationEffect> {
+        match self {
+            Self::Assign { place, .. }
+                if place
+                    .projections
+                    .iter()
+                    .any(|projection| matches!(projection, HirPlaceProjection::Index { .. })) =>
+            {
+                Some(MutationEffect::ElementMutation)
+            }
+            Self::ListPush { mutation, .. } | Self::ListReserve { mutation, .. } => {
+                Some(mutation.effect())
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Fully resolved ownership behavior of an enum match.
@@ -677,6 +718,11 @@ pub enum HirExprKind {
     },
     ListCapacity {
         source: HirPlace,
+    },
+    ListPop {
+        source: HirPlace,
+        element_type: TypeId,
+        effect: MutationEffect,
     },
     View {
         source: HirPlace,
@@ -2916,6 +2962,15 @@ impl Monomorphizer<'_> {
             HirExprKind::ListLength { source } => HirExprKind::ListLength {
                 source: self.substitute_place(source, substitution)?,
             },
+            HirExprKind::ListPop {
+                source,
+                element_type,
+                effect,
+            } => HirExprKind::ListPop {
+                source: self.substitute_place(source, substitution)?,
+                element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+                effect: *effect,
+            },
             HirExprKind::ListCapacity { source } => HirExprKind::ListCapacity {
                 source: self.substitute_place(source, substitution)?,
             },
@@ -3324,6 +3379,9 @@ struct OwnershipAnalysis<'a> {
     borrowed: Vec<BTreeSet<LocalId>>,
     storage_borrowed: Vec<BTreeSet<LocalId>>,
     buffer_lengths: Vec<Option<u64>>,
+    storage_ranges: Vec<Vec<(LocalId, Option<u64>)>>,
+    borrow_indices: Vec<Option<u64>>,
+    storage_references: Vec<bool>,
 }
 
 fn synthesize_ownership(
@@ -3341,6 +3399,9 @@ fn synthesize_ownership(
         borrowed: Vec::new(),
         storage_borrowed: Vec::new(),
         buffer_lengths: vec![None; locals.len()],
+        storage_ranges: Vec::new(),
+        borrow_indices: vec![None; locals.len()],
+        storage_references: vec![false; locals.len()],
     };
     for parameter in parameters {
         if !types.guarantees_copy(parameter.ty) {
@@ -3416,6 +3477,7 @@ impl OwnershipAnalysis<'_> {
         let active_start = self.active.len();
         self.borrowed.push(BTreeSet::new());
         self.storage_borrowed.push(BTreeSet::new());
+        self.storage_ranges.push(Vec::new());
         for statement in &mut block.statements {
             match &mut statement.kind {
                 HirStmtKind::Nop => {}
@@ -3426,6 +3488,10 @@ impl OwnershipAnalysis<'_> {
                         self.borrowed.last_mut().unwrap().insert(owner);
                         if self.is_list_storage_borrow(initializer) {
                             self.storage_borrowed.last_mut().unwrap().insert(owner);
+                            let index = self.storage_index(initializer);
+                            self.borrow_indices[local.0 as usize] = index;
+                            self.storage_references[local.0 as usize] = true;
+                            self.storage_ranges.last_mut().unwrap().push((owner, index));
                         }
                     }
                     if !self.types.guarantees_copy(self.locals[local.0 as usize].ty) {
@@ -3542,6 +3608,13 @@ impl OwnershipAnalysis<'_> {
                     self.borrowed = borrowed;
                 }
                 HirStmtKind::While { condition, body } => {
+                    // A loop can revisit pop with a shorter prefix. Fixed-size
+                    // Array/Buffer length facts remain valid across backedges.
+                    for local in self.locals {
+                        if self.types.list_element(local.ty).is_some() {
+                            self.buffer_lengths[local.id.0 as usize] = None;
+                        }
+                    }
                     self.expr(condition)?;
                     let before = self.state.clone();
                     let before_lengths = self.buffer_lengths.clone();
@@ -3663,6 +3736,7 @@ impl OwnershipAnalysis<'_> {
         self.active.truncate(active_start);
         self.borrowed.pop();
         self.storage_borrowed.pop();
+        self.storage_ranges.pop();
         if !nested {
             debug_assert!(self.borrowed.is_empty());
             debug_assert!(self.storage_borrowed.is_empty());
@@ -3682,6 +3756,22 @@ impl OwnershipAnalysis<'_> {
             }
             HirExprKind::Int(_) | HirExprKind::Float(_) | HirExprKind::Bool(_) => Ok(()),
             HirExprKind::Load(place) => self.place(place, expr.span),
+            HirExprKind::ListPop { source, .. } => {
+                self.place(source, expr.span)?;
+                if let Some(owner) = self.owner_of_place(source) {
+                    // Only a direct root and a direct constant element borrow have
+                    // enough provenance to prove survival. Nested storage fails closed.
+                    let direct = source.projections.is_empty();
+                    let tail = self.buffer_lengths[owner.0 as usize].and_then(|n| n.checked_sub(1));
+                    if self.storage_ranges.iter().flatten().any(|(root, index)| {
+                        *root == owner && !(direct && index.zip(tail).is_some_and(|(i, t)| i < t))
+                    }) {
+                        return Err(self.error("E0319", "pop invalidates a live reference/view that may cover the removed tail (including an unknown index or whole-list range)", expr.span));
+                    }
+                    self.buffer_lengths[owner.0 as usize] = if direct { tail } else { None };
+                }
+                Ok(())
+            }
             HirExprKind::Borrow { place, .. } | HirExprKind::View { source: place, .. } => {
                 self.place(place, expr.span)
             }
@@ -3704,13 +3794,18 @@ impl OwnershipAnalysis<'_> {
             | HirExprKind::ListLength { source }
             | HirExprKind::ListCapacity { source } => self.place(source, expr.span),
             HirExprKind::Call { args, .. } => {
+                // Earlier borrowed arguments remain live while later arguments
+                // are evaluated (which can now extract an owning storage slot).
+                self.borrowed.push(BTreeSet::new());
+                self.storage_borrowed.push(BTreeSet::new());
+                self.storage_ranges.push(Vec::new());
                 for argument in args {
                     self.expr(argument)?;
                     if self
                         .types
                         .reference_info(argument.ty)
                         .is_some_and(|(pointee, mutable)| {
-                            mutable && self.types.list_element(pointee).is_some()
+                            mutable && self.types.may_contain_list(pointee)
                         })
                         && let Some(owner) = self.derived_owner(argument).or_else(|| {
                             if let HirExprKind::Borrow { place, .. } = &argument.kind {
@@ -3723,11 +3818,47 @@ impl OwnershipAnalysis<'_> {
                     {
                         return Err(self.error(
                             "E0313",
-                            "cannot pass a writable List reference to a call while a derived element reference/view remains live",
+                            "cannot pass a writable reference to a call while a derived element reference/view remains live",
                             argument.span,
                         ));
                     }
+                    if self
+                        .types
+                        .reference_info(argument.ty)
+                        .is_some_and(|(pointee, mutable)| {
+                            mutable && self.types.may_contain_list(pointee)
+                        })
+                        && let Some(owner) = self.derived_owner(argument)
+                    {
+                        self.buffer_lengths[owner.0 as usize] = None;
+                    }
+                    if let Some(owner) = self.derived_owner(argument) {
+                        self.borrowed.last_mut().unwrap().insert(owner);
+                        if self.is_list_storage_borrow(argument) {
+                            let index = self.storage_index(argument);
+                            self.storage_borrowed.last_mut().unwrap().insert(owner);
+                            self.storage_ranges.last_mut().unwrap().push((owner, index));
+                        }
+                    }
                 }
+                // A later argument can introduce a storage borrow that aliases
+                // an earlier writable argument. Check the full call boundary.
+                for argument in args {
+                    if self
+                        .types
+                        .reference_info(argument.ty)
+                        .is_some_and(|(pointee, mutable)| {
+                            mutable && self.types.may_contain_list(pointee)
+                        })
+                        && let Some(owner) = self.derived_owner(argument)
+                        && self.has_live_storage_borrow(owner)
+                    {
+                        return Err(self.error("E0313", "writable call argument may invalidate another live element reference/view argument", argument.span));
+                    }
+                }
+                self.borrowed.pop();
+                self.storage_borrowed.pop();
+                self.storage_ranges.pop();
                 Ok(())
             }
             HirExprKind::StructInit { fields, .. } => {
@@ -3827,6 +3958,27 @@ impl OwnershipAnalysis<'_> {
         Ok(())
     }
 
+    fn storage_index(&self, expr: &HirExpr) -> Option<u64> {
+        match &expr.kind {
+            HirExprKind::Local(local) => self.borrow_indices[local.0 as usize],
+            HirExprKind::Borrow { place, .. } => {
+                if let HirPlaceBase::Local(local) = place.base
+                    && self
+                        .types
+                        .list_element(self.locals[local.0 as usize].ty)
+                        .is_some()
+                    && let [HirPlaceProjection::Index { index, .. }] = place.projections.as_slice()
+                    && let HirExprKind::Int(index) = index.kind
+                {
+                    u64::try_from(index).ok()
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
     fn is_list_storage_borrow(&self, expr: &HirExpr) -> bool {
         match &expr.kind {
             HirExprKind::Borrow { place, .. } => place
@@ -3834,6 +3986,7 @@ impl OwnershipAnalysis<'_> {
                 .iter()
                 .any(|projection| matches!(projection, HirPlaceProjection::Index { .. })),
             HirExprKind::View { source, .. } => self.types.list_element(source.ty).is_some(),
+            HirExprKind::Local(local) => self.storage_references[local.0 as usize],
             _ => false,
         }
     }
@@ -4633,6 +4786,60 @@ impl Analyzer<'_> {
         e: &AstExpr,
         expected: Option<TypeId>,
     ) -> Result<Checked, Vec<Diagnostic>> {
+        if let AstExprKind::Call {
+            callee,
+            type_arguments,
+            args,
+        } = &e.kind
+            && callee == "pop"
+        {
+            if !type_arguments.is_empty() || args.len() != 1 {
+                return Err(vec![Diagnostic::new(
+                    "E0318",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    "pop expects exactly one writable List<T> place and no type arguments",
+                    Some(e.span),
+                )]);
+            }
+            let source = self
+                .resolve_expr_place(&args[0], true)
+                .map_err(|mut errors| {
+                    for error in &mut errors {
+                        error.code = "E0318";
+                    }
+                    errors
+                })?;
+            let Some(element_type) = self.types.list_element(source.ty) else {
+                return Err(vec![Diagnostic::new(
+                    "E0318",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    "pop requires a writable List<T> place",
+                    Some(e.span),
+                )]);
+            };
+            // The descriptor is an aliasable mutation root. All following reads,
+            // moves and cleanup observe the committed initialized-prefix boundary.
+            if let HirPlaceBase::Local(local) = source.base {
+                self.locals[local.0 as usize].address_taken = true;
+            }
+            return self.coerce(
+                Checked {
+                    expr: HirExpr {
+                        kind: HirExprKind::ListPop {
+                            source,
+                            element_type,
+                            effect: MutationEffect::StableStructuralMutation,
+                        },
+                        ty: element_type,
+                        span: e.span,
+                    },
+                    constant: None,
+                },
+                expected,
+            );
+        }
         if let AstExprKind::CollectionLiteral(elements) = &e.kind {
             return self.collection_literal(elements, e.span, expected);
         }
@@ -6935,6 +7142,25 @@ fn verify_expr(
             {
                 return Err(fail(
                     "HIR List literal construction contract invalid".into(),
+                ));
+            }
+        }
+        HirExprKind::ListPop {
+            source,
+            element_type,
+            effect,
+        } => {
+            verify_place(source, f, sigs, structs, enums, types, fail)?;
+            if types.list_element(source.ty) != Some(*element_type)
+                || e.ty != *element_type
+                || *effect != MutationEffect::StableStructuralMutation
+                || matches!(
+                    source.base,
+                    HirPlaceBase::Dereference { mutable: false, .. }
+                )
+            {
+                return Err(fail(
+                    "HIR ListPop writable/type/effect contract invalid".into(),
                 ));
             }
         }

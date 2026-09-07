@@ -1,0 +1,9 @@
+T popLast<T: Storable + Relocatable>(ref mut List<T> values) { return pop(*values); }
+int main() {
+    List<List<int>> values = {{10}, {20, 30}};
+    List<int> last = popLast(&mut values);
+    if (length(values) != 1) { return 1; }
+    if (length(last) != 2) { return 2; }
+    if (last[0] + last[1] + values[0][0] != 60) { return 3; }
+    return 0;
+}

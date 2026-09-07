@@ -1,0 +1,11 @@
+int main() {
+    List<Buffer<int>> values = {Buffer<int>(1, 10), Buffer<int>(1, 20)};
+    reserve(values, 8);
+    usize before = capacity(values);
+    Buffer<int> last = pop(values);
+    push(values, last);
+    if (capacity(values) != before) { return 1; }
+    if (length(values) != 2) { return 2; }
+    if (values[0][0] + values[1][0] != 30) { return 3; }
+    return 0;
+}

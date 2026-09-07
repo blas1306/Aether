@@ -1,5 +1,6 @@
-//! Cross-layer and native qualification through NEXT-VERTICAL-17.
+//! Cross-layer and native qualification through NEXT-VERTICAL-18.
 
+use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -1732,7 +1733,7 @@ fn vertical13_array_diagnostics_fail_closed() {
             "E0292",
         ),
         ("int main(){Array<int> a={1};return push(a,2);}", "E0212"),
-        ("int main(){Array<int> a={1};return pop(a);}", "E0212"),
+        ("int main(){Array<int> a={1};return pop(a);}", "E0318"),
         ("int main(){Array<int> a={1};return reserve(a,2);}", "E0212"),
         ("int main(){Array<int> a={1};return resize(a,2);}", "E0212"),
         (
@@ -2630,4 +2631,514 @@ fn vertical17_verifiers_reject_symbolic_collection_runtime_types() {
     ssa.functions[0].blocks[0].instructions[0].ty = symbolic;
     let errors = verify_ssa(ssa).unwrap_err();
     assert!(errors[0].message.contains("unresolved generic"));
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical18_pop_native_owners_and_exact_counts() {
+    for (fixture, count, relocations) in [
+        ("v18_pop_int.ae", 1, 0),
+        ("v18_pop_buffer.ae", 4, 0),
+        ("v18_pop_nested.ae", 3, 0),
+        ("v18_pop_reuse.ae", 4, 2),
+        ("v18_pop_owners.ae", 14, 0),
+        ("v18_pop_conditional.ae", 8, 0),
+    ] {
+        let compilation = compile_session(
+            CompilationSession::discover(&program(fixture)).unwrap(),
+            &[],
+        )
+        .unwrap();
+        for (counter, expected) in [
+            (None, 0),
+            (Some("@aether_heap_alloc_count"), count),
+            (Some("@aether_heap_free_count"), count),
+            (Some("@aether_relocation_count"), relocations),
+        ] {
+            let llvm = counter.map_or_else(|| compilation.llvm.clone(), |counter| compilation.llvm.replace(
+                "  %process_status = trunc i64 %aether_result to i32",
+                &format!("  %observed_count = load i64, ptr {counter}\n  %process_status = trunc i64 %observed_count to i32"),
+            ));
+            let artifact = temporary("v18-count");
+            ClangToolchain::default()
+                .link_executable(&llvm, &artifact)
+                .unwrap();
+            let status = Command::new(&artifact).status().unwrap();
+            let _ = fs::remove_file(artifact);
+            assert_eq!(status.code(), Some(expected), "{fixture}: {counter:?}");
+        }
+    }
+    let (_, status) =
+        run_path(&module_program("v18_pop"), &[], &ClangToolchain::default()).unwrap();
+    assert_eq!(status.code(), Some(42));
+}
+
+#[test]
+fn vertical18_pop_borrow_and_capability_diagnostics() {
+    let cases = [
+        (
+            "int f(ref List<int> x){return pop(*x);}int main(){List<int>x={1};return f(&x);}",
+            "E0318",
+        ),
+        (
+            "int main(){List<int>x={1,2,3};ref int r=&x[2];int v=pop(x);return *r;}",
+            "E0319",
+        ),
+        (
+            "int main(){List<int>x={1,2,3};ref mut int r=&mut x[2];int v=pop(x);return *r;}",
+            "E0319",
+        ),
+        (
+            "int main(){List<int>x={1,2,3};usize i=1;ref int r=&x[i];int v=pop(x);return *r;}",
+            "E0319",
+        ),
+        (
+            "int main(){List<int>x={1,2,3};View<int>v=view(x);int y=pop(x);return v[0];}",
+            "E0319",
+        ),
+        (
+            "int main(){List<int>x={1,2,3};ViewMut<int>v=view_mut(x);int y=pop(x);return v[0];}",
+            "E0319",
+        ),
+        (
+            "int main(){List<Buffer<int>>x={Buffer<int>(1,1),Buffer<int>(1,2)};ref int r=&x[0][0];Buffer<int>v=pop(x);return *r;}",
+            "E0319",
+        ),
+        (
+            "int main(){List<int>x={1,2};ref int r=&x[0];int a=pop(x);int b=pop(x);return *r;}",
+            "E0319",
+        ),
+        (
+            "int main(){List<int>x={1,2};ref int r=&x[0];while(length(x)>0){int a=pop(x);}return *r;}",
+            "E0319",
+        ),
+        (
+            "T f<T: Storable>(ref mut List<T> x){return pop(*x);}int main(){return 0;}",
+            "E0310",
+        ),
+        (
+            "T f<T: Relocatable>(ref mut List<T> x){return pop(*x);}int main(){return 0;}",
+            "E0310",
+        ),
+        ("int main(){List<int>x={1};return pop(x,1);}", "E0318"),
+        (
+            "int f(ref mut List<int>x,ref int r){int a=pop(*x);return *r;}int main(){List<int>x={1,2};return f(&mut x,&x[1]);}",
+            "E0313",
+        ),
+        (
+            "struct Wrap{List<int> x;}int f(ref mut Wrap w){return pop((*w).x);}int main(){Wrap w=Wrap({1,2});ref int r=&w.x[1];return f(&mut w);}",
+            "E0313",
+        ),
+        (
+            "int use(ref int r,int v){return *r+v;}int main(){List<int>x={1,2};return use(&x[1],pop(x));}",
+            "E0319",
+        ),
+        (
+            "int shrink(ref mut List<int>x){return pop(*x);}int main(){List<int>x={1,2};int a=shrink(&mut x);ref int r=&x[0];int b=pop(x);return *r;}",
+            "E0319",
+        ),
+    ];
+    for (source, expected) in cases {
+        let errors = compile_source(&SourceFile::new("v18-borrow.ae", source), &[]).unwrap_err();
+        assert_eq!(errors[0].code, expected, "{source}: {}", errors[0].message);
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical18_pop_scopes_aliases_loops_and_conditional_cleanup() {
+    let cases = [
+        "int main(){List<int>x={1,2,3};if(true){ref int r=&x[2];int a=*r;}return pop(x);}",
+        "int main(){List<int>x={1,2,3};if(true){View<int>v=view(x);int a=v[2];}return pop(x);}",
+        "int main(){List<int>x={1,2,3};if(true){ViewMut<int>v=view_mut(x);v[2]=3;}return pop(x);}",
+        "int main(){List<int>x={1,2,3};ref mut List<int> handle=&mut x;ref int r=&x[0];int a=pop(*handle);return a+*r-1;}",
+        "int main(){List<int>x={1,2};ref int r=&x[0];ref int other=r;int a=pop(x);return *other+a;}",
+        "int inc(ref mut int x){*x=*x+1;return 0;}int main(){List<int>x={0,2};ref int r=&x[0];int ignored=inc(&mut x[0]);int a=pop(x);return *r+a;}",
+        "struct Point{int value;}int set(ref mut Point x){(*x).value=1;return 0;}int main(){List<Point>x={Point(0),Point(2)};int ignored=set(&mut x[0]);Point tail=pop(x);return x[0].value+tail.value;}",
+        "int main(){List<int>x={1,2};ref int r=&x[0];ref mut List<int>handle=&mut x;ref mut List<int>other=handle;int a=pop(*other);return *r+a;}",
+        "int main(){List<int>x={1,2};int sum=0;while(length(x)>0){sum=sum+pop(x);}push(x,sum);return pop(x);}",
+        "int consume(Buffer<int>x){return x[0];}int main(){List<Buffer<int>>x={Buffer<int>(1,3)};Buffer<int>b=pop(x);if(length(x)==0){int r=consume(b);}return 3;}",
+        "List<int> take(List<int>x){int a=pop(x);return x;}int main(){List<int>x={3,4};List<int>y=take(x);return y[0];}",
+        "int main(){List<List<int>>x={{3,4}};int a=pop(x[0]);return a-1;}",
+        "int use(ref int r,int v){return *r+v;}int main(){List<int>x={1,2};return use(&x[0],pop(x));}",
+    ];
+    for source in cases {
+        let compilation = compile_source(&SourceFile::new("v18-scope.ae", source), &[]).unwrap();
+        let artifact = temporary("v18-scope");
+        ClangToolchain::default()
+            .link_executable(&compilation.llvm, &artifact)
+            .unwrap();
+        let status = Command::new(&artifact).status().unwrap();
+        let _ = fs::remove_file(artifact);
+        assert_eq!(status.code(), Some(3), "{source}");
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical18_empty_pop_traps_before_extraction() {
+    for source in [
+        "int f(ref mut List<int>x){return pop(*x);}int main(){List<int>x={};return f(&mut x);}",
+        "int main(){List<Buffer<int>>x={};Buffer<int>b=pop(x);return b[0];}",
+    ] {
+        let compilation = compile_source(
+            &SourceFile::new("v18-empty.ae", source),
+            &[Emit::Mir, Emit::Ssa],
+        )
+        .unwrap();
+        assert!(compilation.dumps[&Emit::Mir].contains("ListEmpty"));
+        assert!(compilation.dumps[&Emit::Ssa].contains("ListEmpty"));
+        let artifact = temporary("v18-empty");
+        ClangToolchain::default()
+            .link_executable(&compilation.llvm, &artifact)
+            .unwrap();
+        let status = Command::new(&artifact).status().unwrap();
+        let _ = fs::remove_file(artifact);
+        assert!(!status.success());
+    }
+}
+
+#[test]
+fn vertical18_dumps_retain_slot_ownership_and_stable_effect() {
+    let source = SourceFile::new(
+        "v18-dump.ae",
+        "int main(){List<Buffer<int>>x={Buffer<int>(1,42)};Buffer<int>b=pop(x);return b[0];}",
+    );
+    let phases = [Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm];
+    let compilation = compile_source(&source, &phases).unwrap();
+    let again = compile_source(&source, &phases).unwrap();
+    assert_eq!(compilation.dumps, again.dumps);
+    assert!(compilation.dumps[&Emit::Hir].contains("ListPop"));
+    assert!(compilation.dumps[&Emit::Hir].contains("StableStructuralMutation"));
+    for phase in [Emit::Mir, Emit::Ssa] {
+        for text in [
+            "TailIndex",
+            "Take",
+            "SlotPlace",
+            "before: Initialized",
+            "after: Uninitialized",
+            "ListSetLength",
+            "ListEmpty",
+        ] {
+            assert!(
+                compilation.dumps[&phase].contains(text),
+                "{phase:?}: {text}"
+            );
+        }
+    }
+    assert!(compilation.llvm.contains("checked nonempty tail"));
+    assert!(compilation.llvm.contains("Take: source slot Uninitialized"));
+    assert!(compilation.llvm.contains("commit initialized prefix"));
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn vertical18_verifiers_reject_corrupt_extraction_transactions() {
+    use aether_middle::{
+        ElementInitialization, Operand, Rvalue, SsaOp, SsaOperand, Terminator, build_ssa,
+        lower_hir, verify_mir, verify_ssa,
+    };
+    let source = SourceFile::new(
+        "v18-corrupt.ae",
+        "int main(){List<Buffer<int>>x={Buffer<int>(1,42)};Buffer<int>b=pop(x);return b[0];}",
+    );
+    let raw = lower_hir(analyze(parse_source(&source).unwrap()).unwrap());
+    let success = raw.functions[0]
+        .blocks
+        .iter()
+        .position(|b| {
+            b.instructions
+                .iter()
+                .any(|i| matches!(i.value, Rvalue::Take { .. }))
+        })
+        .unwrap();
+    for mutation in 0..10 {
+        let mut corrupt = raw.clone();
+        let block = &mut corrupt.functions[0].blocks[success];
+        match mutation {
+            0 => {
+                if let Rvalue::Take { state, .. } = &mut block.instructions[1].value {
+                    state.before = ElementInitialization::Uninitialized;
+                }
+            }
+            1 => {
+                if let Rvalue::Take { state, .. } = &mut block.instructions[1].value {
+                    state.after = ElementInitialization::Initialized;
+                }
+            }
+            2 => {
+                block.instructions.insert(2, block.instructions[1].clone());
+            }
+            3 => {
+                block.instructions.remove(2);
+            }
+            4 => {
+                if let Rvalue::ListSetLength { length, .. } = &mut block.instructions[2].value {
+                    *length = Operand::Int {
+                        value: 1,
+                        ty: aether_frontend::TypeId::USIZE,
+                    };
+                }
+            }
+            5 => {
+                if let Rvalue::Take { slot, .. } = &mut block.instructions[1].value {
+                    slot.index = Operand::Int {
+                        value: 8,
+                        ty: aether_frontend::TypeId::USIZE,
+                    };
+                }
+            }
+            6 => {
+                block.instructions.swap(1, 2);
+            }
+            7 => {
+                corrupt.functions[0].blocks[0].terminator = Some(Terminator::Goto(
+                    aether_middle::BlockId(u32::try_from(success).unwrap()),
+                ));
+            }
+            8 => {
+                if let Rvalue::Take { state, .. } = &mut block.instructions[1].value {
+                    state.non_trapping = false;
+                }
+            }
+            9 => {
+                let Rvalue::Take { slot, .. } = block.instructions[1].value.clone() else {
+                    unreachable!()
+                };
+                let mut owner = slot.root;
+                owner
+                    .projections
+                    .push(aether_middle::PlaceProjection::Index {
+                        index: slot.index,
+                        element_type: slot.type_id,
+                        bounds_trap: aether_middle::TrapKind::IndexOutOfBounds,
+                    });
+                let drop = block
+                    .instructions
+                    .iter_mut()
+                    .find(|i| matches!(i.value, Rvalue::Drop { .. }))
+                    .unwrap();
+                drop.value = Rvalue::Drop { owner };
+            }
+            _ => unreachable!(),
+        }
+        assert!(verify_mir(corrupt).is_err(), "MIR mutation {mutation}");
+    }
+    let ssa = build_ssa(&verify_mir(raw).unwrap());
+    for mutation in 0..10 {
+        let mut corrupt = ssa.clone();
+        let block = &mut corrupt.functions[0].blocks[success];
+        match mutation {
+            0 => {
+                if let SsaOp::Take { state, .. } = &mut block.instructions[1].op {
+                    state.before = ElementInitialization::Uninitialized;
+                }
+            }
+            1 => {
+                if let SsaOp::Take { state, .. } = &mut block.instructions[1].op {
+                    state.after = ElementInitialization::Initialized;
+                }
+            }
+            2 => {
+                block.instructions.insert(2, block.instructions[1].clone());
+            }
+            3 => {
+                block.instructions.remove(2);
+            }
+            4 => {
+                if let SsaOp::ListSetLength { length, .. } = &mut block.instructions[2].op {
+                    *length = SsaOperand::Int {
+                        value: 1,
+                        ty: aether_frontend::TypeId::USIZE,
+                    };
+                }
+            }
+            5 => {
+                if let SsaOp::Take { slot, .. } = &mut block.instructions[1].op {
+                    slot.index = SsaOperand::Int {
+                        value: 8,
+                        ty: aether_frontend::TypeId::USIZE,
+                    };
+                }
+            }
+            6 => {
+                block.instructions.swap(1, 2);
+            }
+            7 => {
+                block.instructions[1].op =
+                    SsaOp::Use(SsaOperand::Value(block.instructions[1].result));
+            }
+            8 => {
+                if let SsaOp::Take { state, .. } = &mut block.instructions[1].op {
+                    state.non_trapping = false;
+                }
+            }
+            9 => {
+                let SsaOp::Take { slot, .. } = block.instructions[1].op.clone() else {
+                    unreachable!()
+                };
+                let mut owner = slot.root;
+                owner
+                    .projections
+                    .push(aether_middle::SsaPlaceProjection::Index {
+                        index: slot.index,
+                        element_type: slot.type_id,
+                        bounds_trap: aether_middle::TrapKind::IndexOutOfBounds,
+                    });
+                let drop = block
+                    .instructions
+                    .iter_mut()
+                    .find(|i| matches!(i.op, SsaOp::Drop { .. }))
+                    .unwrap();
+                drop.op = SsaOp::Drop { owner };
+            }
+            _ => unreachable!(),
+        }
+        assert!(verify_ssa(corrupt).is_err(), "SSA mutation {mutation}");
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical18_each_pop_preserves_pointer_capacity_and_heap_counters() {
+    for fixture in [
+        "v18_pop_int.ae",
+        "v18_pop_buffer.ae",
+        "v18_pop_nested.ae",
+        "v18_pop_reuse.ae",
+        "v18_pop_owners.ae",
+        "v18_pop_conditional.ae",
+    ] {
+        let compilation = compile_session(
+            CompilationSession::discover(&program(fixture)).unwrap(),
+            &[],
+        )
+        .unwrap();
+        let mut llvm = String::new();
+        let mut pending = None;
+        let mut probes = 0;
+        for line in compilation.llvm.lines() {
+            if line.starts_with("  %take") && line.contains("_data = extractvalue") {
+                let id = line
+                    .trim()
+                    .strip_prefix("%take")
+                    .unwrap()
+                    .split('_')
+                    .next()
+                    .unwrap();
+                let descriptor = line
+                    .split_once("} ")
+                    .unwrap()
+                    .1
+                    .strip_suffix(", 0")
+                    .unwrap();
+                write!(llvm, "  %probe{id}_alloc = load i64, ptr @aether_heap_alloc_count\n  %probe{id}_free = load i64, ptr @aether_heap_free_count\n  %probe{id}_cap = extractvalue {{ ptr, i64, i64 }} {descriptor}, 2\n").unwrap();
+                pending = Some(id.to_string());
+            }
+            llvm.push_str(line);
+            llvm.push('\n');
+            if line.contains("; commit initialized prefix") {
+                let id = pending.take().expect("Take precedes every length commit");
+                let length_pointer = line
+                    .split_once("ptr ")
+                    .unwrap()
+                    .1
+                    .split(" ;")
+                    .next()
+                    .unwrap();
+                writeln!(llvm, "  call void @v18_assert_pop(ptr %take{id}_data, i64 %probe{id}_cap, i64 %probe{id}_alloc, i64 %probe{id}_free, ptr {length_pointer})").unwrap();
+                probes += 1;
+            }
+        }
+        assert!(probes > 0);
+        assert!(pending.is_none());
+        llvm.push_str(r"
+define internal void @v18_assert_pop(ptr %old_data, i64 %old_cap, i64 %old_alloc, i64 %old_free, ptr %length_field) {
+entry:
+  %data_field = getelementptr i64, ptr %length_field, i64 -1
+  %capacity_field = getelementptr i64, ptr %length_field, i64 1
+  %data = load ptr, ptr %data_field
+  %capacity = load i64, ptr %capacity_field
+  %allocs = load i64, ptr @aether_heap_alloc_count
+  %frees = load i64, ptr @aether_heap_free_count
+  %same_data = icmp eq ptr %data, %old_data
+  %same_capacity = icmp eq i64 %capacity, %old_cap
+  %same_allocs = icmp eq i64 %allocs, %old_alloc
+  %same_frees = icmp eq i64 %frees, %old_free
+  %storage_ok = and i1 %same_data, %same_capacity
+  %heap_ok = and i1 %same_allocs, %same_frees
+  %ok = and i1 %storage_ok, %heap_ok
+  br i1 %ok, label %done, label %failed
+failed:
+  call void @llvm.trap()
+  unreachable
+done:
+  ret void
+}
+");
+        let artifact = temporary("v18-stable-storage");
+        ClangToolchain::default()
+            .link_executable(&llvm, &artifact)
+            .unwrap();
+        let status = Command::new(&artifact).status().unwrap();
+        let _ = fs::remove_file(artifact);
+        assert_eq!(status.code(), Some(0), "{fixture}");
+    }
+}
+
+#[test]
+fn vertical18_push_reinitialization_and_effect_contracts() {
+    use aether_frontend::{MutationEffect, StructuralMutation};
+    use aether_middle::{
+        ElementInitialization, Rvalue, SsaOp, build_ssa, lower_hir, verify_mir, verify_ssa,
+    };
+    assert_eq!(
+        StructuralMutation::Pop.effect(),
+        MutationEffect::StableStructuralMutation
+    );
+    assert_eq!(
+        StructuralMutation::Push.effect(),
+        MutationEffect::PotentiallyRelocatingMutation
+    );
+    assert_eq!(
+        StructuralMutation::Reserve.effect(),
+        MutationEffect::PotentiallyRelocatingMutation
+    );
+    let source = SourceFile::new(
+        "v18-push.ae",
+        "int main(){List<int>x={1};int a=pop(x);push(x,a);return x[0];}",
+    );
+    let raw = lower_hir(analyze(parse_source(&source).unwrap()).unwrap());
+    let mut corrupt = raw.clone();
+    let initialization = corrupt.functions[0]
+        .blocks
+        .iter_mut()
+        .flat_map(|b| &mut b.instructions)
+        .find_map(|i| {
+            if let Rvalue::ListPush { initialization, .. } = &mut i.value {
+                Some(initialization)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    initialization.before = ElementInitialization::Initialized;
+    assert!(verify_mir(corrupt).is_err());
+    let mir = verify_mir(raw).unwrap();
+    assert!(mir.dump().contains("PushInit"));
+    let mut ssa = build_ssa(&mir);
+    let initialization = ssa.functions[0]
+        .blocks
+        .iter_mut()
+        .flat_map(|b| &mut b.instructions)
+        .find_map(|i| {
+            if let SsaOp::ListPush { initialization, .. } = &mut i.op {
+                Some(initialization)
+            } else {
+                None
+            }
+        })
+        .unwrap();
+    initialization.after = ElementInitialization::Uninitialized;
+    assert!(verify_ssa(ssa).is_err());
 }

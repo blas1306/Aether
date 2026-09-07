@@ -285,6 +285,19 @@ references, pinning or extraction operations. Buffer's retained Copy/no-drop
 source gate is a current constructor/drop implementation limit, not a general
 semantic law of storage.
 
+NEXT-VERTICAL-18 admits whole-element owning extraction with `pop(list)`.
+It checks nonemptiness before access and traps with structured ListEmpty on
+failure. Success transfers the final value exactly once, makes its old storage
+slot uninitialized and decrements length without changing capacity or backing
+allocation. Copy and owning non-Copy elements follow the same prefix rule.
+Take, source Move and storage Relocate retain distinct compiler semantics;
+length alone represents the runtime initialized prefix, without a slot bitmap.
+Pop is a storage-stable range mutation. Provably surviving direct prefix
+references remain valid; references/views that may cover the removed tail are
+rejected. Whole-list views cover the old prefix, and nested provenance remains
+conservative. A future optional library API remains independent; this milestone
+adds no Option magic, remove/insert, methods, stored lifetimes or Array extraction.
+
 ## Performance and predictability
 
 Execution performance and compilation performance are independent product

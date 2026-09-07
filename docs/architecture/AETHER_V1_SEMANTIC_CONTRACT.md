@@ -843,6 +843,57 @@ is type-dependent, never a configurable global switch. `Buffer`, `View`,
 `ViewMut`, `Array` and `List` are zero-based. Future mathematical
 `Vector`, `Matrix` and their mathematical views are one-based.
 
+### 6.5 Initialized storage extraction — NEXT-VERTICAL-18 DECIDED
+
+`pop(list_place)` returns T for a writable `List<T>` place, including explicit
+`pop(*reference)` through `ref mut List<T>`. Shared/read-only access cannot pop.
+List's existing Storable + Relocatable requirements suffice parametrically;
+no Copy requirement or runtime capability dispatch is added.
+
+The operation MUST check `length > 0` before computing `length-1` or accessing
+storage. Empty pop MUST take structured `ListEmpty` without storage mutation.
+Traps abort without unwind. This contract does not introduce Option/try_pop or
+prevent a future independent library optional form.
+
+On success, Take transfers the one initialized tail T to an ordinary result and
+ends the old slot's initialized lifetime. The source slot becomes Uninitialized,
+including for Copy T. The length becomes exactly `old_length-1`; pointer and
+capacity MUST remain unchanged. Extraction performs no heap allocation, free,
+reallocation, shrinking or movement of surviving elements. Transfer after the
+check is non-trapping for admitted types. The result follows ordinary ownership
+semantics in locals, returns, consuming arguments and aggregate construction.
+
+The invariant is that exactly `[0,length)` contains live initialized elements.
+Reserved slots and the taken tail are raw storage. Take is distinct from a
+source Move (which marks a source root Moved) and Relocate (which transfers
+between storage locations). List drop visits only the new prefix. Push can
+initialize the old tail again; it must not drop the already-taken value.
+No per-slot runtime bitmap or extra tail drop flag is permitted.
+
+The compiler MUST distinguish ordinary checked logical indexing from internal
+typed storage-slot addressing. MIR and SSA retain and verify the nonempty edge,
+Take transition and prefix commit. Corrupted state, repeated extraction, a
+missing/wrong boundary commit or Drop of a taken slot must be rejected. The V18
+implementation admits a bounded contiguous checked transaction, without a
+general memory or partial-initialization analysis.
+
+Element assignment is element mutation; pop is stable structural/range mutation;
+push/reserve remain potentially relocating mutations. A live direct constant
+reference to an earlier element is permitted when current length facts prove it
+excludes the removed tail. Definite tail, unknown-index and unknown-length
+borrows fail closed. Whole-list View/ViewMut covers the old initialized prefix
+and therefore blocks pop until its lexical lifetime ends. No ranged view or
+arithmetic theorem prover is implied. Nested borrow provenance remains
+conservative; a surviving inner allocation alone is not a sufficient proof.
+Borrowed call arguments stay live while subsequent arguments are evaluated;
+arbitrary calls with writable access to List-containing types conservatively
+invalidate storage/length knowledge. Calls restricted to scalar/Copy elements
+do not constitute structural List mutations.
+
+Array keeps fixed, fully initialized storage. V18 adds no Array take, general
+field partial move, remove/insert/swap_remove/drain/pop_front, methods, Option,
+Buffer expansion, named lifetimes, Vector or Matrix.
+
 ## 7. Text
 
 ### 7.1 `byte`, `char` and `string` — DECIDED

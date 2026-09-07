@@ -19,11 +19,11 @@ pub use hir::{
     FunctionInstanceInfo, FunctionSignature, GenericHirFunction, GenericParamInfo, HirBinaryOp,
     HirBlock, HirCallTarget, HirDrop, HirExpr, HirExprKind, HirFunction, HirLocal, HirMatchArm,
     HirMatchBinding, HirParameter, HirPlace, HirPlaceBase, HirPlaceProjection, HirStmt,
-    HirStmtKind, HirUnaryOp, LocalId, MatchMode, ModuleId, ModuleInfo, ParameterSignature,
-    ParsedModule, ParsedProgram, ResolvedImport, StructInfo, StructuralMutation, TypeAliasInfo,
-    TypeLayout, TypedHir, VariantInfo, VariantPayloadInfo, analyze, analyze_bodies,
-    analyze_bodies_for_target, collect_program_signatures, collect_signatures, format_type,
-    layout_of, verify_hir,
+    HirStmtKind, HirUnaryOp, LocalId, MatchMode, ModuleId, ModuleInfo, MutationEffect,
+    ParameterSignature, ParsedModule, ParsedProgram, ResolvedImport, StructInfo,
+    StructuralMutation, TypeAliasInfo, TypeLayout, TypedHir, VariantInfo, VariantPayloadInfo,
+    analyze, analyze_bodies, analyze_bodies_for_target, collect_program_signatures,
+    collect_signatures, format_type, layout_of, verify_hir,
 };
 pub use lexer::{Token, TokenKind, lex};
 pub use parser::parse;

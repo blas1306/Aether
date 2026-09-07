@@ -1,0 +1,19 @@
+int consume(Buffer<int> value) { return value[0]; }
+int conditional(bool transfer) {
+    List<Buffer<int>> values = {Buffer<int>(1, 42)};
+    Buffer<int> last = pop(values);
+    if (transfer) { int result = consume(last); }
+    return 0;
+}
+int main() {
+    int a = conditional(true);
+    int b = conditional(false);
+    List<Buffer<int>> values = {Buffer<int>(1, 1), Buffer<int>(1, 2), Buffer<int>(1, 3)};
+    int sum = 0;
+    while (length(values) > 0) {
+        Buffer<int> last = pop(values);
+        sum = sum + last[0];
+    }
+    if (sum != 6) { return 1; }
+    return a + b;
+}

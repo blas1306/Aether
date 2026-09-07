@@ -1,0 +1,6 @@
+import storage;
+int main() {
+    List<Buffer<int>> values = {Buffer<int>(1, 42)};
+    Buffer<int> last = storage.popLast(&mut values);
+    return last[0];
+}
