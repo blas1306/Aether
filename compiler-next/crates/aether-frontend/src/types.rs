@@ -1,9 +1,10 @@
 //! Canonical semantic types and the minimal admitted target model.
 #![allow(missing_docs)]
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::sync::RwLock;
+use std::time::Instant;
 
 /// Session-local nominal identity of a source `struct` declaration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -36,6 +37,7 @@ pub struct GenericParamId {
 pub enum Capability {
     Copy,
     Relocatable,
+    Storable,
 }
 
 impl Capability {
@@ -51,6 +53,7 @@ impl fmt::Display for Capability {
         f.write_str(match self {
             Self::Copy => "Copy",
             Self::Relocatable => "Relocatable",
+            Self::Storable => "Storable",
         })
     }
 }
@@ -296,20 +299,36 @@ pub struct TypeProperties {
     /// Moving the value to different physical storage preserves its semantic
     /// value when the old location ceases to be live. This is not duplication.
     pub is_relocatable: bool,
+    /// Persistent owning storage introduces no unrepresentable lifetime
+    /// dependency under the current ownership model. Independent of drop.
+    pub is_storable: bool,
     pub needs_drop: bool,
 }
 
 /// Result of the single semantic admission query used by owning collections.
-/// Storage legality deliberately remains independent from public capabilities:
-/// a borrowed descriptor can be `Relocatable` without being persistently
-/// storable in an `Array` or `List`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CollectionElementAdmission {
     Admitted,
     InvalidType,
+    MissingStorable,
     MissingRelocatable,
-    ForbiddenBorrow,
-    SymbolicStorageUnknown,
+}
+
+/// Positive element requirements, shared by resolution and IR verification.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CollectionKind {
+    Array,
+    List,
+}
+
+impl CollectionKind {
+    #[must_use]
+    pub fn requirements(self) -> &'static [Capability] {
+        match self {
+            Self::Array => &[Capability::Storable],
+            Self::List => &[Capability::Storable, Capability::Relocatable],
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -383,6 +402,28 @@ impl fmt::Display for TypeData {
     }
 }
 
+/// Session-local observational counters, excluded from semantic identity and dumps.
+#[derive(Default)]
+struct SemanticTimings(RwLock<BTreeMap<&'static str, u128>>);
+
+impl fmt::Debug for SemanticTimings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SemanticTimings").finish_non_exhaustive()
+    }
+}
+
+pub(crate) struct SemanticTimer<'a> {
+    types: &'a TypeArena,
+    phase: &'static str,
+    started: Instant,
+}
+
+impl Drop for SemanticTimer<'_> {
+    fn drop(&mut self) {
+        self.types.record_semantic_time(self.phase, self.started);
+    }
+}
+
 /// Session-owned bidirectional canonical type table.
 ///
 /// The arena has ordinary Rust ownership, contains no global state and can be
@@ -400,6 +441,7 @@ pub struct TypeArena {
     generic_capabilities: HashMap<GenericParamId, BTreeSet<Capability>>,
     generic_names: HashMap<GenericParamId, String>,
     property_cache: RwLock<HashMap<TypeId, TypeProperties>>,
+    semantic_timings: SemanticTimings,
 }
 
 impl Clone for TypeArena {
@@ -414,6 +456,7 @@ impl Clone for TypeArena {
             enum_properties: self.enum_properties.clone(),
             generic_capabilities: self.generic_capabilities.clone(),
             generic_names: self.generic_names.clone(),
+            semantic_timings: SemanticTimings(RwLock::new(self.semantic_timings_ns())),
             property_cache: RwLock::new(
                 self.property_cache
                     .read()
@@ -462,6 +505,7 @@ impl TypeArena {
             generic_capabilities: HashMap::new(),
             generic_names: HashMap::new(),
             property_cache: RwLock::new(HashMap::new()),
+            semantic_timings: SemanticTimings::default(),
         };
         let baseline = [
             TypeData::Bool,
@@ -483,6 +527,46 @@ impl TypeArena {
             debug_assert_eq!(id.0 as usize, expected);
         }
         arena
+    }
+
+    /// Inclusive frontend detail times. Snapshot before HIR dumps or lowering;
+    /// these overlap the existing phase timers and must not be added to totals.
+    #[must_use]
+    pub fn semantic_timings_ns(&self) -> BTreeMap<&'static str, u128> {
+        let mut result = self
+            .semantic_timings
+            .0
+            .read()
+            .expect("semantic timing lock")
+            .clone();
+        for name in [
+            "frontend.detail.constraint_resolution",
+            "frontend.detail.symbolic_property_derivation",
+            "frontend.detail.collection_admission",
+            "frontend.detail.nominal_second_pass",
+        ] {
+            result.entry(name).or_default();
+        }
+        result
+    }
+
+    pub(crate) fn record_semantic_time(&self, phase: &'static str, started: Instant) {
+        let elapsed = started.elapsed().as_nanos();
+        *self
+            .semantic_timings
+            .0
+            .write()
+            .expect("semantic timing lock")
+            .entry(phase)
+            .or_default() += elapsed;
+    }
+
+    pub(crate) fn semantic_timer(&self, phase: &'static str) -> SemanticTimer<'_> {
+        SemanticTimer {
+            types: self,
+            phase,
+            started: Instant::now(),
+        }
     }
 
     /// Returns the existing canonical identity or inserts one new entry.
@@ -812,13 +896,14 @@ impl TypeArena {
     fn properties_with_substitution(
         &self,
         id: TypeId,
-        substitution: &HashMap<GenericParamId, TypeId>,
+        substitution: &HashMap<GenericParamId, TypeProperties>,
         visiting: &mut BTreeSet<TypeId>,
     ) -> TypeProperties {
         let unknown = TypeProperties {
             is_known: false,
             is_copy: false,
             is_relocatable: false,
+            is_storable: false,
             needs_drop: true,
         };
         let Some(data) = self.get(id).copied() else {
@@ -826,32 +911,38 @@ impl TypeArena {
         };
         let aggregate_ty = id;
         match data {
-            TypeData::Bool
-            | TypeData::Integer(_)
-            | TypeData::Float(_)
-            | TypeData::Reference { .. }
-            | TypeData::View { .. } => TypeProperties {
+            TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_) => TypeProperties {
                 is_known: true,
                 is_copy: true,
                 is_relocatable: true,
+                is_storable: true,
                 needs_drop: false,
             },
-            TypeData::Buffer { .. } | TypeData::Array { .. } | TypeData::List { .. } => {
+            TypeData::Reference { .. } | TypeData::View { .. } => TypeProperties {
+                is_known: true,
+                is_copy: true,
+                is_relocatable: true,
+                is_storable: false,
+                needs_drop: false,
+            },
+            TypeData::Buffer { element }
+            | TypeData::Array { element }
+            | TypeData::List { element } => {
+                if !visiting.insert(id) {
+                    return unknown;
+                }
+                let element = self.properties_with_substitution(element, substitution, visiting);
+                visiting.remove(&id);
                 TypeProperties {
-                    is_known: true,
+                    is_known: element.is_known,
                     is_copy: false,
                     is_relocatable: true,
+                    is_storable: element.is_storable,
                     needs_drop: true,
                 }
             }
             TypeData::GenericParam(parameter) => {
-                substitution.get(&parameter).map_or(unknown, |ty| {
-                    if *ty == id {
-                        unknown
-                    } else {
-                        self.properties_with_substitution(*ty, substitution, visiting)
-                    }
-                })
+                substitution.get(&parameter).copied().unwrap_or(unknown)
             }
             TypeData::Struct(id) => {
                 self.aggregate_properties(false, id.0, aggregate_ty, None, substitution, visiting)
@@ -884,7 +975,7 @@ impl TypeArena {
         raw_id: u32,
         aggregate_ty: TypeId,
         arguments: Option<TypeArgsId>,
-        outer: &HashMap<GenericParamId, TypeId>,
+        outer: &HashMap<GenericParamId, TypeProperties>,
         visiting: &mut BTreeSet<TypeId>,
     ) -> TypeProperties {
         if !visiting.insert(aggregate_ty) {
@@ -892,6 +983,7 @@ impl TypeArena {
                 is_known: false,
                 is_copy: false,
                 is_relocatable: false,
+                is_storable: false,
                 needs_drop: true,
             };
         }
@@ -906,6 +998,7 @@ impl TypeArena {
                 is_known: false,
                 is_copy: false,
                 is_relocatable: false,
+                is_storable: false,
                 needs_drop: true,
             };
         };
@@ -917,11 +1010,25 @@ impl TypeArena {
                     is_known: false,
                     is_copy: false,
                     is_relocatable: false,
+                    is_storable: false,
                     needs_drop: true,
                 };
             };
+            if arguments.len() != definition.parameters.len() {
+                visiting.remove(&aggregate_ty);
+                return TypeProperties {
+                    is_known: false,
+                    is_copy: false,
+                    is_relocatable: false,
+                    is_storable: false,
+                    needs_drop: true,
+                };
+            }
             for (parameter, argument) in definition.parameters.iter().zip(arguments) {
-                substitution.insert(*parameter, *argument);
+                // Resolve in the outer environment before shadowing this binder.
+                // Holder<Holder<T>> must not capture the inner Holder parameter.
+                let properties = self.properties_with_substitution(*argument, outer, visiting);
+                substitution.insert(*parameter, properties);
             }
         } else if !definition.parameters.is_empty() {
             visiting.remove(&aggregate_ty);
@@ -929,6 +1036,7 @@ impl TypeArena {
                 is_known: false,
                 is_copy: false,
                 is_relocatable: false,
+                is_storable: false,
                 needs_drop: true,
             };
         }
@@ -936,6 +1044,7 @@ impl TypeArena {
             is_known: true,
             is_copy: true,
             is_relocatable: true,
+            is_storable: true,
             needs_drop: false,
         };
         for member in definition.members.iter().flatten() {
@@ -943,6 +1052,7 @@ impl TypeArena {
             result.is_known &= properties.is_known;
             result.is_copy &= properties.is_copy;
             result.is_relocatable &= properties.is_relocatable;
+            result.is_storable &= properties.is_storable;
             result.needs_drop |= properties.needs_drop;
         }
         visiting.remove(&aggregate_ty);
@@ -963,10 +1073,31 @@ impl TypeArena {
             .is_some_and(|properties| properties.is_relocatable)
     }
 
+    #[must_use]
+    pub fn is_storable(&self, id: TypeId) -> bool {
+        self.properties(id)
+            .is_some_and(|properties| properties.is_storable)
+    }
+
+    #[must_use]
+    pub fn guarantees_storable(&self, id: TypeId) -> bool {
+        self.guarantees_capability(id, Capability::Storable)
+    }
+
     /// Answers whether a concrete or symbolic type is guaranteed to provide
     /// a capability in its current declaration context.
     #[must_use]
     pub fn guarantees_capability(&self, id: TypeId, capability: Capability) -> bool {
+        if !self.contains_generic(id) {
+            return self
+                .properties(id)
+                .is_some_and(|properties| match capability {
+                    Capability::Copy => properties.is_copy,
+                    Capability::Relocatable => properties.is_relocatable,
+                    Capability::Storable => properties.is_storable,
+                });
+        }
+        let _timer = self.semantic_timer("frontend.detail.symbolic_property_derivation");
         self.guarantees_capability_with_substitution(
             id,
             capability,
@@ -989,30 +1120,21 @@ impl TypeArena {
         &self,
         id: TypeId,
         capability: Capability,
-        substitution: &HashMap<GenericParamId, TypeId>,
+        substitution: &HashMap<GenericParamId, bool>,
         visiting: &mut BTreeSet<(Capability, TypeId)>,
     ) -> bool {
         if !visiting.insert((capability, id)) {
             return false;
         }
         let result = match self.get(id).copied() {
-            Some(TypeData::GenericParam(parameter)) => substitution.get(&parameter).map_or_else(
-                || {
+            Some(TypeData::GenericParam(parameter)) => {
+                substitution.get(&parameter).copied().unwrap_or_else(|| {
                     self.generic_capabilities(parameter)
                         .is_some_and(|provided| {
                             provided.iter().any(|value| value.implies(capability))
                         })
-                },
-                |ty| {
-                    *ty != id
-                        && self.guarantees_capability_with_substitution(
-                            *ty,
-                            capability,
-                            substitution,
-                            visiting,
-                        )
-                },
-            ),
+                })
+            }
             Some(TypeData::Struct(declaration)) => self.aggregate_guarantees_capability(
                 false,
                 declaration.0,
@@ -1047,16 +1169,24 @@ impl TypeArena {
                     substitution,
                     visiting,
                 ),
-            Some(
-                TypeData::Bool
-                | TypeData::Integer(_)
-                | TypeData::Float(_)
-                | TypeData::Reference { .. }
-                | TypeData::View { .. },
-            ) => true,
-            Some(TypeData::Buffer { .. } | TypeData::Array { .. } | TypeData::List { .. }) => {
-                capability == Capability::Relocatable
+            Some(TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_)) => true,
+            Some(TypeData::Reference { .. } | TypeData::View { .. }) => {
+                capability != Capability::Storable
             }
+            Some(
+                TypeData::Buffer { element }
+                | TypeData::Array { element }
+                | TypeData::List { element },
+            ) => match capability {
+                Capability::Copy => false,
+                Capability::Relocatable => true,
+                Capability::Storable => self.guarantees_capability_with_substitution(
+                    element,
+                    capability,
+                    substitution,
+                    visiting,
+                ),
+            },
             None => false,
         };
         visiting.remove(&(capability, id));
@@ -1069,7 +1199,7 @@ impl TypeArena {
         raw_id: u32,
         arguments: Option<TypeArgsId>,
         capability: Capability,
-        outer: &HashMap<GenericParamId, TypeId>,
+        outer: &HashMap<GenericParamId, bool>,
         visiting: &mut BTreeSet<(Capability, TypeId)>,
     ) -> bool {
         let definition = if is_enum {
@@ -1090,7 +1220,10 @@ impl TypeArena {
                     return false;
                 }
                 for (parameter, argument) in definition.parameters.iter().zip(arguments) {
-                    substitution.insert(*parameter, *argument);
+                    let guaranteed = self.guarantees_capability_with_substitution(
+                        *argument, capability, outer, visiting,
+                    );
+                    substitution.insert(*parameter, guaranteed);
                 }
             }
             None if !definition.parameters.is_empty() => return false,
@@ -1125,43 +1258,41 @@ impl TypeArena {
             && !self.contains_owning(id)
     }
 
-    /// Central Vertical-16 admission proof for owning collection elements.
-    ///
-    /// Concrete values are admitted exactly when relocation glue is available
-    /// and current lifetime rules prove that no reference or view is stored.
-    /// A symbolic capability alone cannot prove the latter because references
-    /// themselves are Relocatable, so unresolved element types remain
-    /// conservatively rejected without adding a public negative capability.
+    /// Positive storage proof using concrete facts or declaration-owned
+    /// symbolic guarantees. Array initialization does not relocate existing
+    /// elements; List growth does, and therefore needs an additional proof.
     #[must_use]
-    pub fn collection_element_admission(&self, id: TypeId) -> CollectionElementAdmission {
+    pub fn collection_element_admission(
+        &self,
+        kind: CollectionKind,
+        id: TypeId,
+    ) -> CollectionElementAdmission {
+        let _timer = self.semantic_timer("frontend.detail.collection_admission");
         if !self.is_valid(id) {
             return CollectionElementAdmission::InvalidType;
         }
-        if self.contains_generic(id) {
-            return if self.guarantees_relocatable(id) {
-                CollectionElementAdmission::SymbolicStorageUnknown
-            } else {
-                CollectionElementAdmission::MissingRelocatable
-            };
-        }
-        if self.contains_reference(id) || self.contains_view(id) {
-            return CollectionElementAdmission::ForbiddenBorrow;
-        }
-        if !self.is_relocatable(id) {
-            return CollectionElementAdmission::MissingRelocatable;
+        for requirement in kind.requirements() {
+            if !self.guarantees_capability(id, *requirement) {
+                return match requirement {
+                    Capability::Storable => CollectionElementAdmission::MissingStorable,
+                    Capability::Relocatable => CollectionElementAdmission::MissingRelocatable,
+                    Capability::Copy => unreachable!("storage does not require duplication"),
+                };
+            }
         }
         CollectionElementAdmission::Admitted
     }
 
-    /// Array and List deliberately share one V16 storage predicate.
     #[must_use]
     pub fn is_admitted_array_element(&self, id: TypeId) -> bool {
-        self.collection_element_admission(id) == CollectionElementAdmission::Admitted
+        self.collection_element_admission(CollectionKind::Array, id)
+            == CollectionElementAdmission::Admitted
     }
 
     #[must_use]
     pub fn is_admitted_list_element(&self, id: TypeId) -> bool {
-        self.collection_element_admission(id) == CollectionElementAdmission::Admitted
+        self.collection_element_admission(CollectionKind::List, id)
+            == CollectionElementAdmission::Admitted
     }
 
     #[must_use]
@@ -1474,6 +1605,147 @@ impl Substitution {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn storable_concrete_properties_are_independent_and_structural() {
+        let mut types = TypeArena::new();
+        let buffer = types.intern_buffer(TypeId::INT64);
+        let array = types.intern_array(TypeId::INT64);
+        let list = types.intern_list(TypeId::INT64);
+        for ty in [TypeId::INT64, buffer, array, list] {
+            let p = types.properties(ty).unwrap();
+            assert!(p.is_known && p.is_storable && p.is_relocatable);
+            assert_eq!(p.is_copy, ty == TypeId::INT64);
+            assert_eq!(p.needs_drop, ty != TypeId::INT64);
+        }
+        for borrowed in [
+            types.intern_reference(TypeId::INT64, false),
+            types.intern_reference(TypeId::INT64, true),
+            types.intern_view(TypeId::INT64, false),
+            types.intern_view(TypeId::INT64, true),
+        ] {
+            let p = types.properties(borrowed).unwrap();
+            assert!(p.is_copy && p.is_relocatable && !p.needs_drop);
+            assert!(!p.is_storable && !types.guarantees_storable(borrowed));
+            for kind in [CollectionKind::Array, CollectionKind::List] {
+                assert_eq!(
+                    types.collection_element_admission(kind, borrowed),
+                    CollectionElementAdmission::MissingStorable
+                );
+            }
+            // Even malformed owning types must not erase a stored borrow.
+            let owner = types.intern_array(borrowed);
+            assert!(!types.is_storable(owner));
+            assert!(!types.guarantees_storable(owner));
+            let bad_struct = types.intern(TypeData::Struct(StructId(0)));
+            types.register_struct_properties(StructId(0), vec![], vec![borrowed]);
+            let bad_enum = types.intern(TypeData::Enum(EnumId(0)));
+            types.register_enum_properties(
+                EnumId(0),
+                vec![],
+                vec![vec![], vec![buffer], vec![borrowed]],
+            );
+            for ty in [bad_struct, bad_enum] {
+                assert!(!types.is_storable(ty));
+                assert!(!types.guarantees_storable(ty));
+            }
+        }
+        let dataset = types.intern(TypeData::Struct(StructId(1)));
+        types.register_struct_properties(StructId(1), vec![], vec![buffer, TypeId::INT64]);
+        assert!(types.is_storable(dataset) && types.needs_drop(dataset));
+        assert!(!types.is_copy(dataset));
+        assert_eq!(
+            types.collection_element_admission(CollectionKind::Array, TypeId(u32::MAX)),
+            CollectionElementAdmission::InvalidType
+        );
+        let missing = types.intern(TypeData::Struct(StructId(99)));
+        assert!(!types.guarantees_storable(missing));
+        assert!(!types.is_storable(missing));
+    }
+
+    #[test]
+    fn storable_symbolic_guarantees_do_not_cross_imply_or_become_concrete() {
+        let mut types = TypeArena::new();
+        let field = GenericParamId {
+            owner: GenericOwner::Struct(StructId(0)),
+            index: 0,
+        };
+        let field_ty = types.intern(TypeData::GenericParam(field));
+        types.register_struct_properties(StructId(0), vec![field], vec![field_ty, TypeId::INT64]);
+        let payload = GenericParamId {
+            owner: GenericOwner::Enum(EnumId(0)),
+            index: 0,
+        };
+        let payload_ty = types.intern(TypeData::GenericParam(payload));
+        types.register_enum_properties(EnumId(0), vec![payload], vec![vec![], vec![payload_ty]]);
+        for (index, capabilities) in [
+            vec![],
+            vec![Capability::Storable],
+            vec![Capability::Relocatable],
+            vec![Capability::Storable, Capability::Relocatable],
+            vec![Capability::Copy],
+            vec![Capability::Copy, Capability::Storable],
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let parameter = GenericParamId {
+                owner: GenericOwner::Function(u32::try_from(index).unwrap()),
+                index: 0,
+            };
+            types.register_generic_capabilities(
+                parameter,
+                "T".into(),
+                capabilities.iter().copied(),
+            );
+            let ty = types.intern(TypeData::GenericParam(parameter));
+            let holder = types.intern_struct_instance(StructId(0), vec![ty]);
+            let maybe = types.intern_enum_instance(EnumId(0), vec![ty]);
+            let nested = types.intern_struct_instance(StructId(0), vec![maybe]);
+            let repeated = types.intern_struct_instance(StructId(0), vec![holder]);
+            let stored = capabilities.contains(&Capability::Storable);
+            let copy = capabilities.contains(&Capability::Copy);
+            let relocatable = copy || capabilities.contains(&Capability::Relocatable);
+            for queried in [ty, holder, maybe, nested, repeated] {
+                let p = types.properties(queried).unwrap();
+                assert!(
+                    !p.is_known
+                        && !p.is_copy
+                        && !p.is_storable
+                        && !p.is_relocatable
+                        && p.needs_drop
+                );
+                assert_eq!(types.guarantees_storable(queried), stored);
+                assert_eq!(types.guarantees_copy(queried), copy);
+                assert_eq!(types.guarantees_relocatable(queried), relocatable);
+                assert_eq!(types.is_admitted_array_element(queried), stored);
+                assert_eq!(
+                    types.is_admitted_list_element(queried),
+                    stored && relocatable
+                );
+            }
+            let array = types.intern_array(ty);
+            assert_eq!(types.guarantees_storable(array), stored);
+            assert!(!types.is_storable(array));
+            assert!(types.guarantees_relocatable(array)); // descriptor, not element
+        }
+        for from in [
+            Capability::Copy,
+            Capability::Relocatable,
+            Capability::Storable,
+        ] {
+            for to in [
+                Capability::Copy,
+                Capability::Relocatable,
+                Capability::Storable,
+            ] {
+                assert_eq!(
+                    from.implies(to),
+                    from == to || (from == Capability::Copy && to == Capability::Relocatable)
+                );
+            }
+        }
+    }
 
     #[test]
     fn baseline_is_canonical_and_target_sized_types_remain_distinct() {

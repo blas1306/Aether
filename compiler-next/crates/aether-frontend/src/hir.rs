@@ -14,13 +14,14 @@
 )]
 use crate::{
     AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstMatchArm, AstMatchMode,
-    AstStmtKind, AstType, AstUnaryOp, Capability, CollectionElementAdmission, Diagnostic,
-    DiagnosticCategory, EnumId, FieldId, FloatType, GenericOwner, GenericParamId, IntegerType,
-    ParsedAst, Phase, SourceId, Span, StructId, Substitution, TargetProperties, TypeArena,
-    TypeData, TypeId, VariantId,
+    AstStmtKind, AstType, AstUnaryOp, Capability, CollectionElementAdmission, CollectionKind,
+    Diagnostic, DiagnosticCategory, EnumId, FieldId, FloatType, GenericOwner, GenericParamId,
+    IntegerType, ParsedAst, Phase, SourceId, Span, StructId, Substitution, TargetProperties,
+    TypeArena, TypeData, TypeId, VariantId,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
+use std::time::Instant;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ModuleId(pub u32);
@@ -381,14 +382,34 @@ impl TypedHir {
             .types
             .entries()
             .map(|(id, _)| {
-                let guarantees = [Capability::Copy, Capability::Relocatable]
-                    .into_iter()
-                    .filter(|capability| self.types.guarantees_capability(id, *capability))
-                    .map(|capability| capability.to_string())
-                    .collect::<Vec<_>>()
-                    .join(" + ");
+                let guarantees = [
+                    Capability::Copy,
+                    Capability::Relocatable,
+                    Capability::Storable,
+                ]
+                .into_iter()
+                .filter(|capability| self.types.guarantees_capability(id, *capability))
+                .map(|capability| capability.to_string())
+                .collect::<Vec<_>>()
+                .join(" + ");
+                let collection = self
+                    .types
+                    .array_element(id)
+                    .map(|element| (CollectionKind::Array, element))
+                    .or_else(|| {
+                        self.types
+                            .list_element(id)
+                            .map(|element| (CollectionKind::List, element))
+                    });
+                let admission = collection.map_or_else(String::new, |(kind, element)| {
+                    format!(
+                        "; element_requirements={:?}; element_admission={:?}",
+                        kind.requirements(),
+                        self.types.collection_element_admission(kind, element)
+                    )
+                });
                 format!(
-                    "  {id:?} = {}; properties={:?}; guarantees={}",
+                    "  {id:?} = {}; properties={:?}; guarantees={}{}",
                     format_type(&self.types, id, &self.structs, &self.enums),
                     self.types
                         .properties(id)
@@ -397,7 +418,8 @@ impl TypedHir {
                         "none"
                     } else {
                         &guarantees
-                    }
+                    },
+                    admission
                 )
             })
             .collect::<Vec<_>>()
@@ -1135,6 +1157,7 @@ pub fn collect_program_signatures(
                 .collect(),
         );
     }
+    let nominal_validation_started = Instant::now();
     // Constraint checking is deferred until every aggregate definition is
     // registered, allowing structural symbolic reasoning across declaration
     // order without template-style instantiation semantics.
@@ -1180,9 +1203,8 @@ pub fn collect_program_signatures(
             _ => return None,
         };
         let admitted = match kind {
-            1 | 2 => {
-                types.collection_element_admission(element) == CollectionElementAdmission::Admitted
-            }
+            1 => types.is_admitted_array_element(element),
+            2 => types.is_admitted_list_element(element),
             _ => types.is_admitted_buffer_element(element),
         };
         (!admitted).then_some((container, element, kind))
@@ -1222,7 +1244,14 @@ pub fn collect_program_signatures(
                 collection_admission_message(
                     if kind == 1 { "Array" } else { "List" },
                     format_type(&types, element, &structs, &enums),
-                    types.collection_element_admission(element),
+                    types.collection_element_admission(
+                        if kind == 1 {
+                            CollectionKind::Array
+                        } else {
+                            CollectionKind::List
+                        },
+                        element,
+                    ),
                 )
             },
             location.map(|(span, _)| span),
@@ -1271,6 +1300,10 @@ pub fn collect_program_signatures(
             )]);
         }
     }
+    types.record_semantic_time(
+        "frontend.detail.nominal_second_pass",
+        nominal_validation_started,
+    );
     let mut signatures = vec![];
     let mut names = vec![BTreeMap::new(); program.modules.len()];
     for module in &program.modules {
@@ -1581,29 +1614,15 @@ fn resolve_type_in_module(
             return Err(generic_arity(ty, expected));
         }
         let element = arguments[0];
-        if types.contains_generic(element) {
+        if types.contains_generic(element) && !matches!(ty.name.as_str(), "Array" | "List") {
             return Err(Diagnostic::new(
-                if ty.name == "List" {
-                    "E0310"
-                } else if ty.name == "Array" {
-                    "E0304"
-                } else {
-                    "E0283"
-                },
+                "E0283",
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                if matches!(ty.name.as_str(), "Array" | "List") {
-                    collection_admission_message(
-                        &ty.name,
-                        element,
-                        types.collection_element_admission(element),
-                    )
-                } else {
-                    format!(
-                        "{} element types must be concrete; generic capability constraints are deferred",
-                        ty.name
-                    )
-                },
+                format!(
+                    "{} element types must be concrete; generic Buffer/View construction is deferred",
+                    ty.name
+                ),
                 Some(ty.span),
             ));
         }
@@ -1639,8 +1658,8 @@ fn resolve_type_in_module(
                         DiagnosticCategory::Type,
                         collection_admission_message(
                             "Array",
-                            element,
-                            types.collection_element_admission(element),
+                            format_type(types, element, &[], &[]),
+                            types.collection_element_admission(CollectionKind::Array, element),
                         ),
                         Some(ty.span),
                     ))
@@ -1660,8 +1679,8 @@ fn resolve_type_in_module(
                         DiagnosticCategory::Type,
                         collection_admission_message(
                             "List",
-                            element,
-                            types.collection_element_admission(element),
+                            format_type(types, element, &[], &[]),
+                            types.collection_element_admission(CollectionKind::List, element),
                         ),
                         Some(ty.span),
                     ))
@@ -1693,12 +1712,6 @@ fn resolve_type_in_module(
         if arguments.len() != expected {
             return Err(generic_arity(ty, expected));
         }
-        if arguments
-            .iter()
-            .any(|argument| types.contains_reference(*argument) || types.contains_view(*argument))
-        {
-            return Err(restricted_generic_argument(ty.span));
-        }
         return if expected == 0 {
             Ok(types
                 .id_of(TypeData::Struct(id))
@@ -1711,12 +1724,6 @@ fn resolve_type_in_module(
         let expected = enum_arities[id.0 as usize];
         if arguments.len() != expected {
             return Err(generic_arity(ty, expected));
-        }
-        if arguments
-            .iter()
-            .any(|argument| types.contains_reference(*argument) || types.contains_view(*argument))
-        {
-            return Err(restricted_generic_argument(ty.span));
         }
         return if expected == 0 {
             Ok(types
@@ -1780,8 +1787,9 @@ fn collect_generic_parameters(
     parameters: &[crate::AstGenericParam],
     types: &mut TypeArena,
 ) -> Result<Vec<GenericParamInfo>, Diagnostic> {
+    let started = Instant::now();
     let mut seen = BTreeSet::new();
-    parameters
+    let result = parameters
         .iter()
         .enumerate()
         .map(|(index, parameter)| {
@@ -1803,6 +1811,7 @@ fn collect_generic_parameters(
                 let capability = match constraint.name.as_str() {
                     "Copy" => Capability::Copy,
                     "Relocatable" => Capability::Relocatable,
+                    "Storable" => Capability::Storable,
                     _ => {
                         return Err(Diagnostic::new(
                             "E0314",
@@ -1839,7 +1848,9 @@ fn collect_generic_parameters(
                 span: parameter.span,
             })
         })
-        .collect()
+        .collect();
+    types.record_semantic_time("frontend.detail.constraint_resolution", started);
+    result
 }
 
 fn generic_call_arity(name: &str, expected: usize, found: usize, span: Span) -> Diagnostic {
@@ -1872,12 +1883,16 @@ fn validate_generic_constraints(
                 } else {
                     "does not satisfy"
                 };
-                let available = [Capability::Copy, Capability::Relocatable]
-                    .into_iter()
-                    .filter(|available| types.guarantees_capability(*argument, *available))
-                    .map(|available| available.to_string())
-                    .collect::<Vec<_>>()
-                    .join(" + ");
+                let available = [
+                    Capability::Copy,
+                    Capability::Relocatable,
+                    Capability::Storable,
+                ]
+                .into_iter()
+                .filter(|available| types.guarantees_capability(*argument, *available))
+                .map(|available| available.to_string())
+                .collect::<Vec<_>>()
+                .join(" + ");
                 let subject = if inferred {
                     format!("inference succeeded, but inferred type `{actual}`")
                 } else if symbolic {
@@ -1910,6 +1925,12 @@ fn validate_generic_constraints(
             }
         }
     }
+    if arguments
+        .iter()
+        .any(|argument| types.contains_reference(*argument) || types.contains_view(*argument))
+    {
+        return Err(vec![restricted_generic_argument(span)]);
+    }
     Ok(())
 }
 
@@ -1931,11 +1952,31 @@ fn validate_type_constraints(
             types.arguments(arguments).unwrap_or(&[]),
             enums[id.0 as usize].name.as_str(),
         ),
+        Some(TypeData::Array { element } | TypeData::List { element }) => {
+            let (kind, name, code) = if types.array_element(ty).is_some() {
+                (CollectionKind::Array, "Array", "E0304")
+            } else {
+                (CollectionKind::List, "List", "E0310")
+            };
+            let admission = types.collection_element_admission(kind, element);
+            if admission != CollectionElementAdmission::Admitted {
+                return Err(vec![Diagnostic::new(
+                    code,
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    collection_admission_message(
+                        name,
+                        format_type(types, element, structs, enums),
+                        admission,
+                    ),
+                    Some(span),
+                )]);
+            }
+            return validate_type_constraints(types, element, structs, enums, span);
+        }
         Some(
             TypeData::Reference { pointee: ty, .. }
             | TypeData::Buffer { element: ty }
-            | TypeData::Array { element: ty }
-            | TypeData::List { element: ty }
             | TypeData::View { element: ty, .. },
         ) => return validate_type_constraints(types, ty, structs, enums, span),
         _ => return Ok(()),
@@ -1977,6 +2018,10 @@ fn infer_generic_arguments(
         return Ok(());
     }
     match (types.get(pattern), types.get(actual)) {
+        (Some(TypeData::Array { element: left }), Some(TypeData::Array { element: right }))
+        | (Some(TypeData::List { element: left }), Some(TypeData::List { element: right })) => {
+            infer_generic_arguments(types, *left, *right, inferred)
+        }
         (
             Some(TypeData::Reference {
                 pointee: left,
@@ -2412,6 +2457,8 @@ struct Monomorphizer<'a> {
     enums: &'a [EnumInfo],
     ids: BTreeMap<InstanceKey, crate::InstanceId>,
     queue: Vec<InstanceKey>,
+    parents: Vec<Option<usize>>,
+    current: Option<usize>,
     instances: Vec<FunctionInstanceInfo>,
     functions: Vec<HirFunction>,
 }
@@ -2439,6 +2486,8 @@ fn monomorphize(
         enums,
         ids: BTreeMap::new(),
         queue: Vec::new(),
+        parents: Vec::new(),
+        current: None,
         instances: Vec::new(),
         functions: Vec::new(),
     };
@@ -2463,6 +2512,7 @@ fn monomorphize(
     let mut cursor = 0;
     while cursor < mono.queue.len() {
         let key = mono.queue[cursor].clone();
+        mono.current = Some(cursor);
         mono.instantiate(key)?;
         cursor += 1;
     }
@@ -2510,16 +2560,22 @@ impl Monomorphizer<'_> {
             span,
             false,
         )?;
-        let structurally_expands = self.queue.iter().any(|previous| {
-            previous.function == key.function
+        // Only an instantiation ancestor can establish expanding recursion.
+        // Independent calls such as keep<int> and keep<Array<int>> are finite.
+        let mut ancestor = self.current;
+        let mut structurally_expands = false;
+        while let Some(index) = ancestor {
+            let previous = &self.queue[index];
+            structurally_expands |= previous.function == key.function
                 && previous.arguments.len() == key.arguments.len()
                 && key
                     .arguments
                     .iter()
                     .zip(&previous.arguments)
                     .all(|(new, old)| type_contains(self.types, *new, *old))
-                && key.arguments != previous.arguments
-        });
+                && key.arguments != previous.arguments;
+            ancestor = self.parents[index];
+        }
         if structurally_expands
             || self.queue.len() >= 256
             || key
@@ -2541,6 +2597,7 @@ impl Monomorphizer<'_> {
         let id = crate::InstanceId(self.queue.len() as u32);
         self.ids.insert(key.clone(), id);
         self.queue.push(key);
+        self.parents.push(self.current);
         Ok(id)
     }
 
@@ -3891,11 +3948,6 @@ impl Analyzer<'_> {
         arguments: Vec<TypeId>,
         span: Span,
     ) -> Result<TypeId, Vec<Diagnostic>> {
-        if arguments.iter().any(|argument| {
-            self.types.contains_reference(*argument) || self.types.contains_view(*argument)
-        }) {
-            return Err(vec![restricted_generic_argument(span)]);
-        }
         let expected = self.struct_arities[id.0 as usize];
         if arguments.len() != expected {
             return Err(vec![generic_call_arity(
@@ -3930,11 +3982,6 @@ impl Analyzer<'_> {
         arguments: Vec<TypeId>,
         span: Span,
     ) -> Result<TypeId, Vec<Diagnostic>> {
-        if arguments.iter().any(|argument| {
-            self.types.contains_reference(*argument) || self.types.contains_view(*argument)
-        }) {
-            return Err(vec![restricted_generic_argument(span)]);
-        }
         let expected = self.enum_arities[id.0 as usize];
         if arguments.len() != expected {
             return Err(vec![generic_call_arity(
@@ -5168,15 +5215,6 @@ impl Analyzer<'_> {
             )]);
         }
         let element = self.resolve_type_arguments(type_arguments)?[0];
-        if self.types.contains_generic(element) {
-            return Err(vec![Diagnostic::new(
-                "E0304",
-                Phase::Semantic,
-                DiagnosticCategory::Type,
-                "Vertical-16 Array fill element type must be concrete; stored-borrow freedom cannot yet be proven symbolically",
-                Some(span),
-            )]);
-        }
         if !self.types.is_admitted_array_element(element) {
             return Err(vec![Diagnostic::new(
                 "E0304",
@@ -5185,7 +5223,8 @@ impl Analyzer<'_> {
                 collection_admission_message(
                     "Array",
                     self.type_name(element),
-                    self.types.collection_element_admission(element),
+                    self.types
+                        .collection_element_admission(CollectionKind::Array, element),
                 ),
                 Some(span),
             )]);
@@ -5318,7 +5357,9 @@ impl Analyzer<'_> {
         span: Span,
         collection: &str,
     ) -> Result<(), Vec<Diagnostic>> {
-        if let Some(ConstantValue::Integer(length_value)) = length.constant {
+        if let Some(ConstantValue::Integer(length_value)) = length.constant
+            && !self.types.contains_generic(element)
+        {
             let layout = layout_of(self.types, element, self.target, self.structs, self.enums)
                 .expect("admitted concrete contiguous element has layout");
             if u64::try_from(length_value)
@@ -5777,11 +5818,6 @@ impl Analyzer<'_> {
                 type_arguments.len(),
                 span,
             )]);
-        }
-        if type_arguments.iter().any(|argument| {
-            self.types.contains_reference(*argument) || self.types.contains_view(*argument)
-        }) {
-            return Err(vec![restricted_generic_argument(span)]);
         }
         validate_generic_constraints(
             self.types,
@@ -6295,14 +6331,11 @@ fn collection_admission_message(
     admission: CollectionElementAdmission,
 ) -> String {
     match admission {
-        CollectionElementAdmission::ForbiddenBorrow => format!(
-            "{collection} cannot persist borrowed element type {element}; stored references and views require lifetime support not available in Vertical-16"
-        ),
-        CollectionElementAdmission::SymbolicStorageUnknown => format!(
-            "{collection} element type {element} is symbolically Relocatable, but its stored-borrow freedom cannot be proven; Vertical-16 keeps symbolic collection storage conservative"
+        CollectionElementAdmission::MissingStorable => format!(
+            "{collection} element type `{element}` does not satisfy `Storable`: persistent storage legality cannot be proven; stored references and views require lifetime support not yet available"
         ),
         CollectionElementAdmission::MissingRelocatable => format!(
-            "{collection} element type {element} does not provide the Relocatable capability required for owning collection storage"
+            "{collection} element type `{element}` does not satisfy `Relocatable`, required to relocate initialized elements during List growth"
         ),
         CollectionElementAdmission::InvalidType => {
             format!("{collection} element type {element} is invalid")

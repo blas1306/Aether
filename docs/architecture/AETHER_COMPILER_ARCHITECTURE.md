@@ -1635,3 +1635,48 @@ an empty-result contract and representing the newly uninitialized tail slot in
 MIR. A separate internal positive storable/lifetime guarantee should precede
 any attempt to admit symbolic `List<T>`; it should not be approximated by a
 public negative capability.
+
+
+## 34. NEXT-VERTICAL-17 implementation confirmation
+
+V17 introduces compiler-derived `Capability::Storable` and independent concrete
+`TypeProperties::is_storable`. Struct fields, all enum payloads and owning
+descriptor elements derive it structurally; references/views do not. The
+implication lattice remains Copy => Relocatable only. The same binder-owned
+symbolic guarantee engine derives applied aggregate storage without fabricating
+concrete GenericParam properties.
+
+`collection_element_admission(CollectionKind, TypeId)` centralizes positive
+requirements: Array needs Storable; List needs Storable plus Relocatable. Generic
+literal construction, push, reserve and Copy-gated Array fill now check before
+monomorphization. HIR shows capability sets, guarantees, requirements/admission
+and ordinary consuming Move operands. MIR/SSA audit concrete arena entries and
+reject symbolic runtime types; unused generic metadata may remain in the shared
+arena. LLVM has no Storable operation or runtime artifact. V16 relocation and
+recursive destruction glue remain unchanged.
+
+Three independent assumptions surfaced when the symbolic gate was removed:
+constant-length fill/reserve checking tried to obtain a symbolic layout; local
+inference did not match Array/List element patterns; and monomorphization
+mistook independent nested type applications for expanding recursion. Symbolic
+layout-dependent allocation checks now use the existing concrete runtime helpers,
+inference matches canonical collection kinds, and recursion compares the actual
+instantiation ancestry while retaining depth/count limits. Structural property
+substitution also now evaluates each argument in the outer binder context before
+binding member properties, avoiding capture in Holder<Holder<T>>.
+
+Existing phase timers remain intact. Four inclusive frontend detail counters
+measure binder/constraint resolution, symbolic property derivation, collection
+admission and nominal second-pass validation. The driver snapshots them before
+HIR dumps and lowering. They overlap each other and their parent phases; they
+are not additive to core time and are excluded from semantic identity/dumps.
+The README and reproducible measurement script define each boundary.
+
+Buffer retains its narrower concrete Copy/no-drop source gate as a constructor
+and cleanup implementation limitation, not a semantic equation between storage
+and Copy. Broadening it still needs separate type admission, fill validation and
+recursive element initialization/drop. Stored borrows, lifetimes, pinning,
+self-references, pop/remove and traits remain outside V17.
+
+See [NEXT_VERTICAL_17_REPORT.md](NEXT_VERTICAL_17_REPORT.md) for exact tests,
+measurements, accepted debt and the NEXT-VERTICAL-18 recommendation.

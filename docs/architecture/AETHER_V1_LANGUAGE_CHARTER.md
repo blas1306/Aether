@@ -270,6 +270,21 @@ unchecked indexing, manual allocation, intrinsics, custom allocators and FFI.
 Such operations MUST be locally visible, have specified optimizer/aliasing
 consequences and never make ordinary safe code implicitly unsafe.
 
+NEXT-VERTICAL-17 formalizes persistent owning-storage legality as the positive,
+compiler-derived `Storable` capability. It is independent of duplication,
+relocation and destruction: `Copy => Relocatable` remains the only cross-
+capability implication. References/views are not Storable under the current
+lifetime model. Structs and enums derive it from all stored fields/payloads;
+owning containers derive it from their elements and may still require drop.
+Array elements require Storable, while List elements additionally require
+Relocatable for growth. These same positive requirements admit symbolic generic
+collections before monomorphization. Fill separately requires Copy. Source code
+cannot implement capabilities, and no runtime capability machinery is introduced.
+This does not admit stored borrows, named lifetimes, borrowed returns, self-
+references, pinning or extraction operations. Buffer's retained Copy/no-drop
+source gate is a current constructor/drop implementation limit, not a general
+semantic law of storage.
+
 ## Performance and predictability
 
 Execution performance and compilation performance are independent product

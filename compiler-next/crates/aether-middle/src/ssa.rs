@@ -1314,14 +1314,21 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
             "SSA function table/body cardinality is invalid".into(),
         ));
     }
-    if ssa.types.entries().any(|(_, data)| match data {
-        TypeData::Buffer { element } | TypeData::View { element, .. } => {
-            !ssa.types.is_admitted_buffer_element(*element)
-        }
-        TypeData::Array { element } => !ssa.types.is_admitted_array_element(*element),
-        TypeData::List { element } => !ssa.types.is_admitted_list_element(*element),
-        _ => false,
-    }) {
+    // The shared arena retains generic declaration metadata. Runtime uses are
+    // checked for concreteness below; only concrete entries need this audit.
+    if ssa
+        .types
+        .entries()
+        .filter(|(ty, _)| !ssa.types.contains_generic(*ty))
+        .any(|(_, data)| match data {
+            TypeData::Buffer { element } | TypeData::View { element, .. } => {
+                !ssa.types.is_admitted_buffer_element(*element)
+            }
+            TypeData::Array { element } => !ssa.types.is_admitted_array_element(*element),
+            TypeData::List { element } => !ssa.types.is_admitted_list_element(*element),
+            _ => false,
+        })
+    {
         return Err(fail(
             "SSA contains a Buffer/View/Array/List with an inadmissible element type".into(),
         ));

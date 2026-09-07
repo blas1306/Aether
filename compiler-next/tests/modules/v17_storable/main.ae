@@ -1,0 +1,7 @@
+import storage;
+List<T> forwarded<T: Storable + Relocatable>(T value) { return storage.list<T>(value); }
+int main() {
+    storage.Box<Buffer<int>> box = storage.Box<Buffer<int>>(storage.array(Buffer<int>(1, 20)));
+    List<Buffer<int>> values = forwarded(Buffer<int>(1, 22));
+    return box.values[0][0] + values[0][0];
+}

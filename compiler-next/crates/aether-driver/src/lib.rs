@@ -236,6 +236,7 @@ pub fn compile_source(source: &SourceFile, emits: &[Emit]) -> Result<Compilation
     let target = TargetDescriptor::linux_x86_64();
     let hir = analyze_bodies_for_target(declared, target.properties)?;
     timings_ns.insert("frontend.semantic_bodies", started.elapsed().as_nanos());
+    timings_ns.extend(hir.types().semantic_timings_ns());
     if emits.contains(&Emit::Hir) {
         dumps.insert(Emit::Hir, hir.dump());
     }
@@ -299,6 +300,7 @@ pub fn compile_session(
     let target = TargetDescriptor::linux_x86_64();
     let hir = analyze_bodies_for_target(declared, target.properties)?;
     timings_ns.insert("frontend.semantic_bodies", started.elapsed().as_nanos());
+    timings_ns.extend(hir.types().semantic_timings_ns());
     if emits.contains(&Emit::Hir) {
         dumps.insert(Emit::Hir, hir.dump());
     }

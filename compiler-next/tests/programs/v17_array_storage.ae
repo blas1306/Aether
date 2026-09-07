@@ -1,0 +1,8 @@
+Array<T> singleton<T: Storable>(T value) {
+    Array<T> result = {value};
+    return result;
+}
+int main() {
+    Array<Buffer<int>> values = singleton(Buffer<int>(1, 42));
+    return values[0][0] - 42;
+}

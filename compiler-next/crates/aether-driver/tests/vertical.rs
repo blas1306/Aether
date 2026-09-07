@@ -1,4 +1,4 @@
-//! Cross-layer and native qualification through NEXT-VERTICAL-16.
+//! Cross-layer and native qualification through NEXT-VERTICAL-17.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -111,7 +111,14 @@ fn dumps_are_deterministic_and_all_phase_boundaries_are_visible() {
     let second = compile_source(&source, &emits).unwrap();
     assert_eq!(first.dumps, second.dumps);
     assert_eq!(first.dumps.len(), 5);
-    assert_eq!(first.timings_ns.len(), 8);
+    assert_eq!(
+        first
+            .timings_ns
+            .keys()
+            .filter(|key| !key.starts_with("frontend.detail."))
+            .count(),
+        8
+    );
 }
 
 #[test]
@@ -516,7 +523,14 @@ fn module_dumps_and_mangling_are_deterministic_and_collision_free() {
         llvm.find("__aether_v2_m1_a_f3_foo"),
         llvm.find("__aether_v2_m1_b_f3_foo")
     );
-    assert_eq!(first.timings_ns.len(), 10);
+    assert_eq!(
+        first
+            .timings_ns
+            .keys()
+            .filter(|key| !key.starts_with("frontend.detail."))
+            .count(),
+        10
+    );
 }
 
 #[test]
@@ -2292,4 +2306,328 @@ fn vertical16_owned_collections_relocate_and_drop_exactly_once() {
         let _ = fs::remove_file(&artifact);
         assert_eq!(status.code(), Some(expected), "{counter}");
     }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)] // Table covers independent storage, move and lifetime failures.
+fn vertical17_storable_diagnostics_and_parametric_ownership() {
+    for (source, code, detail) in [
+        (
+            "int f<T: Storable>(T x){return 0;}int main(){int x=0;return f<ref int>(&x);}",
+            "E0316",
+            "`Storable`; required by generic parameter `T`",
+        ),
+        (
+            "int f<T: Storable>(T x){return 0;}int main(){int x=0;return f<ref mut int>(&mut x);}",
+            "E0316",
+            "ref mut int64",
+        ),
+        (
+            "int f<T: Storable>(T x){return 0;}int main(){Buffer<int> b=Buffer<int>(1,0);return f<View<int>>(view(b));}",
+            "E0316",
+            "View<int64>",
+        ),
+        (
+            "int f<T: Storable>(T x){return 0;}int main(){Buffer<int> b=Buffer<int>(1,0);return f<ViewMut<int>>(view_mut(b));}",
+            "E0316",
+            "ViewMut<int64>",
+        ),
+        (
+            "Array<T> f<T>(T x){Array<T> a={x};return a;}int main(){return 0;}",
+            "E0304",
+            "does not satisfy `Storable`",
+        ),
+        (
+            "Array<T> f<T: Relocatable>(T x){Array<T> a={x};return a;}int main(){return 0;}",
+            "E0304",
+            "does not satisfy `Storable`",
+        ),
+        (
+            "List<T> f<T: Relocatable>(T x){List<T> a={};return a;}int main(){return 0;}",
+            "E0310",
+            "Storable",
+        ),
+        (
+            "List<T> f<T: Storable>(T x){List<T> a={};return a;}int main(){return 0;}",
+            "E0310",
+            "element type `T` does not satisfy `Relocatable`",
+        ),
+        (
+            "struct Box<T: Storable>{T x;}int main(){Box<ref int> x=Box<ref int>();return 0;}",
+            "E0316",
+            "Storable",
+        ),
+        (
+            "enum Box<T: Storable>{None,Some(T)}int main(){Box<ref int> x=Box<ref int>.None;return 0;}",
+            "E0316",
+            "Storable",
+        ),
+        (
+            "T helper<T: Storable>(T x){return x;}T f<T: Relocatable>(T x){return helper<T>(x);}int main(){return 0;}",
+            "E0316",
+            "Storable",
+        ),
+        (
+            "Array<T> f<T: Storable>(T x){return Array<T>(2,x);}int main(){return 0;}",
+            "E0314",
+            "requires Copy",
+        ),
+        (
+            "T f<T: Storable>(T x){T y=x;return x;}int main(){return 0;}",
+            "E0291",
+            "use after move",
+        ),
+        (
+            "T f<T: Storable>(T x){Array<T> a={x};return x;}int main(){return 0;}",
+            "E0291",
+            "use after move",
+        ),
+        (
+            "T f<T: Storable + Relocatable>(T x){List<T> a={x};return x;}int main(){return 0;}",
+            "E0291",
+            "use after move",
+        ),
+        (
+            "T f<T: Storable + Relocatable>(T x){List<T> a={};push(a,x);return x;}int main(){return 0;}",
+            "E0291",
+            "use after move",
+        ),
+        (
+            "ref T f<T: Storable>(ref T x){return x;}int main(){return 0;}",
+            "E0273",
+            "reference",
+        ),
+        (
+            "struct Bad<T: Storable>{ref T x;}int main(){return 0;}",
+            "E0274",
+            "reference",
+        ),
+        (
+            "int main(){int x=0;Array<ref int> a={&x};return 0;}",
+            "E0304",
+            "does not satisfy `Storable`",
+        ),
+        (
+            "int main(){List<ViewMut<int>> a={};return 0;}",
+            "E0310",
+            "Storable",
+        ),
+        (
+            "T f<T: Storable + Storable>(T x){return x;}int main(){return 0;}",
+            "E0315",
+            "duplicate `Storable`",
+        ),
+        (
+            "T f<T: Storeable>(T x){return x;}int main(){return 0;}",
+            "E0314",
+            "Storeable",
+        ),
+        (
+            "int f<T: Copy>(T x){return 0;}int main(){return f(Buffer<int>(1,0));}",
+            "E0317",
+            "inferred type",
+        ),
+        (
+            "int f<T: Storable>(T x){ref T r=&x;Array<T> a={x};return 0;}int main(){return 0;}",
+            "E0292",
+            "derived reference",
+        ),
+        (
+            "int f<T: Storable + Relocatable>(T x,T y){List<T> a={x};ref T r=&a[0];push(a,y);return 0;}int main(){return 0;}",
+            "E0313",
+            "derived element reference",
+        ),
+        (
+            "struct Holder<T>{T x;}struct Bad<T: Relocatable>{Array<Holder<T>> x;}int main(){return 0;}",
+            "E0304",
+            "does not satisfy `Storable`",
+        ),
+    ] {
+        let diagnostics =
+            compile_source(&SourceFile::new("v17-error.ae", source), &[]).expect_err(source);
+        assert_eq!(
+            diagnostics[0].code, code,
+            "{source}: {}",
+            diagnostics[0].message
+        );
+        assert!(
+            diagnostics[0].message.contains(detail),
+            "{source}: {}",
+            diagnostics[0].message
+        );
+        assert!(diagnostics[0].span.is_some());
+    }
+}
+
+#[test]
+fn vertical17_hir_retains_guarantees_requirements_and_consumption() {
+    let session = CompilationSession::discover(&program("v17_storable.ae")).unwrap();
+    let compilation = compile_session(session, &[Emit::Hir, Emit::Mir, Emit::Ssa]).unwrap();
+    let hir = &compilation.dumps[&Emit::Hir];
+    assert!(hir.contains("Storable"));
+    assert!(hir.contains("is_storable: true"));
+    assert!(hir.contains("element_requirements=[Storable]; element_admission=Admitted"));
+    assert!(
+        hir.contains("element_requirements=[Storable, Relocatable]; element_admission=Admitted")
+    );
+    let generic = hir
+        .split("generic HIR:")
+        .nth(1)
+        .unwrap()
+        .split("instances (")
+        .next()
+        .unwrap();
+    for operation in ["ArrayInit", "ArrayFill", "ListInit", "ListPush", "Move("] {
+        assert!(generic.contains(operation), "{operation}");
+    }
+    for phase in [Emit::Mir, Emit::Ssa] {
+        assert!(compilation.dumps[&phase].contains("Drop"));
+        assert!(compilation.dumps[&phase].contains("Relocate"));
+        assert!(!compilation.dumps[&phase].contains("Capability::Storable"));
+    }
+    assert!(!compilation.llvm.contains("Storable"));
+    assert!(!compilation.llvm.contains("@aether_storable"));
+    assert!(!compilation.llvm.contains("GenericParam"));
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical17_symbolic_collections_execute_natively_and_drop_owners() {
+    for (path, expected) in [
+        (program("v17_storable.ae"), 0),
+        (module_program("v17_storable"), 42),
+    ] {
+        let (_, status) = run_path(&path, &[], &ClangToolchain::default()).unwrap();
+        assert_eq!(status.code(), Some(expected), "{}", path.display());
+    }
+}
+
+#[test]
+fn vertical17_independent_instances_are_not_expanding_recursion() {
+    let source = "T keep<T: Storable>(T x){return x;}int main(){int a=keep(1);Array<int> b=keep<Array<int>>({a});Array<Array<int>> c=keep<Array<Array<int>>>({b});return c[0][0];}";
+    compile_source(&SourceFile::new("v17-finite.ae", source), &[]).unwrap();
+    let recursive = "int grow<T: Storable>(T x){Array<T> a={x};return grow<Array<T>>(a);}int main(){return grow(1);}";
+    let diagnostics =
+        compile_source(&SourceFile::new("v17-recursive.ae", recursive), &[]).unwrap_err();
+    assert_eq!(diagnostics[0].code, "E0265");
+}
+
+#[test]
+fn vertical17_all_borrowed_collection_elements_fail_storable() {
+    for (collection, code) in [("Array", "E0304"), ("List", "E0310")] {
+        for element in ["ref int", "ref mut int", "View<int>", "ViewMut<int>"] {
+            let source = format!("int main(){{{collection}<{element}> a={{}};return 0;}}");
+            let diagnostics =
+                compile_source(&SourceFile::new("v17-borrow.ae", source), &[]).unwrap_err();
+            assert_eq!(diagnostics[0].code, code);
+            assert!(diagnostics[0].message.contains("Storable"));
+        }
+    }
+    let source = "int accept<T: Storable>(T x){return 0;}int main(){int x=0;return accept(&x);}";
+    let diagnostics =
+        compile_source(&SourceFile::new("v17-inferred-ref.ae", source), &[]).unwrap_err();
+    assert_eq!(diagnostics[0].code, "E0317");
+    assert!(diagnostics[0].message.contains("inferred type `ref int64`"));
+    assert!(diagnostics[0].message.contains("Storable"));
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical17_repeated_nominal_binders_derive_storage_without_capture() {
+    let source = SourceFile::new(
+        "v17-nested.ae",
+        "struct Holder<T>{T value;}Array<Holder<Holder<T>>> wrap<T: Storable>(T x){Array<Holder<Holder<T>>> a={Holder<Holder<T>>(Holder<T>(x))};return a;}int main(){Array<Holder<Holder<Buffer<int>>>> a=wrap(Buffer<int>(1,42));return a[0].value.value[0];}",
+    );
+    let compilation = compile_source(&source, &[]).unwrap();
+    let artifact = temporary("v17-nested");
+    ClangToolchain::default()
+        .link_executable(&compilation.llvm, &artifact)
+        .unwrap();
+    let status = Command::new(&artifact).status().unwrap();
+    let _ = fs::remove_file(artifact);
+    assert_eq!(status.code(), Some(42));
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical17_exact_cleanup_and_relocation_counts() {
+    let session = CompilationSession::discover(&program("v17_storable.ae")).unwrap();
+    let compilation = compile_session(session, &[]).unwrap();
+    for (counter, expected) in [
+        ("@aether_heap_alloc_count", 67),
+        ("@aether_heap_free_count", 67),
+        ("@aether_relocation_count", 56),
+    ] {
+        let observed = format!(
+            "  %observed_count = load i64, ptr {counter}\n  %process_status = trunc i64 %observed_count to i32"
+        );
+        let llvm = compilation.llvm.replace(
+            "  %process_status = trunc i64 %aether_result to i32",
+            &observed,
+        );
+        let artifact = temporary("v17-count");
+        ClangToolchain::default()
+            .link_executable(&llvm, &artifact)
+            .unwrap();
+        let status = Command::new(&artifact).status().unwrap();
+        let _ = fs::remove_file(artifact);
+        assert_eq!(status.code(), Some(expected), "{counter}");
+    }
+}
+
+#[test]
+fn vertical17_semantic_detail_timers_have_explicit_scope() {
+    let session = CompilationSession::discover(&program("v17_storable.ae")).unwrap();
+    let compilation = compile_session(session, &[]).unwrap();
+    for name in [
+        "constraint_resolution",
+        "symbolic_property_derivation",
+        "collection_admission",
+        "nominal_second_pass",
+    ] {
+        let key = format!("frontend.detail.{name}");
+        assert!(compilation.timings_ns[key.as_str()] > 0, "{key}");
+    }
+    // These inclusive details overlap existing phase measurements. The driver
+    // retains the eight original core timers rather than replacing them.
+    for key in [
+        "frontend.parse",
+        "frontend.signature_collection",
+        "frontend.semantic_bodies",
+        "middle.mir_lower",
+        "middle.mir_verify",
+        "middle.ssa_build",
+        "middle.ssa_verify",
+        "backend.llvm",
+    ] {
+        assert!(compilation.timings_ns.contains_key(key));
+    }
+}
+
+#[test]
+fn vertical17_verifiers_reject_symbolic_collection_runtime_types() {
+    use aether_middle::{build_ssa, lower_hir, verify_mir, verify_ssa};
+    let source = SourceFile::new(
+        "v17-concrete.ae",
+        "Array<T> singleton<T: Storable>(T x){Array<T> a={x};return a;}int main(){Array<int> a=singleton(1);return a[0];}",
+    );
+    let hir = analyze(parse_source(&source).unwrap()).unwrap();
+    let symbolic = hir
+        .types()
+        .entries()
+        .find_map(|(ty, data)| {
+            (matches!(data, TypeData::Array { .. }) && hir.types().contains_generic(ty))
+                .then_some(ty)
+        })
+        .unwrap();
+    let raw = lower_hir(hir);
+    let mut corrupt = raw.clone();
+    corrupt.functions[0].locals[0].ty = symbolic;
+    let errors = verify_mir(corrupt).unwrap_err();
+    assert!(errors[0].message.contains("unresolved generic"));
+    let mir = verify_mir(raw).unwrap();
+    let mut ssa = build_ssa(&mir);
+    ssa.functions[0].blocks[0].instructions[0].ty = symbolic;
+    let errors = verify_ssa(ssa).unwrap_err();
+    assert!(errors[0].message.contains("unresolved generic"));
 }

@@ -1,7 +1,9 @@
-# Aether NEXT-VERTICAL-16
+# Aether NEXT-VERTICAL-17
 
 This directory is the isolated Rust implementation of the first reconstruction
-slice. It does not replace the production `aether` CLI or import any legacy
+slice. The current storage/capability contract is Vertical-17; the numbered
+Vertical-9..16 sections below retain historical qualification context.
+It does not replace the production `aether` CLI or import any legacy
 Python object, JSON schema, Initial IR, or SSA representation.
 
 ## Pipeline and crates
@@ -32,7 +34,7 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-16 grammar
+## Vertical-17 grammar
 
 ```text
 program    := import* (alias | struct | enum | function)+ EOF
@@ -45,7 +47,7 @@ variant    := IDENT | IDENT "(" type ("," type)* ")"
 function   := type IDENT generic-params? "(" parameters? ")" block
 generic-params := "<" generic-param ("," generic-param)* ">"
 generic-param  := IDENT (":" capability ("+" capability)*)?
-capability     := "Copy" | "Relocatable"
+capability     := "Copy" | "Relocatable" | "Storable"
 parameters := parameter ("," parameter)*
 parameter  := type IDENT
 type       := "ref" "mut"? type
@@ -783,6 +785,140 @@ V15 capability signature collection averaged 2.75 ms and semantic bodies
 symbolic derivation and nominal second-pass validation further, which remains
 measurement debt rather than a reason to speculate about their individual
 costs.
+
+## Vertical-17 Storable and symbolic collection legality
+
+`Storable` is a positive compiler-derived capability: a value may persist as
+an owning field/payload/element without introducing a lifetime dependency the
+current ownership model cannot represent. It is independent of `Copy`,
+`Relocatable`, size, and `needs_drop`. The only cross-capability implication is
+still `Copy => Relocatable`. Source code cannot implement or assert a capability.
+
+| Concrete type | Copy | Relocatable | Storable | Needs drop |
+|---|:---:|:---:|:---:|:---:|
+| `int` and other admitted scalars | yes | yes | yes | no |
+| `Buffer<int>` | no | yes | yes | yes |
+| `Array<int>` / `List<int>` | no | yes | yes | yes |
+| `ref int` / `ref mut int` | yes | yes | no | no |
+| `View<int>` / `ViewMut<int>` | yes | yes | no | no |
+
+Structs derive Storable iff every substituted field does; enums require every
+payload of every variant. Owning descriptors derive storage legality from their
+element without requiring that element to be Copy or no-drop. Descriptor
+relocatability is independent of element relocatability. Concrete properties
+are memoized actual facts; `guarantees_storable` and `guarantees_capability`
+resolve symbolic declaration guarantees structurally. A generic parameter's
+`TypeProperties` remains unknown and potentially drop-requiring even under
+`T: Storable`. Nested applications evaluate arguments in their outer binder
+context before deriving members, including `Holder<Holder<T>>`.
+
+One `collection_element_admission(CollectionKind, TypeId)` query applies
+positive requirements to both concrete and symbolic types:
+
+- `Array<T>` requires `T: Storable`.
+- `List<T>` requires `T: Storable + Relocatable` because growth relocates live elements.
+- Array fill additionally requires `T: Copy` because it duplicates a value.
+
+```aether
+Array<T> singleton<T: Storable>(T value) {
+    Array<T> result = {value};
+    return result;
+}
+List<T> append<T: Storable + Relocatable>(T value) {
+    List<T> result = {};
+    push(result, value);
+    return result;
+}
+Array<T> repeated<T: Storable + Copy>(T value) {
+    return Array<T>(3, value);
+}
+```
+
+Literal elements and push arguments consume a non-guaranteed-Copy root; adding
+Copy permits reuse. Storable alone does not remove cleanup obligations. Explicit,
+inferred, forwarded and constrained nominal applications validate before
+`InstanceId` allocation. Exact local inference also matches Array/List element
+patterns. Array literal lowering initializes each final slot once from a typed
+value: it performs no post-initialization element relocation. Source Move is an
+ownership transfer, distinct from V16's physical Relocate. Future address-sensitive
+types will need their own initialization/ABI rules; they are not implemented.
+
+HIR dumps expose generic capability sets, concrete properties, symbolic
+guarantees, each collection's element requirements/admission, and Move operands
+in init/push. Monomorphization supplies ordinary concrete MIR/SSA operations and
+re-synthesizes cleanup. MIR/SSA audit concrete type entries and reject symbolic
+runtime locals/results; the shared arena may retain generic declaration metadata.
+LLVM has no Storable operation, dispatch, dictionary, vtable or runtime overhead.
+List relocation/drop glue and allocation semantics remain V16's.
+
+Stored references/views remain forbidden. Storable does not introduce named
+lifetimes, borrowed returns, lifetime-parameterized storage, self-references,
+pinning, pop/remove, partial moves, traits or mathematical types. Array/List
+remain zero-based collections; future Vector/Matrix remain one-based mathematics.
+
+**Buffer distinction:** semantic persistent storage requires a Storable element;
+repeating one fill additionally needs Copy. V17 derives Buffer storage properties
+independently, but retains the source-level V10 concrete Copy/no-drop admission
+as an implementation restriction: the only initializer is fill and Buffer drop
+glue does not recursively destroy elements. It is not a universal type-level
+law that owning storage needs Copy. A future Buffer extension can split type
+admission from fill, add recursive element cleanup and a fully initialized
+literal/builder API, or retain Buffer as the restricted substrate. V17 does not
+choose or implement that extension. Symbolic Buffer/View construction remains deferred.
+
+Qualification adds 11 Rust tests to the 114-test baseline, including native
+symbolic owner/aggregate/nested collections, parameter consumption, borrowed
+rejection, inference, cross-module constraints and concrete verifier mutations.
+The full V17 fixture observes 67 allocations, 67 frees and 56 root-element List
+relocations. V16 still observes 43/43 and 12. See the complete
+[V17 implementation report](../docs/architecture/NEXT_VERTICAL_17_REPORT.md).
+
+### Vertical-17 timing methodology
+
+The existing timers retain their scope:
+
+| Timer | Inclusive measured work |
+|---|---|
+| `module.discovery` | source-root setup, transitive discovery, file reads, parsing and module graph assembly |
+| `module.file_load` | sum of file reads inside discovery |
+| `frontend.parse` | lex/parse; summed per module for a session |
+| `frontend.signature_collection` | global declarations, aliases, generic binders, fields/payloads, nominal second pass, signatures |
+| `frontend.semantic_bodies` | target layouts, parametric body checking/ownership, monomorphization, concrete layouts and HIR verification |
+| `middle.mir_lower` / `middle.mir_verify` | HIR-to-MIR lowering / MIR verification |
+| `middle.ssa_build` / `middle.ssa_verify` | SSA construction / SSA verification |
+| `backend.llvm` | LLVM text and runtime-helper emission |
+
+Four additional `frontend.detail.*` counters are snapshotted immediately after
+semantic bodies, before HIR dump generation and middle/backend processing:
+
+| Detail suffix | Inclusive measured work |
+|---|---|
+| `constraint_resolution` | declaration binder collection, constraint-name lookup/deduplication, registration/interning; excludes application constraint checking |
+| `symbolic_property_derivation` | each top-level guarantee query whose type contains a generic parameter, including recursive argument/member derivation; excludes concrete property queries |
+| `collection_admission` | each Array/List element admission query, including its capability queries |
+| `nominal_second_pass` | post-registration validation of fields, enum payloads, aliases, container entries and stored-borrow restrictions; excludes function signatures/bodies |
+
+These are nested inclusive measurements, not disjoint costs. Never add detail
+timers to phase totals, nor discovery to its file-read/parse components. Timer
+bookkeeping has compiler-side overhead and is excluded from semantic identity and
+deterministic dumps. The measurement script's `core` is exactly the original
+eight parse-through-LLVM timers; it excludes discovery, file I/O, dumps, process
+startup, output writing and clang/linking. Layout-dependent generic allocation
+size checks remain in concrete runtime helpers when symbolic layout is unknown.
+
+Reproduce a snapshot after building the debug driver, with no concurrent builds:
+
+```bash
+cargo build -p aether-driver --bin aether-next
+python3 tests/measure-v17.py --runs 10
+```
+
+The script launches a fresh process for each build, discards one warmup per
+fixture, then reports mean/median milliseconds across ten warm-cache builds.
+Clang runs for each build but is outside core timings. Fixture contents and
+compiler build/profile matter; earlier V13..16 numbers are historical snapshots,
+not comparable before/after measurements. Raw results and summarized values are
+linked from the V17 report.
 
 ## Bootstrap ABI and deliberate limits
 

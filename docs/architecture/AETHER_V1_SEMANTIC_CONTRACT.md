@@ -1089,6 +1089,75 @@ Consequently symbolic Array/List element applications remain rejected with a
 storage-proof diagnostic, while concrete substituted generic aggregates are
 admitted when the central collection predicate succeeds.
 
+### 10.7 Positive persistent storage — NEXT-VERTICAL-17 IMPLEMENTED
+
+This section supersedes V16's concrete-only Array/List admission and symbolic
+storage rejection. `Storable` means that a value may reside persistently as an
+owning subobject/element without an unrepresentable lifetime dependency under
+the **current** ownership model. It is compiler-derived only. It is not Copy,
+Relocatable, no-drop, Sized, lifetime erasure, or a user assertion.
+
+The closed capability set is `Copy`, `Relocatable`, `Storable`; inline grammar
+accepts any conjunction (`T: Storable`, `T: Copy + Storable`,
+`T: Storable + Relocatable`). The only non-reflexive implication remains
+`Copy => Relocatable`. There is no negative constraint, where clause, user impl,
+trait dispatch or new grammar family.
+
+| Type | Copy | Relocatable | Storable | needs_drop |
+|---|:---:|:---:|:---:|:---:|
+| admitted scalar | yes | yes | yes | no |
+| `Buffer<int>`, `Array<int>`, `List<int>` | no | yes | yes | yes |
+| `ref int`, `ref mut int`, `View<int>`, `ViewMut<int>` | yes | yes | no | no |
+
+A struct is Storable iff every substituted field is Storable. An enum is
+Storable iff every payload of every variant is Storable. One forbidden borrowed
+payload invalidates that property for the whole enum, even if currently inactive.
+Owning descriptors recursively derive Storable from their element. Nested owning
+Array/List and owning aggregates require no special whitelist.
+
+Concrete `TypeProperties` has independent `is_known`, `is_copy`,
+`is_relocatable`, `is_storable`, `needs_drop`. Symbolic guarantees belong to exact
+declaration-owned generic parameters and are derived through applied aggregates;
+they never become concrete facts on an unresolved GenericParam. A generic
+`T: Storable` remains potentially non-Copy, non-Relocatable and drop-requiring.
+`Holder<T>` and `Maybe<T>` derive only the properties guaranteed by all members.
+
+Array element admission requires Storable only. Fixed storage is initialized
+once per slot; source value transfer during initialization is not relocation of
+an existing initialized Array element. There is no Array growth or post-
+construction element relocation. Future address-sensitive types will require an
+initialization/ABI design before admission; this vertical adds no such type.
+List element admission requires both Storable and Relocatable, as its growth
+physically transfers initialized elements to new storage. These predicates apply
+parametrically before instantiation, not only after concrete substitution.
+
+`Array<T> a = {x}` is legal under `T: Storable`; the List equivalent and push
+need `T: Storable + Relocatable`. Without Copy, a source root is consumed and
+unavailable afterward. A Copy guarantee permits reuse. Array fill additionally
+requires Copy, independently of storage legality. No capability removes drop
+obligations; concrete instantiation supplies the existing recursive drop and
+relocation glue, with no runtime capability representation.
+
+Explicit, inferred and forwarded function applications, plus constrained struct/
+enum applications, validate capabilities before `InstanceId` allocation.
+Diagnostics identify parameter, required capability and actual type. Storage,
+relocation and fill duplication failures are distinct. Existing V9 generic
+borrow/escape restrictions still apply after capability checking; Storable never
+permits reference/view fields, payloads, elements or borrowed returns.
+
+Buffer's semantic storage property and initialization API are distinct. Its
+current only initializer repeats a fill and its current drop frees the backing
+allocation without element recursion, so the V10 concrete Copy/no-drop source
+admission remains an explicit implementation restriction. Broadening Buffer
+would require separate type admission, Copy-only fill validation, recursive
+cleanup and an initializer that creates every owning element once. V17 does not
+implement that extension or claim that storage semantically implies Copy.
+
+No pop/remove, generalized slot extraction, named lifetimes, stored borrowed
+lifetime parameters, self-references, pinning, user capability implementations,
+behavioral traits, Vector or Matrix are introduced. Zero-based collection and
+future one-based mathematical indexing remain separate.
+
 ## 11. Layout, ABI and FFI
 
 ### 11.1 Layout — DECIDED/OPEN

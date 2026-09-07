@@ -1,0 +1,67 @@
+struct Dataset { Buffer<int> values; int count; }
+struct Holder<T> { T value; }
+enum Maybe<T> { None, Some(T) }
+struct Box<T: Storable> { T value; }
+enum Stored<T: Storable> { None, Some(T) }
+struct ArrayBox<T: Storable> { Array<T> values; }
+struct ListBox<T: Storable + Relocatable> { List<T> values; }
+
+T keep<T: Storable>(T value) { return value; }
+T forward<T: Storable + Relocatable>(T value) { return keep<T>(value); }
+Array<T> singleton<T: Storable>(T value) { Array<T> result = {value}; return result; }
+List<T> growing<T: Storable + Relocatable>(T a, T b, T c) {
+    List<T> result = {a};
+    push(result, b);
+    push(result, c);
+    reserve(result, 8);
+    return result;
+}
+Array<T> fill<T: Storable + Copy>(T value) { return Array<T>(3, value); }
+T copied<T: Copy + Storable>(T value) {
+    Array<T> a = {value, value};
+    List<T> l = {};
+    push(l, value);
+    push(l, value);
+    return value;
+}
+Array<Holder<T>> holder<T: Storable>(T value) {
+    Array<Holder<T>> a = {Holder<T>(value)};
+    return a;
+}
+List<Maybe<T>> maybe<T: Storable + Relocatable>(T value) {
+    List<Maybe<T>> a = {Maybe<T>.None};
+    push(a, Maybe<T>.Some(value));
+    return a;
+}
+usize size<T: Storable>(ref Array<T> value) { return length(*value); }
+int main() {
+    int n = copied(keep(42));
+    Buffer<int> b = keep(Buffer<int>(1, n));
+    Array<Buffer<int>> a = singleton(b);
+    List<Buffer<int>> l = growing(Buffer<int>(1, 10), Buffer<int>(1, 20), Buffer<int>(1, 30));
+    Array<int> f = fill(7);
+    Dataset d = keep(Dataset(Buffer<int>(1, 4), 1));
+    Box<Buffer<int>> box = Box<Buffer<int>>(forward(Buffer<int>(1, 5)));
+    Stored<Buffer<int>> stored = Stored<Buffer<int>>.Some(Buffer<int>(1, 6));
+    Array<Holder<Buffer<int>>> h = holder(Buffer<int>(1, 8));
+    List<Maybe<Buffer<int>>> m = maybe(Buffer<int>(1, 9));
+    ArrayBox<Buffer<int>> ab = ArrayBox<Buffer<int>>(singleton(Buffer<int>(1, 11)));
+    ListBox<Buffer<int>> lb = ListBox<Buffer<int>>(growing(Buffer<int>(1, 12), Buffer<int>(1, 13), Buffer<int>(1, 14)));
+    Array<Array<int>> aa = singleton(keep(singleton(15)));
+    Array<List<int>> al = singleton(keep(growing(16, 17, 18)));
+    List<Array<int>> la = growing(singleton(19), singleton(20), singleton(21));
+    List<List<int>> ll = growing(growing(22, 23, 24), growing(25, 26, 27), growing(28, 29, 30));
+    List<Dataset> ld = growing(Dataset(Buffer<int>(1, 31), 1), Dataset(Buffer<int>(1, 32), 1), Dataset(Buffer<int>(1, 33), 1));
+    if (size(&a) != 1) { return 1; }
+    if (a[0][0] != 42) { return 2; }
+    if (l[0][0] + l[2][0] != 40) { return 3; }
+    if (f[2] != 7) { return 4; }
+    if (d.values[0] + box.value[0] + h[0].value[0] != 17) { return 5; }
+    if (ab.values[0][0] + lb.values[2][0] != 25) { return 6; }
+    if (aa[0][0] + al[0][2] + la[2][0] + ll[2][2] + ld[2].values[0] != 117) { return 7; }
+    match (stored) {
+        Stored<Buffer<int>>.None => { return 8; }
+        Stored<Buffer<int>>.Some(value) => { if (value[0] != 6) { return 9; } }
+    }
+    return 0;
+}

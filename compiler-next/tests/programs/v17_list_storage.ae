@@ -1,0 +1,10 @@
+List<T> growing<T: Storable + Relocatable>(T first, T second) {
+    List<T> result = {first};
+    push(result, second);
+    reserve(result, 8);
+    return result;
+}
+int main() {
+    List<Buffer<int>> values = growing(Buffer<int>(1, 20), Buffer<int>(1, 22));
+    return values[0][0] + values[1][0] - 42;
+}

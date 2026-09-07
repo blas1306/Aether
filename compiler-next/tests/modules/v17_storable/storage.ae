@@ -1,0 +1,8 @@
+struct Box<T: Storable> { Array<T> values; }
+Array<T> array<T: Storable>(T value) { Array<T> result = {value}; return result; }
+List<T> list<T: Storable + Relocatable>(T value) {
+    List<T> result = {};
+    push(result, value);
+    reserve(result, 4);
+    return result;
+}
