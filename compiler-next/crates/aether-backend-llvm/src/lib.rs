@@ -1201,6 +1201,12 @@ fn emit_function(
                     )
                     .unwrap();
                 }
+                SsaOp::VectorTransposeMove { operand, .. } => {
+                    // LLVM has no semantic orientation. This aliases the same
+                    // descriptor bits; no backing/element address is evaluated.
+                    let value = llvm_operand(operand);
+                    writeln!(output, "  %v{} = select i1 true, {{ ptr, i64 }} {value}, {{ ptr, i64 }} {value} ; VectorTransposeMove", instruction.result.0).unwrap();
+                }
                 SsaOp::VectorInit {
                     element_type,
                     elements,

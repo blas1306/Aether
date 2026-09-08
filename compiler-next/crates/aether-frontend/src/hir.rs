@@ -722,6 +722,12 @@ pub enum HirExprKind {
         length: Box<HirExpr>,
         initial: Box<HirExpr>,
     },
+    /// Consumes one owner and transfers its unchanged {ptr, dimension} descriptor.
+    /// Source/result `TypeIds` encode the exact element and opposite orientations.
+    VectorTranspose {
+        operand: Box<HirExpr>,
+        source_type: TypeId,
+    },
     /// Expected-type-resolved `[...]` mathematical construction.
     VectorInit {
         element_type: TypeId,
@@ -3074,6 +3080,13 @@ impl Monomorphizer<'_> {
                 length: Box::new(self.substitute_expr(length, substitution)?),
                 initial: Box::new(self.substitute_expr(initial, substitution)?),
             },
+            HirExprKind::VectorTranspose {
+                operand,
+                source_type,
+            } => HirExprKind::VectorTranspose {
+                operand: Box::new(self.substitute_expr(operand, substitution)?),
+                source_type: self.substitute_type(*source_type, substitution, expression.span)?,
+            },
             HirExprKind::VectorInit {
                 element_type,
                 elements,
@@ -4121,7 +4134,8 @@ impl OwnershipAnalysis<'_> {
                 }
                 Ok(())
             }
-            HirExprKind::Coerce { operand, .. }
+            HirExprKind::VectorTranspose { operand, .. }
+            | HirExprKind::Coerce { operand, .. }
             | HirExprKind::ExplicitCast { operand, .. }
             | HirExprKind::Unary { operand, .. } => self.expr(operand),
             HirExprKind::Binary { left, right, .. } => {
@@ -4245,6 +4259,7 @@ impl OwnershipAnalysis<'_> {
 
     fn known_length(&self, expr: &HirExpr) -> Option<u64> {
         match &expr.kind {
+            HirExprKind::VectorTranspose { operand, .. } => self.known_length(operand),
             HirExprKind::BufferInit { length, .. } | HirExprKind::ArrayFill { length, .. } => {
                 match length.kind {
                     HirExprKind::Int(value) => u64::try_from(value).ok(),
@@ -4611,6 +4626,34 @@ impl Analyzer<'_> {
     }
 
     fn effect_statement(&mut self, expression: &AstExpr) -> Result<HirStmtKind, Vec<Diagnostic>> {
+        if !matches!(&expression.kind, AstExprKind::Call { callee, .. }
+            if matches!(callee.as_str(), "push" | "reserve"))
+        {
+            let initializer = self.expression(expression, None)?.expr;
+            if !matches!(initializer.kind, HirExprKind::Call { .. })
+                || !self.types.guarantees_copy(initializer.ty)
+            {
+                return Err(vec![Diagnostic::new(
+                    "E0311",
+                    Phase::Semantic,
+                    DiagnosticCategory::Unsupported,
+                    "a discarded declaration call must return Copy; bind owning results explicitly",
+                    Some(expression.span),
+                )]);
+            }
+            // A Copy sink uses existing call evaluation/ownership machinery and
+            // has no cleanup obligation or source-visible binding.
+            let local = LocalId(self.locals.len() as u32);
+            self.locals.push(HirLocal {
+                id: local,
+                name: format!("$discard{}", local.0),
+                ty: initializer.ty,
+                span: expression.span,
+                parameter: false,
+                address_taken: false,
+            });
+            return Ok(HirStmtKind::Local { local, initializer });
+        }
         let AstExprKind::Call {
             callee,
             type_arguments,
@@ -4621,14 +4664,11 @@ impl Analyzer<'_> {
                 "E0311",
                 Phase::Semantic,
                 DiagnosticCategory::Unsupported,
-                "only push(...) and reserve(...) are admitted as effect statements",
+                "effect statements require push/reserve or a declared call with a Copy result",
                 Some(expression.span),
             )]);
         };
-        if !type_arguments.is_empty()
-            || args.len() != 2
-            || !matches!(callee.as_str(), "push" | "reserve")
-        {
+        if !type_arguments.is_empty() || args.len() != 2 {
             return Err(vec![Diagnostic::new(
                 "E0311",
                 Phase::Semantic,
@@ -5204,6 +5244,9 @@ impl Analyzer<'_> {
                 if callee == "Array" {
                     return self.array_fill(type_arguments, args, e.span, expected);
                 }
+                if callee == "transpose" {
+                    return self.vector_transpose(type_arguments, args, e.span, expected);
+                }
                 if callee == "dimension" {
                     return self.vector_dimension(type_arguments, args, e.span, expected);
                 }
@@ -5671,6 +5714,54 @@ impl Analyzer<'_> {
             },
             constant: None,
         })
+    }
+
+    fn vector_transpose(
+        &mut self,
+        type_arguments: &[AstType],
+        args: &[AstExpr],
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        let invalid = |message| {
+            vec![Diagnostic::new(
+                "E0328",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                message,
+                Some(span),
+            )]
+        };
+        if !type_arguments.is_empty() || args.len() != 1 {
+            return Err(invalid(
+                "Vector transpose expects exactly one consuming operand and no type arguments",
+            ));
+        }
+        // Derive orientation from the operand, independently of destination context.
+        let operand = self.expression(&args[0], None)?.expr;
+        let Some(TypeData::Vector {
+            element,
+            orientation,
+        }) = self.types.get(operand.ty)
+        else {
+            return Err(invalid("Vector transpose operand must be an owning Vector"));
+        };
+        let ty = self.types.intern_vector(*element, orientation.transposed());
+        let source_type = operand.ty;
+        self.coerce(
+            Checked {
+                expr: HirExpr {
+                    kind: HirExprKind::VectorTranspose {
+                        operand: Box::new(operand),
+                        source_type,
+                    },
+                    ty,
+                    span,
+                },
+                constant: None,
+            },
+            expected,
+        )
     }
 
     fn vector_dimension(
@@ -7475,6 +7566,23 @@ fn verify_expr(
                 return Err(fail("HIR Buffer construction contract invalid".into()));
             }
         }
+        HirExprKind::VectorTranspose {
+            operand,
+            source_type,
+        } => {
+            verify_expr(operand, f, sigs, structs, enums, types, fail)?;
+            if operand.ty != *source_type
+                || matches!(operand.kind, HirExprKind::Local(_) | HirExprKind::Load(_))
+                || !matches!((types.get(*source_type), types.get(e.ty)),
+                (Some(TypeData::Vector { element: a, orientation: x }),
+                 Some(TypeData::Vector { element: b, orientation: y }))
+                if a == b && x.transposed() == *y)
+            {
+                return Err(fail(
+                    "HIR Vector transpose consuming orientation/type contract invalid".into(),
+                ));
+            }
+        }
         HirExprKind::VectorInit {
             element_type,
             elements,
@@ -8089,6 +8197,57 @@ mod tests {
         }
         assert!(verify_hir(&corrupt).is_err());
     }
+    #[test]
+    fn vertical22_hir_rejects_corrupt_transpose_contracts() {
+        let hir = check(
+            "int main(){Vector<int,Row> r=[1];Vector<int,Column> c=transpose(r);return c[1];}",
+        )
+        .unwrap();
+        for case in 0..5 {
+            let mut corrupt = hir.clone();
+            let initializer = corrupt.functions[0]
+                .body
+                .statements
+                .iter_mut()
+                .find_map(|statement| {
+                    if let HirStmtKind::Local { initializer, .. } = &mut statement.kind
+                        && matches!(initializer.kind, HirExprKind::VectorTranspose { .. })
+                    {
+                        Some(initializer)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+            let HirExprKind::VectorTranspose {
+                operand,
+                source_type,
+            } = &mut initializer.kind
+            else {
+                panic!()
+            };
+            match case {
+                0 => initializer.ty = *source_type,
+                1 => *source_type = TypeId::BOOL,
+                2 => {
+                    initializer.ty = corrupt
+                        .types
+                        .intern_vector(TypeId::FLOAT64, Orientation::Column)
+                }
+                3 => initializer.ty = TypeId::INT64,
+                4 => {
+                    let HirExprKind::Move(local) = operand.kind else {
+                        panic!()
+                    };
+                    operand.kind = HirExprKind::Local(local);
+                }
+                _ => unreachable!(),
+            }
+            let errors = verify_hir(&corrupt).unwrap_err();
+            assert!(errors[0].message.contains("Vector transpose"), "{errors:?}");
+        }
+    }
+
     #[test]
     fn vertical21_hir_rejects_erased_vector_contracts() {
         let hir = check("int main(){Vector<int,Row> v=[10,20];usize n=dimension(v);int x=v[1];return x+int(n);}").unwrap();

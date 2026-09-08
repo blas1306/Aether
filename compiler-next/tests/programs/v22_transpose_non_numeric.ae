@@ -1,0 +1,9 @@
+struct Item { Buffer<int> data; }
+int main() {
+    Vector<Item,Row> r=[Item(Buffer<int>(1,42))];
+    Vector<Item,Column> c=transpose(r);
+    Vector<bool,Column> b=[true,false];
+    Vector<bool,Row> b2=transpose(b);
+    if(b2[1]) { if(b2[2]) { return 1; } return c[1].data[0]-42; }
+    return 2;
+}

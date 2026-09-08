@@ -245,6 +245,16 @@ pub enum Orientation {
     Column,
 }
 
+impl Orientation {
+    #[must_use]
+    pub const fn transposed(self) -> Self {
+        match self {
+            Self::Row => Self::Column,
+            Self::Column => Self::Row,
+        }
+    }
+}
+
 /// Source index contract, selected by canonical container type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IndexSemantics {

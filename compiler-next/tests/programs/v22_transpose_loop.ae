@@ -1,0 +1,10 @@
+int main() {
+    usize i=0;
+    while(i<3) {
+        Vector<Buffer<int>,Row> r=[Buffer<int>(1,42)];
+        Vector<Buffer<int>,Row> back=transpose(transpose(r));
+        if(back[1][0]!=42) { return 1; }
+        i=i+1;
+    }
+    return 0;
+}

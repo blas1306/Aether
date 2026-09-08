@@ -1,0 +1,9 @@
+import storage;
+int main() {
+    Vector<Buffer<int>,Row> r=[Buffer<int>(1,42)];
+    Vector<Buffer<int>,Column> c=storage.identity(storage.toColumn(r));
+    Vector<Buffer<int>,Row> back=storage.identity(storage.toRow(c));
+    if(back[1][0]!=42) { return 1; }
+    storage.consume(transpose(back));
+    return 0;
+}

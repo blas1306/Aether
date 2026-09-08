@@ -1833,3 +1833,43 @@ descriptors, without forcing unrelated values into memory. Qualification include
 native mixed-base nesting, exact heap counts, reversed owning-element free order,
 orientation diagnostics and independent malformed-IR rejection. See
 [NEXT_VERTICAL_21_REPORT.md](NEXT_VERTICAL_21_REPORT.md) for exact tests and snapshots.
+
+
+## 39. NEXT-VERTICAL-22 implementation confirmation
+
+V22 resolves neutral transpose application to consuming HirExprKind::VectorTranspose.
+The operand is checked without destination context; canonical element identity
+and Orientation::transposed derive the result. source_type plus enclosing result
+type retain all semantic metadata without a redundant orientation/layout cache.
+Monomorphization substitutes both types and the operand. Existing ownership
+analysis visits the operand Move, preserves dimension facts, rejects live borrows
+and handles branches with normal cleanup flags.
+
+MIR and SSA retain explicit VectorTransposeMove. Each verifier independently
+checks both canonical types, equal elements and opposite orientations. Canonical
+Vector layout is always {ptr,dimension}. MIR consumes the operand and initializes
+the result through normal owner dataflow. SSA audits materialized transpose
+source/result uses independently, rejecting duplication and direct phi escape;
+root assignment still happens through normal Move, so conditional roots/phis
+need no additional state. The audit counts uses in a single function traversal
+and skips its counting pass for functions without transpose.
+
+LLVM emits a constant select of the existing aggregate bits. There is no
+transpose runtime helper, orientation field, branch, allocation/free, element
+GEP, copy, relocation or drop. This remains true for owning Buffer elements and
+empty Vector. Final destination cleanup uses existing reverse drop. QRow/QColumn
+mangling and imported signature identity remain unchanged.
+
+The required `consume(transpose(v));` form exposed the V14 restriction that
+only push/reserve could be effect statements. Declared local/imported calls
+with a guaranteed Copy result now lower to a compiler-only sink local. This
+reuses ordinary call argument ownership and has no cleanup/lifetime obligation.
+Discarded owning results still require explicit bindings; no void type or
+arbitrary expression-statement semantics is added.
+
+Qualification instruments individual operations for pointer/dimension identity
+and exact zero heap/relocation deltas; native fixtures cover both orientations,
+empty, double transpose, generics, refs, conditional cleanup, aggregates and
+modules. Malformed HIR/MIR/SSA tests keep the semantic bridge explicit. See
+[NEXT_VERTICAL_22_REPORT.md](NEXT_VERTICAL_22_REPORT.md) for exact qualification,
+compilation snapshots, architectural limits and NEXT-VERTICAL-23 recommendation.

@@ -29,3 +29,4 @@ v18_pop	accept:42	cross-module generic whole-element List extraction
 v19_swap_remove	accept:42	V19 cross-module generic indexed owning extraction
 v20_remove	accept:42	V20 cross-module generic order-preserving owning extraction
 v21_vectors	accept:0	V21 cross-module Row/Column signatures and generic aggregates
+v22_transpose	accept:0	consuming Vector transpose across modules preserves orientation and ownership

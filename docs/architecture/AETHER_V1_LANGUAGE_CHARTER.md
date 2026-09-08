@@ -398,3 +398,15 @@ references compose with existing ownership; non-Copy partial extraction and
 replacement remain rejected. Matrix's `[a,b; c,d]` and `A[i,j]` are reserved for a
 future structurally 2D type. Mathematical arithmetic and numeric capabilities
 are separate milestones. See [the V21 report](NEXT_VERTICAL_21_REPORT.md).
+
+
+## NEXT-VERTICAL-22 consuming transpose
+
+`transpose(v)` explicitly consumes an owning Vector and flips Row/Column in
+its canonical type. It preserves the exact element type, backing pointer,
+dimension, component order and values. This is an O(1) descriptor transfer with
+zero allocation, free, element copy, relocation or drop. The source is moved;
+live element borrows prevent consumption. No implicit orientation assignment is
+added. T: Storable suffices, including owning elements; no numeric capability
+is required. Transpose never conjugates. Borrowed VectorView transpose and
+Matrix transpose require separate contracts. See [the V22 report](NEXT_VERTICAL_22_REPORT.md).

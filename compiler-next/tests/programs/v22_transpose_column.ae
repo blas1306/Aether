@@ -1,0 +1,10 @@
+int main() {
+    Vector<double,Column> c=[10.0,20.0,30.0];
+    usize before=dimension(c);
+    Vector<double,Row> r=transpose(c);
+    if(dimension(r)!=before) { return 1; }
+    if(r[1]!=10.0) { return 2; }
+    if(r[2]!=20.0) { return 3; }
+    if(r[3]!=30.0) { return 4; }
+    return 0;
+}

@@ -1,7 +1,7 @@
-# Aether NEXT-VERTICAL-21
+# Aether NEXT-VERTICAL-22
 
 This directory is the isolated Rust implementation of the first reconstruction
-slice. The current mathematical Vector foundation is Vertical-21; the numbered
+slice. The current mathematical operation is the consuming Vector transpose of Vertical-22; the numbered
 Vertical-9..17 sections below retain historical qualification context.
 It does not replace the production `aether` CLI or import any legacy
 Python object, JSON schema, Initial IR, or SSA representation.
@@ -83,8 +83,9 @@ Braces in expression position form a neutral `CollectionLiteral`; braces
 required by a statement/declaration remain blocks. Semantic analysis resolves
 the literal from its expected type. Vertical-14 admits `Array<T>` and `List<T>`
 as expected collection kinds, including the canonical empty literal `{}`.
-Effect statements are currently restricted semantically to `push(...)` and
-`reserve(...)`; this is not a general void-expression or method system.
+Effect statements admit `push(...)`, `reserve(...)`, and (since V22) declared
+calls with a Copy result, which is discarded. Owning results require an explicit
+binding; this is not a general void-expression or method system.
 
 The semantic restriction is narrower than the expression-shaped grammar:
 `&` and `&mut` accept only an existing resolved `Place`. No temporary lifetime
@@ -1234,3 +1235,66 @@ snapshots using `python3 tests/measure-v21.py --runs 10`, optionally with
 `--baseline-binary <separate-v20-driver> --baseline-revision <revision>`.
 No arithmetic, dot/outer/norm/transpose, Matrix, methods, traits, Numeric/Scalar,
 Vector views, or new List operations are implemented by V21.
+
+
+## Vertical-22 explicit consuming Vector transpose
+
+```aether
+Vector<T,Column> toColumn<T:Storable>(Vector<T,Row> v) {
+    return transpose(v);
+}
+int main() {
+    Vector<int,Row> r = [10,20,30];
+    Vector<int,Column> c = transpose(r);
+    Vector<int,Row> r2 = transpose(c);
+    return r2[1] + r2[2] + r2[3] - 60;
+}
+```
+
+`transpose(vector)` consumes its operand and derives its result type without
+expected-type inference: `Vector<T,Row> -> Vector<T,Column>` and conversely.
+The exact element TypeId is preserved. The source owner is moved, including
+when T is Copy; subsequent use is an ordinary use-after-move error. Direct
+Row/Column assignment remains invalid. Return, consuming arguments, generic
+bodies with only T: Storable, struct fields at construction, enum payloads and
+imported signatures compose with existing whole-owner transfer rules.
+`consume(transpose(v));` is supported when consume returns Copy (for example int):
+a compiler-only sink discards the result using ordinary call lowering. Owning
+results must be bound explicitly; no unit/void type is introduced.
+Non-Copy partial field/index extraction and moving through a reference remain
+rejected. A live shared or mutable element borrow blocks consumption; ordinary
+one-based indexing and borrowing work on the result.
+
+This is a strong O(1) physical contract: the exact backing pointer and dimension
+are transferred unchanged. Transpose performs zero allocations, frees, element
+copies, relocations or drops, including for Vector<Buffer<int>,Row>. Empty
+null/zero descriptors remain empty. Components keep their order and values;
+there is no reversal, conjugation or invocation of element functions. This is
+not conjugate transpose. The final destination performs the ordinary reverse
+index element drop and one backing free. Double transpose restores the original
+orientation with the same allocation.
+
+AST retains ordinary application syntax. HIR VectorTranspose and MIR/SSA
+VectorTransposeMove are explicit consuming operations. The operand source_type
+and enclosing result TypeId are the sole orientation/element authorities;
+independent verifiers require equal elements and opposite orientations. Their
+canonical Vector representation defines the same two-field descriptor layout,
+without a mutable layout/orientation cache. MIR uses existing owner states and
+cleanup flags. SSA independently checks each materialized source and result
+transfers exactly once before a phi. LLVM passes the identical aggregate bits
+using a constant select, with no orientation runtime field, branch, helper,
+backing access or element loop. Existing QRow/QColumn mangling is unchanged.
+
+E0328 reports invalid operand kind, arity or explicit type arguments. Ordinary
+ownership/type diagnostics cover moved owners, live borrows and partial moves.
+The operation accepts one owning Vector expression and no explicit type
+arguments; a bare `transpose([])` lacks operand orientation context and fails
+with the existing mathematical literal diagnostic.
+
+Qualification instruments every emitted transpose to compare pointer, dimension
+and allocation/free/relocation counters before and after, plus final exact heap
+counts and reverse drop traces. See [the V22 report](../docs/architecture/NEXT_VERTICAL_22_REPORT.md).
+Compilation-only snapshots: `python3 tests/measure-v22.py --runs 10`, optionally
+with `--baseline-binary <separate-v21-driver> --baseline-revision <revision>`.
+Borrowed transpose/VectorView, Matrix transpose, arithmetic, numeric traits,
+methods, operator syntax and conjugate transpose remain separate future work.

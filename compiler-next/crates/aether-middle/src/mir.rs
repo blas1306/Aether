@@ -271,6 +271,11 @@ pub enum Rvalue {
         size_trap: TrapKind,
         failure_trap: TrapKind,
     },
+    /// Consuming O(1) descriptor transfer; never an element/storage operation.
+    VectorTransposeMove {
+        operand: Operand,
+        source_type: TypeId,
+    },
     VectorInit {
         element_type: TypeId,
         elements: Vec<Operand>,
@@ -1109,6 +1114,28 @@ impl Builder<'_> {
                     },
                     expression.span,
                 );
+                Operand::Local(destination)
+            }
+            HirExprKind::VectorTranspose {
+                operand,
+                source_type,
+            } => {
+                let operand = self.lower_expr(operand);
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::VectorTransposeMove {
+                        operand: operand.clone(),
+                        source_type: *source_type,
+                    },
+                    expression.span,
+                );
+                if let Some(local) = operand_local_id(&operand) {
+                    self.set_drop_flag(local, false, expression.span);
+                }
                 Operand::Local(destination)
             }
             HirExprKind::VectorInit {
@@ -2413,6 +2440,14 @@ fn verify_drop_flag_contract(
                         transitions.push((flag, true));
                     }
                 }
+                Rvalue::VectorTransposeMove { operand, .. } => {
+                    consume_operand(operand, &mut transitions);
+                    if let Some(owner) = destination
+                        && let Some(flag) = flag_for(owner)
+                    {
+                        transitions.push((flag, true));
+                    }
+                }
                 Rvalue::Drop { owner } | Rvalue::ConsumeEnum { owner } => {
                     if let Some(owner) = place_root_local(owner)
                         && let Some(flag) = flag_for(owner)
@@ -2583,6 +2618,20 @@ fn verify_ownership(
                     let owner = place_root_local(owner)
                         .ok_or_else(|| fail("MIR consuming match owner has no local".into()))?;
                     consume_owner(function, types, &mut state, owner, "consuming match", fail)?;
+                }
+                Rvalue::VectorTransposeMove { operand, .. } => {
+                    let source = operand_local_id(operand).ok_or_else(|| {
+                        fail("MIR Vector transpose source must be an owner".into())
+                    })?;
+                    consume_owner(
+                        function,
+                        types,
+                        &mut state,
+                        source,
+                        "Vector transpose",
+                        fail,
+                    )?;
+                    initialize_owner(function, types, &mut state, destination, fail)?;
                 }
                 Rvalue::BufferAlloc { .. } | Rvalue::ArrayFill { .. } => {
                     initialize_owner(function, types, &mut state, destination, fail)?;
@@ -2982,6 +3031,20 @@ fn validate_rvalue(
                 || *failure_trap != TrapKind::AllocationFailure
             {
                 return Err("MIR Buffer allocation contract invalid".into());
+            }
+        }
+        Rvalue::VectorTransposeMove {
+            operand,
+            source_type,
+        } => {
+            validate_operand(function, operand, initialized)?;
+            if operand_type(function, operand)? != *source_type
+                || !matches!((types.get(*source_type), types.get(destination)),
+                (Some(TypeData::Vector { element: a, orientation: x }),
+                 Some(TypeData::Vector { element: b, orientation: y }))
+                if a == b && x.transposed() == *y)
+            {
+                return Err("MIR Vector transpose orientation/type contract invalid".into());
             }
         }
         Rvalue::VectorInit {

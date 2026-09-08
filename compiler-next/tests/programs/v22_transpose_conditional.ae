@@ -1,0 +1,13 @@
+int consume(Vector<Buffer<int>,Column> v) { return v[1][0]-10; }
+int branch(bool take) {
+    Vector<Buffer<int>,Row> r=[Buffer<int>(1,10)];
+    if(take) { int used=consume(transpose(r)); if(used!=0) { return 1; } }
+    return 0;
+}
+int both(bool take) {
+    Vector<int,Row> r=[10];
+    Vector<int,Column> result=[];
+    if(take) { result=transpose(r); } else { result=transpose(r); }
+    return result[1]-10;
+}
+int main() { return branch(true)+branch(false)+both(true)+both(false); }

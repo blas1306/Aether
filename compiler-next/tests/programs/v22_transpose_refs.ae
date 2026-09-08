@@ -1,0 +1,12 @@
+int main() {
+    Vector<int,Row> r=[10,20,30];
+    if(true) { ref int before=&r[1]; if(*before!=10) { return 1; } }
+    Vector<int,Column> c=transpose(r);
+    c[3]=40;
+    ref int first=&c[1];
+    ref mut int last=&mut c[3];
+    *last=50;
+    Array<int> a={7,8};
+    List<int> l={9,10};
+    return *first+c[2]+*last+a[0]+a[1]+l[0]+l[1]-114;
+}

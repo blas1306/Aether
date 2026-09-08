@@ -1,0 +1,8 @@
+int main() {
+    Vector<int,Row> r=[];
+    Vector<int,Column> c=transpose(r);
+    Vector<int,Row> r2=transpose(c);
+    Vector<Buffer<int>,Column> owners=[];
+    Vector<Buffer<int>,Row> moved=transpose(owners);
+    return int(dimension(r2))+int(dimension(moved));
+}

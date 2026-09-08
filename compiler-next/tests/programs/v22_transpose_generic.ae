@@ -1,0 +1,13 @@
+Vector<T,Column> toColumn<T:Storable>(Vector<T,Row> v) { return transpose(v); }
+Vector<T,Row> toRow<T:Storable>(Vector<T,Column> v) { return transpose(v); }
+int consume(Vector<int,Column> v) { return v[1]+v[3]-40; }
+Vector<int,Row> make() { return [10,20,30]; }
+int main() {
+    Vector<Buffer<int>,Row> r=[Buffer<int>(1,10)];
+    Vector<Buffer<int>,Column> c=toColumn(r);
+    Vector<Buffer<int>,Row> r2=toRow(c);
+    int used=consume(transpose(make()));
+    Vector<int,Row> numbers=[10,20,30];
+    consume(transpose(numbers));
+    return used+r2[1][0]-10;
+}

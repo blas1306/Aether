@@ -1,0 +1,15 @@
+struct Holder { Vector<int,Column> value; }
+enum Choice { Empty, Value(Vector<Buffer<int>,Column>) }
+int main() {
+    Vector<int,Row> r=[10,20];
+    Holder h=Holder(transpose(r));
+    Vector<Buffer<int>,Row> owners=[Buffer<int>(1,30)];
+    Choice c=Choice.Value(transpose(owners));
+    match(c) {
+        Choice.Empty => { return 1; }
+        Choice.Value(v) => {
+            Vector<Buffer<int>,Row> back=transpose(v);
+            return h.value[1]+h.value[2]+back[1][0]-60;
+        }
+    }
+}

@@ -5458,3 +5458,413 @@ fn vertical21_cross_module_orientation_rejection_and_mangling() {
     }
     fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn vertical22_deterministic_consuming_ir() {
+    let source = SourceFile::new(
+        "transpose.ae",
+        "Vector<T,Column> turn<T:Storable>(Vector<T,Row> v){return transpose(v);}int main(){Vector<int,Row> r=[10,20,30];Vector<int,Column> c=turn(r);return c[1]-10;}",
+    );
+    let emits = [Emit::Ast, Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm];
+    let first = compile_source(&source, &emits).unwrap();
+    let second = compile_source(&source, &emits).unwrap();
+    assert_eq!(first.dumps, second.dumps);
+    assert!(first.dumps[&Emit::Ast].contains("transpose"));
+    assert!(!first.dumps[&Emit::Ast].contains("VectorTranspose"));
+    for emit in [Emit::Hir, Emit::Mir, Emit::Ssa] {
+        assert!(first.dumps[&emit].contains("VectorTranspose"));
+        assert!(first.dumps[&emit].contains("Row"));
+        assert!(first.dumps[&emit].contains("Column"));
+        assert!(first.dumps[&emit].contains("source_type"));
+    }
+    let helper = first
+        .llvm
+        .split("define ")
+        .find(|part| part.contains("; VectorTransposeMove"))
+        .unwrap();
+    let body = helper.split("\n}").next().unwrap();
+    for forbidden in [
+        "call ",
+        "getelementptr",
+        "alloca",
+        "extractvalue",
+        "insertvalue",
+        "br ",
+        "memcpy",
+        "conjugate",
+    ] {
+        assert!(!body.contains(forbidden), "{forbidden}: {body}");
+    }
+    assert!(body.contains("ret { ptr, i64 }"));
+}
+
+#[test]
+fn vertical22_structured_diagnostics_and_parametric_checking() {
+    for (prefix, argument) in [
+        ("Array<int> a={1};", "a"),
+        ("List<int> a={1};", "a"),
+        ("Buffer<int> a=Buffer<int>(1,1);", "a"),
+        ("", "1"),
+        ("Vector<int,Row> a=[1];", "&a"),
+    ] {
+        let text =
+            format!("int main(){{{prefix}Vector<int,Column> c=transpose({argument});return 0;}}");
+        let errors = compile_source(&SourceFile::new("invalid.ae", text), &[]).unwrap_err();
+        assert_eq!(errors[0].code, "E0328");
+        assert!(errors[0].message.contains("Vector transpose"));
+        assert!(errors[0].span.is_some());
+    }
+    for call in ["transpose()", "transpose(a,a)", "transpose<int>(a)"] {
+        let text =
+            format!("int main(){{Vector<int,Row> a=[1];Vector<int,Column> c={call};return 0;}}");
+        assert_eq!(
+            compile_source(&SourceFile::new("arity.ae", text), &[]).unwrap_err()[0].code,
+            "E0328"
+        );
+    }
+    for text in [
+        "int main(){Vector<int,Row> r=[1];Vector<int,Column> c=r;return 0;}",
+        "int main(){Vector<int,Row> r=[1];Vector<int,Row> c=transpose(r);return 0;}",
+        "int main(){Vector<int,Row> r=[1];Vector<double,Column> c=transpose(r);return 0;}",
+        "int main(){Vector<int,Row> r=[1];Vector<int,Column> c=transpose(r);return r[1];}",
+        "int main(){Vector<int,Row> r=[1];Vector<int,Column> c=transpose(r);return int(dimension(r));}",
+        "int main(){Vector<int,Row> r=[1];ref int x=&r[1];Vector<int,Column> c=transpose(r);return *x;}",
+        "int main(){Vector<int,Row> r=[1];ref mut int x=&mut r[1];Vector<int,Column> c=transpose(r);return *x;}",
+        "struct H{Vector<int,Row> v;}int main(){H h=H([1]);Vector<int,Column> c=transpose(h.v);return 0;}",
+        "int main(){Array<Vector<int,Row>> a={[1]};Vector<int,Column> c=transpose(a[0]);return 0;}",
+        "int f(ref Vector<int,Row> v){Vector<int,Column> c=transpose(*v);return 0;}int main(){return 0;}",
+        "int branch(bool b){Vector<int,Row> r=[1];if(b){Vector<int,Column> c=transpose(r);}return r[1];}int main(){return branch(true);}",
+        "Vector<T,Row> wrong<T:Storable>(Vector<T,Row> v){return transpose(v);}int main(){return 0;}",
+        "Vector<T,Column> wrong<T:Copy>(Vector<T,Row> v){return transpose(v);}int main(){return 0;}",
+        "int use(ref int x,Vector<int,Column> c){return *x;}int main(){Vector<int,Row> r=[1];return use(&r[1],transpose(r));}",
+    ] {
+        let errors = compile_source(&SourceFile::new("ownership.ae", text), &[]).expect_err(text);
+        assert!(errors[0].span.is_some(), "{text}");
+    }
+    for (text, code) in [
+        (
+            "int main(){Vector<int,Row> r=[1];Vector<int,Column> c=transpose(r);return r[1];}",
+            "E0291",
+        ),
+        (
+            "int main(){Vector<int,Row> r=[1];ref int x=&r[1];Vector<int,Column> c=transpose(r);return *x;}",
+            "E0292",
+        ),
+        (
+            "int main(){Vector<int,Row> r=[1];ref mut int x=&mut r[1];Vector<int,Column> c=transpose(r);return *x;}",
+            "E0292",
+        ),
+        (
+            "struct H{Vector<int,Row> v;}int main(){H h=H([1]);Vector<int,Column> c=transpose(h.v);return 0;}",
+            "E0293",
+        ),
+        (
+            "int main(){Vector<int,Row> r=[1];transpose(r);return 0;}",
+            "E0311",
+        ),
+        (
+            "Vector<int,Column> f(Vector<int,Column> v){return v;}int main(){Vector<int,Row> r=[1];f(transpose(r));return 0;}",
+            "E0311",
+        ),
+    ] {
+        assert_eq!(
+            compile_source(&SourceFile::new("diagnostic.ae", text), &[]).unwrap_err()[0].code,
+            code,
+            "{text}"
+        );
+    }
+    // An unused generic body is checked with only its symbolic Storable proof.
+    compile_source(&SourceFile::new("generic.ae", "Vector<T,Column> turn<T:Storable>(Vector<T,Row> v){return transpose(v);}Vector<T,Row> back<T:Storable>(Vector<T,Column> v){return transpose(v);}int main(){return 0;}"), &[]).unwrap();
+}
+
+/// Qualification-only instrumentation; no source-language/runtime API.
+fn instrument_v22_transposes(llvm: &str, expected_heap: u64) -> String {
+    let mut output = String::new();
+    let mut count = 0;
+    for line in llvm.lines() {
+        if line.ends_with("; VectorTransposeMove") {
+            let id = count;
+            count += 1;
+            let result = line.trim().split(" = ").next().unwrap();
+            let operand = line
+                .split("{ ptr, i64 } ")
+                .nth(1)
+                .unwrap()
+                .split(',')
+                .next()
+                .unwrap();
+            for (suffix, global) in [("a", "heap_alloc"), ("f", "heap_free"), ("r", "relocation")] {
+                writeln!(
+                    output,
+                    "  %q{id}_{suffix}0 = load i64, ptr @aether_{global}_count"
+                )
+                .unwrap();
+            }
+            writeln!(output, "  %q{id}_p0 = extractvalue {{ ptr, i64 }} {operand}, 0\n  %q{id}_n0 = extractvalue {{ ptr, i64 }} {operand}, 1").unwrap();
+            writeln!(output, "{line}").unwrap();
+            for (suffix, global) in [("a", "heap_alloc"), ("f", "heap_free"), ("r", "relocation")] {
+                writeln!(output, "  %q{id}_{suffix}1 = load i64, ptr @aether_{global}_count\n  %q{id}_{suffix}ok = icmp eq i64 %q{id}_{suffix}0, %q{id}_{suffix}1").unwrap();
+            }
+            writeln!(output, "  %q{id}_p1 = extractvalue {{ ptr, i64 }} {result}, 0\n  %q{id}_n1 = extractvalue {{ ptr, i64 }} {result}, 1\n  %q{id}_pok = icmp eq ptr %q{id}_p0, %q{id}_p1\n  %q{id}_nok = icmp eq i64 %q{id}_n0, %q{id}_n1").unwrap();
+            writeln!(output, "  %q{id}_af = and i1 %q{id}_aok, %q{id}_fok\n  %q{id}_afr = and i1 %q{id}_af, %q{id}_rok\n  %q{id}_pn = and i1 %q{id}_pok, %q{id}_nok\n  %q{id}_ok = and i1 %q{id}_afr, %q{id}_pn\n  %q{id}_prior = load i1, ptr @v22_ok\n  %q{id}_all = and i1 %q{id}_prior, %q{id}_ok\n  store i1 %q{id}_all, ptr @v22_ok\n  %q{id}_seen = load i64, ptr @v22_seen\n  %q{id}_next = add i64 %q{id}_seen, 1\n  store i64 %q{id}_next, ptr @v22_seen").unwrap();
+        } else if line == "  %process_status = trunc i64 %aether_result to i32" {
+            writeln!(output, "  %qok = load i1, ptr @v22_ok\n  %qseen = load i64, ptr @v22_seen\n  %qran = icmp ugt i64 %qseen, 0\n  %qa = load i64, ptr @aether_heap_alloc_count\n  %qf = load i64, ptr @aether_heap_free_count\n  %qr = load i64, ptr @aether_relocation_count\n  %qaok = icmp eq i64 %qa, {expected_heap}\n  %qfok = icmp eq i64 %qf, {expected_heap}\n  %qrok = icmp eq i64 %qr, 0\n  %qaf = and i1 %qaok, %qfok\n  %qafr = and i1 %qaf, %qrok\n  %qopr = and i1 %qok, %qran\n  %qpass = and i1 %qafr, %qopr\n  %qresult = trunc i64 %aether_result to i32\n  %process_status = select i1 %qpass, i32 %qresult, i32 99").unwrap();
+        } else {
+            writeln!(output, "{line}").unwrap();
+        }
+    }
+    assert!(count > 0);
+    output.push_str("\n@v22_ok = internal global i1 true\n@v22_seen = internal global i64 0\n");
+    output
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical22_native_data_ownership_and_per_transpose_zero_cost() {
+    for (fixture, heap) in [
+        ("row", 1),
+        ("column", 1),
+        ("empty", 0),
+        ("owning", 4),
+        ("double", 1),
+        ("refs", 3),
+        ("generic", 4),
+        ("conditional", 6),
+        ("aggregate", 3),
+        ("non_numeric", 3),
+        ("loop", 6),
+    ] {
+        let compilation = compile_session(
+            CompilationSession::discover(&program(&format!("v22_transpose_{fixture}.ae"))).unwrap(),
+            &[],
+        )
+        .unwrap();
+        for llvm in [
+            compilation.llvm.clone(),
+            instrument_v22_transposes(&compilation.llvm, heap),
+        ] {
+            let artifact = temporary("v22-native");
+            ClangToolchain::default()
+                .link_executable(&llvm, &artifact)
+                .unwrap();
+            let status = Command::new(&artifact).status().unwrap();
+            fs::remove_file(artifact).unwrap();
+            assert_eq!(status.code(), Some(0), "{fixture}");
+        }
+    }
+    let compilation = compile_session(
+        CompilationSession::discover(&module_program("v22_transpose")).unwrap(),
+        &[],
+    )
+    .unwrap();
+    assert!(compilation.llvm.contains("QRow"));
+    assert!(compilation.llvm.contains("QColumn"));
+    let artifact = temporary("v22-module");
+    ClangToolchain::default()
+        .link_executable(&instrument_v22_transposes(&compilation.llvm, 2), &artifact)
+        .unwrap();
+    assert_eq!(Command::new(&artifact).status().unwrap().code(), Some(0));
+    fs::remove_file(artifact).unwrap();
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn vertical22_mir_ssa_reject_corrupt_type_and_owner_transfers() {
+    use aether_frontend::{Orientation, TypeId};
+    use aether_middle::{PlaceBase, Rvalue, SsaOp, build_ssa, lower_hir, verify_mir, verify_ssa};
+    let source = SourceFile::new(
+        "verify.ae",
+        "int main(){Vector<int,Row> r=[10];Vector<int,Column> c=transpose(r);Vector<int,Row> back=transpose(c);return back[1]-10;}",
+    );
+    let hir = analyze(parse_source(&source).unwrap()).unwrap();
+    let mir = lower_hir(hir);
+    let ssa = build_ssa(&verify_mir(mir.clone()).unwrap());
+    for case in 0..5 {
+        let mut corrupt = mir.clone();
+        let changed_type = match case {
+            0 => std::sync::Arc::make_mut(&mut corrupt.types)
+                .intern_vector(TypeId::INT64, Orientation::Row),
+            1 => std::sync::Arc::make_mut(&mut corrupt.types)
+                .intern_vector(TypeId::FLOAT64, Orientation::Column),
+            _ => TypeId::INT64,
+        };
+        let function = &mut corrupt.functions[0];
+        let instruction = function
+            .blocks
+            .iter_mut()
+            .flat_map(|b| &mut b.instructions)
+            .find(|i| matches!(i.value, Rvalue::VectorTransposeMove { .. }))
+            .unwrap();
+        if case <= 2 {
+            let PlaceBase::Local(local) = instruction.destination.base else {
+                panic!()
+            };
+            function.locals[local.0 as usize].ty = changed_type;
+        } else if let Rvalue::VectorTransposeMove {
+            operand,
+            source_type,
+        } = &mut instruction.value
+        {
+            if case == 3 {
+                *source_type = TypeId::BOOL;
+            } else {
+                instruction.value = Rvalue::Use(operand.clone());
+            }
+        }
+        assert!(verify_mir(corrupt).is_err(), "MIR {case}");
+        let mut corrupt = ssa.clone();
+        let changed_type = match case {
+            0 => std::sync::Arc::make_mut(&mut corrupt.types)
+                .intern_vector(TypeId::INT64, Orientation::Row),
+            1 => std::sync::Arc::make_mut(&mut corrupt.types)
+                .intern_vector(TypeId::FLOAT64, Orientation::Column),
+            _ => TypeId::INT64,
+        };
+        let instruction = corrupt.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|b| &mut b.instructions)
+            .find(|i| matches!(i.op, SsaOp::VectorTransposeMove { .. }))
+            .unwrap();
+        if case <= 2 {
+            instruction.ty = changed_type;
+        } else if let SsaOp::VectorTransposeMove {
+            operand,
+            source_type,
+        } = &mut instruction.op
+        {
+            if case == 3 {
+                *source_type = TypeId::BOOL;
+            } else {
+                instruction.op = SsaOp::Use(operand.clone());
+            }
+        }
+        assert!(verify_ssa(corrupt).is_err(), "SSA {case}");
+    }
+    // Duplicate a valid transfer with a fresh destination/value: type checking
+    // succeeds, so rejection must come from the independent owner audit.
+    let mut corrupt = mir;
+    let f = &mut corrupt.functions[0];
+    let b = &mut f.blocks[0];
+    let index = b
+        .instructions
+        .iter()
+        .position(|i| matches!(i.value, Rvalue::VectorTransposeMove { .. }))
+        .unwrap();
+    let mut duplicate = b.instructions[index].clone();
+    let PlaceBase::Local(local) = duplicate.destination.base else {
+        panic!()
+    };
+    let mut new_local = f.locals[local.0 as usize].clone();
+    new_local.id = aether_frontend::LocalId(u32::try_from(f.locals.len()).unwrap());
+    duplicate.destination.base = PlaceBase::Local(new_local.id);
+    f.locals.push(new_local);
+    b.instructions.insert(index + 1, duplicate);
+    let errors = verify_mir(corrupt).unwrap_err();
+    assert!(
+        errors[0].message.contains("moved") || errors[0].message.contains("owned"),
+        "{errors:?}"
+    );
+    let mut corrupt = ssa;
+    let f = &mut corrupt.functions[0];
+    let fresh = f
+        .blocks
+        .iter()
+        .flat_map(|b| &b.instructions)
+        .map(|i| i.result.0)
+        .max()
+        .unwrap()
+        + 1;
+    let b = &mut f.blocks[0];
+    let index = b
+        .instructions
+        .iter()
+        .position(|i| matches!(i.op, SsaOp::VectorTransposeMove { .. }))
+        .unwrap();
+    let mut duplicate = b.instructions[index].clone();
+    duplicate.result = aether_middle::ValueId(fresh);
+    b.instructions.insert(index + 1, duplicate);
+    let errors = verify_ssa(corrupt).unwrap_err();
+    assert!(
+        errors[0].message.contains("transfer exactly once"),
+        "{errors:?}"
+    );
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical22_final_drop_is_once_in_reverse_order() {
+    for (from, to) in [("Row", "Column"), ("Column", "Row")] {
+        let source = format!(
+            "int main(){{Vector<Buffer<int>,{from}> v=[Buffer<int>(1,10),Buffer<int>(1,20),Buffer<int>(1,30)];Vector<Buffer<int>,{to}> result=transpose(v);return result[1][0]-10;}}"
+        );
+        let compilation = compile_source(&SourceFile::new("drop.ae", source), &[]).unwrap();
+        let mut llvm = instrument_v22_transposes(&compilation.llvm, 4)
+            .replace("call void @free(ptr %ptr)", "call void @v22_note_free(ptr %ptr, i64 %size)\n  call void @free(ptr %ptr)")
+            .replace("  %qpass = and i1 %qafr, %qopr", "  %qbase = and i1 %qafr, %qopr\n  %qtrace = load i64, ptr @v22_trace\n  %qordered = icmp eq i64 %qtrace, 302010\n  %qpass = and i1 %qbase, %qordered");
+        llvm.push_str(
+            r"
+@v22_trace = internal global i64 0
+define internal void @v22_note_free(ptr %data, i64 %size) {
+entry:
+  %buffer = icmp eq i64 %size, 8
+  br i1 %buffer, label %record, label %done
+record:
+  %payload = load i64, ptr %data
+  %old = load i64, ptr @v22_trace
+  %shift = mul i64 %old, 100
+  %next = add i64 %shift, %payload
+  store i64 %next, ptr @v22_trace
+  br label %done
+done:
+  ret void
+}
+",
+        );
+        let artifact = temporary("v22-drop");
+        ClangToolchain::default()
+            .link_executable(&llvm, &artifact)
+            .unwrap();
+        let status = Command::new(&artifact).status().unwrap();
+        fs::remove_file(artifact).unwrap();
+        assert_eq!(status.code(), Some(0), "{from}");
+    }
+}
+
+#[test]
+fn vertical22_cross_module_orientation_and_layout() {
+    use aether_frontend::{Orientation, TypeArena, TypeId};
+    let mut types = TypeArena::new();
+    let row = types.intern_vector(TypeId::INT64, Orientation::Row);
+    let column = types.intern_vector(TypeId::INT64, Orientation::Column);
+    assert_ne!(row, column);
+    assert_eq!(
+        layout_of(&types, row, TargetProperties::LINUX_X86_64, &[], &[]).unwrap(),
+        layout_of(&types, column, TargetProperties::LINUX_X86_64, &[], &[]).unwrap()
+    );
+    assert!(!types.is_copy(row));
+    assert!(!types.is_copy(column));
+    let directory = temporary("v22-module-errors");
+    fs::create_dir_all(&directory).unwrap();
+    fs::copy(
+        module_program("v22_transpose").with_file_name("storage.ae"),
+        directory.join("storage.ae"),
+    )
+    .unwrap();
+    for text in [
+        "import storage;int main(){Vector<int,Row> r=[1];Vector<int,Row> bad=storage.toColumn(r);return 0;}",
+        "import storage;int main(){Vector<int,Column> c=[1];Vector<int,Column> bad=storage.toRow(c);return 0;}",
+        "import storage;int main(){Vector<int,Column> c=[1];Vector<int,Column> bad=storage.toColumn(c);return 0;}",
+    ] {
+        fs::write(directory.join("main.ae"), text).unwrap();
+        assert!(
+            compile_session(
+                CompilationSession::discover(&directory.join("main.ae")).unwrap(),
+                &[]
+            )
+            .is_err(),
+            "{text}"
+        );
+    }
+    fs::remove_dir_all(directory).unwrap();
+}

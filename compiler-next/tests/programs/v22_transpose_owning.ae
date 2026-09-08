@@ -1,0 +1,11 @@
+int main() {
+    Vector<Buffer<int>,Row> r=[Buffer<int>(1,10),Buffer<int>(1,20),Buffer<int>(1,30)];
+    Vector<Buffer<int>,Column> c=transpose(r);
+    if(dimension(c)!=3) { return 1; }
+    if(c[1][0]!=10) { return 2; }
+    if(c[2][0]!=20) { return 3; }
+    if(c[3][0]!=30) { return 4; }
+    Vector<Buffer<int>,Row> r2=transpose(c);
+    ref Buffer<int> first=&r2[1];
+    return (*first)[0]+r2[2][0]+r2[3][0]-60;
+}

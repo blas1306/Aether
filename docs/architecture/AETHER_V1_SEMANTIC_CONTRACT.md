@@ -884,6 +884,54 @@ structurally 2D Matrix literal, never parsed as nested VectorLiteral. No vector
 arithmetic, dot, outer, norm, transpose, Matrix, methods, traits or numerical
 capability system is admitted in V21.
 
+#### V22 explicit consuming Vector transpose — DECIDED
+
+`transpose(v)` MUST map Vector<T,Row> to Vector<T,Column> and Vector<T,Column>
+to Vector<T,Row>. The result MUST be derived from the operand's canonical type,
+preserving the exact element TypeId without expected-orientation guessing.
+Direct assignment between orientations MUST remain invalid. The source syntax
+is an ordinary application with one owning Vector operand and no explicit type
+arguments. Array, List, Buffer, scalar and reference operands MUST be rejected
+with a structured Vector-transpose diagnostic.
+
+The operation MUST consume the Vector owner regardless of whether T is Copy.
+The result MUST own the identical backing allocation and preserve its pointer
+and dimension bit-for-bit. This is a strong O(1) contract with exactly zero
+allocations, frees, element copies, relocations, reconstruction or drops during
+transpose. Empty null/zero descriptors MUST remain unchanged. Components MUST
+retain their order and values. Transpose MUST NOT reverse or conjugate elements,
+apply numeric transformations or call element functions. Conjugate transpose
+is a separate future operation.
+
+T: Storable is sufficient, checked parametrically before monomorphization.
+Neither Copy, Relocatable nor Numeric is an additional requirement. In particular,
+Vector<Buffer<int>,Row> transfers only the outer descriptor; no Buffer element
+or pointee is touched. The final owner performs ordinary reverse-index element
+destruction and one backing free. The moved source MUST NOT destroy storage.
+
+Existing move, live-borrow, conditional ownership and cleanup rules apply;
+shared and mutable element borrows block consumption while live. No special
+borrow escape or partial-field move exception is admitted. Return, consuming
+call, aggregate construction and cross-module signatures retain exact types.
+The statement `consume(transpose(v));` admits a declared function with a
+guaranteed Copy result that is discarded. An owning call result requires an
+explicit binding; V22 adds no void type or implicit owning-result destruction.
+Successful results support ordinary one-based indexing, Copy writes and borrows.
+Double transpose restores the original orientation with the same descriptor.
+
+HIR VectorTranspose and MIR/SSA VectorTransposeMove MUST preserve source and
+result TypeIds, prove equal element types/opposite orientations and consume one
+owner to produce one owner. Canonical Vector types define compatible descriptor
+layout; no runtime orientation metadata is permitted. Independent verifiers
+MUST reject corrupt type/orientation metadata and duplicated transpose owners.
+LLVM MUST transfer the same aggregate bits without backing operations or runtime
+orientation branches. Transpose MUST NOT become a scalar cast or arbitrary
+reinterpret operation. Qualification MUST check per-operation pointer/dimension
+identity and zero allocation/free/relocation deltas.
+
+Borrowed transpose, VectorView, Matrix transpose, methods, apostrophe syntax,
+arithmetic, conjugation and numeric capabilities are outside V22.
+
 ### 6.4 Bounds — DECIDED
 
 Safe indexing and slicing check bounds and trap or return the language's

@@ -132,6 +132,11 @@ pub enum SsaOp {
         size_trap: TrapKind,
         failure_trap: TrapKind,
     },
+    /// Consuming O(1) descriptor transfer; never an element/storage operation.
+    VectorTransposeMove {
+        operand: SsaOperand,
+        source_type: TypeId,
+    },
     VectorInit {
         element_type: TypeId,
         elements: Vec<SsaOperand>,
@@ -779,6 +784,13 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             size_trap: *size_trap,
             failure_trap: *failure_trap,
         },
+        Rvalue::VectorTransposeMove {
+            operand,
+            source_type,
+        } => SsaOp::VectorTransposeMove {
+            operand: rename_operand(operand, stacks),
+            source_type: *source_type,
+        },
         Rvalue::VectorInit {
             element_type,
             elements,
@@ -1291,6 +1303,7 @@ fn mir_liveness(function: &MirFunction, cfg: &Cfg) -> Vec<BTreeSet<LocalId>> {
 fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
     match value {
         Rvalue::Use(operand)
+        | Rvalue::VectorTransposeMove { operand, .. }
         | Rvalue::Coerce { operand, .. }
         | Rvalue::Cast { operand, .. }
         | Rvalue::Unary { operand, .. } => operand_local(operand).into_iter().collect(),
@@ -1874,6 +1887,7 @@ fn verify_ssa_function(
             SsaTerminator::Goto(_) | SsaTerminator::Trap(_) => {}
         }
     }
+    verify_vector_transpose_ownership(function, fail)?;
     verify_take_protocol(function, types, fail)?;
     Ok(())
 }
@@ -1979,6 +1993,19 @@ fn verify_op(
                 || *failure_trap != TrapKind::AllocationFailure
             {
                 return Err("SSA Buffer allocation contract invalid".into());
+            }
+        }
+        SsaOp::VectorTransposeMove {
+            operand,
+            source_type,
+        } => {
+            if operand_ty(operand)? != *source_type
+                || !matches!((types.get(*source_type), types.get(result)),
+                (Some(TypeData::Vector { element: a, orientation: x }),
+                 Some(TypeData::Vector { element: b, orientation: y }))
+                if a == b && x.transposed() == *y)
+            {
+                return Err("SSA Vector transpose orientation/type contract invalid".into());
             }
         }
         SsaOp::VectorInit {
@@ -2574,6 +2601,7 @@ fn valid_coercion(types: &TypeArena, kind: CoercionKind, from: TypeId, to: TypeI
 fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
     match op {
         SsaOp::Use(value)
+        | SsaOp::VectorTransposeMove { operand: value, .. }
         | SsaOp::Coerce { operand: value, .. }
         | SsaOp::Cast { operand: value, .. }
         | SsaOp::EnumDiscriminant { value, .. }
@@ -3120,6 +3148,62 @@ fn verify_remove_protocol(
         ]);
     }
     Ok(covered)
+}
+
+/// Transpose consumes a materialized owner and produces a materialized owner.
+/// Both temporaries must transfer exactly once before any phi; ordinary root
+/// Move operations retain the existing conditional cleanup representation.
+fn verify_vector_transpose_ownership(
+    function: &SsaFunction,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut owners = BTreeSet::new();
+    for instruction in function.blocks.iter().flat_map(|b| &b.instructions) {
+        let SsaOp::VectorTransposeMove { operand, .. } = &instruction.op else {
+            continue;
+        };
+        let SsaOperand::Value(source) = operand else {
+            return Err(fail("SSA Vector transpose source is not an owner".into()));
+        };
+        owners.extend([*source, instruction.result]);
+    }
+    if owners.is_empty() {
+        return Ok(());
+    }
+    // Count once over the function, not once per transpose. SSA builder always
+    // materializes these temporary transfers before root assignment/phis.
+    let mut uses = BTreeMap::<ValueId, usize>::new();
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            for operand in op_operands(&instruction.op) {
+                if let SsaOperand::Value(value) = operand
+                    && owners.contains(value)
+                {
+                    *uses.entry(*value).or_default() += 1;
+                }
+            }
+        }
+        if let SsaTerminator::Return(SsaOperand::Value(value)) = &block.terminator
+            && owners.contains(value)
+        {
+            *uses.entry(*value).or_default() += 1;
+        }
+        if block
+            .phis
+            .iter()
+            .any(|p| p.incoming.iter().any(|(_, v)| owners.contains(v)))
+        {
+            return Err(fail(
+                "SSA Vector transpose owner must transfer before a phi".into(),
+            ));
+        }
+    }
+    if owners.iter().any(|owner| uses.get(owner) != Some(&1)) {
+        return Err(fail(
+            "SSA Vector transpose owner must transfer exactly once".into(),
+        ));
+    }
+    Ok(())
 }
 
 /// Validate the initialized-prefix transaction on the actual CFG. Every Take
