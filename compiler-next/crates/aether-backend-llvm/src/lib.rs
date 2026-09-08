@@ -99,6 +99,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             | TypeData::Vector { element, .. }
             | TypeData::Array { element }
             | TypeData::List { element }
+            | TypeData::MatrixView { element, .. }
             | TypeData::View { element, .. }
                 if !types.contains_generic(ty) =>
             {
@@ -222,6 +223,11 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         emit_buffer_allocation_wrapper(&mut output, types, element);
     }
     for element in indexed_elements {
+        if types.entries().any(
+            |(_, data)| matches!(data, TypeData::MatrixView { element: e, .. } if *e == element),
+        ) {
+            emit_matrix_view_index(&mut output, types, element);
+        }
         emit_index_helper(&mut output, types, element, IndexSemantics::ZeroBased);
         if types
             .entries()
@@ -386,6 +392,7 @@ fn emit_relocation_glue(
         | TypeData::Integer(_)
         | TypeData::Float(_)
         | TypeData::Reference { .. }
+        | TypeData::MatrixView { .. }
         | TypeData::View { .. }
         | TypeData::Buffer { .. }
         | TypeData::Vector { .. }
@@ -537,6 +544,7 @@ fn emit_drop_glue(
         | TypeData::Integer(_)
         | TypeData::Float(_)
         | TypeData::Reference { .. }
+        | TypeData::MatrixView { .. }
         | TypeData::View { .. }
         | TypeData::GenericParam(_) => unreachable!("non-dropping type requested drop glue"),
     }
@@ -1144,6 +1152,64 @@ fn emit_function(
                     )
                     .unwrap();
                 }
+                SsaOp::MatrixView {
+                    source,
+                    descriptor: recipe,
+                    ..
+                } => {
+                    use aether_frontend::MatrixViewField;
+                    let id = instruction.result.0;
+                    let (descriptor, source_ty) =
+                        emit_place_value(output, function, source, id, types, structs);
+                    let source_llvm = llvm_type(types, source_ty);
+                    let view_llvm = llvm_type(types, instruction.ty);
+                    writeln!(output, "  ; MatrixViewBegin {source_llvm}|{descriptor}").unwrap();
+                    writeln!(
+                        output,
+                        "  %mv{id}_ptr = extractvalue {source_llvm} {descriptor}, 0"
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  %mv{id}_0 = insertvalue {view_llvm} poison, ptr %mv{id}_ptr, 0"
+                    )
+                    .unwrap();
+                    for (i, field) in [
+                        recipe.rows,
+                        recipe.columns,
+                        recipe.row_stride,
+                        recipe.column_stride,
+                    ]
+                    .iter()
+                    .enumerate()
+                    {
+                        let slot = i + 1;
+                        let value = if *field == MatrixViewField::One {
+                            "1".to_string()
+                        } else {
+                            let source_slot = match field {
+                                MatrixViewField::Rows => 1,
+                                MatrixViewField::Columns => 2,
+                                MatrixViewField::RowStride => 3,
+                                MatrixViewField::ColumnStride => 4,
+                                MatrixViewField::One => unreachable!(),
+                            };
+                            writeln!(output, "  %mv{id}_field{slot} = extractvalue {source_llvm} {descriptor}, {source_slot}").unwrap();
+                            format!("%mv{id}_field{slot}")
+                        };
+                        let result = if slot == 4 {
+                            format!("%v{id}")
+                        } else {
+                            format!("%mv{id}_{slot}")
+                        };
+                        writeln!(
+                            output,
+                            "  {result} = insertvalue {view_llvm} %mv{id}_{i}, i64 {value}, {slot}"
+                        )
+                        .unwrap();
+                    }
+                    writeln!(output, "  ; MatrixViewEnd %v{id}").unwrap();
+                }
                 SsaOp::View { source, .. } => {
                     let (descriptor, source_ty) = emit_place_value(
                         output,
@@ -1267,7 +1333,7 @@ fn emit_function(
                     }
                 }
                 SsaOp::MatrixRows { source } | SsaOp::MatrixColumns { source } => {
-                    let (descriptor, _) = emit_place_value(
+                    let (descriptor, source_ty) = emit_place_value(
                         output,
                         function,
                         source,
@@ -1282,8 +1348,9 @@ fn emit_function(
                     };
                     writeln!(
                         output,
-                        "  %v{} = extractvalue {{ ptr, i64, i64 }} {descriptor}, {field}",
-                        instruction.result.0
+                        "  %v{} = extractvalue {} {descriptor}, {field}",
+                        instruction.result.0,
+                        llvm_type(types, source_ty)
                     )
                     .unwrap();
                 }
@@ -2638,6 +2705,11 @@ fn mangle_symbol_type(
             "L{}",
             mangle_symbol_type(types, *element, modules, structs, enums)
         ),
+        TypeData::MatrixView { element, mutable } => format!(
+            "MV{}{}",
+            if *mutable { "m" } else { "s" },
+            mangle_symbol_type(types, *element, modules, structs, enums)
+        ),
         TypeData::View { element, mutable } => format!(
             "V{}{}",
             if *mutable { "m" } else { "s" },
@@ -2701,6 +2773,7 @@ fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
         | TypeData::Array { .. }
         | TypeData::View { .. } => "{ ptr, i64 }".into(),
         TypeData::Matrix { .. } | TypeData::List { .. } => "{ ptr, i64, i64 }".into(),
+        TypeData::MatrixView { .. } => "{ ptr, i64, i64, i64, i64 }".into(),
         TypeData::GenericParam(_) => panic!("unresolved generic parameter reached LLVM"),
     }
 }
@@ -2741,6 +2814,11 @@ fn mangle_type(types: &TypeArena, ty: TypeId) -> String {
         TypeData::Matrix { element } => format!("M{}", mangle_type(types, *element)),
         TypeData::Array { element } => format!("A{}", mangle_type(types, *element)),
         TypeData::List { element } => format!("L{}", mangle_type(types, *element)),
+        TypeData::MatrixView { element, mutable } => format!(
+            "MV{}{}",
+            if *mutable { "m" } else { "s" },
+            mangle_type(types, *element)
+        ),
         TypeData::View { element, mutable } => format!(
             "V{}{}",
             if *mutable { "m" } else { "s" },
@@ -2810,11 +2888,24 @@ fn emit_place_pointer(
             emit_place_value(output, function, &descriptor_place, result, types, structs);
         debug_assert!(
             types.owning_contiguous_element(descriptor_ty).is_some()
-                || types.view_info(descriptor_ty).is_some()
+                || types.borrowed_view_info(descriptor_ty).is_some()
         );
         let mut pointer = format!("%place{result}_index");
         if let Some(column) = column {
-            writeln!(output, "  {pointer} = call ptr @aether_matrix_index_{}({{ ptr, i64, i64 }} {descriptor}, i64 {}, i64 {})", mangle_type(types, *element_type), llvm_operand(index), llvm_operand(column)).unwrap();
+            writeln!(
+                output,
+                "  {pointer} = call ptr @aether_matrix{}index_{}({} {descriptor}, i64 {}, i64 {})",
+                if types.matrix_view_info(descriptor_ty).is_some() {
+                    "_view_"
+                } else {
+                    "_"
+                },
+                mangle_type(types, *element_type),
+                llvm_type(types, descriptor_ty),
+                llvm_operand(index),
+                llvm_operand(column)
+            )
+            .unwrap();
         } else if types.list_element(descriptor_ty).is_some() {
             writeln!(
                 output,
@@ -2877,7 +2968,7 @@ fn emit_place_pointer(
                     .unwrap();
                     let next = format!("%place{result}_index{projection_position}");
                     if let Some(column) = column {
-                        writeln!(output, "  {next} = call ptr @aether_matrix_index_{}({{ ptr, i64, i64 }} {descriptor}, i64 {}, i64 {})", mangle_type(types, *element_type), llvm_operand(index), llvm_operand(column)).unwrap();
+                        writeln!(output, "  {next} = call ptr @aether_matrix{}index_{}({} {descriptor}, i64 {}, i64 {})", if types.matrix_view_info(ty).is_some() { "_view_" } else { "_" }, mangle_type(types, *element_type), llvm_type(types, ty), llvm_operand(index), llvm_operand(column)).unwrap();
                     } else if types.list_element(ty).is_some() {
                         writeln!(output, "  {next} = call ptr @aether_list_index_{}({{ ptr, i64, i64 }} {descriptor}, i64 {})", mangle_type(types, *element_type), llvm_operand(index)).unwrap();
                     } else {
@@ -3273,6 +3364,44 @@ address:
   %linear = add i64 %row_offset, %column0
   %data = extractvalue {{ ptr, i64, i64 }} %matrix, 0
   %slot = getelementptr inbounds {element_ty}, ptr %data, i64 %linear
+  ret ptr %slot
+}}
+").unwrap();
+}
+
+/// All four bounds dominate arithmetic. Valid recipes preserve the original
+/// owner's representable shape product, so each offset is within its allocation.
+fn emit_matrix_view_index(output: &mut String, types: &TypeArena, element: TypeId) {
+    let suffix = mangle_type(types, element);
+    let element_ty = llvm_type(types, element);
+    writeln!(output, r"define internal ptr @aether_matrix_view_index_{suffix}({{ ptr, i64, i64, i64, i64 }} %view, i64 %row, i64 %column) {{
+entry:
+  %rows = extractvalue {{ ptr, i64, i64, i64, i64 }} %view, 1
+  %columns = extractvalue {{ ptr, i64, i64, i64, i64 }} %view, 2
+  %row_lower = icmp uge i64 %row, 1
+  br i1 %row_lower, label %row_upper_check, label %trap
+row_upper_check:
+  %row_upper = icmp ule i64 %row, %rows
+  br i1 %row_upper, label %column_lower_check, label %trap
+column_lower_check:
+  %column_lower = icmp uge i64 %column, 1
+  br i1 %column_lower, label %column_upper_check, label %trap
+column_upper_check:
+  %column_upper = icmp ule i64 %column, %columns
+  br i1 %column_upper, label %address, label %trap
+trap:
+  call void @llvm.trap()
+  unreachable
+address:
+  %row0 = sub i64 %row, 1
+  %column0 = sub i64 %column, 1
+  %row_stride = extractvalue {{ ptr, i64, i64, i64, i64 }} %view, 3
+  %column_stride = extractvalue {{ ptr, i64, i64, i64, i64 }} %view, 4
+  %row_offset = mul i64 %row0, %row_stride
+  %column_offset = mul i64 %column0, %column_stride
+  %linear = add i64 %row_offset, %column_offset
+  %data = extractvalue {{ ptr, i64, i64, i64, i64 }} %view, 0
+  %slot = getelementptr {element_ty}, ptr %data, i64 %linear
   ret ptr %slot
 }}
 ").unwrap();

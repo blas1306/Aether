@@ -147,6 +147,10 @@ pub fn layout_of(
             size: u64::from(target.pointer_width / 4),
             align: u64::from(target.pointer_width / 8),
         },
+        TypeData::MatrixView { .. } => TypeLayout {
+            size: 5 * u64::from(target.pointer_width / 8),
+            align: u64::from(target.pointer_width / 8),
+        },
         TypeData::Matrix { .. } | TypeData::List { .. } => TypeLayout {
             size: 3 * u64::from(target.pointer_width / 8),
             align: u64::from(target.pointer_width / 8),
@@ -222,6 +226,15 @@ pub fn format_type(
         Some(TypeData::List { element }) => {
             format!("List<{}>", format_type(types, *element, structs, enums))
         }
+        Some(TypeData::MatrixView { element, mutable }) => format!(
+            "{}<{}>",
+            if *mutable {
+                "MatrixViewMut"
+            } else {
+                "MatrixView"
+            },
+            format_type(types, *element, structs, enums)
+        ),
         Some(TypeData::View { element, mutable }) => format!(
             "{}<{}>",
             if *mutable { "ViewMut" } else { "View" },
@@ -805,6 +818,14 @@ pub enum HirExprKind {
         source: HirPlace,
         element_type: TypeId,
         effect: MutationEffect,
+    },
+    /// Borrow the source backing. Source Place and descriptor copy/use chains
+    /// retain provenance; the closed recipe is independently verified.
+    MatrixView {
+        source: HirPlace,
+        mutable: bool,
+        transpose: bool,
+        descriptor: crate::types::MatrixViewDescriptor,
     },
     View {
         source: HirPlace,
@@ -1737,7 +1758,10 @@ fn resolve_type_in_module(
         }
         return Ok(parameter);
     }
-    if ty.module.is_none() && ty.name == "Matrix" && ty.arguments.len() != 1 {
+    if ty.module.is_none()
+        && matches!(ty.name.as_str(), "Matrix" | "MatrixView" | "MatrixViewMut")
+        && ty.arguments.len() != 1
+    {
         return Err(generic_arity(ty, 1));
     }
     if ty.module.is_none() && ty.name == "Vector" {
@@ -1824,7 +1848,10 @@ fn resolve_type_in_module(
         }
         let element = arguments[0];
         if types.contains_generic(element)
-            && !matches!(ty.name.as_str(), "Matrix" | "Array" | "List")
+            && !matches!(
+                ty.name.as_str(),
+                "Matrix" | "MatrixView" | "MatrixViewMut" | "Array" | "List"
+            )
         {
             return Err(Diagnostic::new(
                 "E0283",
@@ -1934,6 +1961,8 @@ fn resolve_type_in_module(
                     Some(ty.span),
                 ))
             }
+            "MatrixView" => Ok(types.intern_matrix_view(element, false)),
+            "MatrixViewMut" => Ok(types.intern_matrix_view(element, true)),
             "View" => Ok(types.intern_view(element, false)),
             "ViewMut" => Ok(types.intern_view(element, true)),
             _ => unreachable!(),
@@ -2006,7 +2035,14 @@ fn intrinsic_type_arity(name: &str) -> Option<usize> {
     }
     matches!(
         name,
-        "Matrix" | "Buffer" | "Array" | "List" | "View" | "ViewMut"
+        "MatrixView"
+            | "MatrixViewMut"
+            | "Matrix"
+            | "Buffer"
+            | "Array"
+            | "List"
+            | "View"
+            | "ViewMut"
     )
     .then_some(1)
 }
@@ -2197,7 +2233,7 @@ fn validate_type_constraints(
             | TypeData::Array { element }
             | TypeData::List { element },
         ) => {
-            let (kind, name, code) = if types.matrix_element(ty).is_some() {
+            let (kind, name, code) = if types.matrix_like_element(ty).is_some() {
                 (CollectionKind::Matrix, "Matrix", "E0331")
             } else if types.vector_element(ty).is_some() {
                 (CollectionKind::Vector, "Vector", "E0325")
@@ -2225,7 +2261,8 @@ fn validate_type_constraints(
         Some(
             TypeData::Reference { pointee: ty, .. }
             | TypeData::Buffer { element: ty }
-            | TypeData::View { element: ty, .. },
+            | TypeData::View { element: ty, .. }
+            | TypeData::MatrixView { element: ty, .. },
         ) => return validate_type_constraints(types, ty, structs, enums, span),
         _ => return Ok(()),
     };
@@ -2276,6 +2313,16 @@ fn infer_generic_arguments(
                 orientation: ro,
             }),
         ) if lo == ro => infer_generic_arguments(types, *left, *right, inferred),
+        (
+            Some(TypeData::MatrixView {
+                element: left,
+                mutable: lm,
+            }),
+            Some(TypeData::MatrixView {
+                element: right,
+                mutable: rm,
+            }),
+        ) if lm == rm => infer_generic_arguments(types, *left, *right, inferred),
         (Some(TypeData::Matrix { element: left }), Some(TypeData::Matrix { element: right }))
         | (Some(TypeData::Array { element: left }), Some(TypeData::Array { element: right }))
         | (Some(TypeData::List { element: left }), Some(TypeData::List { element: right })) => {
@@ -2482,6 +2529,13 @@ fn compute_aggregate_layouts(
                 let bytes = u64::from(target.pointer_width / 8);
                 TypeLayout {
                     size: bytes * 2,
+                    align: bytes,
+                }
+            }
+            TypeData::MatrixView { .. } => {
+                let bytes = u64::from(target.pointer_width / 8);
+                TypeLayout {
+                    size: bytes * 5,
                     align: bytes,
                 }
             }
@@ -3265,6 +3319,17 @@ impl Monomorphizer<'_> {
             HirExprKind::ListCapacity { source } => HirExprKind::ListCapacity {
                 source: self.substitute_place(source, substitution)?,
             },
+            HirExprKind::MatrixView {
+                source,
+                mutable,
+                transpose,
+                descriptor,
+            } => HirExprKind::MatrixView {
+                source: self.substitute_place(source, substitution)?,
+                mutable: *mutable,
+                transpose: *transpose,
+                descriptor: *descriptor,
+            },
             HirExprKind::View { source, mutable } => HirExprKind::View {
                 source: self.substitute_place(source, substitution)?,
                 mutable: *mutable,
@@ -3364,7 +3429,8 @@ fn type_depth(types: &TypeArena, ty: TypeId) -> usize {
             | TypeData::Vector { element, .. }
             | TypeData::Array { element }
             | TypeData::List { element }
-            | TypeData::View { element, .. },
+            | TypeData::View { element, .. }
+            | TypeData::MatrixView { element, .. },
         ) => 1 + type_depth(types, *element),
         Some(TypeData::StructInstance(_, args) | TypeData::EnumInstance(_, args)) => {
             1 + types
@@ -3396,7 +3462,8 @@ fn type_contains(types: &TypeArena, outer: TypeId, needle: TypeId) -> bool {
                 | TypeData::Vector { element, .. }
                 | TypeData::Array { element }
                 | TypeData::List { element }
-                | TypeData::View { element, .. },
+                | TypeData::View { element, .. }
+                | TypeData::MatrixView { element, .. },
             ) => type_contains(types, *element, needle),
             _ => false,
         }
@@ -3455,6 +3522,13 @@ fn compute_concrete_layouts(
                 let bytes = u64::from(target.pointer_width / 8);
                 Some(TypeLayout {
                     size: bytes * 2,
+                    align: bytes,
+                })
+            }
+            TypeData::MatrixView { .. } => {
+                let bytes = u64::from(target.pointer_width / 8);
+                Some(TypeLayout {
+                    size: bytes * 5,
                     align: bytes,
                 })
             }
@@ -3704,6 +3778,11 @@ fn synthesize_ownership(
         storage_references: vec![false; locals.len()],
     };
     for parameter in parameters {
+        // An incoming view borrows caller storage. Its parameter is the local
+        // proxy root, so references and descriptor copies keep that ancestry.
+        if types.matrix_view_info(parameter.ty).is_some() {
+            analysis.provenance[parameter.local.0 as usize] = Some(parameter.local);
+        }
         if !types.guarantees_copy(parameter.ty) {
             analysis.state[parameter.local.0 as usize] = OwnerState::Owned;
             analysis.active.push(parameter.local);
@@ -3807,7 +3886,7 @@ impl OwnershipAnalysis<'_> {
                         self.active.push(*local);
                     } else if self
                         .types
-                        .view_info(self.locals[local.0 as usize].ty)
+                        .borrowed_view_info(self.locals[local.0 as usize].ty)
                         .is_some()
                     {
                         self.buffer_lengths[local.0 as usize] = self.known_length(initializer);
@@ -4069,7 +4148,6 @@ impl OwnershipAnalysis<'_> {
                 }
             }
             HirExprKind::Int(_) | HirExprKind::Float(_) | HirExprKind::Bool(_) => Ok(()),
-            HirExprKind::Load(place) => self.place(place, expr.span),
             HirExprKind::ListSwapRemove { source, index, .. } => {
                 self.place(source, expr.span)?;
                 self.expr(index)?;
@@ -4140,9 +4218,10 @@ impl OwnershipAnalysis<'_> {
                 }
                 Ok(())
             }
-            HirExprKind::Borrow { place, .. } | HirExprKind::View { source: place, .. } => {
-                self.place(place, expr.span)
-            }
+            HirExprKind::Load(place)
+            | HirExprKind::Borrow { place, .. }
+            | HirExprKind::View { source: place, .. }
+            | HirExprKind::MatrixView { source: place, .. } => self.place(place, expr.span),
             HirExprKind::BufferInit {
                 length, initial, ..
             }
@@ -4168,6 +4247,23 @@ impl OwnershipAnalysis<'_> {
             | HirExprKind::ListLength { source }
             | HirExprKind::ListCapacity { source } => self.place(source, expr.span),
             HirExprKind::Call { args, .. } => {
+                // Writable nested List effects cannot yet be related across
+                // aliased descriptor parameters. Keep this boundary closed.
+                if let Some(argument) = args.iter().find(|argument| {
+                    let mut ty = argument.ty;
+                    // A shared reference can still copy a writable descriptor.
+                    while let Some((pointee, _)) = self.types.reference_info(ty) {
+                        ty = pointee;
+                    }
+                    self.types
+                        .matrix_view_info(ty)
+                        .is_some_and(|(element, mutable)| {
+                            mutable && self.types.may_contain_list(element)
+                        })
+                }) {
+                    return Err(self.error("E0313", "passing a mutable matrix view containing List storage requires nested alias-effect provenance", argument.span));
+                }
+
                 if args.iter().any(|a| {
                     self.types
                         .reference_info(a.ty)
@@ -4316,15 +4412,7 @@ impl OwnershipAnalysis<'_> {
                 }
             }
         }
-        if place.projections.iter().any(|p| {
-            matches!(
-                p,
-                HirPlaceProjection::Index {
-                    column: Some(_),
-                    ..
-                }
-            )
-        }) && let Some(owner) = self.owner_of_place(place)
+        if let Some(owner) = self.owner_of_place(place)
             && !self.types.guarantees_copy(self.locals[owner.0 as usize].ty)
         {
             self.require_owned(owner, span)?;
@@ -4353,9 +4441,9 @@ impl OwnershipAnalysis<'_> {
 
     fn derived_owner(&self, expr: &HirExpr) -> Option<LocalId> {
         match &expr.kind {
-            HirExprKind::Borrow { place, .. } | HirExprKind::View { source: place, .. } => {
-                self.owner_of_place(place)
-            }
+            HirExprKind::Borrow { place, .. }
+            | HirExprKind::View { source: place, .. }
+            | HirExprKind::MatrixView { source: place, .. } => self.owner_of_place(place),
             HirExprKind::Local(local) => self.provenance[local.0 as usize],
             _ => None,
         }
@@ -4412,6 +4500,7 @@ impl OwnershipAnalysis<'_> {
                 .projections
                 .iter()
                 .any(|projection| matches!(projection, HirPlaceProjection::Index { .. })),
+            HirExprKind::MatrixView { .. } => true,
             HirExprKind::View { source, .. } => self.types.list_element(source.ty).is_some(),
             HirExprKind::Local(local) => self.storage_references[local.0 as usize],
             _ => false,
@@ -4421,6 +4510,18 @@ impl OwnershipAnalysis<'_> {
     fn known_matrix_shape(&self, expr: &HirExpr) -> Option<(u64, u64)> {
         match &expr.kind {
             HirExprKind::MatrixInit { rows, columns, .. } => Some((*rows, *columns)),
+            HirExprKind::MatrixView {
+                source, transpose, ..
+            } => {
+                if let HirPlaceBase::Local(local) = source.base
+                    && source.projections.is_empty()
+                {
+                    self.matrix_shapes[local.0 as usize]
+                        .map(|(r, c)| if *transpose { (c, r) } else { (r, c) })
+                } else {
+                    None
+                }
+            }
             HirExprKind::Move(local) | HirExprKind::Local(local) => {
                 self.matrix_shapes[local.0 as usize]
             }
@@ -4726,7 +4827,7 @@ impl Analyzer<'_> {
                             .is_some()
                             || self
                                 .types
-                                .view_info(self.locals[local.0 as usize].ty)
+                                .borrowed_view_info(self.locals[local.0 as usize].ty)
                                 .is_some())
                     {
                         return Err(vec![Diagnostic::new(
@@ -5160,7 +5261,7 @@ impl Analyzer<'_> {
             }
             AstExprKind::Index { base, indices } => {
                 let mut place = self.resolve_expr_place(base, writable)?;
-                let rank = if self.types.matrix_element(place.ty).is_some() {
+                let rank = if self.types.matrix_like_element(place.ty).is_some() {
                     2
                 } else {
                     1
@@ -5178,31 +5279,32 @@ impl Analyzer<'_> {
                         Some(expression.span),
                     )]);
                 }
-                let (element_type, mutable) =
-                    if let Some(element) = self.types.buffer_element(place.ty) {
-                        (element, true)
-                    } else if let Some(element) = self.types.matrix_element(place.ty) {
-                        (element, true)
-                    } else if let Some(element) = self.types.vector_element(place.ty) {
-                        (element, true)
-                    } else if let Some(element) = self.types.array_element(place.ty) {
-                        (element, true)
-                    } else if let Some(element) = self.types.list_element(place.ty) {
-                        (element, true)
-                    } else if let Some((element, mutable)) = self.types.view_info(place.ty) {
-                        (element, mutable)
-                    } else {
-                        return Err(vec![Diagnostic::new(
-                            "E0287",
-                            Phase::Semantic,
-                            DiagnosticCategory::Type,
-                            format!(
-                                "checked indexing requires Buffer/Array/List/Vector/View, found {}",
-                                self.type_name(place.ty)
-                            ),
-                            Some(expression.span),
-                        )]);
-                    };
+                let (element_type, mutable) = if let Some(element) =
+                    self.types.buffer_element(place.ty)
+                {
+                    (element, true)
+                } else if let Some(element) = self.types.matrix_element(place.ty) {
+                    (element, true)
+                } else if let Some(element) = self.types.vector_element(place.ty) {
+                    (element, true)
+                } else if let Some(element) = self.types.array_element(place.ty) {
+                    (element, true)
+                } else if let Some(element) = self.types.list_element(place.ty) {
+                    (element, true)
+                } else if let Some((element, mutable)) = self.types.borrowed_view_info(place.ty) {
+                    (element, mutable)
+                } else {
+                    return Err(vec![Diagnostic::new(
+                        "E0287",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        format!(
+                            "checked indexing requires Buffer/Array/List/Vector/View, found {}",
+                            self.type_name(place.ty)
+                        ),
+                        Some(expression.span),
+                    )]);
+                };
                 if writable && !mutable {
                     return Err(vec![Diagnostic::new(
                         "E0288",
@@ -5463,6 +5565,12 @@ impl Analyzer<'_> {
                 }
                 if callee == "capacity" {
                     return self.list_capacity(type_arguments, args, e.span, expected);
+                }
+                if matches!(
+                    callee.as_str(),
+                    "matrix_view" | "matrix_view_mut" | "transpose_view" | "transpose_view_mut"
+                ) {
+                    return self.matrix_view_init(callee, type_arguments, args, e.span, expected);
                 }
                 if callee == "view" || callee == "view_mut" {
                     return self.view_init(
@@ -5769,7 +5877,8 @@ impl Analyzer<'_> {
                 | TypeData::Array { .. }
                 | TypeData::Matrix { .. }
                 | TypeData::List { .. }
-                | TypeData::View { .. },
+                | TypeData::View { .. }
+                | TypeData::MatrixView { .. },
             )
             | None => {
                 return Err(vec![type_error(
@@ -5980,7 +6089,7 @@ impl Analyzer<'_> {
                 "E0335",
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                "rows/columns expects exactly one Matrix place and no type arguments",
+                "rows/columns expects exactly one Matrix/MatrixView/MatrixViewMut place and no type arguments",
                 Some(span),
             )]
         };
@@ -5988,7 +6097,7 @@ impl Analyzer<'_> {
             return Err(invalid());
         }
         let source = self.resolve_expr_place(&args[0], false)?;
-        if self.types.matrix_element(source.ty).is_none() {
+        if self.types.matrix_like_element(source.ty).is_none() {
             return Err(invalid());
         }
         self.coerce(
@@ -6348,6 +6457,70 @@ impl Analyzer<'_> {
             }
         }
         Ok(())
+    }
+
+    fn matrix_view_init(
+        &mut self,
+        name: &str,
+        type_arguments: &[AstType],
+        args: &[AstExpr],
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        let invalid = || {
+            vec![Diagnostic::new(
+                "E0336",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "matrix_view/transpose_view requires one Matrix or mathematical matrix view place and no type arguments",
+                Some(span),
+            )]
+        };
+        if !type_arguments.is_empty() || args.len() != 1 {
+            return Err(invalid());
+        }
+        let mutable = name.ends_with("_mut");
+        let transpose = name.starts_with("transpose");
+        let source = self.resolve_expr_place(&args[0], mutable)?;
+        let element = self
+            .types
+            .matrix_like_element(source.ty)
+            .ok_or_else(invalid)?;
+        if mutable
+            && self
+                .types
+                .matrix_view_info(source.ty)
+                .is_some_and(|(_, m)| !m)
+        {
+            return Err(vec![Diagnostic::new(
+                "E0337",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "mutable matrix view requires writable source capability",
+                Some(span),
+            )]);
+        }
+        let descriptor = crate::types::MatrixViewDescriptor::derived(
+            self.types.matrix_view_info(source.ty).is_some(),
+            transpose,
+        );
+        let ty = self.types.intern_matrix_view(element, mutable);
+        self.coerce(
+            Checked {
+                expr: HirExpr {
+                    kind: HirExprKind::MatrixView {
+                        source,
+                        mutable,
+                        transpose,
+                        descriptor,
+                    },
+                    ty,
+                    span,
+                },
+                constant: None,
+            },
+            expected,
+        )
     }
 
     fn view_init(
@@ -7620,7 +7793,7 @@ fn verify_block(
                 if place.ty != value.ty {
                     return Err(fail("HIR field assignment mismatch".into()));
                 }
-                if matches!(place.base, HirPlaceBase::Dereference { mutable: false, .. }) {
+                if !hir_place_writable(place, f, types, structs, enums) {
                     return Err(fail("HIR writes through a shared reference".into()));
                 }
             }
@@ -7832,7 +8005,7 @@ fn verify_expr(
             if types.reference_info(e.ty) != Some((place.ty, *mutable)) {
                 return Err(fail("HIR borrow type/capability mismatch".into()));
             }
-            if *mutable && matches!(place.base, HirPlaceBase::Dereference { mutable: false, .. }) {
+            if *mutable && !hir_place_writable(place, f, types, structs, enums) {
                 return Err(fail("HIR mutable borrow through shared reference".into()));
             }
             if let HirPlaceBase::Local(local) = &place.base
@@ -7950,7 +8123,7 @@ fn verify_expr(
         }
         HirExprKind::MatrixRows { source } | HirExprKind::MatrixColumns { source } => {
             verify_place(source, f, sigs, structs, enums, types, fail)?;
-            if types.matrix_element(source.ty).is_none() || e.ty != TypeId::USIZE {
+            if types.matrix_like_element(source.ty).is_none() || e.ty != TypeId::USIZE {
                 return Err(fail("HIR Matrix shape contract invalid".into()));
             }
         }
@@ -8053,6 +8226,31 @@ fn verify_expr(
             verify_place(source, f, sigs, structs, enums, types, fail)?;
             if types.list_element(source.ty).is_none() || e.ty != TypeId::USIZE {
                 return Err(fail("HIR List metadata query contract invalid".into()));
+            }
+        }
+        HirExprKind::MatrixView {
+            source,
+            mutable,
+            transpose,
+            descriptor,
+        } => {
+            verify_place(source, f, sigs, structs, enums, types, fail)?;
+            let element = types
+                .matrix_like_element(source.ty)
+                .ok_or_else(|| fail("HIR MatrixView source invalid".into()))?;
+            if types.matrix_view_info(e.ty) != Some((element, *mutable))
+                || *descriptor
+                    != crate::types::MatrixViewDescriptor::derived(
+                        types.matrix_view_info(source.ty).is_some(),
+                        *transpose,
+                    )
+                || (*mutable
+                    && (types.matrix_view_info(source.ty).is_some_and(|(_, m)| !m)
+                        || !hir_place_writable(source, f, types, structs, enums)))
+            {
+                return Err(fail(
+                    "HIR MatrixView stride/type/capability contract invalid".into(),
+                ));
             }
         }
         HirExprKind::View { source, mutable } => {
@@ -8233,6 +8431,53 @@ fn verify_expr(
     Ok(())
 }
 
+fn hir_place_writable(
+    place: &HirPlace,
+    f: &HirFunction,
+    types: &TypeArena,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+) -> bool {
+    let mut ty = match &place.base {
+        HirPlaceBase::Local(local) => f.locals[local.0 as usize].ty,
+        HirPlaceBase::Dereference { reference, mutable } => {
+            if !mutable {
+                return false;
+            }
+            let Some((pointee, true)) = types.reference_info(reference.ty) else {
+                return false;
+            };
+            pointee
+        }
+    };
+    for projection in &place.projections {
+        match projection {
+            HirPlaceProjection::Index { element_type, .. } => {
+                if types.borrowed_view_info(ty).is_some_and(|(_, m)| !m) {
+                    return false;
+                }
+                ty = *element_type;
+            }
+            HirPlaceProjection::Field(field) => {
+                let Some(owner) = types.struct_id(ty) else {
+                    return false;
+                };
+                let Some(info) = structs
+                    .get(owner.0 as usize)
+                    .and_then(|s| s.fields.iter().find(|f| f.id == *field))
+                else {
+                    return false;
+                };
+                let Some(member) = concrete_member_type(types, ty, info.ty, structs, enums) else {
+                    return false;
+                };
+                ty = member;
+            }
+        }
+    }
+    true
+}
+
 fn verify_place(
     place: &HirPlace,
     function: &HirFunction,
@@ -8294,9 +8539,9 @@ fn verify_place(
                     .or_else(|| types.vector_element(ty))
                     .or_else(|| types.matrix_element(ty))
                     .or_else(|| types.list_element(ty))
-                    .or_else(|| types.view_info(ty).map(|(element, _)| element))
+                    .or_else(|| types.borrowed_view_info(ty).map(|(element, _)| element))
                     .ok_or_else(|| fail("HIR index projection has non-contiguous base".into()))?;
-                if column.is_some() != (types.matrix_element(ty).is_some())
+                if column.is_some() != (types.matrix_like_element(ty).is_some())
                     || column.as_ref().is_some_and(|c| c.ty != TypeId::USIZE)
                     || index.ty != TypeId::USIZE
                     || element != *element_type
@@ -8537,6 +8782,55 @@ mod tests {
         }
         assert!(verify_hir(&corrupt).is_err());
     }
+    #[test]
+    fn vertical24_hir_rejects_corrupt_matrix_view_contracts() {
+        let hir = check("int main(){Matrix<int> a=[1,2,3;4,5,6];MatrixView<int> v=transpose_view(a);return v[1,1];}").unwrap();
+        for case in 0..6 {
+            let mut corrupt = hir.clone();
+            let initializer = corrupt.functions[0]
+                .body
+                .statements
+                .iter_mut()
+                .find_map(|s| {
+                    if let HirStmtKind::Local { initializer, .. } = &mut s.kind
+                        && matches!(initializer.kind, HirExprKind::MatrixView { .. })
+                    {
+                        Some(initializer)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+            let HirExprKind::MatrixView {
+                source,
+                mutable,
+                transpose,
+                descriptor,
+            } = &mut initializer.kind
+            else {
+                panic!()
+            };
+            match case {
+                0 => std::mem::swap(&mut descriptor.rows, &mut descriptor.columns),
+                1 => descriptor.row_stride = crate::types::MatrixViewField::Rows,
+                2 => descriptor.column_stride = crate::types::MatrixViewField::One,
+                3 => *mutable = true,
+                4 => *transpose = false,
+                5 => {
+                    initializer.kind = HirExprKind::View {
+                        source: source.clone(),
+                        mutable: *mutable,
+                    }
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                verify_hir(&corrupt).is_err(),
+                "accepted HIR corruption {case}"
+            );
+        }
+    }
+
     #[test]
     fn vertical22_hir_rejects_corrupt_transpose_contracts() {
         let hir = check(

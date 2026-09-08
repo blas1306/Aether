@@ -792,10 +792,11 @@ deferred until its empty-result/error semantics are designed. Resize, insert,
 erase, non-Copy elements and a general method/property
 surface are also outside V14.
 
-### 6.3 `Vector` — V21 foundation; `Matrix` — future implementation
+### 6.3 `Vector` — V21 foundation; Matrix V23 and MatrixView V24 below
 
-`Matrix<T>` has contiguous dense storage by default with dimensions, strides,
-layout and ownership represented explicitly in semantic IR. It is not
+`Matrix<T>` has contiguous dense storage by default with dimensions and
+ownership represented explicitly in semantic IR. V23 owners have no stored
+strides; V24 borrowed MatrixView values carry explicit strides. It is not
 `Array<Array<T>>`, `List<List<T>>` or nested Vector literals. A future sparse
 matrix is a different type/family.
 
@@ -1549,3 +1550,75 @@ swapping descriptor dimensions would incorrectly reinterpret rectangular data.
 A future MatrixView or transpose must specify lifetime, strides and layout.
 No arithmetic, BLAS, tensor model, Numeric capability or source layout system
 is introduced. See [NEXT_VERTICAL_23_REPORT.md](NEXT_VERTICAL_23_REPORT.md).
+
+
+## NEXT-VERTICAL-24 — normative borrowed MatrixView contract
+
+`MatrixView<T>` and `MatrixViewMut<T>` MUST retain distinct mathematical type
+identity from Matrix, View/ViewMut, Array, List and Vector. Their canonical
+representation is `MatrixView { element, mutable }`; runtime shape and strides
+MUST NOT enter TypeId. Both are Copy, Relocatable, non-Storable and no-drop,
+independently of T. Writable descriptors MAY alias; they imply no exclusivity,
+no runtime reference count and no LLVM noalias.
+
+`matrix_view(x)` and `transpose_view(x)` produce shared MatrixView<T>.
+`matrix_view_mut(x)` and `transpose_view_mut(x)` produce MatrixViewMut<T> only
+from a writable Place. Sources MUST be Matrix<T> or either matrix-view type;
+a shared view cannot produce a writable view. References require explicit `*`.
+The operations MUST borrow the existing owner and MUST NOT consume it.
+
+Descriptors contain `{ptr,rows,columns,row_stride,column_stride}` with strides
+measured in elements. From an R by C contiguous row-major owner, normal metadata
+MUST be `(R,C,C,1)` and transposed metadata `(C,R,1,C)`. From a view, normal
+creation preserves metadata and transpose swaps rows/columns AND row/column
+strides. Two transposes restore the descriptor. Empty Matrix has null backing
+and canonical 0x0 shape, normal strides `(0,1)` and transposed strides `(1,0)`.
+These stride values are internal, not a source inspection API.
+
+All four creation operations MUST have zero allocation, free and relocation
+deltas and MUST preserve the source backing pointer. They MUST NOT load/store
+or drop backing elements. Reading/copying an existing descriptor is permitted.
+There is no source raw-pointer/stride constructor and no arbitrary descriptor
+assembly operation in HIR/MIR/SSA. Each boundary MUST independently validate
+the closed descriptor recipe against source kind, transpose flag and result
+capability. A shape swap without the corresponding stride swap is invalid IR.
+The source Place is the borrow relation; ordinary descriptor copies preserve
+its def-use ancestry, never introduce an independent owner.
+
+`rows(x)`/`columns(x)` MUST accept all three matrix types, return usize and
+preserve the source kind through IR. `v[i,j]` MUST carry OneBased2D with exactly
+two usize operands. Checks MUST establish `1<=i<=rows` and `1<=j<=columns` before
+subtraction, stride multiplication, addition or address calculation. The offset
+is exactly `(i-1)*row_stride+(j-1)*column_stride`. No raw zero-based access or
+contiguity assumption is permitted for matrix views.
+
+Safety follows inductively from the checked owner's shape/byte allocation:
+normal offsets are at most R*C-1; a transpose only exchanges coordinate/stride
+pairs and hence preserves that offset set; copying preserves it as well.
+Every reachable descriptor therefore has representable in-allocation offsets.
+Empty descriptors cannot pass bounds. LLVM uses plain unsigned arithmetic
+without overflow flags and a non-inbounds GEP after the guards.
+
+Copy elements MAY be read by value and written through mutable views. Shared
+views MUST reject writes and mutable element borrows, including nested paths.
+Non-Copy elements MUST be borrowed instead of partially extracted; replacing
+an owning slot remains unsupported. No implicit Clone/drop is introduced.
+
+Provenance MUST resolve to the existing owner root through copies, transposes,
+projected fields, indexed owning containers and explicit references. A live
+view or derived alias prevents owner movement/replacement; lexical scope end
+releases this restriction. Nested List invalidation stays conservative, with
+no stored lifetimes or runtime ownership tags. Borrowed parameters support
+local shared/mutable helpers, including cross-module calls. Passing mutable
+matrix views whose elements contain List (also through references to the
+descriptor) across a call MUST fail closed until
+nested alias effects are representable; shared views and writable views of
+scalar/Buffer elements remain permitted. Returning/storing
+views, rebinding borrowed locals, and using a view as a bare generic type
+argument remain forbidden by the current borrowed-value rules. Element-generic
+MatrixView<T> helper signatures remain permitted.
+
+Matrix ownership, its three-word row-major descriptor and reverse cleanup MUST
+remain unchanged. `transpose(Matrix)` MUST stay invalid; Vector transpose MUST
+retain its consuming O(1) transfer. V24 adds no slicing/ranges, row/column views,
+VectorView, arithmetic, BLAS, numeric traits, methods, raw pointers or user lifetimes.

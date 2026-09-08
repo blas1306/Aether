@@ -370,6 +370,14 @@ pub enum Rvalue {
         size_trap: TrapKind,
         failure_trap: TrapKind,
     },
+    /// Borrow the source backing. Source Place and descriptor copy/use chains
+    /// retain provenance; the closed recipe is independently verified.
+    MatrixView {
+        source: Place,
+        mutable: bool,
+        transpose: bool,
+        descriptor: aether_frontend::MatrixViewDescriptor,
+    },
     View {
         source: Place,
         mutable: bool,
@@ -1687,6 +1695,29 @@ impl Builder<'_> {
                 );
                 Operand::Local(destination)
             }
+            HirExprKind::MatrixView {
+                source,
+                mutable,
+                transpose,
+                descriptor,
+            } => {
+                let source = self.lower_place(source);
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::MatrixView {
+                        source,
+                        mutable: *mutable,
+                        transpose: *transpose,
+                        descriptor: *descriptor,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
             HirExprKind::View { source, mutable } => {
                 let source = self.lower_place(source);
                 let destination = self.temporary(expression.ty);
@@ -2350,10 +2381,15 @@ fn verify_mir_function(
             if place_has_index(&instruction.destination)
                 && let PlaceBase::Local(local) = &instruction.destination.base
                 && types
-                    .view_info(function.locals[local.0 as usize].ty)
+                    .borrowed_view_info(function.locals[local.0 as usize].ty)
                     .is_some_and(|(_, mutable)| !mutable)
             {
                 return Err(fail("MIR store through read-only View".into()));
+            }
+            if !mir_place_writable(function, &instruction.destination, structs, types)
+                .map_err(&fail)?
+            {
+                return Err(fail("MIR store through shared view/reference".into()));
             }
             let destination_ty =
                 place_type(function, &instruction.destination, structs, types).map_err(&fail)?;
@@ -2775,6 +2811,7 @@ fn verify_ownership(
                 }
                 Rvalue::Load(place)
                 | Rvalue::Borrow { place, .. }
+                | Rvalue::MatrixView { source: place, .. }
                 | Rvalue::View { source: place, .. }
                 | Rvalue::MatrixRows { source: place }
                 | Rvalue::MatrixColumns { source: place }
@@ -3087,7 +3124,7 @@ fn validate_rvalue(
             if types.reference_info(destination) != Some((pointee, *mutable)) {
                 return Err("MIR borrow result type/capability mismatch".into());
             }
-            if *mutable && matches!(&place.base, PlaceBase::Dereference { mutable: false, .. }) {
+            if *mutable && !mir_place_writable(function, place, structs, types)? {
                 return Err("MIR mutable borrow through shared reference".into());
             }
             if let PlaceBase::Local(local) = &place.base
@@ -3238,7 +3275,7 @@ fn validate_rvalue(
         Rvalue::MatrixRows { source } | Rvalue::MatrixColumns { source } => {
             validate_place_read(function, source, structs, types, initialized)?;
             let source_ty = place_type(function, source, structs, types)?;
-            if destination != TypeId::USIZE || types.matrix_element(source_ty).is_none() {
+            if destination != TypeId::USIZE || types.matrix_like_element(source_ty).is_none() {
                 return Err("MIR Matrix shape contract invalid".into());
             }
         }
@@ -3338,7 +3375,7 @@ fn validate_rvalue(
                 }
             };
             if types
-                .view_info(root_ty)
+                .borrowed_view_info(root_ty)
                 .is_some_and(|(_, mutable)| !mutable)
                 || destination != TypeId::BOOL
                 || operand_type(function, length)? != TypeId::USIZE
@@ -3394,6 +3431,30 @@ fn validate_rvalue(
                 || *failure_trap != TrapKind::AllocationFailure
             {
                 return Err("MIR List reserve contract invalid".into());
+            }
+        }
+        Rvalue::MatrixView {
+            source,
+            mutable,
+            transpose,
+            descriptor,
+        } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            let source_ty = place_type(function, source, structs, types)?;
+            let element = types
+                .matrix_like_element(source_ty)
+                .ok_or_else(|| "MIR MatrixView source invalid".to_string())?;
+            if types.matrix_view_info(destination) != Some((element, *mutable))
+                || *descriptor
+                    != aether_frontend::MatrixViewDescriptor::derived(
+                        types.matrix_view_info(source_ty).is_some(),
+                        *transpose,
+                    )
+                || (*mutable
+                    && (types.matrix_view_info(source_ty).is_some_and(|(_, m)| !m)
+                        || !mir_place_writable(function, source, structs, types)?))
+            {
+                return Err("MIR MatrixView stride/type/capability contract invalid".into());
             }
         }
         Rvalue::View { source, mutable } => {
@@ -3744,9 +3805,9 @@ pub(crate) fn place_type(
                     .or_else(|| types.vector_element(ty))
                     .or_else(|| types.matrix_element(ty))
                     .or_else(|| types.list_element(ty))
-                    .or_else(|| types.view_info(ty).map(|(element, _)| element))
+                    .or_else(|| types.borrowed_view_info(ty).map(|(element, _)| element))
                     .ok_or_else(|| "MIR index projection has non-contiguous base".to_string())?;
-                if column.is_some() != types.matrix_element(ty).is_some()
+                if column.is_some() != types.matrix_like_element(ty).is_some()
                     || column
                         .as_ref()
                         .is_some_and(|c| operand_type(function, c).ok() != Some(TypeId::USIZE))
@@ -3762,6 +3823,32 @@ pub(crate) fn place_type(
         }
     }
     Ok(ty)
+}
+
+fn mir_place_writable(
+    function: &MirFunction,
+    place: &Place,
+    structs: &[StructInfo],
+    types: &TypeArena,
+) -> Result<bool, String> {
+    if matches!(place.base, PlaceBase::Dereference { mutable: false, .. }) {
+        return Ok(false);
+    }
+    for (position, projection) in place.projections.iter().enumerate() {
+        if matches!(projection, PlaceProjection::Index { .. }) {
+            let prefix = Place {
+                base: place.base.clone(),
+                projections: place.projections[..position].to_vec(),
+            };
+            if types
+                .borrowed_view_info(place_type(function, &prefix, structs, types)?)
+                .is_some_and(|(_, m)| !m)
+            {
+                return Ok(false);
+            }
+        }
+    }
+    Ok(true)
 }
 
 fn place_root_local(place: &Place) -> Option<LocalId> {

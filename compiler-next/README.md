@@ -1,10 +1,63 @@
-# Aether NEXT-VERTICAL-23
+# Aether NEXT-VERTICAL-24
 
 This directory is the isolated Rust implementation of the first reconstruction
-slice. The current mathematical foundation is Matrix<T> with two-dimensional literals and checked one-based indexing; the numbered
+slice. The current mathematical foundation includes Matrix<T> owners and borrowed strided MatrixView/MatrixViewMut with zero-copy transpose; the numbered
 Vertical-9..17 sections below retain historical qualification context.
 It does not replace the production `aether` CLI or import any legacy
 Python object, JSON schema, Initial IR, or SSA representation.
+
+## Borrowed strided matrix views (V24)
+
+```aether
+Matrix<int> A = [1,2,3;4,5,6];
+MatrixView<int> v = matrix_view(A);
+MatrixViewMut<int> T = transpose_view_mut(A);
+T[2,1] = 99; // A[1,2] is now 99
+MatrixView<int> back = transpose_view(T); // shape 2x3 again
+usize m = rows(T);    // 3
+usize n = columns(T); // 2
+ref int x = &v[1,2];
+```
+
+The four intrinsics are `matrix_view`, `matrix_view_mut`, `transpose_view` and
+`transpose_view_mut`. Each takes one existing Matrix or matrix-view Place, with
+explicit dereference for references. The `_mut` operations require writable
+source capability. These are borrowed operations; Vector's consuming
+`transpose` remains separate, and `transpose(Matrix)` remains rejected.
+
+Canonical `TypeData::MatrixView { element, mutable }` distinguishes both source
+types from Matrix and zero-based raw View/ViewMut. Only T and write capability
+participate in identity. Both view descriptors are Copy and Relocatable,
+non-Storable and have no drop. Mutable capability implies no uniqueness and
+LLVM receives no noalias promise. Copy aliases and transposed views retain the
+original owner provenance under the existing lexical borrow model.
+
+The five-word bootstrap descriptor is `{ptr,rows,columns,row_stride,column_stride}`
+(40 bytes on x86_64), with strides in elements. Matrix owners still use their
+three-word contiguous row-major descriptor. Normal owner views have `(R,C,C,1)`;
+transposed owner views have `(C,R,1,C)`. Transposing a view swaps both shape and
+strides, preserving its pointer. No transformation allocates, frees, relocates,
+loads/stores elements or drops backing storage. Empty normal metadata is
+`(0,0,0,1)`; transposed empty metadata is `(0,0,1,0)`.
+
+Indexing remains `v[i,j]`, with two usize axes and all four one-based bounds
+checks before `(i-1)*row_stride+(j-1)*column_stride`. Closed, independently
+verified descriptor recipes preserve the original allocation's valid offset
+range; no source pointer/stride constructor exists. Copy reads/writes and
+shared/mutable element references use this same path. Owning elements can be
+borrowed; partial owner extraction/replacement remains rejected.
+
+An owner cannot move or be replaced while any derived view/copy is lexically
+live. After the view scope ends, ordinary owner transfer and cleanup resume.
+Struct fields, indexed owning containers and explicit owner references work;
+nested List invalidation remains conservative. Passing mutable views whose
+elements contain List across calls is rejected until nested alias effects can
+be represented safely. Views cannot return, be stored
+in owning aggregates/containers, be rebound, or be supplied as bare generic
+type arguments under the existing borrowed-value restrictions. Helpers with
+`MatrixView<T>`/`MatrixViewMut<T>` parameters support element generics and modules.
+There are no stored lifetimes, methods, slicing, VectorView, arithmetic or BLAS.
+See [the V24 report](../docs/architecture/NEXT_VERTICAL_24_REPORT.md).
 
 ## Current mathematical foundation (V23)
 
@@ -54,10 +107,9 @@ ordinary ownership and cleanup.
 
 Matrix semantics are layout-independent. Row-major is a bootstrap layout
 choice, not type identity. There is no Matrix arithmetic, multiplication,
-transpose, slicing, row/column view, layout parameter or MatrixView in V23.
+transpose, slicing, row/column view, layout parameter or MatrixView in V23 (borrowed views are added by V24 above).
 `transpose(Matrix)` is rejected by the Vector intrinsic. Raw View/ViewMut also
-reject Matrix because they erase shape and use zero-based indexing. Future
-MatrixView/transpose work must decide borrowing, strides and layout semantics.
+reject Matrix because they erase shape and use zero-based indexing. V24 above defines borrowed MatrixView/transpose; owning transpose remains future work.
 
 See [the V23 report](../docs/architecture/NEXT_VERTICAL_23_REPORT.md) for
 qualification, verifier corruption tests, allocation/drop instrumentation,
@@ -244,7 +296,8 @@ applied aggregate forms, generic parameters, and
 `Reference { pointee: TypeId, mutable: bool }`, `Buffer { element: TypeId }`,
 `Array { element: TypeId }`, `List { element: TypeId }`,
 `Vector { element: TypeId, orientation: Orientation }`,
-`Matrix { element: TypeId }`, and
+`Matrix { element: TypeId }`,
+`MatrixView { element: TypeId, mutable: bool }`, and
 `View { element: TypeId, mutable: bool }`. Repeated `ref T` resolution
 reuses one ID, while `ref T` and `ref mut T` remain distinct. HIR is the first canonical boundary;
 HIR, MIR, SSA, signatures, fields and enum payloads transport IDs rather than

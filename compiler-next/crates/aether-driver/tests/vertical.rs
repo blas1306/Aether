@@ -6376,3 +6376,478 @@ fn vertical23_cross_module_signature_rejections() {
     }
     fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical24_native_mapping_borrows_and_heap_counts() {
+    for (name, heap) in [
+        ("normal", 1),
+        ("mutable", 1),
+        ("transpose", 1),
+        ("transpose_mut", 1),
+        ("double", 1),
+        ("empty", 0),
+        ("owning", 5),
+        ("projected", 5),
+        ("refs", 1),
+        ("copy", 1),
+        ("scope", 1),
+        ("generic", 1),
+    ] {
+        let compiled = compile_session(
+            CompilationSession::discover(&program(&format!("v24_matrix_view_{name}.ae"))).unwrap(),
+            &[],
+        )
+        .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        assert_eq!(
+            v23_execute(&v23_heap_guard(&compiled.llvm, heap)).code(),
+            Some(0),
+            "{name}"
+        );
+    }
+    let compiled = compile_session(
+        CompilationSession::discover(&module_program("v24_matrix_views")).unwrap(),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        v23_execute(&v23_heap_guard(&compiled.llvm, 1)).code(),
+        Some(0)
+    );
+}
+
+#[test]
+fn vertical24_identity_and_deterministic_ir() {
+    use aether_frontend::{IndexSemantics, TypeArena, TypeId};
+    let mut types = TypeArena::new();
+    let v = types.intern_matrix_view(TypeId::INT64, false);
+    let w = types.intern_matrix_view(TypeId::INT64, true);
+    assert_eq!(v, types.intern_matrix_view(TypeId::INT64, false));
+    assert_ne!(v, w);
+    for t in [v, w] {
+        assert_ne!(t, types.intern_matrix(TypeId::INT64));
+        assert_ne!(t, types.intern_view(TypeId::INT64, false));
+        assert_ne!(t, types.intern_view(TypeId::INT64, true));
+        let p = types.properties(t).unwrap();
+        assert!(p.is_copy && p.is_relocatable && !p.is_storable && !p.needs_drop);
+        assert!(types.contains_view(t));
+        assert_eq!(types.index_semantics(t), Some(IndexSemantics::OneBased2D));
+        assert_eq!(
+            layout_of(&types, t, TargetProperties::LINUX_X86_64, &[], &[])
+                .unwrap()
+                .size,
+            40
+        );
+    }
+    let source = SourceFile::new(
+        "view.ae",
+        fs::read_to_string(program("v24_matrix_view_double.ae")).unwrap(),
+    );
+    let emits = [Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm];
+    let first = compile_source(&source, &emits).unwrap();
+    assert_eq!(first.dumps, compile_source(&source, &emits).unwrap().dumps);
+    for phase in [Emit::Hir, Emit::Mir, Emit::Ssa] {
+        for word in [
+            "MatrixView",
+            "row_stride",
+            "column_stride",
+            "OneBased2D",
+            "transpose: true",
+        ] {
+            assert!(first.dumps[&phase].contains(word), "{phase:?}: {word}");
+        }
+    }
+    assert!(!first.llvm.contains("noalias"));
+    let helper = first
+        .llvm
+        .split("define internal ptr @aether_matrix_view_index_")
+        .nth(1)
+        .unwrap()
+        .split("\n}")
+        .next()
+        .unwrap();
+    assert!(helper.find("column_upper_check:").unwrap() < helper.find("%row0 = sub").unwrap());
+    assert!(helper.contains("mul i64 %row0, %row_stride"));
+    assert!(helper.contains("mul i64 %column0, %column_stride"));
+    assert!(!helper.contains("getelementptr inbounds"));
+}
+
+#[test]
+fn vertical24_structured_diagnostics_and_owner_liveness() {
+    for (body, code) in [
+        (
+            "Array<int> a={1};MatrixView<int> v=matrix_view(a);",
+            "E0336",
+        ),
+        (
+            "Vector<int,Row> a=[1];MatrixView<int> v=matrix_view(a);",
+            "E0336",
+        ),
+        (
+            "Array<int> a={1};MatrixView<int> v=transpose_view(a);",
+            "E0336",
+        ),
+        (
+            "Matrix<int> a=[1];MatrixView<int> v=matrix_view(a);v[1,1]=2;",
+            "E0288",
+        ),
+        (
+            "Matrix<int> a=[1];MatrixView<int> v=matrix_view(a);MatrixViewMut<int> w=matrix_view_mut(v);",
+            "E0337",
+        ),
+        (
+            "Matrix<int> a=[1];MatrixView<int> v=matrix_view(a);int x=v[1];",
+            "E0334",
+        ),
+        (
+            "Matrix<int> a=[1];MatrixView<int> v=matrix_view(a);int x=v[1,1,1];",
+            "E0334",
+        ),
+        (
+            "Matrix<int> a=[1];MatrixView<int> v=matrix_view(a);int x=v[0,1];",
+            "E0296",
+        ),
+        (
+            "Matrix<int> a=[1];MatrixView<int> v=matrix_view(a);a=[2];",
+            "E0292",
+        ),
+        (
+            "Matrix<int> a=[1];MatrixView<int> v=matrix_view(a);consume(a);",
+            "E0292",
+        ),
+        (
+            "Matrix<int> a=[1];MatrixViewMut<int> v=matrix_view_mut(a);consume(a);",
+            "E0292",
+        ),
+        (
+            "Matrix<int> a=[1];MatrixView<int> v=transpose_view(a);MatrixView<int> w=v;consume(a);",
+            "E0292",
+        ),
+        (
+            "Matrix<int> a=[1];MatrixViewMut<int> v=transpose_view_mut(a);MatrixView<int> w=transpose_view(v);consume(a);",
+            "E0292",
+        ),
+        ("Matrix<int> a=[1];Matrix<int> b=transpose(a);", "E0328"),
+        (
+            "Matrix<int> a=[1];MatrixView<int> v=MatrixView<int>(a,1,1,1,1);",
+            "E0212",
+        ),
+    ] {
+        let source =
+            format!("int consume(Matrix<int> a){{return 0;}}int main(){{{body}return 0;}}");
+        let e = compile_source(&SourceFile::new("bad.ae", source), &[])
+            .err()
+            .unwrap_or_else(|| panic!("accepted {body}"));
+        assert!(
+            e.iter().any(|d| d.code == code),
+            "{body}: expected {code}, got {e:?}"
+        );
+    }
+    for source in [
+        "int main(){Matrix<int> a=[1];ref Matrix<int> r=&a;MatrixViewMut<int> v=matrix_view_mut(*r);return 0;}",
+        "int main(){Matrix<int> a=[1];MatrixView<int> v=matrix_view(a);ref mut int r=&mut v[1,1];return 0;}",
+        "MatrixView<int> bad(){Matrix<int> a=[1];return matrix_view(a);}int main(){return 0;}",
+        "MatrixViewMut<int> bad(MatrixViewMut<int> v){return v;}int main(){return 0;}",
+        "struct H{MatrixView<int> v;}int main(){return 0;}",
+        "struct H{MatrixViewMut<int> v;}int main(){return 0;}",
+        "int main(){Array<MatrixView<int>> a={};return 0;}",
+        "int main(){List<MatrixView<int>> a={};return 0;}",
+        "int main(){Matrix<MatrixView<int>> a=[];return 0;}",
+        "int main(){Matrix<int> a=[1];MatrixView<int> v=matrix_view(a);bool b=true;return v[b,1];}",
+        "int main(){Matrix<Buffer<int>> a=[Buffer<int>(1,2)];MatrixView<Buffer<int>> v=matrix_view(a);Buffer<int> b=v[1,1];return 0;}",
+        "int main(){Matrix<Buffer<int>> a=[Buffer<int>(1,2)];MatrixViewMut<Buffer<int>> v=matrix_view_mut(a);v[1,1]=Buffer<int>(1,3);return 0;}",
+        "struct H{Matrix<int> a;}int consume(H h){return 0;}int main(){H h=H([1]);MatrixView<int> v=matrix_view(h.a);consume(h);return 0;}",
+        "int main(){List<Matrix<int>> a={[1]};MatrixView<int> v=matrix_view(a[0]);push(a,[2]);return 0;}",
+    ] {
+        assert!(
+            compile_source(&SourceFile::new("bad.ae", source), &[]).is_err(),
+            "accepted {source}"
+        );
+    }
+}
+
+/// Observe each descriptor transform, including its backing pointer, with no
+/// changes to the production runtime or source API.
+fn v24_zero_cost_guard(llvm: &str, heap: u64) -> String {
+    let mut output = String::new();
+    let mut count = 0;
+    let mut inside = false;
+    for line in llvm.lines() {
+        if let Some(source) = line.trim().strip_prefix("; MatrixViewBegin ") {
+            assert!(!inside);
+            inside = true;
+            let (ty, value) = source.split_once('|').unwrap();
+            for (suffix, global) in [("a", "heap_alloc"), ("f", "heap_free"), ("r", "relocation")] {
+                writeln!(
+                    output,
+                    "  %qv{count}_{suffix}0 = load i64, ptr @aether_{global}_count"
+                )
+                .unwrap();
+            }
+            writeln!(output, "  %qv{count}_p0 = extractvalue {ty} {value}, 0").unwrap();
+        } else if let Some(result) = line.trim().strip_prefix("; MatrixViewEnd ") {
+            assert!(inside);
+            inside = false;
+            for (suffix, global) in [("a", "heap_alloc"), ("f", "heap_free"), ("r", "relocation")] {
+                writeln!(output,"  %qv{count}_{suffix}1 = load i64, ptr @aether_{global}_count\n  %qv{count}_{suffix}ok = icmp eq i64 %qv{count}_{suffix}0, %qv{count}_{suffix}1").unwrap();
+            }
+            writeln!(output,"  %qv{count}_p1 = extractvalue {{ ptr, i64, i64, i64, i64 }} {result}, 0\n  %qv{count}_pok = icmp eq ptr %qv{count}_p0, %qv{count}_p1\n  %qv{count}_af = and i1 %qv{count}_aok, %qv{count}_fok\n  %qv{count}_rp = and i1 %qv{count}_rok, %qv{count}_pok\n  %qv{count}_ok = and i1 %qv{count}_af, %qv{count}_rp\n  %qv{count}_prior = load i1, ptr @v24_ok\n  %qv{count}_all = and i1 %qv{count}_prior, %qv{count}_ok\n  store i1 %qv{count}_all, ptr @v24_ok\n  %qv{count}_seen = load i64, ptr @v24_seen\n  %qv{count}_next = add i64 %qv{count}_seen, 1\n  store i64 %qv{count}_next, ptr @v24_seen").unwrap();
+            count += 1;
+        } else if line == "  %process_status = trunc i64 %aether_result to i32" {
+            writeln!(output,"  %qv_ok = load i1, ptr @v24_ok\n  %qv_seen = load i64, ptr @v24_seen\n  %qv_ran = icmp ugt i64 %qv_seen, 0\n  %qv_a = load i64, ptr @aether_heap_alloc_count\n  %qv_f = load i64, ptr @aether_heap_free_count\n  %qv_r = load i64, ptr @aether_relocation_count\n  %qv_aok = icmp eq i64 %qv_a, {heap}\n  %qv_fok = icmp eq i64 %qv_f, {heap}\n  %qv_rok = icmp eq i64 %qv_r, 0\n  %qv_af = and i1 %qv_aok, %qv_fok\n  %qv_afr = and i1 %qv_af, %qv_rok\n  %qv_op = and i1 %qv_ok, %qv_ran\n  %qv_pass = and i1 %qv_afr, %qv_op\n  %qv_result = trunc i64 %aether_result to i32\n  %process_status = select i1 %qv_pass, i32 %qv_result, i32 99").unwrap();
+        } else {
+            if inside {
+                assert!(
+                    line.contains("extractvalue") || line.contains("insertvalue"),
+                    "element/storage operation during view transform: {line}"
+                );
+            }
+            writeln!(output, "{line}").unwrap();
+        }
+    }
+    assert!(count > 0 && !inside);
+    output.push_str("\n@v24_ok = internal global i1 true\n@v24_seen = internal global i64 0\n");
+    output
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical24_each_view_has_zero_heap_relocation_and_pointer_delta() {
+    for (name, heap) in [
+        ("normal", 1),
+        ("mutable", 1),
+        ("transpose", 1),
+        ("transpose_mut", 1),
+        ("double", 1),
+        ("empty", 0),
+        ("owning", 5),
+        ("projected", 5),
+        ("refs", 1),
+        ("copy", 1),
+        ("scope", 1),
+        ("generic", 1),
+    ] {
+        let compiled = compile_source(
+            &SourceFile::new(
+                "cost.ae",
+                fs::read_to_string(program(&format!("v24_matrix_view_{name}.ae"))).unwrap(),
+            ),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            v23_execute(&v24_zero_cost_guard(&compiled.llvm, heap)).code(),
+            Some(0),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical24_runtime_bounds_all_axes_and_capabilities() {
+    use std::os::unix::process::ExitStatusExt;
+    for (literal, r, c) in [("[]", 0, 0), ("[1,2,3;4,5,6]", 2, 3)] {
+        for (ty, create, transpose) in [
+            ("MatrixView", "matrix_view", false),
+            ("MatrixView", "transpose_view", true),
+            ("MatrixViewMut", "matrix_view_mut", false),
+            ("MatrixViewMut", "transpose_view_mut", true),
+        ] {
+            let (r, c) = if transpose { (c, r) } else { (r, c) };
+            for (i, j) in [
+                (0, 1),
+                (1, 0),
+                (r + 1, 1),
+                (1, c + 1),
+                (u64::MAX, 1),
+                (1, u64::MAX),
+            ] {
+                let operations = if ty == "MatrixViewMut" {
+                    vec![
+                        "return v[i,j];",
+                        "v[i,j]=42;return 0;",
+                        "ref int x=&v[i,j];return *x;",
+                        "ref mut int x=&mut v[i,j];*x=42;return 0;",
+                    ]
+                } else {
+                    vec!["return v[i,j];", "ref int x=&v[i,j];return *x;"]
+                };
+                for operation in operations {
+                    let source = format!(
+                        "int main(){{Matrix<int> a={literal};{ty}<int> v={create}(a);usize i={i};usize j={j};{operation}}}"
+                    );
+                    let compiled =
+                        compile_source(&SourceFile::new("bounds.ae", source), &[]).unwrap();
+                    assert_eq!(
+                        v23_execute(&compiled.llvm).signal(),
+                        Some(4),
+                        "{literal} {create} {i},{j} {operation}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn vertical24_mir_ssa_reject_corrupt_descriptor_contracts() {
+    use aether_frontend::{IndexSemantics, MatrixViewField};
+    use aether_middle::{
+        PlaceProjection, Rvalue, SsaOp, SsaPlaceProjection, build_ssa, lower_hir, verify_mir,
+        verify_ssa,
+    };
+    let source = SourceFile::new(
+        "corrupt.ae",
+        "int main(){Matrix<int> a=[1,2,3;4,5,6];MatrixView<int> v=transpose_view(a);MatrixView<int> u=transpose_view(v);MatrixView<int> w=u;return w[1,2];}",
+    );
+    let hir = analyze(parse_source(&source).unwrap()).unwrap();
+    let mir = lower_hir(hir);
+    let ssa = build_ssa(&verify_mir(mir.clone()).unwrap());
+    for case in 0..7 {
+        let mut m = mir.clone();
+        let mut changed = false;
+        for i in m.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|b| &mut b.instructions)
+        {
+            if let Rvalue::MatrixView {
+                source,
+                mutable,
+                transpose,
+                descriptor,
+            } = &mut i.value
+            {
+                match case {
+                    0 => std::mem::swap(&mut descriptor.rows, &mut descriptor.columns),
+                    1 => descriptor.row_stride = MatrixViewField::Rows,
+                    2 => descriptor.column_stride = MatrixViewField::One,
+                    3 => *mutable = !*mutable,
+                    4 => *transpose = !*transpose,
+                    5 => {
+                        i.value = Rvalue::View {
+                            source: source.clone(),
+                            mutable: *mutable,
+                        };
+                    }
+                    _ => continue,
+                }
+                changed = true;
+                break;
+            }
+            if case == 6
+                && let Rvalue::Load(place) = &mut i.value
+            {
+                for p in &mut place.projections {
+                    if let PlaceProjection::Index { semantics, .. } = p {
+                        *semantics = IndexSemantics::ZeroBased;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        assert!(changed, "MIR {case}");
+        assert!(verify_mir(m).is_err(), "MIR accepted {case}");
+        let mut s = ssa.clone();
+        let mut changed = false;
+        for i in s.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|b| &mut b.instructions)
+        {
+            if let SsaOp::MatrixView {
+                source,
+                mutable,
+                transpose,
+                descriptor,
+            } = &mut i.op
+            {
+                match case {
+                    0 => std::mem::swap(&mut descriptor.rows, &mut descriptor.columns),
+                    1 => descriptor.row_stride = MatrixViewField::Rows,
+                    2 => descriptor.column_stride = MatrixViewField::One,
+                    3 => *mutable = !*mutable,
+                    4 => *transpose = !*transpose,
+                    5 => {
+                        i.op = SsaOp::View {
+                            source: source.clone(),
+                            mutable: *mutable,
+                        };
+                    }
+                    _ => continue,
+                }
+                changed = true;
+                break;
+            }
+            if case == 6
+                && let SsaOp::Load { place } = &mut i.op
+            {
+                for p in &mut place.projections {
+                    if let SsaPlaceProjection::Index { semantics, .. } = p {
+                        *semantics = IndexSemantics::ZeroBased;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        assert!(changed, "SSA {case}");
+        assert!(verify_ssa(s).is_err(), "SSA accepted {case}");
+    }
+}
+
+#[test]
+fn vertical24_projected_provenance_and_cross_module_rejections() {
+    for source in [
+        "int eat(Matrix<int> a){return 1;}int main(){Matrix<int> a=[1];MatrixView<int> v=matrix_view(a);return v[usize(eat(a)),1];}",
+        "int eat(Array<Matrix<int>> a){return 0;}int main(){Array<Matrix<int>> a={[1]};MatrixView<int> v=matrix_view(a[usize(eat(a))]);return 0;}",
+        "int consume(Matrix<int> a){return 0;}int read(MatrixView<int> v,int x){return v[1,1];}int main(){Matrix<int> a=[1];return read(transpose_view(a),consume(a));}",
+        "int main(){Matrix<int> a=[1];MatrixView<int> v=matrix_view(a);return v[2,1];}",
+        "int main(){Matrix<int> a=[1];MatrixView<int> v=transpose_view(a);return v[1,2];}",
+        "int main(){Matrix<int> a=[1];MatrixView<int> v=matrix_view(a);int i=1;return v[i,1];}",
+        "int main(){Matrix<int> a=[1];MatrixView<int> v=matrix_view(a);MatrixView<int> u=matrix_view(a);v=u;return 0;}",
+        "int grow(MatrixViewMut<List<int>> v){push(v[1,1],42);return 0;}int main(){Matrix<List<int>> a=[{1}];ref int x=&a[1,1][0];grow(matrix_view_mut(a));return *x;}",
+        "int bad(MatrixViewMut<List<int>> v){ref int x=&v[1,1][0];MatrixViewMut<List<int>> w=v;push(w[1,1],42);return *x;}int main(){return 0;}",
+        "int grow(ref MatrixViewMut<List<int>> r){MatrixViewMut<List<int>> v=*r;push(v[1,1],42);return 0;}int main(){Matrix<List<int>> a=[{1}];MatrixViewMut<List<int>> v=matrix_view_mut(a);ref int x=&a[1,1][0];grow(&v);return *x;}",
+        "enum E{V(MatrixView<int>)}int main(){return 0;}",
+        "int inspect<V:Copy>(V v){return 0;}int main(){Matrix<int> a=[1];return inspect<MatrixView<int>>(matrix_view(a));}",
+    ] {
+        assert!(
+            compile_source(&SourceFile::new("bad.ae", source), &[]).is_err(),
+            "accepted {source}"
+        );
+    }
+    let directory = temporary("v24-modules");
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("helper.ae"),"int read(MatrixView<int> v){return v[1,1];}int write(MatrixViewMut<int> v){v[1,1]=42;return 0;}").unwrap();
+    for source in [
+        "import helper;int main(){Matrix<int> a=[1];return helper.read(a);}",
+        "import helper;int main(){Array<int> a={1};return helper.read(view(a));}",
+        "import helper;int main(){Matrix<int> a=[1];return helper.write(matrix_view(a));}",
+        "import helper;int main(){Matrix<double> a=[1];return helper.read(matrix_view(a));}",
+    ] {
+        fs::write(directory.join("main.ae"), source).unwrap();
+        assert!(
+            compile_session(
+                CompilationSession::discover(&directory.join("main.ae")).unwrap(),
+                &[]
+            )
+            .is_err(),
+            "accepted {source}"
+        );
+    }
+    fs::remove_dir_all(directory).unwrap();
+    let compiled = compile_source(
+        &SourceFile::new(
+            "view-only.ae",
+            "int read(MatrixView<int> v){return v[1,1];}int main(){return 0;}",
+        ),
+        &[],
+    )
+    .unwrap();
+    assert!(compiled.llvm.contains("@aether_matrix_view_index_"));
+    assert!(!compiled.llvm.contains("@malloc"));
+    assert!(!compiled.llvm.contains("@free"));
+    compile_source(&SourceFile::new("symbolic.ae","int shape<T:Storable>(ref Matrix<T> a){MatrixView<T> v=matrix_view(*a);return int(rows(v));}int main(){Matrix<Buffer<int>> a=[Buffer<int>(1,2)];return shape(&a)-1;}"),&[]).unwrap();
+}

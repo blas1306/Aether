@@ -1,0 +1,1 @@
+import storage; int main(){Matrix<int> a=[1,2,3;4,5,6];storage.write(transpose_view_mut(a));return storage.read(transpose_view(a))-99;}

@@ -1917,3 +1917,44 @@ owning element operands to transfer once, before ordinary root assignment/phis.
 These are bounded extensions of the existing model, without MemorySSA or new
 ownership states. See [NEXT_VERTICAL_23_REPORT.md](NEXT_VERTICAL_23_REPORT.md)
 for verification, evidence, compilation snapshots and accepted limitations.
+
+
+## 41. NEXT-VERTICAL-24 implementation confirmation
+
+Canonical MatrixView { element, mutable } carries mathematical borrow identity
+through substitution, HIR, MIR, SSA and MV-prefixed structural mangling. Its
+five-word descriptor stores pointer, logical shape and two element strides;
+Matrix's three-word owning representation is unchanged. Copy/Relocatable and
+no-drop/non-Storable classification follows existing writable View semantics.
+No exclusivity/noalias, runtime ownership tag or refcount is introduced.
+
+A single explicit MatrixView operation carries source Place, write capability,
+transpose flag and MatrixViewDescriptor recipe. Recipes select source rows,
+columns, strides or constant one. HIR/MIR/SSA independently require the exact
+recipe for owner/view sources and normal/transposed operations. This retains
+explicit strides without admitting arbitrary descriptor assembly. Source Place
+and ordinary copy/SSA use chains preserve borrow ancestry. Lexical owner
+liveness remains frontend semantic authority, as with existing references/views;
+this vertical does not introduce a general MIR/SSA lifetime analysis.
+
+Queries retain source types. OneBased2D is selected for matrix owners and
+views; bounds dominate both stride products and their sum. Safety is inductive:
+normal owner views inherit checked allocation bounds, transpose preserves the
+coordinate/stride offset set, and descriptor copies preserve the invariant.
+LLVM emits extractvalue/insertvalue only during transforms and non-inbounds GEP
+for view indexing. View-only signatures emit index support without owner runtime.
+
+Qualification additionally exposed root-only capability checks in IR: a shared
+view reached via dereference or a deeper projection must still reject writes
+and mutable borrows. All three boundaries now walk the typed path. Owner
+liveness is rechecked after evaluating any Place index, including a Matrix
+projected from an Array whose index expression tries to consume that Array.
+Nested List invalidation remains conservative even if an inner allocation is
+physically stable. Incoming matrix-view parameters provide proxy provenance
+roots for their derived aliases. Calls with mutable matrix views containing
+List are rejected because hidden nested reallocations cannot yet be related
+across aliased descriptor parameters. Existing bare borrowed generic-argument rejection remains;
+element-generic MatrixView<T> signatures support ordinary local/module helpers.
+
+See [NEXT_VERTICAL_24_REPORT.md](NEXT_VERTICAL_24_REPORT.md) for exact native,
+corruption, zero-cost and compilation snapshot evidence and remaining decisions.

@@ -31,3 +31,4 @@ v20_remove	accept:42	V20 cross-module generic order-preserving owning extraction
 v21_vectors	accept:0	V21 cross-module Row/Column signatures and generic aggregates
 v22_transpose	accept:0	consuming Vector transpose across modules preserves orientation and ownership
 v23_matrix	accept:0	Matrix shape and owning generic signatures across modules
+v24_matrix_views	accept:0	shared/mutable strided matrix views across modules

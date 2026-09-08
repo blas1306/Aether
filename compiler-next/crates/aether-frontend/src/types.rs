@@ -326,6 +326,12 @@ pub enum TypeData {
     List {
         element: TypeId,
     },
+    /// Non-owning mathematical 2D descriptor with value-level shape and element
+    /// strides. Write capability carries no uniqueness promise.
+    MatrixView {
+        element: TypeId,
+        mutable: bool,
+    },
     /// Non-owning contiguous sequence plus length. `mutable` is write
     /// capability only and carries no uniqueness promise.
     View {
@@ -447,6 +453,15 @@ impl fmt::Display for TypeData {
             Self::Matrix { element } => write!(f, "Matrix<{element}>"),
             Self::Array { element } => write!(f, "Array<{element}>"),
             Self::List { element } => write!(f, "List<{element}>"),
+            Self::MatrixView { element, mutable } => write!(
+                f,
+                "{}<{element}>",
+                if *mutable {
+                    "MatrixViewMut"
+                } else {
+                    "MatrixView"
+                }
+            ),
             Self::View { element, mutable } => write!(
                 f,
                 "{}<{element}>",
@@ -679,6 +694,10 @@ impl TypeArena {
         self.intern(TypeData::List { element })
     }
 
+    pub fn intern_matrix_view(&mut self, element: TypeId, mutable: bool) -> TypeId {
+        self.intern(TypeData::MatrixView { element, mutable })
+    }
+
     pub fn intern_view(&mut self, element: TypeId, mutable: bool) -> TypeId {
         self.intern(TypeData::View { element, mutable })
     }
@@ -799,7 +818,8 @@ impl TypeArena {
                 | TypeData::Vector { element, .. }
                 | TypeData::Array { element }
                 | TypeData::List { element }
-                | TypeData::View { element, .. },
+                | TypeData::View { element, .. }
+                | TypeData::MatrixView { element, .. },
             ) => self.contains_generic(*element),
             _ => false,
         }
@@ -919,7 +939,9 @@ impl TypeArena {
     pub fn index_semantics(&self, id: TypeId) -> Option<IndexSemantics> {
         match self.get(id)? {
             TypeData::Vector { .. } => Some(IndexSemantics::OneBased),
-            TypeData::Matrix { .. } => Some(IndexSemantics::OneBased2D),
+            TypeData::Matrix { .. } | TypeData::MatrixView { .. } => {
+                Some(IndexSemantics::OneBased2D)
+            }
             TypeData::Buffer { .. }
             | TypeData::Array { .. }
             | TypeData::List { .. }
@@ -960,6 +982,26 @@ impl TypeArena {
             Some(TypeData::View { element, mutable }) => Some((*element, *mutable)),
             _ => None,
         }
+    }
+
+    /// Mathematical shape-bearing values; does not classify views as owners.
+    #[must_use]
+    pub fn matrix_like_element(&self, id: TypeId) -> Option<TypeId> {
+        self.matrix_element(id)
+            .or_else(|| self.matrix_view_info(id).map(|x| x.0))
+    }
+
+    #[must_use]
+    pub fn matrix_view_info(&self, id: TypeId) -> Option<(TypeId, bool)> {
+        match self.get(id) {
+            Some(TypeData::MatrixView { element, mutable }) => Some((*element, *mutable)),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn borrowed_view_info(&self, id: TypeId) -> Option<(TypeId, bool)> {
+        self.view_info(id).or_else(|| self.matrix_view_info(id))
     }
 
     /// Central lifecycle classification for a canonical semantic type.
@@ -1017,13 +1059,15 @@ impl TypeArena {
                 is_storable: true,
                 needs_drop: false,
             },
-            TypeData::Reference { .. } | TypeData::View { .. } => TypeProperties {
-                is_known: true,
-                is_copy: true,
-                is_relocatable: true,
-                is_storable: false,
-                needs_drop: false,
-            },
+            TypeData::Reference { .. } | TypeData::View { .. } | TypeData::MatrixView { .. } => {
+                TypeProperties {
+                    is_known: true,
+                    is_copy: true,
+                    is_relocatable: true,
+                    is_storable: false,
+                    needs_drop: false,
+                }
+            }
             TypeData::Buffer { element }
             | TypeData::Matrix { element }
             | TypeData::Vector { element, .. }
@@ -1271,9 +1315,9 @@ impl TypeArena {
                     visiting,
                 ),
             Some(TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_)) => true,
-            Some(TypeData::Reference { .. } | TypeData::View { .. }) => {
-                capability != Capability::Storable
-            }
+            Some(
+                TypeData::Reference { .. } | TypeData::View { .. } | TypeData::MatrixView { .. },
+            ) => capability != Capability::Storable,
             Some(
                 TypeData::Buffer { element }
                 | TypeData::Matrix { element }
@@ -1448,7 +1492,7 @@ impl TypeArena {
                 capability == 0
                     || self.contains_capability(pointee, capability, substitution, visiting)
             }
-            Some(TypeData::View { element, .. }) => {
+            Some(TypeData::View { element, .. } | TypeData::MatrixView { element, .. }) => {
                 capability == 1
                     || self.contains_capability(element, capability, substitution, visiting)
             }
@@ -1625,6 +1669,10 @@ impl TypeArena {
                 let element = self.substitute(element, substitution)?;
                 Ok(self.intern_list(element))
             }
+            Some(TypeData::MatrixView { element, mutable }) => {
+                let element = self.substitute(element, substitution)?;
+                Ok(self.intern_matrix_view(element, mutable))
+            }
             Some(TypeData::View { element, mutable }) => {
                 let element = self.substitute(element, substitution)?;
                 Ok(self.intern_view(element, mutable))
@@ -1723,6 +1771,13 @@ impl TypeArena {
                     .ids
                     .get(&TypeData::List { element })
                     .expect("monomorphizer interned substituted List"))
+            }
+            Some(TypeData::MatrixView { element, mutable }) => {
+                let element = self.substituted_existing(element, substitution)?;
+                Ok(*self
+                    .ids
+                    .get(&TypeData::MatrixView { element, mutable })
+                    .expect("monomorphizer interned substituted MatrixView"))
             }
             Some(TypeData::View { element, mutable }) => {
                 let element = self.substituted_existing(element, substitution)?;
@@ -1975,5 +2030,51 @@ mod tests {
             types.intern_struct_instance(StructId(0), vec![parameter_ty, TypeId::FLOAT64]);
         let substitution = Substitution::new([parameter], [TypeId::INT64]);
         assert_eq!(types.substitute(symbolic, &substitution), Ok(pair));
+    }
+}
+
+/// Compiler-only descriptor field selectors, in element units for strides.
+/// No source syntax can construct these recipes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatrixViewField {
+    Rows,
+    Columns,
+    RowStride,
+    ColumnStride,
+    One,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MatrixViewDescriptor {
+    pub rows: MatrixViewField,
+    pub columns: MatrixViewField,
+    pub row_stride: MatrixViewField,
+    pub column_stride: MatrixViewField,
+}
+
+impl MatrixViewDescriptor {
+    #[must_use]
+    pub fn derived(from_view: bool, transpose: bool) -> Self {
+        use MatrixViewField::{ColumnStride, Columns, One, RowStride, Rows};
+        let (rs, cs) = if from_view {
+            (RowStride, ColumnStride)
+        } else {
+            (Columns, One)
+        };
+        if transpose {
+            Self {
+                rows: Columns,
+                columns: Rows,
+                row_stride: cs,
+                column_stride: rs,
+            }
+        } else {
+            Self {
+                rows: Rows,
+                columns: Columns,
+                row_stride: rs,
+                column_stride: cs,
+            }
+        }
     }
 }

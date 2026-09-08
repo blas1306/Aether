@@ -1,0 +1,1 @@
+int main(){Matrix<int> a=[1,2,3;4,5,6];MatrixView<int> v=matrix_view(a);MatrixView<int> u=v;MatrixViewMut<int> w=transpose_view_mut(a);MatrixViewMut<int> x=w;x[2,1]=99;return u[1,2]+w[2,1]-198;}

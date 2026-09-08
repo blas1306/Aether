@@ -1,0 +1,1 @@
+struct Holder{Matrix<int> m;}int main(){Holder h=Holder([1,2,3;4,5,6]);MatrixView<int> v=matrix_view(h.m);MatrixViewMut<int> t=transpose_view_mut(h.m);t[3,2]=42;Array<Matrix<int>> a={[10,20;30,40]};MatrixView<int> u=transpose_view(a[0]);List<Matrix<int>> l={[5,6]};MatrixViewMut<int> w=matrix_view_mut(l[0]);w[1,2]=99;return v[2,3]+u[2,1]+l[0][1,2]-161;}

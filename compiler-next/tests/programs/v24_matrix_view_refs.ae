@@ -1,0 +1,1 @@
+int read(ref Matrix<int> a){MatrixView<int> v=transpose_view(*a);return v[3,2];}int write(ref mut Matrix<int> a){MatrixViewMut<int> v=transpose_view_mut(*a);v[2,1]=99;return 0;}int main(){Matrix<int> a=[1,2,3;4,5,6];int x=read(&a);write(&mut a);return a[1,2]+x-105;}

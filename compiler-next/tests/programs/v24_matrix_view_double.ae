@@ -1,0 +1,1 @@
+int main(){Matrix<int> a=[1,2,3;4,5,6];MatrixView<int> t=transpose_view(a);MatrixView<int> u=transpose_view(t);MatrixViewMut<int> w=matrix_view_mut(a);MatrixViewMut<int> x=transpose_view_mut(w);MatrixViewMut<int> y=transpose_view_mut(x);if(rows(u)!=2){return 1;}if(columns(u)!=3){return 2;}if(rows(y)!=2){return 3;}if(columns(y)!=3){return 4;}y[2,3]=42;return u[1,2]+u[2,3]-44;}

@@ -426,3 +426,20 @@ static shapes and numeric traits remain separate future work. V22 Vector
 transpose keeps its consuming O(1) contract and rejects Matrix.
 
 See [NEXT_VERTICAL_23_REPORT.md](NEXT_VERTICAL_23_REPORT.md).
+
+## NEXT-VERTICAL-24 — borrowed matrix views implemented
+
+MatrixView<T> and MatrixViewMut<T> preserve mathematical 2D shape and one-based
+indexing with explicit element strides. They are Copy/Relocatable, non-Storable
+borrowed descriptors with no backing ownership or drop. Mutable views confer
+write capability without exclusivity. `matrix_view`/`matrix_view_mut` derive
+normal views; `transpose_view`/`transpose_view_mut` swap shape and strides in
+O(1), preserving the pointer and performing no element/storage operation.
+They accept Matrix owners and existing matrix-view Places, including projected
+owners and explicit references. Copies and transposes retain lexical owner
+provenance; live aliases prevent owner move/replacement. Stored/returned borrows
+remain forbidden. Matrix's owner descriptor/layout is unchanged, and owning
+Matrix transpose remains unresolved. Slicing, row/column VectorView, arithmetic,
+BLAS, numeric traits and named lifetimes remain future work.
+
+See [NEXT_VERTICAL_24_REPORT.md](NEXT_VERTICAL_24_REPORT.md).

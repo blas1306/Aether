@@ -1,0 +1,1 @@
+int main(){Matrix<Buffer<int>> a=[Buffer<int>(1,10),Buffer<int>(1,20);Buffer<int>(1,30),Buffer<int>(1,40)];MatrixView<Buffer<int>> v=transpose_view(a);ref Buffer<int> b=&v[1,2];MatrixViewMut<Buffer<int>> w=matrix_view_mut(a);ref mut Buffer<int> c=&mut w[1,2];(*c)[0]=99;return (*b)[0]+a[1,2][0]-129;}

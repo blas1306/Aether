@@ -229,6 +229,14 @@ pub enum SsaOp {
         size_trap: TrapKind,
         failure_trap: TrapKind,
     },
+    /// Borrow the source backing. Source Place and descriptor copy/use chains
+    /// retain provenance; the closed recipe is independently verified.
+    MatrixView {
+        source: SsaPlace,
+        mutable: bool,
+        transpose: bool,
+        descriptor: aether_frontend::MatrixViewDescriptor,
+    },
     View {
         source: SsaPlace,
         mutable: bool,
@@ -969,6 +977,17 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             size_trap: *size_trap,
             failure_trap: *failure_trap,
         },
+        Rvalue::MatrixView {
+            source,
+            mutable,
+            transpose,
+            descriptor,
+        } => SsaOp::MatrixView {
+            source: rename_place(source, stacks, mir),
+            mutable: *mutable,
+            transpose: *transpose,
+            descriptor: *descriptor,
+        },
         Rvalue::View { source, mutable } => SsaOp::View {
             source: rename_place(source, stacks, mir),
             mutable: *mutable,
@@ -1358,6 +1377,7 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
         | Rvalue::Move { source: place }
         | Rvalue::Drop { owner: place }
         | Rvalue::ConsumeEnum { owner: place }
+        | Rvalue::MatrixView { source: place, .. }
         | Rvalue::View { source: place, .. }
         | Rvalue::MatrixRows { source: place }
         | Rvalue::MatrixColumns { source: place }
@@ -1955,6 +1975,32 @@ fn verify_op(
     memory_locals: &[SsaMemoryLocal],
     operand_ty: &impl Fn(&SsaOperand) -> Result<TypeId, String>,
 ) -> Result<(), String> {
+    let writable = |place: &SsaPlace| -> Result<bool, String> {
+        if matches!(place.base, SsaPlaceBase::Dereference { mutable: false, .. }) {
+            return Ok(false);
+        }
+        for (position, projection) in place.projections.iter().enumerate() {
+            if matches!(projection, SsaPlaceProjection::Index { .. }) {
+                let prefix = SsaPlace {
+                    base: place.base.clone(),
+                    projections: place.projections[..position].to_vec(),
+                };
+                if types
+                    .borrowed_view_info(ssa_place_type(
+                        &prefix,
+                        memory_locals,
+                        structs,
+                        types,
+                        operand_ty,
+                    )?)
+                    .is_some_and(|(_, m)| !m)
+                {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
+    };
     match op {
         SsaOp::Use(operand) => {
             if operand_ty(operand)? != result || !types.is_copy(result) {
@@ -1967,6 +2013,9 @@ fn verify_op(
             }
         }
         SsaOp::Store { place, value } => {
+            if !writable(place)? {
+                return Err("SSA store through shared view/reference".into());
+            }
             let place_ty = ssa_place_type(place, memory_locals, structs, types, operand_ty)?;
             let value_ty = operand_ty(value)?;
             if place_ty != value_ty
@@ -1989,7 +2038,7 @@ fn verify_op(
                 SsaPlaceBase::Dereference { .. } => None,
             };
             if base_ty
-                .and_then(|ty| types.view_info(ty))
+                .and_then(|ty| types.borrowed_view_info(ty))
                 .is_some_and(|(_, mutable)| !mutable)
                 && place
                     .projections
@@ -2004,12 +2053,7 @@ fn verify_op(
             if types.reference_info(result) != Some((pointee, *mutable)) {
                 return Err("SSA borrow result type mismatch".into());
             }
-            if *mutable
-                && matches!(
-                    &place.base,
-                    SsaPlaceBase::Dereference { mutable: false, .. }
-                )
-            {
+            if *mutable && !writable(place)? {
                 return Err("SSA mutable borrow through shared reference".into());
             }
         }
@@ -2134,7 +2178,7 @@ fn verify_op(
         }
         SsaOp::MatrixRows { source } | SsaOp::MatrixColumns { source } => {
             let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
-            if result != TypeId::USIZE || types.matrix_element(source_ty).is_none() {
+            if result != TypeId::USIZE || types.matrix_like_element(source_ty).is_none() {
                 return Err("SSA Matrix shape contract invalid".into());
             }
         }
@@ -2218,7 +2262,7 @@ fn verify_op(
             };
             let root_ty = ssa_place_type(&root, memory_locals, structs, types, operand_ty)?;
             if types
-                .view_info(root_ty)
+                .borrowed_view_info(root_ty)
                 .is_some_and(|(_, mutable)| !mutable)
                 || result != TypeId::BOOL
                 || operand_ty(length)? != TypeId::USIZE
@@ -2270,6 +2314,29 @@ fn verify_op(
                 || *failure_trap != TrapKind::AllocationFailure
             {
                 return Err("SSA List reserve contract invalid".into());
+            }
+        }
+        SsaOp::MatrixView {
+            source,
+            mutable,
+            transpose,
+            descriptor,
+        } => {
+            let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
+            let element = types
+                .matrix_like_element(source_ty)
+                .ok_or_else(|| "SSA MatrixView source invalid".to_string())?;
+            if types.matrix_view_info(result) != Some((element, *mutable))
+                || *descriptor
+                    != aether_frontend::MatrixViewDescriptor::derived(
+                        types.matrix_view_info(source_ty).is_some(),
+                        *transpose,
+                    )
+                || (*mutable
+                    && (types.matrix_view_info(source_ty).is_some_and(|(_, m)| !m)
+                        || !writable(source)?))
+            {
+                return Err("SSA MatrixView stride/type/capability contract invalid".into());
             }
         }
         SsaOp::View { source, mutable } => {
@@ -2583,9 +2650,9 @@ fn ssa_place_type(
                     .or_else(|| types.vector_element(ty))
                     .or_else(|| types.matrix_element(ty))
                     .or_else(|| types.list_element(ty))
-                    .or_else(|| types.view_info(ty).map(|(element, _)| element))
+                    .or_else(|| types.borrowed_view_info(ty).map(|(element, _)| element))
                     .ok_or_else(|| "SSA index projection has non-contiguous base".to_string())?;
-                if column.is_some() != types.matrix_element(ty).is_some()
+                if column.is_some() != types.matrix_like_element(ty).is_some()
                     || column
                         .as_ref()
                         .is_some_and(|c| operand_ty(c).ok() != Some(TypeId::USIZE))
@@ -2698,6 +2765,7 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         | SsaOp::Move { source: place }
         | SsaOp::Drop { owner: place }
         | SsaOp::ConsumeEnum { owner: place }
+        | SsaOp::MatrixView { source: place, .. }
         | SsaOp::View { source: place, .. }
         | SsaOp::MatrixRows { source: place }
         | SsaOp::MatrixColumns { source: place }

@@ -1,0 +1,1 @@
+int main(){Matrix<int> a=[1,2,3;4,5,6];MatrixViewMut<int> w=matrix_view_mut(a);w[2,3]=42;ref mut int x=&mut w[1,2];*x=99;ref int y=&w[2,3];return a[1,2]+a[2,3]+*y-183;}
