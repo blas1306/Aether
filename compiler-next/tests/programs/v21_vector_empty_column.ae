@@ -1,0 +1,1 @@
+int main() { Vector<double,Column> v=[]; return int(dimension(v)); }

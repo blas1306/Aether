@@ -5,8 +5,8 @@ use std::fmt::Write;
 
 use aether_frontend::{
     CastKind, CoercionKind, EnumInfo, FieldId, FloatType, FloatValue, FunctionInstanceInfo,
-    IntegerType, MatchMode, ModuleInfo, StructInfo, Substitution, TargetProperties, TypeArena,
-    TypeData, TypeId, layout_of,
+    IndexSemantics, IntegerType, MatchMode, ModuleInfo, StructInfo, Substitution, TargetProperties,
+    TypeArena, TypeData, TypeId, layout_of,
 };
 use aether_middle::{
     BinaryOp, BlockId, SsaFunction, SsaOp, SsaOperand, SsaPlace, SsaPlaceBase, SsaPlaceProjection,
@@ -62,10 +62,14 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             _ => None,
         })
         .collect::<BTreeSet<_>>();
-    let array_elements = types
+    let fixed_literal_elements = types
         .entries()
         .filter_map(|(ty, data)| match data {
-            TypeData::Array { element } if !types.contains_generic(ty) => Some(*element),
+            TypeData::Array { element } | TypeData::Vector { element, .. }
+                if !types.contains_generic(ty) =>
+            {
+                Some(*element)
+            }
             _ => None,
         })
         .collect::<BTreeSet<_>>();
@@ -77,7 +81,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         })
         .collect::<BTreeSet<_>>();
     let fixed_elements = buffer_elements
-        .union(&array_elements)
+        .union(&fixed_literal_elements)
         .copied()
         .collect::<BTreeSet<_>>();
     let fill_elements = fixed_elements
@@ -89,6 +93,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         .entries()
         .filter_map(|(ty, data)| match data {
             TypeData::Buffer { element }
+            | TypeData::Vector { element, .. }
             | TypeData::Array { element }
             | TypeData::List { element }
             | TypeData::View { element, .. }
@@ -214,7 +219,13 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         emit_buffer_allocation_wrapper(&mut output, types, element);
     }
     for element in indexed_elements {
-        emit_index_helper(&mut output, types, element);
+        emit_index_helper(&mut output, types, element, IndexSemantics::ZeroBased);
+        if types
+            .entries()
+            .any(|(_, data)| matches!(data, TypeData::Vector { element: e, .. } if *e == element))
+        {
+            emit_index_helper(&mut output, types, element, IndexSemantics::OneBased);
+        }
     }
     for element in &list_elements {
         let layout = layout_of(
@@ -368,6 +379,7 @@ fn emit_relocation_glue(
         | TypeData::Reference { .. }
         | TypeData::View { .. }
         | TypeData::Buffer { .. }
+        | TypeData::Vector { .. }
         | TypeData::Array { .. }
         | TypeData::List { .. } => {
             writeln!(output, "  %value = load {value_ty}, ptr %source").unwrap();
@@ -435,7 +447,7 @@ fn emit_drop_glue(
         TypeData::Buffer { element } => {
             emit_descriptor_free(output, types, *element, false, structs, enums);
         }
-        TypeData::Array { element } => {
+        TypeData::Array { element } | TypeData::Vector { element, .. } => {
             emit_collection_drop(output, types, *element, false, structs, enums);
         }
         TypeData::List { element } => {
@@ -752,12 +764,22 @@ fn emit_buffer_allocation_wrapper(output: &mut String, types: &TypeArena, elemen
     writeln!(output, "  ret {{ ptr, i64 }} %descriptor\n}}\n").unwrap();
 }
 
-fn emit_index_helper(output: &mut String, types: &TypeArena, element: TypeId) {
+fn emit_index_helper(
+    output: &mut String,
+    types: &TypeArena,
+    element: TypeId,
+    semantics: IndexSemantics,
+) {
+    let prefix = if semantics == IndexSemantics::OneBased {
+        "vector_"
+    } else {
+        ""
+    };
     let suffix = mangle_type(types, element);
     let element_ty = llvm_type(types, element);
     writeln!(
         output,
-        "define internal ptr @aether_index_{suffix}({{ ptr, i64 }} %descriptor, i64 %index) {{"
+        "define internal ptr @aether_{prefix}index_{suffix}({{ ptr, i64 }} %descriptor, i64 %index) {{"
     )
     .unwrap();
     writeln!(output, "entry:").unwrap();
@@ -766,13 +788,27 @@ fn emit_index_helper(output: &mut String, types: &TypeArena, element: TypeId) {
         "  %length = extractvalue {{ ptr, i64 }} %descriptor, 1"
     )
     .unwrap();
-    writeln!(output, "  %in_bounds = icmp ult i64 %index, %length").unwrap();
+    if semantics == IndexSemantics::OneBased {
+        writeln!(output, "  %lower = icmp uge i64 %index, 1\n  br i1 %lower, label %upper_bound, label %trap_index_out_of_bounds\nupper_bound:\n  %in_bounds = icmp ule i64 %index, %length").unwrap();
+    } else {
+        writeln!(output, "  %in_bounds = icmp ult i64 %index, %length").unwrap();
+    }
     writeln!(
         output,
         "  br i1 %in_bounds, label %valid, label %trap_index_out_of_bounds"
     )
     .unwrap();
     writeln!(output, "valid:").unwrap();
+    let offset = if semantics == IndexSemantics::OneBased {
+        writeln!(
+            output,
+            "  ; Vector logical index checked before physical offset\n  %offset = sub i64 %index, 1"
+        )
+        .unwrap();
+        "%offset"
+    } else {
+        "%index"
+    };
     writeln!(
         output,
         "  %data = extractvalue {{ ptr, i64 }} %descriptor, 0"
@@ -780,7 +816,7 @@ fn emit_index_helper(output: &mut String, types: &TypeArena, element: TypeId) {
     .unwrap();
     writeln!(
         output,
-        "  %element = getelementptr inbounds {element_ty}, ptr %data, i64 %index"
+        "  %element = getelementptr inbounds {element_ty}, ptr %data, i64 {offset}"
     )
     .unwrap();
     writeln!(output, "  ret ptr %element").unwrap();
@@ -1165,19 +1201,28 @@ fn emit_function(
                     )
                     .unwrap();
                 }
-                SsaOp::ArrayInit {
+                SsaOp::VectorInit {
+                    element_type,
+                    elements,
+                    ..
+                }
+                | SsaOp::ArrayInit {
                     element_type,
                     elements,
                     ..
                 } => {
-                    writeln!(
-                        output,
-                        "  %v{} = call {{ ptr, i64 }} @aether_fixed_new_{}(i64 {})",
-                        instruction.result.0,
-                        mangle_type(types, *element_type),
-                        elements.len()
-                    )
-                    .unwrap();
+                    if elements.is_empty() && matches!(instruction.op, SsaOp::VectorInit { .. }) {
+                        writeln!(output, "  %v{} = select i1 true, {{ ptr, i64 }} zeroinitializer, {{ ptr, i64 }} zeroinitializer", instruction.result.0).unwrap();
+                    } else {
+                        writeln!(
+                            output,
+                            "  %v{} = call {{ ptr, i64 }} @aether_fixed_new_{}(i64 {})",
+                            instruction.result.0,
+                            mangle_type(types, *element_type),
+                            elements.len()
+                        )
+                        .unwrap();
+                    }
                     if !elements.is_empty() {
                         writeln!(
                             output,
@@ -1208,13 +1253,14 @@ fn emit_function(
                         .unwrap();
                     }
                 }
-                SsaOp::ArrayLength { source } => {
-                    let (descriptor, _) = emit_descriptor_value(
+                SsaOp::VectorDimension { source } | SsaOp::ArrayLength { source } => {
+                    let (descriptor, _) = emit_place_value(
                         output,
                         function,
                         source,
                         instruction.result.0,
                         types,
+                        structs,
                     );
                     writeln!(
                         output,
@@ -2487,6 +2533,13 @@ fn mangle_symbol_type(
             "B{}",
             mangle_symbol_type(types, *element, modules, structs, enums)
         ),
+        TypeData::Vector {
+            element,
+            orientation,
+        } => format!(
+            "Q{orientation:?}{}",
+            mangle_symbol_type(types, *element, modules, structs, enums)
+        ),
         TypeData::Array { element } => format!(
             "A{}",
             mangle_symbol_type(types, *element, modules, structs, enums)
@@ -2553,9 +2606,10 @@ fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
             mangle_type_arguments(types, *args)
         ),
         TypeData::Reference { .. } => "ptr".into(),
-        TypeData::Buffer { .. } | TypeData::Array { .. } | TypeData::View { .. } => {
-            "{ ptr, i64 }".into()
-        }
+        TypeData::Buffer { .. }
+        | TypeData::Vector { .. }
+        | TypeData::Array { .. }
+        | TypeData::View { .. } => "{ ptr, i64 }".into(),
         TypeData::List { .. } => "{ ptr, i64, i64 }".into(),
         TypeData::GenericParam(_) => panic!("unresolved generic parameter reached LLVM"),
     }
@@ -2590,6 +2644,10 @@ fn mangle_type(types: &TypeArena, ty: TypeId) -> String {
             mangle_type(types, *pointee)
         ),
         TypeData::Buffer { element } => format!("B{}", mangle_type(types, *element)),
+        TypeData::Vector {
+            element,
+            orientation,
+        } => format!("Q{orientation:?}{}", mangle_type(types, *element)),
         TypeData::Array { element } => format!("A{}", mangle_type(types, *element)),
         TypeData::List { element } => format!("L{}", mangle_type(types, *element)),
         TypeData::View { element, mutable } => format!(
@@ -2674,7 +2732,12 @@ fn emit_place_pointer(
         } else {
             writeln!(
                 output,
-                "  {pointer} = call ptr @aether_index_{}({{ ptr, i64 }} {descriptor}, i64 {})",
+                "  {pointer} = call ptr @aether_{}index_{}({{ ptr, i64 }} {descriptor}, i64 {})",
+                if types.index_semantics(descriptor_ty) == Some(IndexSemantics::OneBased) {
+                    "vector_"
+                } else {
+                    ""
+                },
                 mangle_type(types, *element_type),
                 llvm_operand(index)
             )
@@ -2721,7 +2784,7 @@ fn emit_place_pointer(
                     if types.list_element(ty).is_some() {
                         writeln!(output, "  {next} = call ptr @aether_list_index_{}({{ ptr, i64, i64 }} {descriptor}, i64 {})", mangle_type(types, *element_type), llvm_operand(index)).unwrap();
                     } else {
-                        writeln!(output, "  {next} = call ptr @aether_index_{}({{ ptr, i64 }} {descriptor}, i64 {})", mangle_type(types, *element_type), llvm_operand(index)).unwrap();
+                        writeln!(output, "  {next} = call ptr @aether_{}index_{}({{ ptr, i64 }} {descriptor}, i64 {})", if types.index_semantics(ty) == Some(IndexSemantics::OneBased) { "vector_" } else { "" }, mangle_type(types, *element_type), llvm_operand(index)).unwrap();
                     }
                     pointer = next;
                     ty = *element_type;
@@ -2782,6 +2845,25 @@ fn emit_place_value(
     types: &TypeArena,
     structs: &[StructInfo],
 ) -> (String, TypeId) {
+    // A promoted descriptor can itself contain another descriptor. Resolve its
+    // indexed address before reading metadata, preserving each level's index base.
+    if matches!(place.base, SsaPlaceBase::Value(_))
+        && place
+            .projections
+            .iter()
+            .any(|p| matches!(p, SsaPlaceProjection::Index { .. }))
+    {
+        let address = emit_place_pointer(output, function, place, result, types, structs);
+        let ty = ssa_backend_place_type(function, place, types, structs);
+        let value = format!("%place_value{result}_loaded{}", place.projections.len());
+        writeln!(
+            output,
+            "  {value} = load {}, ptr {address}",
+            llvm_type(types, ty)
+        )
+        .unwrap();
+        return (value, ty);
+    }
     let (mut value, mut ty) = match &place.base {
         SsaPlaceBase::Value(value) => (llvm_operand(value), operand_type(function, value)),
         SsaPlaceBase::MemoryLocal(local) => {
@@ -2926,46 +3008,6 @@ fn ssa_backend_place_type(
         }
     }
     ty
-}
-
-fn emit_descriptor_value(
-    output: &mut String,
-    function: &SsaFunction,
-    place: &SsaPlace,
-    result: u32,
-    types: &TypeArena,
-) -> (String, TypeId) {
-    assert!(
-        place.projections.is_empty(),
-        "descriptor place must be whole"
-    );
-    match &place.base {
-        SsaPlaceBase::Value(value) => (llvm_operand(value), operand_type(function, value)),
-        SsaPlaceBase::MemoryLocal(local) => {
-            let memory = function
-                .memory_locals
-                .iter()
-                .find(|memory| memory.local == *local)
-                .expect("verified descriptor memory local");
-            let value = format!("%descriptor{result}");
-            writeln!(output, "  {value} = load {{ ptr, i64 }}, ptr %m{}", local.0).unwrap();
-            (value, memory.ty)
-        }
-        SsaPlaceBase::Dereference { reference, .. } => {
-            let reference_ty = operand_type(function, reference);
-            let (pointee, _) = types
-                .reference_info(reference_ty)
-                .expect("verified descriptor reference");
-            let value = format!("%descriptor{result}");
-            writeln!(
-                output,
-                "  {value} = load {{ ptr, i64 }}, ptr {}",
-                llvm_operand(reference)
-            )
-            .unwrap();
-            (value, pointee)
-        }
-    }
 }
 
 fn concrete_struct_member(

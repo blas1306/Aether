@@ -1,0 +1,8 @@
+int main() {
+    float small=2.5;
+    Vector<double,Row> v=[1,small,3];
+    if (v[1]!=1.0) { return 1; }
+    if (v[2]!=2.5) { return 2; }
+    if (v[3]!=3.0) { return 3; }
+    return 0;
+}

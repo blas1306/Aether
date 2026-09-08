@@ -1,0 +1,11 @@
+int change(ref mut Vector<int,Row> v) { (*v)[2]=40; return 0; }
+int main() {
+    Vector<int,Row> v=[10,20];
+    ref int first=&v[1];
+    ref mut int second=&mut v[2];
+    *second=30;
+    int changed=change(&mut v);
+    if (*first!=10) { return 1; }
+    if (*second!=40) { return 2; }
+    return changed;
+}

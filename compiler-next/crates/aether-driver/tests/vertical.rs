@@ -2911,6 +2911,7 @@ fn vertical18_verifiers_reject_corrupt_extraction_transactions() {
                     .push(aether_middle::PlaceProjection::Index {
                         index: slot.index,
                         element_type: slot.type_id,
+                        semantics: aether_frontend::IndexSemantics::ZeroBased,
                         bounds_trap: aether_middle::TrapKind::IndexOutOfBounds,
                     });
                 let drop = block
@@ -2983,6 +2984,7 @@ fn vertical18_verifiers_reject_corrupt_extraction_transactions() {
                     .push(aether_middle::SsaPlaceProjection::Index {
                         index: slot.index,
                         element_type: slot.type_id,
+                        semantics: aether_frontend::IndexSemantics::ZeroBased,
                         bounds_trap: aether_middle::TrapKind::IndexOutOfBounds,
                     });
                 let drop = block
@@ -3595,6 +3597,7 @@ fn vertical19_mir_rejects_corrupt_slot_transactions() {
                 owner.projections.push(PlaceProjection::Index {
                     index: tail.index.clone(),
                     element_type: tail.type_id,
+                    semantics: aether_frontend::IndexSemantics::ZeroBased,
                     bounds_trap: TrapKind::IndexOutOfBounds,
                 });
                 let mut i = blocks[transfer].instructions[0].clone();
@@ -3823,6 +3826,7 @@ fn vertical19_ssa_rejects_corrupt_slot_transactions() {
                 owner.projections.push(SsaPlaceProjection::Index {
                     index: tail.index.clone(),
                     element_type: tail.type_id,
+                    semantics: aether_frontend::IndexSemantics::ZeroBased,
                     bounds_trap: TrapKind::IndexOutOfBounds,
                 });
                 let mut i = blocks[transfer].instructions[0].clone();
@@ -4978,4 +4982,479 @@ fn vertical20_projected_descriptor_is_resolved_before_hole_exists() {
         assert!(!transaction.contains(forbidden), "{forbidden}");
     }
     assert!(compilation.dumps[&Emit::Mir].contains("Borrow"));
+}
+
+#[test]
+fn vertical21_orientation_identity_and_symbolic_storage() {
+    use aether_frontend::{
+        GenericOwner, GenericParamId, IndexSemantics, Orientation, TypeArena, TypeId,
+    };
+    let mut types = TypeArena::new();
+    let row = types.intern_vector(TypeId::INT64, Orientation::Row);
+    let column = types.intern_vector(TypeId::INT64, Orientation::Column);
+    assert_eq!(row, types.intern_vector(TypeId::INT64, Orientation::Row));
+    assert_ne!(row, column);
+    assert_ne!(row, types.intern_array(TypeId::INT64));
+    assert_eq!(types.index_semantics(row), Some(IndexSemantics::OneBased));
+    assert_eq!(
+        types.index_semantics(column),
+        Some(IndexSemantics::OneBased)
+    );
+    let properties = types.properties(row).unwrap();
+    assert!(!properties.is_copy && properties.needs_drop && properties.is_storable);
+    let parameter = GenericParamId {
+        owner: GenericOwner::Function(0),
+        index: 0,
+    };
+    types.register_generic_capabilities(parameter, "T".into(), [Capability::Storable]);
+    let element = types.intern(TypeData::GenericParam(parameter));
+    assert!(!types.guarantees_relocatable(element));
+    assert!(types.is_admitted_vector_element(element));
+    let symbolic = types.intern_vector(element, Orientation::Row);
+    let substitution = aether_frontend::Substitution::new([parameter], [TypeId::INT64]);
+    assert_eq!(types.substitute(symbolic, &substitution).unwrap(), row);
+    assert_eq!(
+        types.substituted_existing(symbolic, &substitution).unwrap(),
+        row
+    );
+    assert_eq!(
+        types.index_semantics(symbolic),
+        Some(IndexSemantics::OneBased)
+    );
+}
+
+#[test]
+fn vertical21_deterministic_mathematical_ir() {
+    let source = SourceFile::new(
+        "v21.ae",
+        fs::read_to_string(program("v21_vector_row.ae")).unwrap(),
+    );
+    let phases = [Emit::Ast, Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm];
+    let first = compile_source(&source, &phases).unwrap();
+    assert_eq!(first.dumps, compile_source(&source, &phases).unwrap().dumps);
+    assert!(first.dumps[&Emit::Ast].contains("VectorLiteral"));
+    assert!(!first.dumps[&Emit::Ast].contains("CollectionLiteral"));
+    for phase in [Emit::Hir, Emit::Mir, Emit::Ssa] {
+        let dump = &first.dumps[&phase];
+        for expected in ["VectorInit", "VectorDimension", "OneBased"] {
+            assert!(dump.contains(expected), "{phase:?}: {expected}");
+        }
+        assert!(!dump.contains("ArrayInit"));
+        assert!(!dump.contains("ArrayLength"));
+    }
+    assert!(first.dumps[&Emit::Hir].contains("Vector<int64, Row>"));
+    assert!(first.dumps[&Emit::Hir].contains("element_requirements=[Storable]"));
+    let helper = first
+        .llvm
+        .split("define internal ptr @aether_vector_index_")
+        .nth(1)
+        .unwrap()
+        .split("\n}")
+        .next()
+        .unwrap();
+    let lower = helper.find("icmp uge i64 %index, 1").unwrap();
+    let upper = helper.find("icmp ule i64 %index, %length").unwrap();
+    let valid = helper.find("\nvalid:").unwrap();
+    let offset = helper.find("%offset = sub i64 %index, 1").unwrap();
+    let gep = helper.find("getelementptr inbounds").unwrap();
+    assert!(lower < upper && upper < valid && valid < offset && offset < gep);
+    assert!(helper.contains("br i1 %lower, label %upper_bound, label %trap_index_out_of_bounds"));
+    assert!(helper.contains("br i1 %in_bounds, label %valid, label %trap_index_out_of_bounds"));
+    assert!(helper.contains("ptr %data, i64 %offset"));
+}
+
+#[test]
+fn vertical21_diagnostics_and_matrix_reservation() {
+    for text in [
+        "int main(){Vector<int,Row> v=[1,2];return v[0];}",
+        "int main(){Vector<int,Column> v=[1,2];return v[3];}",
+        "int main(){Vector<int,Row> v=[1];int i=1;return v[i];}",
+        "int main(){Vector<int,Row> v=[1];return v[-1];}",
+        "int main(){Vector<int,Row> v=[1];return v[true];}",
+        "int main(){Vector<int,Row> r=[1];Vector<int,Column> c=r;return 0;}",
+        "int main(){Vector<int,Column> c=[1];Vector<int,Row> r=c;return 0;}",
+        "int main(){Vector<int,Diagonal> v=[];return 0;}",
+        "int main(){Vector<int,ref Row> v=[];return 0;}",
+        "int main(){Vector<int,Row<int>> v=[];return 0;}",
+        "int main(){Vector<int> v=[];return 0;}",
+        "int main(){Vector<int,Row,int> v=[];return 0;}",
+        "int main(){Vector v=[];return 0;}",
+        "Vector<T,Row> bad<T>(T x){return [x];}int main(){return 0;}",
+        "Vector<T,Row> bad<T:Copy>(T x){return [x];}int main(){return 0;}",
+        "int main(){Vector<ref int,Row> v=[];return 0;}",
+        "int main(){Vector<int,Row> v={};return 0;}",
+        "int main(){Array<int> v=[];return 0;}",
+        "int main(){List<int> v=[];return 0;}",
+        "int main(){auto v=[1,2];return 0;}",
+        "int main(){return [1,2];}",
+        "T id<T>(T x){return x;}int main(){return id([1,2]);}",
+        "int main(){Vector<int,Row> v=[1];ref int r=&v[1];Vector<int,Row> moved=v;return *r;}",
+        "int main(){Vector<int,Row> v=[1];ref mut int r=&mut v[1];Vector<int,Row> moved=v;return *r;}",
+        "int main(){Vector<Buffer<int>,Row> v=[Buffer<int>(1,1)];Buffer<int> x=v[1];return 0;}",
+        "int main(){Vector<Buffer<int>,Row> v=[Buffer<int>(1,1)];v[1]=Buffer<int>(1,2);return 0;}",
+        "int main(){Vector<int,Row> v=[];View<int> x=view(v);return 0;}",
+        "int main(){Vector<int,Row> v=[];ViewMut<int> x=view_mut(v);return 0;}",
+        "int main(){Array<int> a={1};Vector<int,Row> v=a;return 0;}",
+        "int main(){Vector<int,Row> v=[1];Array<int> a=v;return 0;}",
+        "int main(){Vector<int,Row> v=[1];push(v,2);return 0;}",
+        "int main(){Vector<int,Row> v=[1];reserve(v,2);return 0;}",
+        "int main(){Vector<int,Row> v=[1];return pop(v);}",
+        "int main(){Vector<int,Row> v=[1];return remove(v,0);}",
+        "int main(){Vector<int,Row> v=[1];return swap_remove(v,0);}",
+        "int main(){Vector<int,Row> v=[1];return int(length(v));}",
+        "int main(){Vector<int,Row> v=[1];return int(capacity(v));}",
+        "int main(){Array<int> v={1};return int(dimension(v));}",
+        "int main(){Vector<int,Row> v=[1];return int(dimension(v,v));}",
+        "int main(){Vector<int,Row> v=[1];return int(dimension<int>(v));}",
+        "int main(){Vector<int,Row> v=[1];Vector<int,Row> w=v+v;return 0;}",
+        "int main(){Vector<bool,Row> v=[1];return 0;}",
+        "int main(){Vector<int,Row> v=[true];return 0;}",
+        "int main(){Vector<int,Row> v=[1];Vector<int,Row> w=v;return v[1];}",
+        "struct Vector { int x; } int main(){return 0;}",
+    ] {
+        let errors = compile_source(&SourceFile::new("v21-error.ae", text), &[]).expect_err(text);
+        assert!(errors[0].span.is_some(), "{text}");
+    }
+    let errors = parse_source(&SourceFile::new(
+        "matrix.ae",
+        "int main(){Vector<int,Row> v=[1,2;3,4];return 0;}",
+    ))
+    .unwrap_err();
+    assert!(errors[0].message.contains("reserved for future Matrix"));
+    for (source, expected) in [
+        ("int main(){Vector<int,Bad> v=[];return 0;}", "E0324"),
+        (
+            "Vector<T,Row> bad<T>(T x){return [x];}int main(){return 0;}",
+            "E0325",
+        ),
+        ("int main(){Array<int> v=[];return 0;}", "E0326"),
+        ("int main(){return int(dimension(1));}", "E0270"),
+    ] {
+        assert_eq!(
+            compile_source(&SourceFile::new("error.ae", source), &[]).unwrap_err()[0].code,
+            expected
+        );
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical21_native_values_and_exact_heap_counts() {
+    for (fixture, count) in [
+        ("empty_row", 0),
+        ("empty_column", 0),
+        ("row", 1),
+        ("column", 1),
+        ("widening", 1),
+        ("refs", 1),
+        ("loop", 1),
+        ("move", 1),
+        ("return", 1),
+        ("struct", 1),
+        ("enum", 1),
+        ("generic", 2),
+        ("owning", 3),
+        ("conditional", 4),
+        ("nested", 10),
+        ("non_numeric", 3),
+        ("index_once", 1),
+    ] {
+        let compilation = compile_session(
+            CompilationSession::discover(&program(&format!("v21_vector_{fixture}.ae"))).unwrap(),
+            &[],
+        )
+        .unwrap();
+        for (counter, expected) in [
+            (None, 0),
+            (Some("@aether_heap_alloc_count"), count),
+            (Some("@aether_heap_free_count"), count),
+        ] {
+            let llvm=counter.map_or_else(||compilation.llvm.clone(),|counter|compilation.llvm.replace(
+                "  %process_status = trunc i64 %aether_result to i32",
+                &format!("  %observed = load i64, ptr {counter}\n  %process_status = trunc i64 %observed to i32")));
+            let artifact = temporary("v21-count");
+            ClangToolchain::default()
+                .link_executable(&llvm, &artifact)
+                .unwrap();
+            let status = Command::new(&artifact).status().unwrap();
+            let _ = fs::remove_file(artifact);
+            assert_eq!(status.code(), Some(expected), "{fixture}: {counter:?}");
+        }
+    }
+    let (_, status) = run_path(
+        &module_program("v21_vectors"),
+        &[],
+        &ClangToolchain::default(),
+    )
+    .unwrap();
+    assert_eq!(status.code(), Some(0));
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical21_runtime_bounds_read_write_and_borrow() {
+    use std::os::unix::process::ExitStatusExt;
+    for orientation in ["Row", "Column"] {
+        for (literal, index) in [
+            ("[10,20]", "0"),
+            ("[10,20]", "3"),
+            ("[10,20]", "18446744073709551615"),
+            ("[]", "0"),
+            ("[]", "1"),
+        ] {
+            for operation in [
+                "return v[i];",
+                "v[i]=42;return 0;",
+                "ref int r=&v[i];return *r;",
+                "ref mut int r=&mut v[i];*r=42;return 0;",
+            ] {
+                let source = format!(
+                    "int main(){{Vector<int,{orientation}> v={literal};usize i={index};{operation}}}"
+                );
+                let compilation =
+                    compile_source(&SourceFile::new("v21-trap.ae", source), &[]).unwrap();
+                let artifact = temporary("v21-trap");
+                ClangToolchain::default()
+                    .link_executable(&compilation.llvm, &artifact)
+                    .unwrap();
+                let status = Command::new(&artifact).status().unwrap();
+                let _ = fs::remove_file(artifact);
+                assert_eq!(
+                    status.signal(),
+                    Some(4),
+                    "{orientation} {literal} {index} {operation}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical21_collections_keep_zero_based_indices() {
+    let text = "int main(){Array<int> a={10,20};List<int> l={30,40};Vector<int,Row> r=[50,60];Vector<int,Column> c=[70,80];a[0]=11;l[0]=31;if(a[0]+l[0]+r[1]+c[1]!=162){return 1;}return a[1]+l[1]+r[2]+c[2]-200;}";
+    let compiled = compile_source(&SourceFile::new("bases.ae", text), &[Emit::Ssa]).unwrap();
+    assert!(compiled.dumps[&Emit::Ssa].contains("ZeroBased"));
+    assert!(compiled.dumps[&Emit::Ssa].contains("OneBased"));
+    let artifact = temporary("v21-bases");
+    ClangToolchain::default()
+        .link_executable(&compiled.llvm, &artifact)
+        .unwrap();
+    let status = Command::new(&artifact).status().unwrap();
+    let _ = fs::remove_file(artifact);
+    assert_eq!(status.code(), Some(0));
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn vertical21_verifiers_reject_erased_index_and_vector_contracts() {
+    use aether_frontend::{IndexSemantics, TypeId};
+    use aether_middle::{
+        PlaceProjection, Rvalue, SsaOp, SsaPlaceProjection, TrapKind, build_ssa, lower_hir,
+        verify_mir, verify_ssa,
+    };
+    let source = SourceFile::new(
+        "v21-verify.ae",
+        "int main(){Vector<int,Row> v=[10,20];usize n=dimension(v);int x=v[1];return x+int(n);}",
+    );
+    let hir = analyze(parse_source(&source).unwrap()).unwrap();
+    let mir = lower_hir(hir);
+    let ssa = build_ssa(&verify_mir(mir.clone()).unwrap());
+    for case in 0..6 {
+        let mut corrupt = mir.clone();
+        let mut changed = false;
+        for instruction in corrupt.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|b| &mut b.instructions)
+        {
+            match (&mut instruction.value, case) {
+                (
+                    Rvalue::VectorInit {
+                        element_type,
+                        elements,
+                        size_trap,
+                        failure_trap,
+                    },
+                    0,
+                ) => {
+                    instruction.value = Rvalue::ArrayInit {
+                        element_type: *element_type,
+                        elements: elements.clone(),
+                        size_trap: *size_trap,
+                        failure_trap: *failure_trap,
+                    };
+                    changed = true;
+                }
+                (Rvalue::VectorDimension { source }, 1) => {
+                    instruction.value = Rvalue::ArrayLength {
+                        source: source.clone(),
+                    };
+                    changed = true;
+                }
+                (Rvalue::Load(place), 2) => {
+                    for projection in &mut place.projections {
+                        if let PlaceProjection::Index { semantics, .. } = projection {
+                            *semantics = IndexSemantics::ZeroBased;
+                            changed = true;
+                        }
+                    }
+                }
+                (Rvalue::VectorInit { element_type, .. }, 3) => {
+                    *element_type = TypeId::BOOL;
+                    changed = true;
+                }
+                (Rvalue::VectorInit { size_trap, .. }, 4) => {
+                    *size_trap = TrapKind::IndexOutOfBounds;
+                    changed = true;
+                }
+                (Rvalue::Load(place), 5) => {
+                    for projection in &mut place.projections {
+                        if let PlaceProjection::Index { bounds_trap, .. } = projection {
+                            *bounds_trap = TrapKind::AllocationFailure;
+                            changed = true;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert!(changed, "MIR case {case}");
+        assert!(verify_mir(corrupt).is_err(), "MIR case {case}");
+        let mut corrupt = ssa.clone();
+        let mut changed = false;
+        for instruction in corrupt.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|b| &mut b.instructions)
+        {
+            match (&mut instruction.op, case) {
+                (
+                    SsaOp::VectorInit {
+                        element_type,
+                        elements,
+                        size_trap,
+                        failure_trap,
+                    },
+                    0,
+                ) => {
+                    instruction.op = SsaOp::ArrayInit {
+                        element_type: *element_type,
+                        elements: elements.clone(),
+                        size_trap: *size_trap,
+                        failure_trap: *failure_trap,
+                    };
+                    changed = true;
+                }
+                (SsaOp::VectorDimension { source }, 1) => {
+                    instruction.op = SsaOp::ArrayLength {
+                        source: source.clone(),
+                    };
+                    changed = true;
+                }
+                (SsaOp::Load { place }, 2) => {
+                    for projection in &mut place.projections {
+                        if let SsaPlaceProjection::Index { semantics, .. } = projection {
+                            *semantics = IndexSemantics::ZeroBased;
+                            changed = true;
+                        }
+                    }
+                }
+                (SsaOp::VectorInit { element_type, .. }, 3) => {
+                    *element_type = TypeId::BOOL;
+                    changed = true;
+                }
+                (SsaOp::VectorInit { size_trap, .. }, 4) => {
+                    *size_trap = TrapKind::IndexOutOfBounds;
+                    changed = true;
+                }
+                (SsaOp::Load { place }, 5) => {
+                    for projection in &mut place.projections {
+                        if let SsaPlaceProjection::Index { bounds_trap, .. } = projection {
+                            *bounds_trap = TrapKind::AllocationFailure;
+                            changed = true;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert!(changed, "SSA case {case}");
+        assert!(verify_ssa(corrupt).is_err(), "SSA case {case}");
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical21_drop_order_is_reverse_logical_index() {
+    for orientation in ["Row", "Column"] {
+        let source = format!(
+            "int main(){{Vector<Buffer<int>,{orientation}> v=[Buffer<int>(1,10),Buffer<int>(1,20),Buffer<int>(1,30)];return v[1][0]-10;}}"
+        );
+        let compilation = compile_source(&SourceFile::new("drop.ae", source), &[]).unwrap();
+        let mut llvm=compilation.llvm.replace("call void @free(ptr %ptr)","call void @v21_note_free(ptr %ptr, i64 %size)\n  call void @free(ptr %ptr)").replace(
+            "  %process_status = trunc i64 %aether_result to i32",
+            "  %trace = load i64, ptr @v21_trace\n  %ordered = icmp eq i64 %trace, 302010\n  %process_status = select i1 %ordered, i32 0, i32 99");
+        llvm.push_str(
+            r"
+@v21_trace = internal global i64 0
+define internal void @v21_note_free(ptr %data, i64 %size) {
+entry:
+  %buffer = icmp eq i64 %size, 8
+  br i1 %buffer, label %record, label %done
+record:
+  %payload = load i64, ptr %data
+  %old = load i64, ptr @v21_trace
+  %shift = mul i64 %old, 100
+  %next = add i64 %shift, %payload
+  store i64 %next, ptr @v21_trace
+  br label %done
+done:
+  ret void
+}
+",
+        );
+        let artifact = temporary("v21-drop-order");
+        ClangToolchain::default()
+            .link_executable(&llvm, &artifact)
+            .unwrap();
+        let status = Command::new(&artifact).status().unwrap();
+        let _ = fs::remove_file(artifact);
+        assert_eq!(status.code(), Some(0), "{orientation}");
+    }
+}
+
+#[test]
+fn vertical21_cross_module_orientation_rejection_and_mangling() {
+    let compilation = compile_session(
+        CompilationSession::discover(&module_program("v21_vectors")).unwrap(),
+        &[Emit::Hir, Emit::Ssa],
+    )
+    .unwrap();
+    assert!(compilation.llvm.contains("QRow"));
+    assert!(compilation.llvm.contains("QColumn"));
+    let directory = temporary("v21-modules");
+    fs::create_dir_all(&directory).unwrap();
+    fs::copy(
+        module_program("v21_vectors").with_file_name("storage.ae"),
+        directory.join("storage.ae"),
+    )
+    .unwrap();
+    for text in [
+        "import storage;int main(){Vector<int,Column> c=storage.row(1,2);return 0;}",
+        "import storage;int main(){Vector<int,Row> r=storage.column(1,2);return 0;}",
+        "import storage;int main(){Vector<int,Row> r=[1,2];return storage.readColumn(&r,1);}",
+        "import storage;int main(){storage.Holder<Vector<int,Row>> r=storage.Holder<Vector<int,Row>>([1]);storage.Holder<Vector<int,Column>> c=r;return 0;}",
+    ] {
+        fs::write(directory.join("main.ae"), text).unwrap();
+        assert!(
+            compile_session(
+                CompilationSession::discover(&directory.join("main.ae")).unwrap(),
+                &[]
+            )
+            .is_err(),
+            "{text}"
+        );
+    }
+    fs::remove_dir_all(directory).unwrap();
 }

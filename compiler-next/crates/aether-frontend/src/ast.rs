@@ -305,6 +305,8 @@ pub enum AstExprKind {
     /// Collection literal. Its concrete collection kind is selected only from
     /// the expected semantic type; future `List<T>` can reuse this node.
     CollectionLiteral(Vec<AstExpr>),
+    /// Mathematical one-dimensional literal; semicolons are reserved for Matrix.
+    VectorLiteral(Vec<AstExpr>),
     /// Unresolved name.
     Name(String),
     /// Unresolved direct call.

@@ -1,0 +1,11 @@
+int main() {
+    Vector<double,Column> v=[
+        1.0,
+        2.0,
+        3.0,
+    ];
+    if (dimension(v)!=3) { return 1; }
+    if (v[1]!=1.0) { return 2; }
+    if (v[3]!=3.0) { return 3; }
+    return 0;
+}

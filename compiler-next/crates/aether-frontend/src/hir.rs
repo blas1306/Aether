@@ -19,6 +19,7 @@ use crate::{
     IntegerType, ParsedAst, Phase, SourceId, Span, StructId, Substitution, TargetProperties,
     TypeArena, TypeData, TypeId, VariantId,
 };
+use crate::{IndexSemantics, Orientation};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use std::time::Instant;
@@ -139,7 +140,10 @@ pub fn layout_of(
             size: u64::from(target.pointer_width / 8),
             align: u64::from(target.pointer_width / 8),
         },
-        TypeData::Buffer { .. } | TypeData::Array { .. } | TypeData::View { .. } => TypeLayout {
+        TypeData::Buffer { .. }
+        | TypeData::Vector { .. }
+        | TypeData::Array { .. }
+        | TypeData::View { .. } => TypeLayout {
             size: u64::from(target.pointer_width / 4),
             align: u64::from(target.pointer_width / 8),
         },
@@ -201,6 +205,14 @@ pub fn format_type(
         Some(TypeData::Buffer { element }) => {
             format!("Buffer<{}>", format_type(types, *element, structs, enums))
         }
+        Some(TypeData::Vector {
+            element,
+            orientation,
+        }) => format!(
+            "Vector<{}, {:?}>",
+            format_type(types, *element, structs, enums),
+            orientation
+        ),
         Some(TypeData::Array { element }) => {
             format!("Array<{}>", format_type(types, *element, structs, enums))
         }
@@ -396,6 +408,11 @@ impl TypedHir {
                     .types
                     .array_element(id)
                     .map(|element| (CollectionKind::Array, element))
+                    .or_else(|| {
+                        self.types
+                            .vector_element(id)
+                            .map(|element| (CollectionKind::Vector, element))
+                    })
                     .or_else(|| {
                         self.types
                             .list_element(id)
@@ -665,6 +682,7 @@ pub enum HirPlaceProjection {
         index: Box<HirExpr>,
         element_type: TypeId,
         checked: bool,
+        semantics: IndexSemantics,
     },
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -704,6 +722,11 @@ pub enum HirExprKind {
         length: Box<HirExpr>,
         initial: Box<HirExpr>,
     },
+    /// Expected-type-resolved `[...]` mathematical construction.
+    VectorInit {
+        element_type: TypeId,
+        elements: Vec<HirExpr>,
+    },
     /// Expected-type-resolved `{...}` collection construction.
     ArrayInit {
         element_type: TypeId,
@@ -715,7 +738,11 @@ pub enum HirExprKind {
         length: Box<HirExpr>,
         initial: Box<HirExpr>,
     },
-    /// Bootstrap `length(array-place)` query, resolved below HIR.
+    /// Mathematical `dimension(vector-place)` query.
+    VectorDimension {
+        source: HirPlace,
+    },
+    /// Bootstrap `length(array-place)` query.
     ArrayLength {
         source: HirPlace,
     },
@@ -1269,6 +1296,7 @@ pub fn collect_program_signatures(
     if let Some((container, element, kind)) = types.entries().find_map(|(container, data)| {
         let (element, kind) = match data {
             TypeData::Buffer { element } | TypeData::View { element, .. } => (*element, 0_u8),
+            TypeData::Vector { element, .. } => (*element, 3),
             TypeData::Array { element } => (*element, 1),
             TypeData::List { element } => (*element, 2),
             _ => return None,
@@ -1276,6 +1304,7 @@ pub fn collect_program_signatures(
         let admitted = match kind {
             1 => types.is_admitted_array_element(element),
             2 => types.is_admitted_list_element(element),
+            3 => types.is_admitted_vector_element(element),
             _ => types.is_admitted_buffer_element(element),
         };
         (!admitted).then_some((container, element, kind))
@@ -1301,6 +1330,7 @@ pub fn collect_program_signatures(
             match kind {
                 1 => "E0304",
                 2 => "E0310",
+                3 => "E0325",
                 _ => "E0280",
             },
             Phase::Semantic,
@@ -1313,10 +1343,18 @@ pub fn collect_program_signatures(
                 )
             } else {
                 collection_admission_message(
-                    if kind == 1 { "Array" } else { "List" },
+                    if kind == 1 {
+                        "Array"
+                    } else if kind == 3 {
+                        "Vector"
+                    } else {
+                        "List"
+                    },
                     format_type(&types, element, &structs, &enums),
                     types.collection_element_admission(
-                        if kind == 1 {
+                        if kind == 3 {
+                            CollectionKind::Vector
+                        } else if kind == 1 {
                             CollectionKind::Array
                         } else {
                             CollectionKind::List
@@ -1662,6 +1700,66 @@ fn resolve_type_in_module(
         }
         return Ok(parameter);
     }
+    if ty.module.is_none() && ty.name == "Vector" {
+        if ty.arguments.len() != 2 {
+            return Err(generic_arity(ty, 2));
+        }
+        let marker = &ty.arguments[1];
+        let orientation = match marker.name.as_str() {
+            "Row"
+                if marker.module.is_none()
+                    && marker.reference.is_none()
+                    && marker.arguments.is_empty() =>
+            {
+                Orientation::Row
+            }
+            "Column"
+                if marker.module.is_none()
+                    && marker.reference.is_none()
+                    && marker.arguments.is_empty() =>
+            {
+                Orientation::Column
+            }
+            _ => {
+                return Err(Diagnostic::new(
+                    "E0324",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    "Vector orientation must be the intrinsic marker Row or Column",
+                    Some(marker.span),
+                ));
+            }
+        };
+        let element = resolve_type_in_module(
+            &ty.arguments[0],
+            current,
+            aliases,
+            struct_names,
+            enum_names,
+            imports,
+            module_names,
+            types,
+            generic_scope,
+            struct_arities,
+            enum_arities,
+        )?;
+        let deferred_aggregate = types.properties(element).is_some_and(|p| !p.is_known)
+            && (types.struct_id(element).is_some() || types.enum_id(element).is_some());
+        if !types.is_admitted_vector_element(element) && !deferred_aggregate {
+            return Err(Diagnostic::new(
+                "E0325",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                collection_admission_message(
+                    "Vector",
+                    format_type(types, element, &[], &[]),
+                    types.collection_element_admission(CollectionKind::Vector, element),
+                ),
+                Some(ty.span),
+            ));
+        }
+        return Ok(types.intern_vector(element, orientation));
+    }
     let mut arguments = Vec::with_capacity(ty.arguments.len());
     for argument in &ty.arguments {
         arguments.push(resolve_type_in_module(
@@ -1840,6 +1938,9 @@ fn generic_arity(ty: &AstType, expected: usize) -> Diagnostic {
 }
 
 fn intrinsic_type_arity(name: &str) -> Option<usize> {
+    if name == "Vector" {
+        return Some(2);
+    }
     matches!(name, "Buffer" | "Array" | "List" | "View" | "ViewMut").then_some(1)
 }
 
@@ -2023,8 +2124,14 @@ fn validate_type_constraints(
             types.arguments(arguments).unwrap_or(&[]),
             enums[id.0 as usize].name.as_str(),
         ),
-        Some(TypeData::Array { element } | TypeData::List { element }) => {
-            let (kind, name, code) = if types.array_element(ty).is_some() {
+        Some(
+            TypeData::Vector { element, .. }
+            | TypeData::Array { element }
+            | TypeData::List { element },
+        ) => {
+            let (kind, name, code) = if types.vector_element(ty).is_some() {
+                (CollectionKind::Vector, "Vector", "E0325")
+            } else if types.array_element(ty).is_some() {
                 (CollectionKind::Array, "Array", "E0304")
             } else {
                 (CollectionKind::List, "List", "E0310")
@@ -2089,6 +2196,16 @@ fn infer_generic_arguments(
         return Ok(());
     }
     match (types.get(pattern), types.get(actual)) {
+        (
+            Some(TypeData::Vector {
+                element: left,
+                orientation: lo,
+            }),
+            Some(TypeData::Vector {
+                element: right,
+                orientation: ro,
+            }),
+        ) if lo == ro => infer_generic_arguments(types, *left, *right, inferred),
         (Some(TypeData::Array { element: left }), Some(TypeData::Array { element: right }))
         | (Some(TypeData::List { element: left }), Some(TypeData::List { element: right })) => {
             infer_generic_arguments(types, *left, *right, inferred)
@@ -2287,7 +2404,10 @@ fn compute_aggregate_layouts(
                     align: bytes,
                 }
             }
-            TypeData::Buffer { .. } | TypeData::Array { .. } | TypeData::View { .. } => {
+            TypeData::Buffer { .. }
+            | TypeData::Vector { .. }
+            | TypeData::Array { .. }
+            | TypeData::View { .. } => {
                 let bytes = u64::from(target.pointer_width / 8);
                 TypeLayout {
                     size: bytes * 2,
@@ -2893,6 +3013,7 @@ impl Monomorphizer<'_> {
                         index,
                         element_type,
                         checked,
+                        semantics,
                     } => Ok(HirPlaceProjection::Index {
                         index: Box::new(self.substitute_expr(index, substitution)?),
                         element_type: self.substitute_type(
@@ -2901,6 +3022,7 @@ impl Monomorphizer<'_> {
                             index.span,
                         )?,
                         checked: *checked,
+                        semantics: *semantics,
                     }),
                 })
                 .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?,
@@ -2952,6 +3074,16 @@ impl Monomorphizer<'_> {
                 length: Box::new(self.substitute_expr(length, substitution)?),
                 initial: Box::new(self.substitute_expr(initial, substitution)?),
             },
+            HirExprKind::VectorInit {
+                element_type,
+                elements,
+            } => HirExprKind::VectorInit {
+                element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+                elements: elements
+                    .iter()
+                    .map(|element| self.substitute_expr(element, substitution))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
             HirExprKind::ArrayInit {
                 element_type,
                 elements,
@@ -2970,6 +3102,9 @@ impl Monomorphizer<'_> {
                 element_type: self.substitute_type(*element_type, substitution, expression.span)?,
                 length: Box::new(self.substitute_expr(length, substitution)?),
                 initial: Box::new(self.substitute_expr(initial, substitution)?),
+            },
+            HirExprKind::VectorDimension { source } => HirExprKind::VectorDimension {
+                source: self.substitute_place(source, substitution)?,
             },
             HirExprKind::ArrayLength { source } => HirExprKind::ArrayLength {
                 source: self.substitute_place(source, substitution)?,
@@ -3120,6 +3255,7 @@ fn type_depth(types: &TypeArena, ty: TypeId) -> usize {
         Some(TypeData::Reference { pointee, .. }) => 1 + type_depth(types, *pointee),
         Some(
             TypeData::Buffer { element }
+            | TypeData::Vector { element, .. }
             | TypeData::Array { element }
             | TypeData::List { element }
             | TypeData::View { element, .. },
@@ -3150,6 +3286,7 @@ fn type_contains(types: &TypeArena, outer: TypeId, needle: TypeId) -> bool {
             Some(TypeData::Reference { pointee, .. }) => type_contains(types, *pointee, needle),
             Some(
                 TypeData::Buffer { element }
+                | TypeData::Vector { element, .. }
                 | TypeData::Array { element }
                 | TypeData::List { element }
                 | TypeData::View { element, .. },
@@ -3204,7 +3341,10 @@ fn compute_concrete_layouts(
                     align: bytes,
                 })
             }
-            TypeData::Buffer { .. } | TypeData::Array { .. } | TypeData::View { .. } => {
+            TypeData::Buffer { .. }
+            | TypeData::Vector { .. }
+            | TypeData::Array { .. }
+            | TypeData::View { .. } => {
                 let bytes = u64::from(target.pointer_width / 8);
                 Some(TypeLayout {
                     size: bytes * 2,
@@ -3889,13 +4029,16 @@ impl OwnershipAnalysis<'_> {
                 self.expr(length)?;
                 self.expr(initial)
             }
-            HirExprKind::ArrayInit { elements, .. } | HirExprKind::ListInit { elements, .. } => {
+            HirExprKind::VectorInit { elements, .. }
+            | HirExprKind::ArrayInit { elements, .. }
+            | HirExprKind::ListInit { elements, .. } => {
                 for element in elements {
                     self.expr(element)?;
                 }
                 Ok(())
             }
-            HirExprKind::ArrayLength { source }
+            HirExprKind::VectorDimension { source }
+            | HirExprKind::ArrayLength { source }
             | HirExprKind::ListLength { source }
             | HirExprKind::ListCapacity { source } => self.place(source, expr.span),
             HirExprKind::Call { args, .. } => {
@@ -3997,17 +4140,21 @@ impl OwnershipAnalysis<'_> {
         if let HirPlaceBase::Dereference { reference, .. } = &place.base {
             self.expr(reference)?;
         }
-        for projection in &place.projections {
-            if let HirPlaceProjection::Index { index, .. } = projection {
+        for (position, projection) in place.projections.iter().enumerate() {
+            if let HirPlaceProjection::Index {
+                index, semantics, ..
+            } = projection
+            {
                 self.expr(index)?;
                 if let HirExprKind::Int(value) = index.kind
                     && let HirPlaceBase::Local(local) = place.base
+                    && position == 0
                     && let Some(length) = self.buffer_lengths[local.0 as usize]
-                    && u64::try_from(value).is_ok_and(|index| index >= length)
+                    && u64::try_from(value).is_ok_and(|index| !semantics.contains(index, length))
                 {
                     return Err(self.error(
                         "E0296",
-                        format!("constant index {value} is out of bounds for length {length}"),
+                        format!("constant index {value} is out of bounds for {semantics:?} extent {length}"),
                         index.span,
                     ));
                 }
@@ -4103,6 +4250,9 @@ impl OwnershipAnalysis<'_> {
                     HirExprKind::Int(value) => u64::try_from(value).ok(),
                     _ => None,
                 }
+            }
+            HirExprKind::VectorInit { elements, .. } => {
+                Some(u64::try_from(elements.len()).expect("Vector literal length fits u64"))
             }
             HirExprKind::ArrayInit { elements, .. } => {
                 Some(u64::try_from(elements.len()).expect("Array literal length fits u64"))
@@ -4802,6 +4952,8 @@ impl Analyzer<'_> {
                 let (element_type, mutable) =
                     if let Some(element) = self.types.buffer_element(place.ty) {
                         (element, true)
+                    } else if let Some(element) = self.types.vector_element(place.ty) {
+                        (element, true)
                     } else if let Some(element) = self.types.array_element(place.ty) {
                         (element, true)
                     } else if let Some(element) = self.types.list_element(place.ty) {
@@ -4814,7 +4966,7 @@ impl Analyzer<'_> {
                             Phase::Semantic,
                             DiagnosticCategory::Type,
                             format!(
-                                "checked indexing requires Buffer/Array/List/View, found {}",
+                                "checked indexing requires Buffer/Array/List/Vector/View, found {}",
                                 self.type_name(place.ty)
                             ),
                             Some(expression.span),
@@ -4834,6 +4986,10 @@ impl Analyzer<'_> {
                     index: Box::new(index),
                     element_type,
                     checked: true,
+                    semantics: self
+                        .types
+                        .index_semantics(place.ty)
+                        .expect("indexable type"),
                 });
                 place.ty = element_type;
                 Ok(place)
@@ -4978,6 +5134,9 @@ impl Analyzer<'_> {
                 expected,
             );
         }
+        if let AstExprKind::VectorLiteral(elements) = &e.kind {
+            return self.vector_literal(elements, e.span, expected);
+        }
         if let AstExprKind::CollectionLiteral(elements) = &e.kind {
             return self.collection_literal(elements, e.span, expected);
         }
@@ -5044,6 +5203,9 @@ impl Analyzer<'_> {
                 }
                 if callee == "Array" {
                     return self.array_fill(type_arguments, args, e.span, expected);
+                }
+                if callee == "dimension" {
+                    return self.vector_dimension(type_arguments, args, e.span, expected);
                 }
                 if callee == "length" {
                     return self.collection_length(type_arguments, args, e.span, expected);
@@ -5352,6 +5514,7 @@ impl Analyzer<'_> {
                 | TypeData::EnumInstance(_, _)
                 | TypeData::Reference { .. }
                 | TypeData::Buffer { .. }
+                | TypeData::Vector { .. }
                 | TypeData::Array { .. }
                 | TypeData::List { .. }
                 | TypeData::View { .. },
@@ -5474,6 +5637,79 @@ impl Analyzer<'_> {
             },
             constant: None,
         })
+    }
+
+    fn vector_literal(
+        &mut self,
+        elements: &[AstExpr],
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        let Some((ty, element_type)) =
+            expected.and_then(|ty| self.types.vector_element(ty).map(|element| (ty, element)))
+        else {
+            return Err(vec![Diagnostic::new(
+                "E0326",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "vector literal requires an expected Vector<T, Row> or Vector<T, Column> type",
+                Some(span),
+            )]);
+        };
+        let elements = elements
+            .iter()
+            .map(|e| self.expression(e, Some(element_type)).map(|c| c.expr))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(Checked {
+            expr: HirExpr {
+                kind: HirExprKind::VectorInit {
+                    element_type,
+                    elements,
+                },
+                ty,
+                span,
+            },
+            constant: None,
+        })
+    }
+
+    fn vector_dimension(
+        &mut self,
+        type_arguments: &[AstType],
+        args: &[AstExpr],
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        if !type_arguments.is_empty() || args.len() != 1 {
+            return Err(vec![Diagnostic::new(
+                "E0327",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "dimension expects exactly one Vector place and no type arguments",
+                Some(span),
+            )]);
+        }
+        let source = self.resolve_expr_place(&args[0], false)?;
+        if self.types.vector_element(source.ty).is_none() {
+            return Err(vec![Diagnostic::new(
+                "E0327",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "dimension source must be a Vector place",
+                Some(span),
+            )]);
+        }
+        self.coerce(
+            Checked {
+                expr: HirExpr {
+                    kind: HirExprKind::VectorDimension { source },
+                    ty: TypeId::USIZE,
+                    span,
+                },
+                constant: None,
+            },
+            expected,
+        )
     }
 
     fn collection_literal(
@@ -5744,7 +5980,11 @@ impl Analyzer<'_> {
             )]);
         }
         let source = self.resolve_expr_place(&args[0], mutable)?;
-        let Some(element) = self.types.owning_contiguous_element(source.ty) else {
+        let Some(element) = self
+            .types
+            .owning_contiguous_element(source.ty)
+            .filter(|_| self.types.vector_element(source.ty).is_none())
+        else {
             return Err(vec![Diagnostic::new(
                 "E0289",
                 Phase::Semantic,
@@ -6828,12 +7068,13 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
         TypeData::Buffer { element } | TypeData::View { element, .. } => {
             !h.types.is_admitted_buffer_element(*element)
         }
+        TypeData::Vector { element, .. } => !h.types.is_admitted_vector_element(*element),
         TypeData::Array { element } => !h.types.is_admitted_array_element(*element),
         TypeData::List { element } => !h.types.is_admitted_list_element(*element),
         _ => false,
     }) {
         return Err(fail(
-            "HIR contains a Buffer/View/Array/List with an inadmissible element type".into(),
+            "HIR contains a Buffer/View/Array/List/Vector with an inadmissible element type".into(),
         ));
     }
     for ty in h
@@ -7234,6 +7475,22 @@ fn verify_expr(
                 return Err(fail("HIR Buffer construction contract invalid".into()));
             }
         }
+        HirExprKind::VectorInit {
+            element_type,
+            elements,
+        } => {
+            for element in elements {
+                verify_expr(element, f, sigs, structs, enums, types, fail)?;
+            }
+            if types.vector_element(e.ty) != Some(*element_type)
+                || elements.iter().any(|element| element.ty != *element_type)
+                || !types.is_admitted_vector_element(*element_type)
+            {
+                return Err(fail(
+                    "HIR Vector literal construction contract invalid".into(),
+                ));
+            }
+        }
         HirExprKind::ArrayInit {
             element_type,
             elements,
@@ -7264,6 +7521,12 @@ fn verify_expr(
                 || !types.guarantees_copy(*element_type)
             {
                 return Err(fail("HIR Array fill construction contract invalid".into()));
+            }
+        }
+        HirExprKind::VectorDimension { source } => {
+            verify_place(source, f, sigs, structs, enums, types, fail)?;
+            if types.vector_element(source.ty).is_none() || e.ty != TypeId::USIZE {
+                return Err(fail("HIR Vector dimension contract invalid".into()));
             }
         }
         HirExprKind::ArrayLength { source } => {
@@ -7363,7 +7626,10 @@ fn verify_expr(
         }
         HirExprKind::View { source, mutable } => {
             verify_place(source, f, sigs, structs, enums, types, fail)?;
-            let Some(element) = types.owning_contiguous_element(source.ty) else {
+            let Some(element) = types
+                .owning_contiguous_element(source.ty)
+                .filter(|_| types.vector_element(source.ty).is_none())
+            else {
                 return Err(fail("HIR View source is not Buffer/Array/List".into()));
             };
             if types.view_info(e.ty) != Some((element, *mutable)) {
@@ -7584,15 +7850,21 @@ fn verify_place(
                 index,
                 element_type,
                 checked,
+                semantics,
             } => {
                 verify_expr(index, function, sigs, structs, enums, types, fail)?;
                 let element = types
                     .buffer_element(ty)
                     .or_else(|| types.array_element(ty))
+                    .or_else(|| types.vector_element(ty))
                     .or_else(|| types.list_element(ty))
                     .or_else(|| types.view_info(ty).map(|(element, _)| element))
                     .ok_or_else(|| fail("HIR index projection has non-contiguous base".into()))?;
-                if index.ty != TypeId::USIZE || element != *element_type || !*checked {
+                if index.ty != TypeId::USIZE
+                    || element != *element_type
+                    || !*checked
+                    || types.index_semantics(ty) != Some(*semantics)
+                {
                     return Err(fail("HIR index projection contract invalid".into()));
                 }
                 ty = element;
@@ -7816,5 +8088,49 @@ mod tests {
             fields[0].0 = FieldId(999);
         }
         assert!(verify_hir(&corrupt).is_err());
+    }
+    #[test]
+    fn vertical21_hir_rejects_erased_vector_contracts() {
+        let hir = check("int main(){Vector<int,Row> v=[10,20];usize n=dimension(v);int x=v[1];return x+int(n);}").unwrap();
+        for case in 0..3 {
+            let mut corrupt = hir.clone();
+            let mut changed = false;
+            for statement in &mut corrupt.functions[0].body.statements {
+                if let HirStmtKind::Local { initializer, .. } = &mut statement.kind {
+                    match (&mut initializer.kind, case) {
+                        (
+                            HirExprKind::VectorInit {
+                                element_type,
+                                elements,
+                            },
+                            0,
+                        ) => {
+                            initializer.kind = HirExprKind::ArrayInit {
+                                element_type: *element_type,
+                                elements: elements.clone(),
+                            };
+                            changed = true;
+                        }
+                        (HirExprKind::VectorDimension { source }, 1) => {
+                            initializer.kind = HirExprKind::ArrayLength {
+                                source: source.clone(),
+                            };
+                            changed = true;
+                        }
+                        (HirExprKind::Load(place), 2) => {
+                            for projection in &mut place.projections {
+                                if let HirPlaceProjection::Index { semantics, .. } = projection {
+                                    *semantics = IndexSemantics::ZeroBased;
+                                    changed = true;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            assert!(changed, "HIR case {case}");
+            assert!(verify_hir(&corrupt).is_err(), "HIR case {case}");
+        }
     }
 }

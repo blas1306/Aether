@@ -1,0 +1,7 @@
+import storage;
+int main() {
+    storage.Holder<Vector<int,Row>> r=storage.Holder<Vector<int,Row>>(storage.row(10,20));
+    Vector<int,Column> c=storage.column(30,40);
+    if(storage.rowSize(&r.value)!=2) { return 1; }
+    return storage.readColumn(&c,2)-40;
+}

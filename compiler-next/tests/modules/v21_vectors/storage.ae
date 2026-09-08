@@ -1,0 +1,5 @@
+struct Holder<T: Storable> { T value; }
+Vector<T,Row> row<T: Storable>(T a,T b) { return [a,b]; }
+Vector<T,Column> column<T: Storable>(T a,T b) { return [a,b]; }
+usize rowSize<T: Storable>(ref Vector<T,Row> v) { return dimension(*v); }
+int readColumn(ref Vector<int,Column> v,usize i) { return (*v)[i]; }

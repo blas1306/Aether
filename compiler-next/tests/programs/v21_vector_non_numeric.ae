@@ -1,0 +1,14 @@
+struct Item { int value; }
+struct Empty { }
+int main() {
+    Vector<bool,Column> flags=[true,false];
+    if (flags[1]!=true) { return 1; }
+    flags[2]=true;
+    if (flags[2]!=true) { return 2; }
+    Vector<Item,Row> items=[Item(10),Item(20)];
+    items[1].value=22;
+    ref int r=&items[2].value;
+    if(items[1].value+*r!=42) { return 3; }
+    Vector<Empty,Column> emptyElements=[Empty(),Empty()];
+    return int(dimension(emptyElements))-2;
+}

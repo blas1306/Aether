@@ -1,6 +1,7 @@
 //! Explicit control-flow MIR and fail-closed verification.
 #![allow(missing_docs)]
 
+use aether_frontend::IndexSemantics;
 use std::collections::{BTreeSet, VecDeque};
 use std::fmt::Write;
 use std::sync::Arc;
@@ -160,6 +161,7 @@ pub enum PlaceProjection {
         index: Operand,
         element_type: TypeId,
         bounds_trap: TrapKind,
+        semantics: IndexSemantics,
     },
 }
 
@@ -269,6 +271,12 @@ pub enum Rvalue {
         size_trap: TrapKind,
         failure_trap: TrapKind,
     },
+    VectorInit {
+        element_type: TypeId,
+        elements: Vec<Operand>,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
     ArrayInit {
         element_type: TypeId,
         elements: Vec<Operand>,
@@ -281,6 +289,9 @@ pub enum Rvalue {
         initial: Operand,
         size_trap: TrapKind,
         failure_trap: TrapKind,
+    },
+    VectorDimension {
+        source: Place,
     },
     ArrayLength {
         source: Place,
@@ -1100,6 +1111,30 @@ impl Builder<'_> {
                 );
                 Operand::Local(destination)
             }
+            HirExprKind::VectorInit {
+                element_type,
+                elements,
+            } => {
+                let elements = elements
+                    .iter()
+                    .map(|element| self.lower_expr(element))
+                    .collect();
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::VectorInit {
+                        element_type: *element_type,
+                        elements,
+                        size_trap: TrapKind::AllocationSizeOverflow,
+                        failure_trap: TrapKind::AllocationFailure,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
             HirExprKind::ArrayInit {
                 element_type,
                 elements,
@@ -1144,6 +1179,19 @@ impl Builder<'_> {
                         size_trap: TrapKind::AllocationSizeOverflow,
                         failure_trap: TrapKind::AllocationFailure,
                     },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::VectorDimension { source } => {
+                let source = self.lower_place(source);
+                let destination = self.temporary(TypeId::USIZE);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::VectorDimension { source },
                     expression.span,
                 );
                 Operand::Local(destination)
@@ -1888,10 +1936,12 @@ impl Builder<'_> {
                         index,
                         element_type,
                         checked: _,
+                        semantics,
                     } => PlaceProjection::Index {
                         index: self.lower_expr(index),
                         element_type: *element_type,
                         bounds_trap: TrapKind::IndexOutOfBounds,
+                        semantics: *semantics,
                     },
                 })
                 .collect(),
@@ -1943,13 +1993,14 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
             TypeData::Buffer { element } | TypeData::View { element, .. } => {
                 !mir.types.is_admitted_buffer_element(*element)
             }
+            TypeData::Vector { element, .. } => !mir.types.is_admitted_vector_element(*element),
             TypeData::Array { element } => !mir.types.is_admitted_array_element(*element),
             TypeData::List { element } => !mir.types.is_admitted_list_element(*element),
             _ => false,
         })
     {
         return Err(fail(
-            "MIR contains a Buffer/View/Array/List with an inadmissible element type".into(),
+            "MIR contains a Buffer/View/Array/List/Vector with an inadmissible element type".into(),
         ));
     }
     for ty in mir
@@ -2370,6 +2421,7 @@ fn verify_drop_flag_contract(
                     }
                 }
                 Rvalue::BufferAlloc { .. }
+                | Rvalue::VectorInit { .. }
                 | Rvalue::ArrayInit { .. }
                 | Rvalue::ArrayFill { .. }
                 | Rvalue::ListInit { .. }
@@ -2535,7 +2587,9 @@ fn verify_ownership(
                 Rvalue::BufferAlloc { .. } | Rvalue::ArrayFill { .. } => {
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
-                Rvalue::ArrayInit { elements, .. } | Rvalue::ListInit { elements, .. } => {
+                Rvalue::VectorInit { elements, .. }
+                | Rvalue::ArrayInit { elements, .. }
+                | Rvalue::ListInit { elements, .. } => {
                     consume_owned_operands(
                         function,
                         types,
@@ -2571,6 +2625,7 @@ fn verify_ownership(
                 Rvalue::Load(place)
                 | Rvalue::Borrow { place, .. }
                 | Rvalue::View { source: place, .. }
+                | Rvalue::VectorDimension { source: place }
                 | Rvalue::ArrayLength { source: place }
                 | Rvalue::ListLength { source: place }
                 | Rvalue::ListCapacity { source: place }
@@ -2929,6 +2984,26 @@ fn validate_rvalue(
                 return Err("MIR Buffer allocation contract invalid".into());
             }
         }
+        Rvalue::VectorInit {
+            element_type,
+            elements,
+            size_trap,
+            failure_trap,
+        } => {
+            for element in elements {
+                validate_operand(function, element, initialized)?;
+            }
+            if types.vector_element(destination) != Some(*element_type)
+                || elements
+                    .iter()
+                    .any(|element| operand_type(function, element).ok() != Some(*element_type))
+                || !types.is_admitted_vector_element(*element_type)
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("MIR Vector literal allocation contract invalid".into());
+            }
+        }
         Rvalue::ArrayInit {
             element_type,
             elements,
@@ -2967,6 +3042,13 @@ fn validate_rvalue(
                 || *failure_trap != TrapKind::AllocationFailure
             {
                 return Err("MIR Array fill allocation contract invalid".into());
+            }
+        }
+        Rvalue::VectorDimension { source } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            let source_ty = place_type(function, source, structs, types)?;
+            if destination != TypeId::USIZE || types.vector_element(source_ty).is_none() {
+                return Err("MIR Vector dimension contract invalid".into());
             }
         }
         Rvalue::ArrayLength { source } => {
@@ -3121,6 +3203,7 @@ fn validate_rvalue(
             let source_ty = place_type(function, source, structs, types)?;
             let element = types
                 .owning_contiguous_element(source_ty)
+                .filter(|_| types.vector_element(source_ty).is_none())
                 .ok_or_else(|| "MIR View source is not Buffer/Array/List".to_string())?;
             if types.view_info(destination) != Some((element, *mutable)) {
                 return Err("MIR View contract invalid".into());
@@ -3448,15 +3531,18 @@ pub(crate) fn place_type(
                 index,
                 element_type,
                 bounds_trap,
+                semantics,
             } => {
                 let element = types
                     .buffer_element(ty)
                     .or_else(|| types.array_element(ty))
+                    .or_else(|| types.vector_element(ty))
                     .or_else(|| types.list_element(ty))
                     .or_else(|| types.view_info(ty).map(|(element, _)| element))
                     .ok_or_else(|| "MIR index projection has non-contiguous base".to_string())?;
                 if operand_type(function, index)? != TypeId::USIZE
                     || element != *element_type
+                    || types.index_semantics(ty) != Some(*semantics)
                     || *bounds_trap != TrapKind::IndexOutOfBounds
                 {
                     return Err("MIR index projection contract invalid".into());

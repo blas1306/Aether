@@ -1,0 +1,14 @@
+alias RowInt = Vector<int,Row>;
+usize next(ref mut usize calls) { *calls=*calls+1; return 1; }
+int main() {
+    RowInt v=[10];
+    usize calls=0;
+    int x=v[next(&mut calls)];
+    v[next(&mut calls)]=20;
+    ref int r=&v[next(&mut calls)];
+    ref mut int m=&mut v[next(&mut calls)];
+    *m=30;
+    if(calls!=4) { return 1; }
+    if(x!=10) { return 2; }
+    return *r-30;
+}

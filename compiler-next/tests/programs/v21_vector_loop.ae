@@ -1,0 +1,9 @@
+int main() {
+    Vector<int,Row> v=[10,20,30];
+    usize i=1;
+    int total=0;
+    while (i<=dimension(v)) { total=total+v[i]; v[i]=v[i]+1; i=i+1; }
+    if (total!=60) { return 1; }
+    if (v[1]+v[2]+v[3]!=63) { return 2; }
+    return 0;
+}

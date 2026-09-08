@@ -1,0 +1,2 @@
+struct Owner { Vector<int,Row> v; }
+int main() { Owner o=Owner([10,20]); Owner moved=o; moved.v[1]=22; return moved.v[1]+moved.v[2]-42; }

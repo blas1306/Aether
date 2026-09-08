@@ -28,3 +28,4 @@ v17_storable	accept:42	cross-module Storable Array and Storable+Relocatable List
 v18_pop	accept:42	cross-module generic whole-element List extraction
 v19_swap_remove	accept:42	V19 cross-module generic indexed owning extraction
 v20_remove	accept:42	V20 cross-module generic order-preserving owning extraction
+v21_vectors	accept:0	V21 cross-module Row/Column signatures and generic aggregates

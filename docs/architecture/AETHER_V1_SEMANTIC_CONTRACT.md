@@ -792,7 +792,7 @@ deferred until its empty-result/error semantics are designed. Resize, insert,
 erase, non-Copy elements and a general method/property
 surface are also outside V14.
 
-### 6.3 `Vector` and `Matrix` — DECIDED surface direction / future implementation
+### 6.3 `Vector` — V21 foundation; `Matrix` — future implementation
 
 `Matrix<T>` has contiguous dense storage by default with dimensions, strides,
 layout and ownership represented explicitly in semantic IR. It is not
@@ -801,8 +801,8 @@ matrix is a different type/family.
 
 `Vector<T, Orientation>` carries Row/Column orientation in its mathematical
 semantics and type because orientation changes multiplication validity and
-result type. The exact type-level argument mechanics still await generic
-constraint work.
+result type. V21 resolves Row/Column as intrinsic compile-time orientation
+arguments in canonical TypeData; it does not introduce general value generics.
 
 Vector literal syntax is `[a, b, c]`. Matrix literal syntax is one
 two-dimensional construct whose semicolons separate rows:
@@ -816,8 +816,8 @@ two-dimensional construct whose semicolons separate rows:
 
 Both mathematical types use one-based source indexing; Matrix access is
 `A[i, j]`. Their bracket AST/HIR forms remain structurally distinct from the
-neutral `{...}` collection literal. No Vector or Matrix syntax is implemented
-by V14.
+neutral `{...}` collection literal. V21 implements the Vector foundation below;
+Matrix syntax and mathematical operations remain deferred.
 
 Static dimensions are also open.  Dynamic dimensions must work; optional
 compile-time dimensions may enable specialization without making ordinary
@@ -834,14 +834,64 @@ All core scientific operations MUST remain recognizable before lowering to
 loops/runtime calls so the compiler can later select fusion, buffer reuse,
 SIMD or BLAS.
 
+#### V21 fixed-dimensional Vector contract — DECIDED
+
+`Vector<T,Row>` and `Vector<T,Column>` MUST be distinct canonical TypeIds.
+Repeated element/orientation resolution MUST reuse the same TypeId. Orientation
+is not a runtime field or an incidental HIR annotation. No implicit orientation
+conversion or Array/Vector conversion is admitted.
+
+`[...]` MUST produce a distinct mathematical AST node and resolve only with
+expected Vector context. Both orientations share this literal shape. Each
+operand uses normal contextual element typing/coercion; literals transfer
+non-Copy operands exactly once. `[]` is valid for both orientations, owns a
+null/zero descriptor and has dimension zero with no heap allocation.
+
+Element admission requires T: Storable, including symbolic T. It MUST NOT
+require Copy, Relocatable or Numeric merely for fixed storage. Vector owns
+contiguous fixed-dimensional initialized storage. It has no capacity, resize,
+push/reserve/pop/remove/swap_remove contract. Its bootstrap descriptor contains
+only pointer and dimension. Dimension is fixed for each constructed value;
+ordinary whole-owner reassignment may install a different constructed value.
+
+`dimension(vector_place)` MUST resolve to VectorDimension and return usize
+without consuming the owner. Every index operand is usize. Vector indexing is
+valid exactly when `1 <= i <= dimension`; known-invalid direct constants are
+rejected, otherwise failure traps with IndexOutOfBounds. Lowering MUST prove or
+check the lower and upper bounds before computing i-1 or issuing an inbounds
+GEP. The IndexSemantics carried by each Place projection MUST match its canonical
+container type, independently verified in HIR/MIR/SSA. Nested storage MUST use
+each descriptor's own semantics, never its outer owner's index base/extent.
+
+Copy reads and writes, shared element references and mutable element references
+are admitted. Ordinary non-Copy reads by value and partial owning replacement
+remain unsupported and MUST fail closed. Borrowing an owning element and
+mutating its Copy subobjects remains legal. No hidden clone/drop operation may
+approximate partial replacement.
+
+Vector is non-Copy and needs_drop. Ordinary root ownership handles moves,
+consuming parameters, returns, structs, enums, generics and conditional cleanup.
+Drop MUST visit initialized elements in reverse logical index order n..1 and
+then free the backing allocation exactly once. No Vector-specific ownership
+state or runtime orientation is introduced. Live element references retain owner
+liveness requirements; fixed Vector storage does not structurally invalidate
+addresses. Nested mutable Lists retain their independent invalidation rules.
+
+Public raw View/ViewMut conversion from Vector MUST be rejected because it
+would discard orientation and one-based semantics. A future VectorView is a
+separate mathematical abstraction. `[a,b; c,d]` remains reserved for a future
+structurally 2D Matrix literal, never parsed as nested VectorLiteral. No vector
+arithmetic, dot, outer, norm, transpose, Matrix, methods, traits or numerical
+capability system is admitted in V21.
+
 ### 6.4 Bounds — DECIDED
 
 Safe indexing and slicing check bounds and trap or return the language's
 specified error form.  Optimization may remove a check only with a proof.
 Unchecked indexing requires an explicit low-level operation/region. Index base
 is type-dependent, never a configurable global switch. `Buffer`, `View`,
-`ViewMut`, `Array` and `List` are zero-based. Future mathematical
-`Vector`, `Matrix` and their mathematical views are one-based.
+`ViewMut`, `Array` and `List` are zero-based. Vector is one-based; future
+Matrix and mathematical views will also be one-based.
 
 ### 6.5 Initialized storage extraction — NEXT-VERTICAL-18 DECIDED
 

@@ -1,0 +1,6 @@
+int main() {
+    Vector<int,Row> original=[10,20];
+    Vector<int,Row> moved=original;
+    if (moved[1]+moved[2]!=30) { return 1; }
+    return 0;
+}

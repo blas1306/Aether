@@ -679,6 +679,28 @@ impl Parser {
                 kind: AstExprKind::Bool(false),
                 span: token.span,
             },
+            TokenKind::LeftBracket => {
+                let mut elements = Vec::new();
+                if !self.at(TokenKind::RightBracket) {
+                    loop {
+                        elements.push(self.expression()?);
+                        if self.consume(TokenKind::Comma).is_none() {
+                            break;
+                        }
+                        if self.at(TokenKind::RightBracket) {
+                            break;
+                        }
+                    }
+                }
+                let right = self.expect(
+                    TokenKind::RightBracket,
+                    "expected `]` after vector literal; semicolons are reserved for future Matrix syntax",
+                )?;
+                AstExpr {
+                    kind: AstExprKind::VectorLiteral(elements),
+                    span: token.span.through(right.span),
+                }
+            }
             TokenKind::LeftBrace => {
                 let mut elements = Vec::new();
                 if !self.at(TokenKind::RightBrace) {

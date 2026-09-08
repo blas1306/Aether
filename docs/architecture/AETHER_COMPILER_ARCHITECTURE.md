@@ -1801,3 +1801,35 @@ pointer/capacity and alloc/free counters remain stable. Final-prefix cleanup
 remains reverse final index order. Pop, swap_remove and growth are unchanged.
 See [NEXT_VERTICAL_20_REPORT.md](NEXT_VERTICAL_20_REPORT.md) for qualification,
 compile snapshots, accepted limitations and the next vertical recommendation.
+
+
+## 38. NEXT-VERTICAL-21 implementation confirmation
+
+V21 adds canonical TypeData::Vector { element, orientation } and compile-time
+Orientation::{Row,Column}. Interning, structural properties, substitutions,
+inference, aggregate layout and generic symbol mangling retain orientation.
+Fixed storage admission reuses the positive Storable proof; symbolic Vector<T>
+does not demand Relocatable or Copy. No capability dispatch reaches runtime.
+
+The parser creates VectorLiteral for brackets and reserves semicolons for future
+Matrix. Expected Vector context resolves source-order operands to VectorInit;
+dimension(place) resolves to VectorDimension. Both operations survive HIR/MIR/
+SSA verification. Source index Place projections carry IndexSemantics; the
+central TypeArena query returns OneBased for Vector and ZeroBased for collections.
+Each verifier checks that cache against its traversed container TypeId. LLVM
+checks lower then upper bounds before subtracting one and addressing the slot.
+
+Physical exact allocation and recursive reverse drop reuse fixed-storage
+internals with a two-field descriptor. Empty Vector needs no allocation. Owning
+literal operands and descriptor moves reuse normal root ownership and cleanup.
+Partial non-Copy indexed reads/replacement remain rejected. Raw View constructors
+and their verifiers explicitly exclude Vector. No arithmetic or Matrix exists.
+
+The audit exposed zero-based constant-bound assumptions and outer-length reuse
+for nested indices. Constant validation now consults IndexSemantics and uses
+root extent facts only for the direct projection. Metadata queries also assumed
+whole descriptors: they now use projected Place loads, including indexed promoted
+descriptors, without forcing unrelated values into memory. Qualification includes
+native mixed-base nesting, exact heap counts, reversed owning-element free order,
+orientation diagnostics and independent malformed-IR rejection. See
+[NEXT_VERTICAL_21_REPORT.md](NEXT_VERTICAL_21_REPORT.md) for exact tests and snapshots.

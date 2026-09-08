@@ -1,6 +1,7 @@
 //! MIR-to-SSA promotion, phi construction, dominance and verification.
 #![allow(missing_docs)]
 
+use aether_frontend::IndexSemantics;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 use std::sync::Arc;
@@ -81,6 +82,7 @@ pub enum SsaPlaceProjection {
         index: SsaOperand,
         element_type: TypeId,
         bounds_trap: TrapKind,
+        semantics: IndexSemantics,
     },
 }
 
@@ -130,6 +132,12 @@ pub enum SsaOp {
         size_trap: TrapKind,
         failure_trap: TrapKind,
     },
+    VectorInit {
+        element_type: TypeId,
+        elements: Vec<SsaOperand>,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
     ArrayInit {
         element_type: TypeId,
         elements: Vec<SsaOperand>,
@@ -142,6 +150,9 @@ pub enum SsaOp {
         initial: SsaOperand,
         size_trap: TrapKind,
         failure_trap: TrapKind,
+    },
+    VectorDimension {
+        source: SsaPlace,
     },
     ArrayLength {
         source: SsaPlace,
@@ -768,6 +779,20 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             size_trap: *size_trap,
             failure_trap: *failure_trap,
         },
+        Rvalue::VectorInit {
+            element_type,
+            elements,
+            size_trap,
+            failure_trap,
+        } => SsaOp::VectorInit {
+            element_type: *element_type,
+            elements: elements
+                .iter()
+                .map(|element| rename_operand(element, stacks))
+                .collect(),
+            size_trap: *size_trap,
+            failure_trap: *failure_trap,
+        },
         Rvalue::ArrayInit {
             element_type,
             elements,
@@ -794,6 +819,9 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             initial: rename_operand(initial, stacks),
             size_trap: *size_trap,
             failure_trap: *failure_trap,
+        },
+        Rvalue::VectorDimension { source } => SsaOp::VectorDimension {
+            source: rename_place(source, stacks, mir),
         },
         Rvalue::ArrayLength { source } => SsaOp::ArrayLength {
             source: rename_place(source, stacks, mir),
@@ -1009,10 +1037,12 @@ fn rename_place(place: &Place, stacks: &[Vec<ValueId>], mir: &MirFunction) -> Ss
                     index,
                     element_type,
                     bounds_trap,
+                    semantics,
                 } => SsaPlaceProjection::Index {
                     index: rename_operand(index, stacks),
                     element_type: *element_type,
                     bounds_trap: *bounds_trap,
+                    semantics: *semantics,
                 },
             })
             .collect(),
@@ -1270,6 +1300,7 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
         | Rvalue::Drop { owner: place }
         | Rvalue::ConsumeEnum { owner: place }
         | Rvalue::View { source: place, .. }
+        | Rvalue::VectorDimension { source: place }
         | Rvalue::ArrayLength { source: place }
         | Rvalue::ListLength { source: place }
         | Rvalue::ListCapacity { source: place } => place_locals(function, place),
@@ -1282,9 +1313,9 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
             .into_iter()
             .chain(operand_local(initial))
             .collect(),
-        Rvalue::ArrayInit { elements, .. } | Rvalue::ListInit { elements, .. } => {
-            elements.iter().filter_map(operand_local).collect()
-        }
+        Rvalue::VectorInit { elements, .. }
+        | Rvalue::ArrayInit { elements, .. }
+        | Rvalue::ListInit { elements, .. } => elements.iter().filter_map(operand_local).collect(),
         Rvalue::HoleNext { hole: length } | Rvalue::TailIndex { length } => {
             operand_local(length).into_iter().collect()
         }
@@ -1406,13 +1437,14 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
             TypeData::Buffer { element } | TypeData::View { element, .. } => {
                 !ssa.types.is_admitted_buffer_element(*element)
             }
+            TypeData::Vector { element, .. } => !ssa.types.is_admitted_vector_element(*element),
             TypeData::Array { element } => !ssa.types.is_admitted_array_element(*element),
             TypeData::List { element } => !ssa.types.is_admitted_list_element(*element),
             _ => false,
         })
     {
         return Err(fail(
-            "SSA contains a Buffer/View/Array/List with an inadmissible element type".into(),
+            "SSA contains a Buffer/View/Array/List/Vector with an inadmissible element type".into(),
         ));
     }
     for ty in ssa
@@ -1949,6 +1981,23 @@ fn verify_op(
                 return Err("SSA Buffer allocation contract invalid".into());
             }
         }
+        SsaOp::VectorInit {
+            element_type,
+            elements,
+            size_trap,
+            failure_trap,
+        } => {
+            if types.vector_element(result) != Some(*element_type)
+                || elements
+                    .iter()
+                    .any(|element| operand_ty(element).ok() != Some(*element_type))
+                || !types.is_admitted_vector_element(*element_type)
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("SSA Vector literal allocation contract invalid".into());
+            }
+        }
         SsaOp::ArrayInit {
             element_type,
             elements,
@@ -1982,6 +2031,12 @@ fn verify_op(
                 || *failure_trap != TrapKind::AllocationFailure
             {
                 return Err("SSA Array fill allocation contract invalid".into());
+            }
+        }
+        SsaOp::VectorDimension { source } => {
+            let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
+            if result != TypeId::USIZE || types.vector_element(source_ty).is_none() {
+                return Err("SSA Vector dimension contract invalid".into());
             }
         }
         SsaOp::ArrayLength { source } => {
@@ -2116,6 +2171,7 @@ fn verify_op(
             let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
             let element = types
                 .owning_contiguous_element(source_ty)
+                .filter(|_| types.vector_element(source_ty).is_none())
                 .ok_or_else(|| "SSA View source is not Buffer/Array/List".to_string())?;
             if types.view_info(result) != Some((element, *mutable)) {
                 return Err("SSA View contract invalid".into());
@@ -2410,15 +2466,18 @@ fn ssa_place_type(
                 index,
                 element_type,
                 bounds_trap,
+                semantics,
             } => {
                 let element = types
                     .buffer_element(ty)
                     .or_else(|| types.array_element(ty))
+                    .or_else(|| types.vector_element(ty))
                     .or_else(|| types.list_element(ty))
                     .or_else(|| types.view_info(ty).map(|(element, _)| element))
                     .ok_or_else(|| "SSA index projection has non-contiguous base".to_string())?;
                 if operand_ty(index)? != TypeId::USIZE
                     || element != *element_type
+                    || types.index_semantics(ty) != Some(*semantics)
                     || *bounds_trap != TrapKind::IndexOutOfBounds
                 {
                     return Err("SSA index projection contract invalid".into());
@@ -2525,6 +2584,7 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         | SsaOp::Drop { owner: place }
         | SsaOp::ConsumeEnum { owner: place }
         | SsaOp::View { source: place, .. }
+        | SsaOp::VectorDimension { source: place }
         | SsaOp::ArrayLength { source: place }
         | SsaOp::ListLength { source: place }
         | SsaOp::ListCapacity { source: place } => place_operands(place),
@@ -2538,9 +2598,9 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         | SsaOp::ArrayFill {
             length, initial, ..
         } => vec![length, initial],
-        SsaOp::ArrayInit { elements, .. } | SsaOp::ListInit { elements, .. } => {
-            elements.iter().collect()
-        }
+        SsaOp::VectorInit { elements, .. }
+        | SsaOp::ArrayInit { elements, .. }
+        | SsaOp::ListInit { elements, .. } => elements.iter().collect(),
         SsaOp::HoleNext { hole: length } | SsaOp::TailIndex { length } => vec![length],
         SsaOp::Take { slot, .. } => place_operands(&slot.root)
             .into_iter()

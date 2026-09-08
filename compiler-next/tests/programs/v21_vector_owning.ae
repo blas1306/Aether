@@ -1,0 +1,11 @@
+Vector<T,Row> pair<T: Storable>(T a,T b) { return [a,b]; }
+int main() {
+    Buffer<int> a=Buffer<int>(1,10);
+    Vector<Buffer<int>,Row> v=pair(a,Buffer<int>(1,20));
+    ref Buffer<int> first=&v[1];
+    ref mut Buffer<int> second=&mut v[2];
+    (*second)[0]=30;
+    if ((*first)[0]!=10) { return 1; }
+    if (v[2][0]!=30) { return 2; }
+    return 0;
+}

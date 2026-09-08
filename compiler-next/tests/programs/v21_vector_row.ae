@@ -1,0 +1,9 @@
+int main() {
+    Vector<int,Row> v=[10,20,30];
+    if (dimension(v)!=3) { return 1; }
+    if (v[1]!=10) { return 2; }
+    if (v[3]!=30) { return 3; }
+    v[2]=42;
+    if (v[2]!=42) { return 4; }
+    return 0;
+}

@@ -1,0 +1,7 @@
+int consume(Vector<Buffer<int>,Row> v) { return v[1][0]-10; }
+int branch(bool take) {
+    Vector<Buffer<int>,Row> v=[Buffer<int>(1,10)];
+    if (take) { int result=consume(v); if(result!=0) { return 1; } }
+    return 0;
+}
+int main() { return branch(true)+branch(false); }

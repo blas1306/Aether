@@ -1,0 +1,3 @@
+Vector<int,Column> make() { Vector<int,Column> v=[10,20]; return v; }
+int consume(Vector<int,Column> v) { if (dimension(v)!=2) { return 1; } return v[1]+v[2]-30; }
+int main() { Vector<int,Column> v=make(); return consume(v); }

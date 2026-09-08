@@ -253,7 +253,7 @@ the public capability vocabulary.
 
 The collection/mathematics distinction is intentional. `List<T>` is the
 dynamic zero-based computational collection sharing `{...}` literal syntax.
-Future `Vector<T, Orientation>` and `Matrix<T>` are mathematical types using
+`Vector<T, Orientation>` (V21) and future `Matrix<T>` are mathematical types using
 bracket literals and one-based indexing. A Matrix literal is one structurally
 two-dimensional construct with semicolon-separated rows; Matrix is not
 semantically a nested Array, List or Vector.
@@ -383,3 +383,18 @@ Every proposal that changes accepted programs, observable behavior, layout,
 ownership, FFI or optimization legality MUST update the semantic contract, name
 its open decisions, identify its end-to-end native path and define its
 qualification evidence before being called supported.
+
+
+## NEXT-VERTICAL-21 mathematical foundation
+
+The isolated compiler admits `Vector<T, Row>` and `Vector<T, Column>` with
+contextual `[...]` mathematical literals, including zero-dimensional `[]`.
+Orientation is part of canonical type identity. Vectors own fixed contiguous
+storage, require Storable elements, and use checked one-based usize indices.
+`dimension(v)` is a semantic intrinsic. Array/List retain `{...}` and zero-based
+indices. No implicit orientation or Array conversion, raw Vector-to-View
+conversion, capacity or dynamic mutation is admitted. Moves, drop and element
+references compose with existing ownership; non-Copy partial extraction and
+replacement remain rejected. Matrix's `[a,b; c,d]` and `A[i,j]` are reserved for a
+future structurally 2D type. Mathematical arithmetic and numeric capabilities
+are separate milestones. See [the V21 report](NEXT_VERTICAL_21_REPORT.md).

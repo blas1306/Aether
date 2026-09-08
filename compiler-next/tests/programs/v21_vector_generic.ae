@@ -1,0 +1,12 @@
+struct Holder<T: Storable> { T value; }
+Vector<T,Row> pair<T: Storable>(T a,T b) { Vector<T,Row> v=[a,b]; return v; }
+usize size<T: Storable>(ref Vector<T,Row> v) { return dimension(*v); }
+T identity<T: Storable>(T x) { return x; }
+int main() {
+    Holder<Vector<int,Row>> h=Holder<Vector<int,Row>>(pair<int>(10,20));
+    if (size(&h.value)!=2) { return 1; }
+    Holder<Vector<int,Column>> c=Holder<Vector<int,Column>>([30,40]);
+    Holder<Vector<int,Row>> moved=identity(h);
+    if (moved.value[2]!=20) { return 2; }
+    return c.value[1]+c.value[2]-70;
+}

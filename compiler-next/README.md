@@ -1,7 +1,7 @@
-# Aether NEXT-VERTICAL-20
+# Aether NEXT-VERTICAL-21
 
 This directory is the isolated Rust implementation of the first reconstruction
-slice. The current storage/extraction contract is Vertical-20; the numbered
+slice. The current mathematical Vector foundation is Vertical-21; the numbered
 Vertical-9..17 sections below retain historical qualification context.
 It does not replace the production `aether` CLI or import any legacy
 Python object, JSON schema, Initial IR, or SSA representation.
@@ -34,7 +34,7 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-20 grammar
+## Vertical-21 grammar
 
 ```text
 program    := import* (alias | struct | enum | function)+ EOF
@@ -65,6 +65,7 @@ match-arm  := variant-path ("(" IDENT ("," IDENT)* ")")? "=>" block
 match-mode := "ref" "mut"?
 expression := integer | float | "true" | "false" | IDENT | apply
             | "{" (expression ("," expression)* ","?)? "}"
+            | "[" (expression ("," expression)* ","?)? "]"
             | expression "." IDENT | expression "[" expression "]"
             | "(" expression ")" | "-" expression
             | "&" expression | "&" "mut" expression | "*" expression
@@ -181,7 +182,8 @@ Canonical semantic types use the compact, copyable, session-local identity
 mapping. Its current data variants are `Bool`, `Integer`, `Float`, nominal and
 applied aggregate forms, generic parameters, and
 `Reference { pointee: TypeId, mutable: bool }`, `Buffer { element: TypeId }`,
-`Array { element: TypeId }`, `List { element: TypeId }`, and
+`Array { element: TypeId }`, `List { element: TypeId }`,
+`Vector { element: TypeId, orientation: Orientation }`, and
 `View { element: TypeId, mutable: bool }`. Repeated `ref T` resolution
 reuses one ID, while `ref T` and `ref mut T` remain distinct. HIR is the first canonical boundary;
 HIR, MIR, SSA, signatures, fields and enum payloads transport IDs rather than
@@ -1157,3 +1159,78 @@ for exact coverage and compile snapshots. Reproduce timings with
 `--baseline-revision` select a separately built V19 compiler. Insert, range erase,
 drain, methods, Option, lifetimes, traits, Array removal and Buffer changes remain
 outside this vertical.
+
+
+## Vertical-21 mathematical Vector foundation
+
+```aether
+Vector<T, Row> pair<T: Storable>(T a, T b) { return [a, b]; }
+int main() {
+    Vector<double, Row> r = [1, 2, 3];
+    Vector<double, Column> c = [];
+    r[1] = 4.0;
+    ref double first = &r[1];
+    ref mut double last = &mut r[3];
+    *last = 5.0;
+    return int(dimension(r)) + int(dimension(c)) - 3;
+}
+```
+
+| Type | Literal | Extent | Source indices | Query |
+|---|---|---|---|---|
+| Array<T> | `{...}` | Fixed length | `0 <= i < length` | `length(a)` |
+| List<T> | `{...}` | Dynamic length/capacity | `0 <= i < length` | `length(l)`, `capacity(l)` |
+| Vector<T, Row/Column> | `[...]` | Fixed dimension | `1 <= i <= dimension` | `dimension(v)` |
+
+Vector is an intrinsic mathematical type, not an Array alias. Canonical
+`TypeData::Vector { element, orientation: Orientation::{Row,Column} }` makes
+orientations distinct TypeIds, including inside generic aggregates and imported
+signatures. Markers are intrinsic compile-time arguments; no value generics,
+orientation fields or strides are introduced. `Vector` takes exactly two
+arguments. Dimension is descriptor data, not a type argument.
+
+`AstExprKind::VectorLiteral` is separate from `CollectionLiteral`. Expected
+Vector context supplies both element type and orientation, including for `[]`
+(dimension zero). Ordinary contextual literals and widening apply; unconstrained
+`auto`/untyped mathematical literals remain rejected. No implicit Array/Vector
+or Row/Column conversion exists. Matrix remains future: `[a,b; c,d]` is reserved
+for a structurally 2D literal with `A[i,j]`, never nested Vector/Array semantics.
+The parser reports that reservation when a semicolon occurs in a bracket literal.
+
+Vector admits `T: Storable` without Copy, Relocatable or a numerical capability
+requirement. Symbolic bodies, exact inference and monomorphization preserve
+orientation. Bool, structs, enums and owning elements are legal storage types.
+`Vector<Buffer<int>,Row>` transfers each literal operand once; there is no
+intermediate Array, deep copy or implicit extraction. Ordinary non-Copy indexed
+reads and non-Copy partial replacement remain rejected by existing ownership
+rules. Copy reads/writes and element `ref`/`ref mut` work, including projections.
+
+HIR, MIR and SSA retain VectorInit and VectorDimension. Their shared Place
+index model carries IndexSemantics, checked independently against canonical
+container TypeId in every verifier. Vector selects OneBased; Array/List/Buffer/
+View select ZeroBased. Index operands remain usize. Known invalid direct indices
+are diagnosed; other invalid indices trap with IndexOutOfBounds. LLVM checks
+`i >= 1`, then `i <= dimension`, and only in the successful block computes
+`offset = i - 1` and its GEP. Nested descriptor access selects each level's base.
+
+The physical descriptor is `{ ptr, i64 dimension }` on Linux x86_64. Nonempty
+construction uses shared exact fixed allocation, then stores source-order
+operands. Empty Vector uses null/zero without allocation. It has no capacity,
+growth or extraction operations. Vector is non-Copy and needs_drop; normal root
+move, call, return, aggregate and conditional cleanup transfer its ownership.
+Drop destroys owning elements in reverse logical order n..1 (slots n-1..0), then
+frees the backing allocation. No Vector-specific ownership flags are introduced.
+
+Backing addresses remain stable while the owner lives. Live element references
+block owner moves/replacement under existing lexical rules. Vector has no List
+structural invalidation; element-only mutation through a Vector reference does
+not acquire a List growth effect. A nested List retains its own effects.
+Public `view`/`view_mut` reject Vector: raw zero-based View would erase orientation
+and mathematical semantics. Future VectorView is separate work.
+
+Qualification and exact heap counts are in
+[the V21 report](../docs/architecture/NEXT_VERTICAL_21_REPORT.md). Reproduce compile
+snapshots using `python3 tests/measure-v21.py --runs 10`, optionally with
+`--baseline-binary <separate-v20-driver> --baseline-revision <revision>`.
+No arithmetic, dot/outer/norm/transpose, Matrix, methods, traits, Numeric/Scalar,
+Vector views, or new List operations are implemented by V21.

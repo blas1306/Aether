@@ -1,0 +1,5 @@
+enum Choice { Empty, Value(Vector<int,Column>) }
+int main() {
+    Choice c=Choice.Value([10,20]);
+    match(c) { Choice.Empty => { return 1; } Choice.Value(v) => { return v[1]+v[2]-30; } }
+}

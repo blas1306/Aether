@@ -238,6 +238,30 @@ impl fmt::Display for TypeId {
     }
 }
 
+/// Compile-time mathematical orientation; never a runtime field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Orientation {
+    Row,
+    Column,
+}
+
+/// Source index contract, selected by canonical container type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IndexSemantics {
+    ZeroBased,
+    OneBased,
+}
+
+impl IndexSemantics {
+    #[must_use]
+    pub fn contains(self, index: u64, extent: u64) -> bool {
+        match self {
+            Self::ZeroBased => index < extent,
+            Self::OneBased => index >= 1 && index <= extent,
+        }
+    }
+}
+
 /// Data stored once for each canonical semantic type.
 ///
 /// Nominal aggregate variants contain declaration identity, so equal-layout
@@ -273,6 +297,11 @@ pub enum TypeData {
     /// distinct semantic type from the lower-level `Buffer<T>` substrate.
     Array {
         element: TypeId,
+    },
+    /// Fixed-dimensional mathematical owner, distinct from collections.
+    Vector {
+        element: TypeId,
+        orientation: Orientation,
     },
     /// Dynamic-length language-level collection with owned contiguous
     /// storage. Only the initialized prefix `[0, length)` contains values.
@@ -317,6 +346,7 @@ pub enum CollectionElementAdmission {
 /// Positive element requirements, shared by resolution and IR verification.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CollectionKind {
+    Vector,
     Array,
     List,
 }
@@ -325,7 +355,7 @@ impl CollectionKind {
     #[must_use]
     pub fn requirements(self) -> &'static [Capability] {
         match self {
-            Self::Array => &[Capability::Storable],
+            Self::Array | Self::Vector => &[Capability::Storable],
             Self::List => &[Capability::Storable, Capability::Relocatable],
         }
     }
@@ -391,6 +421,10 @@ impl fmt::Display for TypeData {
                 write!(f, "ref {}{pointee}", if *mutable { "mut " } else { "" })
             }
             Self::Buffer { element } => write!(f, "Buffer<{element}>"),
+            Self::Vector {
+                element,
+                orientation,
+            } => write!(f, "Vector<{element},{orientation:?}>"),
             Self::Array { element } => write!(f, "Array<{element}>"),
             Self::List { element } => write!(f, "List<{element}>"),
             Self::View { element, mutable } => write!(
@@ -605,6 +639,13 @@ impl TypeArena {
         self.intern(TypeData::Buffer { element })
     }
 
+    pub fn intern_vector(&mut self, element: TypeId, orientation: Orientation) -> TypeId {
+        self.intern(TypeData::Vector {
+            element,
+            orientation,
+        })
+    }
+
     pub fn intern_array(&mut self, element: TypeId) -> TypeId {
         self.intern(TypeData::Array { element })
     }
@@ -729,6 +770,7 @@ impl TypeArena {
             Some(TypeData::Reference { pointee, .. }) => self.contains_generic(*pointee),
             Some(
                 TypeData::Buffer { element }
+                | TypeData::Vector { element, .. }
                 | TypeData::Array { element }
                 | TypeData::List { element }
                 | TypeData::View { element, .. },
@@ -832,6 +874,26 @@ impl TypeArena {
     }
 
     #[must_use]
+    pub fn vector_element(&self, id: TypeId) -> Option<TypeId> {
+        match self.get(id) {
+            Some(TypeData::Vector { element, .. }) => Some(*element),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn index_semantics(&self, id: TypeId) -> Option<IndexSemantics> {
+        match self.get(id)? {
+            TypeData::Vector { .. } => Some(IndexSemantics::OneBased),
+            TypeData::Buffer { .. }
+            | TypeData::Array { .. }
+            | TypeData::List { .. }
+            | TypeData::View { .. } => Some(IndexSemantics::ZeroBased),
+            _ => None,
+        }
+    }
+
+    #[must_use]
     pub fn array_element(&self, id: TypeId) -> Option<TypeId> {
         match self.get(id) {
             Some(TypeData::Array { element }) => Some(*element),
@@ -852,6 +914,7 @@ impl TypeArena {
     pub fn owning_contiguous_element(&self, id: TypeId) -> Option<TypeId> {
         self.buffer_element(id)
             .or_else(|| self.array_element(id))
+            .or_else(|| self.vector_element(id))
             .or_else(|| self.list_element(id))
     }
 
@@ -926,6 +989,7 @@ impl TypeArena {
                 needs_drop: false,
             },
             TypeData::Buffer { element }
+            | TypeData::Vector { element, .. }
             | TypeData::Array { element }
             | TypeData::List { element } => {
                 if !visiting.insert(id) {
@@ -1175,6 +1239,7 @@ impl TypeArena {
             }
             Some(
                 TypeData::Buffer { element }
+                | TypeData::Vector { element, .. }
                 | TypeData::Array { element }
                 | TypeData::List { element },
             ) => match capability {
@@ -1284,6 +1349,12 @@ impl TypeArena {
     }
 
     #[must_use]
+    pub fn is_admitted_vector_element(&self, id: TypeId) -> bool {
+        self.collection_element_admission(CollectionKind::Vector, id)
+            == CollectionElementAdmission::Admitted
+    }
+
+    #[must_use]
     pub fn is_admitted_array_element(&self, id: TypeId) -> bool {
         self.collection_element_admission(CollectionKind::Array, id)
             == CollectionElementAdmission::Admitted
@@ -1339,6 +1410,7 @@ impl TypeArena {
             }
             Some(
                 TypeData::Buffer { element }
+                | TypeData::Vector { element, .. }
                 | TypeData::Array { element }
                 | TypeData::List { element },
             ) => {
@@ -1489,6 +1561,13 @@ impl TypeArena {
                 let element = self.substitute(element, substitution)?;
                 Ok(self.intern_buffer(element))
             }
+            Some(TypeData::Vector {
+                element,
+                orientation,
+            }) => {
+                let element = self.substitute(element, substitution)?;
+                Ok(self.intern_vector(element, orientation))
+            }
             Some(TypeData::Array { element }) => {
                 let element = self.substitute(element, substitution)?;
                 Ok(self.intern_array(element))
@@ -1561,6 +1640,19 @@ impl TypeArena {
                     .ids
                     .get(&TypeData::Buffer { element })
                     .expect("monomorphizer interned substituted Buffer"))
+            }
+            Some(TypeData::Vector {
+                element,
+                orientation,
+            }) => {
+                let element = self.substituted_existing(element, substitution)?;
+                Ok(*self
+                    .ids
+                    .get(&TypeData::Vector {
+                        element,
+                        orientation,
+                    })
+                    .expect("monomorphizer interned substituted Vector"))
             }
             Some(TypeData::Array { element }) => {
                 let element = self.substituted_existing(element, substitution)?;
