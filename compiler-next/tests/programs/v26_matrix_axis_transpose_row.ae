@@ -1,0 +1,10 @@
+int main() {
+    Matrix<int> a = [1,2,3;4,5,6];
+    MatrixView<int> t = transpose_view(a);
+    VectorView<int,Row> r = row(t,2);
+    VectorView<int,Column> flipped = transpose_view(r);
+    if (dimension(r) != 2) { return 1; }
+    if (r[1] != 2) { return 2; }
+    if (r[2] != 5) { return 3; }
+    return flipped[2]-5;
+}

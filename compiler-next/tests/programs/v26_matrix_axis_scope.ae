@@ -1,0 +1,11 @@
+int consume(Matrix<int> a) { return a[2,2]; }
+int main() {
+    Matrix<int> a = [1,2;3,4];
+    if (true) {
+        MatrixView<int> t = transpose_view(a);
+        VectorView<int,Row> r = row(t,2);
+        VectorView<int,Row> copy = r;
+        if (copy[2] != 4) { return 1; }
+    }
+    return consume(a)-4;
+}

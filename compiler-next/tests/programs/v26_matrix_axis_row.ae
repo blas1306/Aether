@@ -1,0 +1,8 @@
+int main() {
+    Matrix<int> a = [1,2,3;4,5,6];
+    VectorView<int,Row> r = row(a,2);
+    if (dimension(r) != 3) { return 1; }
+    if (r[1] != 4) { return 2; }
+    if (r[2] != 5) { return 3; }
+    return r[3]-6;
+}

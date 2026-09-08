@@ -1,0 +1,10 @@
+T read<T:Copy>(MatrixView<T> a) {
+    VectorView<T,Row> r = row(a,2);
+    return r[1];
+}
+int write<T:Copy>(MatrixViewMut<T> a,T x) {
+    VectorViewMut<T,Column> c = column_mut(a,2);
+    c[1] = x;
+    return 0;
+}
+T vectorRead<T:Copy>(VectorView<T,Column> c) { return c[1]; }

@@ -7478,3 +7478,576 @@ fn vertical25_mir_ssa_reject_mutable_from_shared_with_matching_result() {
         "{errors:?}"
     );
 }
+
+const V26_FIXTURES: &[(&str, u64)] = &[
+    ("row", 1),
+    ("column", 1),
+    ("row_mut", 1),
+    ("column_mut", 1),
+    ("normal", 1),
+    ("transpose_row", 1),
+    ("transpose_column", 1),
+    ("transpose_mut", 1),
+    ("owning", 5),
+    ("projected", 5),
+    ("refs", 1),
+    ("copy", 1),
+    ("scope", 1),
+    ("generic", 3),
+    ("control_flow", 1),
+    ("evaluation", 3),
+];
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical26_native_mapping_borrows_and_heap_counts() {
+    for &(name, heap) in V26_FIXTURES {
+        let compiled = compile_session(
+            CompilationSession::discover(&program(&format!("v26_matrix_axis_{name}.ae"))).unwrap(),
+            &[],
+        )
+        .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        assert_eq!(
+            v23_execute(&v23_heap_guard(&compiled.llvm, heap)).code(),
+            Some(0),
+            "{name}"
+        );
+    }
+    let compiled = compile_session(
+        CompilationSession::discover(&module_program("v26_matrix_axes")).unwrap(),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        v23_execute(&v23_heap_guard(&compiled.llvm, 1)).code(),
+        Some(0)
+    );
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn vertical26_structured_diagnostics_and_provenance() {
+    for (body, code) in [
+        (
+            "Vector<int,Row> a=[1];VectorView<int,Row> r=row(a,1);",
+            "E0340",
+        ),
+        (
+            "Array<int> a={1};VectorView<int,Column> c=column(a,1);",
+            "E0340",
+        ),
+        ("Matrix<int> a=[1];VectorView<int,Row> r=row(a);", "E0340"),
+        (
+            "Matrix<int> a=[1];VectorView<int,Row> r=row<int>(a,1);",
+            "E0340",
+        ),
+        (
+            "Matrix<int> a=[1];VectorView<int,Column> c=column(a,1,1);",
+            "E0340",
+        ),
+        (
+            "Matrix<int> a=[1];MatrixView<int> v=matrix_view(a);VectorViewMut<int,Row> r=row_mut(v,1);",
+            "E0341",
+        ),
+        (
+            "Matrix<int> a=[1];ref Matrix<int> p=&a;VectorViewMut<int,Column> c=column_mut(*p,1);",
+            "E0272",
+        ),
+        (
+            "Matrix<int> a=[1];MatrixViewMut<int> v=matrix_view_mut(a);ref MatrixViewMut<int> p=&v;VectorViewMut<int,Row> r=row_mut(*p,1);",
+            "E0272",
+        ),
+        ("Matrix<int> a=[1];VectorView<int,Row> r=row(a,0);", "E0296"),
+        ("Matrix<int> a=[1];VectorView<int,Row> r=row(a,2);", "E0296"),
+        (
+            "Matrix<int> a=[1];VectorView<int,Column> c=column(a,0);",
+            "E0296",
+        ),
+        (
+            "Matrix<int> a=[1];VectorView<int,Column> c=column(a,2);",
+            "E0296",
+        ),
+        ("Matrix<int> a=[];VectorView<int,Row> r=row(a,1);", "E0296"),
+        (
+            "Matrix<int> a=[];VectorView<int,Column> c=column(a,1);",
+            "E0296",
+        ),
+        (
+            "Matrix<int> a=[1,2,3;4,5,6];MatrixView<int> t=transpose_view(a);VectorView<int,Column> c=column(t,3);",
+            "E0296",
+        ),
+        (
+            "Matrix<int> a=[1];VectorView<int,Row> r=row(a,1);r[1]=2;",
+            "E0288",
+        ),
+        (
+            "Matrix<int> a=[1];VectorView<int,Row> r=row(a,1);consume(a);",
+            "E0292",
+        ),
+        (
+            "Matrix<int> a=[1];VectorViewMut<int,Column> c=column_mut(a,1);consume(a);",
+            "E0292",
+        ),
+        (
+            "Matrix<int> a=[1];MatrixView<int> t=transpose_view(a);VectorView<int,Row> r=row(t,1);VectorView<int,Row> copy=r;consume(a);",
+            "E0292",
+        ),
+        (
+            "Matrix<int> a=[1];VectorView<int,Row> r=row(a,1);a=[2];",
+            "E0292",
+        ),
+        (
+            "Matrix<int> a=[1];VectorView<int,Row> r=row(a,1);VectorView<int,Row> v=r;r=v;",
+            "E0277",
+        ),
+        (
+            "Matrix<int> a=[1];VectorView<int,Row> r=row(a,usize(consume(a)));",
+            "E0292",
+        ),
+        (
+            "List<Matrix<int>> a={[1]};VectorView<int,Row> r=row(a[0],1);push(a,[2]);",
+            "E0313",
+        ),
+    ] {
+        let source =
+            format!("int consume(Matrix<int> a){{return 1;}}int main(){{{body}return 0;}}");
+        let errors = compile_source(&SourceFile::new("bad.ae", source), &[])
+            .err()
+            .unwrap_or_else(|| panic!("accepted {body}"));
+        assert!(
+            errors.iter().any(|e| e.code == code),
+            "expected {code}: {body}: {errors:?}"
+        );
+    }
+    for source in [
+        "int main(){Matrix<int> a=[1];int i=1;VectorView<int,Row> r=row(a,i);return 0;}",
+        "int main(){Matrix<int> a=[1];VectorView<int,Row> r=row(a,true);return 0;}",
+        "int main(){Matrix<int> a=[1];VectorView<int,Column> r=row(a,1);return 0;}",
+        "int main(){Matrix<int> a=[1];VectorViewMut<int,Row> r=row(a,1);return 0;}",
+        "int main(){Matrix<int> a=[1];View<int> r=row(a,1);return 0;}",
+        "int main(){Matrix<int> a=[1];Vector<int,Row> r=row(a,1);return 0;}",
+        "int main(){Matrix<int> a=[1];VectorView<int,Column> r=transpose_view(row(a,1));return 0;}",
+        "VectorView<int,Row> bad(){Matrix<int> a=[1];return row(a,1);}int main(){return 0;}",
+        "struct H{VectorView<int,Row> v;}int main(){return 0;}",
+        "int main(){Matrix<int> a=[1];Array<VectorView<int,Column>> c={column(a,1)};return 0;}",
+        "int main(){Matrix<Buffer<int>> a=[Buffer<int>(1,1)];VectorView<Buffer<int>,Row> r=row(a,1);Buffer<int> b=r[1];return 0;}",
+        "int main(){Matrix<Buffer<int>> a=[Buffer<int>(1,1)];VectorViewMut<Buffer<int>,Row> r=row_mut(a,1);r[1]=Buffer<int>(1,2);return 0;}",
+        "int eat(Array<Matrix<int>> a){return 0;}int main(){Array<Matrix<int>> a={[1]};VectorView<int,Row> r=row(a[usize(eat(a))],1);return 0;}",
+        "int grow(ref mut List<Matrix<int>> a){push(*a,[2]);return 1;}int main(){List<Matrix<int>> a={[1]};VectorView<int,Row> r=row(a[0],usize(grow(&mut a)));return 0;}",
+        "int grow(VectorViewMut<List<int>,Row> r){push(r[1],2);return 0;}int main(){Matrix<List<int>> a=[{1}];grow(row_mut(a,1));return 0;}",
+        "int grow(ref VectorViewMut<List<int>,Row> r){VectorViewMut<List<int>,Row> c=*r;push(c[1],2);return 0;}int main(){Matrix<List<int>> a=[{1}];VectorViewMut<List<int>,Row> r=row_mut(a,1);grow(&r);return 0;}",
+        "int main(){Matrix<List<int>> a=[{1}];MatrixViewMut<List<int>> t=transpose_view_mut(a);VectorViewMut<List<int>,Row> r=row_mut(t,1);ref VectorViewMut<List<int>,Row> p=&r;VectorViewMut<List<int>,Row> c=*p;ref int x=&r[1][0];push(c[1],2);return *x;}",
+        "int bad(MatrixViewMut<List<int>> t){VectorViewMut<List<int>,Column> c=column_mut(t,1);ref int x=&c[1][0];VectorViewMut<List<int>,Column> copy=c;push(copy[1],2);return *x;}int main(){return 0;}",
+        "int eat(Matrix<int> a){return 0;}int read(VectorView<int,Row> r,int x){return r[1];}int main(){Matrix<int> a=[1];return read(row(a,1),eat(a));}",
+        "int main(){Matrix<int> a=[1];Matrix<int> b=transpose(a);return 0;}",
+    ] {
+        assert!(
+            compile_source(&SourceFile::new("bad.ae", source), &[]).is_err(),
+            "accepted {source}"
+        );
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn vertical26_mir_ssa_reject_corrupt_recipes() {
+    use aether_frontend::{MatrixViewField, Orientation};
+    use aether_middle::{Rvalue, SsaOp, TrapKind, build_ssa, lower_hir, verify_mir, verify_ssa};
+    // Both axes: corrupt selectors individually, orientation, capability, index,
+    // source rank, raw-View substitution, and the structured trap.
+    for (operation, orientation) in [("row", "Row"), ("column", "Column")] {
+        let source = SourceFile::new(
+            "corrupt.ae",
+            format!(
+                "int main(){{Matrix<int> a=[1,2;3,4];VectorView<int,{orientation}> r={operation}(a,1);return r[1];}}"
+            ),
+        );
+        let hir = analyze(parse_source(&source).unwrap()).unwrap();
+        let mir = lower_hir(hir.clone());
+        let ssa = build_ssa(&verify_mir(mir.clone()).unwrap());
+        for case in 0..10 {
+            let mut m = mir.clone();
+            let instruction = m.functions[0]
+                .blocks
+                .iter_mut()
+                .flat_map(|b| &mut b.instructions)
+                .find(|i| matches!(i.value, Rvalue::MatrixAxisVectorView { .. }))
+                .unwrap();
+            let Rvalue::MatrixAxisVectorView {
+                source,
+                fixed_index,
+                axis,
+                mutable,
+                descriptor,
+                bounds_trap,
+            } = &mut instruction.value
+            else {
+                panic!()
+            };
+            match case {
+                0 => descriptor.fixed_extent = MatrixViewField::One,
+                1 => {
+                    descriptor.base_stride = if *axis == Orientation::Row {
+                        MatrixViewField::ColumnStride
+                    } else {
+                        MatrixViewField::RowStride
+                    }
+                }
+                2 => descriptor.dimension = descriptor.fixed_extent,
+                3 => descriptor.stride = descriptor.base_stride,
+                4 => *axis = axis.transposed(),
+                5 => *mutable = true,
+                6 => *fixed_index = aether_middle::Operand::Bool(true),
+                7 => source.base = aether_middle::PlaceBase::Local(aether_frontend::LocalId(9999)),
+                8 => {
+                    instruction.value = Rvalue::View {
+                        source: source.clone(),
+                        mutable: false,
+                    }
+                }
+                9 => *bounds_trap = TrapKind::IntegerOverflow,
+                _ => unreachable!(),
+            }
+            assert!(verify_mir(m).is_err(), "MIR accepted {operation} {case}");
+            let mut s = ssa.clone();
+            let instruction = s.functions[0]
+                .blocks
+                .iter_mut()
+                .flat_map(|b| &mut b.instructions)
+                .find(|i| matches!(i.op, SsaOp::MatrixAxisVectorView { .. }))
+                .unwrap();
+            let SsaOp::MatrixAxisVectorView {
+                source,
+                fixed_index,
+                axis,
+                mutable,
+                descriptor,
+                bounds_trap,
+            } = &mut instruction.op
+            else {
+                panic!()
+            };
+            match case {
+                0 => descriptor.fixed_extent = MatrixViewField::One,
+                1 => {
+                    descriptor.base_stride = if *axis == Orientation::Row {
+                        MatrixViewField::ColumnStride
+                    } else {
+                        MatrixViewField::RowStride
+                    }
+                }
+                2 => descriptor.dimension = descriptor.fixed_extent,
+                3 => descriptor.stride = descriptor.base_stride,
+                4 => *axis = axis.transposed(),
+                5 => *mutable = true,
+                6 => *fixed_index = aether_middle::SsaOperand::Bool(true),
+                7 => {
+                    source.base =
+                        aether_middle::SsaPlaceBase::Value(aether_middle::SsaOperand::Bool(true));
+                }
+                8 => {
+                    instruction.op = SsaOp::View {
+                        source: source.clone(),
+                        mutable: false,
+                    }
+                }
+                9 => *bounds_trap = TrapKind::IntegerOverflow,
+                _ => unreachable!(),
+            }
+            assert!(verify_ssa(s).is_err(), "SSA accepted {operation} {case}");
+        }
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical26_runtime_fixed_axis_and_result_bounds() {
+    use std::os::unix::process::ExitStatusExt;
+    for (literal, rows, columns) in [
+        ("[]", 0, 0),
+        ("[1,2,3]", 1, 3),
+        ("[1;2;3]", 3, 1),
+        ("[1,2,3;4,5,6]", 2, 3),
+    ] {
+        for (setup, target, transposed) in [
+            ("", "a", false),
+            ("MatrixView<int> v=matrix_view(a);", "v", false),
+            ("MatrixView<int> v=transpose_view(a);", "v", true),
+            ("MatrixViewMut<int> v=matrix_view_mut(a);", "v", false),
+            ("MatrixViewMut<int> v=transpose_view_mut(a);", "v", true),
+        ] {
+            for operation in ["row", "column", "row_mut", "column_mut"] {
+                if operation.ends_with("_mut") && setup.contains("MatrixView<int>") {
+                    continue;
+                }
+                let row = operation.starts_with("row");
+                let orientation = if row { "Row" } else { "Column" };
+                let view = if operation.ends_with("_mut") {
+                    "VectorViewMut"
+                } else {
+                    "VectorView"
+                };
+                let (r, c) = if transposed {
+                    (columns, rows)
+                } else {
+                    (rows, columns)
+                };
+                let extent = if row { r } else { c };
+                for index in [0, extent + 1, u64::MAX] {
+                    let source = format!(
+                        "int main(){{Matrix<int> a={literal};{setup}usize i={index};{view}<int,{orientation}> x={operation}({target},i);return int(dimension(x));}}"
+                    );
+                    let compiled =
+                        compile_source(&SourceFile::new("bounds.ae", source), &[]).unwrap();
+                    assert_eq!(
+                        v23_execute(&compiled.llvm).signal(),
+                        Some(4),
+                        "{literal} {setup} {operation} {index}"
+                    );
+                }
+                // Projection validates only the fixed axis; V25 checks the remaining axis.
+                if extent > 0 {
+                    let dimension = if row { c } else { r };
+                    for index in [0, dimension + 1, u64::MAX] {
+                        let access = if operation.ends_with("_mut") {
+                            "x[k]=99;return 0;"
+                        } else {
+                            "return x[k];"
+                        };
+                        let source = format!(
+                            "int main(){{Matrix<int> a={literal};{setup}{view}<int,{orientation}> x={operation}({target},1);usize k={index};{access}}}"
+                        );
+                        let compiled =
+                            compile_source(&SourceFile::new("bounds.ae", source), &[]).unwrap();
+                        assert_eq!(
+                            v23_execute(&compiled.llvm).signal(),
+                            Some(4),
+                            "result {literal} {setup} {operation} {index}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn vertical26_deterministic_ir_and_ordered_bounds() {
+    let source = SourceFile::new(
+        "dump.ae",
+        fs::read_to_string(program("v26_matrix_axis_transpose_mut.ae")).unwrap(),
+    );
+    let emits = [Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm];
+    let first = compile_source(&source, &emits).unwrap();
+    assert_eq!(first.dumps, compile_source(&source, &emits).unwrap().dumps);
+    for phase in [Emit::Hir, Emit::Mir, Emit::Ssa] {
+        for word in [
+            "MatrixAxisVectorView",
+            "fixed_index",
+            "axis: Row",
+            "axis: Column",
+            "mutable: true",
+            "fixed_extent",
+            "base_stride",
+            "dimension",
+            "stride",
+            "VectorView",
+        ] {
+            assert!(
+                first.dumps[&phase].contains(word),
+                "{phase:?}: missing {word}"
+            );
+        }
+    }
+    for phase in [Emit::Mir, Emit::Ssa] {
+        assert!(first.dumps[&phase].contains("IndexOutOfBounds"));
+    }
+    for section in first.llvm.split("; MatrixAxisVectorViewBegin ").skip(1) {
+        let section = section.split("; MatrixAxisVectorViewEnd").next().unwrap();
+        assert!(section.find("icmp uge").unwrap() < section.find("icmp ule").unwrap());
+        assert!(section.find("icmp ule").unwrap() < section.find(" = sub i64").unwrap());
+        assert!(section.find(" = sub i64").unwrap() < section.find(" = mul i64").unwrap());
+        assert!(section.find(" = mul i64").unwrap() < section.find("getelementptr").unwrap());
+        assert!(
+            !section.contains("inbounds") && !section.contains("nsw") && !section.contains("nuw")
+        );
+        assert!(section.contains("insertvalue { ptr, i64, i64 }"));
+        assert!(section.contains("trap_index_out_of_bounds"));
+    }
+    assert!(!first.llvm.contains("noalias"));
+    let compiled=compile_source(&SourceFile::new("view-only.ae","int read(MatrixView<int> a,usize i){VectorView<int,Row> r=row(a,i);return r[1];}int main(){return 0;}"),&[]).unwrap();
+    assert!(!compiled.llvm.contains("@malloc") && !compiled.llvm.contains("@free"));
+}
+
+// Independently derive the expected projection from the source descriptor,
+// then check pointer/dimension/stride and each operation's heap counters.
+#[allow(clippy::too_many_lines)]
+fn v26_zero_cost_guard(llvm: &str, heap: u64) -> String {
+    let mut output = String::new();
+    let mut count = 0;
+    let mut source_fields: Option<Vec<String>> = None;
+    for line in llvm.lines() {
+        if let Some(source) = line.trim().strip_prefix("; MatrixAxisVectorViewBegin ") {
+            assert!(source_fields.is_none());
+            source_fields = Some(source.split('|').map(str::to_string).collect());
+            for (suffix, global) in [("a", "heap_alloc"), ("f", "heap_free"), ("r", "relocation")] {
+                writeln!(
+                    output,
+                    "  %ax{count}_{suffix}0 = load i64, ptr @aether_{global}_count"
+                )
+                .unwrap();
+            }
+        } else if let Some(result) = line.trim().strip_prefix("; MatrixAxisVectorViewEnd ") {
+            let fields = source_fields.take().unwrap();
+            let (ty, value, axis, index, element) =
+                (&fields[0], &fields[1], &fields[2], &fields[3], &fields[4]);
+            for (suffix, global) in [("a", "heap_alloc"), ("f", "heap_free"), ("r", "relocation")] {
+                writeln!(output,"  %ax{count}_{suffix}1 = load i64, ptr @aether_{global}_count\n  %ax{count}_{suffix}ok = icmp eq i64 %ax{count}_{suffix}0, %ax{count}_{suffix}1").unwrap();
+            }
+            writeln!(output,"  %ax{count}_p0 = extractvalue {ty} {value}, 0\n  %ax{count}_rows = extractvalue {ty} {value}, 1\n  %ax{count}_columns = extractvalue {ty} {value}, 2").unwrap();
+            if ty == "{ ptr, i64, i64 }" {
+                writeln!(output,"  %ax{count}_rs = add i64 0, %ax{count}_columns\n  %ax{count}_cs = add i64 0, 1").unwrap();
+            } else {
+                writeln!(output,"  %ax{count}_rs = extractvalue {ty} {value}, 3\n  %ax{count}_cs = extractvalue {ty} {value}, 4").unwrap();
+            }
+            let (base, dimension, stride) = if axis == "Row" {
+                ("rs", "columns", "cs")
+            } else {
+                ("cs", "rows", "rs")
+            };
+            writeln!(output,"  %ax{count}_i0 = sub i64 {index}, 1\n  %ax{count}_offset = mul i64 %ax{count}_i0, %ax{count}_{base}\n  %ax{count}_expected = getelementptr {element}, ptr %ax{count}_p0, i64 %ax{count}_offset\n  %ax{count}_p1 = extractvalue {{ ptr, i64, i64 }} {result}, 0\n  %ax{count}_d1 = extractvalue {{ ptr, i64, i64 }} {result}, 1\n  %ax{count}_s1 = extractvalue {{ ptr, i64, i64 }} {result}, 2\n  %ax{count}_pok = icmp eq ptr %ax{count}_expected, %ax{count}_p1\n  %ax{count}_dok = icmp eq i64 %ax{count}_{dimension}, %ax{count}_d1\n  %ax{count}_sok = icmp eq i64 %ax{count}_{stride}, %ax{count}_s1").unwrap();
+            writeln!(output,"  %ax{count}_af = and i1 %ax{count}_aok, %ax{count}_fok\n  %ax{count}_rp = and i1 %ax{count}_rok, %ax{count}_pok\n  %ax{count}_ds = and i1 %ax{count}_dok, %ax{count}_sok\n  %ax{count}_afrp = and i1 %ax{count}_af, %ax{count}_rp\n  %ax{count}_ok = and i1 %ax{count}_afrp, %ax{count}_ds\n  %ax{count}_prior = load i1, ptr @v26_ok\n  %ax{count}_all = and i1 %ax{count}_prior, %ax{count}_ok\n  store i1 %ax{count}_all, ptr @v26_ok\n  %ax{count}_seen = load i64, ptr @v26_seen\n  %ax{count}_next = add i64 %ax{count}_seen, 1\n  store i64 %ax{count}_next, ptr @v26_seen").unwrap();
+            count += 1;
+        } else if line == "  %process_status = trunc i64 %aether_result to i32" {
+            writeln!(output,"  %ax_ok = load i1, ptr @v26_ok\n  %ax_seen = load i64, ptr @v26_seen\n  %ax_ran = icmp ugt i64 %ax_seen, 0\n  %ax_a = load i64, ptr @aether_heap_alloc_count\n  %ax_f = load i64, ptr @aether_heap_free_count\n  %ax_r = load i64, ptr @aether_relocation_count\n  %ax_aok = icmp eq i64 %ax_a, {heap}\n  %ax_fok = icmp eq i64 %ax_f, {heap}\n  %ax_rok = icmp eq i64 %ax_r, 0\n  %ax_af = and i1 %ax_aok, %ax_fok\n  %ax_afr = and i1 %ax_af, %ax_rok\n  %ax_op = and i1 %ax_ok, %ax_ran\n  %ax_pass = and i1 %ax_afr, %ax_op\n  %ax_result = trunc i64 %aether_result to i32\n  %process_status = select i1 %ax_pass, i32 %ax_result, i32 99").unwrap();
+        } else {
+            if source_fields.is_some() {
+                assert!(
+                    [
+                        "extractvalue",
+                        "insertvalue",
+                        "icmp",
+                        "br i1",
+                        " = sub i64",
+                        " = mul i64",
+                        "getelementptr"
+                    ]
+                    .iter()
+                    .any(|op| line.contains(op))
+                        || line.ends_with(':'),
+                    "unexpected element/storage operation: {line}"
+                );
+                assert!(
+                    !line.contains("inbounds")
+                        && !line.contains(" call ")
+                        && !line.contains(" load ")
+                        && !line.contains(" store ")
+                );
+            }
+            writeln!(output, "{line}").unwrap();
+        }
+    }
+    assert!(count > 0 && source_fields.is_none());
+    output.push_str("\n@v26_ok = internal global i1 true\n@v26_seen = internal global i64 0\n");
+    output
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical26_each_projection_zero_cost_and_exact_pointer_metadata() {
+    for &(name, heap) in V26_FIXTURES {
+        let compiled = compile_session(
+            CompilationSession::discover(&program(&format!("v26_matrix_axis_{name}.ae"))).unwrap(),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            v23_execute(&v26_zero_cost_guard(&compiled.llvm, heap)).code(),
+            Some(0),
+            "{name}"
+        );
+    }
+    let compiled = compile_session(
+        CompilationSession::discover(&module_program("v26_matrix_axes")).unwrap(),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        v23_execute(&v26_zero_cost_guard(&compiled.llvm, 1)).code(),
+        Some(0)
+    );
+}
+
+#[test]
+fn vertical26_mir_ssa_reject_shared_source_with_matching_mutable_result() {
+    use aether_middle::{
+        Rvalue, SsaOp, SsaOperand, SsaPlace, SsaPlaceBase, build_ssa, lower_hir, verify_mir,
+        verify_ssa,
+    };
+    for operation in ["row_mut", "column_mut"] {
+        let orientation = if operation == "row_mut" {
+            "Row"
+        } else {
+            "Column"
+        };
+        let source = SourceFile::new(
+            "capability.ae",
+            format!(
+                "int main(){{Matrix<int> a=[1];MatrixView<int> shared=matrix_view(a);VectorViewMut<int,{orientation}> w={operation}(a,1);return w[1];}}"
+            ),
+        );
+        let mut mir = lower_hir(analyze(parse_source(&source).unwrap()).unwrap());
+        let mut ssa = build_ssa(&verify_mir(mir.clone()).unwrap());
+        let mut shared = None;
+        let mut changed = false;
+        for i in mir.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|b| &mut b.instructions)
+        {
+            match &mut i.value {
+                Rvalue::MatrixView { mutable: false, .. } => shared = Some(i.destination.clone()),
+                Rvalue::MatrixAxisVectorView { source, .. } => {
+                    *source = shared.clone().unwrap();
+                    changed = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(changed);
+        let errors = verify_mir(mir).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("capability contract")),
+            "{errors:?}"
+        );
+        let mut shared = None;
+        let mut changed = false;
+        for i in ssa.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|b| &mut b.instructions)
+        {
+            match &mut i.op {
+                SsaOp::MatrixView { mutable: false, .. } => shared = Some(i.result),
+                SsaOp::MatrixAxisVectorView { source, .. } => {
+                    *source = SsaPlace {
+                        base: SsaPlaceBase::Value(SsaOperand::Value(shared.unwrap())),
+                        projections: vec![],
+                    };
+                    changed = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(changed);
+        let errors = verify_ssa(ssa).unwrap_err();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.message.contains("capability contract")),
+            "{errors:?}"
+        );
+    }
+}

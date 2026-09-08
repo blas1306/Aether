@@ -29,9 +29,10 @@ pub use lexer::{Token, TokenKind, lex};
 pub use parser::parse;
 pub use types::{
     Capability, CollectionElementAdmission, CollectionKind, EnumId, FieldId, FloatType,
-    GenericOwner, GenericParamId, IndexSemantics, InstanceId, IntegerType, MatrixViewDescriptor,
-    MatrixViewField, Orientation, StructId, Substitution, TargetProperties, TypeArena, TypeArgsId,
-    TypeData, TypeId, TypeProperties, VariantId, VectorViewDescriptor, VectorViewField,
+    GenericOwner, GenericParamId, IndexSemantics, InstanceId, IntegerType,
+    MatrixAxisVectorViewDescriptor, MatrixViewDescriptor, MatrixViewField, Orientation, StructId,
+    Substitution, TargetProperties, TypeArena, TypeArgsId, TypeData, TypeId, TypeProperties,
+    VariantId, VectorViewDescriptor, VectorViewField,
 };
 
 /// Lexes and parses one source file.

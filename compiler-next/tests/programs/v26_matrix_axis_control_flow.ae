@@ -1,0 +1,18 @@
+int main() {
+    Matrix<int> a = [1,2,3;4,5,6];
+    usize i = 1;
+    int sum = 0;
+    while (i <= 2) {
+        VectorView<int,Row> r = row(a,i);
+        if (i == 1) {
+            VectorView<int,Column> c = column(a,3);
+            sum = sum+c[1];
+        } else {
+            VectorView<int,Column> c = column(a,2);
+            sum = sum+c[2];
+        }
+        sum = sum+r[1];
+        i = i+1;
+    }
+    return sum-13;
+}

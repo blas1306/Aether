@@ -1,0 +1,29 @@
+T read<T:Copy>(MatrixView<T> v) {
+    VectorView<T,Row> r = row(v,1);
+    VectorView<T,Column> c = column(v,1);
+    if (dimension(r) == 0) { return c[1]; }
+    return r[1];
+}
+int write<T:Copy>(MatrixViewMut<T> v,T x) {
+    VectorViewMut<T,Column> c = column_mut(v,1);
+    VectorViewMut<T,Row> r = row_mut(v,1);
+    c[1] = x;
+    r[2] = x;
+    return 0;
+}
+int shape<T>(MatrixView<T> v) {
+    VectorView<T,Row> r = row(v,1);
+    return int(dimension(r));
+}
+int owner<T:Storable>(ref Matrix<T> a) {
+    VectorView<T,Column> c = column(*a,1);
+    return int(dimension(c));
+}
+int main() {
+    Matrix<int> a = [1,2;3,4];
+    write(matrix_view_mut(a),42);
+    if (read<int>(matrix_view(a)) != 42) { return 1; }
+    Matrix<Buffer<int>> b = [Buffer<int>(1,9)];
+    if (shape(matrix_view(b)) != 1) { return 2; }
+    return owner(&b)-1;
+}

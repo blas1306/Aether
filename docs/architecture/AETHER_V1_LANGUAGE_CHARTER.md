@@ -462,3 +462,18 @@ Matrix row/column projection is future work, as are slicing, arithmetic,
 conjugation, methods, traits, raw descriptor construction and named lifetimes.
 
 See [NEXT_VERTICAL_25_REPORT.md](NEXT_VERTICAL_25_REPORT.md).
+
+
+## NEXT-VERTICAL-26 admission — complete mathematical axes
+
+The isolated native compiler now connects Matrix/MatrixView with the existing
+oriented VectorView abstraction through full-axis borrowed projections.
+`row(x,i)` and `column(x,j)` produce Row and Column shared views; `_mut` variants
+require write capability through the source Place. Mathematical orientation
+MUST remain independent from physical stride, including transposed sources.
+Projection is zero-copy, with fixed-axis bounds before address calculation,
+closed independently verified descriptor recipes and the same underlying owner
+provenance. No allocation, owning row copy or hidden element transfer is allowed.
+Existing lexical/no-escape and mutable nested-List effect restrictions apply.
+Slicing, submatrices, arithmetic, methods and lifetime extensions are not admitted.
+See [NEXT_VERTICAL_26_REPORT.md](NEXT_VERTICAL_26_REPORT.md).

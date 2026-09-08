@@ -1,0 +1,8 @@
+usize advance(ref mut usize i) { *i = 1; return 1; }
+int main() {
+    Array<Matrix<int>> a = {[10,20],[30,40]};
+    usize i = 0;
+    VectorView<int,Row> r = row(a[i],advance(&mut i));
+    if (i != 1) { return 1; }
+    return r[1]-10;
+}

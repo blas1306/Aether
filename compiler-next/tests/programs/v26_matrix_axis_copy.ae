@@ -1,0 +1,11 @@
+int main() {
+    Matrix<int> a = [1,2;3,4];
+    MatrixViewMut<int> t = transpose_view_mut(a);
+    VectorViewMut<int,Row> r = row_mut(t,2);
+    VectorViewMut<int,Row> copy = r;
+    VectorView<int,Row> shared = row(t,2);
+    VectorView<int,Column> flipped = transpose_view(shared);
+    copy[2] = 42;
+    if (shared[2] != 42) { return 1; }
+    return flipped[2]-42;
+}

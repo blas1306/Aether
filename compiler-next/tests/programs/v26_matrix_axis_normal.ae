@@ -1,0 +1,20 @@
+int main() {
+    Matrix<int> a = [1,2,3;4,5,6];
+    MatrixView<int> v = matrix_view(a);
+    VectorView<int,Row> r = row(v,2);
+    VectorView<int,Column> c = column(v,2);
+    if (r[1] != 4) { return 1; }
+    if (r[2] != 5) { return 2; }
+    if (r[3] != 6) { return 3; }
+    if (c[1] != 2) { return 4; }
+    if (c[2] != 5) { return 5; }
+    MatrixViewMut<int> w = matrix_view_mut(a);
+    VectorView<int,Row> shared = row(w,1);
+    VectorView<int,Column> sharedc = column(w,3);
+    VectorViewMut<int,Row> rw = row_mut(w,1);
+    VectorViewMut<int,Column> cw = column_mut(w,3);
+    rw[1] = 11;
+    cw[2] = 66;
+    if (shared[1] != 11) { return 6; }
+    return sharedc[2]-66;
+}

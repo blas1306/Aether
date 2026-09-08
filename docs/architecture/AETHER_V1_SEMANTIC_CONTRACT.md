@@ -1690,3 +1690,89 @@ descriptor extraction/insertion for transforms, three-word view values, and
 checked strided GEP. MatrixView keeps its separate five-word 2D semantics.
 No slicing/ranges, arithmetic, conjugation, apostrophe syntax, methods, traits,
 named lifetimes, Matrix row/column extraction or raw pointers are introduced.
+
+
+## NEXT-VERTICAL-26 — normative Matrix axis projection contract
+
+`row(source,i)` MUST return VectorView<T,Row>; `column(source,j)` MUST return
+VectorView<T,Column>. Mutable variants MUST return the corresponding
+VectorViewMut with identical T and orientation. Canonical V25 TypeData MUST be
+reused. No raw View, owning Vector, RowView or ColumnView type is introduced.
+Each operation takes exactly two arguments and no explicit type arguments.
+The source MUST be an existing Matrix/MatrixView/MatrixViewMut Place and the
+fixed index MUST be usize. References require explicit dereference.
+
+Shared projections MAY borrow any of the three source kinds. Mutable
+projections MUST require writable Matrix or MatrixViewMut capability through
+the current typed path. A shared MatrixView, shared reference to an owner, or
+shared reference to a mutable matrix-view descriptor MUST NOT recover writable
+capability from its backing owner. Mutable descriptors MAY alias; they do not
+imply uniqueness or noalias.
+
+All recipes operate on the logical matrix-like descriptor `(ptr,R,C,RS,CS)`:
+
+| Axis | Fixed bound | Base offset after bounds | Dimension | Stride | Orientation |
+|---|---|---|---|---|---|
+| Row | 1 <= i <= R | (i-1)*RS | C | CS | Row |
+| Column | 1 <= j <= C | (j-1)*CS | R | RS | Column |
+
+Owners materialize RS=C and CS=1; views MUST supply actual descriptor fields.
+Source orientation/layout MUST NOT change the result's mathematical
+orientation. For `[1,2,3;4,5,6]` transposed to shape 3x2 and strides (1,3),
+row 2 MUST be Row `[2,5]` with dimension 2 and stride 3; column 2 MUST be Column
+`[4,5,6]` with dimension 3 and stride 1. Mutable projections use the same
+mapping for write-back.
+
+The lower and upper fixed-axis checks MUST precede index subtraction, stride
+multiplication and base GEP. Failure is structured IndexOutOfBounds. The second
+axis MUST NOT be checked at projection creation; ordinary V25 one-based
+indexing checks the resulting dimension and uses its stride. A 0x0 Matrix
+has no valid row/column and MUST trap or produce a constant bounds diagnostic.
+No empty view may be fabricated for a nonexistent axis.
+
+Address validity is inductive from V24. A valid fixed row i0 and result k0
+address `i0*RS+k0*CS`, exactly source coordinate (i,k); a column addresses
+`k0*RS+j0*CS`, exactly (k,j). Thus all offsets remain representable and within
+the allocation established by the source descriptor invariant. LLVM uses plain
+internal arithmetic without poison overflow flags and non-inbounds GEP.
+No arbitrary pointer/stride constructor or unchecked source recipe is allowed.
+
+Each successful projection MUST have alloc/free/relocation deltas (0,0,0)
+and MUST NOT load/store/copy/drop backing elements merely to create the view.
+Only descriptor extraction, bounds, base address calculation and construction
+of the existing three-word VectorView descriptor are permitted. Copying the
+source descriptor or resolving its Place is permitted.
+
+The source Place and fixed index are evaluated in source order. Projected
+source addresses MUST be resolved before the fixed index can mutate index
+locals. The source root/storage borrow MUST remain protected while evaluating
+the fixed index, including calls that could consume the owner or invalidate
+its containing List. The resulting borrow MUST retain the underlying root
+through MatrixView transpose, projection, VectorView copy/load/transpose and
+derived references. No local MatrixView descriptor becomes a replacement
+lifetime root. Live aliases block owning root movement/replacement; lexical
+scope end releases the restriction. Containing struct/Array/List roots and
+explicit dereference paths follow existing conservative provenance rules.
+
+Owning elements such as Buffer<T> MAY be borrowed without extraction; mutable
+projections MAY update Copy subelements through existing rules. Partial owning
+slot replacement remains invalid. Shared results prohibit writes. `dimension`
+and VectorView indexing MUST reuse V25 unchanged. Parametric helpers taking
+MatrixView<T>/MatrixViewMut<T> MAY project locally, with inferred/explicit T
+and cross-module monomorphization; element reads/writes need T:Copy and owning
+Matrix<T> types need T:Storable. The centralized mutable mathematical-view
+call-effect query MUST apply unchanged for List-containing elements.
+
+HIR/MIR/SSA MUST retain explicit MatrixAxisVectorView metadata: source Place,
+fixed index, axis, capability, closed descriptor selectors and canonical result
+type. MIR/SSA additionally carry IndexOutOfBounds. Each verifier independently
+checks source rank, element, orientation, capability, usize index and exact
+fixed-extent/base-stride/dimension/stride selectors. SSA dependency and dominance
+walkers MUST visit the source and fixed operand. Lifetime authority remains
+frontend lexical analysis; no general IR lifetime inference is introduced.
+
+Current no-escape/non-Storable/borrowed-rebind restrictions remain. Applying
+borrowed transpose to a projection requires a local binding; no temporary
+lifetime extension exists. Owning Matrix transpose remains rejected. This
+vertical adds no slicing, ranges, submatrix constructors, owning row copies,
+arithmetic, BLAS, traits, methods, raw pointers or stored lifetimes.

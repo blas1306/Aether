@@ -1,0 +1,20 @@
+int main() {
+    Matrix<int> a = [1,2;3,4];
+    ref Matrix<int> shared = &a;
+    VectorView<int,Row> r = row(*shared,2);
+    ref mut Matrix<int> writable = &mut a;
+    VectorViewMut<int,Column> c = column_mut(*writable,2);
+    c[2] = 42;
+    MatrixViewMut<int> t = transpose_view_mut(a);
+    ref mut MatrixViewMut<int> p = &mut t;
+    VectorViewMut<int,Row> w = row_mut(*p,1);
+    w[1] = 11;
+    ref MatrixViewMut<int> q = &t;
+    VectorView<int,Column> v = column(*q,1);
+    ref VectorViewMut<int,Column> cp = &c;
+    VectorViewMut<int,Column> copy = *cp;
+    copy[1] = 22;
+    if (r[2] != 42) { return 1; }
+    if (v[1] != 11) { return 2; }
+    return a[1,2]-22;
+}

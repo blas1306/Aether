@@ -1160,6 +1160,71 @@ fn emit_function(
                     )
                     .unwrap();
                 }
+                SsaOp::MatrixAxisVectorView {
+                    source,
+                    fixed_index,
+                    axis,
+                    descriptor: recipe,
+                    ..
+                } => {
+                    use aether_frontend::MatrixViewField;
+                    let id = instruction.result.0;
+                    let (descriptor, source_ty) =
+                        emit_place_value(output, function, source, id, types, structs);
+                    let source_llvm = llvm_type(types, source_ty);
+                    let view_llvm = llvm_type(types, instruction.ty);
+                    let element = types
+                        .matrix_like_element(source_ty)
+                        .expect("verified matrix-like source");
+                    let element_llvm = llvm_type(types, element);
+                    let index = llvm_operand(fixed_index);
+                    writeln!(output, "  ; MatrixAxisVectorViewBegin {source_llvm}|{descriptor}|{axis:?}|{index}|{element_llvm}").unwrap();
+                    writeln!(
+                        output,
+                        "  %av{id}_ptr = extractvalue {source_llvm} {descriptor}, 0"
+                    )
+                    .unwrap();
+                    let from_view = types.matrix_view_info(source_ty).is_some();
+                    // Materialize the logical descriptor before applying the same closed
+                    // projection recipe to owners and views. Never assume view layout.
+                    let mut fields = Vec::new();
+                    for (slot, field) in [
+                        recipe.fixed_extent,
+                        recipe.base_stride,
+                        recipe.dimension,
+                        recipe.stride,
+                    ]
+                    .iter()
+                    .enumerate()
+                    {
+                        let field = match field {
+                            MatrixViewField::RowStride if !from_view => MatrixViewField::Columns,
+                            MatrixViewField::ColumnStride if !from_view => MatrixViewField::One,
+                            field => *field,
+                        };
+                        if field == MatrixViewField::One {
+                            fields.push("1".to_string());
+                        } else {
+                            let source_slot = match field {
+                                MatrixViewField::Rows => 1,
+                                MatrixViewField::Columns => 2,
+                                MatrixViewField::RowStride => 3,
+                                MatrixViewField::ColumnStride => 4,
+                                MatrixViewField::One => unreachable!(),
+                            };
+                            writeln!(output, "  %av{id}_field{slot} = extractvalue {source_llvm} {descriptor}, {source_slot}").unwrap();
+                            fields.push(format!("%av{id}_field{slot}"));
+                        }
+                    }
+                    bounds_trap = true;
+                    writeln!(output, "  %av{id}_lower = icmp uge i64 {index}, 1\n  br i1 %av{id}_lower, label %av{id}_upper_check, label %trap_index_out_of_bounds\nav{id}_upper_check:\n  %av{id}_upper = icmp ule i64 {index}, {}\n  br i1 %av{id}_upper, label %{}, label %trap_index_out_of_bounds\n{}:", fields[0], continuation_label(block.id,id), continuation_label(block.id,id)).unwrap();
+                    // V24's descriptor invariant plus fixed-axis bounds proves that
+                    // this base and every V25 index map to a valid source coordinate.
+                    // Plain arithmetic has no poison overflow flags; GEP is not inbounds.
+                    writeln!(output, "  %av{id}_index0 = sub i64 {index}, 1\n  %av{id}_offset = mul i64 %av{id}_index0, {}\n  %av{id}_base = getelementptr {element_llvm}, ptr %av{id}_ptr, i64 %av{id}_offset", fields[1]).unwrap();
+                    writeln!(output, "  %av{id}_0 = insertvalue {view_llvm} poison, ptr %av{id}_base, 0\n  %av{id}_1 = insertvalue {view_llvm} %av{id}_0, i64 {}, 1\n  %v{id} = insertvalue {view_llvm} %av{id}_1, i64 {}, 2", fields[2], fields[3]).unwrap();
+                    writeln!(output, "  ; MatrixAxisVectorViewEnd %v{id}").unwrap();
+                }
                 SsaOp::VectorView {
                     source,
                     descriptor: recipe,
@@ -2640,22 +2705,25 @@ fn emit_integer_division(
 fn is_checked(op: &SsaOp) -> bool {
     matches!(
         op,
-        SsaOp::Unary {
-            op: UnaryOp::NegateIntegerChecked,
-            ..
-        } | SsaOp::Cast {
-            trap: Some(TrapKind::ConversionOutOfRange),
-            ..
-        } | SsaOp::Binary {
-            op: BinaryOp::AddIntegerChecked
-                | BinaryOp::SubtractIntegerChecked
-                | BinaryOp::MultiplyIntegerChecked
-                | BinaryOp::DivideIntegerSignedChecked
-                | BinaryOp::DivideIntegerUnsignedChecked
-                | BinaryOp::RemainderIntegerSignedChecked
-                | BinaryOp::RemainderIntegerUnsignedChecked,
-            ..
-        }
+        SsaOp::MatrixAxisVectorView { .. }
+            | SsaOp::Unary {
+                op: UnaryOp::NegateIntegerChecked,
+                ..
+            }
+            | SsaOp::Cast {
+                trap: Some(TrapKind::ConversionOutOfRange),
+                ..
+            }
+            | SsaOp::Binary {
+                op: BinaryOp::AddIntegerChecked
+                    | BinaryOp::SubtractIntegerChecked
+                    | BinaryOp::MultiplyIntegerChecked
+                    | BinaryOp::DivideIntegerSignedChecked
+                    | BinaryOp::DivideIntegerUnsignedChecked
+                    | BinaryOp::RemainderIntegerSignedChecked
+                    | BinaryOp::RemainderIntegerUnsignedChecked,
+                ..
+            }
     )
 }
 

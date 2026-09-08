@@ -1,0 +1,9 @@
+int main() {
+    Matrix<int> a = [1,2,3;4,5,6];
+    MatrixView<int> t = transpose_view(a);
+    VectorView<int,Column> c = column(t,2);
+    if (dimension(c) != 3) { return 1; }
+    if (c[1] != 4) { return 2; }
+    if (c[2] != 5) { return 3; }
+    return c[3]-6;
+}

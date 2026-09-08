@@ -1,0 +1,9 @@
+int main() {
+    Matrix<int> a = [1,2,3;4,5,6];
+    VectorViewMut<int,Column> c = column_mut(a,2);
+    c[1] = 77;
+    ref mut int last = &mut c[2];
+    *last = 42;
+    if (a[1,2] != 77) { return 1; }
+    return a[2,2]-42;
+}

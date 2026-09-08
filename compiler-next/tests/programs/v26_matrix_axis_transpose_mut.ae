@@ -1,0 +1,13 @@
+int main() {
+    Matrix<int> a = [1,2,3;4,5,6];
+    MatrixViewMut<int> t = transpose_view_mut(a);
+    VectorViewMut<int,Row> r = row_mut(t,2);
+    r[1] = 88;
+    if (a[1,2] != 88) { return 1; }
+    VectorViewMut<int,Column> c = column_mut(t,2);
+    c[3] = 99;
+    if (a[2,3] != 99) { return 2; }
+    VectorViewMut<int,Column> rt = transpose_view_mut(r);
+    rt[2] = 77;
+    return a[2,2]-77;
+}

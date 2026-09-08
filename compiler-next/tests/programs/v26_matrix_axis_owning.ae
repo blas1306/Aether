@@ -1,0 +1,14 @@
+int main() {
+    Matrix<Buffer<int>> a = [Buffer<int>(1,10),Buffer<int>(1,20);Buffer<int>(1,30),Buffer<int>(1,40)];
+    MatrixView<Buffer<int>> t = transpose_view(a);
+    VectorView<Buffer<int>,Row> r = row(t,2);
+    VectorView<Buffer<int>,Column> c = column(a,1);
+    ref Buffer<int> b = &r[1];
+    ref int x = &c[2][0];
+    VectorViewMut<Buffer<int>,Column> w = column_mut(a,2);
+    ref mut Buffer<int> last = &mut w[2];
+    (*last)[0] = 99;
+    if ((*b)[0] != 20) { return 1; }
+    if (*x != 30) { return 2; }
+    return a[2,2][0]-99;
+}

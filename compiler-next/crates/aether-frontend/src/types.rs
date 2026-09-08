@@ -2218,3 +2218,33 @@ impl VectorViewDescriptor {
         }
     }
 }
+
+/// Closed full-axis projection over the logical Matrix-like descriptor.
+/// Owners materialize RowStride=Columns and ColumnStride=1 in the backend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MatrixAxisVectorViewDescriptor {
+    pub fixed_extent: MatrixViewField,
+    pub base_stride: MatrixViewField,
+    pub dimension: MatrixViewField,
+    pub stride: MatrixViewField,
+}
+impl MatrixAxisVectorViewDescriptor {
+    #[must_use]
+    pub fn derived(axis: Orientation) -> Self {
+        use MatrixViewField::{ColumnStride, Columns, RowStride, Rows};
+        match axis {
+            Orientation::Row => Self {
+                fixed_extent: Rows,
+                base_stride: RowStride,
+                dimension: Columns,
+                stride: ColumnStride,
+            },
+            Orientation::Column => Self {
+                fixed_extent: Columns,
+                base_stride: ColumnStride,
+                dimension: Rows,
+                stride: RowStride,
+            },
+        }
+    }
+}

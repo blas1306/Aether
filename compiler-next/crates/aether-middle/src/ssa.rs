@@ -231,6 +231,15 @@ pub enum SsaOp {
     },
     /// Borrow the source backing. Source Place and descriptor copy/use chains
     /// retain provenance; the closed recipe is independently verified.
+    MatrixAxisVectorView {
+        source: SsaPlace,
+        fixed_index: SsaOperand,
+        axis: aether_frontend::Orientation,
+        mutable: bool,
+        descriptor: aether_frontend::MatrixAxisVectorViewDescriptor,
+        bounds_trap: TrapKind,
+    },
+    /// Borrow/transpose an oriented vector with a closed stride recipe.
     VectorView {
         source: SsaPlace,
         mutable: bool,
@@ -984,6 +993,21 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             size_trap: *size_trap,
             failure_trap: *failure_trap,
         },
+        Rvalue::MatrixAxisVectorView {
+            source,
+            fixed_index,
+            axis,
+            mutable,
+            descriptor,
+            bounds_trap,
+        } => SsaOp::MatrixAxisVectorView {
+            source: rename_place(source, stacks, mir),
+            fixed_index: rename_operand(fixed_index, stacks),
+            axis: *axis,
+            mutable: *mutable,
+            descriptor: *descriptor,
+            bounds_trap: *bounds_trap,
+        },
         Rvalue::VectorView {
             source,
             mutable,
@@ -1390,6 +1414,14 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
         | Rvalue::Coerce { operand, .. }
         | Rvalue::Cast { operand, .. }
         | Rvalue::Unary { operand, .. } => operand_local(operand).into_iter().collect(),
+        Rvalue::MatrixAxisVectorView {
+            source,
+            fixed_index,
+            ..
+        } => place_locals(function, source)
+            .into_iter()
+            .chain(operand_local(fixed_index))
+            .collect(),
         Rvalue::Load(place)
         | Rvalue::Borrow { place, .. }
         | Rvalue::Move { source: place }
@@ -2335,6 +2367,29 @@ fn verify_op(
                 return Err("SSA List reserve contract invalid".into());
             }
         }
+        SsaOp::MatrixAxisVectorView {
+            source,
+            fixed_index,
+            axis,
+            mutable,
+            descriptor,
+            bounds_trap,
+        } => {
+            let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
+            let element = types
+                .matrix_like_element(source_ty)
+                .ok_or_else(|| "SSA MatrixAxisVectorView source rank/type invalid".to_string())?;
+            if types.vector_view_info(result) != Some((element, *axis, *mutable))
+                || operand_ty(fixed_index)? != TypeId::USIZE
+                || *bounds_trap != TrapKind::IndexOutOfBounds
+                || *descriptor != aether_frontend::MatrixAxisVectorViewDescriptor::derived(*axis)
+                || (*mutable
+                    && (types.matrix_view_info(source_ty).is_some_and(|(_, m)| !m)
+                        || !writable(source)?))
+            {
+                return Err("SSA MatrixAxisVectorView bounds/recipe/orientation/capability contract invalid".into());
+            }
+        }
         SsaOp::VectorView {
             source,
             mutable,
@@ -2812,6 +2867,14 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         | SsaOp::Cast { operand: value, .. }
         | SsaOp::EnumDiscriminant { value, .. }
         | SsaOp::EnumPayload { value, .. } => vec![value],
+        SsaOp::MatrixAxisVectorView {
+            source,
+            fixed_index,
+            ..
+        } => place_operands(source)
+            .into_iter()
+            .chain(std::iter::once(fixed_index))
+            .collect(),
         SsaOp::Load { place }
         | SsaOp::Borrow { place, .. }
         | SsaOp::Move { source: place }

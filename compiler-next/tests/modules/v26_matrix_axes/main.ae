@@ -1,0 +1,7 @@
+import helper;
+int main() {
+    Matrix<int> a = [1,2,3;4,5,6];
+    helper.write(matrix_view_mut(a),42);
+    if (helper.read(transpose_view(a)) != 42) { return 1; }
+    return helper.vectorRead(column(a,2))-42;
+}

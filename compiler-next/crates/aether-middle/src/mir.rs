@@ -372,6 +372,15 @@ pub enum Rvalue {
     },
     /// Borrow the source backing. Source Place and descriptor copy/use chains
     /// retain provenance; the closed recipe is independently verified.
+    MatrixAxisVectorView {
+        source: Place,
+        fixed_index: Operand,
+        axis: aether_frontend::Orientation,
+        mutable: bool,
+        descriptor: aether_frontend::MatrixAxisVectorViewDescriptor,
+        bounds_trap: TrapKind,
+    },
+    /// Borrow/transpose an oriented vector with a closed stride recipe.
     VectorView {
         source: Place,
         mutable: bool,
@@ -1702,6 +1711,59 @@ impl Builder<'_> {
                 );
                 Operand::Local(destination)
             }
+            HirExprKind::MatrixAxisVectorView {
+                source,
+                fixed_index,
+                axis,
+                mutable,
+                descriptor,
+            } => {
+                let source_type = source.ty;
+                let mut source = self.lower_place(source);
+                // Evaluate/freeze projected descriptor addresses before the fixed index.
+                // A direct owner has immutable shape and is protected by the HIR borrow.
+                if !source.projections.is_empty()
+                    || matches!(source.base, PlaceBase::Dereference { .. })
+                {
+                    if let PlaceBase::Local(local) = source.base
+                        && !place_has_index(&source)
+                    {
+                        self.function.locals[local.0 as usize].address_taken = true;
+                    }
+                    let reference_type = self.types.intern_reference(source_type, *mutable);
+                    let reference = Operand::Local(self.temporary(reference_type));
+                    self.assign(
+                        operand_place(&reference),
+                        Rvalue::Borrow {
+                            place: source,
+                            mutable: *mutable,
+                        },
+                        expression.span,
+                    );
+                    source = Place {
+                        base: PlaceBase::Dereference {
+                            reference,
+                            mutable: *mutable,
+                        },
+                        projections: vec![],
+                    };
+                }
+                let fixed_index = self.lower_frozen_expr(fixed_index);
+                let destination = Operand::Local(self.temporary(expression.ty));
+                self.assign(
+                    operand_place(&destination),
+                    Rvalue::MatrixAxisVectorView {
+                        source,
+                        fixed_index,
+                        axis: *axis,
+                        mutable: *mutable,
+                        descriptor: *descriptor,
+                        bounds_trap: TrapKind::IndexOutOfBounds,
+                    },
+                    expression.span,
+                );
+                destination
+            }
             HirExprKind::VectorView {
                 source,
                 mutable,
@@ -2841,6 +2903,7 @@ fn verify_ownership(
                 }
                 Rvalue::Load(place)
                 | Rvalue::Borrow { place, .. }
+                | Rvalue::MatrixAxisVectorView { source: place, .. }
                 | Rvalue::VectorView { source: place, .. }
                 | Rvalue::MatrixView { source: place, .. }
                 | Rvalue::View { source: place, .. }
@@ -3109,11 +3172,14 @@ fn require_place_owner(
     place: &Place,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
-    if let Some(local) = place_root_local(place)
-        && !types.is_copy(function.locals[local.0 as usize].ty)
-        && state[local.0 as usize] != MirOwnerState::Owned
-    {
-        return Err(fail("MIR place uses moved/dropped non-Copy storage".into()));
+    if let Some(local) = place_root_local(place) {
+        let info = function
+            .locals
+            .get(local.0 as usize)
+            .ok_or_else(|| fail("MIR place references unknown local".into()))?;
+        if !types.is_copy(info.ty) && state[local.0 as usize] != MirOwnerState::Owned {
+            return Err(fail("MIR place uses moved/dropped non-Copy storage".into()));
+        }
     }
     Ok(())
 }
@@ -3462,6 +3528,31 @@ fn validate_rvalue(
                 || *failure_trap != TrapKind::AllocationFailure
             {
                 return Err("MIR List reserve contract invalid".into());
+            }
+        }
+        Rvalue::MatrixAxisVectorView {
+            source,
+            fixed_index,
+            axis,
+            mutable,
+            descriptor,
+            bounds_trap,
+        } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            validate_operand(function, fixed_index, initialized)?;
+            let source_ty = place_type(function, source, structs, types)?;
+            let element = types
+                .matrix_like_element(source_ty)
+                .ok_or_else(|| "MIR MatrixAxisVectorView source rank/type invalid".to_string())?;
+            if types.vector_view_info(destination) != Some((element, *axis, *mutable))
+                || operand_type(function, fixed_index)? != TypeId::USIZE
+                || *bounds_trap != TrapKind::IndexOutOfBounds
+                || *descriptor != aether_frontend::MatrixAxisVectorViewDescriptor::derived(*axis)
+                || (*mutable
+                    && (types.matrix_view_info(source_ty).is_some_and(|(_, m)| !m)
+                        || !mir_place_writable(function, source, structs, types)?))
+            {
+                return Err("MIR MatrixAxisVectorView bounds/recipe/orientation/capability contract invalid".into());
             }
         }
         Rvalue::VectorView {

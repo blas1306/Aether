@@ -1,10 +1,56 @@
-# Aether NEXT-VERTICAL-25
+# Aether NEXT-VERTICAL-26
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. The current mathematical foundation includes Matrix<T> owners and borrowed strided MatrixView/MatrixViewMut and oriented VectorView/VectorViewMut with zero-copy transpose; the numbered
 Vertical-9..17 sections below retain historical qualification context.
 It does not replace the production `aether` CLI or import any legacy
 Python object, JSON schema, Initial IR, or SSA representation.
+
+## Matrix rows and columns as oriented vector views (V26)
+
+```aether
+Matrix<int> A = [1,2,3;4,5,6];
+VectorView<int,Row> r = row(A,2);          // [4,5,6], dimension 3, stride 1
+VectorView<int,Column> c = column(A,2);    // [2,5], dimension 2, stride 3
+VectorViewMut<int,Row> w = row_mut(A,2);
+w[2] = 99;                              // A[2,2] = 99
+MatrixView<int> T = transpose_view(A);
+VectorView<int,Row> tr = row(T,2);        // [2,99], dimension 2, stride 3
+VectorView<int,Column> tc = column(T,2);  // [4,99,6], dimension 3, stride 1
+VectorView<int,Column> rt = transpose_view(r);
+```
+
+`row` / `column` accept Matrix, MatrixView and MatrixViewMut Places.
+`row_mut` / `column_mut` require writable Matrix or MatrixViewMut capability
+through the current path. References require explicit dereference; shared
+references cannot regain write capability. All operations take a source and
+one usize index, without type arguments or methods. Row/Column is mathematical
+orientation, independent of physical layout; element T is preserved exactly.
+The result is always the existing V25 VectorView/VectorViewMut, never an owning
+Vector or raw View.
+
+For source logical metadata `(ptr,R,C,RS,CS)`, row i gives
+`{ptr+(i-1)*RS,C,CS}` and column j gives `{ptr+(j-1)*CS,R,RS}`.
+Owners supply RS=C, CS=1; matrix views supply their actual strides, including
+transposes. Fixed-axis lower and upper bounds precede subtraction and pointer
+math. Empty 0x0 matrices have no valid row or column. Indexing the result uses
+ordinary V25 one-based strided bounds; `dimension` works unchanged.
+
+Every successful projection has zero allocation/free/relocation delta and
+performs no element copy/load/store/drop. Its provenance follows the source
+through views, copies and transposes to the same underlying owner or containing
+struct/Array/List root. Live derived aliases block owner move/replacement and
+potential List invalidation. Scope exit releases the borrow. Owning elements
+can be borrowed; Copy subelements may be written through mutable projections.
+No partial owning-element extraction/replacement is added.
+
+Element-generic MatrixView<T>/MatrixViewMut<T> helpers support inferred T and
+cross-module calls. The V25 centralized mutable-view call restriction for
+List-containing elements remains in force. Projections cannot return, enter
+owning storage or extend temporary lifetimes: bind a projection before applying
+`transpose_view` to it. Slices/ranges, submatrices, owning row copies, Matrix
+owning transpose, arithmetic and lifetimes remain future work.
+See [the V26 report](../docs/architecture/NEXT_VERTICAL_26_REPORT.md).
 
 ## Oriented borrowed vector views (V25)
 
@@ -48,7 +94,7 @@ rule covers MatrixView too.
 
 V22 `transpose(Vector)` still consumes the owner and transfers its two-word
 descriptor. Borrowed transpose leaves that owner live. V24 MatrixView keeps
-its separate 2D descriptor and recipes. V25 adds no Matrix row/column extraction,
+its separate 2D descriptor and recipes. V25 itself adds no Matrix row/column extraction (V26 connects them above),
 slicing/ranges, arithmetic, conjugation, traits, methods, raw descriptors or
 lifetime parameters. See [the V25 report](../docs/architecture/NEXT_VERTICAL_25_REPORT.md)
 for qualification, exact instrumentation, supported forms and compile snapshots.

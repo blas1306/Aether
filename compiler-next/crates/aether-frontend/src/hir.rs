@@ -836,6 +836,14 @@ pub enum HirExprKind {
     },
     /// Borrow the source backing. Source Place and descriptor copy/use chains
     /// retain provenance; the closed recipe is independently verified.
+    MatrixAxisVectorView {
+        source: HirPlace,
+        fixed_index: Box<HirExpr>,
+        axis: crate::types::Orientation,
+        mutable: bool,
+        descriptor: crate::types::MatrixAxisVectorViewDescriptor,
+    },
+    /// Borrow/transpose an oriented vector with a closed stride recipe.
     VectorView {
         source: HirPlace,
         mutable: bool,
@@ -3358,6 +3366,19 @@ impl Monomorphizer<'_> {
             HirExprKind::ListCapacity { source } => HirExprKind::ListCapacity {
                 source: self.substitute_place(source, substitution)?,
             },
+            HirExprKind::MatrixAxisVectorView {
+                source,
+                fixed_index,
+                axis,
+                mutable,
+                descriptor,
+            } => HirExprKind::MatrixAxisVectorView {
+                source: self.substitute_place(source, substitution)?,
+                fixed_index: Box::new(self.substitute_expr(fixed_index, substitution)?),
+                axis: *axis,
+                mutable: *mutable,
+                descriptor: *descriptor,
+            },
             HirExprKind::VectorView {
                 source,
                 mutable,
@@ -4200,6 +4221,48 @@ impl OwnershipAnalysis<'_> {
                 }
             }
             HirExprKind::Int(_) | HirExprKind::Float(_) | HirExprKind::Bool(_) => Ok(()),
+            HirExprKind::MatrixAxisVectorView {
+                source,
+                fixed_index,
+                axis,
+                ..
+            } => {
+                self.place(source, expr.span)?;
+                let owner = self.owner_of_place(source);
+                self.borrowed.push(owner.into_iter().collect());
+                self.storage_borrowed.push(owner.into_iter().collect());
+                self.storage_ranges
+                    .push(owner.into_iter().map(|o| (o, None)).collect());
+                self.expr(fixed_index)?;
+                self.borrowed.pop();
+                self.storage_borrowed.pop();
+                self.storage_ranges.pop();
+                if let Some(owner) = owner
+                    && !self.types.guarantees_copy(self.locals[owner.0 as usize].ty)
+                {
+                    self.require_owned(owner, expr.span)?;
+                }
+                let shape = if let HirPlaceBase::Local(local) = source.base
+                    && source.projections.is_empty()
+                {
+                    self.matrix_shapes[local.0 as usize]
+                } else {
+                    None
+                };
+                let extent = shape.map(|(r, c)| {
+                    if *axis == crate::types::Orientation::Row {
+                        r
+                    } else {
+                        c
+                    }
+                });
+                if let HirExprKind::Int(i) = fixed_index.kind
+                    && (i == 0 || extent.is_some_and(|n| i > i128::from(n)))
+                {
+                    return Err(self.error("E0296", format!("IndexOutOfBounds: Matrix {axis:?} projection index {i}, extent {extent:?}"), fixed_index.span));
+                }
+                Ok(())
+            }
             HirExprKind::ListSwapRemove { source, index, .. } => {
                 self.place(source, expr.span)?;
                 self.expr(index)?;
@@ -4488,6 +4551,7 @@ impl OwnershipAnalysis<'_> {
         match &expr.kind {
             HirExprKind::Borrow { place, .. }
             | HirExprKind::View { source: place, .. }
+            | HirExprKind::MatrixAxisVectorView { source: place, .. }
             | HirExprKind::VectorView { source: place, .. }
             | HirExprKind::MatrixView { source: place, .. } => self.owner_of_place(place),
             HirExprKind::Load(place) if self.types.mathematical_view_info(expr.ty).is_some() => {
@@ -4549,7 +4613,9 @@ impl OwnershipAnalysis<'_> {
                 .projections
                 .iter()
                 .any(|projection| matches!(projection, HirPlaceProjection::Index { .. })),
-            HirExprKind::VectorView { .. } | HirExprKind::MatrixView { .. } => true,
+            HirExprKind::MatrixAxisVectorView { .. }
+            | HirExprKind::VectorView { .. }
+            | HirExprKind::MatrixView { .. } => true,
             HirExprKind::Load(_) if self.types.mathematical_view_info(expr.ty).is_some() => true,
             HirExprKind::View { source, .. } => self.types.list_element(source.ty).is_some(),
             HirExprKind::Local(local) => self.storage_references[local.0 as usize],
@@ -4581,6 +4647,21 @@ impl OwnershipAnalysis<'_> {
 
     fn known_length(&self, expr: &HirExpr) -> Option<u64> {
         match &expr.kind {
+            HirExprKind::MatrixAxisVectorView { source, axis, .. } => {
+                if let HirPlaceBase::Local(local) = source.base
+                    && source.projections.is_empty()
+                {
+                    self.matrix_shapes[local.0 as usize].map(|(r, c)| {
+                        if *axis == crate::types::Orientation::Row {
+                            c
+                        } else {
+                            r
+                        }
+                    })
+                } else {
+                    None
+                }
+            }
             HirExprKind::VectorTranspose { operand, .. } => self.known_length(operand),
             HirExprKind::VectorView { source, .. } => {
                 if let HirPlaceBase::Local(local) = source.base
@@ -5616,6 +5697,15 @@ impl Analyzer<'_> {
                         expected,
                     );
                 }
+                if matches!(callee.as_str(), "row" | "column" | "row_mut" | "column_mut") {
+                    return self.matrix_axis_vector_view(
+                        callee,
+                        type_arguments,
+                        args,
+                        e.span,
+                        expected,
+                    );
+                }
                 if callee == "dimension" {
                     return self.vector_dimension(type_arguments, args, e.span, expected);
                 }
@@ -6537,6 +6627,73 @@ impl Analyzer<'_> {
             }
         }
         Ok(())
+    }
+
+    fn matrix_axis_vector_view(
+        &mut self,
+        name: &str,
+        type_arguments: &[AstType],
+        args: &[AstExpr],
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        let invalid = || {
+            vec![Diagnostic::new(
+                "E0340",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "row/column projection requires a Matrix/MatrixView/MatrixViewMut Place and one usize index, without type arguments",
+                Some(span),
+            )]
+        };
+        if !type_arguments.is_empty() || args.len() != 2 {
+            return Err(invalid());
+        }
+        let mutable = name.ends_with("_mut");
+        let source = self.resolve_expr_place(&args[0], mutable)?;
+        let element = self
+            .types
+            .matrix_like_element(source.ty)
+            .ok_or_else(invalid)?;
+        if mutable
+            && self
+                .types
+                .matrix_view_info(source.ty)
+                .is_some_and(|(_, m)| !m)
+        {
+            return Err(vec![Diagnostic::new(
+                "E0341",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "mutable Matrix row/column projection requires writable source capability",
+                Some(span),
+            )]);
+        }
+        let fixed_index = Box::new(self.expression(&args[1], Some(TypeId::USIZE))?.expr);
+        let axis = if name.starts_with("row") {
+            crate::types::Orientation::Row
+        } else {
+            crate::types::Orientation::Column
+        };
+        let descriptor = crate::types::MatrixAxisVectorViewDescriptor::derived(axis);
+        let ty = self.types.intern_vector_view(element, axis, mutable);
+        self.coerce(
+            Checked {
+                expr: HirExpr {
+                    kind: HirExprKind::MatrixAxisVectorView {
+                        source,
+                        fixed_index,
+                        axis,
+                        mutable,
+                        descriptor,
+                    },
+                    ty,
+                    span,
+                },
+                constant: None,
+            },
+            expected,
+        )
     }
 
     fn mathematical_view_init(
@@ -8371,6 +8528,28 @@ fn verify_expr(
                 return Err(fail("HIR List metadata query contract invalid".into()));
             }
         }
+        HirExprKind::MatrixAxisVectorView {
+            source,
+            fixed_index,
+            axis,
+            mutable,
+            descriptor,
+        } => {
+            verify_place(source, f, sigs, structs, enums, types, fail)?;
+            verify_expr(fixed_index, f, sigs, structs, enums, types, fail)?;
+            let element = types
+                .matrix_like_element(source.ty)
+                .ok_or_else(|| fail("HIR MatrixAxisVectorView source rank/type invalid".into()))?;
+            if types.vector_view_info(e.ty) != Some((element, *axis, *mutable))
+                || fixed_index.ty != TypeId::USIZE
+                || *descriptor != crate::types::MatrixAxisVectorViewDescriptor::derived(*axis)
+                || (*mutable
+                    && (types.matrix_view_info(source.ty).is_some_and(|(_, m)| !m)
+                        || !hir_place_writable(source, f, types, structs, enums)))
+            {
+                return Err(fail("HIR MatrixAxisVectorView bounds/recipe/orientation/capability contract invalid".into()));
+            }
+        }
         HirExprKind::VectorView {
             source,
             mutable,
@@ -8960,6 +9139,103 @@ mod tests {
         }
         assert!(verify_hir(&corrupt).is_err());
     }
+    #[test]
+    fn vertical26_hir_rejects_shared_projection_source() {
+        for (operation, orientation) in [("row_mut", "Row"), ("column_mut", "Column")] {
+            let mut h = check(&format!("int main(){{Matrix<int> a=[1];MatrixView<int> shared=matrix_view(a);VectorViewMut<int,{orientation}> w={operation}(a,1);return w[1];}}")).unwrap();
+            let shared = h.functions[0]
+                .locals
+                .iter()
+                .find(|l| l.name == "shared")
+                .unwrap()
+                .clone();
+            let mut changed = false;
+            for statement in &mut h.functions[0].body.statements {
+                if let HirStmtKind::Local { initializer, .. } = &mut statement.kind
+                    && let HirExprKind::MatrixAxisVectorView { source, .. } = &mut initializer.kind
+                {
+                    *source = HirPlace {
+                        base: HirPlaceBase::Local(shared.id),
+                        projections: vec![],
+                        ty: shared.ty,
+                    };
+                    changed = true;
+                }
+            }
+            assert!(changed);
+            let errors = verify_hir(&h).unwrap_err();
+            assert!(
+                errors
+                    .iter()
+                    .any(|e| e.message.contains("capability contract")),
+                "{errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn vertical26_hir_rejects_corrupt_projection_recipes() {
+        use crate::types::{MatrixViewField, Orientation};
+        for (operation, orientation) in [("row", "Row"), ("column", "Column")] {
+            let hir = check(&format!("int main(){{Matrix<int> a=[1,2;3,4];VectorView<int,{orientation}> r={operation}(a,1);return r[1];}}")).unwrap();
+            for case in 0..9 {
+                if case < 9 {
+                    let mut h = hir.clone();
+                    let e = h.functions[0]
+                        .body
+                        .statements
+                        .iter_mut()
+                        .find_map(|s| match &mut s.kind {
+                            HirStmtKind::Local { initializer, .. }
+                                if matches!(
+                                    initializer.kind,
+                                    HirExprKind::MatrixAxisVectorView { .. }
+                                ) =>
+                            {
+                                Some(initializer)
+                            }
+                            _ => None,
+                        })
+                        .unwrap();
+                    let HirExprKind::MatrixAxisVectorView {
+                        source,
+                        fixed_index,
+                        axis,
+                        mutable,
+                        descriptor,
+                    } = &mut e.kind
+                    else {
+                        panic!()
+                    };
+                    match case {
+                        0 => descriptor.fixed_extent = MatrixViewField::One,
+                        1 => {
+                            descriptor.base_stride = if *axis == Orientation::Row {
+                                MatrixViewField::ColumnStride
+                            } else {
+                                MatrixViewField::RowStride
+                            }
+                        }
+                        2 => descriptor.dimension = descriptor.fixed_extent,
+                        3 => descriptor.stride = descriptor.base_stride,
+                        4 => *axis = axis.transposed(),
+                        5 => *mutable = true,
+                        6 => fixed_index.ty = TypeId::INT64,
+                        7 => source.ty = TypeId::INT64,
+                        8 => {
+                            e.kind = HirExprKind::View {
+                                source: source.clone(),
+                                mutable: false,
+                            }
+                        }
+                        _ => unreachable!(),
+                    }
+                    assert!(verify_hir(&h).is_err(), "HIR accepted {operation} {case}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn vertical25_hir_rejects_corrupt_vector_view_contracts() {
         let hir = check("int main(){Vector<int,Row> a=[1,2,3];VectorView<int,Column> v=transpose_view(a);return v[1];}").unwrap();

@@ -1990,3 +1990,43 @@ recipes remain independent; Matrix row/column projection is deferred.
 
 See [NEXT_VERTICAL_25_REPORT.md](NEXT_VERTICAL_25_REPORT.md) for qualification,
 exact per-operation counters, timing snapshots and remaining decisions.
+
+
+## 43. NEXT-VERTICAL-26 implementation confirmation
+
+MatrixAxisVectorView bridges matrix-like sources and canonical V25 VectorView.
+Axis reuses the closed Orientation::{Row,Column}; result T/capability/orientation
+are verified against TypeId at every boundary. MatrixAxisVectorViewDescriptor
+selects fixed_extent/base_stride/dimension/stride from the logical matrix
+metadata. Row selects Rows/RowStride/Columns/ColumnStride; Column selects
+Columns/ColumnStride/Rows/RowStride. Owners are normalized to logical strides
+C and 1 only in LLVM; views use their actual strides. No frontend pointer
+arithmetic or arbitrary descriptor constructor is introduced.
+
+Ownership analysis protects the source root and storage during fixed-index
+evaluation, derives the result's original owner provenance and retains lexical
+shape facts for constant diagnostics/result dimension. MIR resolves projected
+source addresses before evaluating the fixed operand, preserving evaluation
+order when that operand mutates an outer index. It then keeps one semantic
+projection with explicit IndexOutOfBounds. SSA renames both dependencies;
+independent validators check complete recipes, source paths and result identity.
+No new ownership/drop state, exclusivity or noalias is added. V25's centralized
+mutable mathematical-view effect query governs projected results unchanged.
+
+LLVM extracts the source descriptor, emits lower then upper fixed-axis guards,
+then subtraction, base-stride product and a non-inbounds element GEP. It builds
+the ordinary three-word vector view and V25 handles subsequent indexing.
+Projection branches participate in checked-instruction continuation labels so
+successor phis name the actual LLVM predecessor. Safety follows directly from
+mapping each resulting index to a valid source MatrixView coordinate.
+Per-operation markers permit independent pointer/shape/stride and zero-cost
+instrumentation without runtime projection helpers.
+
+Malformed-source testing exposed an unchecked LocalId access in the preexisting
+MIR owner-place verifier. Unknown roots now produce structured verification
+errors instead of Rust panics. The change is limited to that bounds check.
+Native fixtures additionally verify address freezing, loop/branch phis, owning
+elements, generics, modules and containing-root provenance. The lexical lifetime
+model and temporary binding requirement remain explicit limitations.
+See [NEXT_VERTICAL_26_REPORT.md](NEXT_VERTICAL_26_REPORT.md) for exact tests,
+trap executions, counters, compilation snapshots and open decisions.
