@@ -1,0 +1,12 @@
+T takeAt<T: Storable + Relocatable>(ref mut List<T> values, usize i) { return remove(*values,i); }
+int main() {
+    List<List<int>> values = {{10},{20,21},{30},{40,41}};
+    List<int> removed = takeAt(&mut values,1);
+    if (length(values) != 3) { return 1; }
+    if (removed[0] + removed[1] != 41) { return 2; }
+    if (values[1][0] != 30) { return 3; }
+    List<int> first = remove(values,0);
+    if (first[0] != 10) { return 4; }
+    if (values[0][0] != 30) { return 5; }
+    return 0;
+}

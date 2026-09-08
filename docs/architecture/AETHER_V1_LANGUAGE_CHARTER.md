@@ -306,8 +306,21 @@ O(1), modulo element relocation glue cost. Take plus optional Relocate completes
 before length changes, leaving a fully initialized final prefix. Backing pointer
 and capacity are stable, and the operation allocates/frees nothing. Borrows to
 `{index, tail}` and whole-list views block it; provably unaffected direct element
-references survive. Existing generic storage guarantees suffice. Order-preserving
-remove and insert remain future work; no methods or lifetime system is added.
+references survive. Existing generic storage guarantees suffice. V20 extends extraction with
+order preservation below; no methods or lifetime system is added.
+
+
+NEXT-VERTICAL-20 adds `remove(list, index)`, preserving order at intended
+O(N-i) time, modulo element relocation glue. It performs exactly N-i-1 forward
+slot relocations after Take(index); tail/singleton cases perform none. The
+hole moves from index to old tail before length is committed. Bounds failure
+uses IndexOutOfBounds before any storage mutation. Pointer/capacity remain
+stable and the operation allocates/frees nothing, including owning elements.
+Its StableStructuralMutation invalidates old suffix [index,N). Provably earlier
+direct references survive; affected/unknown references and whole views block
+it. MIR and SSA independently prove the forward hole loop and final initialized
+prefix. List's existing Storable + Relocatable requirement suffices. Insert,
+drain, range erase, methods, Option, lifetimes and Array removal are not added.
 
 ## Performance and predictability
 

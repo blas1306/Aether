@@ -1282,6 +1282,15 @@ fn emit_function(
                     )
                     .unwrap();
                 }
+                SsaOp::HoleNext { hole } => {
+                    writeln!(
+                        output,
+                        "  %v{} = add i64 {}, 1 ; forward hole successor proven below tail",
+                        instruction.result.0,
+                        llvm_operand(hole)
+                    )
+                    .unwrap();
+                }
                 SsaOp::TailIndex { length } => {
                     writeln!(
                         output,
@@ -1333,7 +1342,7 @@ fn emit_function(
                     .unwrap();
                     writeln!(output, "  %relocate{id}_source = getelementptr inbounds {element}, ptr %relocate{id}_data, i64 {}", llvm_operand(&source.index)).unwrap();
                     writeln!(output, "  %relocate{id}_hole = getelementptr inbounds {element}, ptr %relocate{id}_data, i64 {}", llvm_operand(&destination.index)).unwrap();
-                    writeln!(output, "  call void @aether_relocate_{}(ptr %relocate{id}_source, ptr %relocate{id}_hole) ; Relocate: tail Uninitialized, hole Initialized", mangle_type(types, source.type_id)).unwrap();
+                    writeln!(output, "  call void @aether_relocate_{}(ptr %relocate{id}_source, ptr %relocate{id}_hole) ; Relocate: source slot Uninitialized, hole Initialized", mangle_type(types, source.type_id)).unwrap();
                     writeln!(
                         output,
                         "  %relocate{id}_count = load i64, ptr @aether_relocation_count"

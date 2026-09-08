@@ -1,0 +1,8 @@
+Buffer<int> takeAt(ref mut List<Buffer<int>> values, usize i) { return remove(*values,i); }
+int main() {
+    List<Buffer<int>> values = {Buffer<int>(1,10),Buffer<int>(1,20)};
+    Buffer<int> removed = takeAt(&mut values,0);
+    if (removed[0] != 10) { return 1; }
+    if (values[0][0] != 20) { return 2; }
+    return 0;
+}

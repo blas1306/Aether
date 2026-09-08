@@ -1,7 +1,7 @@
-# Aether NEXT-VERTICAL-19
+# Aether NEXT-VERTICAL-20
 
 This directory is the isolated Rust implementation of the first reconstruction
-slice. The current storage/extraction contract is Vertical-19; the numbered
+slice. The current storage/extraction contract is Vertical-20; the numbered
 Vertical-9..17 sections below retain historical qualification context.
 It does not replace the production `aether` CLI or import any legacy
 Python object, JSON schema, Initial IR, or SSA representation.
@@ -34,7 +34,7 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-19 grammar
+## Vertical-20 grammar
 
 ```text
 program    := import* (alias | struct | enum | function)+ EOF
@@ -1060,7 +1060,7 @@ python3 tests/measure-v19.py --runs 10
 
 `tests/timings/v19-debug.json` records mean/median for a V18 pop baseline and
 swap_remove int, Buffer, nested owning and reuse fixtures. These are debug
-snapshots, not optimizer claims. Order-preserving remove, insert, drain, methods,
+snapshots, not optimizer claims. V19 leaves order-preserving remove to V20 below. Insert, drain, methods,
 Option, Array extraction, Buffer broadening and lifetimes remain outside V19.
 
 ## Bootstrap ABI and deliberate limits
@@ -1090,3 +1090,70 @@ keywords, overloads, behavioral traits, generic aliases, function values, closur
 heap values beyond `Buffer`/`Array`/`List`, strings, named initializers, methods, general
 ownership, optimization pipeline, public ABI/runtime API, or LLVM library binding. Unsupported forms fail
 closed before lowering.
+
+
+## Vertical-20 order-preserving List removal
+
+```aether
+T removeAt<T: Storable + Relocatable>(ref mut List<T> values, usize i) {
+    return remove(*values, i);
+}
+int main() {
+    List<int> values = {10,20,30,40};
+    ref int first = &values[0];
+    int removed = remove(values, 1);
+    // removed == 20; values == {10,30,40}; *first == 10
+    return 0;
+}
+```
+
+| Operation | Final sequence after removing 1 | Intended time | Relocations |
+|---|---|---|---|
+| `swap_remove` | `{10,40,30}` | O(1) | 0 at tail, otherwise 1 |
+| `remove` | `{10,30,40}` | O(N-i), modulo element glue | N-i-1 |
+
+`remove` requires a writable List Place and one zero-based usize index. It
+returns T with ordinary owning or Copy behavior; no Copy constraint is added.
+A fresh length check traps with IndexOutOfBounds before N-1, Take or mutation,
+including empty Lists. The index expression is evaluated once. Pointer and
+capacity remain unchanged, and remove itself performs zero allocation/free.
+
+The explicit MIR/SSA CFG uses the existing Take at i, then a pretested forward
+loop. Its sole hole starts at i: Relocate(h+1 -> h) initializes h and ends
+h+1 liveness; HoleNext supplies the bounded, non-trapping successor. After
+h reaches N-1, the loop exits and commits length=N-1. Tail and singleton
+removals execute no loop body and no relocation. The extracted owner is never
+merged by a phi; SSA promotes only the usize hole in this loop.
+
+Both layers independently verify roots, operands, initialization states, exact
+successor, actual loop edges, unique entry, bound and complete prefix at commit.
+Projected descriptor addresses are resolved before the transaction through the
+existing internal Borrow/dereference representation, avoiding repeated checked
+outer indexing while a hole exists. LLVM emits the verified loop, typed GEPs,
+existing non-trapping relocation glue and the final length store. It does not
+use memmove as ownership authority or introduce runtime slot flags.
+
+HIR marks ListRemove as StableStructuralMutation with SuffixFrom, whose index
+is the operation's resolved index field. Live refs/ref muts to any old slot
+>= i are rejected, including shifted values that survive at another address.
+A direct constant borrowed index < constant removal index survives even if
+length is unknown. Dynamic/unknown relations, whole View/ViewMut and ambiguous
+nested provenance remain conservative. Scope exit releases the restriction;
+writable descriptor aliases retain root identity. Diagnostics are E0322 for
+invalid targets/arity and E0323 for affected or unprovable borrows, plus ordinary
+usize/type diagnostics.
+
+Buffer, Array, nested List, Dataset, owning enum and generic/cross-module tests
+exercise unique transfer, consuming calls/returns, projected and alias freshness,
+remove+push reuse, conditional cleanup and reverse FINAL index destruction.
+Per-operation probes assert pointer/capacity stability, zero alloc/free and
+N-i-1 relocations. A Buffer example records extracted 20 followed by List
+cleanup 40,30,10. Existing pop, swap_remove and growth retain their contracts.
+
+Qualification: 153 workspace tests pass, including eleven V20 tests, 40 MIR
+and 45 SSA corruptions. See [the V20 report](../docs/architecture/NEXT_VERTICAL_20_REPORT.md)
+for exact coverage and compile snapshots. Reproduce timings with
+`python3 tests/measure-v20.py --runs 10`; optional `--baseline-binary` and
+`--baseline-revision` select a separately built V19 compiler. Insert, range erase,
+drain, methods, Option, lifetimes, traits, Array removal and Buffer changes remain
+outside this vertical.

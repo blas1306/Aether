@@ -158,6 +158,10 @@ pub enum SsaOp {
     ListCapacity {
         source: SsaPlace,
     },
+    /// Bounded successor within a verified forward hole transaction.
+    HoleNext {
+        hole: SsaOperand,
+    },
     TailIndex {
         length: SsaOperand,
     },
@@ -814,6 +818,9 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
         Rvalue::ListCapacity { source } => SsaOp::ListCapacity {
             source: rename_place(source, stacks, mir),
         },
+        Rvalue::HoleNext { hole } => SsaOp::HoleNext {
+            hole: rename_operand(hole, stacks),
+        },
         Rvalue::TailIndex { length } => SsaOp::TailIndex {
             length: rename_operand(length, stacks),
         },
@@ -1278,7 +1285,9 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
         Rvalue::ArrayInit { elements, .. } | Rvalue::ListInit { elements, .. } => {
             elements.iter().filter_map(operand_local).collect()
         }
-        Rvalue::TailIndex { length } => operand_local(length).into_iter().collect(),
+        Rvalue::HoleNext { hole: length } | Rvalue::TailIndex { length } => {
+            operand_local(length).into_iter().collect()
+        }
         Rvalue::Take { slot, .. } => place_locals(function, &slot.root)
             .into_iter()
             .chain(operand_local(&slot.index))
@@ -2004,7 +2013,7 @@ fn verify_op(
                 return Err("SSA List metadata query contract invalid".into());
             }
         }
-        SsaOp::TailIndex { length } => {
+        SsaOp::HoleNext { hole: length } | SsaOp::TailIndex { length } => {
             if result != TypeId::USIZE || operand_ty(length)? != TypeId::USIZE {
                 return Err("SSA invalid Take tail index type".into());
             }
@@ -2532,7 +2541,7 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         SsaOp::ArrayInit { elements, .. } | SsaOp::ListInit { elements, .. } => {
             elements.iter().collect()
         }
-        SsaOp::TailIndex { length } => vec![length],
+        SsaOp::HoleNext { hole: length } | SsaOp::TailIndex { length } => vec![length],
         SsaOp::Take { slot, .. } => place_operands(&slot.root)
             .into_iter()
             .chain(std::iter::once(&slot.index))
@@ -2854,6 +2863,205 @@ fn verify_swap_remove_protocol(
     Ok(covered)
 }
 
+/// Prove the forward overlapping shift inductively on this layer's actual CFG.
+/// Recognition is deliberately closed: no other effect or edge may observe a hole.
+#[allow(clippy::too_many_lines)]
+fn verify_remove_protocol(
+    function: &SsaFunction,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<BTreeSet<(BlockId, usize)>, Vec<Diagnostic>> {
+    let mut covered = BTreeSet::new();
+    let predecessors = |id| {
+        function
+            .blocks
+            .iter()
+            .filter(|b| ssa_targets(&b.terminator).contains(&id))
+            .map(|b| b.id)
+            .collect::<BTreeSet<_>>()
+    };
+    let value = |i: &SsaInstruction| -> Result<SsaOperand, Vec<Diagnostic>> {
+        Ok(SsaOperand::Value(i.result))
+    };
+    for block in &function.blocks {
+        let [tail, take, seed] = block.instructions.as_slice() else {
+            continue;
+        };
+        let SsaOp::TailIndex { length: old_length } = &tail.op else {
+            continue;
+        };
+        let SsaOp::Use(requested) = &seed.op else {
+            continue;
+        };
+        let SsaOp::Take { slot, state } = &take.op else {
+            return Err(fail("invalid remove transaction: missing Take".into()));
+        };
+        let tail_value = value(tail)?;
+        value(take)?;
+        if !slot.root.projections.is_empty()
+            || slot.index != *requested
+            || *state != TakeState::INITIALIZED_TO_UNINITIALIZED
+        {
+            return Err(fail(
+                "invalid remove transaction: Take must create the initial hole".into(),
+            ));
+        }
+        let SsaTerminator::Goto(header_id) = &block.terminator else {
+            return Err(fail(
+                "invalid remove transaction: missing loop entry".into(),
+            ));
+        };
+        let header = &function.blocks[header_id.0 as usize];
+        let [test] = header.instructions.as_slice() else {
+            return Err(fail(
+                "invalid remove transaction: observable effect in hole header".into(),
+            ));
+        };
+        let SsaTerminator::Branch {
+            condition,
+            then_block: body_id,
+            else_block: commit_id,
+        } = &header.terminator
+        else {
+            return Err(fail(
+                "invalid remove transaction: missing bounded forward loop".into(),
+            ));
+        };
+        let body = &function.blocks[body_id.0 as usize];
+        let [next, transfer, update] = body.instructions.as_slice() else {
+            return Err(fail(
+                "invalid remove transaction: missing/duplicate relocation or effect in loop".into(),
+            ));
+        };
+        let [phi] = header.phis.as_slice() else {
+            return Err(fail(
+                "invalid remove transaction: expected only hole phi".into(),
+            ));
+        };
+        let hole = SsaOperand::Value(phi.result);
+        if phi.ty != TypeId::USIZE
+            || phi.incoming.len() != 2
+            || !phi.incoming.contains(&(block.id, seed.result))
+            || !phi.incoming.contains(&(*body_id, update.result))
+            || [block, body, &function.blocks[commit_id.0 as usize]]
+                .iter()
+                .any(|b| !b.phis.is_empty())
+        {
+            return Err(fail(
+                "invalid remove transaction: phi must merge only initial hole and exact successor"
+                    .into(),
+            ));
+        }
+        if !matches!(&test.op, SsaOp::Binary { op: BinaryOp::Less, left, right, trap: None, secondary_trap: None } if *left == hole && *right == tail_value)
+            || *condition != value(test)?
+            || !matches!(&next.op, SsaOp::HoleNext { hole: h } if *h == hole)
+            || !matches!(&update.op, SsaOp::Use(v) if *v == value(next)?)
+            || body.terminator != SsaTerminator::Goto(*header_id)
+            || predecessors(*header_id) != BTreeSet::from([block.id, *body_id])
+            || predecessors(*body_id) != BTreeSet::from([*header_id])
+            || predecessors(*commit_id) != BTreeSet::from([*header_id])
+        {
+            return Err(fail(
+                "invalid remove transaction: hole successor, loop bound, update or exit".into(),
+            ));
+        }
+        let SsaOp::Relocate {
+            source,
+            destination,
+            relocation,
+        } = &transfer.op
+        else {
+            return Err(fail(
+                "invalid remove transaction: missing forward Relocate".into(),
+            ));
+        };
+        if source.root != slot.root
+            || destination.root != slot.root
+            || source.type_id != slot.type_id
+            || destination.type_id != slot.type_id
+            || source.index != value(next)?
+            || destination.index != hole
+            || *relocation != Relocate::single_slot(slot.type_id)
+        {
+            return Err(fail(
+                "invalid remove transaction: require initialized hole+1 -> raw hole, forward only"
+                    .into(),
+            ));
+        }
+        value(transfer)?;
+        // Base: Take made i raw. Step: h+1 -> h makes precisely h+1 raw.
+        // h < tail authorizes h+1 <= tail without overflow. The sole exit h >= tail
+        // therefore has h == tail and [0,tail) initialized; no bitmap is needed.
+        let commit_block = &function.blocks[commit_id.0 as usize];
+        let Some(commit) = commit_block.instructions.first() else {
+            return Err(fail(
+                "invalid remove transaction: missing prefix commit".into(),
+            ));
+        };
+        if !matches!(&commit.op, SsaOp::ListSetLength { source, length } if *source == slot.root && *length == tail_value)
+        {
+            return Err(fail(
+                "invalid remove transaction: commit before hole reaches old tail or wrong length"
+                    .into(),
+            ));
+        }
+        value(commit)?;
+        let parents = predecessors(block.id);
+        if parents.len() != 1 {
+            return Err(fail(
+                "invalid remove transaction: missing unique bounds edge".into(),
+            ));
+        }
+        let guard = &function.blocks[parents.first().unwrap().0 as usize];
+        let SsaTerminator::Branch {
+            condition,
+            then_block: success,
+            else_block: trap,
+        } = &guard.terminator
+        else {
+            return Err(fail(
+                "invalid remove transaction: missing bounds guard".into(),
+            ));
+        };
+        let trap_block = &function.blocks[trap.0 as usize];
+        if *success != block.id
+            || !trap_block.instructions.is_empty()
+            || trap_block.terminator != SsaTerminator::Trap(TrapKind::IndexOutOfBounds)
+        {
+            return Err(fail(
+                "invalid remove transaction: bounds must trap before tail subtraction and Take"
+                    .into(),
+            ));
+        }
+        let [.., index, read, check] = guard.instructions.as_slice() else {
+            return Err(fail(
+                "invalid remove transaction: missing fresh operands".into(),
+            ));
+        };
+        if !matches!(index.op, SsaOp::Use(_))
+            || value(index)? != *requested
+            || !matches!(&read.op, SsaOp::ListLength { source } if *source == slot.root)
+            || value(read)? != *old_length
+            || value(check)? != *condition
+            || !matches!(&check.op, SsaOp::Binary { op: BinaryOp::Less, left, right, trap: None, secondary_trap: None } if left == requested && right == old_length)
+        {
+            return Err(fail(
+                "invalid remove transaction: stale index/length/root in bounds check".into(),
+            ));
+        }
+        covered.extend([
+            (block.id, 0),
+            (block.id, 1),
+            (block.id, 2),
+            (header.id, 0),
+            (body.id, 0),
+            (body.id, 1),
+            (body.id, 2),
+            (*commit_id, 0),
+        ]);
+    }
+    Ok(covered)
+}
+
 /// Validate the initialized-prefix transaction on the actual CFG. Every Take
 /// must be the single extraction between a fresh nonempty check and an
 /// immediate boundary commit. No slot handle can escape this three-op region.
@@ -2863,7 +3071,8 @@ fn verify_take_protocol(
     types: &TypeArena,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
-    let indexed = verify_swap_remove_protocol(function, fail)?;
+    let mut indexed = verify_swap_remove_protocol(function, fail)?;
+    indexed.extend(verify_remove_protocol(function, fail)?);
     // Check extracted ownership directly in SSA, including the indexed diamond.
     for take in function.blocks.iter().flat_map(|b| &b.instructions) {
         if let SsaOp::Take { slot, .. } = &take.op {
@@ -2901,7 +3110,7 @@ fn verify_take_protocol(
                 continue;
             }
             match &instruction.op {
-                SsaOp::Relocate { .. } => {
+                SsaOp::HoleNext { .. } | SsaOp::Relocate { .. } => {
                     return Err(fail("Relocate outside verified slot transaction".into()));
                 }
                 SsaOp::TailIndex { .. } if position != 0 => {

@@ -298,6 +298,10 @@ pub enum Rvalue {
         source: Place,
     },
     /// Non-trapping subtraction authorized only by the nonempty CFG edge.
+    /// Non-trapping successor, authorized only by the verified hole < tail loop.
+    HoleNext {
+        hole: Operand,
+    },
     TailIndex {
         length: Operand,
     },
@@ -541,12 +545,12 @@ impl VerifiedMir {
 /// Lowers typed, resolved HIR into a raw CFG.
 #[must_use]
 pub fn lower_hir(hir: TypedHir) -> FlowMir {
-    let (modules, types, structs, enums, signatures, functions, entry) = hir.into_parts();
+    let (modules, mut types, structs, enums, signatures, functions, entry) = hir.into_parts();
     let functions = functions
         .iter()
         .map(|function| {
             let return_type = signatures[function.id.0 as usize].return_type;
-            lower_function(function, return_type, &enums, &types)
+            lower_function(function, return_type, &enums, &mut types)
         })
         .collect();
     FlowMir {
@@ -610,7 +614,7 @@ fn lower_function(
     function: &HirFunction,
     return_type: TypeId,
     enums: &[EnumInfo],
-    types: &TypeArena,
+    types: &mut TypeArena,
 ) -> MirFunction {
     let locals = function
         .locals
@@ -677,7 +681,7 @@ struct Builder<'a> {
     function: MirFunction,
     current: Option<BlockId>,
     enums: &'a [EnumInfo],
-    types: &'a TypeArena,
+    types: &'a mut TypeArena,
     drop_flag_by_owner: Vec<Option<LocalId>>,
 }
 
@@ -1284,6 +1288,157 @@ impl Builder<'_> {
                     expression.span,
                 );
                 self.terminate(Terminator::Goto(commit));
+                self.current = Some(commit);
+                let token = Operand::Local(self.temporary(TypeId::BOOL));
+                self.assign(
+                    operand_place(&token),
+                    Rvalue::ListSetLength {
+                        source,
+                        length: tail,
+                    },
+                    expression.span,
+                );
+                result
+            }
+            HirExprKind::ListRemove {
+                source,
+                index,
+                element_type,
+                ..
+            } => {
+                let list_type = source.ty;
+                let mut source = self.lower_place(source);
+                let requested = self.lower_expr(index);
+                // Resolve projected descriptor addresses before the non-trapping
+                // transaction. No repeated outer indexing is allowed while a hole exists.
+                if !source.projections.is_empty() {
+                    let reference_type = self.types.intern_reference(list_type, true);
+                    let reference = Operand::Local(self.temporary(reference_type));
+                    self.assign(
+                        operand_place(&reference),
+                        Rvalue::Borrow {
+                            place: source,
+                            mutable: true,
+                        },
+                        expression.span,
+                    );
+                    source = Place {
+                        base: PlaceBase::Dereference {
+                            reference,
+                            mutable: true,
+                        },
+                        projections: vec![],
+                    };
+                }
+                // Freeze the requested index before reading the current descriptor.
+                let index = Operand::Local(self.temporary(TypeId::USIZE));
+                self.assign(
+                    operand_place(&index),
+                    Rvalue::Use(requested),
+                    expression.span,
+                );
+                let length = Operand::Local(self.temporary(TypeId::USIZE));
+                self.assign(
+                    operand_place(&length),
+                    Rvalue::ListLength {
+                        source: source.clone(),
+                    },
+                    expression.span,
+                );
+                let valid = Operand::Local(self.temporary(TypeId::BOOL));
+                self.assign(
+                    operand_place(&valid),
+                    Rvalue::Binary {
+                        op: BinaryOp::Less,
+                        left: index.clone(),
+                        right: length.clone(),
+                        trap: None,
+                        secondary_trap: None,
+                    },
+                    expression.span,
+                );
+                let transaction = self.new_block();
+                let trap = self.new_block();
+                self.terminate(Terminator::Branch {
+                    condition: valid,
+                    then_block: transaction,
+                    else_block: trap,
+                });
+                self.current = Some(trap);
+                self.terminate(Terminator::Trap(TrapKind::IndexOutOfBounds));
+                self.current = Some(transaction);
+                let tail = Operand::Local(self.temporary(TypeId::USIZE));
+                self.assign(
+                    operand_place(&tail),
+                    Rvalue::TailIndex { length },
+                    expression.span,
+                );
+                let removed = SlotPlace {
+                    root: source.clone(),
+                    index: index.clone(),
+                    type_id: *element_type,
+                };
+                let result = Operand::Local(self.temporary(*element_type));
+                self.assign(
+                    operand_place(&result),
+                    Rvalue::Take {
+                        slot: removed.clone(),
+                        state: TakeState::INITIALIZED_TO_UNINITIALIZED,
+                    },
+                    expression.span,
+                );
+                // Inductive state: [0,hole) initialized, hole raw, (hole,N) live.
+                let hole = Operand::Local(self.temporary(TypeId::USIZE));
+                self.assign(operand_place(&hole), Rvalue::Use(index), expression.span);
+                let header = self.new_block();
+                let body = self.new_block();
+                let commit = self.new_block();
+                self.terminate(Terminator::Goto(header));
+                self.current = Some(header);
+                let more = Operand::Local(self.temporary(TypeId::BOOL));
+                self.assign(
+                    operand_place(&more),
+                    Rvalue::Binary {
+                        op: BinaryOp::Less,
+                        left: hole.clone(),
+                        right: tail.clone(),
+                        trap: None,
+                        secondary_trap: None,
+                    },
+                    expression.span,
+                );
+                self.terminate(Terminator::Branch {
+                    condition: more,
+                    then_block: body,
+                    else_block: commit,
+                });
+                self.current = Some(body);
+                let next = Operand::Local(self.temporary(TypeId::USIZE));
+                self.assign(
+                    operand_place(&next),
+                    Rvalue::HoleNext { hole: hole.clone() },
+                    expression.span,
+                );
+                let token = Operand::Local(self.temporary(TypeId::BOOL));
+                self.assign(
+                    operand_place(&token),
+                    Rvalue::Relocate {
+                        source: SlotPlace {
+                            root: source.clone(),
+                            index: next.clone(),
+                            type_id: *element_type,
+                        },
+                        destination: SlotPlace {
+                            root: source.clone(),
+                            index: hole.clone(),
+                            type_id: *element_type,
+                        },
+                        relocation: Relocate::single_slot(*element_type),
+                    },
+                    expression.span,
+                );
+                self.assign(operand_place(&hole), Rvalue::Use(next), expression.span);
+                self.terminate(Terminator::Goto(header));
                 self.current = Some(commit);
                 let token = Operand::Local(self.temporary(TypeId::BOOL));
                 self.assign(
@@ -2848,7 +3003,7 @@ fn validate_rvalue(
                 return Err("MIR List metadata query contract invalid".into());
             }
         }
-        Rvalue::TailIndex { length } => {
+        Rvalue::HoleNext { hole: length } | Rvalue::TailIndex { length } => {
             validate_operand(function, length, initialized)?;
             if destination != TypeId::USIZE || operand_type(function, length)? != TypeId::USIZE {
                 return Err("MIR invalid Take tail index type".into());
@@ -3785,6 +3940,223 @@ fn verify_swap_remove_protocol(
     Ok(covered)
 }
 
+/// Prove the forward overlapping shift inductively on this layer's actual CFG.
+/// Recognition is deliberately closed: no other effect or edge may observe a hole.
+#[allow(clippy::too_many_lines)]
+fn verify_remove_protocol(
+    function: &MirFunction,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<BTreeSet<(BlockId, usize)>, Vec<Diagnostic>> {
+    let mut covered = BTreeSet::new();
+    let predecessors = |id| {
+        function
+            .blocks
+            .iter()
+            .filter(|b| targets(b.terminator.as_ref().expect("verified CFG")).contains(&id))
+            .map(|b| b.id)
+            .collect::<BTreeSet<_>>()
+    };
+    let value = |i: &MirInstruction| -> Result<Operand, Vec<Diagnostic>> {
+        let local = place_root_local(&i.destination)
+            .ok_or_else(|| fail("invalid slot transaction temporary".into()))?;
+        if !i.destination.projections.is_empty()
+            || !function.locals[local.0 as usize].temporary
+            || function.locals[local.0 as usize].address_taken
+            || function
+                .blocks
+                .iter()
+                .flat_map(|b| &b.instructions)
+                .filter(|def| place_root_local(&def.destination) == Some(local))
+                .count()
+                != 1
+        {
+            return Err(fail(
+                "invalid slot transaction: stale or aliased temporary".into(),
+            ));
+        }
+        Ok(Operand::Local(local))
+    };
+    for block in &function.blocks {
+        let [tail, take, seed] = block.instructions.as_slice() else {
+            continue;
+        };
+        let Rvalue::TailIndex { length: old_length } = &tail.value else {
+            continue;
+        };
+        let Rvalue::Use(requested) = &seed.value else {
+            continue;
+        };
+        let Rvalue::Take { slot, state } = &take.value else {
+            return Err(fail("invalid remove transaction: missing Take".into()));
+        };
+        let tail_value = value(tail)?;
+        value(take)?;
+        if !slot.root.projections.is_empty()
+            || slot.index != *requested
+            || *state != TakeState::INITIALIZED_TO_UNINITIALIZED
+        {
+            return Err(fail(
+                "invalid remove transaction: Take must create the initial hole".into(),
+            ));
+        }
+        let Terminator::Goto(header_id) = block.terminator.as_ref().expect("verified CFG") else {
+            return Err(fail(
+                "invalid remove transaction: missing loop entry".into(),
+            ));
+        };
+        let header = &function.blocks[header_id.0 as usize];
+        let [test] = header.instructions.as_slice() else {
+            return Err(fail(
+                "invalid remove transaction: observable effect in hole header".into(),
+            ));
+        };
+        let Terminator::Branch {
+            condition,
+            then_block: body_id,
+            else_block: commit_id,
+        } = header.terminator.as_ref().expect("verified CFG")
+        else {
+            return Err(fail(
+                "invalid remove transaction: missing bounded forward loop".into(),
+            ));
+        };
+        let body = &function.blocks[body_id.0 as usize];
+        let [next, transfer, update] = body.instructions.as_slice() else {
+            return Err(fail(
+                "invalid remove transaction: missing/duplicate relocation or effect in loop".into(),
+            ));
+        };
+        let local = place_root_local(&seed.destination)
+            .ok_or_else(|| fail("invalid remove hole local".into()))?;
+        let hole = Operand::Local(local);
+        if !seed.destination.projections.is_empty()
+            || update.destination != seed.destination
+            || !function.locals[local.0 as usize].temporary
+            || function.locals[local.0 as usize].address_taken
+            || function
+                .blocks
+                .iter()
+                .flat_map(|b| &b.instructions)
+                .filter(|i| place_root_local(&i.destination) == Some(local))
+                .count()
+                != 2
+        {
+            return Err(fail(
+                "invalid remove transaction: hole must have only initial and successor definitions"
+                    .into(),
+            ));
+        }
+        if !matches!(&test.value, Rvalue::Binary { op: BinaryOp::Less, left, right, trap: None, secondary_trap: None } if *left == hole && *right == tail_value)
+            || *condition != value(test)?
+            || !matches!(&next.value, Rvalue::HoleNext { hole: h } if *h == hole)
+            || !matches!(&update.value, Rvalue::Use(v) if *v == value(next)?)
+            || body.terminator.as_ref() != Some(&Terminator::Goto(*header_id))
+            || predecessors(*header_id) != BTreeSet::from([block.id, *body_id])
+            || predecessors(*body_id) != BTreeSet::from([*header_id])
+            || predecessors(*commit_id) != BTreeSet::from([*header_id])
+        {
+            return Err(fail(
+                "invalid remove transaction: hole successor, loop bound, update or exit".into(),
+            ));
+        }
+        let Rvalue::Relocate {
+            source,
+            destination,
+            relocation,
+        } = &transfer.value
+        else {
+            return Err(fail(
+                "invalid remove transaction: missing forward Relocate".into(),
+            ));
+        };
+        if source.root != slot.root
+            || destination.root != slot.root
+            || source.type_id != slot.type_id
+            || destination.type_id != slot.type_id
+            || source.index != value(next)?
+            || destination.index != hole
+            || *relocation != Relocate::single_slot(slot.type_id)
+        {
+            return Err(fail(
+                "invalid remove transaction: require initialized hole+1 -> raw hole, forward only"
+                    .into(),
+            ));
+        }
+        value(transfer)?;
+        // Base: Take made i raw. Step: h+1 -> h makes precisely h+1 raw.
+        // h < tail authorizes h+1 <= tail without overflow. The sole exit h >= tail
+        // therefore has h == tail and [0,tail) initialized; no bitmap is needed.
+        let commit_block = &function.blocks[commit_id.0 as usize];
+        let Some(commit) = commit_block.instructions.first() else {
+            return Err(fail(
+                "invalid remove transaction: missing prefix commit".into(),
+            ));
+        };
+        if !matches!(&commit.value, Rvalue::ListSetLength { source, length } if *source == slot.root && *length == tail_value)
+        {
+            return Err(fail(
+                "invalid remove transaction: commit before hole reaches old tail or wrong length"
+                    .into(),
+            ));
+        }
+        value(commit)?;
+        let parents = predecessors(block.id);
+        if parents.len() != 1 {
+            return Err(fail(
+                "invalid remove transaction: missing unique bounds edge".into(),
+            ));
+        }
+        let guard = &function.blocks[parents.first().unwrap().0 as usize];
+        let Terminator::Branch {
+            condition,
+            then_block: success,
+            else_block: trap,
+        } = guard.terminator.as_ref().expect("verified CFG")
+        else {
+            return Err(fail(
+                "invalid remove transaction: missing bounds guard".into(),
+            ));
+        };
+        let trap_block = &function.blocks[trap.0 as usize];
+        if *success != block.id
+            || !trap_block.instructions.is_empty()
+            || trap_block.terminator.as_ref() != Some(&Terminator::Trap(TrapKind::IndexOutOfBounds))
+        {
+            return Err(fail(
+                "invalid remove transaction: bounds must trap before tail subtraction and Take"
+                    .into(),
+            ));
+        }
+        let [.., index, read, check] = guard.instructions.as_slice() else {
+            return Err(fail(
+                "invalid remove transaction: missing fresh operands".into(),
+            ));
+        };
+        if !matches!(index.value, Rvalue::Use(_))
+            || value(index)? != *requested
+            || !matches!(&read.value, Rvalue::ListLength { source } if *source == slot.root)
+            || value(read)? != *old_length
+            || value(check)? != *condition
+            || !matches!(&check.value, Rvalue::Binary { op: BinaryOp::Less, left, right, trap: None, secondary_trap: None } if left == requested && right == old_length)
+        {
+            return Err(fail(
+                "invalid remove transaction: stale index/length/root in bounds check".into(),
+            ));
+        }
+        covered.extend([
+            (block.id, 0),
+            (block.id, 1),
+            (block.id, 2),
+            (header.id, 0),
+            (body.id, 0),
+            (body.id, 1),
+            (body.id, 2),
+            (*commit_id, 0),
+        ]);
+    }
+    Ok(covered)
+}
+
 /// Validate the initialized-prefix transaction on the actual CFG. Every Take
 /// must be the single extraction between a fresh nonempty check and an
 /// immediate boundary commit. No slot handle can escape this three-op region.
@@ -3793,14 +4165,15 @@ fn verify_take_protocol(
     function: &MirFunction,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
-    let indexed = verify_swap_remove_protocol(function, fail)?;
+    let mut indexed = verify_swap_remove_protocol(function, fail)?;
+    indexed.extend(verify_remove_protocol(function, fail)?);
     for block in &function.blocks {
         for (position, instruction) in block.instructions.iter().enumerate() {
             if indexed.contains(&(block.id, position)) {
                 continue;
             }
             match &instruction.value {
-                Rvalue::Relocate { .. } => {
+                Rvalue::HoleNext { .. } | Rvalue::Relocate { .. } => {
                     return Err(fail("Relocate outside verified slot transaction".into()));
                 }
                 Rvalue::TailIndex { .. } if position != 0 => {

@@ -1,0 +1,12 @@
+int main() {
+    List<int> values = {10,20,30,40};
+    usize cap = capacity(values);
+    int x = remove(values,1);
+    if(x != 20) { return 1; }
+    if(length(values) != 3) { return 2; }
+    if(capacity(values) != cap) { return 3; }
+    if(values[0] != 10) { return 4; }
+    if(values[1] != 30) { return 5; }
+    if(values[2] != 40) { return 6; }
+    return 0;
+}

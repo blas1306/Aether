@@ -945,9 +945,87 @@ or rollback mechanism is introduced. Existing pop retains its V18 transaction.
 
 Generic bodies require the existing `T: Storable + Relocatable` guarantees
 before monomorphization; there are no runtime capabilities. Order-preserving
-`remove(i)` remains a future separate operation. V19 adds no remove, insert,
+removal is specified separately in 6.7. V19 itself adds no remove, insert,
 range erasure, drain, methods, try_swap_remove/Option, Array extraction, Buffer
 changes, lifetimes, traits, Vector or Matrix.
+
+
+### 6.7 Order-preserving List remove — NEXT-VERTICAL-20
+
+`T removed = remove(list_place, index);` requires a writable List<T> Place and
+an ordinary zero-based usize index. Dereferencing `ref mut List<T>` is explicit.
+The removed element transfers exactly once to the expression result, including
+owning/non-Copy T; the existing Storable + Relocatable requirements suffice,
+checked parametrically before monomorphization. There are no runtime capability
+dictionaries, boolean/Option results or new extraction primitives.
+
+The index is evaluated exactly once. A fresh List length N MUST be read and
+`index < N` checked before tail subtraction, Take, relocation or commit. Failure
+is the structured IndexOutOfBounds trap and leaves the List unchanged, including
+for N=0. On success tail=N-1, Take(index) ends the slot's initialization and
+produces the ordinary result. Take remains non-trapping.
+
+The remaining sequence preserves order: `{10,20,30,40}` with index 1 returns
+20 and leaves `{10,30,40}`. In contrast, swap_remove leaves `{10,40,30}`.
+Intended remove complexity is O(N-index), modulo relocation-glue cost, with
+exactly N-index-1 element relocations. Swap_remove retains intended O(1).
+
+The compiler MUST represent and verify this overlapping storage protocol:
+
+```text
+hole = index                    // after Take(index)
+while hole < tail:
+    next = hole + 1             // proven <= tail; cannot overflow
+    Relocate slot[next] -> slot[hole]
+    hole = next
+require hole == tail
+commit length = tail
+```
+
+At each header, `[0,hole)` is Initialized with final values, hole is
+Uninitialized, and `(hole,N)` is Initialized old suffix. Each forward Relocate
+requires initialized source and raw destination, leaves the destination
+Initialized and source Uninitialized, and relocates each suffix element once.
+Backward, duplicated and skipped transfers are invalid even for Copy T. There
+is no Copy/deep-copy requirement, source Drop, runtime bitmap or rollback.
+Take(tail) immediately satisfies the exit invariant: tail and singleton cases
+execute no relocation body. At commit `[0,tail)` MUST be initialized and old
+tail MUST be Uninitialized. No effect, trap or side exit may observe the hole.
+
+MIR and SSA MUST independently verify this invariant inductively on their
+actual CFG: initial hole, roots, fresh index/length, exact successor, forward
+transfer, initialization transitions, loop bound, backedge and only exit to
+commit. It is insufficient to count instructions. Only expected hole/control
+phis may occur; extracted owners and owning elements must not be phi-duplicated.
+The implementation resolves projected descriptor addresses before the transaction
+so no checked outer indexing runs inside it. Typed compiler-derived relocation
+glue is non-trapping. Memmove is not semantic ownership authority.
+
+Pointer and capacity MUST remain unchanged. Remove itself performs no allocation
+or free, including element ownership allocations. Only length changes, after
+all transfers finish. Subsequent length/capacity, indexing, push/pop/swap_remove/
+remove, drop and owner move/return MUST observe fresh descriptor state through
+aliases and projections. Reserved remove+push reuses capacity, transferring the
+removed owner through its result into the new tail exactly once.
+
+The backing effect is StableStructuralMutation. SuffixFrom(index) invalidates
+all old element slots in `[index,N)`: the removed object disappears, later
+objects change address, and the old tail disappears. A live direct ref/ref mut
+with provable borrowed_index < removal_index survives. Otherwise affected,
+dynamic or unknown index relations are rejected conservatively. Whole View and
+ViewMut cover the old sequence and block removal until scope exit. Writable
+aliases identify the same root; there are no noalias assumptions or generalized
+layered-provenance proofs. Ambiguous nested provenance may be over-rejected.
+
+Drop traverses only `[0,new_length)` in reverse FINAL index order. Relocated
+owners drop once at their new location, the old tail is never dropped, and the
+removed result follows normal lexical cleanup independently. For Buffer payloads
+`{10,20,30,40}` removing 1, the List drops 40,30,10; a later-declared result
+normally drops 20 first. Counters are test instrumentation, not public API.
+
+This vertical adds only remove. It adds no insert, range erase, drain,
+try_remove/Option, methods, lifetimes, traits, Array removal, Buffer extension,
+Vector, Matrix, optimizer pass or MemorySSA.
 
 ## 7. Text
 

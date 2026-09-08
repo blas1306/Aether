@@ -1760,3 +1760,44 @@ order. Executable instrumentation verifies per-operation storage and heap
 stability, tail/non-tail relocation counts, payload preservation and drop order.
 See [NEXT_VERTICAL_19_REPORT.md](NEXT_VERTICAL_19_REPORT.md) for exact coverage,
 timing snapshots, architectural limits and the next vertical recommendation.
+
+
+## 37. NEXT-VERTICAL-20 implementation confirmation
+
+V20 resolves `remove(list,index)` to ListRemove with canonical element TypeId,
+StableStructuralMutation and SuffixFrom using the same expression index. Direct
+constant prefix borrows survive whenever borrowed_index < index; this proof
+does not require a known length. Suffix/unknown borrows, whole views and ambiguous
+nested provenance fail closed. Descriptor aliases preserve underlying root
+identity. Existing generic Storable + Relocatable checking is unchanged.
+
+MIR freezes the index and reads fresh length before its bounds branch. The
+success block computes TailIndex, reuses Take and initializes a usize hole. A
+pretested header branches on hole < tail; the body computes HoleNext, reuses
+SingleSlot Relocate(hole+1 -> hole), updates the hole and returns to the header.
+Only the exit commits length=tail. Tail removal has zero body executions. SSA
+promotes the hole with one phi carrying the entry index and exact backedge
+successor; the owning result remains a single Take outside the loop.
+
+Independent MIR/SSA validators prove the hole invariant on their own CFG. They
+check initialization, exact operands and roots, unique entry, forward successor,
+metadata, bounded backedge and completed prefix at the only exit. HoleNext is
+non-trapping only under this verified bounded control; unpaired uses fail closed.
+No side effect or trap is admitted while the hole exists. This extends the closed
+V18/V19 transaction grammar rather than introducing general partial-slot dataflow.
+
+An audit found that projected descriptors would otherwise repeat source index
+helpers inside the transaction. V20 resolves the descriptor address with existing
+Borrow before the guard and uses its stable dereference throughout the loop.
+MIR lowering interns the corresponding canonical reference type on demand, then
+shares the frozen type arena with SSA as before. Both validators reject unresolved
+projections in remove slot roots. This also preserves fresh length on projected
+and address-taken Lists without MemorySSA or noalias assumptions.
+
+LLVM directly emits bounded successor, typed GEPs, existing recursive relocation
+glue and final length store. The glue transfers owning descriptors/active enum
+payloads without copy or source drop. Exactly N-i-1 root relocations are counted;
+pointer/capacity and alloc/free counters remain stable. Final-prefix cleanup
+remains reverse final index order. Pop, swap_remove and growth are unchanged.
+See [NEXT_VERTICAL_20_REPORT.md](NEXT_VERTICAL_20_REPORT.md) for qualification,
+compile snapshots, accepted limitations and the next vertical recommendation.
