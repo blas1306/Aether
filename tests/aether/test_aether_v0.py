@@ -1131,6 +1131,14 @@ def test_linear_algebra_ones_matrix():
     assert result.output == "[1.0 1.0; 1.0 1.0; 1.0 1.0]\n"
 
 
+def test_linear_algebra_eye_matrix():
+    result = run_aether("I = Math.LinearAlgebra.eye(3); println(I);")
+
+    assert result.env["I"].type_name == MatrixType("double", 3, 3)
+    assert matrix_values(result.env["I"]) == [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    assert result.output == "[1.0 0.0 0.0; 0.0 1.0 0.0; 0.0 0.0 1.0]\n"
+
+
 def test_linear_algebra_zeros_and_ones_selective_imports():
     result = run_aether(
         """

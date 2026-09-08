@@ -32,6 +32,7 @@ LU_NAME = "Math.LinearAlgebra.LU"
 LDU_NAME = "Math.LinearAlgebra.LDU"
 ZEROS_NAME = "Math.LinearAlgebra.zeros"
 ONES_NAME = "Math.LinearAlgebra.ones"
+EYE_NAME = "Math.LinearAlgebra.eye"
 NULL_SPACE_NAME = "Math.LinearAlgebra.N"
 RANGE_NAME = "Math.LinearAlgebra.R"
 RANK_NAME = "Math.LinearAlgebra.rank"
@@ -56,6 +57,7 @@ def builtin_definitions() -> list[BuiltinDefinition]:
         BuiltinDefinition(LDU_NAME, _constant_runtime(ldu_builtin), _ldu_type, _exactly_one(LDU_NAME)),
         BuiltinDefinition(ZEROS_NAME, _constant_runtime(zeros_builtin), _matrix_factory_type(ZEROS_NAME), _exactly_two(ZEROS_NAME)),
         BuiltinDefinition(ONES_NAME, _constant_runtime(ones_builtin), _matrix_factory_type(ONES_NAME), _exactly_two(ONES_NAME)),
+        BuiltinDefinition(EYE_NAME, _constant_runtime(eye_builtin), _eye_type, _exactly_one(EYE_NAME)),
         BuiltinDefinition(NULL_SPACE_NAME, _constant_runtime(null_space_builtin), _null_space_type, _exactly_one(NULL_SPACE_NAME)),
         BuiltinDefinition(RANGE_NAME, _constant_runtime(range_builtin), _range_type, _exactly_one(RANGE_NAME)),
         BuiltinDefinition(RANK_NAME, _constant_runtime(rank_builtin), _rank_type, _exactly_one(RANK_NAME)),
@@ -341,6 +343,26 @@ def ones_builtin(args: list[AetherValue]) -> AetherValue:
     return _filled_double_matrix(rows, cols, 1.0)
 
 
+def eye_builtin(args: list[AetherValue]) -> AetherValue:
+    if len(args) != 1:
+        raise AetherTypeError(f"{EYE_NAME}(...) expects exactly one argument.")
+    size_arg = args[0]
+    if size_arg.type_name != "int":
+        raise AetherTypeError(f"{EYE_NAME}(...) expects an integer dimension, got '{type_to_string(size_arg.type_name)}'.")
+    size = int(size_arg.value)
+    if size <= 0:
+        raise AetherTypeError(f"{EYE_NAME}(...) expects a positive dimension, got {size}.")
+    row_type = ArrayType("double")
+    matrix_rows = []
+    for row_index in range(size):
+        row_values = []
+        for col_index in range(size):
+            value = 1.0 if row_index == col_index else 0.0
+            row_values.append(AetherValue("double", value))
+        matrix_rows.append(AetherValue(row_type, row_values))
+    return AetherValue(MatrixType("double", size, size), matrix_rows)
+
+
 def null_space_builtin(args: list[AetherValue]) -> AetherValue:
     if len(args) != 1:
         raise AetherTypeError(f"{NULL_SPACE_NAME}(...) expects exactly one argument.")
@@ -622,6 +644,19 @@ def _matrix_factory_type(label: str):
         return MatrixType("double")
 
     return infer
+
+
+def _eye_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    if len(arg_types) != 1:
+        raise AetherTypeError(f"{EYE_NAME}(...) expects exactly one argument.")
+    argument_type = arg_types[0]
+    if argument_type is None:
+        return None
+    if argument_type != "int":
+        raise AetherTypeError(
+            f"{EYE_NAME}(...) expects an integer dimension, got '{type_to_string(argument_type)}'."
+        )
+    return MatrixType("double")
 
 
 def _null_space_type(arg_types: list[AetherType | None]) -> AetherType | None:
