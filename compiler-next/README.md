@@ -1,10 +1,58 @@
-# Aether NEXT-VERTICAL-27
+# Aether NEXT-VERTICAL-28
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. The current mathematical foundation includes Matrix<T> owners and borrowed strided MatrixView/MatrixViewMut and oriented VectorView/VectorViewMut with zero-copy transpose; the numbered
 Vertical-9..17 sections below retain historical qualification context.
 It does not replace the production `aether` CLI or import any legacy
 Python object, JSON schema, Initial IR, or SSA representation.
+
+## Built-in scalar multiplication (V28)
+
+```aether
+Matrix<int> a = [1,2;3,4];
+Matrix<int> b = 2 * transpose_view(a); // [2,6;4,8]
+Matrix<int> c = transpose_view(a) * 2;
+Vector<int,Column> d = 3 * column(a,2); // [6,12], stride=2
+Vector<int,Row> e = row(a,1) * 3;
+Vector<double,Row> v = [1.5,2.5];
+Vector<double,Row> w = 2 * v; // literal 2 is contextualized as double
+```
+
+Both orders accept one scalar and one Vector/VectorView/VectorViewMut or
+Matrix/MatrixView/MatrixViewMut. The mathematical input is read through a
+borrowed descriptor and stays usable. The result is a fresh owning Vector
+with the same orientation, or Matrix with the same logical rows/columns.
+Reads honor vector strides and both matrix strides, including projections
+and transposed views; result storage is contiguous (row-major for Matrix).
+
+Supported element/scalar types are int8/16/32/64, uint8/16/32/64, isize, usize,
+float32/float64 and canonical aliases int/float/double. Scalar and element
+canonical TypeIds must be equal. A typed `int s` cannot scale a double Vector.
+Existing integer/float literal contexts (including directly negated literals)
+use the mathematical element type; this does not convert typed variables or
+arbitrary expressions. `supports_builtin_multiply` is an internal concrete-type
+query. Storage/Copy constraints do not prove multiplication for symbolic T.
+
+Operands evaluate in source order, and both are captured before allocation.
+The mathematical root stays protected during a following scalar expression.
+Even an empty input evaluates the scalar. Empty results allocate nothing;
+nonempty operations allocate exactly one backing, perform N / R*C scalar
+multiplications and stores in O(N) / O(R*C), and make no input backing copy.
+Integer overflow traps as IntegerOverflow, including after partial result
+initialization; floats use IEEE fmul without fast-math. AllocationSizeOverflow
+and AllocationFailure remain checked. There is no shape compatibility guard.
+
+HIR uses VectorScalarMultiply/MatrixScalarMultiply with source-side metadata.
+The V27 structured MIR/SSA region now accepts an InvariantScalar and one
+StridedLoad per logical element. Both verifiers check types, side, iteration,
+strides, Multiply and complete initialization independently before LLVM emission.
+
+Pairwise mathematical `*` remains rejected: no dot, outer, matmul, Hadamard,
+scalar division, promotion, broadcasting, public Mul/Numeric trait or BLAS.
+No slicing, methods or lifetime changes. Versioned sections below retain their
+historical scope; V28 adds only scalar multiplication to V27 arithmetic.
+See [the V28 report](../docs/architecture/NEXT_VERTICAL_28_REPORT.md).
+Compilation snapshots: `python3 tests/measure-v28.py --runs 10`.
 
 ## Built-in elementwise addition and subtraction (V27)
 
@@ -38,8 +86,8 @@ shape guards, allocation, strided reads, scalar operations and complete-prefix
 initialization. Both verifiers validate the complete region before LLVM emits
 its nested CFG; only the fully initialized owner escapes.
 
-No multiplication, scalar multiplication, dot/outer/matmul, division,
-broadcasting, promotion, operator traits, user overloading or BLAS is admitted.
+V27 itself admitted no multiplication, scalar multiplication, dot/outer/matmul, division,
+broadcasting, promotion, operator traits, user overloading or BLAS.
 The following versioned sections preserve historical scope; V27 supersedes
 their deferral of built-in addition/subtraction only.
 See [the V27 report](../docs/architecture/NEXT_VERTICAL_27_REPORT.md).

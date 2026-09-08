@@ -501,3 +501,28 @@ MIR/SSA MUST verify ordered guards and complete initialization before owner
 escape. No unwinding, behavioral generics, public operator protocol,
 multiplication/division, promotion, broadcasting, BLAS or lifetime extension
 is implied. See [NEXT_VERTICAL_27_REPORT.md](NEXT_VERTICAL_27_REPORT.md).
+
+
+## NEXT-VERTICAL-28 — built-in scalar multiplication
+
+The isolated native compiler admits scalar * vector-like, vector-like * scalar,
+scalar * matrix-like and matrix-like * scalar. Vector/VectorView/VectorViewMut
+and Matrix/MatrixView/MatrixViewMut are readable inputs; operations MUST NOT
+consume existing mathematical owners. Results are fresh owners preserving
+orientation and logical shape, reading explicit strides and writing contiguous
+storage. Nonempty results allocate one backing; empty results allocate none.
+
+Scalar and element MUST share their exact concrete canonical built-in integer
+or float TypeId. Existing contextual literal typing is allowed, including an
+integer literal contextualized to double. Typed values receive no promotion.
+`supports_builtin_multiply` is an internal operation query; Copy/Storable do
+not establish multiplication, including in uninstantiated generic bodies.
+
+Source operand order, temporary borrowing protections, checked integer overflow
+and IEEE floats remain mandatory. Empty scaling still evaluates its scalar.
+There is no second shape and no ShapeMismatch dependency. The verified V27
+initialization region extends to one descriptor and one invariant scalar.
+
+Pairwise mathematical multiplication, dot/outer/matmul/Hadamard, division,
+broadcasting, promotion, public Mul/Numeric traits, BLAS, slicing, methods and
+lifetime changes remain outside this vertical.

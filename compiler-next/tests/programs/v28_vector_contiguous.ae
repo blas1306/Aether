@@ -1,0 +1,6 @@
+int main(){
+Vector<int,Row> a=[1,2,3]; Vector<int,Row> b=3*a; Vector<int,Row> c=a*3;
+Vector<int,Column> d=[2,4]; Vector<int,Column> e=2*d; Vector<int,Column> f=d*2;
+if(b[3]!=9){return 1;}if(c[2]!=6){return 2;}if(e[2]!=8){return 3;}if(f[1]!=4){return 4;}
+return a[1]+d[1]-3;
+}

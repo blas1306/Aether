@@ -750,8 +750,27 @@ pub enum MathShapeCheck {
     /// Exact row equality followed by exact column equality.
     MatrixRowsThenColumns,
 }
+/// Source position of the loop-invariant scalar operand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScalarSide {
+    Left,
+    Right,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HirExprKind {
+    VectorScalarMultiply {
+        left: Box<HirExpr>,
+        right: Box<HirExpr>,
+        scalar_side: ScalarSide,
+        element_type: TypeId,
+        orientation: crate::types::Orientation,
+    },
+    MatrixScalarMultiply {
+        left: Box<HirExpr>,
+        right: Box<HirExpr>,
+        scalar_side: ScalarSide,
+        element_type: TypeId,
+    },
     /// Read operands through logical strides; exact shape, fresh owning result.
     VectorElementwiseBinary {
         shape_check: MathShapeCheck,
@@ -3502,6 +3521,30 @@ impl Monomorphizer<'_> {
                 op: *op,
                 operand: Box::new(self.substitute_expr(operand, substitution)?),
             },
+            HirExprKind::VectorScalarMultiply {
+                left,
+                right,
+                scalar_side,
+                element_type,
+                orientation,
+            } => HirExprKind::VectorScalarMultiply {
+                left: Box::new(self.substitute_expr(left, substitution)?),
+                right: Box::new(self.substitute_expr(right, substitution)?),
+                scalar_side: *scalar_side,
+                element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+                orientation: *orientation,
+            },
+            HirExprKind::MatrixScalarMultiply {
+                left,
+                right,
+                scalar_side,
+                element_type,
+            } => HirExprKind::MatrixScalarMultiply {
+                left: Box::new(self.substitute_expr(left, substitution)?),
+                right: Box::new(self.substitute_expr(right, substitution)?),
+                scalar_side: *scalar_side,
+                element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+            },
             HirExprKind::VectorElementwiseBinary {
                 shape_check,
                 op,
@@ -4515,6 +4558,20 @@ impl OwnershipAnalysis<'_> {
             | HirExprKind::Coerce { operand, .. }
             | HirExprKind::ExplicitCast { operand, .. }
             | HirExprKind::Unary { operand, .. } => self.expr(operand),
+            HirExprKind::VectorScalarMultiply { left, right, .. }
+            | HirExprKind::MatrixScalarMultiply { left, right, .. } => {
+                self.expr(left)?;
+                let owner = self.derived_owner(left);
+                self.borrowed.push(owner.into_iter().collect());
+                self.storage_borrowed.push(owner.into_iter().collect());
+                self.storage_ranges
+                    .push(owner.into_iter().map(|o| (o, None)).collect());
+                self.expr(right)?;
+                self.borrowed.pop();
+                self.storage_borrowed.pop();
+                self.storage_ranges.pop();
+                Ok(())
+            }
             HirExprKind::VectorElementwiseBinary {
                 left, right, op, ..
             }
@@ -4722,6 +4779,16 @@ impl OwnershipAnalysis<'_> {
 
     fn known_matrix_shape(&self, expr: &HirExpr) -> Option<(u64, u64)> {
         match &expr.kind {
+            HirExprKind::MatrixScalarMultiply {
+                left,
+                right,
+                scalar_side,
+                ..
+            } => self.known_matrix_shape(if *scalar_side == ScalarSide::Left {
+                right
+            } else {
+                left
+            }),
             HirExprKind::MatrixElementwiseBinary { left, .. } => self.known_matrix_shape(left),
             HirExprKind::MatrixInit { rows, columns, .. } => Some((*rows, *columns)),
             HirExprKind::MatrixView {
@@ -4745,6 +4812,16 @@ impl OwnershipAnalysis<'_> {
 
     fn known_length(&self, expr: &HirExpr) -> Option<u64> {
         match &expr.kind {
+            HirExprKind::VectorScalarMultiply {
+                left,
+                right,
+                scalar_side,
+                ..
+            } => self.known_length(if *scalar_side == ScalarSide::Left {
+                right
+            } else {
+                left
+            }),
             HirExprKind::VectorElementwiseBinary { left, .. } => self.known_length(left),
             HirExprKind::MatrixAxisVectorView { source, axis, .. } => {
                 if let HirPlaceBase::Local(local) = source.base
@@ -7463,6 +7540,24 @@ impl Analyzer<'_> {
         self.expression(expr, expected)
     }
 
+    fn literal_binary_context(&self, op: AstBinaryOp, ty: TypeId) -> Option<TypeId> {
+        if op == AstBinaryOp::Multiply {
+            if let Some((element, _)) = self.types.vector_like_info(ty) {
+                return self
+                    .types
+                    .supports_builtin_multiply(element)
+                    .then_some(element);
+            }
+            if let Some(element) = self.types.matrix_like_element(ty) {
+                return self
+                    .types
+                    .supports_builtin_multiply(element)
+                    .then_some(element);
+            }
+        }
+        self.types.is_numeric(ty).then_some(ty)
+    }
+
     fn binary(
         &mut self,
         op: AstBinaryOp,
@@ -7476,16 +7571,12 @@ impl Analyzer<'_> {
         let (l, r) = if ll && !rl {
             let r = self.readable_math_operand(ra, None)?;
             (
-                self.readable_math_operand(
-                    la,
-                    self.types.is_numeric(r.expr.ty).then_some(r.expr.ty),
-                )?,
+                self.readable_math_operand(la, self.literal_binary_context(op, r.expr.ty))?,
                 r,
             )
         } else if rl && !ll {
             let l = self.readable_math_operand(la, None)?;
-            let r = self
-                .readable_math_operand(ra, self.types.is_numeric(l.expr.ty).then_some(l.expr.ty))?;
+            let r = self.readable_math_operand(ra, self.literal_binary_context(op, l.expr.ty))?;
             (l, r)
         } else if ll && rl {
             let c = expected.filter(|t| self.types.is_numeric(*t));
@@ -7524,10 +7615,75 @@ impl Analyzer<'_> {
                     Some(span),
                 )]
             };
+            if op == AstBinaryOp::Multiply {
+                let left_math = lv.is_some() || lm.is_some();
+                let right_math = rv.is_some() || rm.is_some();
+                if left_math == right_math {
+                    return Err(error(
+                        "E0342",
+                        "mathematical pair * is unsupported; expected one scalar and one vector-like/matrix-like operand",
+                    ));
+                }
+                let (element, orientation, scalar_ty, scalar_side) = if left_math {
+                    (
+                        lv.map_or_else(|| lm.unwrap(), |v| v.0),
+                        lv.map(|v| v.1),
+                        r.expr.ty,
+                        ScalarSide::Right,
+                    )
+                } else {
+                    (
+                        rv.map_or_else(|| rm.unwrap(), |v| v.0),
+                        rv.map(|v| v.1),
+                        l.expr.ty,
+                        ScalarSide::Left,
+                    )
+                };
+                if !self.types.supports_builtin_multiply(element) {
+                    return Err(error(
+                        "E0346",
+                        "multiplication requires a concrete built-in scalar element; storage capabilities do not prove multiplication",
+                    ));
+                }
+                if scalar_ty != element {
+                    return Err(error(
+                        "E0343",
+                        "scalar and element canonical types must match exactly; no promotion",
+                    ));
+                }
+                let (ty, kind) = if let Some(orientation) = orientation {
+                    self.types.intern_vector_view(element, orientation, false);
+                    (
+                        self.types.intern_vector(element, orientation),
+                        HirExprKind::VectorScalarMultiply {
+                            left: Box::new(l.expr),
+                            right: Box::new(r.expr),
+                            scalar_side,
+                            element_type: element,
+                            orientation,
+                        },
+                    )
+                } else {
+                    self.types.intern_matrix_view(element, false);
+                    (
+                        self.types.intern_matrix(element),
+                        HirExprKind::MatrixScalarMultiply {
+                            left: Box::new(l.expr),
+                            right: Box::new(r.expr),
+                            scalar_side,
+                            element_type: element,
+                        },
+                    )
+                };
+                return Ok(Checked {
+                    expr: HirExpr { kind, ty, span },
+                    constant: None,
+                });
+            }
             if !matches!(op, AstBinaryOp::Add | AstBinaryOp::Subtract) {
                 return Err(error(
                     "E0342",
-                    "only built-in elementwise + and - are supported",
+                    "expected built-in elementwise +/− or scalar * vector-like/matrix-like",
                 ));
             }
             let (element, orientation) = match (lv, rv, lm, rm) {
@@ -8995,6 +9151,54 @@ fn verify_expr(
                 return Err(fail("HIR unary invalid".into()));
             }
         }
+        HirExprKind::VectorScalarMultiply {
+            left,
+            right,
+            scalar_side,
+            element_type,
+            ..
+        }
+        | HirExprKind::MatrixScalarMultiply {
+            left,
+            right,
+            scalar_side,
+            element_type,
+        } => {
+            verify_expr(left, f, sigs, structs, enums, types, fail)?;
+            verify_expr(right, f, sigs, structs, enums, types, fail)?;
+            let (scalar, source) = if *scalar_side == ScalarSide::Left {
+                (left, right)
+            } else {
+                (right, left)
+            };
+            let valid_family = match &e.kind {
+                HirExprKind::VectorScalarMultiply { orientation, .. } => {
+                    types.vector_like_info(source.ty) == Some((*element_type, *orientation))
+                        && types.get(e.ty)
+                            == Some(&TypeData::Vector {
+                                element: *element_type,
+                                orientation: *orientation,
+                            })
+                }
+                _ => {
+                    types.matrix_like_element(source.ty) == Some(*element_type)
+                        && types.matrix_element(e.ty) == Some(*element_type)
+                }
+            };
+            if !valid_family
+                || scalar.ty != *element_type
+                || !types.supports_builtin_multiply(*element_type)
+                || (!types.is_copy(source.ty)
+                    && matches!(
+                        source.kind,
+                        HirExprKind::Local(_) | HirExprKind::Move(_) | HirExprKind::Load(_)
+                    ))
+            {
+                return Err(fail(
+                    "HIR scalar multiplication side/type/read-only result contract invalid".into(),
+                ));
+            }
+        }
         HirExprKind::VectorElementwiseBinary {
             shape_check,
             op,
@@ -9886,6 +10090,88 @@ mod tests {
                     }
                 }
                 assert!(verify_hir(&bad).is_err(), "{matrix} {case}");
+            }
+        }
+    }
+    #[test]
+    fn vertical28_hir_rejects_scalar_side_type_and_consumption() {
+        for matrix in [false, true] {
+            for scalar_left in [false, true] {
+                let ty = if matrix {
+                    "Matrix<int>"
+                } else {
+                    "Vector<int,Row>"
+                };
+                let expr = if scalar_left { "2*a" } else { "a*2" };
+                let hir = check(&format!(
+                    "int main(){{{ty}a=[1,2];{ty}b={expr};Vector<int,Column>other=[1];return 0;}}"
+                ))
+                .unwrap();
+                for case in 0..6 {
+                    let mut h = hir.clone();
+                    let owner_ty = h.functions[0].locals[0].ty;
+                    let wrong_result = h.functions[0]
+                        .locals
+                        .iter()
+                        .find(|l| l.name == "other")
+                        .unwrap()
+                        .ty;
+                    let initializer = h.functions[0]
+                        .body
+                        .statements
+                        .iter_mut()
+                        .find_map(|s| {
+                            if let HirStmtKind::Local { initializer, .. } = &mut s.kind {
+                                if matches!(
+                                    initializer.kind,
+                                    HirExprKind::VectorScalarMultiply { .. }
+                                        | HirExprKind::MatrixScalarMultiply { .. }
+                                ) {
+                                    return Some(initializer);
+                                }
+                            }
+                            None
+                        })
+                        .unwrap();
+                    let (HirExprKind::VectorScalarMultiply {
+                        left,
+                        right,
+                        scalar_side,
+                        element_type,
+                        ..
+                    }
+                    | HirExprKind::MatrixScalarMultiply {
+                        left,
+                        right,
+                        scalar_side,
+                        element_type,
+                    }) = &mut initializer.kind
+                    else {
+                        unreachable!()
+                    };
+                    match case {
+                        0 => {
+                            *scalar_side = if *scalar_side == ScalarSide::Left {
+                                ScalarSide::Right
+                            } else {
+                                ScalarSide::Left
+                            }
+                        }
+                        1 => *element_type = TypeId::FLOAT64,
+                        2 => initializer.ty = TypeId::BOOL,
+                        3 => {
+                            let source = if scalar_left { right } else { left };
+                            source.ty = owner_ty;
+                            source.kind = HirExprKind::Move(LocalId(0));
+                        }
+                        5 => initializer.ty = wrong_result,
+                        _ => {
+                            let scalar = if scalar_left { left } else { right };
+                            scalar.ty = TypeId::INT8;
+                        }
+                    }
+                    assert!(verify_hir(&h).is_err(), "HIR {matrix} {scalar_left} {case}");
+                }
             }
         }
     }

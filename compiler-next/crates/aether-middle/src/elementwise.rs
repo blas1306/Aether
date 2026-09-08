@@ -51,6 +51,9 @@ pub enum MathStep {
         input: MathInput,
         offset: Vec<(MathAxis, MathStride)>,
     },
+    InvariantScalar {
+        input: MathInput,
+    },
     ScalarBinary {
         op: BinaryOp,
         element_type: TypeId,
@@ -65,6 +68,8 @@ pub enum MathStep {
 pub struct ElementwiseKernel {
     /// Logical rank; Vector orientation stays in the operand/result `TypeIds`.
     pub matrix: bool,
+    /// Source side of the scalar, or None for pairwise addition/subtraction.
+    pub scalar_side: Option<MathInput>,
     /// Scalar checked/IEEE operator, independently checked against element type.
     pub op: BinaryOp,
     /// Concrete built-in scalar type, never a symbolic storage capability.
@@ -77,6 +82,21 @@ impl ElementwiseKernel {
     /// Construct the explicit canonical initialization loop.
     #[must_use]
     pub fn new(matrix: bool, op: BinaryOp, element_type: TypeId) -> Self {
+        Self::build(matrix, op, element_type, None)
+    }
+
+    /// Construct scaling with exactly one descriptor and a loop-invariant scalar.
+    #[must_use]
+    pub fn new_scalar(matrix: bool, op: BinaryOp, element_type: TypeId, side: MathInput) -> Self {
+        Self::build(matrix, op, element_type, Some(side))
+    }
+
+    fn build(
+        matrix: bool,
+        op: BinaryOp,
+        element_type: TypeId,
+        scalar_side: Option<MathInput>,
+    ) -> Self {
         use MathAxis::{Columns, Dimension, Rows};
         let axes = if matrix {
             vec![Rows, Columns]
@@ -93,7 +113,9 @@ impl ElementwiseKernel {
         };
         let trap = matches!(
             op,
-            BinaryOp::AddIntegerChecked | BinaryOp::SubtractIntegerChecked
+            BinaryOp::AddIntegerChecked
+                | BinaryOp::SubtractIntegerChecked
+                | BinaryOp::MultiplyIntegerChecked
         )
         .then_some(TrapKind::IntegerOverflow);
         let mut body = vec![
@@ -112,6 +134,9 @@ impl ElementwiseKernel {
             },
             MathStep::InitializeNext,
         ];
+        if let Some(input) = scalar_side {
+            body[usize::from(input == MathInput::Right)] = MathStep::InvariantScalar { input };
+        }
         for axis in axes.iter().rev() {
             body = vec![MathStep::For {
                 axis: *axis,
@@ -127,6 +152,9 @@ impl ElementwiseKernel {
                 trap: TrapKind::ShapeMismatch,
             })
             .collect();
+        if scalar_side.is_some() {
+            program.clear();
+        }
         program.push(MathStep::Allocate {
             extents: axes,
             size_trap: TrapKind::AllocationSizeOverflow,
@@ -136,6 +164,7 @@ impl ElementwiseKernel {
         program.push(MathStep::YieldOwner);
         Self {
             matrix,
+            scalar_side,
             op,
             element_type,
             program,
@@ -158,7 +187,29 @@ impl ElementwiseKernel {
         result: TypeId,
     ) -> Result<(), String> {
         let element = self.element_type;
-        let valid_types = if self.matrix {
+        let valid_types = if let Some(side) = self.scalar_side {
+            let (scalar, source) = if side == MathInput::Left {
+                (left, right)
+            } else {
+                (right, left)
+            };
+            scalar == element
+                && if self.matrix {
+                    types
+                        .matrix_view_info(source)
+                        .is_some_and(|(t, _)| t == element)
+                        && types.matrix_element(result) == Some(element)
+                } else {
+                    types.vector_view_info(source).is_some_and(|(t, o, _)| {
+                        t == element
+                            && types.get(result)
+                                == Some(&TypeData::Vector {
+                                    element,
+                                    orientation: o,
+                                })
+                    })
+                }
+        } else if self.matrix {
             types
                 .matrix_view_info(left)
                 .is_some_and(|(t, _)| t == element)
@@ -180,18 +231,27 @@ impl ElementwiseKernel {
             })
         };
         let scalar = crate::mir::binary_contract(types, self.op, element)?;
+        let valid_op = if self.scalar_side.is_some() {
+            types.supports_builtin_multiply(element)
+                && matches!(
+                    self.op,
+                    BinaryOp::MultiplyIntegerChecked | BinaryOp::MultiplyFloat
+                )
+        } else {
+            types.supports_builtin_add_sub(element)
+                && matches!(
+                    self.op,
+                    BinaryOp::AddIntegerChecked
+                        | BinaryOp::SubtractIntegerChecked
+                        | BinaryOp::AddFloat
+                        | BinaryOp::SubtractFloat
+                )
+        };
         if !valid_types
-            || !types.supports_builtin_add_sub(element)
-            || !matches!(
-                self.op,
-                BinaryOp::AddIntegerChecked
-                    | BinaryOp::SubtractIntegerChecked
-                    | BinaryOp::AddFloat
-                    | BinaryOp::SubtractFloat
-            )
+            || !valid_op
             || scalar.0 != element
             || scalar.1 != element
-            || *self != Self::new(self.matrix, self.op, element)
+            || *self != Self::build(self.matrix, self.op, element, self.scalar_side)
         {
             return Err("elementwise read-only types/shape guards/allocation/stride loop/complete initialization contract invalid".into());
         }

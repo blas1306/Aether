@@ -1830,3 +1830,71 @@ strides, scalar/trap contract and initialization induction, independently of
 prior verification. LLVM translates these instructions into branches, loop
 phis and loads/stores, without an arithmetic runtime helper or dispatcher.
 No MemorySSA or global lifetime extension is introduced.
+
+
+## NEXT-VERTICAL-28 — scalar multiplication of mathematical owners/views
+
+`*` with exactly one mathematical input resolves before scalar coercion or
+implicit owner Move. The other operand MUST have the same canonical TypeId
+as the element. Supported concrete types are int8/16/32/64, uint8/16/32/64,
+isize/usize, float32/float64 and their canonical aliases. The internal
+`supports_builtin_multiply(TypeId)` establishes this closed admission; storage
+and Copy constraints do not prove multiplication for symbolic T. bool,
+user-defined elements, collections, nested mathematical elements and references
+are rejected. Pairwise mathematical `*` MUST NOT resolve to scalar scaling,
+Hadamard, dot, outer or matmul.
+
+Both source orders preserve left-to-right execution. HIR retains left/right
+expressions and ScalarSide rather than swapping operands. Only syntactic numeric
+literals or directly negated numeric literals use the existing element context.
+For a left literal the checker may discover the right type first, since the
+literal has no effects; HIR/MIR still retain source order. This never coerces
+an already typed variable or arbitrary scalar expression to another type.
+
+The mathematical input is Vector<T,O>, VectorView<T,O>, VectorViewMut<T,O>,
+Matrix<T>, MatrixView<T> or MatrixViewMut<T>. Its descriptor is captured for
+read-only use; an existing owner MUST NOT move. A captured left input protects
+its storage while the right scalar evaluates. Effects of a left scalar are
+visible when the right descriptor is selected; normal ownership checks reject
+use after consumption. Existing alias rules allow noninvalidating element
+writes during scalar evaluation; subsequent kernel loads observe those effects.
+This does not permit the kernel itself to write its mathematical input.
+Both operands, including an effectful scalar for an
+empty input, MUST evaluate before the result region starts. Expression-created
+owner temporaries live through the kernel and receive normal cleanup afterward.
+
+Result is Vector<T,O> or Matrix<T>, with logical extents from the single input.
+No compatibility ShapeGuard/ShapeMismatch is allowed in the kernel. Empty
+inputs yield canonical null owners and bypass allocation/iteration. Nonempty
+results check sizes, allocate one backing and only then read elements. Existing
+AllocationSizeOverflow/AllocationFailure traps apply. No adaptation allocates
+or converts the input backing. Shared aliases are allowed; no noalias promise.
+
+For each zero-based logical coordinate, Vector loads ptr[i*stride]; Matrix
+loads ptr[r*row_stride+c*column_stride]. Owners materialize their contiguous
+strides. Results write i or r*C+c. Projection and transposed-view expressions
+are admitted wherever existing Place/temporary-borrow rules permit; there is
+no new temporary lifetime extension. N or R*C multiplications and stores cost
+O(N) or O(R*C). Empty inputs execute no element operations/stores.
+
+Elements use MultiplyIntegerChecked with IntegerOverflow or MultiplyFloat
+with IEEE fmul. No wrapping, UB overflow flags, fast-math or reassociation.
+Overflow after prior initialized slots aborts without unwind or rollback.
+
+HIR records VectorScalarMultiply/MatrixScalarMultiply, ScalarSide, element and
+owning result type (including orientation). MIR/SSA preserve the source-ordered
+scalar and descriptor as the two operands of ElementwiseBinary and the kernel's
+scalar_side. Its closed region is Allocate, nested unit For loops, one
+InvariantScalar selection, one StridedLoad, exact Multiply ScalarBinary,
+InitializeNext, YieldOwner. InvariantScalar references the captured Copy input;
+it has no per-iteration memory read. Scalar operand order follows source side.
+The single descriptor defines Allocate extents, loop bounds and output shape.
+
+Both MIR and SSA independently verify their operand/result TypeIds against the
+complete canonical instruction tree. They reject wrong sides, scalar/element
+mismatch, mathematical owners substituted for readable descriptors, wrong rank
+or orientation, any shape dependency, incorrect strides, non-Multiply operations
+and missing/duplicate initialization. Unit loops enumerate each result slot
+once, so the complete initialization prefix reaches N/R*C before YieldOwner;
+no runtime bitmap is required. LLVM translates this same verified region.
+No MemorySSA, public behavior capability or whole-program lifetime pass is added.

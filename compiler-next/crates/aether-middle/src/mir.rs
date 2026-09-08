@@ -1964,29 +1964,73 @@ impl Builder<'_> {
                 );
                 Operand::Local(destination)
             }
-            HirExprKind::VectorElementwiseBinary {
-                op,
+            HirExprKind::VectorScalarMultiply {
+                left,
+                right,
+                element_type,
+                ..
+            }
+            | HirExprKind::MatrixScalarMultiply {
+                left,
+                right,
+                element_type,
+                ..
+            }
+            | HirExprKind::VectorElementwiseBinary {
                 left,
                 right,
                 element_type,
                 ..
             }
             | HirExprKind::MatrixElementwiseBinary {
-                op,
                 left,
                 right,
                 element_type,
                 ..
             } => {
-                let matrix = matches!(expression.kind, HirExprKind::MatrixElementwiseBinary { .. });
-                let (left, left_owner) = self.lower_math_read(left);
-                let (right, right_owner) = self.lower_math_read(right);
-                let op = match op {
-                    HirBinaryOp::AddIntegerChecked => BinaryOp::AddIntegerChecked,
-                    HirBinaryOp::SubtractIntegerChecked => BinaryOp::SubtractIntegerChecked,
-                    HirBinaryOp::AddFloat => BinaryOp::AddFloat,
-                    HirBinaryOp::SubtractFloat => BinaryOp::SubtractFloat,
-                    _ => unreachable!("verified elementwise op"),
+                let matrix = matches!(
+                    expression.kind,
+                    HirExprKind::MatrixElementwiseBinary { .. }
+                        | HirExprKind::MatrixScalarMultiply { .. }
+                );
+                let scalar_side = match &expression.kind {
+                    HirExprKind::VectorScalarMultiply { scalar_side, .. }
+                    | HirExprKind::MatrixScalarMultiply { scalar_side, .. } => {
+                        Some(match scalar_side {
+                            aether_frontend::ScalarSide::Left => crate::MathInput::Left,
+                            aether_frontend::ScalarSide::Right => crate::MathInput::Right,
+                        })
+                    }
+                    _ => None,
+                };
+                let (left, left_owner) = if scalar_side == Some(crate::MathInput::Left) {
+                    (self.lower_expr(left), None)
+                } else {
+                    self.lower_math_read(left)
+                };
+                let (right, right_owner) = if scalar_side == Some(crate::MathInput::Right) {
+                    (self.lower_expr(right), None)
+                } else {
+                    self.lower_math_read(right)
+                };
+                let op = match &expression.kind {
+                    HirExprKind::VectorElementwiseBinary { op, .. }
+                    | HirExprKind::MatrixElementwiseBinary { op, .. } => match op {
+                        HirBinaryOp::AddIntegerChecked => BinaryOp::AddIntegerChecked,
+                        HirBinaryOp::SubtractIntegerChecked => BinaryOp::SubtractIntegerChecked,
+                        HirBinaryOp::AddFloat => BinaryOp::AddFloat,
+                        HirBinaryOp::SubtractFloat => BinaryOp::SubtractFloat,
+                        _ => unreachable!("verified elementwise op"),
+                    },
+                    _ if self.types.integer_info(*element_type).is_some() => {
+                        BinaryOp::MultiplyIntegerChecked
+                    }
+                    _ => BinaryOp::MultiplyFloat,
+                };
+                let kernel = if let Some(side) = scalar_side {
+                    crate::ElementwiseKernel::new_scalar(matrix, op, *element_type, side)
+                } else {
+                    crate::ElementwiseKernel::new(matrix, op, *element_type)
                 };
                 let destination = self.temporary(expression.ty);
                 self.assign(
@@ -1997,7 +2041,7 @@ impl Builder<'_> {
                     Rvalue::ElementwiseBinary {
                         left,
                         right,
-                        kernel: crate::ElementwiseKernel::new(matrix, op, *element_type),
+                        kernel,
                     },
                     expression.span,
                 );

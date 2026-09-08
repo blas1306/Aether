@@ -8088,7 +8088,8 @@ fn v27_instrument(llvm: &str, heap: u64) -> String {
         if line.trim().starts_with("%ew")
             && (line.contains("_checked = call")
                 || line.contains("_value = fadd")
-                || line.contains("_value = fsub"))
+                || line.contains("_value = fsub")
+                || line.contains("_value = fmul"))
         {
             let id = line
                 .trim()
@@ -8100,15 +8101,24 @@ fn v27_instrument(llvm: &str, heap: u64) -> String {
             writeln!(output,"  %q{id}_on = load i64, ptr @v27_ops\n  %q{id}_on1 = add i64 %q{id}_on, 1\n  store i64 %q{id}_on1, ptr @v27_ops").unwrap();
         }
         if let Some(id) = line.trim().strip_prefix("; ElementwiseEnd ") {
-            let matrix = output.contains(&format!("%ew{id}_Left_Rows ="));
+            let side = if output.contains(&format!("%ew{id}_Left_ptr =")) {
+                "Left"
+            } else {
+                "Right"
+            };
+            let matrix = output.contains(&format!("%ew{id}_{side}_Rows ="));
             if matrix {
                 writeln!(
                     output,
-                    "  %q{id}_count = mul i64 %ew{id}_Left_Rows, %ew{id}_Left_Columns"
+                    "  %q{id}_count = mul i64 %ew{id}_{side}_Rows, %ew{id}_{side}_Columns"
                 )
                 .unwrap();
             } else {
-                writeln!(output, "  %q{id}_count = add i64 %ew{id}_Left_Dimension, 0").unwrap();
+                writeln!(
+                    output,
+                    "  %q{id}_count = add i64 %ew{id}_{side}_Dimension, 0"
+                )
+                .unwrap();
             }
             writeln!(output,"  %q{id}_nonempty = icmp ne i64 %q{id}_count, 0\n  %q{id}_expected = zext i1 %q{id}_nonempty to i64").unwrap();
             for (short, global, expected) in [
@@ -8597,16 +8607,28 @@ fn vertical27_deterministic_dumps_and_logical_codegen() {
 
 #[test]
 fn vertical27_allocation_traps_after_shape_and_before_access() {
+    qualify_math_allocation_traps(false);
+}
+
+#[test]
+fn vertical28_allocation_traps_before_element_access() {
+    qualify_math_allocation_traps(true);
+}
+
+fn qualify_math_allocation_traps(scalar_multiply: bool) {
     for matrix in [false, true] {
         let ty = if matrix {
             "Matrix<int>"
         } else {
             "Vector<int,Row>"
         };
-        let source = SourceFile::new(
-            "allocation.ae",
-            format!("int main(){{{ty} a=[1,2];{ty} b=[3,4];{ty} c=a+b;return 0;}}"),
-        );
+        let previous_allocations = if scalar_multiply { 1 } else { 2 };
+        let expression = if scalar_multiply {
+            format!("int main(){{{ty} a=[1,2];{ty} c=2*a;return 0;}}")
+        } else {
+            format!("int main(){{{ty} a=[1,2];{ty} b=[3,4];{ty} c=a+b;return 0;}}")
+        };
+        let source = SourceFile::new("allocation.ae", expression);
         let compiled = compile_source(&source, &[]).unwrap();
         // Inject impossible extents only into LLVM qualification. Equal oversized
         // shapes must fail the checked allocation before any backing/element access.
@@ -8631,6 +8653,7 @@ fn vertical27_allocation_traps_after_shape_and_before_access() {
         }
         oversized.push_str("declare void @exit(i32) noreturn\n");
         oversized=oversized.replace("trap_allocation_size_overflow:\n  ; structured Aether trap: AllocationSizeOverflow\n  call void @llvm.trap()", "trap_allocation_size_overflow:\n  %allocs = load i64, ptr @aether_heap_alloc_count\n  %ok = icmp eq i64 %allocs, 2\n  %status = select i1 %ok, i32 75, i32 99\n  call void @exit(i32 %status)");
+        oversized = oversized.replace("%allocs, 2", &format!("%allocs, {previous_allocations}"));
         assert_eq!(v23_execute(&oversized).code(), Some(75), "size {matrix}");
         let mut failure = String::new();
         for line in compiled.llvm.lines() {
@@ -8645,6 +8668,7 @@ fn vertical27_allocation_traps_after_shape_and_before_access() {
         );
         failure=failure.replace("; structured Aether trap: AllocationFailure\ncall void @llvm.trap()", "; structured Aether trap: AllocationFailure\n%allocs = load i64, ptr @aether_heap_alloc_count\n%ok = icmp eq i64 %allocs, 2\n%status = select i1 %ok, i32 76, i32 99\ncall void @exit(i32 %status)");
         failure.push_str("\n@v27_fail_malloc = internal global i1 false\ndeclare void @exit(i32) noreturn\ndefine ptr @v27_malloc(i64 %size) {\nentry:\n  %fail = load i1, ptr @v27_fail_malloc\n  br i1 %fail, label %failed, label %allocate\nfailed:\n  ret ptr null\nallocate:\n  %ptr = call ptr @malloc(i64 %size)\n  ret ptr %ptr\n}\n");
+        failure = failure.replace("%allocs, 2", &format!("%allocs, {previous_allocations}"));
         assert_eq!(v23_execute(&failure).code(), Some(76), "failure {matrix}");
     }
 }
@@ -8676,5 +8700,561 @@ fn vertical27_nested_elements_remain_storage_without_arithmetic() {
                 "{element} {matrix}: {errors:?}"
             );
         }
+    }
+}
+
+#[test]
+fn vertical28_native_values_and_exact_allocation_operation_counts() {
+    for (name, heap, operations) in [
+        ("vector_contiguous", 6, 10),
+        ("vector_strided", 5, 12),
+        ("matrix_contiguous", 3, 12),
+        ("matrix_transposed", 5, 14),
+        ("empty", 0, 0),
+        ("evaluation", 15, 18),
+        ("control_flow", 16, 20),
+        ("projected", 10, 12),
+        ("floats", 6, 8),
+    ] {
+        let compiled = compile_source(
+            &SourceFile::new(
+                name,
+                fs::read_to_string(program(&format!("v28_{name}.ae"))).unwrap(),
+            ),
+            &[],
+        )
+        .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        let instrumented = v27_instrument(&compiled.llvm, heap).replace("  %v27_pass = load i1, ptr @v27_ok", &format!("  %v28_local = load i1, ptr @v27_ok\n  %v28_total = load i64, ptr @v27_ops\n  %v28_total_ok = icmp eq i64 %v28_total, {operations}\n  %v27_pass = and i1 %v28_local, %v28_total_ok"));
+        assert_eq!(v23_execute(&instrumented).code(), Some(0), "{name}");
+    }
+}
+
+#[test]
+fn vertical28_all_readable_inputs_types_and_orders() {
+    for matrix in [false, true] {
+        for orientation in ["Row", "Column"] {
+            if matrix && orientation == "Column" {
+                continue;
+            }
+            for view in 0..5 {
+                for scalar_left in [false, true] {
+                    let ty = if matrix {
+                        "Matrix<int>".to_owned()
+                    } else {
+                        format!("Vector<int,{orientation}>")
+                    };
+                    let (view_ty, intrinsic) = if matrix {
+                        ("MatrixView".to_owned(), "matrix_view")
+                    } else {
+                        ("VectorView".to_owned(), "vector_view")
+                    };
+                    let view_ty = format!(
+                        "{view_ty}{}<int{}>",
+                        if view == 2 { "Mut" } else { "" },
+                        if matrix {
+                            String::new()
+                        } else {
+                            format!(",{orientation}")
+                        }
+                    );
+                    let binding = if view == 0 || view >= 3 {
+                        String::new()
+                    } else {
+                        format!(
+                            "{view_ty} v={intrinsic}{}(a);",
+                            if view == 2 { "_mut" } else { "" }
+                        )
+                    };
+                    let input = match view {
+                        0 => "a".to_owned(),
+                        1 | 2 => "v".to_owned(),
+                        _ => format!("{intrinsic}{}(a)", if view == 4 { "_mut" } else { "" }),
+                    };
+                    let expr = if scalar_left {
+                        format!("3*{input}")
+                    } else {
+                        format!("{input}*3")
+                    };
+                    let index = if matrix { "1,2" } else { "2" };
+                    let source = format!(
+                        "int main(){{{ty} a=[2,4];{binding}{ty} b={expr};if(b[{index}]!=12){{return 1;}}return a[{index}]-4;}}"
+                    );
+                    let c = compile_source(&SourceFile::new("inputs.ae", &source), &[])
+                        .unwrap_or_else(|e| panic!("{source}: {e:?}"));
+                    assert_eq!(
+                        v23_execute(&v27_instrument(&c.llvm, 2)).code(),
+                        Some(0),
+                        "{source}"
+                    );
+                }
+            }
+        }
+        for element in [
+            "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "isize",
+            "usize", "float32", "float64", "int", "float", "double",
+        ] {
+            let ty = if matrix {
+                format!("Matrix<{element}>")
+            } else {
+                format!("Vector<{element},Row>")
+            };
+            let index = if matrix { "1,2" } else { "2" };
+            let source = format!(
+                "int main(){{{ty}a=[2,4];{element} s=3;{ty}b=s*a;{ty}c=a*s;if(b[{index}]!=12){{return 1;}}if(c[{index}]!=12){{return 2;}}return 0;}}"
+            );
+            let c = compile_source(&SourceFile::new("types.ae", &source), &[])
+                .unwrap_or_else(|e| panic!("{source}: {e:?}"));
+            assert_eq!(
+                v23_execute(&v27_instrument(&c.llvm, 3)).code(),
+                Some(0),
+                "{source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn vertical28_structured_rejections_and_temporary_borrows() {
+    for (body, code) in [
+        ("Vector<bool,Row>a=[true];Vector<bool,Row>b=2*a;", "E0346"),
+        (
+            "Vector<int,Row>a=[1];int s=2;ref int r=&s;Vector<int,Row>b=r*a;",
+            "E0343",
+        ),
+        ("Vector<int,Row>a=[1];Vector<int,Row>b=a*a;", "E0342"),
+        (
+            "Vector<int,Row>a=[1];Vector<int,Row>b=vector_view(a)*a;",
+            "E0342",
+        ),
+        ("Matrix<int>a=[1];Matrix<int>b=a*a;", "E0342"),
+        ("Matrix<int>a=[1];Matrix<int>b=matrix_view(a)*a;", "E0342"),
+        (
+            "Vector<int,Row>a=[1];Matrix<int>b=[1];Matrix<int>c=a*b;",
+            "E0342",
+        ),
+        (
+            "Vector<int,Row>a=[1];Matrix<int>b=[1];Matrix<int>c=b*a;",
+            "E0342",
+        ),
+        (
+            "Vector<bool,Row>a=[true];Vector<bool,Row>b=true*a;",
+            "E0346",
+        ),
+        ("Matrix<bool>a=[true];Matrix<bool>b=a*true;", "E0346"),
+        ("Vector<int,Row>a=[1];Vector<int,Row>b=true*a;", "E0343"),
+        (
+            "Vector<double,Row>a=[1];int s=2;Vector<double,Row>b=s*a;",
+            "E0343",
+        ),
+        ("Matrix<int8>a=[1];int s=2;Matrix<int8>b=a*s;", "E0343"),
+        (
+            "Matrix<float32>a=[1];float64 s=2;Matrix<float32>b=s*a;",
+            "E0343",
+        ),
+        ("Vector<int,Row>a=[1];Vector<int,Column>b=2*a;", "E0218"),
+        ("Vector<int,Row>a=[1];Matrix<int>b=2*a;", "E0218"),
+        ("Matrix<int>a=[1];Matrix<int>b=a/2;", "E0342"),
+        ("Vector<int,Row>a=[1];Vector<int,Row>b=2/a;", "E0342"),
+    ] {
+        let e = compile_source(
+            &SourceFile::new("negative.ae", format!("int main(){{{body}return 0;}}")),
+            &[],
+        )
+        .unwrap_err();
+        assert!(e.iter().any(|e| e.code == code), "{body}: {e:?}");
+    }
+    for matrix in [false, true] {
+        for bounds in ["Storable", "Copy+Storable"] {
+            let ty = if matrix { "Matrix<T>" } else { "Vector<T,Row>" };
+            let source =
+                format!("{ty} scale<T:{bounds}>(T s,{ty} v){{return s*v;}}int main(){{return 0;}}");
+            let e = compile_source(&SourceFile::new("generic.ae", &source), &[]).unwrap_err();
+            assert!(e.iter().any(|e| e.code == "E0346"), "{source}: {e:?}");
+        }
+        let ty = if matrix {
+            "Matrix<int>"
+        } else {
+            "Vector<int,Row>"
+        };
+        for expr in ["a*take(a)", "take(a)*a"] {
+            let source = format!(
+                "int take({ty} a){{return 2;}}int main(){{{ty}a=[1];{ty}b={expr};return 0;}}"
+            );
+            assert!(compile_source(&SourceFile::new("borrow.ae", source), &[]).is_err());
+        }
+    }
+    for expr in ["column(a,1)*take(a)", "take(a)*column(a,1)"] {
+        let source = format!(
+            "int take(Matrix<int>a){{return 2;}}int main(){{Matrix<int>a=[1];Vector<int,Column>b={expr};return 0;}}"
+        );
+        assert!(compile_source(&SourceFile::new("borrow.ae", source), &[]).is_err());
+    }
+    for (prefix, element, value) in [
+        ("struct S {int x;}", "S", "S(1)"),
+        ("enum E {A}", "E", "E.A"),
+        ("", "Buffer<int>", "Buffer<int>(1,1)"),
+        ("", "Array<int>", "{1}"),
+        ("", "List<int>", "{1}"),
+        ("", "Vector<int,Row>", "[1]"),
+        ("", "Matrix<int>", "[1]"),
+    ] {
+        for ty in [
+            format!("Vector<{element},Row>"),
+            format!("Matrix<{element}>"),
+        ] {
+            let source =
+                format!("{prefix}int main(){{{ty}a=[{value}];int s=2;{ty}b=s*a;return 0;}}");
+            let e = compile_source(&SourceFile::new("element.ae", &source), &[]).unwrap_err();
+            assert!(e.iter().any(|e| e.code == "E0346"), "{source}: {e:?}");
+        }
+    }
+}
+
+#[test]
+fn vertical28_checked_overflow_after_initialized_slot() {
+    use std::os::unix::process::ExitStatusExt;
+    for (element, max) in [
+        ("int8", "127"),
+        ("uint8", "255"),
+        ("int16", "32767"),
+        ("uint16", "65535"),
+        ("int32", "2147483647"),
+        ("uint32", "4294967295"),
+        ("int64", "9223372036854775807"),
+        ("uint64", "18446744073709551615"),
+        ("isize", "9223372036854775807"),
+        ("usize", "18446744073709551615"),
+    ] {
+        for matrix in [false, true] {
+            let ty = if matrix {
+                format!("Matrix<{element}>")
+            } else {
+                format!("Vector<{element},Row>")
+            };
+            let expr = if matrix { "a*2" } else { "2*a" };
+            let source = format!("int main(){{{ty}a=[1,{max}];{ty}b={expr};return 0;}}");
+            let c = compile_source(&SourceFile::new("overflow.ae", source), &[]).unwrap();
+            assert_eq!(v23_execute(&c.llvm).signal(), Some(4), "{element} {matrix}");
+            let mut llvm = String::new();
+            for line in c.llvm.lines() {
+                writeln!(llvm, "{line}").unwrap();
+                if line.contains("; InitializeNext") {
+                    llvm.push_str("  store i32 1, ptr @v28_initialized\n");
+                }
+            }
+            llvm.push_str(
+                "@v28_initialized = internal global i32 0\ndeclare void @exit(i32) noreturn\n",
+            );
+            llvm=llvm.replace("trap_integer_overflow:\n  call void @llvm.trap()", "trap_integer_overflow:\n  %v28_prior = load i32, ptr @v28_initialized\n  %v28_status = add i32 %v28_prior, 73\n  call void @exit(i32 %v28_status)");
+            assert_eq!(v23_execute(&llvm).code(), Some(74), "{element} {matrix}");
+        }
+    }
+}
+
+#[test]
+fn vertical28_ieee_floats_both_ranks_and_orders() {
+    for element in ["float32", "float64", "float", "double"] {
+        for matrix in [false, true] {
+            for left in [false, true] {
+                let ty = if matrix {
+                    format!("Matrix<{element}>")
+                } else {
+                    format!("Vector<{element},Row>")
+                };
+                let idx = if matrix { "1," } else { "" };
+                let expr = if left { "2*a" } else { "a*2" };
+                let source = format!(
+                    "int main(){{{element} z=0.0;{element} inf=1.0/z;{element} nan=z/z;{ty}a=[-z,z,inf,-inf,nan];{ty}b={expr};if(1.0/b[{idx}1]!=-inf){{return 1;}}if(1.0/b[{idx}2]!=inf){{return 2;}}if(b[{idx}3]!=inf){{return 3;}}if(b[{idx}4]!=-inf){{return 4;}}if(b[{idx}5]==b[{idx}5]){{return 5;}}return 0;}}"
+                );
+                let c = compile_source(&SourceFile::new("ieee.ae", source), &[]).unwrap();
+                assert!(c.llvm.contains(" = fmul "));
+                assert!(!c.llvm.contains("fmul fast"));
+                assert_eq!(
+                    v23_execute(&v27_instrument(&c.llvm, 2)).code(),
+                    Some(0),
+                    "{element} {matrix} {left}"
+                );
+            }
+        }
+    }
+}
+
+fn v28_corrupt_kernel(kernel: &mut aether_middle::ElementwiseKernel, case: usize) {
+    use aether_middle::{BinaryOp, MathAxis, MathInput, MathStep, MathStride, TrapKind};
+    match case {
+        0 => kernel.program.insert(
+            0,
+            MathStep::ShapeGuard {
+                axis: MathAxis::Dimension,
+                trap: TrapKind::ShapeMismatch,
+            },
+        ),
+        1 => kernel.op = BinaryOp::AddIntegerChecked,
+        2 => {
+            kernel.scalar_side = Some(if kernel.scalar_side == Some(MathInput::Left) {
+                MathInput::Right
+            } else {
+                MathInput::Left
+            });
+        }
+        3 => kernel.element_type = aether_frontend::TypeId::BOOL,
+        4 => {
+            kernel.program.remove(0);
+        }
+        5 => {
+            if let MathStep::Allocate { extents, .. } = &mut kernel.program[0] {
+                extents.clear();
+            }
+        }
+        11 => kernel.program.insert(0, MathStep::InitializeNext),
+        12 => {
+            if let MathStep::Allocate { size_trap, .. } = &mut kernel.program[0] {
+                *size_trap = TrapKind::ShapeMismatch;
+            }
+        }
+        _ => {
+            let mut body = &mut kernel.program;
+            while let Some(index) = body.iter().position(|s| matches!(s, MathStep::For { .. })) {
+                let MathStep::For {
+                    step, body: inner, ..
+                } = &mut body[index]
+                else {
+                    unreachable!()
+                };
+                if case == 6 {
+                    *step = 2;
+                    return;
+                }
+                body = inner;
+            }
+            match case {
+                7 => {
+                    for step in body {
+                        if let MathStep::StridedLoad { offset, .. } = step {
+                            offset[0].1 = MathStride::ColumnStride;
+                        }
+                    }
+                }
+                8 => {
+                    for step in body {
+                        if let MathStep::ScalarBinary { op, .. } = step {
+                            *op = BinaryOp::AddIntegerChecked;
+                        }
+                    }
+                }
+                9 => body.push(MathStep::InitializeNext),
+                10 => {
+                    for step in body {
+                        if let MathStep::InvariantScalar { input } = step {
+                            *input = if *input == MathInput::Left {
+                                MathInput::Right
+                            } else {
+                                MathInput::Left
+                            };
+                        }
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn vertical28_mir_ssa_independently_reject_corruption() {
+    use aether_frontend::TypeId;
+    use aether_middle::{Rvalue, SsaOp, build_ssa, lower_hir, verify_mir, verify_ssa};
+    for matrix in [false, true] {
+        for scalar_left in [false, true] {
+            let ty = if matrix {
+                "Matrix<int>"
+            } else {
+                "Vector<int,Row>"
+            };
+            let expr = if scalar_left { "2*a" } else { "a*2" };
+            let hir = analyze(
+                parse_source(&SourceFile::new(
+                    "corrupt.ae",
+                    format!("int main(){{{ty}a=[1,2];{ty}b={expr};Vector<int,Column>other=[1];return 0;}}"),
+                ))
+                .unwrap(),
+            )
+            .unwrap();
+            let mir = lower_hir(hir);
+            let ssa = build_ssa(&verify_mir(mir.clone()).unwrap());
+            let wrong_result = mir.functions[0]
+                .locals
+                .iter()
+                .find(|l| l.name.as_deref() == Some("other"))
+                .unwrap()
+                .ty;
+            for case in 0..17 {
+                let mut m = mir.clone();
+                let owner = m.functions[0]
+                    .locals
+                    .iter()
+                    .find(|l| l.name.as_deref() == Some("a"))
+                    .unwrap()
+                    .id;
+                let instruction = m.functions[0]
+                    .blocks
+                    .iter_mut()
+                    .flat_map(|b| &mut b.instructions)
+                    .find(|i| matches!(i.value, Rvalue::ElementwiseBinary { .. }))
+                    .unwrap();
+                let aether_middle::PlaceBase::Local(destination) = instruction.destination.base
+                else {
+                    unreachable!()
+                };
+                let Rvalue::ElementwiseBinary {
+                    left,
+                    right,
+                    kernel,
+                } = &mut instruction.value
+                else {
+                    unreachable!()
+                };
+                match case {
+                    0..=12 => v28_corrupt_kernel(kernel, case),
+                    13 => {
+                        let source = if scalar_left { right } else { left };
+                        *source = aether_middle::Operand::Local(owner);
+                    }
+                    14 => {
+                        let scalar = if scalar_left { left } else { right };
+                        *scalar = aether_middle::Operand::Bool(true);
+                    }
+                    15 => kernel.matrix = !matrix,
+                    _ => {}
+                }
+                if case == 16 {
+                    m.functions[0].locals[destination.0 as usize].ty = wrong_result;
+                }
+                assert!(verify_mir(m).is_err(), "MIR {matrix} {scalar_left} {case}");
+                let mut s = ssa.clone();
+                let owner = s.functions[0]
+                    .blocks
+                    .iter()
+                    .flat_map(|b| &b.instructions)
+                    .find(|i| matches!(i.op, SsaOp::VectorInit { .. } | SsaOp::MatrixInit { .. }))
+                    .unwrap()
+                    .result;
+                let instruction = s.functions[0]
+                    .blocks
+                    .iter_mut()
+                    .flat_map(|b| &mut b.instructions)
+                    .find(|i| matches!(i.op, SsaOp::ElementwiseBinary { .. }))
+                    .unwrap();
+                let SsaOp::ElementwiseBinary {
+                    left,
+                    right,
+                    kernel,
+                } = &mut instruction.op
+                else {
+                    unreachable!()
+                };
+                match case {
+                    0..=12 => v28_corrupt_kernel(kernel, case),
+                    13 => {
+                        let source = if scalar_left { right } else { left };
+                        *source = aether_middle::SsaOperand::Value(owner);
+                    }
+                    14 => {
+                        let scalar = if scalar_left { left } else { right };
+                        *scalar = aether_middle::SsaOperand::Bool(true);
+                    }
+                    15 => instruction.ty = TypeId::BOOL,
+                    _ => instruction.ty = wrong_result,
+                }
+                assert!(verify_ssa(s).is_err(), "SSA {matrix} {scalar_left} {case}");
+            }
+        }
+    }
+}
+
+#[test]
+fn vertical28_deterministic_dumps_and_single_descriptor_codegen() {
+    for name in [
+        "vector_contiguous",
+        "vector_strided",
+        "matrix_contiguous",
+        "matrix_transposed",
+        "empty",
+        "evaluation",
+        "control_flow",
+        "floats",
+    ] {
+        let source = SourceFile::new(
+            name,
+            fs::read_to_string(program(&format!("v28_{name}.ae"))).unwrap(),
+        );
+        let emits = [Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm];
+        let a = compile_source(&source, &emits).unwrap();
+        let b = compile_source(&source, &emits).unwrap();
+        assert_eq!(a.dumps, b.dumps);
+        assert_eq!(a.llvm, b.llvm);
+        assert!(a.dumps[&Emit::Hir].contains("ScalarMultiply"));
+        assert!(a.dumps[&Emit::Hir].contains("scalar_side"));
+        for dump in [Emit::Mir, Emit::Ssa] {
+            for required in [
+                "InvariantScalar",
+                "scalar_side",
+                "Allocate",
+                "For",
+                "StridedLoad",
+                "Multiply",
+                "InitializeNext",
+                "YieldOwner",
+            ] {
+                assert!(
+                    a.dumps[&dump].contains(required),
+                    "{name} {dump:?} {required}"
+                );
+            }
+            assert!(!a.dumps[&dump].contains("ShapeMismatch"));
+        }
+        for region in a.llvm.split("; ElementwiseBegin ").skip(1) {
+            let region = region.split("; ElementwiseEnd ").next().unwrap();
+            assert!(!region.contains("shape_mismatch"));
+            assert_eq!(region.matches("_value = load ").count(), 1);
+            assert_eq!(region.matches("_allocated = call ").count(), 1);
+            assert!(
+                region.find("_allocated = call").unwrap() < region.find("_value = load").unwrap()
+            );
+            assert!(region.contains("mul.with.overflow.") || region.contains(" = fmul "));
+            for forbidden in [
+                "nsw",
+                "nuw",
+                "noalias",
+                "inbounds",
+                "fmul fast",
+                "@aether_free",
+                "@aether_relocate",
+            ] {
+                assert!(!region.contains(forbidden), "{name} {forbidden}");
+            }
+            if name == "matrix_transposed" {
+                for required in [
+                    "RowStride",
+                    "ColumnStride",
+                    "_Rows_index = phi",
+                    "_Columns_index = phi",
+                ] {
+                    assert!(region.contains(required));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn vertical28_noninvalidating_scalar_effects_follow_existing_alias_policy() {
+    for (ty, index) in [("Vector<int,Row>", "1"), ("Matrix<int>", "1,1")] {
+        let source = format!(
+            "int mutate(ref mut int s){{*s=9;return 2;}}int main(){{{ty}a=[1];{ty}b=a*mutate(&mut a[{index}]);if(a[{index}]!=9){{return 1;}}return b[{index}]-18;}}"
+        );
+        let c = compile_source(&SourceFile::new("mutation.ae", source), &[]).unwrap();
+        assert_eq!(v23_execute(&v27_instrument(&c.llvm, 2)).code(), Some(0));
     }
 }

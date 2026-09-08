@@ -1,0 +1,15 @@
+int scalar(ref mut int state){*state=*state*10+1;return 3;}
+Vector<int,Row> vector(ref mut int state){*state=*state*10+2;Vector<int,Row>a=[2,4];return a;}
+Matrix<int> matrix(ref mut int state){*state=*state*10+2;Matrix<int>a=[2,4];return a;}
+int advance(ref mut usize i){*i=1;return 2;}
+Vector<int,Row> change(ref mut int s){*s=9;Vector<int,Row>a=[2,4];return a;}
+int main(){int state=0;
+Vector<int,Row>a=scalar(&mut state)*vector(&mut state);if(state!=12){return 1;}
+state=0;Vector<int,Row>b=vector(&mut state)*scalar(&mut state);if(state!=21){return 2;}
+state=0;Matrix<int>c=scalar(&mut state)*matrix(&mut state);if(state!=12){return 3;}
+state=0;Matrix<int>d=matrix(&mut state)*scalar(&mut state);if(state!=21){return 4;}
+Array<Matrix<int>> items={ [1,2;3,4],[10,20;30,40] };usize i=0;
+Matrix<int>e=items[i]*advance(&mut i);if(e[2,2]!=8){return 5;}
+i=0;Matrix<int>f=advance(&mut i)*items[i];if(f[2,2]!=80){return 6;}
+int s=3;Vector<int,Row>g=s*change(&mut s);if(g[2]!=12){return 7;}if(s!=9){return 8;}
+return a[2]+b[2]+c[1,2]+d[1,2]-48;}

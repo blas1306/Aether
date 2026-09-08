@@ -1,0 +1,3 @@
+int main(){Vector<double,Row>a=[1.5,2.5];Vector<double,Row>b=2*a;Vector<double,Row>c=a*2;
+Matrix<float>d=[1.5,2.5];Matrix<float>e=2*d;Matrix<float>f=d*2;
+if(b[1]!=3.0){return 1;}if(c[2]!=5.0){return 2;}if(e[1,1]!=3.0){return 3;}if(f[1,2]!=5.0){return 4;}return 0;}

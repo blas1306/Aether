@@ -1,0 +1,6 @@
+struct Holder { Matrix<int> m; Vector<int,Row> v; }
+int main(){Array<Matrix<int>>a={ [1,2;3,4] };Matrix<int>b=2*a[0];
+Array<Vector<int,Row>>v={ [2,3] };Vector<int,Row>w=v[0]*3;
+Holder h=Holder([1,2;3,4],[2,3]);Matrix<int>m=2*h.m;Vector<int,Row>n=h.v*3;
+if(m[2,2]!=8){return 3;}if(n[2]!=9){return 4;}
+if(b[2,2]!=8){return 1;}if(w[2]!=9){return 2;}return a[0][1,1]+v[0][1]-3;}

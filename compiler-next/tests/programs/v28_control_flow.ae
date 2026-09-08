@@ -1,0 +1,10 @@
+Vector<int,Row> scale(VectorView<int,Row>a){return 2*a;}
+Matrix<int> scale_matrix(MatrixView<int>a){return a*3;}
+int branch(bool flag){Vector<int,Row>a=[1,2];Vector<int,Row>b=scale(vector_view(a));
+if(flag){Vector<int,Row>c=b*3;return c[2]-12;}
+Vector<int,Row>c=2*(a*3);if(c[2]!=12){return 1;}
+Matrix<int>m=[1,2];Matrix<int>n=scale_matrix(matrix_view(m));
+int i=0;while(i<3){Vector<int,Row>d=2*a;if(d[2]!=4){return 2;}i=i+1;}
+return n[1,2]-6;}
+int conditional(bool flag){Vector<int,Row>a=[1];Vector<int,Row>b=2*a;if(flag){Vector<int,Row>c=b;if(c[1]!=2){return 1;}}return 0;}
+int main(){return branch(true)+branch(false)+conditional(true)+conditional(false);}

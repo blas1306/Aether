@@ -1,0 +1,12 @@
+Vector<int,Row> vector(ref mut int state){*state=*state*10+2;Vector<int,Row>a=[];return a;}
+Matrix<int> matrix(ref mut int state){*state=*state*10+2;Matrix<int>a=[];return a;}
+int scalar(ref mut int state){*state=*state*10+1;return 2;}
+int main(){int state=0;Vector<int,Row>a=[];Matrix<int>b=[];
+Vector<int,Row>c=scalar(&mut state)*a;Vector<int,Row>d=a*scalar(&mut state);
+Matrix<int>e=scalar(&mut state)*b;Matrix<int>f=b*scalar(&mut state);
+if(dimension(c)!=0){return 1;}if(dimension(d)!=0){return 2;}if(rows(e)!=0){return 3;}if(columns(f)!=0){return 4;}
+if(state!=1111){return 5;}state=0;
+Vector<int,Row>g=scalar(&mut state)*vector(&mut state);if(state!=12){return 6;}state=0;
+Vector<int,Row>h=vector(&mut state)*scalar(&mut state);if(state!=21){return 7;}state=0;
+Matrix<int>i=scalar(&mut state)*matrix(&mut state);if(state!=12){return 8;}state=0;
+Matrix<int>j=matrix(&mut state)*scalar(&mut state);return state-21;}

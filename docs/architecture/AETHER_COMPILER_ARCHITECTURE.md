@@ -2071,3 +2071,32 @@ this vertical does not add a whole-program MIR/SSA borrow analysis. The closed
 region is deliberately specific to Add/Sub, not a generic loop optimizer or
 behavioral capability system. See [NEXT_VERTICAL_27_REPORT.md](NEXT_VERTICAL_27_REPORT.md)
 for the complete qualification and tradeoffs.
+
+
+## Confirmation 45 — scalar multiplication reuses verified initialization (V28)
+
+VectorScalarMultiply/MatrixScalarMultiply preserve source left/right expressions
+and a ScalarSide discriminant. The resolver borrows mathematical Places before
+value resolution can insert Move, and contextualizes only syntactic scalar
+literals. Lexical operand capture protects the left mathematical root across
+right scalar effects. Existing owners and explicit temporary owners share V27
+lowering and cleanup; scalar expressions use ordinary Copy lowering.
+
+ElementwiseKernel adds optional scalar_side and InvariantScalar to the closed
+MathStep language. Pairwise Add/Sub still require two descriptors and guards;
+scaling requires exactly one descriptor, one matching built-in scalar and no
+shape guard. Allocation and loop extents derive from the descriptor selected by
+source-side metadata. A complete canonical-tree comparison checks all loop,
+stride, scalar/trap and initialization instructions at both MIR and SSA borders.
+SSA's existing operand renaming, dependency walkers and kernel verification
+carry the new data without a second op-specific representation or trusted flag.
+
+The LLVM translator extends the same recursive region emitter: extract one
+descriptor, select its extents, bypass empty storage, allocate, iterate logical
+coordinates, and combine one strided load with the captured scalar using checked
+multiply or IEEE fmul. This introduces no second backend-only arithmetic loop.
+
+The initialization proof and lexical provenance authority remain V27's closed
+contracts. The operation-specific supports_builtin_multiply query does not
+expose a Numeric/Mul trait. Pairwise mathematical multiplication remains open.
+See [NEXT_VERTICAL_28_REPORT.md](NEXT_VERTICAL_28_REPORT.md) for qualification.

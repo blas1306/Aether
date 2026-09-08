@@ -1,0 +1,9 @@
+int main(){
+Matrix<int> a=[1,2,3;4,5,6;7,8,9]; VectorView<int,Column> c=column(a,2);
+Vector<int,Column> x=3*c;Vector<int,Column> y=c*3;
+Vector<int,Row> r=2*row(a,3);Vector<int,Column> z=column(a,2)*3;
+if(x[1]!=6){return 1;}if(x[2]!=15){return 2;}if(x[3]!=24){return 3;}
+if(y[1]!=6){return 4;}if(y[2]!=15){return 5;}if(y[3]!=24){return 6;}
+if(r[1]!=14){return 7;}if(r[3]!=18){return 8;}if(z[2]!=15){return 9;}
+return a[2,2]-5;
+}

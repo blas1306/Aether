@@ -918,6 +918,12 @@ impl TypeArena {
         self.is_numeric(id)
     }
 
+    /// Compiler-internal multiplication proof, restricted to concrete scalars.
+    #[must_use]
+    pub fn supports_builtin_multiply(&self, id: TypeId) -> bool {
+        self.is_numeric(id)
+    }
+
     #[must_use]
     pub fn is_numeric(&self, id: TypeId) -> bool {
         matches!(
