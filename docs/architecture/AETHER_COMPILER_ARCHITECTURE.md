@@ -1873,3 +1873,47 @@ empty, double transpose, generics, refs, conditional cleanup, aggregates and
 modules. Malformed HIR/MIR/SSA tests keep the semantic bridge explicit. See
 [NEXT_VERTICAL_22_REPORT.md](NEXT_VERTICAL_22_REPORT.md) for exact qualification,
 compilation snapshots, architectural limits and NEXT-VERTICAL-23 recommendation.
+
+
+## 40. NEXT-VERTICAL-23 implementation confirmation
+
+V23 interns TypeData::Matrix { element } and carries that identity through
+signatures, monomorphization, HIR, MIR, SSA and distinct M-prefixed structural
+mangling. Fixed storage admission reuses Storable without conflating Matrix
+with Array, List or Vector. Layout is three pointer-sized words; shape remains
+value metadata. Type properties, structural substitution and nesting compose.
+
+AstExprKind::MathematicalLiteral preserves rows. Context resolves VectorInit
+or MatrixInit only after checking row count and rectangularity. MatrixInit
+carries rows, columns, row_ends, element TypeId and row-major operands; row_ends
+retains source boundaries as verifier evidence, never runtime descriptor data.
+HIR/MIR/SSA independently check shape product, canonical empty shape, every
+row boundary, element typing and admission. MIR/SSA additionally require both
+allocation traps. Rows/Columns remain distinct operations.
+
+The existing Index place projection now carries a first index and optional
+column. IndexSemantics adds OneBased2D; the canonical container selects rank
+and base, and each verifier independently requires exactly one column iff
+the type is Matrix, two usize operands and bounds semantics. Operand walkers,
+substitution, lowering, SSA renaming and dominance checks visit both axes.
+Matrix is never lowered to chained one-dimensional indexing. Public raw views
+exclude both mathematical owner types at every semantic verification boundary.
+
+LLVM constructs {ptr,rows,columns} using the fixed allocation helper internally,
+checks rows*columns and byte size, and writes captured operands in row-major
+order. Four separate bounds branches precede unsigned subtraction and physical
+linearization. The immutable shape/allocation invariant proves the final offset
+cannot wrap. Reverse slot drop reuses recursive element glue, followed by one
+backing free. Source Matrix identity persists despite physical helper reuse.
+
+The audit found two evaluation details requiring explicit handling: Copy
+literal operands and the first Matrix index must be captured before subsequent
+expressions mutate source locals; an index expression must not consume its
+own Matrix owner before the actual access. Lowering snapshots Copy values and
+ownership rechecks the indexed root after evaluating both axes. Shape facts
+are lexical and conservatively discarded at control-flow boundaries/writable
+calls. SSA independently requires materialized Matrix construction results and
+owning element operands to transfer once, before ordinary root assignment/phis.
+These are bounded extensions of the existing model, without MemorySSA or new
+ownership states. See [NEXT_VERTICAL_23_REPORT.md](NEXT_VERTICAL_23_REPORT.md)
+for verification, evidence, compilation snapshots and accepted limitations.

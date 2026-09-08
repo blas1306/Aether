@@ -1,10 +1,67 @@
-# Aether NEXT-VERTICAL-22
+# Aether NEXT-VERTICAL-23
 
 This directory is the isolated Rust implementation of the first reconstruction
-slice. The current mathematical operation is the consuming Vector transpose of Vertical-22; the numbered
+slice. The current mathematical foundation is Matrix<T> with two-dimensional literals and checked one-based indexing; the numbered
 Vertical-9..17 sections below retain historical qualification context.
 It does not replace the production `aether` CLI or import any legacy
 Python object, JSON schema, Initial IR, or SSA representation.
+
+## Current mathematical foundation (V23)
+
+```aether
+Matrix<double> A = [1, 2, 3; 4, 5, 6];
+usize m = rows(A);
+usize n = columns(A);
+double last = A[m,n];
+A[1,2] = 20;
+ref double x = &A[1,1];
+ref mut double y = &mut A[2,3];
+```
+
+`Matrix<T>` is a distinct mathematical owner, never an alias for nested
+collections or vectors. Only T participates in canonical TypeId and structural
+mangling; shape is immutable runtime value metadata. Storable is required,
+including for symbolic `T:Storable`; Copy, Relocatable and Numeric are not
+required of the element. Matrix itself is non-Copy and needs drop.
+
+Brackets parse as `MathematicalLiteral { rows }`. Expected Vector context
+requires at most one nonempty row and resolves to VectorInit, preserving Row /
+Column identity and V22 consuming transpose. Expected Matrix context resolves
+to MatrixInit after rectangular-shape validation. Commas separate entries and
+semicolons separate rows. `[]` gives a 0x0 Matrix or dimension-zero Vector;
+`[1,2,3]` gives a 1x3 Matrix, `[1;2;3]` a 3x1 Matrix. Every row is nonempty and
+has the same width. A single trailing comma is accepted only before the final
+`]`, including `[1,2;3,4,]`; commas before semicolons and trailing row semicolons
+are rejected. Brackets without mathematical expected context are rejected.
+Array/List retain `{...}` and zero-based indexing.
+
+`A[i,j]` carries both usize indices in one place projection. Four ordered
+checks enforce `1 <= i <= rows(A)` and `1 <= j <= columns(A)` before subtraction,
+linearization or GEP. Copy reads/replacement and element references use the
+same checked path. Indexed extraction or replacement of non-Copy elements
+remains rejected. Constant bounds are diagnosed for direct lexical shape facts;
+control-flow joins, writable calls and indirect shapes use runtime checks.
+
+The bootstrap descriptor is `{ptr, i64 rows, i64 columns}` (24 bytes on x86_64),
+with exact fixed contiguous storage, no capacity or stride field. Physical
+storage is row-major: `(i-1)*columns+(j-1)`. Construction checks the shape product
+and allocation byte size. Those immutable invariants plus all four bounds
+prove the offset is representable and inside storage. Source operands are
+evaluated and captured in row-major order; owning values transfer once. Cleanup
+destroys slots in reverse row-major order and frees storage once. Empty matrices
+allocate nothing. Generic calls, returns, structs, enums and nesting reuse
+ordinary ownership and cleanup.
+
+Matrix semantics are layout-independent. Row-major is a bootstrap layout
+choice, not type identity. There is no Matrix arithmetic, multiplication,
+transpose, slicing, row/column view, layout parameter or MatrixView in V23.
+`transpose(Matrix)` is rejected by the Vector intrinsic. Raw View/ViewMut also
+reject Matrix because they erase shape and use zero-based indexing. Future
+MatrixView/transpose work must decide borrowing, strides and layout semantics.
+
+See [the V23 report](../docs/architecture/NEXT_VERTICAL_23_REPORT.md) for
+qualification, verifier corruption tests, allocation/drop instrumentation,
+compilation snapshots and remaining decisions.
 
 ## Pipeline and crates
 
@@ -34,7 +91,7 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-21 grammar
+## Vertical-23 grammar
 
 ```text
 program    := import* (alias | struct | enum | function)+ EOF
@@ -65,8 +122,8 @@ match-arm  := variant-path ("(" IDENT ("," IDENT)* ")")? "=>" block
 match-mode := "ref" "mut"?
 expression := integer | float | "true" | "false" | IDENT | apply
             | "{" (expression ("," expression)* ","?)? "}"
-            | "[" (expression ("," expression)* ","?)? "]"
-            | expression "." IDENT | expression "[" expression "]"
+            | mathematical-literal
+            | expression "." IDENT | expression "[" expression ("," expression)* "]"
             | "(" expression ")" | "-" expression
             | "&" expression | "&" "mut" expression | "*" expression
             | expression ("*" | "/" | "%" | "+" | "-" | "<" | "<=" | ">" | ">="
@@ -75,8 +132,10 @@ apply      := path ("<" type ("," type)* ">")? "(" arguments? ")"
             | type "." IDENT ("(" arguments? ")")?
 variant-path := type "." IDENT
 arguments  := expression ("," expression)*
-place      := IDENT (("." IDENT) | ("[" expression "]"))*
-            | "*" expression | "(" "*" expression ")" (("." IDENT) | ("[" expression "]"))*
+mathematical-literal := "[" (math-row (";" math-row)* ","?)? "]"
+math-row   := expression ("," expression)*
+place      := IDENT (("." IDENT) | ("[" expression ("," expression)* "]"))*
+            | "*" expression | "(" "*" expression ")" (("." IDENT) | ("[" expression ("," expression)* "]"))*
 ```
 
 Braces in expression position form a neutral `CollectionLiteral`; braces
@@ -184,7 +243,8 @@ mapping. Its current data variants are `Bool`, `Integer`, `Float`, nominal and
 applied aggregate forms, generic parameters, and
 `Reference { pointee: TypeId, mutable: bool }`, `Buffer { element: TypeId }`,
 `Array { element: TypeId }`, `List { element: TypeId }`,
-`Vector { element: TypeId, orientation: Orientation }`, and
+`Vector { element: TypeId, orientation: Orientation }`,
+`Matrix { element: TypeId }`, and
 `View { element: TypeId, mutable: bool }`. Repeated `ref T` resolution
 reuses one ID, while `ref T` and `ref mut T` remain distinct. HIR is the first canonical boundary;
 HIR, MIR, SSA, signatures, fields and enum payloads transport IDs rather than

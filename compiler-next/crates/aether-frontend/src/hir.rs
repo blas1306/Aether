@@ -147,7 +147,7 @@ pub fn layout_of(
             size: u64::from(target.pointer_width / 4),
             align: u64::from(target.pointer_width / 8),
         },
-        TypeData::List { .. } => TypeLayout {
+        TypeData::Matrix { .. } | TypeData::List { .. } => TypeLayout {
             size: 3 * u64::from(target.pointer_width / 8),
             align: u64::from(target.pointer_width / 8),
         },
@@ -213,6 +213,9 @@ pub fn format_type(
             format_type(types, *element, structs, enums),
             orientation
         ),
+        Some(TypeData::Matrix { element }) => {
+            format!("Matrix<{}>", format_type(types, *element, structs, enums))
+        }
         Some(TypeData::Array { element }) => {
             format!("Array<{}>", format_type(types, *element, structs, enums))
         }
@@ -408,6 +411,11 @@ impl TypedHir {
                     .types
                     .array_element(id)
                     .map(|element| (CollectionKind::Array, element))
+                    .or_else(|| {
+                        self.types
+                            .matrix_element(id)
+                            .map(|element| (CollectionKind::Matrix, element))
+                    })
                     .or_else(|| {
                         self.types
                             .vector_element(id)
@@ -680,6 +688,8 @@ pub enum HirPlaceProjection {
     Field(FieldId),
     Index {
         index: Box<HirExpr>,
+        /// Present exactly for `OneBased2D` Matrix projections.
+        column: Option<Box<HirExpr>>,
         element_type: TypeId,
         checked: bool,
         semantics: IndexSemantics,
@@ -729,6 +739,14 @@ pub enum HirExprKind {
         source_type: TypeId,
     },
     /// Expected-type-resolved `[...]` mathematical construction.
+    MatrixInit {
+        rows: u64,
+        columns: u64,
+        /// Retained source row boundaries, checked independently; no runtime field.
+        row_ends: Vec<u64>,
+        element_type: TypeId,
+        elements: Vec<HirExpr>,
+    },
     VectorInit {
         element_type: TypeId,
         elements: Vec<HirExpr>,
@@ -745,6 +763,12 @@ pub enum HirExprKind {
         initial: Box<HirExpr>,
     },
     /// Mathematical `dimension(vector-place)` query.
+    MatrixRows {
+        source: HirPlace,
+    },
+    MatrixColumns {
+        source: HirPlace,
+    },
     VectorDimension {
         source: HirPlace,
     },
@@ -1303,6 +1327,7 @@ pub fn collect_program_signatures(
         let (element, kind) = match data {
             TypeData::Buffer { element } | TypeData::View { element, .. } => (*element, 0_u8),
             TypeData::Vector { element, .. } => (*element, 3),
+            TypeData::Matrix { element } => (*element, 4),
             TypeData::Array { element } => (*element, 1),
             TypeData::List { element } => (*element, 2),
             _ => return None,
@@ -1311,6 +1336,7 @@ pub fn collect_program_signatures(
             1 => types.is_admitted_array_element(element),
             2 => types.is_admitted_list_element(element),
             3 => types.is_admitted_vector_element(element),
+            4 => types.is_admitted_matrix_element(element),
             _ => types.is_admitted_buffer_element(element),
         };
         (!admitted).then_some((container, element, kind))
@@ -1337,6 +1363,7 @@ pub fn collect_program_signatures(
                 1 => "E0304",
                 2 => "E0310",
                 3 => "E0325",
+                4 => "E0331",
                 _ => "E0280",
             },
             Phase::Semantic,
@@ -1349,7 +1376,9 @@ pub fn collect_program_signatures(
                 )
             } else {
                 collection_admission_message(
-                    if kind == 1 {
+                    if kind == 4 {
+                        "Matrix"
+                    } else if kind == 1 {
                         "Array"
                     } else if kind == 3 {
                         "Vector"
@@ -1358,7 +1387,9 @@ pub fn collect_program_signatures(
                     },
                     format_type(&types, element, &structs, &enums),
                     types.collection_element_admission(
-                        if kind == 3 {
+                        if kind == 4 {
+                            CollectionKind::Matrix
+                        } else if kind == 3 {
                             CollectionKind::Vector
                         } else if kind == 1 {
                             CollectionKind::Array
@@ -1706,6 +1737,9 @@ fn resolve_type_in_module(
         }
         return Ok(parameter);
     }
+    if ty.module.is_none() && ty.name == "Matrix" && ty.arguments.len() != 1 {
+        return Err(generic_arity(ty, 1));
+    }
     if ty.module.is_none() && ty.name == "Vector" {
         if ty.arguments.len() != 2 {
             return Err(generic_arity(ty, 2));
@@ -1789,7 +1823,9 @@ fn resolve_type_in_module(
             return Err(generic_arity(ty, expected));
         }
         let element = arguments[0];
-        if types.contains_generic(element) && !matches!(ty.name.as_str(), "Array" | "List") {
+        if types.contains_generic(element)
+            && !matches!(ty.name.as_str(), "Matrix" | "Array" | "List")
+        {
             return Err(Diagnostic::new(
                 "E0283",
                 Phase::Semantic,
@@ -1815,6 +1851,27 @@ fn resolve_type_in_module(
                         Phase::Semantic,
                         DiagnosticCategory::Type,
                         "Vertical-10 Buffer elements must be concrete Copy/no-drop values without borrowed or owning substructure",
+                        Some(ty.span),
+                    ))
+                }
+            }
+            "Matrix" => {
+                let deferred_aggregate = types
+                    .properties(element)
+                    .is_some_and(|properties| !properties.is_known)
+                    && (types.struct_id(element).is_some() || types.enum_id(element).is_some());
+                if types.is_admitted_matrix_element(element) || deferred_aggregate {
+                    Ok(types.intern_matrix(element))
+                } else {
+                    Err(Diagnostic::new(
+                        "E0331",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        collection_admission_message(
+                            "Matrix",
+                            format_type(types, element, &[], &[]),
+                            types.collection_element_admission(CollectionKind::Matrix, element),
+                        ),
                         Some(ty.span),
                     ))
                 }
@@ -1947,7 +2004,11 @@ fn intrinsic_type_arity(name: &str) -> Option<usize> {
     if name == "Vector" {
         return Some(2);
     }
-    matches!(name, "Buffer" | "Array" | "List" | "View" | "ViewMut").then_some(1)
+    matches!(
+        name,
+        "Matrix" | "Buffer" | "Array" | "List" | "View" | "ViewMut"
+    )
+    .then_some(1)
 }
 
 fn restricted_generic_argument(span: Span) -> Diagnostic {
@@ -2131,11 +2192,14 @@ fn validate_type_constraints(
             enums[id.0 as usize].name.as_str(),
         ),
         Some(
-            TypeData::Vector { element, .. }
+            TypeData::Matrix { element }
+            | TypeData::Vector { element, .. }
             | TypeData::Array { element }
             | TypeData::List { element },
         ) => {
-            let (kind, name, code) = if types.vector_element(ty).is_some() {
+            let (kind, name, code) = if types.matrix_element(ty).is_some() {
+                (CollectionKind::Matrix, "Matrix", "E0331")
+            } else if types.vector_element(ty).is_some() {
                 (CollectionKind::Vector, "Vector", "E0325")
             } else if types.array_element(ty).is_some() {
                 (CollectionKind::Array, "Array", "E0304")
@@ -2212,7 +2276,8 @@ fn infer_generic_arguments(
                 orientation: ro,
             }),
         ) if lo == ro => infer_generic_arguments(types, *left, *right, inferred),
-        (Some(TypeData::Array { element: left }), Some(TypeData::Array { element: right }))
+        (Some(TypeData::Matrix { element: left }), Some(TypeData::Matrix { element: right }))
+        | (Some(TypeData::Array { element: left }), Some(TypeData::Array { element: right }))
         | (Some(TypeData::List { element: left }), Some(TypeData::List { element: right })) => {
             infer_generic_arguments(types, *left, *right, inferred)
         }
@@ -2420,7 +2485,7 @@ fn compute_aggregate_layouts(
                     align: bytes,
                 }
             }
-            TypeData::List { .. } => {
+            TypeData::Matrix { .. } | TypeData::List { .. } => {
                 let bytes = u64::from(target.pointer_width / 8);
                 TypeLayout {
                     size: bytes * 3,
@@ -3017,11 +3082,16 @@ impl Monomorphizer<'_> {
                     HirPlaceProjection::Field(field) => Ok(HirPlaceProjection::Field(*field)),
                     HirPlaceProjection::Index {
                         index,
+                        column,
                         element_type,
                         checked,
                         semantics,
                     } => Ok(HirPlaceProjection::Index {
                         index: Box::new(self.substitute_expr(index, substitution)?),
+                        column: column
+                            .as_ref()
+                            .map(|c| self.substitute_expr(c, substitution).map(Box::new))
+                            .transpose()?,
                         element_type: self.substitute_type(
                             *element_type,
                             substitution,
@@ -3087,6 +3157,22 @@ impl Monomorphizer<'_> {
                 operand: Box::new(self.substitute_expr(operand, substitution)?),
                 source_type: self.substitute_type(*source_type, substitution, expression.span)?,
             },
+            HirExprKind::MatrixInit {
+                rows,
+                columns,
+                row_ends,
+                element_type,
+                elements,
+            } => HirExprKind::MatrixInit {
+                rows: *rows,
+                columns: *columns,
+                row_ends: row_ends.clone(),
+                element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+                elements: elements
+                    .iter()
+                    .map(|element| self.substitute_expr(element, substitution))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
             HirExprKind::VectorInit {
                 element_type,
                 elements,
@@ -3115,6 +3201,12 @@ impl Monomorphizer<'_> {
                 element_type: self.substitute_type(*element_type, substitution, expression.span)?,
                 length: Box::new(self.substitute_expr(length, substitution)?),
                 initial: Box::new(self.substitute_expr(initial, substitution)?),
+            },
+            HirExprKind::MatrixRows { source } => HirExprKind::MatrixRows {
+                source: self.substitute_place(source, substitution)?,
+            },
+            HirExprKind::MatrixColumns { source } => HirExprKind::MatrixColumns {
+                source: self.substitute_place(source, substitution)?,
             },
             HirExprKind::VectorDimension { source } => HirExprKind::VectorDimension {
                 source: self.substitute_place(source, substitution)?,
@@ -3268,6 +3360,7 @@ fn type_depth(types: &TypeArena, ty: TypeId) -> usize {
         Some(TypeData::Reference { pointee, .. }) => 1 + type_depth(types, *pointee),
         Some(
             TypeData::Buffer { element }
+            | TypeData::Matrix { element }
             | TypeData::Vector { element, .. }
             | TypeData::Array { element }
             | TypeData::List { element }
@@ -3299,6 +3392,7 @@ fn type_contains(types: &TypeArena, outer: TypeId, needle: TypeId) -> bool {
             Some(TypeData::Reference { pointee, .. }) => type_contains(types, *pointee, needle),
             Some(
                 TypeData::Buffer { element }
+                | TypeData::Matrix { element }
                 | TypeData::Vector { element, .. }
                 | TypeData::Array { element }
                 | TypeData::List { element }
@@ -3364,7 +3458,7 @@ fn compute_concrete_layouts(
                     align: bytes,
                 })
             }
-            TypeData::List { .. } => {
+            TypeData::Matrix { .. } | TypeData::List { .. } => {
                 let bytes = u64::from(target.pointer_width / 8);
                 Some(TypeLayout {
                     size: bytes * 3,
@@ -3583,6 +3677,7 @@ struct OwnershipAnalysis<'a> {
     borrowed: Vec<BTreeSet<LocalId>>,
     storage_borrowed: Vec<BTreeSet<LocalId>>,
     buffer_lengths: Vec<Option<u64>>,
+    matrix_shapes: Vec<Option<(u64, u64)>>,
     storage_ranges: Vec<Vec<(LocalId, Option<u64>)>>,
     borrow_indices: Vec<Option<u64>>,
     storage_references: Vec<bool>,
@@ -3603,6 +3698,7 @@ fn synthesize_ownership(
         borrowed: Vec::new(),
         storage_borrowed: Vec::new(),
         buffer_lengths: vec![None; locals.len()],
+        matrix_shapes: vec![None; locals.len()],
         storage_ranges: Vec::new(),
         borrow_indices: vec![None; locals.len()],
         storage_references: vec![false; locals.len()],
@@ -3683,6 +3779,12 @@ impl OwnershipAnalysis<'_> {
         self.storage_borrowed.push(BTreeSet::new());
         self.storage_ranges.push(Vec::new());
         for statement in &mut block.statements {
+            if matches!(
+                statement.kind,
+                HirStmtKind::If { .. } | HirStmtKind::While { .. } | HirStmtKind::Match { .. }
+            ) {
+                self.matrix_shapes.fill(None);
+            }
             match &mut statement.kind {
                 HirStmtKind::Nop => {}
                 HirStmtKind::Local { local, initializer } => {
@@ -3700,6 +3802,7 @@ impl OwnershipAnalysis<'_> {
                     }
                     if !self.types.guarantees_copy(self.locals[local.0 as usize].ty) {
                         self.buffer_lengths[local.0 as usize] = self.known_length(initializer);
+                        self.matrix_shapes[local.0 as usize] = self.known_matrix_shape(initializer);
                         self.state[local.0 as usize] = OwnerState::Owned;
                         self.active.push(*local);
                     } else if self
@@ -3708,6 +3811,7 @@ impl OwnershipAnalysis<'_> {
                         .is_some()
                     {
                         self.buffer_lengths[local.0 as usize] = self.known_length(initializer);
+                        self.matrix_shapes[local.0 as usize] = self.known_matrix_shape(initializer);
                     }
                 }
                 HirStmtKind::Assign { place, value } => {
@@ -3726,6 +3830,7 @@ impl OwnershipAnalysis<'_> {
                         }
                         self.state[local.0 as usize] = OwnerState::Owned;
                         self.buffer_lengths[local.0 as usize] = self.known_length(value);
+                        self.matrix_shapes[local.0 as usize] = self.known_matrix_shape(value);
                     }
                 }
                 HirStmtKind::ListPush { target, value, .. } => {
@@ -3780,6 +3885,7 @@ impl OwnershipAnalysis<'_> {
                     let then_returns = definitely_returns(then_block);
                     self.state.clone_from(&before);
                     self.buffer_lengths.clone_from(&before_lengths);
+                    self.matrix_shapes.fill(None);
                     self.borrowed.clone_from(&borrowed);
                     if let Some(else_block) = else_block {
                         self.block(else_block, true)?;
@@ -3810,6 +3916,7 @@ impl OwnershipAnalysis<'_> {
                         };
                     }
                     self.borrowed = borrowed;
+                    self.matrix_shapes.fill(None);
                 }
                 HirStmtKind::While { condition, body } => {
                     // A loop can revisit pop with a shorter prefix. Fixed-size
@@ -3841,6 +3948,7 @@ impl OwnershipAnalysis<'_> {
                             };
                     }
                     self.state = before;
+                    self.matrix_shapes.fill(None);
                 }
                 HirStmtKind::Match {
                     mode,
@@ -3859,6 +3967,7 @@ impl OwnershipAnalysis<'_> {
                     for arm in arms {
                         self.state.clone_from(&before);
                         self.buffer_lengths.clone_from(&before_lengths);
+                        self.matrix_shapes.fill(None);
                         let active_start = self.active.len();
                         for binding in &arm.bindings {
                             if !self.types.guarantees_copy(binding.ty) {
@@ -3919,6 +4028,7 @@ impl OwnershipAnalysis<'_> {
                     }
                     self.state = continuing.unwrap_or(before);
                     self.buffer_lengths = continuing_lengths.unwrap_or(before_lengths);
+                    self.matrix_shapes.fill(None);
                 }
             }
         }
@@ -4042,7 +4152,8 @@ impl OwnershipAnalysis<'_> {
                 self.expr(length)?;
                 self.expr(initial)
             }
-            HirExprKind::VectorInit { elements, .. }
+            HirExprKind::MatrixInit { elements, .. }
+            | HirExprKind::VectorInit { elements, .. }
             | HirExprKind::ArrayInit { elements, .. }
             | HirExprKind::ListInit { elements, .. } => {
                 for element in elements {
@@ -4050,11 +4161,20 @@ impl OwnershipAnalysis<'_> {
                 }
                 Ok(())
             }
-            HirExprKind::VectorDimension { source }
+            HirExprKind::MatrixRows { source }
+            | HirExprKind::MatrixColumns { source }
+            | HirExprKind::VectorDimension { source }
             | HirExprKind::ArrayLength { source }
             | HirExprKind::ListLength { source }
             | HirExprKind::ListCapacity { source } => self.place(source, expr.span),
             HirExprKind::Call { args, .. } => {
+                if args.iter().any(|a| {
+                    self.types
+                        .reference_info(a.ty)
+                        .is_some_and(|(_, mutable)| mutable)
+                }) {
+                    self.matrix_shapes.fill(None);
+                }
                 // Earlier borrowed arguments remain live while later arguments
                 // are evaluated (which can now extract an owning storage slot).
                 self.borrowed.push(BTreeSet::new());
@@ -4156,10 +4276,32 @@ impl OwnershipAnalysis<'_> {
         }
         for (position, projection) in place.projections.iter().enumerate() {
             if let HirPlaceProjection::Index {
-                index, semantics, ..
+                index,
+                column,
+                semantics,
+                ..
             } = projection
             {
                 self.expr(index)?;
+                if let Some(column) = column {
+                    self.expr(column)?;
+                    let shape = match place.base {
+                        HirPlaceBase::Local(local) if position == 0 => {
+                            self.matrix_shapes[local.0 as usize]
+                        }
+                        _ => None,
+                    };
+                    for (axis, expr, extent) in [
+                        ("row", index.as_ref(), shape.map(|s| s.0)),
+                        ("column", column.as_ref(), shape.map(|s| s.1)),
+                    ] {
+                        if let HirExprKind::Int(value) = expr.kind
+                            && (value == 0 || extent.is_some_and(|n| value > i128::from(n)))
+                        {
+                            return Err(self.error("E0296", format!("IndexOutOfBounds: constant Matrix {axis} {value}, extent {extent:?}"), expr.span));
+                        }
+                    }
+                }
                 if let HirExprKind::Int(value) = index.kind
                     && let HirPlaceBase::Local(local) = place.base
                     && position == 0
@@ -4173,6 +4315,19 @@ impl OwnershipAnalysis<'_> {
                     ));
                 }
             }
+        }
+        if place.projections.iter().any(|p| {
+            matches!(
+                p,
+                HirPlaceProjection::Index {
+                    column: Some(_),
+                    ..
+                }
+            )
+        }) && let Some(owner) = self.owner_of_place(place)
+            && !self.types.guarantees_copy(self.locals[owner.0 as usize].ty)
+        {
+            self.require_owned(owner, span)?;
         }
         Ok(())
     }
@@ -4233,7 +4388,13 @@ impl OwnershipAnalysis<'_> {
                         .types
                         .list_element(self.locals[local.0 as usize].ty)
                         .is_some()
-                    && let [HirPlaceProjection::Index { index, .. }] = place.projections.as_slice()
+                    && let [
+                        HirPlaceProjection::Index {
+                            index,
+                            column: None,
+                            ..
+                        },
+                    ] = place.projections.as_slice()
                     && let HirExprKind::Int(index) = index.kind
                 {
                     u64::try_from(index).ok()
@@ -4254,6 +4415,16 @@ impl OwnershipAnalysis<'_> {
             HirExprKind::View { source, .. } => self.types.list_element(source.ty).is_some(),
             HirExprKind::Local(local) => self.storage_references[local.0 as usize],
             _ => false,
+        }
+    }
+
+    fn known_matrix_shape(&self, expr: &HirExpr) -> Option<(u64, u64)> {
+        match &expr.kind {
+            HirExprKind::MatrixInit { rows, columns, .. } => Some((*rows, *columns)),
+            HirExprKind::Move(local) | HirExprKind::Local(local) => {
+                self.matrix_shapes[local.0 as usize]
+            }
+            _ => None,
         }
     }
 
@@ -4987,10 +5158,30 @@ impl Analyzer<'_> {
                 self.project_field(&mut place, name, *name_span)?;
                 Ok(place)
             }
-            AstExprKind::Index { base, index } => {
+            AstExprKind::Index { base, indices } => {
                 let mut place = self.resolve_expr_place(base, writable)?;
+                let rank = if self.types.matrix_element(place.ty).is_some() {
+                    2
+                } else {
+                    1
+                };
+                if indices.len() != rank {
+                    return Err(vec![Diagnostic::new(
+                        "E0334",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        format!(
+                            "{} indexing expects {rank} indices, found {}",
+                            self.type_name(place.ty),
+                            indices.len()
+                        ),
+                        Some(expression.span),
+                    )]);
+                }
                 let (element_type, mutable) =
                     if let Some(element) = self.types.buffer_element(place.ty) {
+                        (element, true)
+                    } else if let Some(element) = self.types.matrix_element(place.ty) {
                         (element, true)
                     } else if let Some(element) = self.types.vector_element(place.ty) {
                         (element, true)
@@ -5021,9 +5212,17 @@ impl Analyzer<'_> {
                         Some(expression.span),
                     )]);
                 }
-                let index = self.expression(index, Some(TypeId::USIZE))?.expr;
+                let index = self.expression(&indices[0], Some(TypeId::USIZE))?.expr;
+                let column = indices
+                    .get(1)
+                    .map(|c| {
+                        self.expression(c, Some(TypeId::USIZE))
+                            .map(|c| Box::new(c.expr))
+                    })
+                    .transpose()?;
                 place.projections.push(HirPlaceProjection::Index {
                     index: Box::new(index),
+                    column,
                     element_type,
                     checked: true,
                     semantics: self
@@ -5174,8 +5373,8 @@ impl Analyzer<'_> {
                 expected,
             );
         }
-        if let AstExprKind::VectorLiteral(elements) = &e.kind {
-            return self.vector_literal(elements, e.span, expected);
+        if let AstExprKind::MathematicalLiteral { rows } = &e.kind {
+            return self.mathematical_literal(rows, e.span, expected);
         }
         if let AstExprKind::CollectionLiteral(elements) = &e.kind {
             return self.collection_literal(elements, e.span, expected);
@@ -5246,6 +5445,15 @@ impl Analyzer<'_> {
                 }
                 if callee == "transpose" {
                     return self.vector_transpose(type_arguments, args, e.span, expected);
+                }
+                if callee == "rows" || callee == "columns" {
+                    return self.matrix_query(
+                        callee == "columns",
+                        type_arguments,
+                        args,
+                        e.span,
+                        expected,
+                    );
                 }
                 if callee == "dimension" {
                     return self.vector_dimension(type_arguments, args, e.span, expected);
@@ -5559,6 +5767,7 @@ impl Analyzer<'_> {
                 | TypeData::Buffer { .. }
                 | TypeData::Vector { .. }
                 | TypeData::Array { .. }
+                | TypeData::Matrix { .. }
                 | TypeData::List { .. }
                 | TypeData::View { .. },
             )
@@ -5682,38 +5891,121 @@ impl Analyzer<'_> {
         })
     }
 
-    fn vector_literal(
+    fn mathematical_literal(
         &mut self,
-        elements: &[AstExpr],
+        rows: &[Vec<AstExpr>],
         span: Span,
         expected: Option<TypeId>,
     ) -> Result<Checked, Vec<Diagnostic>> {
-        let Some((ty, element_type)) =
-            expected.and_then(|ty| self.types.vector_element(ty).map(|element| (ty, element)))
-        else {
-            return Err(vec![Diagnostic::new(
-                "E0326",
+        let fail = |code, message: String, span| {
+            vec![Diagnostic::new(
+                code,
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                "vector literal requires an expected Vector<T, Row> or Vector<T, Column> type",
+                message,
                 Some(span),
-            )]);
+            )]
         };
-        let elements = elements
+        let Some(ty) = expected else {
+            return Err(fail(
+                "E0326",
+                "mathematical literal requires a Matrix or Vector expected type".into(),
+                span,
+            ));
+        };
+        let matrix = self.types.matrix_element(ty);
+        let Some(element_type) = matrix.or_else(|| self.types.vector_element(ty)) else {
+            return Err(fail(
+                "E0326",
+                "mathematical literal requires a Matrix or Vector expected type".into(),
+                span,
+            ));
+        };
+        if matrix.is_none() && rows.len() > 1 {
+            return Err(fail(
+                "E0332",
+                "multi-row mathematical literal cannot initialize Vector".into(),
+                span,
+            ));
+        }
+        let columns = rows.first().map_or(0, Vec::len);
+        for (i, row) in rows.iter().enumerate() {
+            if row.len() != columns {
+                return Err(fail(
+                    "E0333",
+                    format!(
+                        "ragged Matrix row {}: expected {columns} columns, found {}",
+                        i + 1,
+                        row.len()
+                    ),
+                    row.first().map_or(span, |e| e.span),
+                ));
+            }
+        }
+        let elements = rows
             .iter()
+            .flatten()
             .map(|e| self.expression(e, Some(element_type)).map(|c| c.expr))
             .collect::<Result<Vec<_>, _>>()?;
+        let kind = if matrix.is_some() {
+            HirExprKind::MatrixInit {
+                element_type,
+                elements,
+                rows: rows.len() as u64,
+                columns: columns as u64,
+                row_ends: (1..=rows.len()).map(|r| (r * columns) as u64).collect(),
+            }
+        } else {
+            HirExprKind::VectorInit {
+                element_type,
+                elements,
+            }
+        };
         Ok(Checked {
-            expr: HirExpr {
-                kind: HirExprKind::VectorInit {
-                    element_type,
-                    elements,
-                },
-                ty,
-                span,
-            },
+            expr: HirExpr { kind, ty, span },
             constant: None,
         })
+    }
+
+    fn matrix_query(
+        &mut self,
+        columns: bool,
+        type_arguments: &[AstType],
+        args: &[AstExpr],
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        let invalid = || {
+            vec![Diagnostic::new(
+                "E0335",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "rows/columns expects exactly one Matrix place and no type arguments",
+                Some(span),
+            )]
+        };
+        if !type_arguments.is_empty() || args.len() != 1 {
+            return Err(invalid());
+        }
+        let source = self.resolve_expr_place(&args[0], false)?;
+        if self.types.matrix_element(source.ty).is_none() {
+            return Err(invalid());
+        }
+        self.coerce(
+            Checked {
+                expr: HirExpr {
+                    kind: if columns {
+                        HirExprKind::MatrixColumns { source }
+                    } else {
+                        HirExprKind::MatrixRows { source }
+                    },
+                    ty: TypeId::USIZE,
+                    span,
+                },
+                constant: None,
+            },
+            expected,
+        )
     }
 
     fn vector_transpose(
@@ -5739,6 +6031,11 @@ impl Analyzer<'_> {
         }
         // Derive orientation from the operand, independently of destination context.
         let operand = self.expression(&args[0], None)?.expr;
+        if self.types.matrix_element(operand.ty).is_some() {
+            return Err(invalid(
+                "Matrix transpose is not implemented; transpose accepts only Vector",
+            ));
+        }
         let Some(TypeData::Vector {
             element,
             orientation,
@@ -6071,11 +6368,10 @@ impl Analyzer<'_> {
             )]);
         }
         let source = self.resolve_expr_place(&args[0], mutable)?;
-        let Some(element) = self
-            .types
-            .owning_contiguous_element(source.ty)
-            .filter(|_| self.types.vector_element(source.ty).is_none())
-        else {
+        let Some(element) = self.types.owning_contiguous_element(source.ty).filter(|_| {
+            self.types.vector_element(source.ty).is_none()
+                && self.types.matrix_element(source.ty).is_none()
+        }) else {
             return Err(vec![Diagnostic::new(
                 "E0289",
                 Phase::Semantic,
@@ -7159,6 +7455,7 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
         TypeData::Buffer { element } | TypeData::View { element, .. } => {
             !h.types.is_admitted_buffer_element(*element)
         }
+        TypeData::Matrix { element } => !h.types.is_admitted_matrix_element(*element),
         TypeData::Vector { element, .. } => !h.types.is_admitted_vector_element(*element),
         TypeData::Array { element } => !h.types.is_admitted_array_element(*element),
         TypeData::List { element } => !h.types.is_admitted_list_element(*element),
@@ -7583,6 +7880,26 @@ fn verify_expr(
                 ));
             }
         }
+        HirExprKind::MatrixInit {
+            rows,
+            columns,
+            row_ends,
+            element_type,
+            elements,
+        } => {
+            for element in elements {
+                verify_expr(element, f, sigs, structs, enums, types, fail)?;
+            }
+            if !valid_matrix_literal_shape(*rows, *columns, row_ends, elements.len())
+                || types.matrix_element(e.ty) != Some(*element_type)
+                || elements.iter().any(|element| element.ty != *element_type)
+                || !types.is_admitted_matrix_element(*element_type)
+            {
+                return Err(fail(
+                    "HIR Matrix literal construction contract invalid".into(),
+                ));
+            }
+        }
         HirExprKind::VectorInit {
             element_type,
             elements,
@@ -7629,6 +7946,12 @@ fn verify_expr(
                 || !types.guarantees_copy(*element_type)
             {
                 return Err(fail("HIR Array fill construction contract invalid".into()));
+            }
+        }
+        HirExprKind::MatrixRows { source } | HirExprKind::MatrixColumns { source } => {
+            verify_place(source, f, sigs, structs, enums, types, fail)?;
+            if types.matrix_element(source.ty).is_none() || e.ty != TypeId::USIZE {
+                return Err(fail("HIR Matrix shape contract invalid".into()));
             }
         }
         HirExprKind::VectorDimension { source } => {
@@ -7734,10 +8057,10 @@ fn verify_expr(
         }
         HirExprKind::View { source, mutable } => {
             verify_place(source, f, sigs, structs, enums, types, fail)?;
-            let Some(element) = types
-                .owning_contiguous_element(source.ty)
-                .filter(|_| types.vector_element(source.ty).is_none())
-            else {
+            let Some(element) = types.owning_contiguous_element(source.ty).filter(|_| {
+                types.vector_element(source.ty).is_none()
+                    && types.matrix_element(source.ty).is_none()
+            }) else {
                 return Err(fail("HIR View source is not Buffer/Array/List".into()));
             };
             if types.view_info(e.ty) != Some((element, *mutable)) {
@@ -7956,19 +8279,26 @@ fn verify_place(
             }
             HirPlaceProjection::Index {
                 index,
+                column,
                 element_type,
                 checked,
                 semantics,
             } => {
                 verify_expr(index, function, sigs, structs, enums, types, fail)?;
+                if let Some(column) = column {
+                    verify_expr(column, function, sigs, structs, enums, types, fail)?;
+                }
                 let element = types
                     .buffer_element(ty)
                     .or_else(|| types.array_element(ty))
                     .or_else(|| types.vector_element(ty))
+                    .or_else(|| types.matrix_element(ty))
                     .or_else(|| types.list_element(ty))
                     .or_else(|| types.view_info(ty).map(|(element, _)| element))
                     .ok_or_else(|| fail("HIR index projection has non-contiguous base".into()))?;
-                if index.ty != TypeId::USIZE
+                if column.is_some() != (types.matrix_element(ty).is_some())
+                    || column.as_ref().is_some_and(|c| c.ty != TypeId::USIZE)
+                    || index.ty != TypeId::USIZE
                     || element != *element_type
                     || !*checked
                     || types.index_semantics(ty) != Some(*semantics)
@@ -8025,6 +8355,16 @@ fn statement_returns(s: &HirStmt) -> bool {
 }
 fn definitely_returns(b: &HirBlock) -> bool {
     b.statements.last().is_some_and(statement_returns)
+}
+
+fn valid_matrix_literal_shape(rows: u64, columns: u64, row_ends: &[u64], count: usize) -> bool {
+    rows.checked_mul(columns) == u64::try_from(count).ok()
+        && (rows == 0) == (columns == 0)
+        && u64::try_from(row_ends.len()).ok() == Some(rows)
+        && row_ends
+            .iter()
+            .enumerate()
+            .all(|(i, end)| (i as u64 + 1).checked_mul(columns) == Some(*end))
 }
 
 #[cfg(test)]
@@ -8245,6 +8585,74 @@ mod tests {
             }
             let errors = verify_hir(&corrupt).unwrap_err();
             assert!(errors[0].message.contains("Vector transpose"), "{errors:?}");
+        }
+    }
+
+    #[test]
+    fn vertical23_hir_rejects_corrupt_matrix_contracts() {
+        let hir=check("int main(){Matrix<int> a=[1,2,3;4,5,6];usize n=rows(a);usize m=columns(a);int x=a[2,3];return x+int(n+m);}").unwrap();
+        for case in 0..8 {
+            let mut corrupt = hir.clone();
+            let mut changed = false;
+            for stmt in &mut corrupt.functions[0].body.statements {
+                if let HirStmtKind::Local { initializer, .. } = &mut stmt.kind {
+                    match (&mut initializer.kind, case) {
+                        (HirExprKind::MatrixInit { rows, columns, .. }, 0) => {
+                            std::mem::swap(rows, columns);
+                            changed = true;
+                        }
+                        (HirExprKind::MatrixInit { element_type, .. }, 1) => {
+                            *element_type = TypeId::BOOL;
+                            changed = true;
+                        }
+                        (HirExprKind::MatrixInit { row_ends, .. }, 2) => {
+                            row_ends[0] += 1;
+                            changed = true;
+                        }
+                        (
+                            HirExprKind::MatrixInit {
+                                element_type,
+                                elements,
+                                ..
+                            },
+                            3,
+                        ) => {
+                            initializer.kind = HirExprKind::VectorInit {
+                                element_type: *element_type,
+                                elements: elements.clone(),
+                            };
+                            changed = true;
+                        }
+                        (HirExprKind::MatrixRows { source }, 4) => {
+                            initializer.kind = HirExprKind::VectorDimension {
+                                source: source.clone(),
+                            };
+                            changed = true;
+                        }
+                        (HirExprKind::Load(place), 5..=7) => {
+                            for projection in &mut place.projections {
+                                if let HirPlaceProjection::Index {
+                                    column,
+                                    semantics,
+                                    checked,
+                                    ..
+                                } = projection
+                                {
+                                    match case {
+                                        5 => *column = None,
+                                        6 => *semantics = IndexSemantics::OneBased,
+                                        _ => *checked = false,
+                                    }
+                                    changed = true;
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            assert!(changed, "HIR {case}");
+            assert!(verify_hir(&corrupt).is_err(), "HIR {case}");
         }
     }
 

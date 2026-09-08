@@ -440,12 +440,14 @@ pub fn default_output(source: &Path) -> PathBuf {
 }
 
 fn temporary_path(extension: &str) -> PathBuf {
+    static NEXT_TEMPORARY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let sequence = NEXT_TEMPORARY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
     std::env::temp_dir().join(format!(
-        "aether-next-{}-{nonce}.{extension}",
+        "aether-next-{}-{nonce}-{sequence}.{extension}",
         std::process::id()
     ))
 }

@@ -159,6 +159,8 @@ pub enum PlaceProjection {
     Field(FieldId),
     Index {
         index: Operand,
+        /// Present exactly for `OneBased2D` Matrix projections.
+        column: Option<Operand>,
         element_type: TypeId,
         bounds_trap: TrapKind,
         semantics: IndexSemantics,
@@ -276,6 +278,16 @@ pub enum Rvalue {
         operand: Operand,
         source_type: TypeId,
     },
+    MatrixInit {
+        rows: u64,
+        columns: u64,
+        /// Retained source row boundaries, checked independently; no runtime field.
+        row_ends: Vec<u64>,
+        element_type: TypeId,
+        elements: Vec<Operand>,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
     VectorInit {
         element_type: TypeId,
         elements: Vec<Operand>,
@@ -294,6 +306,12 @@ pub enum Rvalue {
         initial: Operand,
         size_trap: TrapKind,
         failure_trap: TrapKind,
+    },
+    MatrixRows {
+        source: Place,
+    },
+    MatrixColumns {
+        source: Place,
     },
     VectorDimension {
         source: Place,
@@ -1138,6 +1156,36 @@ impl Builder<'_> {
                 }
                 Operand::Local(destination)
             }
+            HirExprKind::MatrixInit {
+                rows,
+                columns,
+                row_ends,
+                element_type,
+                elements,
+            } => {
+                let elements = elements
+                    .iter()
+                    .map(|element| self.lower_frozen_expr(element))
+                    .collect();
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::MatrixInit {
+                        rows: *rows,
+                        columns: *columns,
+                        row_ends: row_ends.clone(),
+                        element_type: *element_type,
+                        elements,
+                        size_trap: TrapKind::AllocationSizeOverflow,
+                        failure_trap: TrapKind::AllocationFailure,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
             HirExprKind::VectorInit {
                 element_type,
                 elements,
@@ -1206,6 +1254,32 @@ impl Builder<'_> {
                         size_trap: TrapKind::AllocationSizeOverflow,
                         failure_trap: TrapKind::AllocationFailure,
                     },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::MatrixRows { source } => {
+                let source = self.lower_place(source);
+                let destination = self.temporary(TypeId::USIZE);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::MatrixRows { source },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::MatrixColumns { source } => {
+                let source = self.lower_place(source);
+                let destination = self.temporary(TypeId::USIZE);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::MatrixColumns { source },
                     expression.span,
                 );
                 Operand::Local(destination)
@@ -1945,6 +2019,25 @@ impl Builder<'_> {
         let block = self.current.take().expect("current block is open");
         self.function.blocks[block.0 as usize].terminator = Some(terminator);
     }
+    // Snapshot Copy operands at their source evaluation point, before later
+    // arguments can mutate an address-taken local. Owning moves already materialize.
+    fn lower_frozen_expr(&mut self, expr: &HirExpr) -> Operand {
+        let value = self.lower_expr(expr);
+        if !self.types.is_copy(expr.ty) {
+            return value;
+        }
+        let local = self.temporary(expr.ty);
+        self.assign(
+            Place {
+                base: PlaceBase::Local(local),
+                projections: vec![],
+            },
+            Rvalue::Use(value),
+            expr.span,
+        );
+        Operand::Local(local)
+    }
+
     fn lower_place(&mut self, place: &HirPlace) -> Place {
         Place {
             base: match &place.base {
@@ -1961,11 +2054,17 @@ impl Builder<'_> {
                     HirPlaceProjection::Field(field) => PlaceProjection::Field(*field),
                     HirPlaceProjection::Index {
                         index,
+                        column,
                         element_type,
                         checked: _,
                         semantics,
                     } => PlaceProjection::Index {
-                        index: self.lower_expr(index),
+                        index: if column.is_some() {
+                            self.lower_frozen_expr(index)
+                        } else {
+                            self.lower_expr(index)
+                        },
+                        column: column.as_ref().map(|c| self.lower_expr(c)),
                         element_type: *element_type,
                         bounds_trap: TrapKind::IndexOutOfBounds,
                         semantics: *semantics,
@@ -2020,6 +2119,7 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
             TypeData::Buffer { element } | TypeData::View { element, .. } => {
                 !mir.types.is_admitted_buffer_element(*element)
             }
+            TypeData::Matrix { element } => !mir.types.is_admitted_matrix_element(*element),
             TypeData::Vector { element, .. } => !mir.types.is_admitted_vector_element(*element),
             TypeData::Array { element } => !mir.types.is_admitted_array_element(*element),
             TypeData::List { element } => !mir.types.is_admitted_list_element(*element),
@@ -2456,6 +2556,7 @@ fn verify_drop_flag_contract(
                     }
                 }
                 Rvalue::BufferAlloc { .. }
+                | Rvalue::MatrixInit { .. }
                 | Rvalue::VectorInit { .. }
                 | Rvalue::ArrayInit { .. }
                 | Rvalue::ArrayFill { .. }
@@ -2636,7 +2737,8 @@ fn verify_ownership(
                 Rvalue::BufferAlloc { .. } | Rvalue::ArrayFill { .. } => {
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
-                Rvalue::VectorInit { elements, .. }
+                Rvalue::MatrixInit { elements, .. }
+                | Rvalue::VectorInit { elements, .. }
                 | Rvalue::ArrayInit { elements, .. }
                 | Rvalue::ListInit { elements, .. } => {
                     consume_owned_operands(
@@ -2674,6 +2776,8 @@ fn verify_ownership(
                 Rvalue::Load(place)
                 | Rvalue::Borrow { place, .. }
                 | Rvalue::View { source: place, .. }
+                | Rvalue::MatrixRows { source: place }
+                | Rvalue::MatrixColumns { source: place }
                 | Rvalue::VectorDimension { source: place }
                 | Rvalue::ArrayLength { source: place }
                 | Rvalue::ListLength { source: place }
@@ -3047,6 +3151,30 @@ fn validate_rvalue(
                 return Err("MIR Vector transpose orientation/type contract invalid".into());
             }
         }
+        Rvalue::MatrixInit {
+            rows,
+            columns,
+            row_ends,
+            element_type,
+            elements,
+            size_trap,
+            failure_trap,
+        } => {
+            for element in elements {
+                validate_operand(function, element, initialized)?;
+            }
+            if !valid_matrix_literal_shape(*rows, *columns, row_ends, elements.len())
+                || types.matrix_element(destination) != Some(*element_type)
+                || elements
+                    .iter()
+                    .any(|element| operand_type(function, element).ok() != Some(*element_type))
+                || !types.is_admitted_matrix_element(*element_type)
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("MIR Matrix literal allocation contract invalid".into());
+            }
+        }
         Rvalue::VectorInit {
             element_type,
             elements,
@@ -3105,6 +3233,13 @@ fn validate_rvalue(
                 || *failure_trap != TrapKind::AllocationFailure
             {
                 return Err("MIR Array fill allocation contract invalid".into());
+            }
+        }
+        Rvalue::MatrixRows { source } | Rvalue::MatrixColumns { source } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            let source_ty = place_type(function, source, structs, types)?;
+            if destination != TypeId::USIZE || types.matrix_element(source_ty).is_none() {
+                return Err("MIR Matrix shape contract invalid".into());
             }
         }
         Rvalue::VectorDimension { source } => {
@@ -3266,7 +3401,10 @@ fn validate_rvalue(
             let source_ty = place_type(function, source, structs, types)?;
             let element = types
                 .owning_contiguous_element(source_ty)
-                .filter(|_| types.vector_element(source_ty).is_none())
+                .filter(|_| {
+                    types.vector_element(source_ty).is_none()
+                        && types.matrix_element(source_ty).is_none()
+                })
                 .ok_or_else(|| "MIR View source is not Buffer/Array/List".to_string())?;
             if types.view_info(destination) != Some((element, *mutable)) {
                 return Err("MIR View contract invalid".into());
@@ -3541,8 +3679,11 @@ fn validate_place_read(
         }
     }
     for projection in &place.projections {
-        if let PlaceProjection::Index { index, .. } = projection {
+        if let PlaceProjection::Index { index, column, .. } = projection {
             validate_operand(function, index, initialized)?;
+            if let Some(column) = column {
+                validate_operand(function, column, initialized)?;
+            }
         }
     }
     Ok(())
@@ -3592,6 +3733,7 @@ pub(crate) fn place_type(
             }
             PlaceProjection::Index {
                 index,
+                column,
                 element_type,
                 bounds_trap,
                 semantics,
@@ -3600,10 +3742,15 @@ pub(crate) fn place_type(
                     .buffer_element(ty)
                     .or_else(|| types.array_element(ty))
                     .or_else(|| types.vector_element(ty))
+                    .or_else(|| types.matrix_element(ty))
                     .or_else(|| types.list_element(ty))
                     .or_else(|| types.view_info(ty).map(|(element, _)| element))
                     .ok_or_else(|| "MIR index projection has non-contiguous base".to_string())?;
-                if operand_type(function, index)? != TypeId::USIZE
+                if column.is_some() != types.matrix_element(ty).is_some()
+                    || column
+                        .as_ref()
+                        .is_some_and(|c| operand_type(function, c).ok() != Some(TypeId::USIZE))
+                    || operand_type(function, index)? != TypeId::USIZE
                     || element != *element_type
                     || types.index_semantics(ty) != Some(*semantics)
                     || *bounds_trap != TrapKind::IndexOutOfBounds
@@ -4453,6 +4600,16 @@ fn verify_take_protocol(
         }
     }
     Ok(())
+}
+
+fn valid_matrix_literal_shape(rows: u64, columns: u64, row_ends: &[u64], count: usize) -> bool {
+    rows.checked_mul(columns) == u64::try_from(count).ok()
+        && (rows == 0) == (columns == 0)
+        && u64::try_from(row_ends.len()).ok() == Some(rows)
+        && row_ends
+            .iter()
+            .enumerate()
+            .all(|(i, end)| (i as u64 + 1).checked_mul(columns) == Some(*end))
 }
 
 #[cfg(test)]

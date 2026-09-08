@@ -1,0 +1,4 @@
+
+int main(){
+Matrix<double> a=[1,2;3,4];float x=2.5;Matrix<double> b=[x];return int(a[2,2]+b[1,1])-6;
+}

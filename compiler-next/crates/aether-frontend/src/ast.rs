@@ -305,8 +305,8 @@ pub enum AstExprKind {
     /// Collection literal. Its concrete collection kind is selected only from
     /// the expected semantic type; future `List<T>` can reuse this node.
     CollectionLiteral(Vec<AstExpr>),
-    /// Mathematical one-dimensional literal; semicolons are reserved for Matrix.
-    VectorLiteral(Vec<AstExpr>),
+    /// Mathematical literal preserving row boundaries until contextual shape validation.
+    MathematicalLiteral { rows: Vec<Vec<AstExpr>> },
     /// Unresolved name.
     Name(String),
     /// Unresolved direct call.
@@ -344,7 +344,7 @@ pub enum AstExprKind {
     /// container and contextualizes the index to `usize`.
     Index {
         base: Box<AstExpr>,
-        index: Box<AstExpr>,
+        indices: Vec<AstExpr>,
     },
     /// Prefix operation.
     Unary {

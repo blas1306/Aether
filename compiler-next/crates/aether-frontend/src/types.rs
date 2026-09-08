@@ -258,8 +258,12 @@ impl Orientation {
 /// Source index contract, selected by canonical container type.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IndexSemantics {
+    /// One-dimensional collection indexing.
     ZeroBased,
+    /// One-dimensional mathematical Vector indexing.
     OneBased,
+    /// Two ordered axes of a mathematical Matrix, both starting at one.
+    OneBased2D,
 }
 
 impl IndexSemantics {
@@ -267,7 +271,7 @@ impl IndexSemantics {
     pub fn contains(self, index: u64, extent: u64) -> bool {
         match self {
             Self::ZeroBased => index < extent,
-            Self::OneBased => index >= 1 && index <= extent,
+            Self::OneBased | Self::OneBased2D => index >= 1 && index <= extent,
         }
     }
 }
@@ -306,6 +310,10 @@ pub enum TypeData {
     /// Fixed-size language-level collection. It intentionally remains a
     /// distinct semantic type from the lower-level `Buffer<T>` substrate.
     Array {
+        element: TypeId,
+    },
+    /// Fixed owning mathematical matrix; runtime shape is value metadata.
+    Matrix {
         element: TypeId,
     },
     /// Fixed-dimensional mathematical owner, distinct from collections.
@@ -357,6 +365,7 @@ pub enum CollectionElementAdmission {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CollectionKind {
     Vector,
+    Matrix,
     Array,
     List,
 }
@@ -365,7 +374,7 @@ impl CollectionKind {
     #[must_use]
     pub fn requirements(self) -> &'static [Capability] {
         match self {
-            Self::Array | Self::Vector => &[Capability::Storable],
+            Self::Array | Self::Vector | Self::Matrix => &[Capability::Storable],
             Self::List => &[Capability::Storable, Capability::Relocatable],
         }
     }
@@ -435,6 +444,7 @@ impl fmt::Display for TypeData {
                 element,
                 orientation,
             } => write!(f, "Vector<{element},{orientation:?}>"),
+            Self::Matrix { element } => write!(f, "Matrix<{element}>"),
             Self::Array { element } => write!(f, "Array<{element}>"),
             Self::List { element } => write!(f, "List<{element}>"),
             Self::View { element, mutable } => write!(
@@ -649,6 +659,11 @@ impl TypeArena {
         self.intern(TypeData::Buffer { element })
     }
 
+    pub fn intern_matrix(&mut self, element: TypeId) -> TypeId {
+        self.intern(TypeData::Matrix { element })
+    }
+
+    #[must_use]
     pub fn intern_vector(&mut self, element: TypeId, orientation: Orientation) -> TypeId {
         self.intern(TypeData::Vector {
             element,
@@ -780,6 +795,7 @@ impl TypeArena {
             Some(TypeData::Reference { pointee, .. }) => self.contains_generic(*pointee),
             Some(
                 TypeData::Buffer { element }
+                | TypeData::Matrix { element }
                 | TypeData::Vector { element, .. }
                 | TypeData::Array { element }
                 | TypeData::List { element }
@@ -884,6 +900,14 @@ impl TypeArena {
     }
 
     #[must_use]
+    pub fn matrix_element(&self, id: TypeId) -> Option<TypeId> {
+        match self.get(id) {
+            Some(TypeData::Matrix { element }) => Some(*element),
+            _ => None,
+        }
+    }
+
+    #[must_use]
     pub fn vector_element(&self, id: TypeId) -> Option<TypeId> {
         match self.get(id) {
             Some(TypeData::Vector { element, .. }) => Some(*element),
@@ -895,6 +919,7 @@ impl TypeArena {
     pub fn index_semantics(&self, id: TypeId) -> Option<IndexSemantics> {
         match self.get(id)? {
             TypeData::Vector { .. } => Some(IndexSemantics::OneBased),
+            TypeData::Matrix { .. } => Some(IndexSemantics::OneBased2D),
             TypeData::Buffer { .. }
             | TypeData::Array { .. }
             | TypeData::List { .. }
@@ -925,6 +950,7 @@ impl TypeArena {
         self.buffer_element(id)
             .or_else(|| self.array_element(id))
             .or_else(|| self.vector_element(id))
+            .or_else(|| self.matrix_element(id))
             .or_else(|| self.list_element(id))
     }
 
@@ -999,6 +1025,7 @@ impl TypeArena {
                 needs_drop: false,
             },
             TypeData::Buffer { element }
+            | TypeData::Matrix { element }
             | TypeData::Vector { element, .. }
             | TypeData::Array { element }
             | TypeData::List { element } => {
@@ -1249,6 +1276,7 @@ impl TypeArena {
             }
             Some(
                 TypeData::Buffer { element }
+                | TypeData::Matrix { element }
                 | TypeData::Vector { element, .. }
                 | TypeData::Array { element }
                 | TypeData::List { element },
@@ -1359,6 +1387,12 @@ impl TypeArena {
     }
 
     #[must_use]
+    pub fn is_admitted_matrix_element(&self, id: TypeId) -> bool {
+        self.collection_element_admission(CollectionKind::Matrix, id)
+            == CollectionElementAdmission::Admitted
+    }
+
+    #[must_use]
     pub fn is_admitted_vector_element(&self, id: TypeId) -> bool {
         self.collection_element_admission(CollectionKind::Vector, id)
             == CollectionElementAdmission::Admitted
@@ -1420,6 +1454,7 @@ impl TypeArena {
             }
             Some(
                 TypeData::Buffer { element }
+                | TypeData::Matrix { element }
                 | TypeData::Vector { element, .. }
                 | TypeData::Array { element }
                 | TypeData::List { element },
@@ -1578,6 +1613,10 @@ impl TypeArena {
                 let element = self.substitute(element, substitution)?;
                 Ok(self.intern_vector(element, orientation))
             }
+            Some(TypeData::Matrix { element }) => {
+                let element = self.substitute(element, substitution)?;
+                Ok(self.intern_matrix(element))
+            }
             Some(TypeData::Array { element }) => {
                 let element = self.substitute(element, substitution)?;
                 Ok(self.intern_array(element))
@@ -1663,6 +1702,13 @@ impl TypeArena {
                         orientation,
                     })
                     .expect("monomorphizer interned substituted Vector"))
+            }
+            Some(TypeData::Matrix { element }) => {
+                let element = self.substituted_existing(element, substitution)?;
+                Ok(*self
+                    .ids
+                    .get(&TypeData::Matrix { element })
+                    .expect("monomorphizer interned substituted Matrix"))
             }
             Some(TypeData::Array { element }) => {
                 let element = self.substituted_existing(element, substitution)?;

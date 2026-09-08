@@ -1,0 +1,4 @@
+
+int main(){
+Matrix<int> a=[10,20,30,];return a[1,3]+int(rows(a)+columns(a))-34;
+}

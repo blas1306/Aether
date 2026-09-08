@@ -80,6 +80,8 @@ pub enum SsaPlaceProjection {
     Field(FieldId),
     Index {
         index: SsaOperand,
+        /// Present exactly for `OneBased2D` Matrix projections.
+        column: Option<SsaOperand>,
         element_type: TypeId,
         bounds_trap: TrapKind,
         semantics: IndexSemantics,
@@ -137,6 +139,16 @@ pub enum SsaOp {
         operand: SsaOperand,
         source_type: TypeId,
     },
+    MatrixInit {
+        rows: u64,
+        columns: u64,
+        /// Retained source row boundaries, checked independently; no runtime field.
+        row_ends: Vec<u64>,
+        element_type: TypeId,
+        elements: Vec<SsaOperand>,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
     VectorInit {
         element_type: TypeId,
         elements: Vec<SsaOperand>,
@@ -155,6 +167,12 @@ pub enum SsaOp {
         initial: SsaOperand,
         size_trap: TrapKind,
         failure_trap: TrapKind,
+    },
+    MatrixRows {
+        source: SsaPlace,
+    },
+    MatrixColumns {
+        source: SsaPlace,
     },
     VectorDimension {
         source: SsaPlace,
@@ -791,6 +809,26 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             operand: rename_operand(operand, stacks),
             source_type: *source_type,
         },
+        Rvalue::MatrixInit {
+            rows,
+            columns,
+            row_ends,
+            element_type,
+            elements,
+            size_trap,
+            failure_trap,
+        } => SsaOp::MatrixInit {
+            rows: *rows,
+            columns: *columns,
+            row_ends: row_ends.clone(),
+            element_type: *element_type,
+            elements: elements
+                .iter()
+                .map(|element| rename_operand(element, stacks))
+                .collect(),
+            size_trap: *size_trap,
+            failure_trap: *failure_trap,
+        },
         Rvalue::VectorInit {
             element_type,
             elements,
@@ -831,6 +869,12 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             initial: rename_operand(initial, stacks),
             size_trap: *size_trap,
             failure_trap: *failure_trap,
+        },
+        Rvalue::MatrixRows { source } => SsaOp::MatrixRows {
+            source: rename_place(source, stacks, mir),
+        },
+        Rvalue::MatrixColumns { source } => SsaOp::MatrixColumns {
+            source: rename_place(source, stacks, mir),
         },
         Rvalue::VectorDimension { source } => SsaOp::VectorDimension {
             source: rename_place(source, stacks, mir),
@@ -1047,11 +1091,13 @@ fn rename_place(place: &Place, stacks: &[Vec<ValueId>], mir: &MirFunction) -> Ss
                 PlaceProjection::Field(field) => SsaPlaceProjection::Field(*field),
                 PlaceProjection::Index {
                     index,
+                    column,
                     element_type,
                     bounds_trap,
                     semantics,
                 } => SsaPlaceProjection::Index {
                     index: rename_operand(index, stacks),
+                    column: column.as_ref().map(|c| rename_operand(c, stacks)),
                     element_type: *element_type,
                     bounds_trap: *bounds_trap,
                     semantics: *semantics,
@@ -1313,6 +1359,8 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
         | Rvalue::Drop { owner: place }
         | Rvalue::ConsumeEnum { owner: place }
         | Rvalue::View { source: place, .. }
+        | Rvalue::MatrixRows { source: place }
+        | Rvalue::MatrixColumns { source: place }
         | Rvalue::VectorDimension { source: place }
         | Rvalue::ArrayLength { source: place }
         | Rvalue::ListLength { source: place }
@@ -1326,7 +1374,8 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
             .into_iter()
             .chain(operand_local(initial))
             .collect(),
-        Rvalue::VectorInit { elements, .. }
+        Rvalue::MatrixInit { elements, .. }
+        | Rvalue::VectorInit { elements, .. }
         | Rvalue::ArrayInit { elements, .. }
         | Rvalue::ListInit { elements, .. } => elements.iter().filter_map(operand_local).collect(),
         Rvalue::HoleNext { hole: length } | Rvalue::TailIndex { length } => {
@@ -1388,15 +1437,15 @@ fn place_locals(function: &MirFunction, place: &Place) -> Vec<LocalId> {
         PlaceBase::Local(_) => Vec::new(),
         PlaceBase::Dereference { reference, .. } => operand_local(reference).into_iter().collect(),
     };
-    locals.extend(
-        place
-            .projections
-            .iter()
-            .filter_map(|projection| match projection {
-                PlaceProjection::Index { index, .. } => operand_local(index),
-                PlaceProjection::Field(_) => None,
-            }),
-    );
+    locals.extend(place.projections.iter().flat_map(|projection| {
+        match projection {
+            PlaceProjection::Index { index, column, .. } => operand_local(index)
+                .into_iter()
+                .chain(column.as_ref().and_then(operand_local))
+                .collect::<Vec<_>>(),
+            PlaceProjection::Field(_) => vec![],
+        }
+    }));
     locals
 }
 
@@ -1450,6 +1499,7 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
             TypeData::Buffer { element } | TypeData::View { element, .. } => {
                 !ssa.types.is_admitted_buffer_element(*element)
             }
+            TypeData::Matrix { element } => !ssa.types.is_admitted_matrix_element(*element),
             TypeData::Vector { element, .. } => !ssa.types.is_admitted_vector_element(*element),
             TypeData::Array { element } => !ssa.types.is_admitted_array_element(*element),
             TypeData::List { element } => !ssa.types.is_admitted_list_element(*element),
@@ -1888,6 +1938,7 @@ fn verify_ssa_function(
         }
     }
     verify_vector_transpose_ownership(function, fail)?;
+    verify_matrix_literal_ownership(function, types, fail)?;
     verify_take_protocol(function, types, fail)?;
     Ok(())
 }
@@ -2008,6 +2059,27 @@ fn verify_op(
                 return Err("SSA Vector transpose orientation/type contract invalid".into());
             }
         }
+        SsaOp::MatrixInit {
+            rows,
+            columns,
+            row_ends,
+            element_type,
+            elements,
+            size_trap,
+            failure_trap,
+        } => {
+            if !valid_matrix_literal_shape(*rows, *columns, row_ends, elements.len())
+                || types.matrix_element(result) != Some(*element_type)
+                || elements
+                    .iter()
+                    .any(|element| operand_ty(element).ok() != Some(*element_type))
+                || !types.is_admitted_matrix_element(*element_type)
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("SSA Matrix literal allocation contract invalid".into());
+            }
+        }
         SsaOp::VectorInit {
             element_type,
             elements,
@@ -2058,6 +2130,12 @@ fn verify_op(
                 || *failure_trap != TrapKind::AllocationFailure
             {
                 return Err("SSA Array fill allocation contract invalid".into());
+            }
+        }
+        SsaOp::MatrixRows { source } | SsaOp::MatrixColumns { source } => {
+            let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
+            if result != TypeId::USIZE || types.matrix_element(source_ty).is_none() {
+                return Err("SSA Matrix shape contract invalid".into());
             }
         }
         SsaOp::VectorDimension { source } => {
@@ -2198,7 +2276,10 @@ fn verify_op(
             let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
             let element = types
                 .owning_contiguous_element(source_ty)
-                .filter(|_| types.vector_element(source_ty).is_none())
+                .filter(|_| {
+                    types.vector_element(source_ty).is_none()
+                        && types.matrix_element(source_ty).is_none()
+                })
                 .ok_or_else(|| "SSA View source is not Buffer/Array/List".to_string())?;
             if types.view_info(result) != Some((element, *mutable)) {
                 return Err("SSA View contract invalid".into());
@@ -2491,6 +2572,7 @@ fn ssa_place_type(
             }
             SsaPlaceProjection::Index {
                 index,
+                column,
                 element_type,
                 bounds_trap,
                 semantics,
@@ -2499,10 +2581,15 @@ fn ssa_place_type(
                     .buffer_element(ty)
                     .or_else(|| types.array_element(ty))
                     .or_else(|| types.vector_element(ty))
+                    .or_else(|| types.matrix_element(ty))
                     .or_else(|| types.list_element(ty))
                     .or_else(|| types.view_info(ty).map(|(element, _)| element))
                     .ok_or_else(|| "SSA index projection has non-contiguous base".to_string())?;
-                if operand_ty(index)? != TypeId::USIZE
+                if column.is_some() != types.matrix_element(ty).is_some()
+                    || column
+                        .as_ref()
+                        .is_some_and(|c| operand_ty(c).ok() != Some(TypeId::USIZE))
+                    || operand_ty(index)? != TypeId::USIZE
                     || element != *element_type
                     || types.index_semantics(ty) != Some(*semantics)
                     || *bounds_trap != TrapKind::IndexOutOfBounds
@@ -2612,6 +2699,8 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         | SsaOp::Drop { owner: place }
         | SsaOp::ConsumeEnum { owner: place }
         | SsaOp::View { source: place, .. }
+        | SsaOp::MatrixRows { source: place }
+        | SsaOp::MatrixColumns { source: place }
         | SsaOp::VectorDimension { source: place }
         | SsaOp::ArrayLength { source: place }
         | SsaOp::ListLength { source: place }
@@ -2626,7 +2715,8 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         | SsaOp::ArrayFill {
             length, initial, ..
         } => vec![length, initial],
-        SsaOp::VectorInit { elements, .. }
+        SsaOp::MatrixInit { elements, .. }
+        | SsaOp::VectorInit { elements, .. }
         | SsaOp::ArrayInit { elements, .. }
         | SsaOp::ListInit { elements, .. } => elements.iter().collect(),
         SsaOp::HoleNext { hole: length } | SsaOp::TailIndex { length } => vec![length],
@@ -2677,15 +2767,14 @@ fn place_operands(place: &SsaPlace) -> Vec<&SsaOperand> {
             vec![reference]
         }
     };
-    operands.extend(
-        place
-            .projections
-            .iter()
-            .filter_map(|projection| match projection {
-                SsaPlaceProjection::Index { index, .. } => Some(index),
-                SsaPlaceProjection::Field(_) => None,
-            }),
-    );
+    operands.extend(place.projections.iter().flat_map(|projection| {
+        match projection {
+            SsaPlaceProjection::Index { index, column, .. } => std::iter::once(index)
+                .chain(column.iter())
+                .collect::<Vec<_>>(),
+            SsaPlaceProjection::Field(_) => vec![],
+        }
+    }));
     operands
 }
 
@@ -3206,6 +3295,72 @@ fn verify_vector_transpose_ownership(
     Ok(())
 }
 
+fn verify_matrix_literal_ownership(
+    function: &SsaFunction,
+    types: &TypeArena,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut owners = BTreeSet::new();
+    for instruction in function.blocks.iter().flat_map(|b| &b.instructions) {
+        let SsaOp::MatrixInit {
+            elements,
+            element_type,
+            ..
+        } = &instruction.op
+        else {
+            continue;
+        };
+        owners.insert(instruction.result);
+        if !types.is_copy(*element_type) {
+            for element in elements {
+                let SsaOperand::Value(source) = element else {
+                    return Err(fail(
+                        "SSA Matrix element must be a materialized owner".into(),
+                    ));
+                };
+                owners.insert(*source);
+            }
+        }
+    }
+    if owners.is_empty() {
+        return Ok(());
+    }
+    // Count once over the function, not once per transpose. SSA builder always
+    // materializes these temporary transfers before root assignment/phis.
+    let mut uses = BTreeMap::<ValueId, usize>::new();
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            for operand in op_operands(&instruction.op) {
+                if let SsaOperand::Value(value) = operand
+                    && owners.contains(value)
+                {
+                    *uses.entry(*value).or_default() += 1;
+                }
+            }
+        }
+        if let SsaTerminator::Return(SsaOperand::Value(value)) = &block.terminator
+            && owners.contains(value)
+        {
+            *uses.entry(*value).or_default() += 1;
+        }
+        if block
+            .phis
+            .iter()
+            .any(|p| p.incoming.iter().any(|(_, v)| owners.contains(v)))
+        {
+            return Err(fail(
+                "SSA Matrix literal owner must transfer before a phi".into(),
+            ));
+        }
+    }
+    if owners.iter().any(|owner| uses.get(owner) != Some(&1)) {
+        return Err(fail(
+            "SSA Matrix literal owner must transfer exactly once".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Validate the initialized-prefix transaction on the actual CFG. Every Take
 /// must be the single extraction between a fresh nonempty check and an
 /// immediate boundary commit. No slot handle can escape this three-op region.
@@ -3353,6 +3508,16 @@ fn verify_take_protocol(
         }
     }
     Ok(())
+}
+
+fn valid_matrix_literal_shape(rows: u64, columns: u64, row_ends: &[u64], count: usize) -> bool {
+    rows.checked_mul(columns) == u64::try_from(count).ok()
+        && (rows == 0) == (columns == 0)
+        && u64::try_from(row_ends.len()).ok() == Some(rows)
+        && row_ends
+            .iter()
+            .enumerate()
+            .all(|(i, end)| (i as u64 + 1).checked_mul(columns) == Some(*end))
 }
 
 #[cfg(test)]

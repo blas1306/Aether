@@ -1,0 +1,4 @@
+
+int main(){
+Matrix<int> a=[10,20,30;40,50,60];return a[2,3]+a[1,1]+int(rows(a)+columns(a))-75;
+}

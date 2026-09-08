@@ -410,3 +410,19 @@ live element borrows prevent consumption. No implicit orientation assignment is
 added. T: Storable suffices, including owning elements; no numeric capability
 is required. Transpose never conjugates. Borrowed VectorView transpose and
 Matrix transpose require separate contracts. See [the V22 report](NEXT_VERTICAL_22_REPORT.md).
+
+
+## NEXT-VERTICAL-23 — Matrix foundation implemented
+
+Matrix<T> is now a first-class mathematical type with runtime value shape,
+Storable elements, fixed contiguous ownership, `rows` / `columns` and checked
+one-based `A[i,j]` access. Mathematical brackets form a contextual family:
+Vector admits a single row; Matrix admits rectangular semicolon-separated rows,
+a one-row literal, a one-column literal and empty 0x0. Shape never enters TypeId.
+Array/List remain zero-based brace collections. Row-major physical storage is a
+bootstrap choice; mathematical identity is independent of layout and of any
+nested containers. Matrix arithmetic, transpose, MatrixView/strides, slicing,
+static shapes and numeric traits remain separate future work. V22 Vector
+transpose keeps its consuming O(1) contract and rejects Matrix.
+
+See [NEXT_VERTICAL_23_REPORT.md](NEXT_VERTICAL_23_REPORT.md).

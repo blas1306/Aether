@@ -1,0 +1,4 @@
+enum Boxed { Empty, Value(Matrix<int>) }
+int main(){
+Boxed a=Boxed.Value([10,20;30,40]);match(a){Boxed.Value(m)=>{return m[2,1]-30;}Boxed.Empty=>{return 1;}}
+}

@@ -1,0 +1,2 @@
+import storage;
+int main(){Matrix<int> a=storage.identity(storage.pair(10,20));Matrix<Buffer<int>> b=storage.identity(storage.pair(Buffer<int>(1,30),Buffer<int>(1,40)));return storage.read(&a,1,2)+b[1,2][0]-60;}

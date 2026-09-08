@@ -1,0 +1,4 @@
+
+int main(){
+Matrix<int> a=[]; return int(rows(a)+columns(a));
+}

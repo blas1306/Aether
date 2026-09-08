@@ -1,0 +1,4 @@
+
+int main(){
+Matrix<int> a=[10,20;30,40];Matrix<int> b=a;return b[2,2]-40;
+}

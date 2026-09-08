@@ -1,0 +1,4 @@
+
+int main(){
+Matrix<Vector<int,Row>> a=[[10,20];[30,40]];Matrix<Matrix<int>> b=[[50,60;70,80]];Array<Matrix<int>> c={[90,100]};List<Matrix<int>> d={[110,120]};push(d,[130]);if(rows(b[1,1])!=2){return 1;}if(columns(c[0])!=2){return 2;}if(columns(d[1])!=1){return 3;}return a[2,1][2]+b[1,1][2,2]+c[0][1,2]+d[1][1,1]-350;
+}

@@ -1,0 +1,1 @@
+int main(){Matrix<Buffer<int>> a=[];return int(rows(a)+columns(a));}

@@ -1504,3 +1504,48 @@ The highest-impact remaining open decisions should close in this order:
 Each closure requires source examples, rejected examples, semantic tests,
 targeted native codegen evidence, diagnostic expectations and a compatibility
 statement against the existing compiler.
+
+
+## NEXT-VERTICAL-23 — normative Matrix foundation
+
+This section supersedes the earlier reservation of bracket semicolons for
+future Matrix syntax. `Matrix<T>` requires exactly one Storable element type;
+rows and columns belong to the value, with no static shape or source layout
+parameter. Matrix is distinct from Array, List and both Vector orientations.
+It is non-Copy, owns fixed stable contiguous storage and participates in normal
+move, parameter/return, aggregate and conditional cleanup semantics.
+
+`[...]` preserves mathematical rows until contextual resolution. A comma
+separates entries, a semicolon separates nonempty rows, and every Matrix row
+must have the same width. Empty brackets mean 0x0 under Matrix context and
+zero dimension under Vector context. A single row may initialize either type
+according to context; multiple rows cannot initialize Vector. The only trailing
+separator accepted is one comma immediately before the closing bracket. No
+trailing row semicolon or comma before a row separator is accepted.
+
+Elements use ordinary contextual typing and coercion. Each operand is evaluated
+and captured in source row-major order. Non-Copy operands transfer once, with
+no implicit Clone or intermediate nested container. Matrix<T> works with
+symbolic T:Storable and with structurally Storable nested owning types.
+
+`rows(matrix_place)` and `columns(matrix_place)` return usize. `A[i,j]` takes
+two usize operands; a single index or three indices is invalid. Checks proceed
+row >= 1, row <= rows, column >= 1, column <= columns. Any failure is
+IndexOutOfBounds. Only after all guards may the implementation subtract one,
+calculate the physical offset and form an address. Copy element reads and
+replacement, shared references and mutable references all obey these checks.
+Non-Copy partial extraction and unsafe slot replacement remain rejected.
+
+The bootstrap descriptor is {ptr,rows,columns}, without capacity or strides.
+Checked shape multiplication and checked allocation size establish an immutable
+representable element count. For valid axes, row0*columns+col0 is less than that
+count, proving representable unsigned offset arithmetic. Cleanup destroys
+initialized elements in reverse row-major order, then frees the allocation
+exactly once; an empty Matrix allocates nothing. Normal traps do not unwind.
+
+Row-major is an implementation choice, not mathematical type identity.
+View/ViewMut cannot expose Matrix. Matrix transpose is explicitly unavailable;
+swapping descriptor dimensions would incorrectly reinterpret rectangular data.
+A future MatrixView or transpose must specify lifetime, strides and layout.
+No arithmetic, BLAS, tensor model, Numeric capability or source layout system
+is introduced. See [NEXT_VERTICAL_23_REPORT.md](NEXT_VERTICAL_23_REPORT.md).

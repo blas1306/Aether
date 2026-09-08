@@ -30,12 +30,14 @@ fn module_program(case: &str) -> PathBuf {
 }
 
 fn temporary(name: &str) -> PathBuf {
+    static NEXT_TEMPORARY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let sequence = NEXT_TEMPORARY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
     std::env::temp_dir().join(format!(
-        "aether-next-test-{}-{nonce}-{name}",
+        "aether-next-test-{}-{nonce}-{sequence}-{name}",
         std::process::id()
     ))
 }
@@ -2912,6 +2914,7 @@ fn vertical18_verifiers_reject_corrupt_extraction_transactions() {
                         index: slot.index,
                         element_type: slot.type_id,
                         semantics: aether_frontend::IndexSemantics::ZeroBased,
+                        column: None,
                         bounds_trap: aether_middle::TrapKind::IndexOutOfBounds,
                     });
                 let drop = block
@@ -2985,6 +2988,7 @@ fn vertical18_verifiers_reject_corrupt_extraction_transactions() {
                         index: slot.index,
                         element_type: slot.type_id,
                         semantics: aether_frontend::IndexSemantics::ZeroBased,
+                        column: None,
                         bounds_trap: aether_middle::TrapKind::IndexOutOfBounds,
                     });
                 let drop = block
@@ -3598,6 +3602,7 @@ fn vertical19_mir_rejects_corrupt_slot_transactions() {
                     index: tail.index.clone(),
                     element_type: tail.type_id,
                     semantics: aether_frontend::IndexSemantics::ZeroBased,
+                    column: None,
                     bounds_trap: TrapKind::IndexOutOfBounds,
                 });
                 let mut i = blocks[transfer].instructions[0].clone();
@@ -3827,6 +3832,7 @@ fn vertical19_ssa_rejects_corrupt_slot_transactions() {
                     index: tail.index.clone(),
                     element_type: tail.type_id,
                     semantics: aether_frontend::IndexSemantics::ZeroBased,
+                    column: None,
                     bounds_trap: TrapKind::IndexOutOfBounds,
                 });
                 let mut i = blocks[transfer].instructions[0].clone();
@@ -5032,7 +5038,7 @@ fn vertical21_deterministic_mathematical_ir() {
     let phases = [Emit::Ast, Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm];
     let first = compile_source(&source, &phases).unwrap();
     assert_eq!(first.dumps, compile_source(&source, &phases).unwrap().dumps);
-    assert!(first.dumps[&Emit::Ast].contains("VectorLiteral"));
+    assert!(first.dumps[&Emit::Ast].contains("MathematicalLiteral"));
     assert!(!first.dumps[&Emit::Ast].contains("CollectionLiteral"));
     for phase in [Emit::Hir, Emit::Mir, Emit::Ssa] {
         let dump = &first.dumps[&phase];
@@ -5115,12 +5121,15 @@ fn vertical21_diagnostics_and_matrix_reservation() {
         let errors = compile_source(&SourceFile::new("v21-error.ae", text), &[]).expect_err(text);
         assert!(errors[0].span.is_some(), "{text}");
     }
-    let errors = parse_source(&SourceFile::new(
-        "matrix.ae",
-        "int main(){Vector<int,Row> v=[1,2;3,4];return 0;}",
-    ))
+    let errors = compile_source(
+        &SourceFile::new(
+            "matrix.ae",
+            "int main(){Vector<int,Row> v=[1,2;3,4];return 0;}",
+        ),
+        &[],
+    )
     .unwrap_err();
-    assert!(errors[0].message.contains("reserved for future Matrix"));
+    assert_eq!(errors[0].code, "E0332");
     for (source, expected) in [
         ("int main(){Vector<int,Bad> v=[];return 0;}", "E0324"),
         (
@@ -5855,6 +5864,505 @@ fn vertical22_cross_module_orientation_and_layout() {
         "import storage;int main(){Vector<int,Row> r=[1];Vector<int,Row> bad=storage.toColumn(r);return 0;}",
         "import storage;int main(){Vector<int,Column> c=[1];Vector<int,Column> bad=storage.toRow(c);return 0;}",
         "import storage;int main(){Vector<int,Column> c=[1];Vector<int,Column> bad=storage.toColumn(c);return 0;}",
+    ] {
+        fs::write(directory.join("main.ae"), text).unwrap();
+        assert!(
+            compile_session(
+                CompilationSession::discover(&directory.join("main.ae")).unwrap(),
+                &[]
+            )
+            .is_err(),
+            "{text}"
+        );
+    }
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn vertical23_identity_context_and_deterministic_ir() {
+    use aether_frontend::{IndexSemantics, Orientation, TypeArena, TypeId};
+    let mut types = TypeArena::new();
+    let matrix = types.intern_matrix(TypeId::INT64);
+    assert_eq!(matrix, types.intern_matrix(TypeId::INT64));
+    for other in [
+        types.intern_array(TypeId::INT64),
+        types.intern_list(TypeId::INT64),
+        types.intern_vector(TypeId::INT64, Orientation::Row),
+        types.intern_vector(TypeId::INT64, Orientation::Column),
+    ] {
+        assert_ne!(matrix, other);
+    }
+    assert!(!types.is_copy(matrix));
+    assert!(types.needs_drop(matrix));
+    assert_eq!(
+        types.index_semantics(matrix),
+        Some(IndexSemantics::OneBased2D)
+    );
+    assert_eq!(
+        layout_of(&types, matrix, TargetProperties::LINUX_X86_64, &[], &[])
+            .unwrap()
+            .size,
+        24
+    );
+    let source = SourceFile::new(
+        "matrix.ae",
+        "int main(){Matrix<int> a=[1,2,3;4,5,6];Vector<int,Row> v=[1,2,3];Vector<int,Column> w=transpose(v);return a[2,3]+int(rows(a)+columns(a)+dimension(w))-14;}",
+    );
+    let emits = [Emit::Ast, Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm];
+    let first = compile_source(&source, &emits).unwrap();
+    assert_eq!(first.dumps, compile_source(&source, &emits).unwrap().dumps);
+    assert!(first.dumps[&Emit::Ast].contains("MathematicalLiteral"));
+    for phase in [Emit::Hir, Emit::Mir, Emit::Ssa] {
+        for name in [
+            "MatrixInit",
+            "MatrixRows",
+            "MatrixColumns",
+            "OneBased2D",
+            "VectorInit",
+        ] {
+            assert!(first.dumps[&phase].contains(name), "{phase:?}: {name}");
+        }
+    }
+    let helper = first
+        .llvm
+        .split("define internal ptr @aether_matrix_index_")
+        .nth(1)
+        .unwrap()
+        .split("\n}")
+        .next()
+        .unwrap();
+    let mut previous = 0;
+    for guard in [
+        "%row_lower =",
+        "%row_upper =",
+        "%column_lower =",
+        "%column_upper =",
+        "%row0 = sub",
+        "%column0 = sub",
+        "%linear = add",
+        "getelementptr inbounds",
+    ] {
+        let position = helper.find(guard).unwrap();
+        assert!(position > previous);
+        previous = position;
+    }
+    assert!(helper.contains("call void @llvm.trap()"));
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical23_native_shapes_ownership_and_exact_heap_counts() {
+    for (fixture, count) in [
+        ("empty", 0),
+        ("empty_owning", 0),
+        ("row", 1),
+        ("column", 1),
+        ("square", 1),
+        ("rectangular", 1),
+        ("widening", 2),
+        ("refs", 1),
+        ("move", 1),
+        ("return", 1),
+        ("struct", 1),
+        ("enum", 1),
+        ("generic", 4),
+        ("owning", 5),
+        ("conditional", 2),
+        ("nested", 11),
+        ("loop", 1),
+        ("evaluation", 1),
+    ] {
+        let compiled = compile_session(
+            CompilationSession::discover(&program(&format!("v23_matrix_{fixture}.ae"))).unwrap(),
+            &[],
+        )
+        .unwrap();
+        let llvm = v23_heap_guard(&compiled.llvm, count);
+        let status = v23_execute(&llvm);
+        assert_eq!(status.code(), Some(0), "{fixture}");
+    }
+    let compiled = compile_session(
+        CompilationSession::discover(&module_program("v23_matrix")).unwrap(),
+        &[],
+    )
+    .unwrap();
+    assert!(compiled.llvm.contains("MiInt64"));
+    assert!(compiled.llvm.contains("MBiInt64"));
+    assert_eq!(
+        v23_execute(&v23_heap_guard(&compiled.llvm, 4)).code(),
+        Some(0)
+    );
+}
+
+fn v23_heap_guard(llvm: &str, count: u64) -> String {
+    llvm.replace("  %process_status = trunc i64 %aether_result to i32",&format!("  %allocs = load i64, ptr @aether_heap_alloc_count\n  %frees = load i64, ptr @aether_heap_free_count\n  %alloc_ok = icmp eq i64 %allocs, {count}\n  %free_ok = icmp eq i64 %frees, {count}\n  %heap_ok = and i1 %alloc_ok, %free_ok\n  %result_ok = icmp eq i64 %aether_result, 0\n  %all_ok = and i1 %heap_ok, %result_ok\n  %process_status = select i1 %all_ok, i32 0, i32 99"))
+}
+fn v23_execute(llvm: &str) -> std::process::ExitStatus {
+    let artifact = temporary("v23");
+    ClangToolchain::default()
+        .link_executable(llvm, &artifact)
+        .unwrap();
+    let status = Command::new(&artifact).status().unwrap();
+    fs::remove_file(artifact).unwrap();
+    status
+}
+
+#[test]
+fn vertical23_structured_diagnostics() {
+    for (body, code) in [
+        ("Matrix<int,int> a=[];", "E0261"),
+        ("Matrix<int,Missing> a=[];", "E0261"),
+        ("Matrix a=[];", "E0261"),
+        ("Matrix<ref int> a=[];", "E0331"),
+        ("Matrix<int> a=[1,2;3,4,5];", "E0333"),
+        ("Vector<int,Row> a=[1;2];", "E0332"),
+        ("int a=[1;2];", "E0326"),
+        ("Matrix<int> a=[1,2;3,4];int x=a[1];", "E0334"),
+        ("Matrix<int> a=[1];int x=a[1,1,1];", "E0334"),
+        ("Matrix<int> a=[1];int x=a[0,1];", "E0296"),
+        ("Matrix<int> a=[1];int x=a[1,0];", "E0296"),
+        ("Matrix<int> a=[1,2,3;4,5,6];int x=a[3,1];", "E0296"),
+        ("Matrix<int> a=[1,2,3;4,5,6];int x=a[1,4];", "E0296"),
+        ("Matrix<int> a=[];int x=a[1,1];", "E0296"),
+        ("Vector<int,Row> a=[1];usize n=rows(a);", "E0335"),
+        ("Array<int> a={1};usize n=columns(a);", "E0335"),
+        ("Matrix<int> a=[1];Matrix<int> b=transpose(a);", "E0328"),
+        ("Matrix<int> a=[1];Matrix<int> b=a;int x=a[1,1];", "E0291"),
+        (
+            "Matrix<int> a=[1];ref int x=&a[1,1];Matrix<int> b=a;",
+            "E0292",
+        ),
+        (
+            "Matrix<int> a=[1];ref mut int x=&mut a[1,1];Matrix<int> b=a;",
+            "E0292",
+        ),
+        ("Matrix<int> a=[1];View<int> v=view(a);", "E0289"),
+        ("Matrix<int> a=[1];ViewMut<int> v=view_mut(a);", "E0289"),
+        ("Matrix<int> a=[1;];", "E0330"),
+    ] {
+        let source = format!("int main(){{{body}return 0;}}");
+        let errors = compile_source(&SourceFile::new("error.ae", source), &[]).expect_err(body);
+        assert_eq!(errors[0].code, code, "{body}: {errors:?}");
+        assert!(errors[0].span.is_some());
+    }
+    for source in [
+        "Matrix<T> bad<T>(T x){return [x];}int main(){return 0;}",
+        "Matrix<T> bad<T:Copy>(T x){return [x];}int main(){return 0;}",
+        "int main(){Matrix<int> a=[1];int i=1;return a[i,1];}",
+        "int main(){Matrix<int> a=[1];int i=1;return a[1,i];}",
+        "int main(){Matrix<int> a=[1];return a[-1,1];}",
+        "int main(){Matrix<int> a=[1];return a[1,true];}",
+        "usize take(Matrix<int> a){return 1;}int main(){Matrix<int> a=[1];return a[1,take(a)];}",
+        "int main(){Matrix<Buffer<int>> a=[Buffer<int>(1,10)];Buffer<int> b=a[1,1];return 0;}",
+        "int main(){Matrix<Buffer<int>> a=[Buffer<int>(1,10)];a[1,1]=Buffer<int>(1,20);return 0;}",
+    ] {
+        assert!(
+            compile_source(&SourceFile::new("error.ae", source), &[]).is_err(),
+            "{source}"
+        );
+    }
+    compile_source(
+        &SourceFile::new(
+            "symbolic.ae",
+            "Matrix<T> make<T:Storable>(T a,T b){return [a,b];}int main(){return 0;}",
+        ),
+        &[],
+    )
+    .unwrap();
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical23_runtime_bounds_all_axes_and_access_modes() {
+    use std::os::unix::process::ExitStatusExt;
+    for (literal, m, n) in [
+        ("[]", 0, 0),
+        ("[1,2,3]", 1, 3),
+        ("[1;2;3]", 3, 1),
+        ("[1,2,3;4,5,6]", 2, 3),
+    ] {
+        for (row, column) in [
+            (0, 1),
+            (1, 0),
+            (m + 1, 1),
+            (1, n + 1),
+            (u64::MAX, 1),
+            (1, u64::MAX),
+        ] {
+            for operation in [
+                "return a[i,j];",
+                "a[i,j]=42;return 0;",
+                "ref int x=&a[i,j];return *x;",
+                "ref mut int x=&mut a[i,j];*x=42;return 0;",
+            ] {
+                let source = format!(
+                    "int main(){{Matrix<int> a={literal};usize i={row};usize j={column};{operation}}}"
+                );
+                let compiled = compile_source(&SourceFile::new("bounds.ae", source), &[]).unwrap();
+                assert_eq!(
+                    v23_execute(&compiled.llvm).signal(),
+                    Some(4),
+                    "{literal}: {row},{column}: {operation}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn vertical23_independent_hir_mir_ssa_contract_verifiers() {
+    use aether_frontend::{IndexSemantics, TypeId};
+    use aether_middle::{
+        PlaceProjection, Rvalue, SsaOp, SsaPlaceProjection, TrapKind, build_ssa, lower_hir,
+        verify_mir, verify_ssa,
+    };
+    let source = SourceFile::new(
+        "verify.ae",
+        "int main(){Matrix<int> a=[1,2,3;4,5,6];usize n=rows(a);usize m=columns(a);int x=a[2,3];return x+int(n+m);}",
+    );
+    let hir = analyze(parse_source(&source).unwrap()).unwrap();
+    let mir = lower_hir(hir);
+    let ssa = build_ssa(&verify_mir(mir.clone()).unwrap());
+    for case in 0..11 {
+        let mut corrupt = mir.clone();
+        let mut changed = false;
+        for instruction in corrupt.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|b| &mut b.instructions)
+        {
+            match (&mut instruction.value, case) {
+                (Rvalue::MatrixInit { rows, columns, .. }, 0) => {
+                    std::mem::swap(rows, columns);
+                    changed = true;
+                }
+                (Rvalue::MatrixInit { element_type, .. }, 1) => {
+                    *element_type = TypeId::BOOL;
+                    changed = true;
+                }
+                (Rvalue::MatrixInit { row_ends, .. }, 2) => {
+                    row_ends[0] += 1;
+                    changed = true;
+                }
+                (
+                    Rvalue::MatrixInit {
+                        element_type,
+                        elements,
+                        size_trap,
+                        failure_trap,
+                        ..
+                    },
+                    3,
+                ) => {
+                    instruction.value = Rvalue::VectorInit {
+                        element_type: *element_type,
+                        elements: elements.clone(),
+                        size_trap: *size_trap,
+                        failure_trap: *failure_trap,
+                    };
+                    changed = true;
+                }
+                (Rvalue::MatrixRows { source }, 4) => {
+                    instruction.value = Rvalue::VectorDimension {
+                        source: source.clone(),
+                    };
+                    changed = true;
+                }
+                (Rvalue::Load(place), 5..=7) => {
+                    for projection in &mut place.projections {
+                        if let PlaceProjection::Index {
+                            column,
+                            semantics,
+                            bounds_trap,
+                            ..
+                        } = projection
+                        {
+                            match case {
+                                5 => *column = None,
+                                6 => *semantics = IndexSemantics::OneBased,
+                                _ => *bounds_trap = TrapKind::AllocationFailure,
+                            }
+                            changed = true;
+                        }
+                    }
+                }
+                (Rvalue::MatrixInit { size_trap, .. }, 8) => {
+                    *size_trap = TrapKind::IndexOutOfBounds;
+                    changed = true;
+                }
+                (Rvalue::MatrixInit { failure_trap, .. }, 9) => {
+                    *failure_trap = TrapKind::IndexOutOfBounds;
+                    changed = true;
+                }
+                (Rvalue::MatrixInit { rows, columns, .. }, 10) => {
+                    *rows = u64::MAX;
+                    *columns = 2;
+                    changed = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(changed, "MIR {case}");
+        assert!(verify_mir(corrupt).is_err(), "MIR {case}");
+        let mut corrupt = ssa.clone();
+        let mut changed = false;
+        for instruction in corrupt.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|b| &mut b.instructions)
+        {
+            match (&mut instruction.op, case) {
+                (SsaOp::MatrixInit { rows, columns, .. }, 0) => {
+                    std::mem::swap(rows, columns);
+                    changed = true;
+                }
+                (SsaOp::MatrixInit { element_type, .. }, 1) => {
+                    *element_type = TypeId::BOOL;
+                    changed = true;
+                }
+                (SsaOp::MatrixInit { row_ends, .. }, 2) => {
+                    row_ends[0] += 1;
+                    changed = true;
+                }
+                (
+                    SsaOp::MatrixInit {
+                        element_type,
+                        elements,
+                        size_trap,
+                        failure_trap,
+                        ..
+                    },
+                    3,
+                ) => {
+                    instruction.op = SsaOp::VectorInit {
+                        element_type: *element_type,
+                        elements: elements.clone(),
+                        size_trap: *size_trap,
+                        failure_trap: *failure_trap,
+                    };
+                    changed = true;
+                }
+                (SsaOp::MatrixRows { source }, 4) => {
+                    instruction.op = SsaOp::VectorDimension {
+                        source: source.clone(),
+                    };
+                    changed = true;
+                }
+                (SsaOp::Load { place }, 5..=7) => {
+                    for projection in &mut place.projections {
+                        if let SsaPlaceProjection::Index {
+                            column,
+                            semantics,
+                            bounds_trap,
+                            ..
+                        } = projection
+                        {
+                            match case {
+                                5 => *column = None,
+                                6 => *semantics = IndexSemantics::OneBased,
+                                _ => *bounds_trap = TrapKind::AllocationFailure,
+                            }
+                            changed = true;
+                        }
+                    }
+                }
+                (SsaOp::MatrixInit { size_trap, .. }, 8) => {
+                    *size_trap = TrapKind::IndexOutOfBounds;
+                    changed = true;
+                }
+                (SsaOp::MatrixInit { failure_trap, .. }, 9) => {
+                    *failure_trap = TrapKind::IndexOutOfBounds;
+                    changed = true;
+                }
+                (SsaOp::MatrixInit { rows, columns, .. }, 10) => {
+                    *rows = u64::MAX;
+                    *columns = 2;
+                    changed = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(changed, "SSA {case}");
+        assert!(verify_ssa(corrupt).is_err(), "SSA {case}");
+    }
+    let owning = analyze(
+        parse_source(&SourceFile::new(
+            "owner.ae",
+            "int main(){Matrix<Buffer<int>> a=[Buffer<int>(1,10),Buffer<int>(1,20)];return 0;}",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let mut mir = lower_hir(owning);
+    let mut ssa = build_ssa(&verify_mir(mir.clone()).unwrap());
+    for instruction in mir.functions[0]
+        .blocks
+        .iter_mut()
+        .flat_map(|b| &mut b.instructions)
+    {
+        if let Rvalue::MatrixInit { elements, .. } = &mut instruction.value {
+            elements[1] = elements[0].clone();
+        }
+    }
+    assert!(verify_mir(mir).is_err());
+    for instruction in ssa.functions[0]
+        .blocks
+        .iter_mut()
+        .flat_map(|b| &mut b.instructions)
+    {
+        if let SsaOp::MatrixInit { elements, .. } = &mut instruction.op {
+            elements[1] = elements[0].clone();
+        }
+    }
+    assert!(verify_ssa(ssa).is_err());
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical23_owning_payload_drop_order() {
+    let compilation = compile_session(
+        CompilationSession::discover(&program("v23_matrix_owning.ae")).unwrap(),
+        &[],
+    )
+    .unwrap();
+    let mut llvm=v23_heap_guard(&compilation.llvm,5).replace("call void @free(ptr %ptr)","call void @v23_note_free(ptr %ptr, i64 %size)\n  call void @free(ptr %ptr)").replace("  %all_ok = and i1 %heap_ok, %result_ok", "  %trace = load i64, ptr @v23_trace\n  %ordered = icmp eq i64 %trace, 40302010\n  %base_ok = and i1 %heap_ok, %result_ok\n  %all_ok = and i1 %base_ok, %ordered");
+    llvm.push_str(
+        r"
+@v23_trace = internal global i64 0
+define internal void @v23_note_free(ptr %data, i64 %size) {
+entry:
+  %buffer = icmp eq i64 %size, 8
+  br i1 %buffer, label %record, label %done
+record:
+  %payload = load i64, ptr %data
+  %old = load i64, ptr @v23_trace
+  %shift = mul i64 %old, 100
+  %next = add i64 %shift, %payload
+  store i64 %next, ptr @v23_trace
+  br label %done
+done:
+  ret void
+}
+",
+    );
+    assert_eq!(v23_execute(&llvm).code(), Some(0));
+}
+
+#[test]
+fn vertical23_cross_module_signature_rejections() {
+    let directory = temporary("v23-modules");
+    fs::create_dir_all(&directory).unwrap();
+    fs::copy(
+        module_program("v23_matrix").with_file_name("storage.ae"),
+        directory.join("storage.ae"),
+    )
+    .unwrap();
+    for text in [
+        "import storage;int main(){Vector<int,Row> a=storage.pair(1,2);return 0;}",
+        "import storage;int main(){Array<int> a=storage.pair(1,2);return 0;}",
+        "import storage;int main(){Matrix<double> a=storage.pair<int>(1,2);return 0;}",
+        "import storage;int main(){Vector<int,Row> a=[1,2];return storage.read(&a,1,1);}",
     ] {
         fs::write(directory.join("main.ae"), text).unwrap();
         assert!(

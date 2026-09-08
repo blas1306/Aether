@@ -1,0 +1,4 @@
+struct Holder { Matrix<int> data; }
+int main(){
+Holder a=Holder([10,20;30,40]);return a.data[2,1]+int(rows(a.data))-32;
+}

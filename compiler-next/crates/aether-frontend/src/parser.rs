@@ -680,24 +680,38 @@ impl Parser {
                 span: token.span,
             },
             TokenKind::LeftBracket => {
-                let mut elements = Vec::new();
+                let mut rows = Vec::new();
                 if !self.at(TokenKind::RightBracket) {
                     loop {
-                        elements.push(self.expression()?);
-                        if self.consume(TokenKind::Comma).is_none() {
+                        let mut row = vec![self.expression()?];
+                        while self.consume(TokenKind::Comma).is_some() {
+                            if self.at(TokenKind::RightBracket) {
+                                break;
+                            }
+                            row.push(self.expression()?);
+                        }
+                        rows.push(row);
+                        if self.consume(TokenKind::Semicolon).is_none() {
                             break;
                         }
+                        // A separator always requires a nonempty next row.
                         if self.at(TokenKind::RightBracket) {
-                            break;
+                            return Err(Diagnostic::new(
+                                "E0330",
+                                Phase::Parse,
+                                DiagnosticCategory::Syntax,
+                                "trailing matrix row separator is not permitted",
+                                Some(self.current().span),
+                            ));
                         }
                     }
                 }
                 let right = self.expect(
                     TokenKind::RightBracket,
-                    "expected `]` after vector literal; semicolons are reserved for future Matrix syntax",
+                    "expected `]` after mathematical literal",
                 )?;
                 AstExpr {
-                    kind: AstExprKind::VectorLiteral(elements),
+                    kind: AstExprKind::MathematicalLiteral { rows },
                     span: token.span.through(right.span),
                 }
             }
@@ -757,13 +771,16 @@ impl Parser {
                     span,
                 };
             } else if self.consume(TokenKind::LeftBracket).is_some() {
-                let index = self.expression()?;
+                let mut indices = vec![self.expression()?];
+                while self.consume(TokenKind::Comma).is_some() {
+                    indices.push(self.expression()?);
+                }
                 let right = self.expect(TokenKind::RightBracket, "expected `]` after index")?;
                 let span = expr.span.through(right.span);
                 expr = AstExpr {
                     kind: AstExprKind::Index {
                         base: Box::new(expr),
-                        index: Box::new(index),
+                        indices,
                     },
                     span,
                 };
