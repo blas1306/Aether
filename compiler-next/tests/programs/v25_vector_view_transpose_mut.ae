@@ -1,0 +1,1 @@
+int main(){Vector<int,Row> a=[1,2,3];VectorViewMut<int,Column> v=transpose_view_mut(a);v[2]=42;VectorViewMut<int,Row> w=transpose_view_mut(v);w[3]=10;return a[2]+a[3]-52;}

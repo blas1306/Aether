@@ -1,0 +1,1 @@
+T read<T:Copy>(VectorView<T,Row> v){return v[1];}int write<T:Copy>(VectorViewMut<T,Column> v,T x){v[1]=x;return 0;}int shape<T:Storable>(ref Vector<T,Row> a){VectorView<T,Row> v=vector_view(*a);return int(dimension(v));}int main(){Vector<int,Row> a=[1,2];write(transpose_view_mut(a),42);return read<int>(vector_view(a))+shape(&a)-44;}

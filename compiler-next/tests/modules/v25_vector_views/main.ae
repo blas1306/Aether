@@ -1,0 +1,1 @@
+import helper;int main(){Vector<int,Row> a=[1,2];helper.write(transpose_view_mut(a),42);return helper.read(vector_view(a))-42;}

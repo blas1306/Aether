@@ -372,6 +372,13 @@ pub enum Rvalue {
     },
     /// Borrow the source backing. Source Place and descriptor copy/use chains
     /// retain provenance; the closed recipe is independently verified.
+    VectorView {
+        source: Place,
+        mutable: bool,
+        transpose: bool,
+        descriptor: aether_frontend::VectorViewDescriptor,
+    },
+    /// Borrow 2D backing with an independently verified shape/stride recipe.
     MatrixView {
         source: Place,
         mutable: bool,
@@ -1695,6 +1702,29 @@ impl Builder<'_> {
                 );
                 Operand::Local(destination)
             }
+            HirExprKind::VectorView {
+                source,
+                mutable,
+                transpose,
+                descriptor,
+            } => {
+                let source = self.lower_place(source);
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::VectorView {
+                        source,
+                        mutable: *mutable,
+                        transpose: *transpose,
+                        descriptor: *descriptor,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
             HirExprKind::MatrixView {
                 source,
                 mutable,
@@ -2811,6 +2841,7 @@ fn verify_ownership(
                 }
                 Rvalue::Load(place)
                 | Rvalue::Borrow { place, .. }
+                | Rvalue::VectorView { source: place, .. }
                 | Rvalue::MatrixView { source: place, .. }
                 | Rvalue::View { source: place, .. }
                 | Rvalue::MatrixRows { source: place }
@@ -3282,7 +3313,7 @@ fn validate_rvalue(
         Rvalue::VectorDimension { source } => {
             validate_place_read(function, source, structs, types, initialized)?;
             let source_ty = place_type(function, source, structs, types)?;
-            if destination != TypeId::USIZE || types.vector_element(source_ty).is_none() {
+            if destination != TypeId::USIZE || types.vector_like_info(source_ty).is_none() {
                 return Err("MIR Vector dimension contract invalid".into());
             }
         }
@@ -3431,6 +3462,40 @@ fn validate_rvalue(
                 || *failure_trap != TrapKind::AllocationFailure
             {
                 return Err("MIR List reserve contract invalid".into());
+            }
+        }
+        Rvalue::VectorView {
+            source,
+            mutable,
+            transpose,
+            descriptor,
+        } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            let source_ty = place_type(function, source, structs, types)?;
+            let (element, orientation) = types
+                .vector_like_info(source_ty)
+                .ok_or_else(|| "MIR VectorView source invalid".to_string())?;
+            if types.vector_view_info(destination)
+                != Some((
+                    element,
+                    if *transpose {
+                        orientation.transposed()
+                    } else {
+                        orientation
+                    },
+                    *mutable,
+                ))
+                || *descriptor
+                    != aether_frontend::VectorViewDescriptor::derived(
+                        types.vector_view_info(source_ty).is_some(),
+                    )
+                || (*mutable
+                    && (types
+                        .vector_view_info(source_ty)
+                        .is_some_and(|(_, _, m)| !m)
+                        || !mir_place_writable(function, source, structs, types)?))
+            {
+                return Err("MIR VectorView stride/type/capability contract invalid".into());
             }
         }
         Rvalue::MatrixView {

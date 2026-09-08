@@ -1,0 +1,1 @@
+int main(){Vector<int,Row> a=[1,2,3];VectorView<int,Row> v=vector_view(a);VectorView<int,Column> t=transpose_view(v);VectorView<int,Row> u=transpose_view(t);VectorViewMut<int,Column> m=transpose_view_mut(a);VectorViewMut<int,Row> n=transpose_view_mut(m);n[2]=42;return u[2]+t[1]+int(dimension(n))-46;}

@@ -1,0 +1,1 @@
+int main(){Vector<int,Row> a=[1,2,3];VectorViewMut<int,Row> v=vector_view_mut(a);v[3]=40;ref mut int x=&mut v[1];*x=2;return a[1]+a[3]+int(dimension(v))-45;}

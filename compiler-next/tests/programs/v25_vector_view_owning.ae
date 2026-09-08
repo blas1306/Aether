@@ -1,0 +1,1 @@
+int main(){Vector<Buffer<int>,Row> a=[Buffer<int>(1,10),Buffer<int>(1,20)];VectorView<Buffer<int>,Column> v=transpose_view(a);ref Buffer<int> b=&v[1];VectorViewMut<Buffer<int>,Row> w=vector_view_mut(a);ref mut Buffer<int> c=&mut w[2];(*c)[0]=99;return (*b)[0]+a[2][0]-109;}

@@ -879,7 +879,7 @@ liveness requirements; fixed Vector storage does not structurally invalidate
 addresses. Nested mutable Lists retain their independent invalidation rules.
 
 Public raw View/ViewMut conversion from Vector MUST be rejected because it
-would discard orientation and one-based semantics. A future VectorView is a
+would discard orientation and one-based semantics. V25 below defines VectorView as a
 separate mathematical abstraction. `[a,b; c,d]` remains reserved for a future
 structurally 2D Matrix literal, never parsed as nested VectorLiteral. No vector
 arithmetic, dot, outer, norm, transpose, Matrix, methods, traits or numerical
@@ -1622,3 +1622,71 @@ Matrix ownership, its three-word row-major descriptor and reverse cleanup MUST
 remain unchanged. `transpose(Matrix)` MUST stay invalid; Vector transpose MUST
 retain its consuming O(1) transfer. V24 adds no slicing/ranges, row/column views,
 VectorView, arithmetic, BLAS, numeric traits, methods, raw pointers or user lifetimes.
+
+
+## NEXT-VERTICAL-25 — normative oriented VectorView contract
+
+`VectorView<T,Row>`, `VectorView<T,Column>`, `VectorViewMut<T,Row>` and
+`VectorViewMut<T,Column>` MUST have canonical mathematical identity distinct
+from Vector, MatrixView and raw View. Canonical representation is
+`VectorView { element, orientation, mutable }`. All three components enter
+TypeId, substitution and structural mangling. No runtime orientation exists.
+Both views MUST be Copy and Relocatable, non-Storable and no-drop, independently
+of T's Copy property. Mutable capability MUST NOT imply uniqueness or noalias.
+
+The target-derived bootstrap descriptor is `{ptr,dimension,stride}`, with
+usize metadata and stride measured in elements. No owner/provenance field,
+refcount, capacity or runtime orientation is permitted. `vector_view(x)` and
+`vector_view_mut(x)` accept a matching oriented Vector or vector-view Place;
+`transpose_view(x)` and `transpose_view_mut(x)` additionally flip Row/Column.
+Sources behind references require explicit dereference. Temporary borrowing
+and user-defined raw pointer/stride constructors MUST remain rejected.
+
+Owner-derived views MUST preserve pointer/dimension and set stride to 1,
+including canonical empty `{null,0,1}`. Existing-view creation and borrowed
+transpose MUST preserve pointer/dimension/stride exactly. Double transpose MUST
+restore the original type and metadata. Each operation MUST have zero allocation,
+free and relocation deltas and MUST NOT read/write/transform elements. Source
+owners remain borrowed and live. V22 `transpose(Vector)` remains consuming.
+
+`dimension` accepts owners and both view capabilities and returns logical usize
+dimension. Indexing requires exactly one usize operand. Both guards
+`index >= 1` and `index <= dimension` MUST precede subtraction, multiplication
+and addressing. Addressing MUST use `(index-1)*stride`, including non-unit
+strides, without assuming contiguous view storage. Empty indexing traps before
+offset calculation. Copy reads are allowed through either capability. Writes
+and `&mut` require a writable path and mutable view capability. Non-Copy slot
+extraction/replacement remains rejected; owning elements may be borrowed.
+
+Descriptor validity is inductive: checked Vector allocation supplies valid
+contiguous offsets; owner creation sets stride 1; view copies and transpose
+preserve the valid offset set. Closed compiler-only recipes MUST independently
+verify dimension/stride selectors, source/result orientation, element identity,
+write capability and source Place. Raw View substitution and arbitrary recipe
+corruption MUST fail HIR/MIR/SSA verification. No arbitrary source stride
+creation or Matrix row/column projection is admitted by V25.
+
+Creation, copies (including explicit loads through descriptor references),
+transpose and derived element references MUST retain the same underlying root
+provenance. A relevant live alias MUST block owner move, drop or replacement.
+The existing lexical scope, borrowed-local single initialization and no-escape
+rules apply: views cannot return, be stored in structs/enums/Array/List/Matrix/
+Vector, or serve as bare generic type arguments. Helpers may use symbolic T
+inside oriented view parameters; Copy access needs T:Copy, and symbolic owner
+sources need T:Storable. Orientation itself is not a generic type parameter.
+
+Struct/projected/indexed owners and explicit ref/ref-mut owner sources retain
+the containing root. List structural mutation remains conservatively blocked
+when it could invalidate derived aliases. The common mathematical-view effect
+query MUST reject calls with mutable views whose elements contain List,
+including references to writable descriptors, until nested alias effects can
+be represented. Loading a mathematical view through a reference MUST preserve
+its backing provenance rather than create an independent root.
+
+Lifetime authority remains frontend lexical analysis. MIR/SSA retain source
+Place and descriptor use chains and independently enforce the type/recipe/
+capability contracts; V25 adds no global IR lifetime analysis. LLVM emits only
+descriptor extraction/insertion for transforms, three-word view values, and
+checked strided GEP. MatrixView keeps its separate five-word 2D semantics.
+No slicing/ranges, arithmetic, conjugation, apostrophe syntax, methods, traits,
+named lifetimes, Matrix row/column extraction or raw pointers are introduced.

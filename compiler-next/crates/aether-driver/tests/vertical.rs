@@ -6851,3 +6851,630 @@ fn vertical24_projected_provenance_and_cross_module_rejections() {
     assert!(!compiled.llvm.contains("@free"));
     compile_source(&SourceFile::new("symbolic.ae","int shape<T:Storable>(ref Matrix<T> a){MatrixView<T> v=matrix_view(*a);return int(rows(v));}int main(){Matrix<Buffer<int>> a=[Buffer<int>(1,2)];return shape(&a)-1;}"),&[]).unwrap();
 }
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical25_native_mapping_borrows_and_heap_counts() {
+    for (name, heap) in [
+        ("normal", 1),
+        ("column", 1),
+        ("column_mut", 1),
+        ("mutable", 1),
+        ("transpose", 2),
+        ("transpose_mut", 1),
+        ("double", 1),
+        ("empty", 0),
+        ("owning", 3),
+        ("projected", 5),
+        ("refs", 1),
+        ("copy", 1),
+        ("scope", 1),
+        ("generic", 1),
+    ] {
+        let compiled = compile_session(
+            CompilationSession::discover(&program(&format!("v25_vector_view_{name}.ae"))).unwrap(),
+            &[],
+        )
+        .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        assert_eq!(
+            v23_execute(&v23_heap_guard(&compiled.llvm, heap)).code(),
+            Some(0),
+            "{name}"
+        );
+    }
+    let compiled = compile_session(
+        CompilationSession::discover(&module_program("v25_vector_views")).unwrap(),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(
+        v23_execute(&v23_heap_guard(&compiled.llvm, 1)).code(),
+        Some(0)
+    );
+}
+
+#[test]
+fn vertical25_identity_and_deterministic_ir() {
+    use aether_frontend::{IndexSemantics, TypeArena, TypeId};
+    let mut types = TypeArena::new();
+    let v = types.intern_vector_view(TypeId::INT64, aether_frontend::Orientation::Row, false);
+    let w = types.intern_vector_view(TypeId::INT64, aether_frontend::Orientation::Row, true);
+    assert_eq!(
+        v,
+        types.intern_vector_view(TypeId::INT64, aether_frontend::Orientation::Row, false)
+    );
+    assert_ne!(v, w);
+    assert_ne!(
+        v,
+        types.intern_vector_view(TypeId::INT64, aether_frontend::Orientation::Column, false)
+    );
+    assert_ne!(v, types.intern_matrix_view(TypeId::INT64, false));
+    for t in [v, w] {
+        assert_ne!(
+            t,
+            types.intern_vector(TypeId::INT64, aether_frontend::Orientation::Row)
+        );
+        assert_ne!(t, types.intern_view(TypeId::INT64, false));
+        assert_ne!(t, types.intern_view(TypeId::INT64, true));
+        let p = types.properties(t).unwrap();
+        assert!(p.is_copy && p.is_relocatable && !p.is_storable && !p.needs_drop);
+        assert!(types.contains_view(t));
+        assert_eq!(types.index_semantics(t), Some(IndexSemantics::OneBased));
+        assert_eq!(
+            layout_of(&types, t, TargetProperties::LINUX_X86_64, &[], &[])
+                .unwrap()
+                .size,
+            24
+        );
+    }
+    let source = SourceFile::new(
+        "view.ae",
+        fs::read_to_string(program("v25_vector_view_double.ae")).unwrap(),
+    );
+    let emits = [Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm];
+    let first = compile_source(&source, &emits).unwrap();
+    assert_eq!(first.dumps, compile_source(&source, &emits).unwrap().dumps);
+    for phase in [Emit::Hir, Emit::Mir, Emit::Ssa] {
+        for word in [
+            "VectorView",
+            "stride",
+            "dimension",
+            "OneBased",
+            "transpose: true",
+        ] {
+            assert!(first.dumps[&phase].contains(word), "{phase:?}: {word}");
+        }
+    }
+    assert!(!first.llvm.contains("noalias"));
+    let helper = first
+        .llvm
+        .split("define internal ptr @aether_vector_view_index_")
+        .nth(1)
+        .unwrap()
+        .split("\n}")
+        .next()
+        .unwrap();
+    assert!(helper.find("upper_check:").unwrap() < helper.find("%index0 = sub").unwrap());
+    assert!(helper.contains("mul i64 %index0, %stride"));
+    assert!(!helper.contains("getelementptr inbounds"));
+}
+
+fn v25_zero_cost_guard(llvm: &str, heap: u64) -> String {
+    let mut output = String::new();
+    let mut count = 0;
+    let mut inside = false;
+    for line in llvm.lines() {
+        if let Some(source) = line.trim().strip_prefix("; VectorViewBegin ") {
+            assert!(!inside);
+            inside = true;
+            let (ty, value) = source.split_once('|').unwrap();
+            for (suffix, global) in [("a", "heap_alloc"), ("f", "heap_free"), ("r", "relocation")] {
+                writeln!(
+                    output,
+                    "  %qv{count}_{suffix}0 = load i64, ptr @aether_{global}_count"
+                )
+                .unwrap();
+            }
+            writeln!(output, "  %qv{count}_p0 = extractvalue {ty} {value}, 0").unwrap();
+            writeln!(output, "  %qv{count}_d0 = extractvalue {ty} {value}, 1").unwrap();
+            if ty == "{ ptr, i64, i64 }" {
+                writeln!(output, "  %qv{count}_s0 = extractvalue {ty} {value}, 2").unwrap();
+            } else {
+                writeln!(output, "  %qv{count}_s0 = add i64 0, 1").unwrap();
+            }
+        } else if let Some(result) = line.trim().strip_prefix("; VectorViewEnd ") {
+            assert!(inside);
+            inside = false;
+            for (suffix, global) in [("a", "heap_alloc"), ("f", "heap_free"), ("r", "relocation")] {
+                writeln!(output,"  %qv{count}_{suffix}1 = load i64, ptr @aether_{global}_count\n  %qv{count}_{suffix}ok = icmp eq i64 %qv{count}_{suffix}0, %qv{count}_{suffix}1").unwrap();
+            }
+            writeln!(output,"  %qv{count}_p1 = extractvalue {{ ptr, i64, i64 }} {result}, 0\n  %qv{count}_pok = icmp eq ptr %qv{count}_p0, %qv{count}_p1\n  %qv{count}_af = and i1 %qv{count}_aok, %qv{count}_fok\n  %qv{count}_rp = and i1 %qv{count}_rok, %qv{count}_pok\n  %qv{count}_ok = and i1 %qv{count}_af, %qv{count}_rp\n  %qv{count}_prior = load i1, ptr @v25_ok\n  %qv{count}_all = and i1 %qv{count}_prior, %qv{count}_ok\n  store i1 %qv{count}_all, ptr @v25_ok\n  %qv{count}_seen = load i64, ptr @v25_seen\n  %qv{count}_next = add i64 %qv{count}_seen, 1\n  store i64 %qv{count}_next, ptr @v25_seen").unwrap();
+            writeln!(output, "  %qv{count}_d1 = extractvalue {{ ptr, i64, i64 }} {result}, 1\n  %qv{count}_s1 = extractvalue {{ ptr, i64, i64 }} {result}, 2\n  %qv{count}_dok = icmp eq i64 %qv{count}_d0, %qv{count}_d1\n  %qv{count}_sok = icmp eq i64 %qv{count}_s0, %qv{count}_s1\n  %qv{count}_ds = and i1 %qv{count}_dok, %qv{count}_sok\n  %qv{count}_metadata = and i1 %qv{count}_all, %qv{count}_ds\n  store i1 %qv{count}_metadata, ptr @v25_ok").unwrap();
+            count += 1;
+        } else if line == "  %process_status = trunc i64 %aether_result to i32" {
+            writeln!(output,"  %qv_ok = load i1, ptr @v25_ok\n  %qv_seen = load i64, ptr @v25_seen\n  %qv_ran = icmp ugt i64 %qv_seen, 0\n  %qv_a = load i64, ptr @aether_heap_alloc_count\n  %qv_f = load i64, ptr @aether_heap_free_count\n  %qv_r = load i64, ptr @aether_relocation_count\n  %qv_aok = icmp eq i64 %qv_a, {heap}\n  %qv_fok = icmp eq i64 %qv_f, {heap}\n  %qv_rok = icmp eq i64 %qv_r, 0\n  %qv_af = and i1 %qv_aok, %qv_fok\n  %qv_afr = and i1 %qv_af, %qv_rok\n  %qv_op = and i1 %qv_ok, %qv_ran\n  %qv_pass = and i1 %qv_afr, %qv_op\n  %qv_result = trunc i64 %aether_result to i32\n  %process_status = select i1 %qv_pass, i32 %qv_result, i32 99").unwrap();
+        } else {
+            if inside {
+                assert!(
+                    line.contains("extractvalue") || line.contains("insertvalue"),
+                    "element/storage operation during view transform: {line}"
+                );
+            }
+            writeln!(output, "{line}").unwrap();
+        }
+    }
+    assert!(count > 0 && !inside);
+    output.push_str("\n@v25_ok = internal global i1 true\n@v25_seen = internal global i64 0\n");
+    output
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical25_each_view_has_zero_heap_relocation_and_pointer_delta() {
+    for (name, heap) in [
+        ("normal", 1),
+        ("column", 1),
+        ("column_mut", 1),
+        ("mutable", 1),
+        ("transpose", 2),
+        ("transpose_mut", 1),
+        ("double", 1),
+        ("empty", 0),
+        ("owning", 3),
+        ("projected", 5),
+        ("refs", 1),
+        ("copy", 1),
+        ("scope", 1),
+        ("generic", 1),
+    ] {
+        let compiled = compile_source(
+            &SourceFile::new(
+                "cost.ae",
+                fs::read_to_string(program(&format!("v25_vector_view_{name}.ae"))).unwrap(),
+            ),
+            &[],
+        )
+        .unwrap();
+        assert_eq!(
+            v23_execute(&v25_zero_cost_guard(&compiled.llvm, heap)).code(),
+            Some(0),
+            "{name}"
+        );
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn vertical25_mir_ssa_reject_corrupt_descriptor_contracts() {
+    use aether_frontend::{IndexSemantics, VectorViewField};
+    use aether_middle::{
+        PlaceProjection, Rvalue, SsaOp, SsaPlaceProjection, build_ssa, lower_hir, verify_mir,
+        verify_ssa,
+    };
+    let source = SourceFile::new(
+        "corrupt.ae",
+        "int main(){Vector<int,Row> a=[1,2,3];VectorView<int,Column> v=transpose_view(a);VectorView<int,Row> u=transpose_view(v);VectorView<int,Row> w=u;return w[2];}",
+    );
+    let hir = analyze(parse_source(&source).unwrap()).unwrap();
+    let mir = lower_hir(hir);
+    let ssa = build_ssa(&verify_mir(mir.clone()).unwrap());
+    for case in 0..7 {
+        let mut m = mir.clone();
+        let mut changed = false;
+        for i in m.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|b| &mut b.instructions)
+        {
+            if let Rvalue::VectorView {
+                source,
+                mutable,
+                transpose,
+                descriptor,
+            } = &mut i.value
+            {
+                match case {
+                    0 => std::mem::swap(&mut descriptor.dimension, &mut descriptor.stride),
+                    1 => descriptor.stride = VectorViewField::Dimension,
+                    2 => descriptor.dimension = VectorViewField::One,
+                    3 => *mutable = !*mutable,
+                    4 => *transpose = !*transpose,
+                    5 => {
+                        i.value = Rvalue::View {
+                            source: source.clone(),
+                            mutable: *mutable,
+                        };
+                    }
+                    _ => continue,
+                }
+                changed = true;
+                break;
+            }
+            if case == 6
+                && let Rvalue::Load(place) = &mut i.value
+            {
+                for p in &mut place.projections {
+                    if let PlaceProjection::Index { semantics, .. } = p {
+                        *semantics = IndexSemantics::ZeroBased;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        assert!(changed, "MIR {case}");
+        assert!(verify_mir(m).is_err(), "MIR accepted {case}");
+        let mut s = ssa.clone();
+        let mut changed = false;
+        for i in s.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|b| &mut b.instructions)
+        {
+            if let SsaOp::VectorView {
+                source,
+                mutable,
+                transpose,
+                descriptor,
+            } = &mut i.op
+            {
+                match case {
+                    0 => std::mem::swap(&mut descriptor.dimension, &mut descriptor.stride),
+                    1 => descriptor.stride = VectorViewField::Dimension,
+                    2 => descriptor.dimension = VectorViewField::One,
+                    3 => *mutable = !*mutable,
+                    4 => *transpose = !*transpose,
+                    5 => {
+                        i.op = SsaOp::View {
+                            source: source.clone(),
+                            mutable: *mutable,
+                        };
+                    }
+                    _ => continue,
+                }
+                changed = true;
+                break;
+            }
+            if case == 6
+                && let SsaOp::Load { place } = &mut i.op
+            {
+                for p in &mut place.projections {
+                    if let SsaPlaceProjection::Index { semantics, .. } = p {
+                        *semantics = IndexSemantics::ZeroBased;
+                        changed = true;
+                    }
+                }
+            }
+        }
+        assert!(changed, "SSA {case}");
+        assert!(verify_ssa(s).is_err(), "SSA accepted {case}");
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn vertical25_structured_diagnostics_and_owner_liveness() {
+    for (body, code) in [
+        (
+            "Array<int> a={1};VectorView<int,Row> v=vector_view(a);",
+            "E0338",
+        ),
+        (
+            "Matrix<int> a=[1];VectorView<int,Row> v=vector_view(a);",
+            "E0338",
+        ),
+        (
+            "Array<int> a={1};VectorView<int,Row> v=transpose_view(a);",
+            "E0336",
+        ),
+        (
+            "Vector<int,Row> a=[1];VectorView<int,Row> v=vector_view(a);v[1]=2;",
+            "E0288",
+        ),
+        (
+            "Vector<int,Row> a=[1];VectorView<int,Row> v=vector_view(a);VectorViewMut<int,Row> w=vector_view_mut(v);",
+            "E0339",
+        ),
+        (
+            "Vector<int,Row> a=[1];VectorView<int,Row> v=vector_view(a);int x=v[1,1];",
+            "E0334",
+        ),
+        (
+            "Vector<int,Row> a=[1];VectorView<int,Row> v=vector_view(a);int x=v[0];",
+            "E0296",
+        ),
+        (
+            "Vector<int,Row> a=[1];VectorView<int,Column> v=transpose_view(a);int x=v[2];",
+            "E0296",
+        ),
+        (
+            "Vector<int,Row> a=[1];VectorView<int,Row> v=vector_view(a);a=[2];",
+            "E0292",
+        ),
+        (
+            "Vector<int,Row> a=[1];VectorView<int,Row> v=vector_view(a);consume(a);",
+            "E0292",
+        ),
+        (
+            "Vector<int,Row> a=[1];VectorViewMut<int,Row> v=vector_view_mut(a);consume(a);",
+            "E0292",
+        ),
+        (
+            "Vector<int,Row> a=[1];VectorView<int,Column> v=transpose_view(a);VectorView<int,Column> w=v;consume(a);",
+            "E0292",
+        ),
+        (
+            "Vector<int,Row> a=[1];VectorViewMut<int,Column> v=transpose_view_mut(a);VectorViewMut<int,Row> w=transpose_view_mut(v);consume(a);",
+            "E0292",
+        ),
+        (
+            "Vector<int,Row> a=[1];VectorViewMut<int,Row> v=vector_view_mut(a);VectorViewMut<int,Row> w=v;consume(a);",
+            "E0292",
+        ),
+        (
+            "Vector<int,Row> a=[1];VectorView<int,Row> v=VectorView<int,Row>(a,1,1);",
+            "E0338",
+        ),
+    ] {
+        let source =
+            format!("int consume(Vector<int,Row> a){{return 0;}}int main(){{{body}return 0;}}");
+        let errors = compile_source(&SourceFile::new("bad.ae", source), &[])
+            .err()
+            .unwrap_or_else(|| panic!("accepted {body}"));
+        assert!(
+            errors.iter().any(|d| d.code == code),
+            "{body}: expected {code}: {errors:?}"
+        );
+    }
+    for source in [
+        "int main(){Vector<int,Row> a=[1];ref Vector<int,Row> r=&a;VectorViewMut<int,Row> v=vector_view_mut(*r);return 0;}",
+        "int main(){Vector<int,Row> a=[1];VectorView<int,Row> v=vector_view(a);ref mut int x=&mut v[1];return 0;}",
+        "int main(){Vector<int,Row> a=[1];VectorView<int,Row> v=vector_view(a);ref VectorView<int,Row> r=&v;ref mut int x=&mut (*r)[1];return 0;}",
+        "int main(){Vector<int,Row> a=[1];VectorView<int,Column> v=vector_view(a);return 0;}",
+        "int main(){Vector<int,Row> a=[1];VectorView<int,Row> v=transpose_view(a);return 0;}",
+        "int main(){Vector<int,Row> a=[1];Vector<int,Column> b=a;return 0;}",
+        "VectorView<int,Row> bad(){Vector<int,Row> a=[1];return vector_view(a);}int main(){return 0;}",
+        "VectorViewMut<int,Row> bad(VectorViewMut<int,Row> v){return v;}int main(){return 0;}",
+        "struct H{VectorView<int,Row> v;}int main(){return 0;}",
+        "enum E{V(VectorViewMut<int,Column>)}int main(){return 0;}",
+        "int main(){Array<VectorView<int,Row>> a={};return 0;}",
+        "int main(){List<VectorViewMut<int,Column>> a={};return 0;}",
+        "int main(){Matrix<VectorView<int,Row>> a=[];return 0;}",
+        "int main(){Vector<VectorView<int,Row>,Column> a=[];return 0;}",
+        "int main(){Vector<int,Row> a=[1];VectorView<int,Row> v=vector_view(a);int i=1;return v[i];}",
+        "int main(){Vector<int,Row> a=[1];VectorView<int,Row> v=vector_view(a);bool i=true;return v[i];}",
+        "int main(){Vector<Buffer<int>,Row> a=[Buffer<int>(1,2)];VectorView<Buffer<int>,Row> v=vector_view(a);Buffer<int> b=v[1];return 0;}",
+        "int main(){Vector<Buffer<int>,Row> a=[Buffer<int>(1,2)];VectorViewMut<Buffer<int>,Row> v=vector_view_mut(a);v[1]=Buffer<int>(1,3);return 0;}",
+        "int main(){Vector<int,Row> a=[1];VectorView<int,Row> v=vector_view(a);VectorView<int,Row> w=v;v=w;return 0;}",
+        "int inspect<V:Copy>(V v){return 0;}int main(){Vector<int,Row> a=[1];return inspect<VectorView<int,Row>>(vector_view(a));}",
+        "int main(){Vector<int,Row> a=[1];View<int> v=view(a);return 0;}",
+        "int main(){Vector<int,Row> a=[1];VectorView<int,Row> v=vector_view(a);View<int> w=v;return 0;}",
+        "int main(){Vector<int,Row> a=[1];VectorView<int,Row> v=vector_view(a);Vector<int,Column> w=transpose(v);return 0;}",
+        "int main(){Vector<int,Row> a=[1];Vector<int,Column> b=transpose(a);return a[1];}",
+        "int main(){Vector<int,Row> a=[1];VectorView<int> v=vector_view(a);return 0;}",
+        "int main(){Vector<int,Row> a=[1];VectorView<int,int> v=vector_view(a);return 0;}",
+    ] {
+        assert!(
+            compile_source(&SourceFile::new("bad.ae", source), &[]).is_err(),
+            "accepted {source}"
+        );
+    }
+}
+
+#[test]
+fn vertical25_nested_provenance_and_call_effects() {
+    for source in [
+        "struct H{Vector<int,Row> v;}int eat(H h){return 0;}int main(){H h=H([1]);VectorView<int,Row> v=vector_view(h.v);eat(h);return 0;}",
+        "int main(){List<Vector<int,Row>> a={[1]};VectorView<int,Row> v=vector_view(a[0]);push(a,[2]);return 0;}",
+        "int eat(Vector<int,Row> a){return 1;}int main(){Vector<int,Row> a=[1];VectorView<int,Row> v=vector_view(a);return v[usize(eat(a))];}",
+        "int eat(Array<Vector<int,Row>> a){return 0;}int main(){Array<Vector<int,Row>> a={[1]};VectorView<int,Row> v=vector_view(a[usize(eat(a))]);return 0;}",
+        "int eat(Vector<int,Row> a){return 0;}int read(VectorView<int,Column> v,int x){return v[1];}int main(){Vector<int,Row> a=[1];return read(transpose_view(a),eat(a));}",
+        "int grow(VectorViewMut<List<int>,Row> v){push(v[1],42);return 0;}int main(){Vector<List<int>,Row> a=[{1}];ref int x=&a[1][0];grow(vector_view_mut(a));return *x;}",
+        "int grow(ref VectorViewMut<List<int>,Row> r){VectorViewMut<List<int>,Row> v=*r;push(v[1],42);return 0;}int main(){Vector<List<int>,Row> a=[{1}];VectorViewMut<List<int>,Row> v=vector_view_mut(a);ref int x=&a[1][0];grow(&v);return *x;}",
+        "int bad(ref MatrixViewMut<List<int>> r){MatrixViewMut<List<int>> v=*r;ref int x=&v[1,1][0];MatrixViewMut<List<int>> w=*r;push(w[1,1],42);return *x;}int main(){return 0;}",
+        "int bad(ref VectorViewMut<List<int>,Row> r){VectorViewMut<List<int>,Row> v=*r;ref int x=&v[1][0];VectorViewMut<List<int>,Row> w=*r;push(w[1],42);return *x;}int main(){return 0;}",
+        "int bad(VectorViewMut<List<int>,Row> v){ref int x=&v[1][0];VectorViewMut<List<int>,Column> w=transpose_view_mut(v);push(w[1],42);return *x;}int main(){return 0;}",
+        "struct H{List<int> l;}int grow(VectorViewMut<H,Row> v){push(v[1].l,42);return 0;}int main(){Vector<H,Row> a=[H({1})];grow(vector_view_mut(a));return 0;}",
+    ] {
+        assert!(
+            compile_source(&SourceFile::new("alias.ae", source), &[]).is_err(),
+            "accepted {source}"
+        );
+    }
+    let compiled = compile_source(
+        &SourceFile::new(
+            "only_view.ae",
+            "int read(VectorView<int,Row> v){return v[1];}int main(){return 0;}",
+        ),
+        &[],
+    )
+    .unwrap();
+    assert!(compiled.llvm.contains("@aether_vector_view_index_"));
+    assert!(!compiled.llvm.contains("@malloc") && !compiled.llvm.contains("@free"));
+    compile_source(&SourceFile::new("symbolic.ae", "int shape<T:Storable>(ref Vector<T,Row> a){VectorView<T,Row> v=vector_view(*a);return int(dimension(v));}int main(){Vector<Buffer<int>,Row> a=[Buffer<int>(1,2)];return shape(&a)-1;}"), &[]).unwrap();
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical25_runtime_bounds_orientations_and_capabilities() {
+    use std::os::unix::process::ExitStatusExt;
+    for orientation in ["Row", "Column"] {
+        for (literal, dimension) in [("[]", 0), ("[1,2,3]", 3)] {
+            for (ty, create, transpose) in [
+                ("VectorView", "vector_view", false),
+                ("VectorView", "transpose_view", true),
+                ("VectorViewMut", "vector_view_mut", false),
+                ("VectorViewMut", "transpose_view_mut", true),
+            ] {
+                let result_orientation = if transpose {
+                    if orientation == "Row" {
+                        "Column"
+                    } else {
+                        "Row"
+                    }
+                } else {
+                    orientation
+                };
+                for index in [0, dimension + 1, u64::MAX] {
+                    let operations = if ty == "VectorViewMut" {
+                        vec![
+                            "return v[i];",
+                            "v[i]=42;return 0;",
+                            "ref int x=&v[i];return *x;",
+                            "ref mut int x=&mut v[i];*x=42;return 0;",
+                        ]
+                    } else {
+                        vec!["return v[i];", "ref int x=&v[i];return *x;"]
+                    };
+                    for operation in operations {
+                        let source = format!(
+                            "int main(){{Vector<int,{orientation}> a={literal};{ty}<int,{result_orientation}> v={create}(a);usize i={index};{operation}}}"
+                        );
+                        let compiled =
+                            compile_source(&SourceFile::new("bounds.ae", source), &[]).unwrap();
+                        assert_eq!(
+                            v23_execute(&compiled.llvm).signal(),
+                            Some(4),
+                            "{literal} {orientation} {create} {index} {operation}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn vertical25_nonunit_stride_backend_contract() {
+    // Test-only verified backing: three logical elements at offsets 0, S, 2S.
+    // There is deliberately no source-level descriptor/stride constructor.
+    let compiled = compile_source(&SourceFile::new("stride.ae", "int probe(VectorViewMut<int,Row> v){VectorViewMut<int,Column> t=transpose_view_mut(v);VectorView<int,Row> back=transpose_view(t);ref int first=&back[1];ref mut int last=&mut t[3];*last=40;return *first+back[3]+int(dimension(t))-45;}int main(){return 0;}"), &[]).unwrap();
+    let symbol = compiled
+        .llvm
+        .lines()
+        .find(|line| line.starts_with("define i64 @") && line.contains("{ ptr, i64, i64 }"))
+        .unwrap()
+        .split('@')
+        .nth(1)
+        .unwrap()
+        .split('(')
+        .next()
+        .unwrap();
+    for stride in [2, 3, 5] {
+        let count = 2 * stride + 1;
+        let harness = format!(
+            "  %backing = alloca [{count} x i64]\n  store [{count} x i64] zeroinitializer, ptr %backing\n  store i64 2, ptr %backing\n  %descriptor0 = insertvalue {{ ptr, i64, i64 }} poison, ptr %backing, 0\n  %descriptor1 = insertvalue {{ ptr, i64, i64 }} %descriptor0, i64 3, 1\n  %descriptor2 = insertvalue {{ ptr, i64, i64 }} %descriptor1, i64 {stride}, 2\n  %probe_result = call i64 @{symbol}({{ ptr, i64, i64 }} %descriptor2)\n  %last_ptr = getelementptr i64, ptr %backing, i64 {}\n  %last_value = load i64, ptr %last_ptr\n  %last_ok = icmp eq i64 %last_value, 40\n  %probe_status = trunc i64 %probe_result to i32\n  %process_status = select i1 %last_ok, i32 %probe_status, i32 99",
+            2 * stride
+        );
+        let llvm = compiled.llvm.replace(
+            "  %process_status = trunc i64 %aether_result to i32",
+            &harness,
+        );
+        assert_ne!(llvm, compiled.llvm);
+        assert_eq!(v23_execute(&llvm).code(), Some(0), "stride {stride}");
+    }
+}
+
+#[test]
+fn vertical25_cross_module_type_capability_rejections() {
+    let directory = temporary("v25-modules");
+    fs::create_dir_all(&directory).unwrap();
+    fs::write(directory.join("helper.ae"), "int read(VectorView<int,Row> v){return v[1];}int write(VectorViewMut<int,Column> v){v[1]=42;return 0;}").unwrap();
+    for source in [
+        "import helper;int main(){Vector<int,Row> a=[1];return helper.write(transpose_view(a));}",
+        "import helper;int main(){Vector<int,Row> a=[1];return helper.read(transpose_view(a));}",
+        "import helper;int main(){Vector<double,Row> a=[1];return helper.read(vector_view(a));}",
+        "import helper;int main(){Array<int> a={1};return helper.read(view(a));}",
+    ] {
+        fs::write(directory.join("main.ae"), source).unwrap();
+        assert!(
+            compile_session(
+                CompilationSession::discover(&directory.join("main.ae")).unwrap(),
+                &[]
+            )
+            .is_err(),
+            "accepted {source}"
+        );
+    }
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn vertical25_mir_ssa_reject_mutable_from_shared_with_matching_result() {
+    use aether_frontend::VectorViewDescriptor;
+    use aether_middle::{
+        Rvalue, SsaOp, SsaOperand, SsaPlace, SsaPlaceBase, build_ssa, lower_hir, verify_mir,
+        verify_ssa,
+    };
+    let source = SourceFile::new(
+        "capability.ae",
+        "int main(){Vector<int,Row> a=[1];VectorView<int,Row> shared=vector_view(a);VectorViewMut<int,Column> writable=transpose_view_mut(a);return writable[1];}",
+    );
+    let mut mir = lower_hir(analyze(parse_source(&source).unwrap()).unwrap());
+    let mut ssa = build_ssa(&verify_mir(mir.clone()).unwrap());
+    let mut shared_place = None;
+    let mut changed = false;
+    for instruction in mir.functions[0]
+        .blocks
+        .iter_mut()
+        .flat_map(|b| &mut b.instructions)
+    {
+        match &mut instruction.value {
+            Rvalue::VectorView { mutable: false, .. } => {
+                shared_place = Some(instruction.destination.clone());
+            }
+            Rvalue::VectorView {
+                source,
+                mutable: true,
+                descriptor,
+                ..
+            } => {
+                *source = shared_place.clone().unwrap();
+                *descriptor = VectorViewDescriptor::derived(true);
+                changed = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(changed);
+    let errors = verify_mir(mir).unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.message.contains("capability contract")),
+        "{errors:?}"
+    );
+    let mut shared_value = None;
+    let mut changed = false;
+    for instruction in ssa.functions[0]
+        .blocks
+        .iter_mut()
+        .flat_map(|b| &mut b.instructions)
+    {
+        match &mut instruction.op {
+            SsaOp::VectorView { mutable: false, .. } => shared_value = Some(instruction.result),
+            SsaOp::VectorView {
+                source,
+                mutable: true,
+                descriptor,
+                ..
+            } => {
+                *source = SsaPlace {
+                    base: SsaPlaceBase::Value(SsaOperand::Value(shared_value.unwrap())),
+                    projections: vec![],
+                };
+                *descriptor = VectorViewDescriptor::derived(true);
+                changed = true;
+            }
+            _ => {}
+        }
+    }
+    assert!(changed);
+    let errors = verify_ssa(ssa).unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.message.contains("capability contract")),
+        "{errors:?}"
+    );
+}

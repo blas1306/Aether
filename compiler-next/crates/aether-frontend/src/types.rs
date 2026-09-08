@@ -326,8 +326,14 @@ pub enum TypeData {
     List {
         element: TypeId,
     },
-    /// Non-owning mathematical 2D descriptor with value-level shape and element
-    /// strides. Write capability carries no uniqueness promise.
+    /// Non-owning oriented 1D descriptor with value-level dimension and stride.
+    /// Write capability carries no uniqueness promise.
+    VectorView {
+        element: TypeId,
+        orientation: Orientation,
+        mutable: bool,
+    },
+    /// Non-owning mathematical 2D descriptor with shape and element strides.
     MatrixView {
         element: TypeId,
         mutable: bool,
@@ -453,6 +459,19 @@ impl fmt::Display for TypeData {
             Self::Matrix { element } => write!(f, "Matrix<{element}>"),
             Self::Array { element } => write!(f, "Array<{element}>"),
             Self::List { element } => write!(f, "List<{element}>"),
+            Self::VectorView {
+                element,
+                orientation,
+                mutable,
+            } => write!(
+                f,
+                "{}<{element}, {orientation:?}>",
+                if *mutable {
+                    "VectorViewMut"
+                } else {
+                    "VectorView"
+                }
+            ),
             Self::MatrixView { element, mutable } => write!(
                 f,
                 "{}<{element}>",
@@ -694,6 +713,19 @@ impl TypeArena {
         self.intern(TypeData::List { element })
     }
 
+    pub fn intern_vector_view(
+        &mut self,
+        element: TypeId,
+        orientation: Orientation,
+        mutable: bool,
+    ) -> TypeId {
+        self.intern(TypeData::VectorView {
+            element,
+            orientation,
+            mutable,
+        })
+    }
+
     pub fn intern_matrix_view(&mut self, element: TypeId, mutable: bool) -> TypeId {
         self.intern(TypeData::MatrixView { element, mutable })
     }
@@ -819,6 +851,7 @@ impl TypeArena {
                 | TypeData::Array { element }
                 | TypeData::List { element }
                 | TypeData::View { element, .. }
+                | TypeData::VectorView { element, .. }
                 | TypeData::MatrixView { element, .. },
             ) => self.contains_generic(*element),
             _ => false,
@@ -938,7 +971,7 @@ impl TypeArena {
     #[must_use]
     pub fn index_semantics(&self, id: TypeId) -> Option<IndexSemantics> {
         match self.get(id)? {
-            TypeData::Vector { .. } => Some(IndexSemantics::OneBased),
+            TypeData::Vector { .. } | TypeData::VectorView { .. } => Some(IndexSemantics::OneBased),
             TypeData::Matrix { .. } | TypeData::MatrixView { .. } => {
                 Some(IndexSemantics::OneBased2D)
             }
@@ -1001,7 +1034,55 @@ impl TypeArena {
 
     #[must_use]
     pub fn borrowed_view_info(&self, id: TypeId) -> Option<(TypeId, bool)> {
-        self.view_info(id).or_else(|| self.matrix_view_info(id))
+        self.view_info(id)
+            .or_else(|| self.mathematical_view_info(id))
+    }
+
+    #[must_use]
+    pub fn vector_view_info(&self, id: TypeId) -> Option<(TypeId, Orientation, bool)> {
+        match self.get(id) {
+            Some(TypeData::VectorView {
+                element,
+                orientation,
+                mutable,
+            }) => Some((*element, *orientation, *mutable)),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn vector_like_info(&self, id: TypeId) -> Option<(TypeId, Orientation)> {
+        match self.get(id) {
+            Some(
+                TypeData::Vector {
+                    element,
+                    orientation,
+                }
+                | TypeData::VectorView {
+                    element,
+                    orientation,
+                    ..
+                },
+            ) => Some((*element, *orientation)),
+            _ => None,
+        }
+    }
+
+    #[must_use]
+    pub fn mathematical_view_info(&self, id: TypeId) -> Option<(TypeId, bool)> {
+        self.matrix_view_info(id)
+            .or_else(|| self.vector_view_info(id).map(|(e, _, m)| (e, m)))
+    }
+
+    /// Writable descriptors can be copied even through shared references.
+    /// Nested relocating call effects require provenance not yet available.
+    #[must_use]
+    pub fn has_untracked_mutable_view_effect(&self, mut id: TypeId) -> bool {
+        while let Some((pointee, _)) = self.reference_info(id) {
+            id = pointee;
+        }
+        self.mathematical_view_info(id)
+            .is_some_and(|(element, mutable)| mutable && self.may_contain_list(element))
     }
 
     /// Central lifecycle classification for a canonical semantic type.
@@ -1059,15 +1140,16 @@ impl TypeArena {
                 is_storable: true,
                 needs_drop: false,
             },
-            TypeData::Reference { .. } | TypeData::View { .. } | TypeData::MatrixView { .. } => {
-                TypeProperties {
-                    is_known: true,
-                    is_copy: true,
-                    is_relocatable: true,
-                    is_storable: false,
-                    needs_drop: false,
-                }
-            }
+            TypeData::Reference { .. }
+            | TypeData::View { .. }
+            | TypeData::VectorView { .. }
+            | TypeData::MatrixView { .. } => TypeProperties {
+                is_known: true,
+                is_copy: true,
+                is_relocatable: true,
+                is_storable: false,
+                needs_drop: false,
+            },
             TypeData::Buffer { element }
             | TypeData::Matrix { element }
             | TypeData::Vector { element, .. }
@@ -1316,7 +1398,10 @@ impl TypeArena {
                 ),
             Some(TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_)) => true,
             Some(
-                TypeData::Reference { .. } | TypeData::View { .. } | TypeData::MatrixView { .. },
+                TypeData::Reference { .. }
+                | TypeData::View { .. }
+                | TypeData::VectorView { .. }
+                | TypeData::MatrixView { .. },
             ) => capability != Capability::Storable,
             Some(
                 TypeData::Buffer { element }
@@ -1492,7 +1577,11 @@ impl TypeArena {
                 capability == 0
                     || self.contains_capability(pointee, capability, substitution, visiting)
             }
-            Some(TypeData::View { element, .. } | TypeData::MatrixView { element, .. }) => {
+            Some(
+                TypeData::View { element, .. }
+                | TypeData::VectorView { element, .. }
+                | TypeData::MatrixView { element, .. },
+            ) => {
                 capability == 1
                     || self.contains_capability(element, capability, substitution, visiting)
             }
@@ -1669,6 +1758,14 @@ impl TypeArena {
                 let element = self.substitute(element, substitution)?;
                 Ok(self.intern_list(element))
             }
+            Some(TypeData::VectorView {
+                element,
+                orientation,
+                mutable,
+            }) => {
+                let element = self.substitute(element, substitution)?;
+                Ok(self.intern_vector_view(element, orientation, mutable))
+            }
             Some(TypeData::MatrixView { element, mutable }) => {
                 let element = self.substitute(element, substitution)?;
                 Ok(self.intern_matrix_view(element, mutable))
@@ -1683,6 +1780,7 @@ impl TypeArena {
 
     /// Read-only substitution used by verifiers after monomorphization. Every
     /// result must already have been interned by the instantiator.
+    #[allow(clippy::too_many_lines)]
     pub fn substituted_existing(
         &self,
         ty: TypeId,
@@ -1771,6 +1869,21 @@ impl TypeArena {
                     .ids
                     .get(&TypeData::List { element })
                     .expect("monomorphizer interned substituted List"))
+            }
+            Some(TypeData::VectorView {
+                element,
+                orientation,
+                mutable,
+            }) => {
+                let element = self.substituted_existing(element, substitution)?;
+                Ok(*self
+                    .ids
+                    .get(&TypeData::VectorView {
+                        element,
+                        orientation,
+                        mutable,
+                    })
+                    .expect("monomorphizer interned substituted VectorView"))
             }
             Some(TypeData::MatrixView { element, mutable }) => {
                 let element = self.substituted_existing(element, substitution)?;
@@ -2075,6 +2188,33 @@ impl MatrixViewDescriptor {
                 row_stride: rs,
                 column_stride: cs,
             }
+        }
+    }
+}
+
+/// Closed descriptor recipe. Source has no raw pointer/stride constructor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VectorViewField {
+    Dimension,
+    Stride,
+    One,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VectorViewDescriptor {
+    pub dimension: VectorViewField,
+    pub stride: VectorViewField,
+}
+impl VectorViewDescriptor {
+    #[must_use]
+    pub fn derived(from_view: bool) -> Self {
+        Self {
+            dimension: VectorViewField::Dimension,
+            stride: if from_view {
+                VectorViewField::Stride
+            } else {
+                VectorViewField::One
+            },
         }
     }
 }

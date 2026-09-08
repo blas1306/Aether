@@ -231,6 +231,13 @@ pub enum SsaOp {
     },
     /// Borrow the source backing. Source Place and descriptor copy/use chains
     /// retain provenance; the closed recipe is independently verified.
+    VectorView {
+        source: SsaPlace,
+        mutable: bool,
+        transpose: bool,
+        descriptor: aether_frontend::VectorViewDescriptor,
+    },
+    /// Borrow 2D backing with an independently verified shape/stride recipe.
     MatrixView {
         source: SsaPlace,
         mutable: bool,
@@ -977,6 +984,17 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             size_trap: *size_trap,
             failure_trap: *failure_trap,
         },
+        Rvalue::VectorView {
+            source,
+            mutable,
+            transpose,
+            descriptor,
+        } => SsaOp::VectorView {
+            source: rename_place(source, stacks, mir),
+            mutable: *mutable,
+            transpose: *transpose,
+            descriptor: *descriptor,
+        },
         Rvalue::MatrixView {
             source,
             mutable,
@@ -1377,6 +1395,7 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
         | Rvalue::Move { source: place }
         | Rvalue::Drop { owner: place }
         | Rvalue::ConsumeEnum { owner: place }
+        | Rvalue::VectorView { source: place, .. }
         | Rvalue::MatrixView { source: place, .. }
         | Rvalue::View { source: place, .. }
         | Rvalue::MatrixRows { source: place }
@@ -2184,7 +2203,7 @@ fn verify_op(
         }
         SsaOp::VectorDimension { source } => {
             let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
-            if result != TypeId::USIZE || types.vector_element(source_ty).is_none() {
+            if result != TypeId::USIZE || types.vector_like_info(source_ty).is_none() {
                 return Err("SSA Vector dimension contract invalid".into());
             }
         }
@@ -2314,6 +2333,39 @@ fn verify_op(
                 || *failure_trap != TrapKind::AllocationFailure
             {
                 return Err("SSA List reserve contract invalid".into());
+            }
+        }
+        SsaOp::VectorView {
+            source,
+            mutable,
+            transpose,
+            descriptor,
+        } => {
+            let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
+            let (element, orientation) = types
+                .vector_like_info(source_ty)
+                .ok_or_else(|| "SSA VectorView source invalid".to_string())?;
+            if types.vector_view_info(result)
+                != Some((
+                    element,
+                    if *transpose {
+                        orientation.transposed()
+                    } else {
+                        orientation
+                    },
+                    *mutable,
+                ))
+                || *descriptor
+                    != aether_frontend::VectorViewDescriptor::derived(
+                        types.vector_view_info(source_ty).is_some(),
+                    )
+                || (*mutable
+                    && (types
+                        .vector_view_info(source_ty)
+                        .is_some_and(|(_, _, m)| !m)
+                        || !writable(source)?))
+            {
+                return Err("SSA VectorView stride/type/capability contract invalid".into());
             }
         }
         SsaOp::MatrixView {
@@ -2765,6 +2817,7 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         | SsaOp::Move { source: place }
         | SsaOp::Drop { owner: place }
         | SsaOp::ConsumeEnum { owner: place }
+        | SsaOp::VectorView { source: place, .. }
         | SsaOp::MatrixView { source: place, .. }
         | SsaOp::View { source: place, .. }
         | SsaOp::MatrixRows { source: place }

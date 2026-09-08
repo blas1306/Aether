@@ -1,0 +1,1 @@
+int main(){Vector<int,Row> a=[1,2,3];VectorView<int,Row> v=vector_view(a);ref int x=&v[1];return *x+v[3]+int(dimension(v))-7;}

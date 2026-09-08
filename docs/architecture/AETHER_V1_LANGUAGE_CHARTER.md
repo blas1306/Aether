@@ -443,3 +443,22 @@ Matrix transpose remains unresolved. Slicing, row/column VectorView, arithmetic,
 BLAS, numeric traits and named lifetimes remain future work.
 
 See [NEXT_VERTICAL_24_REPORT.md](NEXT_VERTICAL_24_REPORT.md).
+
+
+## NEXT-VERTICAL-25 — oriented borrowed vector views implemented
+
+VectorView<T,Row/Column> and VectorViewMut<T,Row/Column> retain mathematical
+1D identity with orientation in TypeId and dimension/element stride in the
+runtime descriptor. Normal owner views borrow contiguous storage with stride 1;
+borrowed transpose flips only type orientation and preserves pointer, dimension,
+stride and provenance in O(1). Both descriptors are Copy/Relocatable,
+non-Storable and have no drop. Writable capability does not imply uniqueness.
+Checked one-based indexing and element references use the actual stride.
+Owners cannot move or be replaced while derived aliases are lexically live.
+Projected owners and explicit owner references are supported; stored/returned
+borrows and potentially invalidating nested List effects remain conservative.
+V22 consuming transpose and V24 MatrixView retain their separate contracts.
+Matrix row/column projection is future work, as are slicing, arithmetic,
+conjugation, methods, traits, raw descriptor construction and named lifetimes.
+
+See [NEXT_VERTICAL_25_REPORT.md](NEXT_VERTICAL_25_REPORT.md).

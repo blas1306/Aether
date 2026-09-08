@@ -1,0 +1,1 @@
+int main(){Vector<int,Row> a=[1,2];VectorView<int,Row> v=vector_view(a);VectorView<int,Row> u=v;VectorViewMut<int,Row> m=vector_view_mut(a);VectorViewMut<int,Row> n=m;n[1]=42;return u[1]+m[1]-84;}

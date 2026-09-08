@@ -1958,3 +1958,35 @@ element-generic MatrixView<T> signatures support ordinary local/module helpers.
 
 See [NEXT_VERTICAL_24_REPORT.md](NEXT_VERTICAL_24_REPORT.md) for exact native,
 corruption, zero-cost and compilation snapshot evidence and remaining decisions.
+
+
+## 42. NEXT-VERTICAL-25 implementation confirmation
+
+Canonical VectorView { element, orientation, mutable } is interned separately
+from Vector, MatrixView and raw View. Orientation participates in substitution,
+inference and QV-prefixed structural mangling; the runtime descriptor contains
+only pointer, dimension and stride. Target-aware layout uses three words.
+Copy/Relocatable/no-drop/non-Storable properties reuse central borrow policy.
+
+HIR, MIR and SSA carry a separate VectorView operation with source Place,
+mutable/transpose flags and closed VectorViewDescriptor selectors. Each layer
+checks source/result element and orientation, writable paths, exact dimension
+and stride recipes, and one-based indexing. Owner creation selects dimension
+and constant stride 1; view creation/transpose selects original dimension and
+stride. Place and copy/use chains preserve ancestry without runtime provenance.
+VectorDimension now selects metadata using the actual descriptor type in LLVM;
+its previous fixed two-word assumption would miscompile a vector view query.
+Bounds precede `(i-1)*stride` and non-inbounds GEP. Test-only native descriptors
+with valid non-unit strides exercise the future projection addressing contract.
+
+The mutable nested-List call boundary now uses a shared mathematical-view
+capability/effect query, including references to writable descriptors. A new
+negative test exposed a provenance gap in explicit Load of a copied view through
+a reference: it could forget the backing root and admit aliased nested List
+mutation. Mathematical descriptor loads now inherit that root and conservatively
+retain storage borrows for both VectorView and MatrixView. No new lifetime model,
+uniqueness rule or noalias is introduced. V22 consuming transpose and V24 2D
+recipes remain independent; Matrix row/column projection is deferred.
+
+See [NEXT_VERTICAL_25_REPORT.md](NEXT_VERTICAL_25_REPORT.md) for qualification,
+exact per-operation counters, timing snapshots and remaining decisions.

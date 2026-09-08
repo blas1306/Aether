@@ -32,3 +32,4 @@ v21_vectors	accept:0	V21 cross-module Row/Column signatures and generic aggregat
 v22_transpose	accept:0	consuming Vector transpose across modules preserves orientation and ownership
 v23_matrix	accept:0	Matrix shape and owning generic signatures across modules
 v24_matrix_views	accept:0	shared/mutable strided matrix views across modules
+v25_vector_views	accept:0	oriented shared/mutable borrowed vector views across modules

@@ -1,0 +1,1 @@
+int main(){Vector<int,Column> a=[1,2,3];VectorViewMut<int,Column> v=vector_view_mut(a);v[1]=42;return a[1]-42;}

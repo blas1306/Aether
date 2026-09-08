@@ -1,10 +1,57 @@
-# Aether NEXT-VERTICAL-24
+# Aether NEXT-VERTICAL-25
 
 This directory is the isolated Rust implementation of the first reconstruction
-slice. The current mathematical foundation includes Matrix<T> owners and borrowed strided MatrixView/MatrixViewMut with zero-copy transpose; the numbered
+slice. The current mathematical foundation includes Matrix<T> owners and borrowed strided MatrixView/MatrixViewMut and oriented VectorView/VectorViewMut with zero-copy transpose; the numbered
 Vertical-9..17 sections below retain historical qualification context.
 It does not replace the production `aether` CLI or import any legacy
 Python object, JSON schema, Initial IR, or SSA representation.
+
+## Oriented borrowed vector views (V25)
+
+```aether
+Vector<int,Row> v = [10,20,30];
+VectorView<int,Row> row = vector_view(v);
+VectorView<int,Column> column = transpose_view(row);
+VectorViewMut<int,Column> writable = transpose_view_mut(v);
+writable[2] = 42; // v[2] is now 42
+ref int first = &column[1];
+usize n = dimension(column);
+```
+
+`VectorView<T,Row/Column>` and `VectorViewMut<T,Row/Column>` are distinct
+mathematical borrowed types. Element, orientation and write capability enter
+canonical TypeId; runtime orientation does not exist. Their target-sized
+three-word descriptor is `{ptr,dimension,stride}`, with stride in elements.
+`vector_view` / `vector_view_mut` borrow a Vector Place with stride 1;
+`transpose_view` / `transpose_view_mut` accept Vector owners or vector views
+and flip Row/Column while preserving pointer, dimension and stride. Normal
+creation from existing views also preserves their metadata. Empty owner views
+use `{null,0,1}`. Every creation/transpose has zero alloc/free/relocation delta.
+
+`view[i]` requires one usize index, checks `1 <= i <= dimension`, then computes
+`(i-1)*stride`. Shared views allow Copy reads and shared references; mutable
+views additionally allow Copy replacement and mutable references. Owning
+Buffer elements/subelements can be borrowed without extracting ownership.
+Both descriptors are Copy/Relocatable, non-Storable and have no drop; writable
+does not imply uniqueness or noalias. Copies, explicit dereference loads and
+transposes preserve the underlying lexical owner root. Live views block owner
+move/replacement; scope exit releases their borrow. Struct fields, indexed
+Array/List owners and explicitly dereferenced owner references are supported.
+
+Views cannot return, enter owning storage, be rebound or serve as bare generic
+type arguments. Element-generic `VectorView<T,Row>` / `VectorViewMut<T,Column>`
+helpers support explicit/inferred T and cross-module calls; there is no generic
+orientation O. Copy operations need T:Copy, and symbolic owning Vector sources
+need T:Storable. Mutable mathematical views with List-containing elements cannot
+cross call boundaries until nested alias effects can be proven; this common
+rule covers MatrixView too.
+
+V22 `transpose(Vector)` still consumes the owner and transfers its two-word
+descriptor. Borrowed transpose leaves that owner live. V24 MatrixView keeps
+its separate 2D descriptor and recipes. V25 adds no Matrix row/column extraction,
+slicing/ranges, arithmetic, conjugation, traits, methods, raw descriptors or
+lifetime parameters. See [the V25 report](../docs/architecture/NEXT_VERTICAL_25_REPORT.md)
+for qualification, exact instrumentation, supported forms and compile snapshots.
 
 ## Borrowed strided matrix views (V24)
 
@@ -56,7 +103,7 @@ be represented safely. Views cannot return, be stored
 in owning aggregates/containers, be rebound, or be supplied as bare generic
 type arguments under the existing borrowed-value restrictions. Helpers with
 `MatrixView<T>`/`MatrixViewMut<T>` parameters support element generics and modules.
-There are no stored lifetimes, methods, slicing, VectorView, arithmetic or BLAS.
+V24 added no stored lifetimes, methods, slicing, arithmetic or BLAS; V25 adds VectorView above.
 See [the V24 report](../docs/architecture/NEXT_VERTICAL_24_REPORT.md).
 
 ## Current mathematical foundation (V23)
@@ -297,7 +344,8 @@ applied aggregate forms, generic parameters, and
 `Array { element: TypeId }`, `List { element: TypeId }`,
 `Vector { element: TypeId, orientation: Orientation }`,
 `Matrix { element: TypeId }`,
-`MatrixView { element: TypeId, mutable: bool }`, and
+`MatrixView { element: TypeId, mutable: bool }`,
+`VectorView { element: TypeId, orientation: Orientation, mutable: bool }`, and
 `View { element: TypeId, mutable: bool }`. Repeated `ref T` resolution
 reuses one ID, while `ref T` and `ref mut T` remain distinct. HIR is the first canonical boundary;
 HIR, MIR, SSA, signatures, fields and enum payloads transport IDs rather than

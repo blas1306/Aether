@@ -151,10 +151,12 @@ pub fn layout_of(
             size: 5 * u64::from(target.pointer_width / 8),
             align: u64::from(target.pointer_width / 8),
         },
-        TypeData::Matrix { .. } | TypeData::List { .. } => TypeLayout {
-            size: 3 * u64::from(target.pointer_width / 8),
-            align: u64::from(target.pointer_width / 8),
-        },
+        TypeData::VectorView { .. } | TypeData::Matrix { .. } | TypeData::List { .. } => {
+            TypeLayout {
+                size: 3 * u64::from(target.pointer_width / 8),
+                align: u64::from(target.pointer_width / 8),
+            }
+        }
         TypeData::GenericParam(_) => return None,
     })
 }
@@ -226,6 +228,19 @@ pub fn format_type(
         Some(TypeData::List { element }) => {
             format!("List<{}>", format_type(types, *element, structs, enums))
         }
+        Some(TypeData::VectorView {
+            element,
+            orientation,
+            mutable,
+        }) => format!(
+            "{}<{}, {orientation:?}>",
+            if *mutable {
+                "VectorViewMut"
+            } else {
+                "VectorView"
+            },
+            format_type(types, *element, structs, enums)
+        ),
         Some(TypeData::MatrixView { element, mutable }) => format!(
             "{}<{}>",
             if *mutable {
@@ -821,6 +836,13 @@ pub enum HirExprKind {
     },
     /// Borrow the source backing. Source Place and descriptor copy/use chains
     /// retain provenance; the closed recipe is independently verified.
+    VectorView {
+        source: HirPlace,
+        mutable: bool,
+        transpose: bool,
+        descriptor: crate::types::VectorViewDescriptor,
+    },
+    /// Borrow 2D backing with an independently verified shape/stride recipe.
     MatrixView {
         source: HirPlace,
         mutable: bool,
@@ -1764,7 +1786,8 @@ fn resolve_type_in_module(
     {
         return Err(generic_arity(ty, 1));
     }
-    if ty.module.is_none() && ty.name == "Vector" {
+    if ty.module.is_none() && matches!(ty.name.as_str(), "Vector" | "VectorView" | "VectorViewMut")
+    {
         if ty.arguments.len() != 2 {
             return Err(generic_arity(ty, 2));
         }
@@ -1807,6 +1830,9 @@ fn resolve_type_in_module(
             struct_arities,
             enum_arities,
         )?;
+        if ty.name != "Vector" {
+            return Ok(types.intern_vector_view(element, orientation, ty.name == "VectorViewMut"));
+        }
         let deferred_aggregate = types.properties(element).is_some_and(|p| !p.is_known)
             && (types.struct_id(element).is_some() || types.enum_id(element).is_some());
         if !types.is_admitted_vector_element(element) && !deferred_aggregate {
@@ -2030,7 +2056,7 @@ fn generic_arity(ty: &AstType, expected: usize) -> Diagnostic {
 }
 
 fn intrinsic_type_arity(name: &str) -> Option<usize> {
-    if name == "Vector" {
+    if matches!(name, "Vector" | "VectorView" | "VectorViewMut") {
         return Some(2);
     }
     matches!(
@@ -2262,6 +2288,7 @@ fn validate_type_constraints(
             TypeData::Reference { pointee: ty, .. }
             | TypeData::Buffer { element: ty }
             | TypeData::View { element: ty, .. }
+            | TypeData::VectorView { element: ty, .. }
             | TypeData::MatrixView { element: ty, .. },
         ) => return validate_type_constraints(types, ty, structs, enums, span),
         _ => return Ok(()),
@@ -2313,6 +2340,18 @@ fn infer_generic_arguments(
                 orientation: ro,
             }),
         ) if lo == ro => infer_generic_arguments(types, *left, *right, inferred),
+        (
+            Some(TypeData::VectorView {
+                element: left,
+                orientation: lo,
+                mutable: lm,
+            }),
+            Some(TypeData::VectorView {
+                element: right,
+                orientation: ro,
+                mutable: rm,
+            }),
+        ) if lo == ro && lm == rm => infer_generic_arguments(types, *left, *right, inferred),
         (
             Some(TypeData::MatrixView {
                 element: left,
@@ -2539,7 +2578,7 @@ fn compute_aggregate_layouts(
                     align: bytes,
                 }
             }
-            TypeData::Matrix { .. } | TypeData::List { .. } => {
+            TypeData::VectorView { .. } | TypeData::Matrix { .. } | TypeData::List { .. } => {
                 let bytes = u64::from(target.pointer_width / 8);
                 TypeLayout {
                     size: bytes * 3,
@@ -3319,6 +3358,17 @@ impl Monomorphizer<'_> {
             HirExprKind::ListCapacity { source } => HirExprKind::ListCapacity {
                 source: self.substitute_place(source, substitution)?,
             },
+            HirExprKind::VectorView {
+                source,
+                mutable,
+                transpose,
+                descriptor,
+            } => HirExprKind::VectorView {
+                source: self.substitute_place(source, substitution)?,
+                mutable: *mutable,
+                transpose: *transpose,
+                descriptor: *descriptor,
+            },
             HirExprKind::MatrixView {
                 source,
                 mutable,
@@ -3430,6 +3480,7 @@ fn type_depth(types: &TypeArena, ty: TypeId) -> usize {
             | TypeData::Array { element }
             | TypeData::List { element }
             | TypeData::View { element, .. }
+            | TypeData::VectorView { element, .. }
             | TypeData::MatrixView { element, .. },
         ) => 1 + type_depth(types, *element),
         Some(TypeData::StructInstance(_, args) | TypeData::EnumInstance(_, args)) => {
@@ -3463,6 +3514,7 @@ fn type_contains(types: &TypeArena, outer: TypeId, needle: TypeId) -> bool {
                 | TypeData::Array { element }
                 | TypeData::List { element }
                 | TypeData::View { element, .. }
+                | TypeData::VectorView { element, .. }
                 | TypeData::MatrixView { element, .. },
             ) => type_contains(types, *element, needle),
             _ => false,
@@ -3532,7 +3584,7 @@ fn compute_concrete_layouts(
                     align: bytes,
                 })
             }
-            TypeData::Matrix { .. } | TypeData::List { .. } => {
+            TypeData::VectorView { .. } | TypeData::Matrix { .. } | TypeData::List { .. } => {
                 let bytes = u64::from(target.pointer_width / 8);
                 Some(TypeLayout {
                     size: bytes * 3,
@@ -3780,7 +3832,7 @@ fn synthesize_ownership(
     for parameter in parameters {
         // An incoming view borrows caller storage. Its parameter is the local
         // proxy root, so references and descriptor copies keep that ancestry.
-        if types.matrix_view_info(parameter.ty).is_some() {
+        if types.mathematical_view_info(parameter.ty).is_some() {
             analysis.provenance[parameter.local.0 as usize] = Some(parameter.local);
         }
         if !types.guarantees_copy(parameter.ty) {
@@ -4221,6 +4273,7 @@ impl OwnershipAnalysis<'_> {
             HirExprKind::Load(place)
             | HirExprKind::Borrow { place, .. }
             | HirExprKind::View { source: place, .. }
+            | HirExprKind::VectorView { source: place, .. }
             | HirExprKind::MatrixView { source: place, .. } => self.place(place, expr.span),
             HirExprKind::BufferInit {
                 length, initial, ..
@@ -4249,19 +4302,11 @@ impl OwnershipAnalysis<'_> {
             HirExprKind::Call { args, .. } => {
                 // Writable nested List effects cannot yet be related across
                 // aliased descriptor parameters. Keep this boundary closed.
-                if let Some(argument) = args.iter().find(|argument| {
-                    let mut ty = argument.ty;
-                    // A shared reference can still copy a writable descriptor.
-                    while let Some((pointee, _)) = self.types.reference_info(ty) {
-                        ty = pointee;
-                    }
-                    self.types
-                        .matrix_view_info(ty)
-                        .is_some_and(|(element, mutable)| {
-                            mutable && self.types.may_contain_list(element)
-                        })
-                }) {
-                    return Err(self.error("E0313", "passing a mutable matrix view containing List storage requires nested alias-effect provenance", argument.span));
+                if let Some(argument) = args
+                    .iter()
+                    .find(|argument| self.types.has_untracked_mutable_view_effect(argument.ty))
+                {
+                    return Err(self.error("E0313", "passing a mutable mathematical view containing List storage requires nested alias-effect provenance", argument.span));
                 }
 
                 if args.iter().any(|a| {
@@ -4443,7 +4488,11 @@ impl OwnershipAnalysis<'_> {
         match &expr.kind {
             HirExprKind::Borrow { place, .. }
             | HirExprKind::View { source: place, .. }
+            | HirExprKind::VectorView { source: place, .. }
             | HirExprKind::MatrixView { source: place, .. } => self.owner_of_place(place),
+            HirExprKind::Load(place) if self.types.mathematical_view_info(expr.ty).is_some() => {
+                self.owner_of_place(place)
+            }
             HirExprKind::Local(local) => self.provenance[local.0 as usize],
             _ => None,
         }
@@ -4500,7 +4549,8 @@ impl OwnershipAnalysis<'_> {
                 .projections
                 .iter()
                 .any(|projection| matches!(projection, HirPlaceProjection::Index { .. })),
-            HirExprKind::MatrixView { .. } => true,
+            HirExprKind::VectorView { .. } | HirExprKind::MatrixView { .. } => true,
+            HirExprKind::Load(_) if self.types.mathematical_view_info(expr.ty).is_some() => true,
             HirExprKind::View { source, .. } => self.types.list_element(source.ty).is_some(),
             HirExprKind::Local(local) => self.storage_references[local.0 as usize],
             _ => false,
@@ -4532,6 +4582,15 @@ impl OwnershipAnalysis<'_> {
     fn known_length(&self, expr: &HirExpr) -> Option<u64> {
         match &expr.kind {
             HirExprKind::VectorTranspose { operand, .. } => self.known_length(operand),
+            HirExprKind::VectorView { source, .. } => {
+                if let HirPlaceBase::Local(local) = source.base
+                    && source.projections.is_empty()
+                {
+                    self.buffer_lengths[local.0 as usize]
+                } else {
+                    None
+                }
+            }
             HirExprKind::BufferInit { length, .. } | HirExprKind::ArrayFill { length, .. } => {
                 match length.kind {
                     HirExprKind::Int(value) => u64::try_from(value).ok(),
@@ -5568,9 +5627,20 @@ impl Analyzer<'_> {
                 }
                 if matches!(
                     callee.as_str(),
-                    "matrix_view" | "matrix_view_mut" | "transpose_view" | "transpose_view_mut"
+                    "vector_view"
+                        | "vector_view_mut"
+                        | "matrix_view"
+                        | "matrix_view_mut"
+                        | "transpose_view"
+                        | "transpose_view_mut"
                 ) {
-                    return self.matrix_view_init(callee, type_arguments, args, e.span, expected);
+                    return self.mathematical_view_init(
+                        callee,
+                        type_arguments,
+                        args,
+                        e.span,
+                        expected,
+                    );
                 }
                 if callee == "view" || callee == "view_mut" {
                     return self.view_init(
@@ -5580,6 +5650,15 @@ impl Analyzer<'_> {
                         e.span,
                         expected,
                     );
+                }
+                if matches!(callee.as_str(), "VectorView" | "VectorViewMut") {
+                    return Err(vec![Diagnostic::new(
+                        "E0338",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "VectorView has no descriptor constructor; use vector_view or transpose_view with an existing place",
+                        Some(e.span),
+                    )]);
                 }
                 let resolved_arguments = self.resolve_type_arguments(type_arguments)?;
                 if let Some(target) = builtin(callee)
@@ -5878,6 +5957,7 @@ impl Analyzer<'_> {
                 | TypeData::Matrix { .. }
                 | TypeData::List { .. }
                 | TypeData::View { .. }
+                | TypeData::VectorView { .. }
                 | TypeData::MatrixView { .. },
             )
             | None => {
@@ -6182,17 +6262,17 @@ impl Analyzer<'_> {
                 "E0327",
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                "dimension expects exactly one Vector place and no type arguments",
+                "dimension expects exactly one Vector/VectorView/VectorViewMut place and no type arguments",
                 Some(span),
             )]);
         }
         let source = self.resolve_expr_place(&args[0], false)?;
-        if self.types.vector_element(source.ty).is_none() {
+        if self.types.vector_like_info(source.ty).is_none() {
             return Err(vec![Diagnostic::new(
                 "E0327",
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                "dimension source must be a Vector place",
+                "dimension source must be a Vector/VectorView/VectorViewMut place",
                 Some(span),
             )]);
         }
@@ -6459,7 +6539,7 @@ impl Analyzer<'_> {
         Ok(())
     }
 
-    fn matrix_view_init(
+    fn mathematical_view_init(
         &mut self,
         name: &str,
         type_arguments: &[AstType],
@@ -6472,7 +6552,7 @@ impl Analyzer<'_> {
                 "E0336",
                 Phase::Semantic,
                 DiagnosticCategory::Type,
-                "matrix_view/transpose_view requires one Matrix or mathematical matrix view place and no type arguments",
+                "view creation requires one matching mathematical owner/view place and no type arguments",
                 Some(span),
             )]
         };
@@ -6482,6 +6562,11 @@ impl Analyzer<'_> {
         let mutable = name.ends_with("_mut");
         let transpose = name.starts_with("transpose");
         let source = self.resolve_expr_place(&args[0], mutable)?;
+        if name.starts_with("vector_view")
+            || (transpose && self.types.vector_like_info(source.ty).is_some())
+        {
+            return self.vector_view_from_place(source, mutable, transpose, span, expected);
+        }
         let element = self
             .types
             .matrix_like_element(source.ty)
@@ -6509,6 +6594,64 @@ impl Analyzer<'_> {
             Checked {
                 expr: HirExpr {
                     kind: HirExprKind::MatrixView {
+                        source,
+                        mutable,
+                        transpose,
+                        descriptor,
+                    },
+                    ty,
+                    span,
+                },
+                constant: None,
+            },
+            expected,
+        )
+    }
+
+    fn vector_view_from_place(
+        &mut self,
+        source: HirPlace,
+        mutable: bool,
+        transpose: bool,
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        let (element, orientation) = self.types.vector_like_info(source.ty).ok_or_else(|| {
+            vec![Diagnostic::new(
+                "E0338",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "vector_view requires a Vector/VectorView/VectorViewMut place",
+                Some(span),
+            )]
+        })?;
+        if mutable
+            && self
+                .types
+                .vector_view_info(source.ty)
+                .is_some_and(|(_, _, m)| !m)
+        {
+            return Err(vec![Diagnostic::new(
+                "E0339",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "mutable vector view requires writable source capability",
+                Some(span),
+            )]);
+        }
+        let descriptor = crate::types::VectorViewDescriptor::derived(
+            self.types.vector_view_info(source.ty).is_some(),
+        );
+        let orientation = if transpose {
+            orientation.transposed()
+        } else {
+            orientation
+        };
+        let ty = self.types.intern_vector_view(element, orientation, mutable);
+        self.coerce(
+            Checked {
+                expr: HirExpr {
+                    kind: HirExprKind::VectorView {
                         source,
                         mutable,
                         transpose,
@@ -8129,7 +8272,7 @@ fn verify_expr(
         }
         HirExprKind::VectorDimension { source } => {
             verify_place(source, f, sigs, structs, enums, types, fail)?;
-            if types.vector_element(source.ty).is_none() || e.ty != TypeId::USIZE {
+            if types.vector_like_info(source.ty).is_none() || e.ty != TypeId::USIZE {
                 return Err(fail("HIR Vector dimension contract invalid".into()));
             }
         }
@@ -8226,6 +8369,41 @@ fn verify_expr(
             verify_place(source, f, sigs, structs, enums, types, fail)?;
             if types.list_element(source.ty).is_none() || e.ty != TypeId::USIZE {
                 return Err(fail("HIR List metadata query contract invalid".into()));
+            }
+        }
+        HirExprKind::VectorView {
+            source,
+            mutable,
+            transpose,
+            descriptor,
+        } => {
+            verify_place(source, f, sigs, structs, enums, types, fail)?;
+            let (element, orientation) = types
+                .vector_like_info(source.ty)
+                .ok_or_else(|| fail("HIR VectorView source invalid".into()))?;
+            if types.vector_view_info(e.ty)
+                != Some((
+                    element,
+                    if *transpose {
+                        orientation.transposed()
+                    } else {
+                        orientation
+                    },
+                    *mutable,
+                ))
+                || *descriptor
+                    != crate::types::VectorViewDescriptor::derived(
+                        types.vector_view_info(source.ty).is_some(),
+                    )
+                || (*mutable
+                    && (types
+                        .vector_view_info(source.ty)
+                        .is_some_and(|(_, _, m)| !m)
+                        || !hir_place_writable(source, f, types, structs, enums)))
+            {
+                return Err(fail(
+                    "HIR VectorView stride/type/capability contract invalid".into(),
+                ));
             }
         }
         HirExprKind::MatrixView {
@@ -8782,6 +8960,55 @@ mod tests {
         }
         assert!(verify_hir(&corrupt).is_err());
     }
+    #[test]
+    fn vertical25_hir_rejects_corrupt_vector_view_contracts() {
+        let hir = check("int main(){Vector<int,Row> a=[1,2,3];VectorView<int,Column> v=transpose_view(a);return v[1];}").unwrap();
+        for case in 0..6 {
+            let mut corrupt = hir.clone();
+            let initializer = corrupt.functions[0]
+                .body
+                .statements
+                .iter_mut()
+                .find_map(|s| {
+                    if let HirStmtKind::Local { initializer, .. } = &mut s.kind
+                        && matches!(initializer.kind, HirExprKind::VectorView { .. })
+                    {
+                        Some(initializer)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+            let HirExprKind::VectorView {
+                source,
+                mutable,
+                transpose,
+                descriptor,
+            } = &mut initializer.kind
+            else {
+                panic!()
+            };
+            match case {
+                0 => std::mem::swap(&mut descriptor.dimension, &mut descriptor.stride),
+                1 => descriptor.stride = crate::types::VectorViewField::Dimension,
+                2 => descriptor.dimension = crate::types::VectorViewField::One,
+                3 => *mutable = true,
+                4 => *transpose = false,
+                5 => {
+                    initializer.kind = HirExprKind::View {
+                        source: source.clone(),
+                        mutable: *mutable,
+                    }
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                verify_hir(&corrupt).is_err(),
+                "accepted HIR corruption {case}"
+            );
+        }
+    }
+
     #[test]
     fn vertical24_hir_rejects_corrupt_matrix_view_contracts() {
         let hir = check("int main(){Matrix<int> a=[1,2,3;4,5,6];MatrixView<int> v=transpose_view(a);return v[1,1];}").unwrap();

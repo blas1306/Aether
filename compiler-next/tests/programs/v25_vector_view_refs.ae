@@ -1,0 +1,1 @@
+int main(){Vector<int,Column> a=[1,2];ref Vector<int,Column> r=&a;VectorView<int,Column> v=vector_view(*r);ref mut Vector<int,Column> m=&mut a;VectorViewMut<int,Row> w=transpose_view_mut(*m);ref VectorViewMut<int,Row> p=&w;VectorViewMut<int,Row> copy=*p;VectorView<int,Column> back=transpose_view(*p);copy[1]=42;return v[1]+back[1]-84;}
