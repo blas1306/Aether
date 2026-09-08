@@ -8,7 +8,11 @@ NUMERIC_TYPES = (IntType, FloatType, DoubleType, ComplexType)
 
 
 def scalar_math_result_type(name: str, arguments: tuple[IRType, ...]) -> IRType:
-    if name in {"sin", "cos", "tan", "exp", "ln", "log", "sqrt"}:
+    if name == "exp":
+        if len(arguments) != 1 or not isinstance(arguments[0], NUMERIC_TYPES):
+            raise ValueError("builtin 'exp' expects one numeric argument")
+        return DoubleType() if not isinstance(arguments[0], ComplexType) else ComplexType()
+    if name in {"sin", "cos", "tan", "ln", "log", "sqrt"}:
         if len(arguments) != 1 or not isinstance(arguments[0], REAL_TYPES):
             raise ValueError(f"builtin '{name}' expects one real numeric argument")
         return DoubleType()

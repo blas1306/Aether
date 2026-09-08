@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import cmath
+
 import pytest
 
 from aether import run_aether
@@ -93,6 +95,7 @@ println(abs(z));
 println(angle(1 + im));
 println(sqrt(-1));
 println(sqrt(4));
+println(exp(1 + im));
 """
     )
 
@@ -105,7 +108,9 @@ println(sqrt(4));
         "5.0",
     ]
     assert float(lines[4]) == pytest.approx(0.7853981633974483)
-    assert lines[5:] == ["im", "2.0"]
+    assert lines[5:-1] == ["im", "2.0"]
+    actual = complex(lines[-1].replace("im", "j").replace(" ", ""))
+    assert actual == pytest.approx(cmath.exp(1 + 1j))
 
 
 def test_complex_matrix_and_vector_literals_and_assignment() -> None:

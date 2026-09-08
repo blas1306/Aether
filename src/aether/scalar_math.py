@@ -34,6 +34,8 @@ SCALAR_MATH_OPERATIONS = {
         ScalarMathOperation("sin", (1,), ScalarMathStatus.CONSOLIDATED, ScalarMathLowering.LIBM),
         ScalarMathOperation("cos", (1,), ScalarMathStatus.CONSOLIDATED, ScalarMathLowering.LIBM),
         ScalarMathOperation("tan", (1,), ScalarMathStatus.CONSOLIDATED, ScalarMathLowering.LIBM),
+        ScalarMathOperation("atan", (1,), ScalarMathStatus.CONSOLIDATED, ScalarMathLowering.LIBM),
+        ScalarMathOperation("atan2", (2,), ScalarMathStatus.CONSOLIDATED, ScalarMathLowering.LIBM),
         ScalarMathOperation("exp", (1,), ScalarMathStatus.CONSOLIDATED, ScalarMathLowering.LIBM),
         ScalarMathOperation("ln", (1,), ScalarMathStatus.CONSOLIDATED, ScalarMathLowering.LIBM),
         ScalarMathOperation("log", (1,), ScalarMathStatus.CONSOLIDATED, ScalarMathLowering.LIBM),

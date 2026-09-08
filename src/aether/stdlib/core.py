@@ -3,7 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 import cmath
 import math
-from math import ceil, cos, exp, factorial as math_factorial, floor, log, log10, sin, sqrt, tan
+from math import ceil, cos, exp, factorial as math_factorial, floor, log, log10, sin, sqrt, tan, atan
+from math import atan2 as _math_atan2
 
 from ..array_safety import checked_array_length_to_int
 from ..errors import AetherRuntimeError, AetherTypeError
@@ -102,7 +103,8 @@ def builtin_definitions() -> list[BuiltinDefinition]:
         BuiltinDefinition("sin", _constant_runtime(math_unary_builtin("sin", sin)), _math_unary_type("sin"), _exactly_one("sin")),
         BuiltinDefinition("cos", _constant_runtime(math_unary_builtin("cos", cos)), _math_unary_type("cos"), _exactly_one("cos")),
         BuiltinDefinition("tan", _constant_runtime(math_unary_builtin("tan", tan)), _math_unary_type("tan"), _exactly_one("tan")),
-        BuiltinDefinition("exp", _constant_runtime(math_unary_builtin("exp", exp)), _math_unary_type("exp"), _exactly_one("exp")),
+        BuiltinDefinition("atan", _constant_runtime(math_unary_builtin("atan", atan)), _math_unary_type("atan"), _exactly_one("atan")),
+        BuiltinDefinition("exp", _constant_runtime(exp_builtin), _exp_type, _exactly_one("exp")),
         BuiltinDefinition("ln", _constant_runtime(ln_builtin), _math_unary_type("ln"), _exactly_one("ln")),
         BuiltinDefinition("log", _constant_runtime(log_builtin), _math_unary_type("log"), _exactly_one("log")),
         BuiltinDefinition("sqrt", _constant_runtime(sqrt_builtin), _sqrt_type, _exactly_one("sqrt")),
@@ -114,6 +116,7 @@ def builtin_definitions() -> list[BuiltinDefinition]:
         BuiltinDefinition("angle", _constant_runtime(angle_builtin), _real_part_type("angle"), _exactly_one("angle")),
         BuiltinDefinition("Math.mod", _constant_runtime(mod_builtin), _math_binary_type("Math.mod"), _exactly_two("Math.mod")),
         BuiltinDefinition("Math.factorial", _constant_runtime(factorial_builtin), _factorial_type, _exactly_one("Math.factorial")),
+        BuiltinDefinition("atan2", _constant_runtime(atan2_builtin), _math_binary_type("atan2"), _exactly_two("atan2")),
         BuiltinDefinition("Math.floor", _constant_runtime(floor_builtin), _real_to_int_type("Math.floor"), _exactly_one("Math.floor")),
         BuiltinDefinition("Math.ceil", _constant_runtime(ceil_builtin), _real_to_int_type("Math.ceil"), _exactly_one("Math.ceil")),
         BuiltinDefinition(PARSE_INT_BUILTIN, _constant_runtime(_parse_int_runtime), _parse_int_type, _exactly_one(PARSE_INT_BUILTIN)),
@@ -583,6 +586,19 @@ def ln_builtin(args: list[AetherValue]) -> AetherValue:
     return AetherValue("double", log(value.value))
 
 
+def exp_builtin(args: list[AetherValue]) -> AetherValue:
+    value = _require_numeric_unary_arg(args, "exp")
+    if value.type_name == "complex":
+        return AetherValue("complex", cmath.exp(value.value))
+    try:
+        result = math.exp(value.value)
+    except ValueError:
+        result = float("nan")
+    except OverflowError:
+        result = math.copysign(float("inf"), value.value)
+    return AetherValue("double", result)
+
+
 def log_builtin(args: list[AetherValue]) -> AetherValue:
     value = _require_real_numeric_unary_arg(args, "log")
     if value.value == 0:
@@ -638,6 +654,13 @@ def conj_builtin(args: list[AetherValue]) -> AetherValue:
 def angle_builtin(args: list[AetherValue]) -> AetherValue:
     value = _require_numeric_unary_arg(args, "angle")
     return AetherValue("double", float(cmath.phase(complex(value.value))))
+
+
+def atan2_builtin(args: list[AetherValue]) -> AetherValue:
+    left, right = _require_real_numeric_binary_args(args, "atan2")
+    # Aether's atan2(x, y) computes arctan(y/x) with quadrant handling.
+    # Python's math.atan2 expects (y, x), so pass reversed.
+    return AetherValue("double", _math_atan2(right.value, left.value))
 
 
 def mod_builtin(args: list[AetherValue]) -> AetherValue:
@@ -976,6 +999,17 @@ def _sqrt_type(arg_types: list[AetherType | None]) -> AetherType | None:
         return None
     if argument_type not in NUMERIC_TYPES:
         raise AetherTypeError(f"sqrt(...) expects a numeric argument, got '{type_to_string(argument_type)}'.")
+    return "complex" if argument_type == "complex" else "double"
+
+
+def _exp_type(arg_types: list[AetherType | None]) -> AetherType | None:
+    if len(arg_types) != 1:
+        raise AetherTypeError("exp(...) expects exactly one argument.")
+    argument_type = arg_types[0]
+    if argument_type is None:
+        return None
+    if argument_type not in NUMERIC_TYPES:
+        raise AetherTypeError(f"exp(...) expects a numeric argument, got '{type_to_string(argument_type)}'.")
     return "complex" if argument_type == "complex" else "double"
 
 
