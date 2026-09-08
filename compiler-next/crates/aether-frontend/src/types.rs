@@ -911,6 +911,13 @@ impl TypeArena {
         }
     }
 
+    /// Compiler-internal arithmetic admission: only concrete built-in scalars.
+    /// Copy, Relocatable and Storable never establish arithmetic behavior.
+    #[must_use]
+    pub fn supports_builtin_add_sub(&self, id: TypeId) -> bool {
+        self.is_numeric(id)
+    }
+
     #[must_use]
     pub fn is_numeric(&self, id: TypeId) -> bool {
         matches!(

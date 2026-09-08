@@ -1,5 +1,7 @@
 //! LLVM backend for verified Vertical-16 program SSA.
 
+mod elementwise;
+
 use std::collections::BTreeSet;
 use std::fmt::Write;
 
@@ -1036,6 +1038,7 @@ fn emit_function(
     let mut allocation_size_trap = false;
     let mut allocation_failure_trap = false;
     let mut bounds_trap = false;
+    let mut shape_trap = false;
     for block in &function.blocks {
         writeln!(output, "{}:", block_label(block.id)).unwrap();
         for phi in &block.phis {
@@ -1159,6 +1162,31 @@ fn emit_function(
                         llvm_type(types, ty),
                     )
                     .unwrap();
+                }
+                SsaOp::ElementwiseBinary {
+                    left,
+                    right,
+                    kernel,
+                } => {
+                    shape_trap = true;
+                    overflow_trap |= types.integer_info(kernel.element_type).is_some();
+                    elementwise::emit(
+                        output,
+                        types,
+                        kernel,
+                        [
+                            (
+                                &llvm_type(types, operand_type(function, left)),
+                                &llvm_operand(left),
+                            ),
+                            (
+                                &llvm_type(types, operand_type(function, right)),
+                                &llvm_operand(right),
+                            ),
+                        ],
+                        instruction.result.0,
+                        block.id,
+                    );
                 }
                 SsaOp::MatrixAxisVectorView {
                     source,
@@ -2227,6 +2255,10 @@ fn emit_function(
                 llvm_operand(value)
             )
             .unwrap(),
+            SsaTerminator::Trap(TrapKind::ShapeMismatch) => {
+                shape_trap = true;
+                writeln!(output, "  br label %trap_shape_mismatch").unwrap();
+            }
             SsaTerminator::Trap(TrapKind::IntegerOverflow) => {
                 overflow_trap = true;
                 writeln!(output, "  br label %trap_integer_overflow").unwrap();
@@ -2263,6 +2295,9 @@ fn emit_function(
                 writeln!(output, "  br label %trap_index_out_of_bounds").unwrap();
             }
         }
+    }
+    if shape_trap {
+        writeln!(output, "trap_shape_mismatch:\n  ; structured Aether trap: ShapeMismatch\n  call void @llvm.trap()\n  unreachable").unwrap();
     }
     if overflow_trap {
         writeln!(
@@ -2705,7 +2740,8 @@ fn emit_integer_division(
 fn is_checked(op: &SsaOp) -> bool {
     matches!(
         op,
-        SsaOp::MatrixAxisVectorView { .. }
+        SsaOp::ElementwiseBinary { .. }
+            | SsaOp::MatrixAxisVectorView { .. }
             | SsaOp::Unary {
                 op: UnaryOp::NegateIntegerChecked,
                 ..
@@ -3483,8 +3519,9 @@ entry:
   %product = call {{ i64, i1 }} @llvm.umul.with.overflow.i64(i64 %rows, i64 %columns)
   %count = extractvalue {{ i64, i1 }} %product, 0
   %overflow = extractvalue {{ i64, i1 }} %product, 1
-  br i1 %overflow, label %trap, label %allocate
-trap:
+  br i1 %overflow, label %trap_allocation_size_overflow, label %allocate
+trap_allocation_size_overflow:
+  ; structured Aether trap: AllocationSizeOverflow
   call void @llvm.trap()
   unreachable
 allocate:

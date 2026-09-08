@@ -1,10 +1,49 @@
-# Aether NEXT-VERTICAL-26
+# Aether NEXT-VERTICAL-27
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. The current mathematical foundation includes Matrix<T> owners and borrowed strided MatrixView/MatrixViewMut and oriented VectorView/VectorViewMut with zero-copy transpose; the numbered
 Vertical-9..17 sections below retain historical qualification context.
 It does not replace the production `aether` CLI or import any legacy
 Python object, JSON schema, Initial IR, or SSA representation.
+
+## Built-in elementwise addition and subtraction (V27)
+
+```aether
+Matrix<int> a = [1,2;3,4];
+Matrix<int> b = transpose_view(a) + transpose_view(a); // [2,6;4,8]
+Vector<int,Column> c = column(a,2) + column(a,2);     // [4,8], strided reads
+Matrix<int> d = b - a;                              // independent owning result
+```
+
+`+` and `-` accept any pair of Vector/VectorView/VectorViewMut, or any pair of
+Matrix/MatrixView/MatrixViewMut. They borrow readable inputs and produce one
+fresh contiguous owner. Vector orientation and canonical element TypeId must
+match exactly. Supported elements are int8/16/32/64, uint8/16/32/64, isize, usize,
+float32 and float64 (including canonical aliases int/float/double). Neither
+Copy nor Storable nor Relocatable proves arithmetic for symbolic T.
+
+Vector dimensions must match; Matrix rows are compared first, then columns.
+Known mismatches produce E0345; dynamic mismatches trap with ShapeMismatch
+before allocation or element reads. Nonempty results allocate exactly one
+backing and perform N (or R*C) scalar operations and stores, with O(N) / O(R*C)
+time. Compatible empty inputs produce a null empty owner without allocation.
+Explicit view strides, including transposes and column projections, govern
+reads. Inputs may alias and remain usable. Integers retain checked overflow;
+floats retain IEEE add/sub without fast-math. A trap aborts without unwinding,
+including overflow after partial result initialization.
+
+HIR retains distinct VectorElementwiseBinary/MatrixElementwiseBinary nodes and
+ordered shape contracts. MIR/SSA contain executable structured loops with
+shape guards, allocation, strided reads, scalar operations and complete-prefix
+initialization. Both verifiers validate the complete region before LLVM emits
+its nested CFG; only the fully initialized owner escapes.
+
+No multiplication, scalar multiplication, dot/outer/matmul, division,
+broadcasting, promotion, operator traits, user overloading or BLAS is admitted.
+The following versioned sections preserve historical scope; V27 supersedes
+their deferral of built-in addition/subtraction only.
+See [the V27 report](../docs/architecture/NEXT_VERTICAL_27_REPORT.md).
+Compilation snapshots: `python3 tests/measure-v27.py --runs 10`.
 
 ## Matrix rows and columns as oriented vector views (V26)
 

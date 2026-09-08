@@ -2030,3 +2030,44 @@ elements, generics, modules and containing-root provenance. The lexical lifetime
 model and temporary binding requirement remain explicit limitations.
 See [NEXT_VERTICAL_26_REPORT.md](NEXT_VERTICAL_26_REPORT.md) for exact tests,
 trap executions, counters, compilation snapshots and open decisions.
+
+## Confirmation 44 — structured mathematical initialization regions (V27)
+
+V27 adds VectorElementwiseBinary and MatrixElementwiseBinary in HIR, selected
+before scalar binary coercion. Their ordered MathShapeCheck and concrete scalar
+op retain exact canonical element identity. Source owner Places become shared
+readable descriptors before value resolution can insert Move. Provenance and
+existing expression/argument borrow protection keep the first owner valid
+through evaluation of the second input, including projected/strided sources.
+
+The middle end has a closed executable structured region, ElementwiseKernel.
+Its MathStep language contains ordered shape guards, validated allocation,
+bounded unit-step For loops over logical dimensions, descriptor-stride loads,
+checked/IEEE scalar operations, prefix initialization and complete owner yield.
+Matrix uses Rows then Columns nested loops; no flattening of source backing is
+legal. This is structured MIR/SSA control flow, rather than extra top-level
+BasicBlocks. Internal counter phis are implicit in For and become explicit in
+LLVM. Both MIR and SSA invoke the complete region verifier against their own
+operand and result types; neither trusts a prior validation flag.
+
+The closed schedule supports an induction over every result slot: guards
+precede allocation, allocation dominates loops, each logical coordinate occurs
+once, and exactly one initialization advances the prefix. Yield requires the
+complete extent product. Verifying the entire executable tree rejects missing
+or reordered stages, altered bounds/steps/strides, wrong scalar/trap contracts
+and premature or duplicate initialization. Source descriptors are Copy reads;
+no instruction in the region can move, drop or store into an operand.
+
+LLVM translates the region instructions recursively. It emits shape branches,
+empty bypass, existing checked storage allocation, logical loop phis, strided
+loads, scalar overflow intrinsics or IEEE add/sub, row-major stores, and a result
+phi. Continuation labels participate in surrounding SSA predecessor handling.
+The allocation helpers remain storage mechanisms; mathematical iteration is
+visible and verified in the middle end. Integer overflow after allocation
+aborts without unwinding. No bitmap is needed for built-in no-drop elements.
+
+Lexical frontend provenance remains the global lifetime authority, as in V26;
+this vertical does not add a whole-program MIR/SSA borrow analysis. The closed
+region is deliberately specific to Add/Sub, not a generic loop optimizer or
+behavioral capability system. See [NEXT_VERTICAL_27_REPORT.md](NEXT_VERTICAL_27_REPORT.md)
+for the complete qualification and tradeoffs.

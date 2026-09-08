@@ -104,6 +104,12 @@ pub enum SsaPlaceBase {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum SsaOp {
+    /// Structured mathematical loop; inputs are Copy readable descriptors.
+    ElementwiseBinary {
+        left: SsaOperand,
+        right: SsaOperand,
+        kernel: crate::ElementwiseKernel,
+    },
     /// Scalar copy.
     Use(SsaOperand),
     /// Alias-aware memory read from address-taken storage or a dereference.
@@ -993,6 +999,15 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             size_trap: *size_trap,
             failure_trap: *failure_trap,
         },
+        Rvalue::ElementwiseBinary {
+            left,
+            right,
+            kernel,
+        } => SsaOp::ElementwiseBinary {
+            left: rename_operand(left, stacks),
+            right: rename_operand(right, stacks),
+            kernel: kernel.clone(),
+        },
         Rvalue::MatrixAxisVectorView {
             source,
             fixed_index,
@@ -1494,10 +1509,12 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
         Rvalue::EnumDiscriminant { value, .. } | Rvalue::EnumPayload { value, .. } => {
             operand_local(value).into_iter().collect()
         }
-        Rvalue::Binary { left, right, .. } => operand_local(left)
-            .into_iter()
-            .chain(operand_local(right))
-            .collect(),
+        Rvalue::ElementwiseBinary { left, right, .. } | Rvalue::Binary { left, right, .. } => {
+            operand_local(left)
+                .into_iter()
+                .chain(operand_local(right))
+                .collect()
+        }
         Rvalue::Call { args, .. } => args.iter().filter_map(operand_local).collect(),
     }
 }
@@ -2107,6 +2124,13 @@ fn verify_op(
             if *mutable && !writable(place)? {
                 return Err("SSA mutable borrow through shared reference".into());
             }
+        }
+        SsaOp::ElementwiseBinary {
+            left,
+            right,
+            kernel,
+        } => {
+            kernel.verify(types, operand_ty(left)?, operand_ty(right)?, result)?;
         }
         SsaOp::Move { source } => {
             let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
@@ -2939,7 +2963,9 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
             aggregate, value, ..
         } => vec![aggregate, value],
         SsaOp::Unary { operand, .. } => vec![operand],
-        SsaOp::Binary { left, right, .. } => vec![left, right],
+        SsaOp::ElementwiseBinary { left, right, .. } | SsaOp::Binary { left, right, .. } => {
+            vec![left, right]
+        }
         SsaOp::Call { args, .. } => args.iter().collect(),
     }
 }

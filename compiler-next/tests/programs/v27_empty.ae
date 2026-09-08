@@ -1,0 +1,11 @@
+int main() {
+    Vector<int,Row> a=[];
+    Vector<int,Row> b=[];
+    Vector<int,Row> c=a+b;
+    Vector<int,Row> d=vector_view(a)-vector_view(b);
+    Matrix<double> x=[];
+    Matrix<double> y=[];
+    Matrix<double> z=x+y;
+    Matrix<double> w=transpose_view(x)-matrix_view(y);
+    return int(dimension(c)+dimension(d)+rows(z)+columns(w));
+}

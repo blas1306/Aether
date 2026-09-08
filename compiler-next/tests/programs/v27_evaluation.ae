@@ -1,0 +1,14 @@
+int advance(ref mut usize i) { *i=1; return 0; }
+Matrix<int> rhs(ref mut usize i) { advance(i); Matrix<int> b=[10,20;30,40]; return b; }
+int main() {
+    Array<Matrix<int>> a={ [1,2;3,4], [100,200;300,400] };
+    usize i=0;
+    Matrix<int> sum=a[i]+rhs(&mut i);
+    if(i!=1){return 1;}
+    if(sum[1,1]!=11){return 2;}
+    if(sum[2,2]!=44){return 3;}
+    Matrix<int> mixed=a[0]+transpose_view(a[0]);
+    if(mixed[1,2]!=5){return 4;}
+    if(mixed[2,1]!=5){return 5;}
+    return a[0][2,2]-4;
+}

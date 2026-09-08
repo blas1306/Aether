@@ -742,8 +742,33 @@ pub enum FloatValue {
     Float32(u32),
     Float64(u64),
 }
+/// Ordered shape compatibility guards, raising `ShapeMismatch` before allocation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MathShapeCheck {
+    /// One exact dimension equality, with no orientation conversion.
+    VectorDimension,
+    /// Exact row equality followed by exact column equality.
+    MatrixRowsThenColumns,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HirExprKind {
+    /// Read operands through logical strides; exact shape, fresh owning result.
+    VectorElementwiseBinary {
+        shape_check: MathShapeCheck,
+        op: HirBinaryOp,
+        left: Box<HirExpr>,
+        right: Box<HirExpr>,
+        element_type: TypeId,
+        orientation: crate::types::Orientation,
+    },
+    /// Logical 2D reads; rows and columns must match before allocation.
+    MatrixElementwiseBinary {
+        shape_check: MathShapeCheck,
+        op: HirBinaryOp,
+        left: Box<HirExpr>,
+        right: Box<HirExpr>,
+        element_type: TypeId,
+    },
     Int(i128),
     Float(FloatValue),
     Bool(bool),
@@ -3477,6 +3502,34 @@ impl Monomorphizer<'_> {
                 op: *op,
                 operand: Box::new(self.substitute_expr(operand, substitution)?),
             },
+            HirExprKind::VectorElementwiseBinary {
+                shape_check,
+                op,
+                left,
+                right,
+                element_type,
+                orientation,
+            } => HirExprKind::VectorElementwiseBinary {
+                shape_check: *shape_check,
+                op: *op,
+                left: Box::new(self.substitute_expr(left, substitution)?),
+                right: Box::new(self.substitute_expr(right, substitution)?),
+                element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+                orientation: *orientation,
+            },
+            HirExprKind::MatrixElementwiseBinary {
+                shape_check,
+                op,
+                left,
+                right,
+                element_type,
+            } => HirExprKind::MatrixElementwiseBinary {
+                shape_check: *shape_check,
+                op: *op,
+                left: Box::new(self.substitute_expr(left, substitution)?),
+                right: Box::new(self.substitute_expr(right, substitution)?),
+                element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+            },
             HirExprKind::Binary { op, left, right } => HirExprKind::Binary {
                 op: *op,
                 left: Box::new(self.substitute_expr(left, substitution)?),
@@ -4462,6 +4515,50 @@ impl OwnershipAnalysis<'_> {
             | HirExprKind::Coerce { operand, .. }
             | HirExprKind::ExplicitCast { operand, .. }
             | HirExprKind::Unary { operand, .. } => self.expr(operand),
+            HirExprKind::VectorElementwiseBinary {
+                left, right, op, ..
+            }
+            | HirExprKind::MatrixElementwiseBinary {
+                left, right, op, ..
+            } => {
+                self.expr(left)?;
+                let owner = self.derived_owner(left);
+                self.borrowed.push(owner.into_iter().collect());
+                self.storage_borrowed.push(owner.into_iter().collect());
+                self.storage_ranges
+                    .push(owner.into_iter().map(|o| (o, None)).collect());
+                self.expr(right)?;
+                self.borrowed.pop();
+                self.storage_borrowed.pop();
+                self.storage_ranges.pop();
+                let mismatch = if self.types.vector_like_info(left.ty).is_some() {
+                    self.known_length(left)
+                        .zip(self.known_length(right))
+                        .filter(|(a, b)| a != b)
+                        .map(|(a, b)| format!("dimension {a} versus {b}"))
+                } else {
+                    self.known_matrix_shape(left)
+                        .zip(self.known_matrix_shape(right))
+                        .filter(|(a, b)| a != b)
+                        .map(|(a, b)| format!("shape {a:?} versus {b:?}"))
+                };
+                if let Some(shape) = mismatch {
+                    return Err(self.error(
+                        "E0345",
+                        format!(
+                            "ShapeMismatch for {}: {shape}",
+                            if matches!(op, HirBinaryOp::AddIntegerChecked | HirBinaryOp::AddFloat)
+                            {
+                                "+"
+                            } else {
+                                "-"
+                            }
+                        ),
+                        expr.span,
+                    ));
+                }
+                Ok(())
+            }
             HirExprKind::Binary { left, right, .. } => {
                 self.expr(left)?;
                 self.expr(right)
@@ -4625,6 +4722,7 @@ impl OwnershipAnalysis<'_> {
 
     fn known_matrix_shape(&self, expr: &HirExpr) -> Option<(u64, u64)> {
         match &expr.kind {
+            HirExprKind::MatrixElementwiseBinary { left, .. } => self.known_matrix_shape(left),
             HirExprKind::MatrixInit { rows, columns, .. } => Some((*rows, *columns)),
             HirExprKind::MatrixView {
                 source, transpose, ..
@@ -4647,6 +4745,7 @@ impl OwnershipAnalysis<'_> {
 
     fn known_length(&self, expr: &HirExpr) -> Option<u64> {
         match &expr.kind {
+            HirExprKind::VectorElementwiseBinary { left, .. } => self.known_length(left),
             HirExprKind::MatrixAxisVectorView { source, axis, .. } => {
                 if let HirPlaceBase::Local(local) = source.base
                     && source.projections.is_empty()
@@ -7329,6 +7428,41 @@ impl Analyzer<'_> {
             constant: None,
         })
     }
+    // Operand places are borrowed before ordinary value resolution can insert Move.
+    // This preserves projected owners and explicit dereferences as well as locals.
+    fn readable_math_operand(
+        &mut self,
+        expr: &AstExpr,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        if let Ok(source) = self.resolve_expr_place(expr, false) {
+            if self.types.vector_like_info(source.ty).is_some() {
+                return self.vector_view_from_place(source, false, false, expr.span, None);
+            }
+            if let Some(element) = self.types.matrix_like_element(source.ty) {
+                let descriptor = crate::types::MatrixViewDescriptor::derived(
+                    self.types.matrix_view_info(source.ty).is_some(),
+                    false,
+                );
+                let ty = self.types.intern_matrix_view(element, false);
+                return Ok(Checked {
+                    expr: HirExpr {
+                        kind: HirExprKind::MatrixView {
+                            source,
+                            mutable: false,
+                            transpose: false,
+                            descriptor,
+                        },
+                        ty,
+                        span: expr.span,
+                    },
+                    constant: None,
+                });
+            }
+        }
+        self.expression(expr, expected)
+    }
+
     fn binary(
         &mut self,
         op: AstBinaryOp,
@@ -7340,18 +7474,140 @@ impl Analyzer<'_> {
         let ll = literal(la);
         let rl = literal(ra);
         let (l, r) = if ll && !rl {
-            let r = self.expression(ra, None)?;
-            (self.expression(la, Some(r.expr.ty))?, r)
+            let r = self.readable_math_operand(ra, None)?;
+            (
+                self.readable_math_operand(
+                    la,
+                    self.types.is_numeric(r.expr.ty).then_some(r.expr.ty),
+                )?,
+                r,
+            )
         } else if rl && !ll {
-            let l = self.expression(la, None)?;
-            let r = self.expression(ra, Some(l.expr.ty))?;
+            let l = self.readable_math_operand(la, None)?;
+            let r = self
+                .readable_math_operand(ra, self.types.is_numeric(l.expr.ty).then_some(l.expr.ty))?;
             (l, r)
         } else if ll && rl {
             let c = expected.filter(|t| self.types.is_numeric(*t));
-            (self.expression(la, c)?, self.expression(ra, c)?)
+            (
+                self.readable_math_operand(la, c)?,
+                self.readable_math_operand(ra, c)?,
+            )
         } else {
-            (self.expression(la, None)?, self.expression(ra, None)?)
+            (
+                self.readable_math_operand(la, None)?,
+                self.readable_math_operand(ra, None)?,
+            )
         };
+        let lv = self.types.vector_like_info(l.expr.ty);
+        let rv = self.types.vector_like_info(r.expr.ty);
+        let lm = self.types.matrix_like_element(l.expr.ty);
+        let rm = self.types.matrix_like_element(r.expr.ty);
+        if lv.is_some() || rv.is_some() || lm.is_some() || rm.is_some() {
+            let symbol = match op {
+                AstBinaryOp::Add => "+",
+                AstBinaryOp::Subtract => "-",
+                AstBinaryOp::Multiply => "*",
+                AstBinaryOp::Divide => "/",
+                _ => "unsupported binary operator",
+            };
+            let error = |code, reason: &str| {
+                vec![Diagnostic::new(
+                    code,
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    format!(
+                        "operator {symbol} on {} and {}: {reason}",
+                        self.type_name(l.expr.ty),
+                        self.type_name(r.expr.ty)
+                    ),
+                    Some(span),
+                )]
+            };
+            if !matches!(op, AstBinaryOp::Add | AstBinaryOp::Subtract) {
+                return Err(error(
+                    "E0342",
+                    "only built-in elementwise + and - are supported",
+                ));
+            }
+            let (element, orientation) = match (lv, rv, lm, rm) {
+                (Some((a, ao)), Some((b, bo)), _, _) => {
+                    if ao != bo {
+                        return Err(error("E0344", "Row/Column orientation must match exactly"));
+                    }
+                    if a != b {
+                        return Err(error(
+                            "E0343",
+                            "canonical element types must match exactly; no promotion",
+                        ));
+                    }
+                    (a, Some(ao))
+                }
+                (_, _, Some(a), Some(b)) => {
+                    if a != b {
+                        return Err(error(
+                            "E0343",
+                            "canonical element types must match exactly; no promotion",
+                        ));
+                    }
+                    (a, None)
+                }
+                _ => {
+                    return Err(error(
+                        "E0342",
+                        "Vector/Matrix/scalar families cannot be mixed",
+                    ));
+                }
+            };
+            if !self.types.supports_builtin_add_sub(element) {
+                return Err(error(
+                    "E0346",
+                    "element must be a concrete built-in arithmetic scalar; storage capabilities do not prove arithmetic",
+                ));
+            }
+            let scalar_op = if self.types.float_info(element).is_some() {
+                if op == AstBinaryOp::Add {
+                    HirBinaryOp::AddFloat
+                } else {
+                    HirBinaryOp::SubtractFloat
+                }
+            } else if op == AstBinaryOp::Add {
+                HirBinaryOp::AddIntegerChecked
+            } else {
+                HirBinaryOp::SubtractIntegerChecked
+            };
+            // Intern readable descriptors for expression-owned temporaries as well.
+            let (ty, kind) = if let Some(orientation) = orientation {
+                self.types.intern_vector_view(element, orientation, false);
+                (
+                    self.types.intern_vector(element, orientation),
+                    HirExprKind::VectorElementwiseBinary {
+                        shape_check: MathShapeCheck::VectorDimension,
+                        op: scalar_op,
+                        left: Box::new(l.expr),
+                        right: Box::new(r.expr),
+                        element_type: element,
+                        orientation,
+                    },
+                )
+            } else {
+                self.types.intern_matrix_view(element, false);
+                (
+                    self.types.intern_matrix(element),
+                    HirExprKind::MatrixElementwiseBinary {
+                        shape_check: MathShapeCheck::MatrixRowsThenColumns,
+                        op: scalar_op,
+                        left: Box::new(l.expr),
+                        right: Box::new(r.expr),
+                        element_type: element,
+                    },
+                )
+            };
+            return Ok(Checked {
+                expr: HirExpr { kind, ty, span },
+                constant: None,
+            });
+        }
         let equality = matches!(op, AstBinaryOp::Equal | AstBinaryOp::NotEqual);
         if self.types.reference_info(l.expr.ty).is_some()
             || self.types.reference_info(r.expr.ty).is_some()
@@ -8739,6 +8995,68 @@ fn verify_expr(
                 return Err(fail("HIR unary invalid".into()));
             }
         }
+        HirExprKind::VectorElementwiseBinary {
+            shape_check,
+            op,
+            left,
+            right,
+            element_type,
+            ..
+        }
+        | HirExprKind::MatrixElementwiseBinary {
+            shape_check,
+            op,
+            left,
+            right,
+            element_type,
+        } => {
+            verify_expr(left, f, sigs, structs, enums, types, fail)?;
+            verify_expr(right, f, sigs, structs, enums, types, fail)?;
+            let valid_types = match &e.kind {
+                HirExprKind::VectorElementwiseBinary { orientation, .. } => {
+                    *shape_check == MathShapeCheck::VectorDimension
+                        && types.vector_like_info(left.ty) == Some((*element_type, *orientation))
+                        && types.vector_like_info(right.ty) == Some((*element_type, *orientation))
+                        && types.get(e.ty)
+                            == Some(&TypeData::Vector {
+                                element: *element_type,
+                                orientation: *orientation,
+                            })
+                }
+                _ => {
+                    *shape_check == MathShapeCheck::MatrixRowsThenColumns
+                        && types.matrix_like_element(left.ty) == Some(*element_type)
+                        && types.matrix_like_element(right.ty) == Some(*element_type)
+                        && types.matrix_element(e.ty) == Some(*element_type)
+                }
+            };
+            let valid_op = if types.integer_info(*element_type).is_some() {
+                matches!(
+                    op,
+                    HirBinaryOp::AddIntegerChecked | HirBinaryOp::SubtractIntegerChecked
+                )
+            } else {
+                matches!(op, HirBinaryOp::AddFloat | HirBinaryOp::SubtractFloat)
+            };
+            if !valid_types
+                || !valid_op
+                || !types.supports_builtin_add_sub(*element_type)
+                || (!types.is_copy(left.ty)
+                    && matches!(
+                        left.kind,
+                        HirExprKind::Local(_) | HirExprKind::Move(_) | HirExprKind::Load(_)
+                    ))
+                || (!types.is_copy(right.ty)
+                    && matches!(
+                        right.kind,
+                        HirExprKind::Local(_) | HirExprKind::Move(_) | HirExprKind::Load(_)
+                    ))
+            {
+                return Err(fail(
+                    "HIR elementwise type/op/read-only ShapeMismatch contract invalid".into(),
+                ));
+            }
+        }
         HirExprKind::Binary { op, left, right } => {
             verify_expr(left, f, sigs, structs, enums, types, fail)?;
             verify_expr(right, f, sigs, structs, enums, types, fail)?;
@@ -9495,6 +9813,80 @@ mod tests {
             }
             assert!(changed, "HIR case {case}");
             assert!(verify_hir(&corrupt).is_err(), "HIR case {case}");
+        }
+    }
+    #[test]
+    fn vertical27_hir_rejects_corrupt_math_types_and_ops() {
+        for matrix in [false, true] {
+            let ty = if matrix {
+                "Matrix<int>"
+            } else {
+                "Vector<int,Row>"
+            };
+            let h = check(&format!("int main(){{{ty} a=[1,2];{ty} b=a+a;return 0;}}")).unwrap();
+            for case in 0..6 {
+                let mut bad = h.clone();
+                let owner_ty = bad.functions[0].locals[0].ty;
+                let initializer = bad.functions[0]
+                    .body
+                    .statements
+                    .iter_mut()
+                    .find_map(|s| {
+                        if let HirStmtKind::Local { initializer, .. } = &mut s.kind {
+                            if matches!(
+                                initializer.kind,
+                                HirExprKind::VectorElementwiseBinary { .. }
+                                    | HirExprKind::MatrixElementwiseBinary { .. }
+                            ) {
+                                return Some(initializer);
+                            }
+                        }
+                        None
+                    })
+                    .unwrap();
+                if case == 0 {
+                    initializer.ty = TypeId::BOOL;
+                } else if case == 5 {
+                    let (HirExprKind::VectorElementwiseBinary { shape_check, .. }
+                    | HirExprKind::MatrixElementwiseBinary { shape_check, .. }) =
+                        &mut initializer.kind
+                    else {
+                        unreachable!()
+                    };
+                    *shape_check = if matrix {
+                        MathShapeCheck::VectorDimension
+                    } else {
+                        MathShapeCheck::MatrixRowsThenColumns
+                    };
+                } else {
+                    let (HirExprKind::VectorElementwiseBinary {
+                        op,
+                        element_type: element,
+                        left,
+                        ..
+                    }
+                    | HirExprKind::MatrixElementwiseBinary {
+                        op,
+                        element_type: element,
+                        left,
+                        ..
+                    }) = &mut initializer.kind
+                    else {
+                        unreachable!()
+                    };
+                    match case {
+                        1 => *op = HirBinaryOp::MultiplyIntegerChecked,
+                        2 => *element = TypeId::BOOL,
+                        3 => left.ty = TypeId::INT64,
+                        4 => {
+                            left.ty = owner_ty;
+                            left.kind = HirExprKind::Local(LocalId(0));
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                assert!(verify_hir(&bad).is_err(), "{matrix} {case}");
+            }
         }
     }
 }

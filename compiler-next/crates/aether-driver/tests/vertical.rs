@@ -5112,7 +5112,7 @@ fn vertical21_diagnostics_and_matrix_reservation() {
         "int main(){Array<int> v={1};return int(dimension(v));}",
         "int main(){Vector<int,Row> v=[1];return int(dimension(v,v));}",
         "int main(){Vector<int,Row> v=[1];return int(dimension<int>(v));}",
-        "int main(){Vector<int,Row> v=[1];Vector<int,Row> w=v+v;return 0;}",
+        "int main(){Vector<int,Row> v=[1];Vector<int,Row> w=v*v;return 0;}",
         "int main(){Vector<bool,Row> v=[1];return 0;}",
         "int main(){Vector<int,Row> v=[true];return 0;}",
         "int main(){Vector<int,Row> v=[1];Vector<int,Row> w=v;return v[1];}",
@@ -8049,5 +8049,632 @@ fn vertical26_mir_ssa_reject_shared_source_with_matching_mutable_result() {
                 .any(|e| e.message.contains("capability contract")),
             "{errors:?}"
         );
+    }
+}
+
+const V27_FIXTURES: &[(&str, u64)] = &[
+    ("vector_contiguous", 4),
+    ("vector_strided", 4),
+    ("matrix_contiguous", 4),
+    ("matrix_transposed", 4),
+    ("empty", 0),
+    ("floats", 8),
+    ("control_flow", 18),
+    ("projected", 9),
+    ("ieee", 4),
+    ("evaluation", 6),
+];
+
+// Qualification-only probes bracket exactly the arithmetic expression, after
+// operand evaluation. Count actual executed element operations/stores, not IR size.
+fn v27_instrument(llvm: &str, heap: u64) -> String {
+    let mut output = String::new();
+    for line in llvm.lines() {
+        writeln!(output, "{line}").unwrap();
+        if let Some(id) = line.trim().strip_prefix("; ElementwiseBegin ") {
+            writeln!(output,"  %q{id}_a0 = load i64, ptr @aether_heap_alloc_count\n  %q{id}_f0 = load i64, ptr @aether_heap_free_count\n  %q{id}_o0 = load i64, ptr @v27_ops\n  %q{id}_s0 = load i64, ptr @v27_stores").unwrap();
+        }
+        if line.contains("; InitializeNext") {
+            let id = line
+                .trim()
+                .split("%ew")
+                .nth(1)
+                .unwrap()
+                .split('_')
+                .next()
+                .unwrap();
+            writeln!(output,"  %q{id}_sn = load i64, ptr @v27_stores\n  %q{id}_sn1 = add i64 %q{id}_sn, 1\n  store i64 %q{id}_sn1, ptr @v27_stores").unwrap();
+        }
+        if line.trim().starts_with("%ew")
+            && (line.contains("_checked = call")
+                || line.contains("_value = fadd")
+                || line.contains("_value = fsub"))
+        {
+            let id = line
+                .trim()
+                .strip_prefix("%ew")
+                .unwrap()
+                .split('_')
+                .next()
+                .unwrap();
+            writeln!(output,"  %q{id}_on = load i64, ptr @v27_ops\n  %q{id}_on1 = add i64 %q{id}_on, 1\n  store i64 %q{id}_on1, ptr @v27_ops").unwrap();
+        }
+        if let Some(id) = line.trim().strip_prefix("; ElementwiseEnd ") {
+            let matrix = output.contains(&format!("%ew{id}_Left_Rows ="));
+            if matrix {
+                writeln!(
+                    output,
+                    "  %q{id}_count = mul i64 %ew{id}_Left_Rows, %ew{id}_Left_Columns"
+                )
+                .unwrap();
+            } else {
+                writeln!(output, "  %q{id}_count = add i64 %ew{id}_Left_Dimension, 0").unwrap();
+            }
+            writeln!(output,"  %q{id}_nonempty = icmp ne i64 %q{id}_count, 0\n  %q{id}_expected = zext i1 %q{id}_nonempty to i64").unwrap();
+            for (short, global, expected) in [
+                ("a", "aether_heap_alloc_count", format!("%q{id}_expected")),
+                ("f", "aether_heap_free_count", "0".into()),
+                ("o", "v27_ops", format!("%q{id}_count")),
+                ("s", "v27_stores", format!("%q{id}_count")),
+            ] {
+                writeln!(output,"  %q{id}_{short}1 = load i64, ptr @{global}\n  %q{id}_{short}delta = sub i64 %q{id}_{short}1, %q{id}_{short}0\n  %q{id}_{short}ok = icmp eq i64 %q{id}_{short}delta, {expected}").unwrap();
+            }
+            writeln!(output,"  %q{id}_af = and i1 %q{id}_aok, %q{id}_fok\n  %q{id}_os = and i1 %q{id}_ook, %q{id}_sok\n  %q{id}_all = and i1 %q{id}_af, %q{id}_os\n  %q{id}_old = load i1, ptr @v27_ok\n  %q{id}_ok = and i1 %q{id}_all, %q{id}_old\n  store i1 %q{id}_ok, ptr @v27_ok").unwrap();
+        }
+    }
+    output.push_str("@v27_ok = internal global i1 true\n@v27_ops = internal global i64 0\n@v27_stores = internal global i64 0\n");
+    v23_heap_guard(&output, heap).replace("  %all_ok = and i1 %heap_ok, %result_ok", "  %v27_pass = load i1, ptr @v27_ok\n  %v27_heap = and i1 %heap_ok, %v27_pass\n  %all_ok = and i1 %v27_heap, %result_ok")
+}
+
+#[test]
+fn vertical27_native_values_and_exact_operation_allocation_counts() {
+    for &(name, heap) in V27_FIXTURES {
+        let compiled = compile_source(
+            &SourceFile::new(
+                name,
+                fs::read_to_string(program(&format!("v27_{name}.ae"))).unwrap(),
+            ),
+            &[],
+        )
+        .unwrap_or_else(|e| panic!("{name}: {e:?}"));
+        let operations = match name {
+            "vector_contiguous" | "vector_strided" => 6,
+            "matrix_contiguous" => 12,
+            "matrix_transposed" | "floats" => 10,
+            "empty" => 0,
+            "control_flow" => 26,
+            "projected" => 14,
+            "ieee" => 5,
+            "evaluation" => 8,
+            _ => unreachable!(),
+        };
+        let instrumented = v27_instrument(&compiled.llvm, heap).replace("  %v27_pass = load i1, ptr @v27_ok", &format!("  %v27_local = load i1, ptr @v27_ok\n  %v27_total = load i64, ptr @v27_ops\n  %v27_total_ok = icmp eq i64 %v27_total, {operations}\n  %v27_pass = and i1 %v27_local, %v27_total_ok"));
+        assert_eq!(v23_execute(&instrumented).code(), Some(0), "{name}");
+    }
+}
+
+#[test]
+fn vertical27_all_readable_pairs_and_scalar_types() {
+    for matrix in [false, true] {
+        for left in 0..3 {
+            for right in 0..3 {
+                for op in ["+", "-"] {
+                    let ty = if matrix {
+                        "Matrix<int>"
+                    } else {
+                        "Vector<int,Row>"
+                    };
+                    let literal = if matrix { "[1,2;3,4]" } else { "[1,2,3,4]" };
+                    let view = if matrix { "matrix_view" } else { "vector_view" };
+                    let read = |n: &str, index| match index {
+                        0 => n.to_string(),
+                        1 => format!("{view}({n})"),
+                        _ => format!("{view}_mut({n})"),
+                    };
+                    let idx = if matrix { "2,2" } else { "4" };
+                    let expected = if op == "+" { 8 } else { 0 };
+                    let source = format!(
+                        "int main(){{{ty} a={literal};{ty} b={literal};{ty} c={} {op} {};if(c[{idx}]!={expected}){{return 1;}}return a[{idx}]+b[{idx}]-8;}}",
+                        read("a", left),
+                        read("b", right)
+                    );
+                    let compiled =
+                        compile_source(&SourceFile::new("pairs.ae", source), &[]).unwrap();
+                    assert_eq!(
+                        v23_execute(&v27_instrument(&compiled.llvm, 3)).code(),
+                        Some(0),
+                        "{matrix} {left} {right} {op}"
+                    );
+                }
+            }
+        }
+    }
+    for scalar in [
+        "int8", "int16", "int32", "int64", "isize", "uint8", "uint16", "uint32", "uint64", "usize",
+        "float32", "float64",
+    ] {
+        let source = format!(
+            "int main(){{Vector<{scalar},Column> a=[4,7];Vector<{scalar},Column> b=a+a;Matrix<{scalar}> m=[2,3;4,5];Matrix<{scalar}> n=m-m;if(b[2]!=14){{return 1;}}if(n[2,2]!=0){{return 2;}}return 0;}}"
+        );
+        let compiled = compile_source(&SourceFile::new("scalar.ae", source), &[]).unwrap();
+        assert_eq!(
+            v23_execute(&v27_instrument(&compiled.llvm, 4)).code(),
+            Some(0),
+            "{scalar}"
+        );
+    }
+}
+
+#[test]
+fn vertical27_structured_rejections_and_evaluation_borrows() {
+    for (body, code) in [
+        (
+            "Vector<int,Row>a=[1];Vector<int,Column>b=[1];Vector<int,Row>c=a+b;",
+            "E0344",
+        ),
+        (
+            "Vector<int,Column>a=[1];Vector<int,Row>b=[1];Vector<int,Column>c=a-b;",
+            "E0344",
+        ),
+        (
+            "Vector<int,Row>a=[1];Vector<double,Row>b=[1];Vector<int,Row>c=a+b;",
+            "E0343",
+        ),
+        (
+            "Vector<float32,Row>a=[1];Vector<float64,Row>b=[1];Vector<float32,Row>c=a-b;",
+            "E0343",
+        ),
+        (
+            "Vector<int,Row>a=[1];Matrix<int>b=[1];Vector<int,Row>c=a+b;",
+            "E0342",
+        ),
+        (
+            "Matrix<int>a=[1];Vector<int,Row>b=[1];Matrix<int>c=a-vector_view(b);",
+            "E0342",
+        ),
+        (
+            "Matrix<int>a=[1];Matrix<double>b=[1];Matrix<int>c=a+b;",
+            "E0343",
+        ),
+        ("Vector<bool,Row>a=[true];Vector<bool,Row>c=a+a;", "E0346"),
+        ("Matrix<bool>a=[true];Matrix<bool>c=a-a;", "E0346"),
+        (
+            "Vector<Buffer<int>,Row>a=[Buffer<int>(1,2)];Vector<Buffer<int>,Row>c=a+a;",
+            "E0346",
+        ),
+        (
+            "Vector<int,Row>a=[1];Vector<int,Row>b=[1,2];Vector<int,Row>c=a+b;",
+            "E0345",
+        ),
+        (
+            "Matrix<int>a=[1,2];Matrix<int>b=[1,2;3,4];Matrix<int>c=a+b;",
+            "E0345",
+        ),
+        (
+            "Matrix<int>a=[1,2];Matrix<int>b=[1,2,3];Matrix<int>c=a+b;",
+            "E0345",
+        ),
+        (
+            "Matrix<int>a=[1,2,3;4,5,6];Matrix<int>b=[1,2;3,4;5,6];Matrix<int>c=a+b;",
+            "E0345",
+        ),
+        (
+            "Vector<int,Row>a=[];Vector<int,Row>b=[1];Vector<int,Row>c=a-b;",
+            "E0345",
+        ),
+        ("Vector<int,Row>a=[1];Vector<int,Row>c=a*a;", "E0342"),
+        ("Matrix<int>a=[1];Matrix<int>c=a/a;", "E0342"),
+    ] {
+        let errors = compile_source(
+            &SourceFile::new("negative.ae", format!("int main(){{{body}return 0;}}")),
+            &[],
+        )
+        .unwrap_err();
+        assert!(errors.iter().any(|e| e.code == code), "{body}: {errors:?}");
+    }
+    for source in [
+        "Vector<T,Row> add<T:Storable>(ref Vector<T,Row> a){return *a+*a;}int main(){return 0;}",
+        "Matrix<T> sub<T:Storable>(ref Matrix<T> a){return *a-*a;}int main(){return 0;}",
+        "Vector<T,Row> add<T:Copy+Storable>(VectorView<T,Row> a){Vector<T,Row> b=a+a;return b;}int main(){return 0;}",
+    ] {
+        assert!(
+            compile_source(&SourceFile::new("generic.ae", source), &[])
+                .unwrap_err()
+                .iter()
+                .any(|e| e.code == "E0346"),
+            "{source}"
+        );
+    }
+    for source in [
+        "Vector<int,Row> take(Vector<int,Row> a){return a;}int main(){Vector<int,Row>a=[1];Vector<int,Row>b=a+take(a);return 0;}",
+        "Matrix<int> take(Matrix<int> a){return a;}int main(){Matrix<int>a=[1];Matrix<int>b=a+take(a);return 0;}",
+        "Vector<int,Column> take(Matrix<int> a){Vector<int,Column>b=[1];return b;}int main(){Matrix<int>a=[1];Vector<int,Column>b=column(a,1)+take(a);return 0;}",
+    ] {
+        let errors = compile_source(&SourceFile::new("borrow.ae", source), &[]).unwrap_err();
+        assert!(
+            errors.iter().any(|e| e.code == "E0292"),
+            "{source}: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn vertical27_runtime_shape_checks_precede_allocation_and_element_access() {
+    use std::os::unix::process::ExitStatusExt;
+    for (ty, view, lhs, rhs) in [
+        ("Vector<int,Row>", "VectorView<int,Row>", "[1,2]", "[1]"),
+        ("Vector<int,Row>", "VectorView<int,Row>", "[]", "[1]"),
+        ("Vector<int,Row>", "VectorView<int,Row>", "[1]", "[]"),
+        ("Matrix<int>", "MatrixView<int>", "[1,2]", "[1,2;3,4]"),
+        ("Matrix<int>", "MatrixView<int>", "[1,2]", "[1,2,3]"),
+        (
+            "Matrix<int>",
+            "MatrixView<int>",
+            "[1,2,3;4,5,6]",
+            "[1,2;3,4;5,6]",
+        ),
+        ("Matrix<int>", "MatrixView<int>", "[]", "[1]"),
+    ] {
+        for op in ["+", "-"] {
+            let make_view = if ty.starts_with("Vector") {
+                "vector_view"
+            } else {
+                "matrix_view"
+            };
+            let source = format!(
+                "{ty} math({view} a,{view} b){{return a{op}b;}}int main(){{{ty} a={lhs};{ty} b={rhs};{ty} c=math({make_view}(a),{make_view}(b));return 0;}}"
+            );
+            let compiled = compile_source(&SourceFile::new("shape.ae", source), &[]).unwrap();
+            assert_eq!(v23_execute(&compiled.llvm).signal(), Some(4));
+            let mut llvm = String::new();
+            for line in compiled.llvm.lines() {
+                writeln!(llvm, "{line}").unwrap();
+                if let Some(id) = line.trim().strip_prefix("; ElementwiseBegin ") {
+                    writeln!(llvm,"  %probe{id} = load i64, ptr @aether_heap_alloc_count\n  store i64 %probe{id}, ptr @v27_start").unwrap();
+                }
+            }
+            llvm.push_str("@v27_start = internal global i64 0\ndeclare void @exit(i32) noreturn\n");
+            llvm=llvm.replace("trap_shape_mismatch:\n  ; structured Aether trap: ShapeMismatch\n  call void @llvm.trap()", "trap_shape_mismatch:\n  %before = load i64, ptr @v27_start\n  %after = load i64, ptr @aether_heap_alloc_count\n  %same = icmp eq i64 %before, %after\n  %code = select i1 %same, i32 73, i32 99\n  call void @exit(i32 %code)");
+            assert_eq!(v23_execute(&llvm).code(), Some(73));
+        }
+    }
+}
+
+#[test]
+fn vertical27_integer_overflow_uses_scalar_checked_traps() {
+    use std::os::unix::process::ExitStatusExt;
+    for (scalar, a, b, op) in [
+        ("int8", "127", "1", "+"),
+        ("int8", "-128", "1", "-"),
+        ("uint8", "255", "1", "+"),
+        ("uint8", "0", "1", "-"),
+        ("int64", "9223372036854775807", "1", "+"),
+    ] {
+        for matrix in [false, true] {
+            let ty = if matrix {
+                format!("Matrix<{scalar}>")
+            } else {
+                format!("Vector<{scalar},Row>")
+            };
+            let source =
+                format!("int main(){{{ty} a=[1,{a}];{ty} b=[1,{b}];{ty} c=a{op}b;return 0;}}");
+            let compiled = compile_source(&SourceFile::new("overflow.ae", source), &[]).unwrap();
+            assert_eq!(v23_execute(&compiled.llvm).signal(), Some(4));
+            let llvm = format!("{}\ndeclare void @exit(i32) noreturn\n", compiled.llvm).replace(
+                "trap_integer_overflow:\n  call void @llvm.trap()",
+                "trap_integer_overflow:\n  call void @exit(i32 74)",
+            );
+            assert_eq!(v23_execute(&llvm).code(), Some(74));
+        }
+    }
+}
+
+fn v27_corrupt_kernel(kernel: &mut aether_middle::ElementwiseKernel, case: usize) {
+    use aether_middle::{BinaryOp, MathStep, MathStride, TrapKind};
+    match case {
+        0 => {
+            kernel.program.remove(0);
+        }
+        1 => kernel.program.swap(0, usize::from(kernel.matrix) + 1),
+        2 => {
+            if let MathStep::ShapeGuard { trap, .. } = &mut kernel.program[0] {
+                *trap = TrapKind::IndexOutOfBounds;
+            }
+        }
+        3 => {
+            if let MathStep::Allocate { extents, .. } =
+                &mut kernel.program[usize::from(kernel.matrix) + 1]
+            {
+                extents.clear();
+            }
+        }
+        4 => {
+            if let MathStep::Allocate { size_trap, .. } =
+                &mut kernel.program[usize::from(kernel.matrix) + 1]
+            {
+                *size_trap = TrapKind::IntegerOverflow;
+            }
+        }
+        5 => {
+            if let MathStep::Allocate { failure_trap, .. } =
+                &mut kernel.program[usize::from(kernel.matrix) + 1]
+            {
+                *failure_trap = TrapKind::ShapeMismatch;
+            }
+        }
+        6 => {
+            kernel.program.pop();
+        }
+        7 => {
+            kernel.op = BinaryOp::MultiplyIntegerChecked;
+        }
+        8 => {
+            kernel.element_type = aether_frontend::TypeId::BOOL;
+        }
+        _ => {
+            let mut body = &mut kernel.program;
+            while let Some(index) = body.iter().position(|s| matches!(s, MathStep::For { .. })) {
+                let MathStep::For {
+                    start,
+                    step,
+                    body: inner,
+                    ..
+                } = &mut body[index]
+                else {
+                    unreachable!()
+                };
+                if case == 9 {
+                    *start = 1;
+                    return;
+                }
+                if case == 10 {
+                    *step = 2;
+                    return;
+                }
+                body = inner;
+            }
+            match case {
+                11 => {
+                    body.pop();
+                }
+                12 => {
+                    body.push(MathStep::InitializeNext);
+                }
+                13 => {
+                    body.swap(0, 3);
+                }
+                14 => {
+                    if let MathStep::StridedLoad { offset, .. } = &mut body[0] {
+                        offset[0].1 = MathStride::ColumnStride;
+                    }
+                }
+                15 => {
+                    if let MathStep::ScalarBinary { op, .. } = &mut body[2] {
+                        *op = BinaryOp::SubtractFloat;
+                    }
+                }
+                16 => {
+                    if let MathStep::ScalarBinary { trap, .. } = &mut body[2] {
+                        *trap = None;
+                    }
+                }
+                _ => unreachable!(),
+            }
+        }
+    }
+}
+
+#[test]
+fn vertical27_mir_ssa_independently_verify_executable_loop_and_types() {
+    use aether_middle::{Rvalue, SsaOp, build_ssa, lower_hir, verify_mir, verify_ssa};
+    for matrix in [false, true] {
+        let ty = if matrix {
+            "Matrix<int>"
+        } else {
+            "Vector<int,Row>"
+        };
+        let hir = analyze(
+            parse_source(&SourceFile::new(
+                "corrupt.ae",
+                format!("int main(){{{ty} a=[1,2];{ty} b=a+a;return 0;}}"),
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let mir = lower_hir(hir);
+        let ssa = build_ssa(&verify_mir(mir.clone()).unwrap());
+        for case in 0..19 {
+            let mut m = mir.clone();
+            let owner = m.functions[0]
+                .locals
+                .iter()
+                .find(|l| l.name.as_deref() == Some("a"))
+                .unwrap()
+                .id;
+            let instruction = m.functions[0]
+                .blocks
+                .iter_mut()
+                .flat_map(|b| &mut b.instructions)
+                .find(|i| matches!(i.value, Rvalue::ElementwiseBinary { .. }))
+                .unwrap();
+            let Rvalue::ElementwiseBinary { left, kernel, .. } = &mut instruction.value else {
+                unreachable!()
+            };
+            match case {
+                0..=16 => v27_corrupt_kernel(kernel, case),
+                17 => *left = aether_middle::Operand::Local(owner),
+                _ => *left = aether_middle::Operand::Local(aether_frontend::LocalId(99999)),
+            }
+            assert!(verify_mir(m).is_err(), "MIR {matrix} {case}");
+            let mut s = ssa.clone();
+            let owner = s.functions[0]
+                .blocks
+                .iter()
+                .flat_map(|b| &b.instructions)
+                .find(|i| matches!(i.op, SsaOp::MatrixInit { .. } | SsaOp::VectorInit { .. }))
+                .unwrap()
+                .result;
+            let instruction = s.functions[0]
+                .blocks
+                .iter_mut()
+                .flat_map(|b| &mut b.instructions)
+                .find(|i| matches!(i.op, SsaOp::ElementwiseBinary { .. }))
+                .unwrap();
+            let SsaOp::ElementwiseBinary { left, kernel, .. } = &mut instruction.op else {
+                unreachable!()
+            };
+            match case {
+                0..=16 => v27_corrupt_kernel(kernel, case),
+                17 => *left = aether_middle::SsaOperand::Value(owner),
+                _ => instruction.ty = aether_frontend::TypeId::BOOL,
+            }
+            assert!(verify_ssa(s).is_err(), "SSA {matrix} {case}");
+        }
+    }
+}
+
+#[test]
+fn vertical27_deterministic_dumps_and_logical_codegen() {
+    for name in [
+        "vector_contiguous",
+        "vector_strided",
+        "matrix_transposed",
+        "control_flow",
+    ] {
+        let source = SourceFile::new(
+            name,
+            fs::read_to_string(program(&format!("v27_{name}.ae"))).unwrap(),
+        );
+        let emits = [Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm];
+        let a = compile_source(&source, &emits).unwrap();
+        let b = compile_source(&source, &emits).unwrap();
+        assert_eq!(a.dumps, b.dumps);
+        assert_eq!(a.llvm, b.llvm);
+        for dump in [Emit::Mir, Emit::Ssa] {
+            for required in [
+                "ShapeGuard",
+                "ShapeMismatch",
+                "Allocate",
+                "For",
+                "StridedLoad",
+                "ScalarBinary",
+                "InitializeNext",
+                "YieldOwner",
+            ] {
+                assert!(
+                    a.dumps[&dump].contains(required),
+                    "{name} {dump:?} {required}"
+                );
+            }
+        }
+        let hir_name = if name == "matrix_transposed" {
+            "MatrixElementwiseBinary"
+        } else {
+            "VectorElementwiseBinary"
+        };
+        assert!(a.dumps[&Emit::Hir].contains(hir_name));
+        for region in a.llvm.split("; ElementwiseBegin ").skip(1) {
+            let region = region.split("; ElementwiseEnd ").next().unwrap();
+            assert!(region.find("_equal_").unwrap() < region.find("_allocated = call").unwrap());
+            assert!(
+                region.find("_allocated = call").unwrap()
+                    < region.find("_Left_value = load").unwrap()
+            );
+            assert!(!region.contains("nsw"));
+            assert!(!region.contains("nuw"));
+            assert!(!region.contains("inbounds"));
+            assert!(!region.contains("@aether_free"));
+            assert!(!region.contains("@aether_relocate"));
+            if name == "matrix_transposed" {
+                assert!(region.contains("RowStride"));
+                assert!(region.contains("ColumnStride"));
+                assert!(region.contains("_Rows_index = phi"));
+                assert!(region.contains("_Columns_index = phi"));
+            }
+        }
+    }
+}
+
+#[test]
+fn vertical27_allocation_traps_after_shape_and_before_access() {
+    for matrix in [false, true] {
+        let ty = if matrix {
+            "Matrix<int>"
+        } else {
+            "Vector<int,Row>"
+        };
+        let source = SourceFile::new(
+            "allocation.ae",
+            format!("int main(){{{ty} a=[1,2];{ty} b=[3,4];{ty} c=a+b;return 0;}}"),
+        );
+        let compiled = compile_source(&source, &[]).unwrap();
+        // Inject impossible extents only into LLVM qualification. Equal oversized
+        // shapes must fail the checked allocation before any backing/element access.
+        let mut oversized = String::new();
+        for line in compiled.llvm.lines() {
+            if line.contains("%ew")
+                && line.contains(" = extractvalue")
+                && (line.contains("_Left_Dimension =")
+                    || line.contains("_Right_Dimension =")
+                    || line.contains("_Left_Rows =")
+                    || line.contains("_Right_Rows ="))
+            {
+                writeln!(
+                    oversized,
+                    "{} = add i64 -1, 0",
+                    line.split(" = ").next().unwrap()
+                )
+                .unwrap();
+            } else {
+                writeln!(oversized, "{line}").unwrap();
+            }
+        }
+        oversized.push_str("declare void @exit(i32) noreturn\n");
+        oversized=oversized.replace("trap_allocation_size_overflow:\n  ; structured Aether trap: AllocationSizeOverflow\n  call void @llvm.trap()", "trap_allocation_size_overflow:\n  %allocs = load i64, ptr @aether_heap_alloc_count\n  %ok = icmp eq i64 %allocs, 2\n  %status = select i1 %ok, i32 75, i32 99\n  call void @exit(i32 %status)");
+        assert_eq!(v23_execute(&oversized).code(), Some(75), "size {matrix}");
+        let mut failure = String::new();
+        for line in compiled.llvm.lines() {
+            writeln!(failure, "{line}").unwrap();
+            if line.trim().starts_with("; ElementwiseBegin ") {
+                failure.push_str("  store i1 true, ptr @v27_fail_malloc\n");
+            }
+        }
+        failure = failure.replace(
+            "%alloc_ptr = call ptr @malloc(i64 %alloc_actual)",
+            "%alloc_ptr = call ptr @v27_malloc(i64 %alloc_actual)",
+        );
+        failure=failure.replace("; structured Aether trap: AllocationFailure\ncall void @llvm.trap()", "; structured Aether trap: AllocationFailure\n%allocs = load i64, ptr @aether_heap_alloc_count\n%ok = icmp eq i64 %allocs, 2\n%status = select i1 %ok, i32 76, i32 99\ncall void @exit(i32 %status)");
+        failure.push_str("\n@v27_fail_malloc = internal global i1 false\ndeclare void @exit(i32) noreturn\ndefine ptr @v27_malloc(i64 %size) {\nentry:\n  %fail = load i1, ptr @v27_fail_malloc\n  br i1 %fail, label %failed, label %allocate\nfailed:\n  ret ptr null\nallocate:\n  %ptr = call ptr @malloc(i64 %size)\n  ret ptr %ptr\n}\n");
+        assert_eq!(v23_execute(&failure).code(), Some(76), "failure {matrix}");
+    }
+}
+
+#[test]
+fn vertical27_nested_elements_remain_storage_without_arithmetic() {
+    for (prefix, element, value) in [
+        ("struct S {int x;}", "S", "S(1)"),
+        ("enum E {A}", "E", "E.A"),
+        ("", "Array<int>", "{1}"),
+        ("", "List<int>", "{1}"),
+        ("", "Vector<int,Row>", "[1]"),
+        ("", "Matrix<int>", "[1]"),
+        ("", "Buffer<int>", "Buffer<int>(1,1)"),
+    ] {
+        for matrix in [false, true] {
+            let ty = if matrix {
+                format!("Matrix<{element}>")
+            } else {
+                format!("Vector<{element},Row>")
+            };
+            let source = SourceFile::new(
+                "element.ae",
+                format!("{prefix}int main(){{{ty} a=[{value}];{ty} b=a+a;return 0;}}"),
+            );
+            let errors = compile_source(&source, &[]).unwrap_err();
+            assert!(
+                errors.iter().any(|e| e.code == "E0346"),
+                "{element} {matrix}: {errors:?}"
+            );
+        }
     }
 }

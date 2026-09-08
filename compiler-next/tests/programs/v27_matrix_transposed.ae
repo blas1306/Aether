@@ -1,0 +1,15 @@
+int main() {
+    Matrix<int> a = [1,2;3,4];
+    MatrixView<int> t = transpose_view(a);
+    Matrix<int> b = t+t;
+    if(b[1,1]!=2){return 1;}
+    if(b[1,2]!=6){return 2;}
+    if(b[2,1]!=4){return 3;}
+    if(b[2,2]!=8){return 4;}
+    Matrix<int> rect = [1,2,3;4,5,6];
+    Matrix<int> twice = transpose_view(rect)+transpose_view(rect);
+    if(rows(twice)!=3){return 5;}
+    if(columns(twice)!=2){return 6;}
+    if(twice[2,2]!=10){return 7;}
+    return twice[3,2]-12;
+}

@@ -1776,3 +1776,57 @@ borrowed transpose to a projection requires a local binding; no temporary
 lifetime extension exists. Owning Matrix transpose remains rejected. This
 vertical adds no slicing, ranges, submatrix constructors, owning row copies,
 arithmetic, BLAS, traits, methods, raw pointers or stored lifetimes.
+
+## NEXT-VERTICAL-27 — built-in elementwise addition/subtraction
+
+Source operators `+` and `-` resolve by operand family, retaining ordinary
+additive precedence. Scalar arithmetic remains unchanged. Vector-like means
+Vector<T,O>, VectorView<T,O> or VectorViewMut<T,O>; matrix-like means Matrix<T>,
+MatrixView<T> or MatrixViewMut<T>. A pair MUST belong to the same family, have
+the exact same canonical element TypeId, and for vectors the same O. There is
+no element coercion, broadcasting or vector/matrix mixing.
+
+`supports_builtin_add_sub(TypeId)` admits only concrete built-in integers and
+floats: int8/16/32/64, uint8/16/32/64, isize/usize, float32/float64. Aliases resolve
+to these identities. bool, structs, enums, collections, mathematical owners,
+references and symbolic generic elements have no arithmetic through storage
+capabilities. This query creates no public trait, method or operator protocol.
+
+Operands are evaluated left-to-right, capturing readable descriptors. A live
+left descriptor protects its underlying owner/storage against invalidation
+while the right operand evaluates. Existing owners MUST NOT move. Writable
+views are read-only for this operation; exact/partial aliasing is allowed and
+no noalias promise is introduced. Explicit expression-created owner temporaries
+stay alive through the operation and use ordinary cleanup afterward.
+
+Before element access or result allocation, Vector compares dimensions;
+Matrix compares rows then columns, never just their product. Known mismatch
+may diagnose E0345; otherwise the structured ShapeMismatch trap aborts.
+Only compatible shapes reach checked AllocationSizeOverflow/AllocationFailure.
+Compatible empty Vectors and 0x0 Matrices yield empty null owners without
+allocation. Nonempty results have one backing; Vector is contiguous and Matrix
+is contiguous row-major, preserving the logical shape and orientation.
+
+Logical addressing uses `i*stride` for vectors, and
+`r*row_stride + c*column_stride` for matrices with zero-based internal counters.
+Owners materialize unit/vector or row-major/matrix strides; views retain their
+explicit strides. Descriptor validity, loop bounds and checked allocation
+establish representable in-backing offsets; no per-element public index guard
+is needed. Source indexing remains one-based and unchanged.
+
+Each scalar element uses exactly the checked integer or IEEE float Add/Sub
+operation already admitted for that type. No wrapping, nsw/nuw, fast-math or
+reassociation is permitted. Overflow during partial initialization aborts;
+there is no unwinding, rollback or result-slot exception cleanup. Elements are
+trivial/no-drop. A successful result initializes every logical slot once before
+ownership escapes: N operations/stores in O(N), or R*C in O(R*C).
+
+HIR records family-specific operations and ordered shape contracts. MIR/SSA
+preserve an executable structured region: ShapeGuard(s), Allocate, unit-step
+For loop(s), two StridedLoads, ScalarBinary, InitializeNext and YieldOwner.
+Only the validated complete-prefix yield escapes the region. Each verification
+boundary checks the full ordered region tree, operand/result types, exact
+strides, scalar/trap contract and initialization induction, independently of
+prior verification. LLVM translates these instructions into branches, loop
+phis and loads/stores, without an arithmetic runtime helper or dispatcher.
+No MemorySSA or global lifetime extension is introduced.

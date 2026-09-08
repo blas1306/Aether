@@ -1,0 +1,16 @@
+int main() {
+    double zero=0.0;
+    double negative_zero=-zero;
+    double infinity=1.0/zero;
+    double nan=zero/zero;
+    Vector<double,Row> a=[negative_zero,infinity,nan];
+    Vector<double,Row> b=a+a;
+    if(1.0/b[1]!=-infinity){return 1;}
+    if(b[2]!=infinity){return 2;}
+    if(b[3]==b[3]){return 3;}
+    Matrix<float> m=[-0.0,1.0];
+    Matrix<float> n=m+m;
+    float z=0.0;
+    if(1.0/n[1,1]!=-1.0/z){return 4;}
+    return 0;
+}

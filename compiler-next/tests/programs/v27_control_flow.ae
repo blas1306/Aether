@@ -1,0 +1,23 @@
+Vector<int,Row> add(VectorView<int,Row> a,VectorView<int,Row> b) {return a+b;}
+Matrix<int> sub(MatrixView<int> a,MatrixView<int> b) {return a-b;}
+int branch(bool flag) {
+    Vector<int,Row> a=[1,2];
+    Vector<int,Row> b=a+a;
+    if(flag){Vector<int,Row> c=b+a;return c[2]-6;}
+    Vector<int,Row> d=add(vector_view(a),vector_view(b));
+    Vector<int,Row> e=(a+b)+(a+b);
+    if(e[2]!=12){return 1;}
+    Matrix<int> m=[3,4;5,6];
+    Matrix<int> n=sub(matrix_view(m),matrix_view(m));
+    if(n[2,2]!=0){return 2;}
+    int i=0;
+    while(i<3){Vector<int,Row> t=a+b;if(t[1]!=3){return 3;}i=i+1;}
+    return d[2]-6;
+}
+int conditional(bool flag) {
+    Vector<int,Row> a=[1];
+    Vector<int,Row> result=a+a;
+    if(flag){Vector<int,Row> moved=result;if(moved[1]!=2){return 1;}}
+    return 0;
+}
+int main(){return branch(true)+branch(false)+conditional(true)+conditional(false);}

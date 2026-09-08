@@ -191,6 +191,8 @@ pub enum Operand {
 pub enum TrapKind {
     /// Checked arithmetic overflow.
     IntegerOverflow,
+    /// Incompatible mathematical dimensions or rows/columns.
+    ShapeMismatch,
     /// Integer division or remainder by zero.
     DivisionByZero,
     /// A checked value conversion cannot represent its result.
@@ -248,6 +250,12 @@ pub enum BinaryOp {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum Rvalue {
+    /// Readable descriptor operands and an explicit structured initialization loop.
+    ElementwiseBinary {
+        left: Operand,
+        right: Operand,
+        kernel: crate::ElementwiseKernel,
+    },
     /// Scalar copy.
     Use(Operand),
     /// Read a local or nested subobject place.
@@ -1956,6 +1964,56 @@ impl Builder<'_> {
                 );
                 Operand::Local(destination)
             }
+            HirExprKind::VectorElementwiseBinary {
+                op,
+                left,
+                right,
+                element_type,
+                ..
+            }
+            | HirExprKind::MatrixElementwiseBinary {
+                op,
+                left,
+                right,
+                element_type,
+                ..
+            } => {
+                let matrix = matches!(expression.kind, HirExprKind::MatrixElementwiseBinary { .. });
+                let (left, left_owner) = self.lower_math_read(left);
+                let (right, right_owner) = self.lower_math_read(right);
+                let op = match op {
+                    HirBinaryOp::AddIntegerChecked => BinaryOp::AddIntegerChecked,
+                    HirBinaryOp::SubtractIntegerChecked => BinaryOp::SubtractIntegerChecked,
+                    HirBinaryOp::AddFloat => BinaryOp::AddFloat,
+                    HirBinaryOp::SubtractFloat => BinaryOp::SubtractFloat,
+                    _ => unreachable!("verified elementwise op"),
+                };
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::ElementwiseBinary {
+                        left,
+                        right,
+                        kernel: crate::ElementwiseKernel::new(matrix, op, *element_type),
+                    },
+                    expression.span,
+                );
+                for owner in [right_owner, left_owner].into_iter().flatten() {
+                    let token = self.temporary(TypeId::BOOL);
+                    self.assign(
+                        Place {
+                            base: PlaceBase::Local(token),
+                            projections: vec![],
+                        },
+                        Rvalue::Drop { owner },
+                        expression.span,
+                    );
+                }
+                Operand::Local(destination)
+            }
             HirExprKind::Binary { op, left, right } => {
                 let left = self.lower_expr(left);
                 let right = self.lower_expr(right);
@@ -2024,6 +2082,63 @@ impl Builder<'_> {
                 Operand::Local(destination)
             }
         }
+    }
+
+    fn lower_math_read(&mut self, expression: &HirExpr) -> (Operand, Option<Place>) {
+        let operand = self.lower_expr(expression);
+        if self.types.mathematical_view_info(expression.ty).is_some() {
+            return (operand, None);
+        }
+        // Only expression-created owners arrive here: source places were borrowed
+        // in HIR. Keep the temporary alive through the operation, then drop it.
+        let source = operand_place(&operand);
+        let (ty, value) =
+            if let Some((element, orientation)) = self.types.vector_like_info(expression.ty) {
+                (
+                    self.types
+                        .id_of(TypeData::VectorView {
+                            element,
+                            orientation,
+                            mutable: false,
+                        })
+                        .expect("interned math read"),
+                    Rvalue::VectorView {
+                        source: source.clone(),
+                        mutable: false,
+                        transpose: false,
+                        descriptor: aether_frontend::VectorViewDescriptor::derived(false),
+                    },
+                )
+            } else {
+                let element = self
+                    .types
+                    .matrix_element(expression.ty)
+                    .expect("math owner");
+                (
+                    self.types
+                        .id_of(TypeData::MatrixView {
+                            element,
+                            mutable: false,
+                        })
+                        .expect("interned math read"),
+                    Rvalue::MatrixView {
+                        source: source.clone(),
+                        mutable: false,
+                        transpose: false,
+                        descriptor: aether_frontend::MatrixViewDescriptor::derived(false, false),
+                    },
+                )
+            };
+        let destination = self.temporary(ty);
+        self.assign(
+            Place {
+                base: PlaceBase::Local(destination),
+                projections: vec![],
+            },
+            value,
+            expression.span,
+        );
+        (Operand::Local(destination), Some(source))
     }
 
     fn temporary(&mut self, ty: TypeId) -> LocalId {
@@ -2862,7 +2977,9 @@ fn verify_ownership(
                     )?;
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
-                Rvalue::BufferAlloc { .. } | Rvalue::ArrayFill { .. } => {
+                Rvalue::ElementwiseBinary { .. }
+                | Rvalue::BufferAlloc { .. }
+                | Rvalue::ArrayFill { .. } => {
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
                 Rvalue::MatrixInit { elements, .. }
@@ -3230,6 +3347,20 @@ fn validate_rvalue(
             {
                 return Err("MIR borrowed local is not address-taken".into());
             }
+        }
+        Rvalue::ElementwiseBinary {
+            left,
+            right,
+            kernel,
+        } => {
+            validate_operand(function, left, initialized)?;
+            validate_operand(function, right, initialized)?;
+            kernel.verify(
+                types,
+                operand_type(function, left)?,
+                operand_type(function, right)?,
+                destination,
+            )?;
         }
         Rvalue::Move { source } => {
             validate_place_read(function, source, structs, types, initialized)?;

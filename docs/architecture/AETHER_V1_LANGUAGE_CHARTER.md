@@ -477,3 +477,27 @@ provenance. No allocation, owning row copy or hidden element transfer is allowed
 Existing lexical/no-escape and mutable nested-List effect restrictions apply.
 Slicing, submatrices, arithmetic, methods and lifetime extensions are not admitted.
 See [NEXT_VERTICAL_26_REPORT.md](NEXT_VERTICAL_26_REPORT.md).
+
+## NEXT-VERTICAL-27 admission — built-in elementwise + and -
+
+The isolated native compiler admits its first mathematical arithmetic for
+concrete built-in scalar elements: signed/unsigned 8/16/32/64-bit integers,
+isize/usize, float32/float64 and their canonical aliases. Arithmetic admission
+is a compiler query; Copy/Relocatable/Storable remain storage capabilities and
+MUST NOT establish arithmetic on symbolic T or user-defined elements.
+
+Any readable Vector/VectorView/VectorViewMut pair with identical element TypeId
+and orientation yields a fresh owning Vector. Any readable
+Matrix/MatrixView/MatrixViewMut pair with identical element TypeId yields a
+fresh owning Matrix. Inputs are borrowed through expression evaluation and
+remain usable. Dynamic dimension equality, or ordered row then column equality,
+MUST succeed before result allocation. ShapeMismatch is distinct from bounds,
+integer overflow and allocation traps. Logical strides govern every view read.
+
+Compatible empty inputs allocate nothing. Nonempty arithmetic allocates one
+backing, performs one scalar operation and initializes each result slot once.
+Integer overflow is checked and aborting; floats use ordinary IEEE semantics.
+MIR/SSA MUST verify ordered guards and complete initialization before owner
+escape. No unwinding, behavioral generics, public operator protocol,
+multiplication/division, promotion, broadcasting, BLAS or lifetime extension
+is implied. See [NEXT_VERTICAL_27_REPORT.md](NEXT_VERTICAL_27_REPORT.md).

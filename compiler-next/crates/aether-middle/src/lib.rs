@@ -1,6 +1,8 @@
 //! Flow MIR and SSA middle-end.
 
+mod elementwise;
 mod mir;
+pub use elementwise::{ElementwiseKernel, MathAxis, MathInput, MathStep, MathStride};
 mod ssa;
 
 pub use mir::{
