@@ -221,7 +221,7 @@ fn vertical31_parametric_constraints_diagnostics_and_forwarding() {
             "Matrix<int>a=[1];Vector<int,Row>b=[1];Matrix<int>x=a*b;",
             "E0342",
         ),
-        ("Matrix<int>a=[1];Matrix<int>x=a*a;", "E0342"),
+        ("Matrix<int>a=[1];Vector<int,Row>x=a*a;", "E0218"),
     ] {
         let e = compile_source(
             &SourceFile::new("bad.ae", format!("int main(){{{body}return 0;}}")),

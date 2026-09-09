@@ -1,10 +1,71 @@
-# Aether NEXT-VERTICAL-32
+# Aether NEXT-VERTICAL-33
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. The current mathematical foundation includes Matrix<T> owners and borrowed strided MatrixView/MatrixViewMut and oriented VectorView/VectorViewMut with zero-copy transpose; the numbered
 Vertical-9..17 sections below retain historical qualification context.
 It does not replace the production `aether` CLI or import any legacy
 Python object, JSON schema, Initial IR, or SSA representation.
+
+## Native Matrix×Matrix multiplication (V33)
+
+```aether
+Matrix<T> multiply<T:Storable+Copy+Add+Mul+Zero>(
+    MatrixView<T> a, MatrixView<T> b) {
+    return a * b;
+}
+```
+
+The complete native `*` table through V33 is:
+
+| Operands | Result | Compatibility |
+|---|---|---|
+| scalar × Vector, Vector × scalar | owning Vector, same orientation | exact scalar/element T |
+| scalar × Matrix, Matrix × scalar | owning Matrix | exact scalar/element T |
+| Row(n) × Column(n) | T | equal dimensions |
+| Column(n) × Row(p) | owning Matrix(n,p) | independent dimensions |
+| Matrix(m,k) × Column(k) | owning Column(m) | matrix columns = vector dimension |
+| Row(k) × Matrix(k,n) | owning Row(n) | vector dimension = matrix rows |
+| Matrix(m,k) × Matrix(k,n) | owning Matrix(m,n) | left columns = right rows |
+
+Both Matrix operands independently accept Matrix, MatrixView and MatrixViewMut,
+with exact same canonical element T and no promotion. Owners are borrowed;
+mutable views are read only for this operation. Inputs may share backing, remain
+usable afterwards, and evaluate left to right with the left owner protected
+while evaluating the right. Temporary owners receive normal cleanup.
+
+Output rows = lhs.rows, output columns = rhs.columns, contraction = lhs.columns.
+Each output starts at exact Zero<T>, iterates contraction indices in increasing
+logical order, then stores once. Output traversal is rows, then columns, then
+contraction. Integers use checked multiplication and checked addition without
+widening. Floats use canonical +0 and separate strict fmul/fadd: no FMA,
+reassociation, fast-math, BLAS or SIMD. Generic T independently requires
+Storable+Copy+Add+Mul+Zero, including unused bodies and generic forwarding.
+Operations and Zero become concrete before MIR; no capability dispatch exists.
+
+Shape mismatch is diagnosed statically when known or traps before the empty
+bypass, allocation, loads and arithmetic. For m×0 times 0×n, the result still
+contains m*n zeros: one allocation if m,n>0, m*n stores, no loads/Mul/Add. Zero
+output rows or columns allocate nothing and preserve exact 0×n/m×0 shape with
+a null pointer. Matrix(1,k)×Matrix(k,1) is Matrix(1,1), never the scalar returned
+by Row×Column. Allocation checks only m*n and its byte size, before source reads.
+
+Logical addressing uses i*lhs.row_stride+l*lhs.column_stride and
+l*rhs.row_stride+j*rhs.column_stride independently, including either or both
+transposed views. Result stores use i*n+j. No row()/column() adaptation or
+transpose materialization occurs. General exact costs: m*k*n Mul, m*k*n Add,
+2*m*k*n loads, m*n stores, one allocation iff m,n>0. Free/relocation deltas
+inside the successful product are zero; normal cleanup balances allocations.
+
+HIR retains explicit MatrixAlgebraicProduct metadata. MIR and SSA each validate
+the concrete MatrixMatrixKernel three-axis schedule before LLVM emits loops.
+Matrix×Row, Column×Matrix, Row×Row and Column×Column remain rejected. No dot,
+Hadamard, matmul function, user impl or lifetime extension is introduced.
+Advanced decompositions remain future STD LinearAlgebra work.
+
+See [the V33 report](../docs/architecture/NEXT_VERTICAL_33_REPORT.md) and
+[the normative contract](../docs/architecture/AETHER_V1_SEMANTIC_CONTRACT.md#next-vertical-33--native-matrixmatrix).
+Compilation snapshots: `python3 tests/measure-v33.py --runs 10`.
+The numbered sections below describe admission at their original boundaries.
 
 ## Native Matrix×Column and Row×Matrix multiplication (V32)
 
@@ -55,8 +116,9 @@ Row×Matrix, and exactly one allocation iff the result extent is nonzero.
 MIR/SSA retain independently verified MatrixColumnKernel/RowMatrixKernel closed
 maps of reductions with explicit result/contraction selectors. LLVM translates
 them to nested loops and the normal `{ptr,dimension}` Vector owner layout.
-No Matrix×Matrix, Matrix×Row, Column×Matrix, Row×Row, Column×Column, dot, Hadamard,
-matmul function, BLAS or user impl is admitted. Advanced decompositions remain
+At the V32 boundary Matrix×Matrix was still deferred; V33 admits it above.
+Matrix×Row, Column×Matrix, Row×Row, Column×Column, dot, Hadamard,
+matmul function, BLAS and user impl remain unimplemented. Advanced decompositions remain
 future LinearAlgebra STD work.
 
 See [the V32 report](../docs/architecture/NEXT_VERTICAL_32_REPORT.md) and

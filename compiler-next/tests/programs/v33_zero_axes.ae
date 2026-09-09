@@ -1,0 +1,10 @@
+int main(){Vector<double,Column>ec=[];Vector<double,Row>er=[];Vector<double,Row>r=[1,2,3];
+ Matrix<double>a=ec*r;Matrix<double>b=[1,2,3,4;5,6,7,8;9,10,11,12];Matrix<double>z=a*b;
+ if(rows(z)!=0){return 1;}if(columns(z)!=4){return 2;}
+ MatrixView<double>bt=transpose_view(b);MatrixView<double>at=transpose_view(a);Matrix<double>w=bt*at;
+ if(rows(w)!=4){return 3;}if(columns(w)!=0){return 4;}
+ Matrix<double>e=ec*er;Matrix<double>ee=e*e;Matrix<double>az=a*at;
+ if(rows(ee)!=0){return 5;}if(columns(ee)!=0){return 6;}
+ if(rows(az)!=0){return 7;}if(columns(az)!=0){return 8;}
+ Matrix<double>m=[1,2,3;4,5,6];Matrix<double>n=m*at;
+ if(rows(n)!=2){return 9;}if(columns(n)!=0){return 10;}return 0;}

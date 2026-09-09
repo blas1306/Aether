@@ -2000,6 +2000,11 @@ impl Builder<'_> {
                         zero,
                         ..
                     }
+                    | aether_frontend::VectorProduct::MatrixAlgebraicProduct {
+                        accumulate_op,
+                        zero,
+                        ..
+                    }
                     | aether_frontend::VectorProduct::MatrixVector {
                         accumulate_op,
                         zero,
@@ -2022,6 +2027,17 @@ impl Builder<'_> {
                             } else {
                                 crate::MathInput::Right
                             },
+                        )
+                    } else if matches!(
+                        product,
+                        aether_frontend::VectorProduct::MatrixAlgebraicProduct { .. }
+                    ) {
+                        let (add, zero) = reduction.expect("verified Matrix map-reduction");
+                        crate::VectorProductKernel::new_matrix_matrix(
+                            *element_type,
+                            concrete(*product_op),
+                            add,
+                            zero,
                         )
                     } else {
                         crate::VectorProductKernel::new(

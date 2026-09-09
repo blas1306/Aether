@@ -617,7 +617,35 @@ floating Mul/Add. Positive output extent allocates once; zero output extent
 allocates nothing. A zero contraction with positive output extent yields a
 nonempty vector of Zero, with no Mul/Add and one store per output.
 
-Matrix×Matrix, Matrix×Row, Column×Matrix and same-orientation Vector products
-remain rejected. No runtime capability dispatch, matmul/dot/Hadamard intrinsic,
+At the V32 boundary Matrix×Matrix was deferred (admitted by V33 below).
+Matrix×Row, Column×Matrix and same-orientation Vector products remain rejected. No runtime capability dispatch, matmul/dot/Hadamard intrinsic,
 BLAS, widening, user impl or lifetime change. Advanced decompositions belong to
 future LinearAlgebra STD. See [NEXT_VERTICAL_32_REPORT.md](NEXT_VERTICAL_32_REPORT.md).
+
+
+## V33 admission — native Matrix×Matrix
+
+Native `*` completes basic algebraic multiplication with
+Matrix<T>(m,k)×Matrix<T>(k,n)->owning Matrix<T>(m,n). Both operands independently
+accept Matrix/MatrixView/MatrixViewMut and require exact canonical T. Inputs
+are borrowed, may alias, and use independent logical strides, including both
+transposed. Matrix(1,k)×Matrix(k,1) remains Matrix(1,1), never scalar.
+
+Three independent extents define output rows, output columns and contraction.
+Shape equality lhs.columns=rhs.rows is checked before empty bypass, allocation,
+loads or operations. Empty output axes preserve both dimensions without backing
+allocation. Zero contraction with positive output axes creates m*n Zero cells,
+one allocation and m*n stores, with no source loads, multiplication or addition.
+
+Generic T independently requires Storable+Copy+Add+Mul+Zero. Each cell starts
+at exact typed Zero, traverses logical contraction in increasing order, and
+performs checked integer Mul then Add or strict floating fmul then fadd. Output
+traversal is rows then columns. There is no FMA, reassociation, BLAS, SIMD,
+widening, helper surface or runtime capability dispatch. General exact cost is
+m*k*n Mul/Add each, 2*m*k*n loads, m*n stores and one nonempty result allocation.
+
+V31/V32 results retain their distinct scalar, Matrix and oriented Vector types;
+scaling and +/− remain unchanged. Row×Row, Column×Column, Matrix×Row and
+Column×Matrix remain rejected. Advanced decompositions belong to future STD
+LinearAlgebra. See [NEXT_VERTICAL_33_REPORT.md](NEXT_VERTICAL_33_REPORT.md)
+and the complete table in [compiler-next/README.md](../../compiler-next/README.md).

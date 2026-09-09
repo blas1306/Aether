@@ -210,7 +210,7 @@ fn vertical32_parametric_constraints_diagnostics_and_forwarding() {
             "Matrix<int>a=[1];Vector<int,Column>x=[1];Vector<int,Column>y=x*a;",
             "E0342",
         ),
-        ("Matrix<int>a=[1];Matrix<int>b=a*a;", "E0342"),
+        ("Matrix<int>a=[1];Vector<int,Row>b=a*a;", "E0218"),
         ("Vector<int,Row>x=[1];Vector<int,Row>y=x*x;", "E0342"),
         ("Vector<int,Column>x=[1];Vector<int,Column>y=x*x;", "E0342"),
         (

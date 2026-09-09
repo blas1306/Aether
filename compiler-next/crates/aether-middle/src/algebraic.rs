@@ -10,6 +10,7 @@ pub enum ProductKind {
     OuterProductKernel,
     MatrixColumnKernel,
     RowMatrixKernel,
+    MatrixMatrixKernel,
 }
 
 /// Scalar reduction or fully initialized owner, with scoped ordered accumulators.
@@ -25,6 +26,10 @@ pub enum ProductStep {
         axis: MathAxis,
         input: MathInput,
         source_axis: MathAxis,
+    },
+    EmptyMatrixResultBypass {
+        rows: MathAxis,
+        columns: MathAxis,
     },
     EmptyResultBypass {
         axis: MathAxis,
@@ -261,6 +266,120 @@ impl VectorProductKernel {
         }
     }
 
+    /// Two output axes and one independent contraction axis. The closed tree
+    /// defines rows -> columns -> contraction, with one Zero/store per cell.
+    #[must_use]
+    pub fn new_matrix_matrix(
+        element_type: TypeId,
+        product_op: BinaryOp,
+        accumulate_op: BinaryOp,
+        zero: Operand,
+    ) -> Self {
+        use MathAxis::{Columns, Contraction, Rows};
+        use MathInput::{Left, Right};
+        let trap = matches!(product_op, BinaryOp::MultiplyIntegerChecked)
+            .then_some(TrapKind::IntegerOverflow);
+        let program = vec![
+            ProductStep::ShapeGuardPair {
+                left_axis: Columns,
+                right_axis: Rows,
+                trap: TrapKind::ShapeMismatch,
+            },
+            ProductStep::SelectSourceExtent {
+                axis: Rows,
+                input: Left,
+                source_axis: Rows,
+            },
+            ProductStep::SelectSourceExtent {
+                axis: Columns,
+                input: Right,
+                source_axis: Columns,
+            },
+            ProductStep::SelectSourceExtent {
+                axis: Contraction,
+                input: Left,
+                source_axis: Columns,
+            },
+            ProductStep::EmptyMatrixResultBypass {
+                rows: Rows,
+                columns: Columns,
+            },
+            ProductStep::Math(MathStep::Allocate {
+                extents: vec![Rows, Columns],
+                size_trap: TrapKind::AllocationSizeOverflow,
+                failure_trap: TrapKind::AllocationFailure,
+            }),
+            ProductStep::For {
+                axis: Rows,
+                start: 0,
+                step: 1,
+                body: vec![ProductStep::For {
+                    axis: Columns,
+                    start: 0,
+                    step: 1,
+                    body: vec![
+                        ProductStep::AccumulatorInit {
+                            value: zero.clone(),
+                        },
+                        ProductStep::For {
+                            axis: Contraction,
+                            start: 0,
+                            step: 1,
+                            body: vec![
+                                ProductStep::Math(MathStep::StridedLoad {
+                                    input: Left,
+                                    offset: vec![
+                                        (Rows, MathStride::RowStride),
+                                        (Contraction, MathStride::ColumnStride),
+                                    ],
+                                }),
+                                ProductStep::Math(MathStep::StridedLoad {
+                                    input: Right,
+                                    offset: vec![
+                                        (Contraction, MathStride::RowStride),
+                                        (Columns, MathStride::ColumnStride),
+                                    ],
+                                }),
+                                ProductStep::Math(MathStep::ScalarBinary {
+                                    op: product_op,
+                                    element_type,
+                                    trap,
+                                }),
+                                ProductStep::Accumulate {
+                                    op: accumulate_op,
+                                    element_type,
+                                    trap,
+                                },
+                            ],
+                        },
+                        ProductStep::Math(MathStep::InitializeNext),
+                    ],
+                }],
+            },
+            ProductStep::Math(MathStep::YieldOwner),
+        ];
+        Self {
+            kind: ProductKind::MatrixMatrixKernel,
+            element_type,
+            product_op,
+            accumulate_op: Some(accumulate_op),
+            zero: Some(zero),
+            program,
+        }
+    }
+
+    /// The single logical loop binding the ordered accumulator, if present.
+    #[must_use]
+    pub fn reduction_axis(&self) -> Option<MathAxis> {
+        match self.kind {
+            ProductKind::ReductionKernel => Some(MathAxis::Dimension),
+            ProductKind::MatrixColumnKernel => Some(MathAxis::Columns),
+            ProductKind::RowMatrixKernel => Some(MathAxis::Rows),
+            ProductKind::MatrixMatrixKernel => Some(MathAxis::Contraction),
+            ProductKind::OuterProductKernel => None,
+        }
+    }
+
     /// Matrix source for the two map-reduction families.
     #[must_use]
     pub fn matrix_input(&self) -> Option<MathInput> {
@@ -315,6 +434,18 @@ impl VectorProductKernel {
                 ty: e,
             }
         };
+        if self.kind == ProductKind::MatrixMatrixKernel {
+            if !types.supports_builtin_multiply(e)
+                || types.needs_drop(e)
+                || types.matrix_view_info(left).is_none_or(|(t, _)| t != e)
+                || types.matrix_view_info(right).is_none_or(|(t, _)| t != e)
+                || types.matrix_element(result) != Some(e)
+                || *self != Self::new_matrix_matrix(e, mul, add, zero)
+            {
+                return Err("Matrix algebraic map-reduction sources/result/three extents/guard/allocation/strides/zero/row-column-contraction initialization schedule invalid".into());
+            }
+            return Ok(());
+        }
         if let Some(matrix) = self.matrix_input() {
             let (mt, vt, orientation) = if matrix == MathInput::Left {
                 (left, right, Orientation::Column)

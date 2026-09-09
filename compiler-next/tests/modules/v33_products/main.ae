@@ -1,0 +1,5 @@
+import helper;
+Matrix<T> forward<T:Storable+Copy+Add+Mul+Zero>(MatrixView<T>a,MatrixView<T>b){return helper.multiply(a,b);}
+int main(){Matrix<int>a=[1,2;3,4];MatrixView<int>t=transpose_view(a);MatrixView<int>v=matrix_view(a);
+ Matrix<int>c=forward(t,v);if(c[1,1]!=10){return 1;}if(c[1,2]!=14){return 2;}if(c[2,2]!=20){return 3;}
+ if(a[2,2]!=4){return 4;}return 0;}

@@ -2156,9 +2156,97 @@ loop bounds, traps, accumulator chain, initialization, no input moves/writes,
 and no late shape guard. SSA preserves the closed region without MemorySSA.
 LLVM translates the verified schedule; it MUST NOT be its first authority.
 
-Matrix×Row, Column×Matrix, Matrix×Matrix, Row×Row and Column×Column remain
-rejected, including dimension one. V31 products, scalar scaling, +/− and
+At the V32 boundary Matrix×Matrix was deferred; V33 admits it below.
+Matrix×Row, Column×Matrix, Row×Row and Column×Column remain rejected, including
+dimension one. V31 products, scalar scaling, +/− and
 transpose/projections retain their contracts. No dot(Vector), Array/List dot,
 Hadamard, matmul function, user impl, One, heterogeneous types, widening,
 BLAS/SIMD/reassociation or lifetime extensions are introduced. Advanced
 decompositions remain future LinearAlgebra STD responsibilities.
+
+
+## NEXT-VERTICAL-33 — native Matrix×Matrix
+
+For A:Matrix<T>(m,k), B:Matrix<T>(k,n), native `A * B` MUST return a fresh
+owning Matrix<T>(m,n). Each operand independently accepts Matrix, MatrixView or
+MatrixViewMut (nine readable pairings); mutable inputs MUST NOT be written.
+Both elements MUST have identical canonical TypeId T. No promotion, structural
+arithmetic derivation, heterogeneous output or accumulator widening is allowed.
+Storable, Copy, Add, Mul and Zero MUST each be established independently for
+symbolic T, including unused generic bodies and local/cross-module forwarding.
+
+The complete table is scalar×Vector/Vector×scalar -> Vector,
+scalar×Matrix/Matrix×scalar -> Matrix, Row×Column -> T, Column×Row -> Matrix,
+Matrix×Column -> Column, Row×Matrix -> Row, and Matrix×Matrix -> Matrix.
+Native type identity MUST determine the result family: 1×k Matrix times k×1
+Matrix returns a 1×1 Matrix, never T. Row×Row, Column×Column, Matrix×Row and
+Column×Matrix remain invalid even with dimension one.
+
+A.columns MUST equal B.rows. A known mismatch MUST produce a structured static
+diagnostic; a dynamic mismatch MUST trap ShapeMismatch. Guard ordering MUST be
+shape guard -> empty output bypass -> checked allocation -> source element
+loads -> Mul/Add, including 0×3 times 4×0. The following three extents MUST
+remain explicit and independently reconstructed by HIR/MIR/SSA verification:
+
+| Extent | Exact source | Purpose |
+|---|---|---|
+| output_rows | A.rows | outer loop, shape, emptiness, size |
+| output_columns | B.columns | middle loop, shape, emptiness, size |
+| contraction_extent | A.columns, checked equal to B.rows | inner loop only |
+
+For m=0 or n=0, result MUST be {null,m,n}, without allocator, stores, loads or
+Mul/Add. For m,n>0 and k=0, result MUST instead allocate once and store exactly
+m*n typed Zero values, with zero source loads, zero Mul and zero Add. Empty
+contraction MUST NOT bypass the output loops. Result size MUST check m*n and
+then bytes using existing Matrix allocation semantics; it MUST NOT include k.
+AllocationSizeOverflow and AllocationFailure MUST precede source element reads.
+
+Logical schedule (internal zero-based indices):
+
+```text
+for i in 0..m:
+    for j in 0..n:
+        acc = Zero<T>
+        for l in 0..k:
+            product = A[i,l] * B[l,j]
+            acc = acc + product
+        C[i,j] = acc
+```
+
+Rows, columns and contraction MUST increase in that nesting order. The first
+addition to Zero MUST remain. Each integer product is MultiplyIntegerChecked;
+each accumulation is AddIntegerChecked, with distinct IntegerOverflow paths and
+no widening/wrapping. Float32/float64 MUST use canonical +0 and separate strict
+fmul then fadd; no FMA, reassociation, fast-math or pairwise reduction is allowed.
+Symbolic HIR uses Behavioral(Mul), Behavioral(Add), Algebraic Zero. Existing
+monomorphization MUST reify exact integer zero / positive floating zero and
+concrete scalar operators; no symbolic metadata may reach concrete MIR/SSA.
+
+Source addresses MUST be i*lhs.RS+l*lhs.CS and l*rhs.RS+j*rhs.CS independently.
+Owners use RS=columns, CS=1; views retain explicit strides. Either or both
+transposed inputs MUST work without source flattening, temporary Vector,
+row()/column() expansion, transpose materialization or noalias assumptions.
+Result stores MUST initialize i*n+j exactly once, and YieldOwner MUST occur
+after complete initialization. There is no bitmap or partially escaped owner.
+
+Operands MUST evaluate left to right; lhs descriptor/root stays protected
+against rhs consumption, replacement or invalidation. Inputs may alias and
+remain usable after success. Temporary owners live through the product and
+receive normal cleanup. No lifetime rules change.
+
+MIR and SSA MUST each resolve their own operand and result types and revalidate
+the complete closed 2D map-of-reductions schedule: guard, all selectors, bypass,
+allocation extents/traps, nesting/bounds/order, per-cell Zero, both stride
+coordinates, Mul before Add, single accumulator, one ordered InitializeNext,
+and final owner yield. Corruption MUST fail closed. No source move/drop/write
+instruction is admitted in this region. SSA needs no MemorySSA. LLVM MUST
+translate the already verified schedule and preserve exact empty shape fields.
+
+Exact successful costs are m*k*n Mul, m*k*n Add, 2*m*k*n source loads, m*n
+stores, one allocation iff m,n>0, and zero free/relocation delta in the product.
+Normal final cleanup balances allocations. Counts are measured at runtime
+separately from compilation snapshots. V0..V32 contracts remain unchanged.
+
+No new Vector product, Array/List dot, Hadamard, matmul function, One, user impl,
+BLAS, SIMD, reassociation or FMA is introduced. Advanced decompositions remain
+future STD LinearAlgebra work. See [NEXT_VERTICAL_33_REPORT.md](NEXT_VERTICAL_33_REPORT.md).

@@ -3,7 +3,8 @@
 use super::{continuation_label, float_operand, llvm_type, mangle_type};
 use aether_frontend::TypeArena;
 use aether_middle::{
-    BinaryOp, BlockId, MathAxis, MathInput, MathStep, Operand, ProductStep, VectorProductKernel,
+    BinaryOp, BlockId, MathAxis, MathInput, MathStep, Operand, ProductKind, ProductStep,
+    VectorProductKernel,
 };
 use std::fmt::Write;
 
@@ -23,7 +24,9 @@ pub(super) fn emit(
     )
     .unwrap();
     for ((ty, value), input) in inputs.into_iter().zip([MathInput::Left, MathInput::Right]) {
-        let fields: &[&str] = if kernel.matrix_input() == Some(input) {
+        let fields: &[&str] = if kernel.matrix_input() == Some(input)
+            || kernel.kind == ProductKind::MatrixMatrixKernel
+        {
             &["ptr", "Rows", "Columns", "RowStride", "ColumnStride"]
         } else {
             &["ptr", "Dimension", "Stride"]
@@ -104,6 +107,11 @@ impl Emitter<'_> {
                     )
                     .unwrap();
                 }
+                ProductStep::EmptyMatrixResultBypass { rows, columns } => {
+                    let cont = continuation_label(self.block, self.id);
+                    writeln!(self.output, "  %{p}_empty_rows = icmp eq i64 %{p}_extent_{rows:?}, 0\n  %{p}_empty_columns = icmp eq i64 %{p}_extent_{columns:?}, 0\n  %{p}_empty = or i1 %{p}_empty_rows, %{p}_empty_columns\n  br i1 %{p}_empty, label %{p}_empty_result, label %{p}_allocate\n{p}_empty_result:\n  %{p}_empty_shape = insertvalue {{ ptr, i64, i64 }} zeroinitializer, i64 %{p}_extent_{rows:?}, 1\n  %{p}_empty_owner = insertvalue {{ ptr, i64, i64 }} %{p}_empty_shape, i64 %{p}_extent_{columns:?}, 2\n  br label %{cont}\n{p}_allocate:").unwrap();
+                    *current = format!("{p}_allocate");
+                }
                 ProductStep::EmptyResultBypass { axis } => {
                     let cont = continuation_label(self.block, self.id);
                     writeln!(self.output, "  %{p}_empty = icmp eq i64 %{p}_extent_{axis:?}, 0\n  br i1 %{p}_empty, label %{p}_empty_result, label %{p}_allocate\n{p}_empty_result:\n  br label %{cont}\n{p}_allocate:").unwrap();
@@ -128,13 +136,7 @@ impl Emitter<'_> {
                     // Accumulator is bound by the reduction loop only, and reset
                     // on each outer iteration, including zero-trip contractions.
                     if let Some(zero) = &self.kernel.zero
-                        && (self.kernel.matrix_input().is_none()
-                            || *axis
-                                == if self.kernel.matrix_input() == Some(MathInput::Left) {
-                                    MathAxis::Columns
-                                } else {
-                                    MathAxis::Rows
-                                })
+                        && self.kernel.reduction_axis() == Some(*axis)
                     {
                         let z = match zero {
                             Operand::Int { value, .. } => value.to_string(),
@@ -169,6 +171,11 @@ impl Emitter<'_> {
                             *current = next;
                         }
                         MathStep::Allocate { extents, .. } => {
+                            if self.kernel.kind == ProductKind::MatrixMatrixKernel {
+                                let suffix = mangle_type(self.types, self.kernel.element_type);
+                                writeln!(self.output, "  %{p}_allocated = call {{ ptr, i64, i64 }} @aether_matrix_new_{suffix}(i64 %{p}_extent_Rows, i64 %{p}_extent_Columns)\n  %{p}_data = extractvalue {{ ptr, i64, i64 }} %{p}_allocated, 0").unwrap();
+                                continue;
+                            }
                             if self.kernel.matrix_input().is_some() {
                                 let suffix = mangle_type(self.types, self.kernel.element_type);
                                 let axis = extents[0];
@@ -217,7 +224,12 @@ impl Emitter<'_> {
                                 writeln!(self.output, "  %{p}_result_slot = getelementptr {et}, ptr %{p}_data, i64 %{p}_{axis:?}_index\n  store {et} %{p}_accumulator, ptr %{p}_result_slot ; InitializeNext").unwrap();
                                 continue;
                             }
-                            writeln!(self.output, "  %{p}_row_base = mul i64 %{p}_Rows_index, %{p}_extent_Columns\n  %{p}_initialized_prefix = add i64 %{p}_row_base, %{p}_Columns_index\n  %{p}_result_slot = getelementptr {et}, ptr %{p}_data, i64 %{p}_initialized_prefix\n  store {et} %{p}_product, ptr %{p}_result_slot ; InitializeNext").unwrap();
+                            let value = if self.kernel.kind == ProductKind::MatrixMatrixKernel {
+                                "accumulator"
+                            } else {
+                                "product"
+                            };
+                            writeln!(self.output, "  %{p}_row_base = mul i64 %{p}_Rows_index, %{p}_extent_Columns\n  %{p}_initialized_prefix = add i64 %{p}_row_base, %{p}_Columns_index\n  %{p}_result_slot = getelementptr {et}, ptr %{p}_data, i64 %{p}_initialized_prefix\n  store {et} %{p}_{value}, ptr %{p}_result_slot ; InitializeNext").unwrap();
                         }
                         MathStep::YieldOwner => {
                             let cont = continuation_label(self.block, self.id);
@@ -226,7 +238,12 @@ impl Emitter<'_> {
                                 *current = cont;
                                 continue;
                             }
-                            writeln!(self.output, "  br label %{cont}\n{cont}:\n  %v{} = phi {{ ptr, i64, i64 }} [ %{p}_allocated, %{p}_empty_result ], [ %{p}_allocated, %{current} ]\n  ; AlgebraicEnd {}", self.id, self.id).unwrap();
+                            let empty = if self.kernel.kind == ProductKind::MatrixMatrixKernel {
+                                "empty_owner"
+                            } else {
+                                "allocated"
+                            };
+                            writeln!(self.output, "  br label %{cont}\n{cont}:\n  %v{} = phi {{ ptr, i64, i64 }} [ %{p}_{empty}, %{p}_empty_result ], [ %{p}_allocated, %{current} ]\n  ; AlgebraicEnd {}", self.id, self.id).unwrap();
                             *current = cont;
                         }
                         _ => unreachable!("verified closed algebraic schedule"),

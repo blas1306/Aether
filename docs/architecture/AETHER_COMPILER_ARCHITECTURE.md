@@ -2266,3 +2266,44 @@ Allocation cannot infer emptiness from total term count, because positive output
 with zero contraction still requires storage. Corruption and native counter
 qualification cover those two extension hazards.
 See [NEXT_VERTICAL_32_REPORT.md](NEXT_VERTICAL_32_REPORT.md).
+
+
+## Confirmation 50 — three-axis Matrix map of reductions (V33)
+
+The existing algebraic HIR family adds VectorProduct::MatrixAlgebraicProduct.
+It retains exact shape_check, output_rows=(Left,Rows),
+output_columns=(Right,Columns), contraction_extent=(Left,Columns), Add and Zero,
+with Mul and element T on the enclosing product. Verification reconstructs all
+three selectors from this closed product kind and operand types, including
+exact owning Matrix result and independent Storable+Copy+Add+Mul+Zero evidence.
+Central V29/V31 substitution concretizes both behaviors and Zero. Existing
+left-root protection and lower_math_read handle ownership and descriptors.
+
+MatrixMatrixKernel extends the verified MIR/SSA region with a distinct
+MathAxis::Contraction and EmptyMatrixResultBypass(Rows,Columns). The first
+instruction compares left Columns to right Rows. Three SelectSourceExtent
+instructions precede output-only bypass and Allocate([Rows,Columns]). Nested
+For(Rows)->For(Columns) contains AccumulatorInit(Zero), For(Contraction), then
+InitializeNext. Inner loads use [(Rows,RowStride),(Contraction,ColumnStride)]
+and [(Contraction,RowStride),(Columns,ColumnStride)], followed by Mul and Add.
+YieldOwner follows complete row-major initialization. Both verifiers resolve
+own operands/result and compare the entire concrete tree against this recipe.
+A zero-trip contraction still initializes every output. No source write/move/drop
+can be expressed in the region's instruction vocabulary.
+
+LLVM extracts both five-field Matrix read descriptors and translates the tree.
+The accumulator phi binds only the kernel's explicit reduction_axis(), replacing
+V32's indirect assumption that absence of a single matrix input implied an inner
+Vector reduction. MatrixMatrixKernel has two Matrix sources and one contraction
+phi per result cell. A nonempty result uses the existing checked matrix storage
+allocator. The empty path constructs {null,lhs.rows,rhs.columns} explicitly,
+before allocation, and merges it with the completed owner. This avoids both an
+undefined allocated value on bypass and loss of a nonzero empty shape axis.
+
+VectorAlgebraicProduct/VectorProductKernel remain historical shared family names;
+variants carry exact rank contracts. SSA renaming and verification integration
+need no new machinery. InitializeNext retains its established ordered prefix
+semantics rather than exposing arbitrary result offsets. Closed common recipes
+remain the MIR/SSA verifier authority, with CFG translation in LLVM; no MemorySSA,
+runtime generic operation, matmul helper, row/column materialization or BLAS.
+See [NEXT_VERTICAL_33_REPORT.md](NEXT_VERTICAL_33_REPORT.md).

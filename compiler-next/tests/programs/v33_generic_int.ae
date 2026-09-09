@@ -1,0 +1,5 @@
+Matrix<T> multiply<T:Storable+Copy+Add+Mul+Zero>(MatrixView<T>a,MatrixView<T>b){return a*b;}
+Matrix<T> forward<T:Storable+Copy+Add+Mul+Zero>(MatrixView<T>a,MatrixView<T>b){return multiply(a,b);}
+int main(){Matrix<int>a=[1,4;2,5;3,6];Matrix<int>b=[1,3,5;2,4,6];
+ MatrixView<int>x=transpose_view(a);MatrixView<int>y=transpose_view(b);Matrix<int>c=forward(x,y);
+ if(c[1,1]!=22){return 1;}if(c[2,2]!=64){return 2;}return 0;}

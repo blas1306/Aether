@@ -11,6 +11,7 @@ use aether_frontend::{TypeArena, TypeData, TypeId};
 #[allow(missing_docs)]
 pub enum MathAxis {
     Dimension,
+    Contraction,
     Rows,
     Columns,
 }

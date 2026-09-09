@@ -1,0 +1,7 @@
+int main(){Vector<double,Column>c=[1,2];Vector<double,Row>r=[1,2,3];
+ Vector<double,Column>ec=[];Vector<double,Row>er=[];
+ Matrix<double>a=c*er;Matrix<double>b=ec*r;Matrix<double>z=a*b;
+ if(rows(z)!=2){return 1;}if(columns(z)!=3){return 2;}
+ if(z[1,1]!=0){return 3;}if(z[1,2]!=0){return 4;}if(z[1,3]!=0){return 5;}
+ if(z[2,1]!=0){return 6;}if(z[2,2]!=0){return 7;}if(z[2,3]!=0){return 8;}
+ if(1/z[1,1]<0){return 9;}return 0;}

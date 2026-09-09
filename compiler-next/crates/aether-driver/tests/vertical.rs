@@ -8826,8 +8826,11 @@ fn vertical28_structured_rejections_and_temporary_borrows() {
             "Vector<int,Row>a=[1];Vector<int,Row>b=vector_view(a)*a;",
             "E0342",
         ),
-        ("Matrix<int>a=[1];Matrix<int>b=a*a;", "E0342"),
-        ("Matrix<int>a=[1];Matrix<int>b=matrix_view(a)*a;", "E0342"),
+        ("Matrix<int>a=[1];Vector<int,Row>b=a*a;", "E0218"),
+        (
+            "Matrix<int>a=[1];Vector<int,Column>b=matrix_view(a)*a;",
+            "E0218",
+        ),
         (
             "Vector<int,Row>a=[1];Matrix<int>b=[1];Matrix<int>c=a*b;",
             "E0218",
@@ -10025,3 +10028,5 @@ fn vertical30_cross_module_strided_kernels() {
 mod vertical31;
 
 mod vertical32;
+
+mod vertical33;
