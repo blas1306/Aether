@@ -1,0 +1,4 @@
+Vector<T,Row> addRows<T:Storable+Copy+Add>(ref Vector<T,Row> a,ref Vector<T,Row> b){return *a+*b;}
+Vector<T,Row> forward<T:Storable+Copy+Add>(ref Vector<T,Row> a,ref Vector<T,Row> b){return addRows(a,b);}
+int main(){Vector<int,Row>a=[1,2,3];Vector<int,Row>b=forward(&a,&a);
+if(b[1]!=2){return 1;}if(b[3]!=6){return 2;}return a[2]-2;}

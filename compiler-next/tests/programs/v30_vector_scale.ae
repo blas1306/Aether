@@ -1,0 +1,3 @@
+Vector<T,Row> scale<T:Storable+Copy+Mul>(T s,ref Vector<T,Row> a){return s * *a;}
+int main(){Vector<double,Row>a=[1.5,2.5,3.5];Vector<double,Row>b=scale(2.0,&a);
+if(b[1]!=3.0){return 1;}if(b[3]!=7.0){return 2;}if(a[2]!=2.5){return 3;}return 0;}

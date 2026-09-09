@@ -1,0 +1,3 @@
+Vector<T,Column> add<T:Storable+Copy+Add>(VectorView<T,Column>a,VectorView<T,Column>b){return a+b;}
+int main(){Matrix<int>a=[1,2,3;4,5,6];Vector<int,Column>b=add(column(a,2),column(a,3));
+if(b[1]!=5){return 1;}if(b[2]!=11){return 2;}return a[2,2]-5;}

@@ -1,0 +1,3 @@
+Vector<T,Column> addColumns<T:Storable+Copy+Add>(VectorView<T,Column> a,VectorView<T,Column> b){return a+b;}
+Matrix<T> subtract<T:Storable+Copy+Sub>(MatrixView<T> a,MatrixView<T> b){return a-b;}
+Matrix<T> scale<T:Storable+Copy+Mul>(T s,MatrixView<T> a){return s*a;}

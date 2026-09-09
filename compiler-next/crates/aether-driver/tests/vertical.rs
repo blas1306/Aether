@@ -9408,7 +9408,7 @@ fn vertical29_structured_rejections_even_without_instances() {
         (
             "Vector<T,Row> bad<T:Storable+Add>(Vector<T,Row> a,Vector<T,Row> b){return a+b;}int main(){return 0;}",
             "E0346",
-            "built-in",
+            "missing Copy",
         ),
         (
             "T twice<T:Add>(T a){return a+a;}int main(){return 0;}",
@@ -9601,4 +9601,423 @@ fn vertical29_mir_ssa_reject_unresolved_behavioral_scalar_types() {
                 .contains("unresolved generic")
         );
     }
+}
+
+#[test]
+fn vertical30_native_strides_forwarding_empty_and_exact_counters() {
+    for (name, heap, operations) in [
+        ("vector_add", 2, 3),
+        ("vector_scale", 2, 3),
+        ("matrix_add", 2, 6),
+        ("matrix_transposed", 3, 12),
+        ("vector_strided", 2, 2),
+        ("empty", 0, 0),
+    ] {
+        let source = SourceFile::new(
+            name,
+            fs::read_to_string(program(&format!("v30_{name}.ae"))).unwrap(),
+        );
+        let c = compile_source(&source, &[Emit::Hir, Emit::Mir, Emit::Ssa]).unwrap();
+        assert!(c.dumps[&Emit::Hir].contains("op: Behavioral("));
+        assert!(c.dumps[&Emit::Hir].contains("op: Concrete("));
+        for phase in [Emit::Mir, Emit::Ssa] {
+            assert!(!c.dumps[&phase].contains("Behavioral("));
+            assert!(!c.dumps[&phase].contains("CapabilityBinary"));
+        }
+        assert!(!c.llvm.contains("Capability"));
+        let llvm = v27_instrument(&c.llvm, heap).replace("  %v27_pass = load i1, ptr @v27_ok", &format!("  %v30_local = load i1, ptr @v27_ok\n  %v30_total = load i64, ptr @v27_ops\n  %v30_total_ok = icmp eq i64 %v30_total, {operations}\n  %v27_pass = and i1 %v30_local, %v30_total_ok"));
+        assert_eq!(v23_execute(&llvm).code(), Some(0), "{name}");
+    }
+}
+
+#[test]
+fn vertical30_all_readable_families_orientations_and_behaviors() {
+    for rank in ["Row", "Column", "Matrix"] {
+        for scalar in ["int", "uint64", "float32", "double"] {
+            let owner = if rank == "Matrix" {
+                "Matrix<T>".to_owned()
+            } else {
+                format!("Vector<T,{rank}>")
+            };
+            let view = owner
+                .replace("Matrix<", "MatrixView<")
+                .replace("Vector<", "VectorView<");
+            let view_mut = view.replace("View<", "ViewMut<");
+            let concrete = owner.replace('T', scalar);
+            let index = if rank == "Matrix" { "2,2" } else { "2" };
+            let literal = if rank == "Matrix" {
+                "[2,4;6,8]"
+            } else {
+                "[6,8]"
+            };
+            let intrinsic = if rank == "Matrix" {
+                "matrix_view"
+            } else {
+                "vector_view"
+            };
+            let forms = [
+                (format!("ref {owner}"), "*a", "&x".to_owned()),
+                (view, "a", format!("{intrinsic}(x)")),
+                (view_mut, "a", format!("{intrinsic}_mut(x)")),
+            ];
+            let mut helpers = String::new();
+            let mut main = format!("int main(){{{concrete} x={literal};");
+            for (i, (param_a, expr_a, arg_a)) in forms.iter().enumerate() {
+                for (j, (param_b, expr_b, arg_b)) in forms.iter().enumerate() {
+                    for (cap, op, expected) in [("Add", "+", 16), ("Sub", "-", 0)] {
+                        let name = format!("f{cap}{i}{j}");
+                        let expr_b = expr_b.replace('a', "b");
+                        write!(helpers, "{owner} {name}<T:Storable+Copy+{cap}>({param_a} a,{param_b} b){{return {expr_a}{op}{expr_b};}}").unwrap();
+                        write!(main, "if(true){{{concrete} r={name}({arg_a},{arg_b});if(r[{index}]!={expected}){{return 1;}}}}").unwrap();
+                    }
+                }
+                for left in [false, true] {
+                    let name = format!("s{i}{}", usize::from(left));
+                    let expr = if left {
+                        format!("s*{expr_a}")
+                    } else {
+                        format!("{expr_a}*s")
+                    };
+                    write!(
+                        helpers,
+                        "{owner} {name}<T:Storable+Copy+Mul>({param_a} a,T s){{return {expr};}}"
+                    )
+                    .unwrap();
+                    write!(main, "if(true){{{concrete} r={name}<{scalar}>({arg_a},2);if(r[{index}]!=16){{return 2;}}}}").unwrap();
+                }
+            }
+            write!(main, "if(x[{index}]!=8){{return 3;}}return 0;}}").unwrap();
+            let c = compile_source(&SourceFile::new("families.ae", helpers + &main), &[])
+                .unwrap_or_else(|e| panic!("{rank} {scalar}: {e:?}"));
+            assert_eq!(v23_execute(&c.llvm).code(), Some(0), "{rank} {scalar}");
+        }
+    }
+}
+
+#[test]
+fn vertical30_missing_independent_guarantees_and_invalid_instances() {
+    for rank in ["Vector<T,Row>", "Matrix<T>"] {
+        for (caps, op, missing) in [
+            ("Storable+Add", "+", "Copy"),
+            ("Storable+Copy", "+", "Add"),
+            ("Copy+Add", "+", "Storable"),
+            ("Storable+Copy+Add+Mul", "-", "Sub"),
+            ("Storable+Copy+Mul", "+", "Add"),
+            ("Storable+Mul", "*", "Copy"),
+            ("Storable+Copy", "*", "Mul"),
+        ] {
+            let (param, expr) = if op == "*" {
+                ("T b".to_owned(), "*a*b".to_owned())
+            } else {
+                (format!("ref {rank} b"), format!("*a{op}*b"))
+            };
+            // Never instantiated: concrete Copy types cannot rescue this body.
+            let source = format!(
+                "{rank} bad<T:{caps}>(ref {rank} a,{param}){{return {expr};}}int main(){{return 0;}}"
+            );
+            let errors = compile_source(&SourceFile::new("missing.ae", source), &[]).unwrap_err();
+            assert!(
+                errors.iter().any(|e| e.message.contains(missing)),
+                "{errors:?}"
+            );
+            if missing != "Storable" {
+                assert_eq!(errors[0].code, "E0346");
+            }
+        }
+        for (required, provided, missing) in [
+            ("Copy+Add", "Add", "Copy"),
+            ("Copy+Add", "Copy", "Add"),
+            ("Copy+Sub", "Copy+Add+Mul", "Sub"),
+            ("Copy+Mul", "Copy+Add", "Mul"),
+        ] {
+            let source = format!(
+                "{rank} inner<T:Storable+{required}>(ref {rank} a){{return [];}}{rank} outer<T:Storable+{provided}>(ref {rank} a){{return inner(a);}}int main(){{return 0;}}"
+            );
+            let e = compile_source(&SourceFile::new("forward.ae", source), &[]).unwrap_err();
+            assert_eq!(e[0].code, "E0317");
+            assert!(e[0].message.contains(missing));
+        }
+    }
+    for (prefix, element, value) in [
+        ("", "bool", "true"),
+        ("struct Point{int x;}", "Point", "Point(2)"),
+    ] {
+        let src = format!(
+            "{prefix}Matrix<T> add<T:Storable+Copy+Add>(ref Matrix<T> a){{return *a+*a;}}int main(){{Matrix<{element}> a=[{value}];Matrix<{element}>b=add(&a);return 0;}}"
+        );
+        let e = compile_source(&SourceFile::new("instance.ae", src), &[]).unwrap_err();
+        assert_eq!(e[0].code, "E0317");
+        assert!(e[0].message.contains("Add"));
+    }
+}
+
+#[test]
+fn vertical30_checked_integer_kernels_trap_after_first_slot() {
+    use std::os::unix::process::ExitStatusExt;
+    for rank in ["Vector<T,Row>", "Matrix<T>"] {
+        for (scalar, value, cap, op, rhs) in [
+            ("int8", "127", "Add", "+", "1"),
+            ("uint8", "255", "Add", "+", "1"),
+            ("int8", "-128", "Sub", "-", "1"),
+            ("uint8", "0", "Sub", "-", "1"),
+            ("int8", "127", "Mul", "*", "2"),
+            ("uint8", "255", "Mul", "*", "2"),
+        ] {
+            let concrete = rank.replace('T', scalar);
+            let (param, expr, init, arg) = if cap == "Mul" {
+                (
+                    "T b".to_owned(),
+                    "*a*b".to_owned(),
+                    String::new(),
+                    rhs.to_owned(),
+                )
+            } else {
+                (
+                    format!("ref {rank} b"),
+                    format!("*a{op}*b"),
+                    format!("{concrete} b=[1,{rhs}];"),
+                    "&b".to_owned(),
+                )
+            };
+            let src = format!(
+                "{rank} kernel<T:Storable+Copy+{cap}>(ref {rank} a,{param}){{return {expr};}}int main(){{{concrete}a=[1,{value}];{init}{concrete}c=kernel<{scalar}>(&a,{arg});return 0;}}"
+            );
+            let c = compile_source(
+                &SourceFile::new("overflow.ae", src),
+                &[Emit::Mir, Emit::Ssa],
+            )
+            .unwrap();
+            for phase in [Emit::Mir, Emit::Ssa] {
+                assert!(c.dumps[&phase].contains("IntegerOverflow"));
+            }
+            assert_eq!(v23_execute(&c.llvm).signal(), Some(4));
+            let llvm = format!("{}\ndeclare void @exit(i32) noreturn\n", c.llvm).replace(
+                "trap_integer_overflow:\n  call void @llvm.trap()",
+                "trap_integer_overflow:\n  call void @exit(i32 74)",
+            );
+            assert_eq!(v23_execute(&llvm).code(), Some(74));
+        }
+    }
+}
+
+#[test]
+fn vertical30_ieee_kernels_preserve_signed_zero_infinity_and_nan() {
+    for ty in ["float32", "float64"] {
+        for rank in ["Vector<T,Row>", "Matrix<T>"] {
+            for (cap, op, a, b, instruction) in [
+                ("Add", "+", "[-z,z,inf,-inf,inf]", "[-z,z,z,z,-inf]", "fadd"),
+                ("Sub", "-", "[-z,z,inf,-inf,inf]", "[z,z,z,z,inf]", "fsub"),
+                ("Mul", "*", "[-z,z,inf,-inf,nan]", "", "fmul"),
+            ] {
+                let concrete = rank.replace('T', ty);
+                let (param, expr, init, arg) = if cap == "Mul" {
+                    ("T b".to_owned(), "*a*b".to_owned(), String::new(), "one")
+                } else {
+                    (
+                        format!("ref {rank} b"),
+                        format!("*a{op}*b"),
+                        format!("{concrete}b={b};"),
+                        "&b",
+                    )
+                };
+                let idx = if rank.starts_with("Matrix") { "1," } else { "" };
+                let src = format!(
+                    "{rank} kernel<T:Storable+Copy+{cap}>(ref {rank} a,{param}){{return {expr};}}int main(){{{ty} z=0;{ty} one=1;{ty} inf=one/z;{ty} nan=inf-inf;{concrete}a={a};{init}{concrete}r=kernel(&a,{arg});if(one/r[{idx}1]!=-inf){{return 1;}}if(one/r[{idx}2]!=inf){{return 2;}}if(r[{idx}3]!=inf){{return 3;}}if(r[{idx}4]!=-inf){{return 4;}}if(r[{idx}5]==r[{idx}5]){{return 5;}}return 0;}}"
+                );
+                let c = compile_source(&SourceFile::new("ieee.ae", src), &[]).unwrap();
+                let llvm_type = if ty == "float32" { "float" } else { "double" };
+                assert!(
+                    c.llvm
+                        .contains(&format!("_value = {instruction} {llvm_type} "))
+                );
+                assert_eq!(v23_execute(&c.llvm).code(), Some(0), "{ty} {rank} {cap}");
+            }
+        }
+    }
+}
+
+#[test]
+fn vertical30_mir_ssa_reject_symbolic_types_and_corrupt_kernel_schedules() {
+    use aether_middle::{Rvalue, SsaOp, build_ssa, lower_hir, verify_mir, verify_ssa};
+    for rank in ["Vector<T,Row>", "Matrix<T>"] {
+        for scaling in [false, true] {
+            let concrete = rank.replace('T', "int");
+            let expr = if scaling { "a*s" } else { "a+a" };
+            let cap = if scaling { "Mul" } else { "Add" };
+            let src = format!(
+                "{rank} kernel<T:Storable+Copy+{cap}>({rank} a,T s){{return {expr};}}int main(){{{concrete}a=[1,2];{concrete}b=kernel<int>(a,2);return 0;}}"
+            );
+            let hir = analyze(parse_source(&SourceFile::new("corrupt.ae", src)).unwrap()).unwrap();
+            let symbolic = hir.signatures()[0].generic_parameters[0].ty;
+            let raw = lower_hir(hir);
+            let fi = raw
+                .functions
+                .iter()
+                .position(|f| {
+                    f.blocks
+                        .iter()
+                        .flat_map(|b| &b.instructions)
+                        .any(|i| matches!(i.value, Rvalue::ElementwiseBinary { .. }))
+                })
+                .unwrap();
+            let ssa = build_ssa(&verify_mir(raw.clone()).unwrap());
+            for case in 0..19 {
+                // Scaling's closed tree has its own thirteen corruption recipes.
+                if scaling && (13..17).contains(&case) {
+                    continue;
+                }
+                let mut m = raw.clone();
+                let owner = m.functions[fi].parameters[0].local;
+                let inst = m.functions[fi]
+                    .blocks
+                    .iter_mut()
+                    .flat_map(|b| &mut b.instructions)
+                    .find(|i| matches!(i.value, Rvalue::ElementwiseBinary { .. }))
+                    .unwrap();
+                let Rvalue::ElementwiseBinary { left, kernel, .. } = &mut inst.value else {
+                    panic!()
+                };
+                match case {
+                    17 => kernel.element_type = symbolic,
+                    18 => *left = aether_middle::Operand::Local(owner),
+                    _ if scaling => v28_corrupt_kernel(kernel, case),
+                    _ => v27_corrupt_kernel(kernel, case),
+                }
+                assert!(verify_mir(m).is_err(), "MIR {rank} {scaling} {case}");
+                let mut s = ssa.clone();
+                let owner = s.functions[fi].parameters[0].value;
+                let inst = s.functions[fi]
+                    .blocks
+                    .iter_mut()
+                    .flat_map(|b| &mut b.instructions)
+                    .find(|i| matches!(i.op, SsaOp::ElementwiseBinary { .. }))
+                    .unwrap();
+                let SsaOp::ElementwiseBinary { left, kernel, .. } = &mut inst.op else {
+                    panic!()
+                };
+                match case {
+                    17 => kernel.element_type = symbolic,
+                    18 => *left = aether_middle::SsaOperand::Value(owner),
+                    _ if scaling => v28_corrupt_kernel(kernel, case),
+                    _ => v27_corrupt_kernel(kernel, case),
+                }
+                assert!(verify_ssa(s).is_err(), "SSA {rank} {scaling} {case}");
+            }
+        }
+    }
+}
+
+#[test]
+fn vertical30_codegen_equivalence_and_deterministic_dumps() {
+    use aether_middle::{Rvalue, SsaOp, build_ssa, lower_hir, verify_mir};
+    for (rank, scalar, params, expr, args, cap) in [
+        (
+            "Vector<T,Row>",
+            "int",
+            "ref Vector<T,Row> b",
+            "*a+*b",
+            "&a",
+            "Add",
+        ),
+        ("Matrix<T>", "double", "T b", "b * *a", "2.0", "Mul"),
+    ] {
+        let generic = format!(
+            "{rank} kernel<T:Storable+Copy+{cap}>(ref {rank} a,{params}){{return {expr};}}"
+        );
+        let concrete = generic
+            .replace(&format!("<T:Storable+Copy+{cap}>"), "")
+            .replace('T', scalar);
+        let ty = rank.replace('T', scalar);
+        let main = format!("int main(){{{ty} a=[1,2];{ty} b=kernel(&a,{args});return 0;}}");
+        let mut kernels = Vec::new();
+        let mut ssa_kernels = Vec::new();
+        let mut llvm_functions = Vec::new();
+        for helper in [generic, concrete] {
+            let source = SourceFile::new("equivalent.ae", helper + &main);
+            let hir = analyze(parse_source(&source).unwrap()).unwrap();
+            let m = verify_mir(lower_hir(hir)).unwrap();
+            let kernel = m
+                .as_mir()
+                .functions
+                .iter()
+                .flat_map(|f| &f.blocks)
+                .flat_map(|b| &b.instructions)
+                .find_map(|i| match &i.value {
+                    Rvalue::ElementwiseBinary { kernel, .. } => Some(kernel.clone()),
+                    _ => None,
+                })
+                .unwrap();
+            kernels.push(kernel);
+            let s = build_ssa(&m);
+            ssa_kernels.push(
+                s.functions
+                    .iter()
+                    .flat_map(|f| &f.blocks)
+                    .flat_map(|b| &b.instructions)
+                    .find_map(|i| match &i.op {
+                        SsaOp::ElementwiseBinary { kernel, .. } => Some(kernel.clone()),
+                        _ => None,
+                    })
+                    .unwrap(),
+            );
+            let c = compile_source(&source, &[Emit::Hir, Emit::Mir, Emit::Ssa]).unwrap();
+            let repeat = compile_source(&source, &[Emit::Hir, Emit::Mir, Emit::Ssa]).unwrap();
+            assert_eq!(c.dumps, repeat.dumps);
+            assert_eq!(c.llvm, repeat.llvm);
+            let function = c
+                .llvm
+                .split("define ")
+                .find(|f| f.contains("; ElementwiseBegin "))
+                .unwrap()
+                .split("\n}")
+                .next()
+                .unwrap();
+            let (return_type, rest) = function.split_once('@').unwrap();
+            let (_, body) = rest.split_once('(').unwrap();
+            llvm_functions.push(format!("{return_type}@kernel({body}"));
+        }
+        assert_eq!(kernels[0], kernels[1]);
+        assert_eq!(ssa_kernels[0], ssa_kernels[1]);
+        assert_eq!(llvm_functions[0], llvm_functions[1]);
+    }
+}
+
+#[test]
+fn vertical30_shape_mismatch_precedes_result_allocation() {
+    for (rank, lhs, rhs) in [
+        ("Vector<T,Row>", "[1,2]", "[1]"),
+        ("Vector<T,Column>", "[]", "[1]"),
+        ("Matrix<T>", "[1,2,3;4,5,6]", "[1,2;3,4;5,6]"),
+        ("Matrix<T>", "[1,2]", "[1,2,3]"),
+        ("Matrix<T>", "[1]", "[]"),
+    ] {
+        for (cap, op) in [("Add", "+"), ("Sub", "-")] {
+            let ty = rank.replace('T', "int");
+            let source = format!(
+                "{rank} kernel<T:Storable+Copy+{cap}>(ref {rank} a,ref {rank} b){{return *a{op}*b;}}int main(){{{ty}a={lhs};{ty}b={rhs};{ty}c=kernel(&a,&b);return 0;}}"
+            );
+            let c = compile_source(&SourceFile::new("shape.ae", source), &[]).unwrap();
+            let mut llvm = String::new();
+            for line in c.llvm.lines() {
+                writeln!(llvm, "{line}").unwrap();
+                if let Some(id) = line.trim().strip_prefix("; ElementwiseBegin ") {
+                    writeln!(llvm,"  %probe{id} = load i64, ptr @aether_heap_alloc_count\n  store i64 %probe{id}, ptr @v30_start").unwrap();
+                }
+            }
+            llvm.push_str("@v30_start = internal global i64 0\ndeclare void @exit(i32) noreturn\n");
+            llvm=llvm.replace("trap_shape_mismatch:\n  ; structured Aether trap: ShapeMismatch\n  call void @llvm.trap()", "trap_shape_mismatch:\n  %before = load i64, ptr @v30_start\n  %after = load i64, ptr @aether_heap_alloc_count\n  %same = icmp eq i64 %before, %after\n  %code = select i1 %same, i32 73, i32 99\n  call void @exit(i32 %code)");
+            assert_eq!(v23_execute(&llvm).code(), Some(73));
+        }
+    }
+}
+
+#[test]
+fn vertical30_cross_module_strided_kernels() {
+    let (_, status) = run_path(
+        &module_program("v30_kernels"),
+        &[],
+        &ClangToolchain::default(),
+    )
+    .unwrap();
+    assert_eq!(status.code(), Some(0));
 }

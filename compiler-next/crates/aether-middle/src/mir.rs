@@ -2013,19 +2013,28 @@ impl Builder<'_> {
                 } else {
                     self.lower_math_read(right)
                 };
-                let op = match &expression.kind {
+                let element_op = match &expression.kind {
                     HirExprKind::VectorElementwiseBinary { op, .. }
-                    | HirExprKind::MatrixElementwiseBinary { op, .. } => match op {
+                    | HirExprKind::MatrixElementwiseBinary { op, .. }
+                    | HirExprKind::VectorScalarMultiply { op, .. }
+                    | HirExprKind::MatrixScalarMultiply { op, .. } => *op,
+                    _ => unreachable!(),
+                };
+                let op = match element_op {
+                    aether_frontend::MathElementOp::Concrete(op) => match op {
                         HirBinaryOp::AddIntegerChecked => BinaryOp::AddIntegerChecked,
                         HirBinaryOp::SubtractIntegerChecked => BinaryOp::SubtractIntegerChecked,
+                        HirBinaryOp::MultiplyIntegerChecked => BinaryOp::MultiplyIntegerChecked,
                         HirBinaryOp::AddFloat => BinaryOp::AddFloat,
                         HirBinaryOp::SubtractFloat => BinaryOp::SubtractFloat,
-                        _ => unreachable!("verified elementwise op"),
+                        HirBinaryOp::MultiplyFloat => BinaryOp::MultiplyFloat,
+                        _ => unreachable!("verified mathematical scalar op"),
                     },
-                    _ if self.types.integer_info(*element_type).is_some() => {
-                        BinaryOp::MultiplyIntegerChecked
+                    aether_frontend::MathElementOp::Behavioral(_) => {
+                        unreachable!(
+                            "unresolved behavioral kernel cannot cross verified HIR into MIR"
+                        )
                     }
-                    _ => BinaryOp::MultiplyFloat,
                 };
                 let kernel = if let Some(side) = scalar_side {
                     crate::ElementwiseKernel::new_scalar(matrix, op, *element_type, side)

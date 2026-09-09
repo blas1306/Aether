@@ -1,0 +1,12 @@
+import helper;
+Vector<T,Column> forward<T:Storable+Copy+Add>(VectorView<T,Column> a,VectorView<T,Column> b){return helper.addColumns(a,b);}
+int main(){
+    Matrix<int> a=[1,2,3;4,5,6];
+    Vector<int,Column> b=forward(column(a,2),column(a,3));
+    if(b[1]!=5){return 1;}if(b[2]!=11){return 2;}
+    Matrix<int> c=helper.subtract(transpose_view(a),transpose_view(a));
+    if(c[3,2]!=0){return 3;}
+    Matrix<int> d=helper.scale(2,transpose_view(a));
+    if(d[2,1]!=4){return 4;}if(d[1,2]!=8){return 5;}
+    return a[2,3]-6;
+}

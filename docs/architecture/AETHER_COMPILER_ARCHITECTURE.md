@@ -2146,3 +2146,34 @@ additional satisfied constraints alter TypeId identity or existing instance
 mangling/ABI. Tests compare complete LLVM output for these variants.
 See [NEXT_VERTICAL_29_REPORT.md](NEXT_VERTICAL_29_REPORT.md) for exact tests,
 invalid-instance/corruption evidence, compile snapshots and deferred decisions.
+
+
+## Confirmation 47 — generic mathematical element recipes (V30)
+
+The mathematical HIR nodes now carry MathElementOp::Concrete(HirBinaryOp) or
+Behavioral(BehavioralCapability). Pairwise nodes additionally retain AstBinaryOp
+source evidence, allowing the verifier to reject mismatched behavior even when
+T guarantees multiple operators. Scaling's node kind supplies the Mul evidence.
+The resolver's math_element_op checks exact GenericParam identity and the three
+independent Storable, Copy and operation requirements. Concrete admission and
+reification share V29's concrete_behavior_op; no numeric classification is
+fabricated for T and no per-element expression tree is materialized.
+
+The parametric verifier rechecks this metadata alongside existing family,
+orientation, shape and non-consuming input contracts. Declaration/arena
+capability consistency remains V29's responsibility. Even coordinated deletion
+of Copy from both tables fails the independent kernel proof. Instantiation
+substitutes element/operand/result types and concretizes behavioral metadata;
+the concrete HIR frontier rejects residual tags. MIR lowering extracts the
+concrete operation for all four mathematical nodes, including explicit scaling
+metadata, then constructs the unchanged ElementwiseKernel.
+
+MIR/SSA/LLVM loop implementations, ownership analysis and type properties are
+unchanged. Corruption tests operate on instantiated generic kernels and verify
+symbolic-type rejection, owner-input rejection and canonical schedules at both
+middle-end boundaries. Generic/concrete representative kernels compare equal
+in MIR/SSA, and complete LLVM function bodies and ABI compare equal after
+normalizing only the function symbol. Native instrumentation checks exact heap,
+scalar-operation and initialization counts for generic strided and empty cases.
+See [NEXT_VERTICAL_30_REPORT.md](NEXT_VERTICAL_30_REPORT.md) for qualification,
+compilation snapshots, accepted debt and remaining decisions.

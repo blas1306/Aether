@@ -1,0 +1,6 @@
+Matrix<T> add<T:Storable+Copy+Add>(MatrixView<T> a,MatrixView<T> b){return a+b;}
+Matrix<T> scale<T:Storable+Copy+Mul>(MatrixView<T> a,T s){return a*s;}
+int main(){Matrix<double>a=[1,2,3;4,5,6];MatrixView<double>t=transpose_view(a);
+Matrix<double>b=add(t,t);Matrix<double>c=scale(t,3.0);
+if(rows(b)!=3){return 1;}if(columns(b)!=2){return 2;}if(b[2,1]!=4){return 3;}if(b[2,2]!=10){return 4;}
+if(c[3,1]!=9){return 5;}if(c[1,2]!=12){return 6;}if(a[2,3]!=6){return 7;}return 0;}

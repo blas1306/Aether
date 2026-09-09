@@ -1953,3 +1953,51 @@ and missing/duplicate initialization. Unit loops enumerate each result slot
 once, so the complete initialization prefix reaches N/R*C before YieldOwner;
 no runtime bitmap is required. LLVM translates this same verified region.
 No MemorySSA, public behavior capability or whole-program lifetime pass is added.
+
+
+## NEXT-VERTICAL-30 — generic mathematical kernel guarantees
+
+This section extends the concrete-only V27/V28 admission to exact GenericParam
+T under V29's homogeneous behavioral contracts. It does not alter scalar V29
+ownership rules or introduce implications between capabilities.
+
+| Kernel | Independent element guarantees |
+|---|---|
+| Vector/Matrix + | Storable + Copy + Add |
+| Vector/Matrix - | Storable + Copy + Sub |
+| scalar * Vector/Matrix, Vector/Matrix * scalar | Storable + Copy + Mul |
+
+All readable owners, shared views and mutable views of the same mathematical
+family are admissible. Generic Vector orientation MUST remain concrete Row or
+Column. Scalar, input elements and owning result element MUST have the exact
+same canonical T. Every body MUST establish each guarantee before any concrete
+instance is requested, even if no call exists. Missing Copy or behavior MUST
+identify the independent missing requirement; missing Storable is diagnosed by
+storage legality or the kernel obligation. Calls and forwarding retain V29
+constraint validation before InstanceId allocation/cache insertion.
+
+Copy applies to elements and the repeated scalar, never the owning descriptor.
+An existing owning input MUST be borrowed, preserving owner usability and all
+lexical borrow protections. Reading an element MUST NOT consume its slot. No
+implicit clone or per-iteration scalar Move is allowed. Borrowed descriptor
+non-Storable properties do not negate an element's independent Storable proof.
+
+HIR retains a declarative MathElementOp, not per-element CapabilityBinary
+expressions. Behavioral metadata is legal only for exact symbolic T with all
+three guarantees. Pairwise nodes retain source operator evidence and require
+exact Add/Sub matching; scaling nodes require Mul. The verifier independently
+checks result, family, orientation, source read-only contract and capabilities.
+Substitution uses the central V29 concrete_behavior_op mapping to checked
+Add/Subtract/MultiplyIntegerChecked or Add/Subtract/MultiplyFloat. Concrete HIR
+MUST reject any remaining Behavioral tag, even when the element is now numeric.
+MIR/SSA use only the existing concrete ElementwiseKernel and independently
+verify its complete schedule. No behavioral operation is representable there.
+
+Vector dimensions, or Matrix rows then columns, MUST match before allocation.
+Scaling MUST have one shape source and no compatibility guard. Logical source
+strides govern every read, including projected columns and transposed views.
+Each nonempty result allocates one backing and initializes each contiguous slot
+once. Empty results bypass allocation and iteration; source-order scalar
+expression evaluation still occurs. Checked integer traps, IEEE operations
+without fast-math, abortive overflow after partial initialization, and storage
+failure traps remain unchanged. No runtime capability machinery is emitted.

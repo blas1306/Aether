@@ -1,10 +1,53 @@
-# Aether NEXT-VERTICAL-29
+# Aether NEXT-VERTICAL-30
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. The current mathematical foundation includes Matrix<T> owners and borrowed strided MatrixView/MatrixViewMut and oriented VectorView/VectorViewMut with zero-copy transpose; the numbered
 Vertical-9..17 sections below retain historical qualification context.
 It does not replace the production `aether` CLI or import any legacy
 Python object, JSON schema, Initial IR, or SSA representation.
+
+## Generic mathematical arithmetic kernels (V30)
+
+```aether
+Vector<T,Row> addRows<T:Storable+Copy+Add>(
+    ref Vector<T,Row> a, ref Vector<T,Row> b) { return *a + *b; }
+Vector<T,Column> subtractColumns<T:Storable+Copy+Sub>(
+    VectorView<T,Column> a, VectorView<T,Column> b) { return a - b; }
+Matrix<T> scale<T:Storable+Copy+Mul>(T scalar, MatrixView<T> m) {
+    return scalar * m;
+}
+```
+
+V30 extends V27/V28 arithmetic to symbolic element T. Addition requires
+`Storable + Copy + Add`, subtraction `Storable + Copy + Sub`, and scaling
+`Storable + Copy + Mul`. These are independent obligations: Storable permits
+owning result storage; Copy permits non-destructive reads from borrowed elements
+and repeated scalar use; the behavior proves exactly `T op T -> T`. No behavior
+implies Copy or Storable. Missing guarantees are diagnosed during parametric
+checking, including unused bodies and forwarding callers, before instantiation.
+
+All existing readable owner/view/mutable-view families work, with exact Row or
+Column orientation. Orientation itself cannot be generic. Owners remain
+non-Copy and arithmetic leaves them usable. Explicit refs require `*a` in the
+body and `&a` at the call; no auto-borrow/deref is introduced. Borrowed views
+remain non-Storable even when their element T guarantees Storable.
+
+HIR kernel metadata is `MathElementOp::Behavioral(Add/Sub/Mul)` for symbolic T,
+`Concrete(HirBinaryOp)` for built-in scalars. Verification checks independent
+capabilities, source operator, family, result, orientation and read-only inputs.
+V29's concretization authority resolves the metadata during substitution;
+concrete HIR rejects residual behavior. MIR/SSA retain the exact existing
+concrete ElementwiseKernel, and LLVM retains checked integer intrinsics and
+IEEE fadd/fsub/fmul without fast-math, dictionaries or hidden operator arguments.
+
+Shape guards, logical strides, contiguous result initialization and allocation
+rules remain V27/V28's. Generic column projections and transposed MatrixView
+kernels honor descriptor strides. Empty kernels allocate nothing; scaling still
+evaluates its scalar. User nominal operators, heterogeneous contracts, generic
+orientation, dot/outer/matmul, identities, in-place operations and lifetimes are
+outside this vertical. The sections below describe their historical versions.
+See [the V30 report](../docs/architecture/NEXT_VERTICAL_30_REPORT.md).
+Compilation snapshots: `python3 tests/measure-v30.py --runs 10`.
 
 ## Behavioral scalar generic capabilities (V29)
 

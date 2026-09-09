@@ -552,3 +552,27 @@ dictionaries, indirect dispatch or new arithmetic runtime operations.
 User implementations, traits/interfaces, associated types, heterogeneous
 operators, generic container arithmetic, Numeric, Zero/One and dot/outer/matmul
 remain deferred. See [NEXT_VERTICAL_29_REPORT.md](NEXT_VERTICAL_29_REPORT.md).
+
+
+## NEXT-VERTICAL-30 — generic non-consuming mathematical kernels
+
+Element-generic Vector/VectorView/VectorViewMut with concrete Row or Column,
+and Matrix/MatrixView/MatrixViewMut, admit the existing addition, subtraction
+and scalar multiplication under independent Storable + Copy + Add/Sub/Mul
+requirements. Storable proves storage of the owning result's element; Copy
+proves non-destructive element reads and scalar reuse. Behavioral guarantees
+remain homogeneous and imply neither structural property. Containers remain
+non-Copy owners and are borrowed by mathematical arithmetic.
+
+Bodies MUST prove these obligations parametrically, even when unused; a later
+concrete Copy instantiation cannot legalize a deficient body. Forwarding must
+prove every callee requirement. Views remain borrowed non-Storable descriptors;
+their element can independently be Storable. Existing explicit reference syntax,
+shape guards, orientation, strides, evaluation order and empty semantics persist.
+
+Behavioral kernel metadata MUST be resolved to existing checked integer or IEEE
+scalar instructions before concrete HIR crosses into MIR. No runtime dispatch,
+dictionaries, hidden operator arguments or behavioral layout metadata is allowed.
+No user implementations, structural nominal behavior derivation, heterogeneous
+operators, generic orientation, identities, dot/outer/matmul, promotion, in-place
+arithmetic, BLAS or lifetime extensions are admitted by V30.

@@ -761,6 +761,12 @@ pub enum ScalarSide {
     Left,
     Right,
 }
+/// Declarative element operation; behavioral metadata exists only before instantiation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MathElementOp {
+    Concrete(HirBinaryOp),
+    Behavioral(BehavioralCapability),
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HirExprKind {
     /// Parametric homogeneous T op T -> T; behavior is the sole operator tag.
@@ -775,6 +781,7 @@ pub enum HirExprKind {
         right: Box<HirExpr>,
         scalar_side: ScalarSide,
         element_type: TypeId,
+        op: MathElementOp,
         orientation: crate::types::Orientation,
     },
     MatrixScalarMultiply {
@@ -782,23 +789,26 @@ pub enum HirExprKind {
         right: Box<HirExpr>,
         scalar_side: ScalarSide,
         element_type: TypeId,
+        op: MathElementOp,
     },
     /// Read operands through logical strides; exact shape, fresh owning result.
     VectorElementwiseBinary {
         shape_check: MathShapeCheck,
-        op: HirBinaryOp,
+        source_op: AstBinaryOp,
         left: Box<HirExpr>,
         right: Box<HirExpr>,
         element_type: TypeId,
+        op: MathElementOp,
         orientation: crate::types::Orientation,
     },
     /// Logical 2D reads; rows and columns must match before allocation.
     MatrixElementwiseBinary {
         shape_check: MathShapeCheck,
-        op: HirBinaryOp,
+        source_op: AstBinaryOp,
         left: Box<HirExpr>,
         right: Box<HirExpr>,
         element_type: TypeId,
+        op: MathElementOp,
     },
     Int(i128),
     Float(FloatValue),
@@ -3274,6 +3284,28 @@ impl Monomorphizer<'_> {
         })
     }
 
+    fn substitute_math_op(
+        &mut self,
+        op: MathElementOp,
+        element: TypeId,
+        substitution: &Substitution,
+        span: Span,
+    ) -> Result<MathElementOp, Vec<Diagnostic>> {
+        match op {
+            MathElementOp::Concrete(_) => Ok(op),
+            MathElementOp::Behavioral(behavior) => {
+                let ty = self.substitute_type(element, substitution, span)?;
+                concrete_behavior_op(self.types, ty, behavior)
+                    .map(MathElementOp::Concrete)
+                    .ok_or_else(|| vec![Diagnostic::new(
+                        "E0348", Phase::Semantic, DiagnosticCategory::Verification,
+                        "behavioral mathematical kernel did not resolve to a concrete scalar operation",
+                        Some(span),
+                    )])
+            }
+        }
+    }
+
     fn substitute_expr(
         &mut self,
         expression: &HirExpr,
@@ -3549,12 +3581,14 @@ impl Monomorphizer<'_> {
                 right,
                 scalar_side,
                 element_type,
+                op,
                 orientation,
             } => HirExprKind::VectorScalarMultiply {
                 left: Box::new(self.substitute_expr(left, substitution)?),
                 right: Box::new(self.substitute_expr(right, substitution)?),
                 scalar_side: *scalar_side,
                 element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+                op: self.substitute_math_op(*op, *element_type, substitution, expression.span)?,
                 orientation: *orientation,
             },
             HirExprKind::MatrixScalarMultiply {
@@ -3562,39 +3596,45 @@ impl Monomorphizer<'_> {
                 right,
                 scalar_side,
                 element_type,
+                op,
             } => HirExprKind::MatrixScalarMultiply {
                 left: Box::new(self.substitute_expr(left, substitution)?),
                 right: Box::new(self.substitute_expr(right, substitution)?),
                 scalar_side: *scalar_side,
                 element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+                op: self.substitute_math_op(*op, *element_type, substitution, expression.span)?,
             },
             HirExprKind::VectorElementwiseBinary {
                 shape_check,
-                op,
+                source_op,
                 left,
                 right,
                 element_type,
+                op,
                 orientation,
             } => HirExprKind::VectorElementwiseBinary {
                 shape_check: *shape_check,
-                op: *op,
+                source_op: *source_op,
                 left: Box::new(self.substitute_expr(left, substitution)?),
                 right: Box::new(self.substitute_expr(right, substitution)?),
                 element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+                op: self.substitute_math_op(*op, *element_type, substitution, expression.span)?,
                 orientation: *orientation,
             },
             HirExprKind::MatrixElementwiseBinary {
                 shape_check,
-                op,
+                source_op,
                 left,
                 right,
                 element_type,
+                op,
             } => HirExprKind::MatrixElementwiseBinary {
                 shape_check: *shape_check,
-                op: *op,
+                source_op: *source_op,
                 left: Box::new(self.substitute_expr(left, substitution)?),
                 right: Box::new(self.substitute_expr(right, substitution)?),
                 element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+                op: self.substitute_math_op(*op, *element_type, substitution, expression.span)?,
             },
             HirExprKind::CapabilityBinary {
                 behavior,
@@ -4616,10 +4656,16 @@ impl OwnershipAnalysis<'_> {
                 Ok(())
             }
             HirExprKind::VectorElementwiseBinary {
-                left, right, op, ..
+                left,
+                right,
+                source_op,
+                ..
             }
             | HirExprKind::MatrixElementwiseBinary {
-                left, right, op, ..
+                left,
+                right,
+                source_op,
+                ..
             } => {
                 self.expr(left)?;
                 let owner = self.derived_owner(left);
@@ -4647,8 +4693,7 @@ impl OwnershipAnalysis<'_> {
                         "E0345",
                         format!(
                             "ShapeMismatch for {}: {shape}",
-                            if matches!(op, HirBinaryOp::AddIntegerChecked | HirBinaryOp::AddFloat)
-                            {
+                            if *source_op == AstBinaryOp::Add {
                                 "+"
                             } else {
                                 "-"
@@ -7683,12 +7728,8 @@ impl Analyzer<'_> {
                         ScalarSide::Left,
                     )
                 };
-                if !self.types.supports_builtin_multiply(element) {
-                    return Err(error(
-                        "E0346",
-                        "multiplication requires a concrete built-in scalar element; storage capabilities do not prove multiplication",
-                    ));
-                }
+                let element_op = math_element_op(self.types, element, BehavioralCapability::Mul)
+                    .map_err(|reason| error("E0346", &reason))?;
                 if scalar_ty != element {
                     return Err(error(
                         "E0343",
@@ -7704,6 +7745,7 @@ impl Analyzer<'_> {
                             right: Box::new(r.expr),
                             scalar_side,
                             element_type: element,
+                            op: element_op,
                             orientation,
                         },
                     )
@@ -7716,6 +7758,7 @@ impl Analyzer<'_> {
                             right: Box::new(r.expr),
                             scalar_side,
                             element_type: element,
+                            op: element_op,
                         },
                     )
                 };
@@ -7759,23 +7802,13 @@ impl Analyzer<'_> {
                     ));
                 }
             };
-            if !self.types.supports_builtin_add_sub(element) {
-                return Err(error(
-                    "E0346",
-                    "element must be a concrete built-in arithmetic scalar; storage capabilities do not prove arithmetic",
-                ));
-            }
-            let scalar_op = if self.types.float_info(element).is_some() {
-                if op == AstBinaryOp::Add {
-                    HirBinaryOp::AddFloat
-                } else {
-                    HirBinaryOp::SubtractFloat
-                }
-            } else if op == AstBinaryOp::Add {
-                HirBinaryOp::AddIntegerChecked
+            let behavior = if op == AstBinaryOp::Add {
+                BehavioralCapability::Add
             } else {
-                HirBinaryOp::SubtractIntegerChecked
+                BehavioralCapability::Sub
             };
+            let scalar_op = math_element_op(self.types, element, behavior)
+                .map_err(|reason| error("E0346", &reason))?;
             // Intern readable descriptors for expression-owned temporaries as well.
             let (ty, kind) = if let Some(orientation) = orientation {
                 self.types.intern_vector_view(element, orientation, false);
@@ -7784,6 +7817,7 @@ impl Analyzer<'_> {
                     HirExprKind::VectorElementwiseBinary {
                         shape_check: MathShapeCheck::VectorDimension,
                         op: scalar_op,
+                        source_op: op,
                         left: Box::new(l.expr),
                         right: Box::new(r.expr),
                         element_type: element,
@@ -7797,6 +7831,7 @@ impl Analyzer<'_> {
                     HirExprKind::MatrixElementwiseBinary {
                         shape_check: MathShapeCheck::MatrixRowsThenColumns,
                         op: scalar_op,
+                        source_op: op,
                         left: Box::new(l.expr),
                         right: Box::new(r.expr),
                         element_type: element,
@@ -8130,6 +8165,62 @@ fn cast_range(value: impl std::fmt::Display, target: TypeId, span: Span) -> Diag
         Some(span),
     )
 }
+/// Independent storage, non-consuming read/reuse and operator obligations.
+fn math_element_op(
+    types: &TypeArena,
+    element: TypeId,
+    behavior: BehavioralCapability,
+) -> Result<MathElementOp, String> {
+    if matches!(types.get(element), Some(TypeData::GenericParam(_))) {
+        let missing = [
+            Capability::Storable,
+            Capability::Copy,
+            Capability::Behavioral(behavior),
+        ]
+        .into_iter()
+        .filter(|cap| !types.guarantees_capability(element, *cap))
+        .map(|cap| cap.to_string())
+        .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            return Err(format!(
+                "element type {} for mathematical {:?} requires Storable + Copy + {}; missing {}",
+                format_type(types, element, &[], &[]),
+                behavior,
+                behavior,
+                missing.join(" + "),
+            ));
+        }
+        Ok(MathElementOp::Behavioral(behavior))
+    } else {
+        concrete_behavior_op(types, element, behavior)
+            .map(MathElementOp::Concrete)
+            .ok_or_else(|| {
+                format!(
+                    "element must be a concrete built-in arithmetic scalar supporting {behavior}"
+                )
+            })
+    }
+}
+
+fn verify_math_element_op(
+    types: &TypeArena,
+    element: TypeId,
+    op: MathElementOp,
+    behavior: BehavioralCapability,
+    sigs: VerificationSignatures<'_>,
+) -> Result<(), String> {
+    if matches!(op, MathElementOp::Behavioral(_))
+        && matches!(sigs, VerificationSignatures::Concrete(_))
+    {
+        return Err("unresolved behavioral mathematical kernel reached concrete HIR".into());
+    }
+    let expected = math_element_op(types, element, behavior)?;
+    if op != expected {
+        return Err("HIR mathematical element operation/source operator metadata invalid".into());
+    }
+    Ok(())
+}
+
 /// Reification of a behavioral contract into the existing concrete scalar IR.
 fn concrete_behavior_op(
     types: &TypeArena,
@@ -9397,6 +9488,7 @@ fn verify_expr(
             right,
             scalar_side,
             element_type,
+            op,
             ..
         }
         | HirExprKind::MatrixScalarMultiply {
@@ -9404,6 +9496,7 @@ fn verify_expr(
             right,
             scalar_side,
             element_type,
+            op,
         } => {
             verify_expr(left, f, sigs, structs, enums, types, fail)?;
             verify_expr(right, f, sigs, structs, enums, types, fail)?;
@@ -9426,9 +9519,10 @@ fn verify_expr(
                         && types.matrix_element(e.ty) == Some(*element_type)
                 }
             };
+            verify_math_element_op(types, *element_type, *op, BehavioralCapability::Mul, sigs)
+                .map_err(fail)?;
             if !valid_family
                 || scalar.ty != *element_type
-                || !types.supports_builtin_multiply(*element_type)
                 || (!types.is_copy(source.ty)
                     && matches!(
                         source.kind,
@@ -9442,18 +9536,20 @@ fn verify_expr(
         }
         HirExprKind::VectorElementwiseBinary {
             shape_check,
-            op,
+            source_op,
             left,
             right,
             element_type,
+            op,
             ..
         }
         | HirExprKind::MatrixElementwiseBinary {
             shape_check,
-            op,
+            source_op,
             left,
             right,
             element_type,
+            op,
         } => {
             verify_expr(left, f, sigs, structs, enums, types, fail)?;
             verify_expr(right, f, sigs, structs, enums, types, fail)?;
@@ -9475,17 +9571,13 @@ fn verify_expr(
                         && types.matrix_element(e.ty) == Some(*element_type)
                 }
             };
-            let valid_op = if types.integer_info(*element_type).is_some() {
-                matches!(
-                    op,
-                    HirBinaryOp::AddIntegerChecked | HirBinaryOp::SubtractIntegerChecked
-                )
-            } else {
-                matches!(op, HirBinaryOp::AddFloat | HirBinaryOp::SubtractFloat)
+            let behavior = match source_op {
+                AstBinaryOp::Add => BehavioralCapability::Add,
+                AstBinaryOp::Subtract => BehavioralCapability::Sub,
+                _ => return Err(fail("HIR elementwise source operator invalid".into())),
             };
+            verify_math_element_op(types, *element_type, *op, behavior, sigs).map_err(fail)?;
             if !valid_types
-                || !valid_op
-                || !types.supports_builtin_add_sub(*element_type)
                 || (!types.is_copy(left.ty)
                     && matches!(
                         left.kind,
@@ -10339,7 +10431,7 @@ mod tests {
                         unreachable!()
                     };
                     match case {
-                        1 => *op = HirBinaryOp::MultiplyIntegerChecked,
+                        1 => *op = MathElementOp::Concrete(HirBinaryOp::MultiplyIntegerChecked),
                         2 => *element = TypeId::BOOL,
                         3 => left.ty = TypeId::INT64,
                         4 => {
@@ -10405,6 +10497,7 @@ mod tests {
                         right,
                         scalar_side,
                         element_type,
+                        ..
                     }) = &mut initializer.kind
                     else {
                         unreachable!()
@@ -10647,5 +10740,141 @@ mod tests {
                 .message
                 .contains("call missing required capability")
         );
+    }
+    #[test]
+    fn vertical30_hir_independently_verifies_symbolic_kernel_contracts() {
+        for matrix in [false, true] {
+            for scaling in [false, true] {
+                let owner = if matrix { "Matrix<T>" } else { "Vector<T,Row>" };
+                let (param, expr) = if scaling {
+                    ("T b".to_owned(), "*a*b")
+                } else {
+                    (format!("ref {owner} b"), "*a+*b")
+                };
+                // All behaviors are present: replacing Add with Mul or Sub must
+                // still disagree with the retained source operator.
+                let h = check(&format!("{owner} kernel<T:Storable+Copy+Add+Sub+Mul>(ref {owner} a,{param}){{return {expr};}}int main(){{return 0;}}")).unwrap();
+                for case in 0..9 {
+                    let mut bad = h.clone();
+                    if case == 2 || case == 3 {
+                        let cap = if case == 2 {
+                            Capability::Copy
+                        } else {
+                            Capability::Storable
+                        };
+                        let p = &mut bad.signatures[0].generic_parameters[0];
+                        p.capabilities.remove(&cap);
+                        bad.types.register_generic_capabilities(
+                            p.id,
+                            p.name.clone(),
+                            p.capabilities.iter().copied(),
+                        );
+                    } else {
+                        let HirStmtKind::Return { value, .. } =
+                            &mut bad.generic_functions[0].body.statements[0].kind
+                        else {
+                            panic!()
+                        };
+                        let (HirExprKind::VectorElementwiseBinary {
+                            op,
+                            element_type,
+                            left,
+                            ..
+                        }
+                        | HirExprKind::MatrixElementwiseBinary {
+                            op,
+                            element_type,
+                            left,
+                            ..
+                        }
+                        | HirExprKind::VectorScalarMultiply {
+                            op,
+                            element_type,
+                            left,
+                            ..
+                        }
+                        | HirExprKind::MatrixScalarMultiply {
+                            op,
+                            element_type,
+                            left,
+                            ..
+                        }) = &mut value.kind
+                        else {
+                            panic!()
+                        };
+                        match case {
+                            0 => {
+                                *op = MathElementOp::Behavioral(if scaling {
+                                    BehavioralCapability::Add
+                                } else {
+                                    BehavioralCapability::Mul
+                                })
+                            }
+                            1 => *op = MathElementOp::Behavioral(BehavioralCapability::Sub),
+                            4 => value.ty = TypeId::BOOL,
+                            5 => *element_type = TypeId::INT64,
+                            6 => *op = MathElementOp::Concrete(HirBinaryOp::AddIntegerChecked),
+                            7 => left.ty = TypeId::BOOL,
+                            8 => {
+                                let t = *element_type;
+                                value.ty = if matrix {
+                                    bad.types.intern_vector(t, crate::Orientation::Row)
+                                } else {
+                                    bad.types.intern_vector(t, crate::Orientation::Column)
+                                };
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    let e = verify_hir(&bad).unwrap_err();
+                    assert_eq!(e[0].code, "E0348", "{matrix} {scaling} {case}: {e:?}");
+                    if case == 2 || case == 3 {
+                        assert!(
+                            e[0].message
+                                .contains(if case == 2 { "Copy" } else { "Storable" }),
+                            "{e:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn vertical30_concrete_hir_rejects_residual_behavioral_kernel() {
+        for matrix in [false, true] {
+            for (cap, expr) in [
+                (BehavioralCapability::Add, "a+a"),
+                (BehavioralCapability::Sub, "a-a"),
+                (BehavioralCapability::Mul, "2*a"),
+            ] {
+                let ty = if matrix {
+                    "Matrix<int>"
+                } else {
+                    "Vector<int,Row>"
+                };
+                let mut h =
+                    check(&format!("int main(){{{ty}a=[1,2];{ty}b={expr};return 0;}}")).unwrap();
+                let HirStmtKind::Local { initializer, .. } =
+                    &mut h.functions[0].body.statements[1].kind
+                else {
+                    panic!()
+                };
+                let (HirExprKind::VectorElementwiseBinary { op, .. }
+                | HirExprKind::MatrixElementwiseBinary { op, .. }
+                | HirExprKind::VectorScalarMultiply { op, .. }
+                | HirExprKind::MatrixScalarMultiply { op, .. }) = &mut initializer.kind
+                else {
+                    panic!()
+                };
+                *op = MathElementOp::Behavioral(cap);
+                let e = verify_hir(&h).unwrap_err();
+                assert_eq!(e[0].code, "E0290");
+                assert!(
+                    e[0].message
+                        .contains("unresolved behavioral mathematical kernel")
+                );
+            }
+        }
     }
 }

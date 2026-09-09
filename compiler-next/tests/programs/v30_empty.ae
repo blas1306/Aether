@@ -1,0 +1,9 @@
+Vector<T,Row> add<T:Storable+Copy+Add>(ref Vector<T,Row>a,ref Vector<T,Row>b){return *a+*b;}
+Matrix<T> sub<T:Storable+Copy+Sub>(ref Matrix<T>a,ref Matrix<T>b){return *a-*b;}
+Vector<T,Row> scaleV<T:Storable+Copy+Mul>(T s,ref Vector<T,Row>a){return s * *a;}
+Matrix<T> scaleM<T:Storable+Copy+Mul>(ref Matrix<T>a,T s){return *a*s;}
+int scalar(ref mut int state){*state=*state+1;return 2;}
+int main(){int state=0;Vector<int,Row>a=[];Matrix<int>b=[];
+Vector<int,Row>c=add(&a,&a);Matrix<int>d=sub(&b,&b);
+Vector<int,Row>e=scaleV(scalar(&mut state),&a);Matrix<int>f=scaleM(&b,scalar(&mut state));
+if(dimension(c)!=0){return 1;}if(rows(d)!=0){return 2;}if(dimension(e)!=0){return 3;}if(columns(f)!=0){return 4;}return state-2;}
