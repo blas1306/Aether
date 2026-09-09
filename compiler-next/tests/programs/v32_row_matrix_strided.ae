@@ -1,0 +1,12 @@
+int main(){
+    Matrix<double>a=[1,2,3;4,5,6];
+    Matrix<double>b=[2,9;3,8;4,7];
+    MatrixView<double>t=transpose_view(a);
+    VectorView<double,Column>c=column(b,1);
+    VectorView<double,Row>r=transpose_view(c);
+    Vector<double,Row>y=r*t;
+    if(dimension(y)!=2){return 1;}
+    if(y[1]!=20){return 2;}
+    if(y[2]!=47){return 3;}
+    return 0;
+}

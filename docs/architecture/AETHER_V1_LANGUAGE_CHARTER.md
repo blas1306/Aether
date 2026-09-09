@@ -600,3 +600,24 @@ generic orientation, BLAS and SIMD/reassociation remain unimplemented. A future
 dot may concern Array/List sequences; advanced decompositions belong to future
 STD LinearAlgebra. No lifetime, slicing or legacy behavior changes are admitted.
 See [NEXT_VERTICAL_31_REPORT.md](NEXT_VERTICAL_31_REPORT.md).
+
+## V32 admission — Matrix×Column and Row×Matrix
+
+The native algebraic `*` table now admits Matrix<T>(m,n)×Column<T>(n)->Column<T>(m)
+and Row<T>(m)×Matrix<T>(m,n)->Row<T>(n), in addition to V31 products and scalar
+scaling in either order. Exact canonical element T and contraction equality are
+mandatory. Any readable owner/view/mutable-view combination works using logical
+Matrix and Vector strides, including transpose_view and simultaneous striding.
+Inputs remain borrowed; the result is a fresh owning oriented Vector.
+
+Storable+Copy+Add+Mul+Zero are independent generic requirements, checked even
+for unused bodies and forwarding. Every output reduces from Zero in increasing
+logical contraction order with checked integer Mul/Add or strict separate
+floating Mul/Add. Positive output extent allocates once; zero output extent
+allocates nothing. A zero contraction with positive output extent yields a
+nonempty vector of Zero, with no Mul/Add and one store per output.
+
+Matrix×Matrix, Matrix×Row, Column×Matrix and same-orientation Vector products
+remain rejected. No runtime capability dispatch, matmul/dot/Hadamard intrinsic,
+BLAS, widening, user impl or lifetime change. Advanced decompositions belong to
+future LinearAlgebra STD. See [NEXT_VERTICAL_32_REPORT.md](NEXT_VERTICAL_32_REPORT.md).

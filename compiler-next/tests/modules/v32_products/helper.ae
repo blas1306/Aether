@@ -1,0 +1,2 @@
+Vector<T,Column> mc<T:Storable+Copy+Add+Mul+Zero>(MatrixView<T>a,VectorView<T,Column>x){return a*x;}
+Vector<T,Row> rm<T:Storable+Copy+Add+Mul+Zero>(VectorView<T,Row>x,MatrixView<T>a){return x*a;}

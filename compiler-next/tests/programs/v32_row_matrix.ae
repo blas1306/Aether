@@ -1,0 +1,12 @@
+int main(){
+    Vector<double,Row>r=[2,3];
+    Matrix<double>a=[1,2,3;4,5,6];
+    Vector<double,Row>y=r*a;
+    if(dimension(y)!=3){return 1;}
+    if(y[1]!=14){return 2;}
+    if(y[2]!=19){return 3;}
+    if(y[3]!=24){return 4;}
+    if(r[2]!=3){return 5;}
+    if(a[2,3]!=6){return 6;}
+    return 0;
+}

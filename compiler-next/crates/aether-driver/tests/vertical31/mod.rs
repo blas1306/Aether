@@ -214,11 +214,11 @@ fn vertical31_parametric_constraints_diagnostics_and_forwarding() {
             "E0346",
         ),
         (
-            "Vector<int,Row>a=[1];Matrix<int>b=[1];Matrix<int>x=a*b;",
+            "Vector<int,Column>a=[1];Matrix<int>b=[1];Matrix<int>x=a*b;",
             "E0342",
         ),
         (
-            "Matrix<int>a=[1];Vector<int,Column>b=[1];Matrix<int>x=a*b;",
+            "Matrix<int>a=[1];Vector<int,Row>b=[1];Matrix<int>x=a*b;",
             "E0342",
         ),
         ("Matrix<int>a=[1];Matrix<int>x=a*a;", "E0342"),

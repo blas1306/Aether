@@ -2076,3 +2076,89 @@ sequence operation for Array/List, which is not implemented here. One, user
 implementations, heterogeneous output, generic orientation, slicing, lifetime
 extensions, BLAS and SIMD remain outside scope. Advanced decompositions remain
 future STD LinearAlgebra concerns.
+
+## NEXT-VERTICAL-32 — native Matrix×Column and Row×Matrix
+
+V32 extends the V31 algebraic contract with exactly two mathematical pairings:
+
+| Inputs | Result | Shape equality | Result extent | Contraction extent |
+|---|---|---|---|---|
+| Matrix<T>(m,n) × Column<T>(n) | owning Vector<T,Column>(m) | A.columns = x.dimension | A.rows | A.columns |
+| Row<T>(m) × Matrix<T>(m,n) | owning Vector<T,Row>(n) | r.dimension = A.rows | A.columns | A.rows |
+
+Readable Matrix/MatrixView/MatrixViewMut and oriented
+Vector/VectorView/VectorViewMut MUST work in any combination. Both elements MUST
+have identical canonical T, with no promotion or widening. Result orientation
+is type identity, independent of layout, strides and runtime dimensions. The
+owning Vector uses the existing `{ptr,dimension}` descriptor; orientation adds
+no runtime field. The complete native mathematical multiplication table is now
+scalar×Vector, Vector×scalar, scalar×Matrix, Matrix×scalar, Row×Column->T,
+Column×Row->Matrix, Matrix×Column->Column and Row×Matrix->Row.
+
+Generic T MUST independently satisfy Storable, Copy, Add, Mul and Zero. Storable
+permits owning result storage, Copy permits repeated by-value reads without
+moving source slots, Mul forms each T*T term, Add updates each T accumulator,
+and Zero seeds it. V32 adds no capability implications. Unused generic bodies
+and cross-module forwarding MUST be validated parametrically. Symbolic HIR
+retains Behavioral(Mul), Behavioral(Add), Algebraic(Zero), exact families,
+orientation, shape equality and distinct result/contraction selectors.
+Monomorphization MUST concretize operations and typed positive zero before MIR;
+capability metadata MUST NOT enter MIR/SSA/LLVM.
+
+Known contraction mismatches MUST raise structured compile-time errors. Dynamic
+ShapeMismatch MUST dominate allocation, loads, multiplication and accumulation,
+even when the result extent is zero. After compatibility, a zero result extent
+MUST return the canonical null/zero Vector without backing allocation, scalar
+operations or stores. A positive result extent MUST check backing byte size,
+allocate exactly once, and preserve AllocationSizeOverflow/AllocationFailure.
+
+For each result coordinate, initialize acc=Zero<T>, visit the contraction index
+in increasing logical order, compute product=lhs*rhs, then acc=acc+product, then
+store the final accumulator once. Matrix×Column computes each row's reduction;
+Row×Matrix computes each column's reduction. Integer Mul/Add MUST be checked at
+T's original width and trap IntegerOverflow independently. Floating zero MUST
+be +0.0; multiplication and addition MUST remain separate strict operations,
+with no reassociation, FMA, fast-math, BLAS or changed iteration order.
+
+Result and contraction extents MUST NOT be conflated:
+
+| Case | Result | Allocation | Mul/Add | Stores |
+|---|---|---:|---:|---:|
+| Matrix(m,0)×Column(0), m>0 | Column(m), all Zero | 1 | 0 | m |
+| Matrix(0,n)×Column(n) | Column(0) | 0 | 0 | 0 |
+| Row(0)×Matrix(0,n), n>0 | Row(n), all Zero | 1 | 0 | n |
+| Row(m)×Matrix(m,0) | Row(0) | 0 | 0 | 0 |
+
+For general m,n, both products perform m*n multiplications and m*n additions;
+Matrix×Column stores m outputs and Row×Matrix stores n. Empty contraction MUST
+run zero inner iterations and store the untouched Zero for every output. Every
+result slot MUST be initialized exactly once before its owner can escape.
+
+Logical Matrix addressing MUST use i*RS+j*CS (zero-based internal coordinates),
+with independent descriptor strides. Owner RS=columns, CS=1; MatrixView uses
+explicit strides. Vector addressing MUST use its descriptor stride. No source
+flattening, materialized transpose, or repeated row()/column() construction is
+permitted. Transpose_view of a zero-axis Matrix MUST preserve swapped axes and
+obey the same rules, including Matrix(3,0)->View(0,3) and
+Matrix(0,4)->View(4,0).
+
+Operands MUST evaluate left to right. The left root MUST remain protected while
+evaluating the right; effects that consume, replace or invalidate it are errors.
+Inputs are borrowed, remain usable after success, and may alias. The result is
+fresh owning storage; no hidden source backing copies or lifetime changes.
+
+MIR MUST represent a closed map of reductions: exact shape guard, separate
+extent selections, result-only empty bypass/allocation, outer result loop,
+Zero initialization, inner contraction loop, strided reads, Mul then Add,
+one InitializeNext per output, then YieldOwner. MIR and SSA MUST independently
+resolve operand/result types and validate the full schedule, including strides,
+loop bounds, traps, accumulator chain, initialization, no input moves/writes,
+and no late shape guard. SSA preserves the closed region without MemorySSA.
+LLVM translates the verified schedule; it MUST NOT be its first authority.
+
+Matrix×Row, Column×Matrix, Matrix×Matrix, Row×Row and Column×Column remain
+rejected, including dimension one. V31 products, scalar scaling, +/− and
+transpose/projections retain their contracts. No dot(Vector), Array/List dot,
+Hadamard, matmul function, user impl, One, heterogeneous types, widening,
+BLAS/SIMD/reassociation or lifetime extensions are introduced. Advanced
+decompositions remain future LinearAlgebra STD responsibilities.

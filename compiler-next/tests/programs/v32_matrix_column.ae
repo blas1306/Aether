@@ -1,0 +1,13 @@
+int main(){
+    Matrix<int>a=[1,2,3;4,5,6];
+    Vector<int,Column>x=[2,3,4];
+    Vector<int,Column>y=a*x;
+    if(dimension(y)!=2){return 1;}
+    if(y[1]!=20){return 2;}
+    if(y[2]!=47){return 3;}
+    if(a[2,3]!=6){return 4;}
+    if(x[3]!=4){return 5;}
+    y[1]=99;
+    if(a[1,1]!=1){return 6;}
+    return 0;
+}

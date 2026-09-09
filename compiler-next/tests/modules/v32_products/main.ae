@@ -1,0 +1,12 @@
+import helper;
+Vector<T,Column> forward<T:Storable+Copy+Add+Mul+Zero>(MatrixView<T>a,VectorView<T,Column>x){return helper.mc(a,x);}
+Vector<T,Row> forward_row<T:Storable+Copy+Add+Mul+Zero>(VectorView<T,Row>x,MatrixView<T>a){return helper.rm(x,a);}
+int main(){
+    Matrix<int>a=[1,2;3,4];MatrixView<int>t=transpose_view(a);
+    VectorView<int,Column>c=column(a,2);VectorView<int,Row>r=transpose_view(c);
+    Vector<int,Column>x=forward(t,c);Vector<int,Row>y=forward_row(r,t);
+    if(x[1]!=14){return 1;}if(x[2]!=20){return 2;}
+    if(y[1]!=10){return 3;}if(y[2]!=22){return 4;}
+    if(a[2,2]!=4){return 5;}
+    return 0;
+}

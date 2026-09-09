@@ -20,9 +20,9 @@ pub use hir::{
     HirBlock, HirCallTarget, HirDrop, HirExpr, HirExprKind, HirFunction, HirLocal, HirMatchArm,
     HirMatchBinding, HirParameter, HirPlace, HirPlaceBase, HirPlaceProjection, HirStmt,
     HirStmtKind, HirUnaryOp, InvalidationShape, LocalId, MatchMode, MathElementOp, MathShapeCheck,
-    ModuleId, ModuleInfo, MutationEffect, ParameterSignature, ParsedModule, ParsedProgram,
-    ResolvedImport, ScalarSide, StructInfo, StructuralMutation, TypeAliasInfo, TypeLayout,
-    TypedHir, VariantInfo, VariantPayloadInfo, VectorProduct, analyze, analyze_bodies,
+    MatrixProductExtent, ModuleId, ModuleInfo, MutationEffect, ParameterSignature, ParsedModule,
+    ParsedProgram, ResolvedImport, ScalarSide, StructInfo, StructuralMutation, TypeAliasInfo,
+    TypeLayout, TypedHir, VariantInfo, VariantPayloadInfo, VectorProduct, analyze, analyze_bodies,
     analyze_bodies_for_target, collect_program_signatures, collect_signatures, format_type,
     layout_of, verify_hir,
 };

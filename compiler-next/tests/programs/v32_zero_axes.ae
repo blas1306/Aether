@@ -1,0 +1,22 @@
+int main(){
+    Vector<double,Column>c=[];Vector<double,Row>r=[];
+    Vector<double,Column>cn=[2,3,4];Vector<double,Row>rn=[5,6,7,8];
+    Matrix<double>a=cn*r;Matrix<double>b=c*rn;
+    Vector<double,Column>ac=a*c;
+    if(dimension(ac)!=3){return 1;}
+    if(ac[1]!=0){return 2;}if(ac[2]!=0){return 3;}if(ac[3]!=0){return 4;}
+    if(1/ac[1]<0){return 5;}
+    Vector<double,Row>rb=r*b;
+    if(dimension(rb)!=4){return 6;}
+    if(rb[1]!=0){return 7;}if(rb[4]!=0){return 8;}if(1/rb[2]<0){return 9;}
+    VectorView<double,Column>xn=transpose_view(rn);Vector<double,Column>bc=b*xn;
+    VectorView<double,Row>yn=transpose_view(cn);Vector<double,Row>ra=yn*a;
+    if(dimension(bc)!=0){return 10;}if(dimension(ra)!=0){return 11;}
+    MatrixView<double>at=transpose_view(a);MatrixView<double>bt=transpose_view(b);
+    Vector<double,Column>btc=bt*c;Vector<double,Row>rat=r*at;
+    if(dimension(btc)!=4){return 12;}if(btc[4]!=0){return 13;}
+    if(dimension(rat)!=3){return 14;}if(rat[3]!=0){return 15;}
+    Vector<double,Column>atc=at*cn;Vector<double,Row>rbt=rn*bt;
+    if(dimension(atc)!=0){return 16;}if(dimension(rbt)!=0){return 17;}
+    return 0;
+}

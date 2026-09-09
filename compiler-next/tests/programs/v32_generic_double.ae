@@ -1,0 +1,3 @@
+Vector<T,Row> apply<T:Storable+Copy+Add+Mul+Zero>(VectorView<T,Row>x,MatrixView<T>a){return x*a;}
+Vector<T,Row> forward<T:Storable+Copy+Add+Mul+Zero>(VectorView<T,Row>x,MatrixView<T>a){return apply(x,a);}
+int main(){Matrix<double>a=[1,2,3;4,5,6];Matrix<double>b=[2,9;3,8;4,7];MatrixView<double>t=transpose_view(a);VectorView<double,Column>c=column(b,1);VectorView<double,Row>r=transpose_view(c);Vector<double,Row>y=forward(r,t);if(y[2]!=47){return 1;}return 0;}

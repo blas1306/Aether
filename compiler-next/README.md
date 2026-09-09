@@ -1,10 +1,68 @@
-# Aether NEXT-VERTICAL-31
+# Aether NEXT-VERTICAL-32
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. The current mathematical foundation includes Matrix<T> owners and borrowed strided MatrixView/MatrixViewMut and oriented VectorView/VectorViewMut with zero-copy transpose; the numbered
 Vertical-9..17 sections below retain historical qualification context.
 It does not replace the production `aether` CLI or import any legacy
 Python object, JSON schema, Initial IR, or SSA representation.
+
+## Native Matrix×Column and Row×Matrix multiplication (V32)
+
+```aether
+Vector<T,Column> apply<T:Storable+Copy+Add+Mul+Zero>(
+    MatrixView<T> a, VectorView<T,Column> x) {
+    return a * x;
+}
+Vector<T,Row> apply_row<T:Storable+Copy+Add+Mul+Zero>(
+    VectorView<T,Row> r, MatrixView<T> a) {
+    return r * a;
+}
+```
+
+The complete native mathematical `*` table through V32 is:
+
+| Operands | Result | Compatibility |
+|---|---|---|
+| scalar × Vector, Vector × scalar | owning Vector, same orientation | exact scalar/element T |
+| scalar × Matrix, Matrix × scalar | owning Matrix | exact scalar/element T |
+| Row(n) × Column(n) | T | equal dimensions |
+| Column(n) × Row(p) | owning Matrix(n,p) | independent dimensions |
+| Matrix(m,n) × Column(n) | owning Column(m) | matrix columns = vector dimension |
+| Row(m) × Matrix(m,n) | owning Row(n) | vector dimension = matrix rows |
+
+Both new products accept every readable owner, view and mutable-view combination,
+require exact canonical same T, and borrow inputs without consuming or copying
+backing. Matrix offsets use logical `i*row_stride+j*column_stride`; vectors use
+`k*stride`. Transposed MatrixView and strided VectorView work simultaneously.
+Orientation comes from types, never strides or a runtime dimension-one shortcut.
+
+Each output starts from Zero<T> (integer zero or floating +0), visits contraction
+indices in increasing logical order, and performs one multiplication followed by
+one addition per term. Integer operations are checked without widening; floating
+operations are separate strict fmul/fadd without FMA, reassociation or fast-math.
+Generic T independently requires Storable+Copy+Add+Mul+Zero. Unused bodies and
+forwarding are checked before operations and Zero concretize for MIR.
+
+Shape mismatch is diagnosed statically when known, otherwise traps before result
+allocation or element access. The result extent alone controls allocation:
+Matrix(m,0)×Column(0) yields m zeros; Row(0)×Matrix(0,n) yields n zeros. These
+nonempty results allocate once and perform zero Mul/Add. Matrix(0,n)×Column(n)
+and Row(m)×Matrix(m,0) yield canonical null/zero Vector descriptors without
+allocation. Each nonempty output is stored exactly once. In general both
+products execute m*n Mul and m*n Add, with m stores for Matrix×Column and n for
+Row×Matrix, and exactly one allocation iff the result extent is nonzero.
+
+MIR/SSA retain independently verified MatrixColumnKernel/RowMatrixKernel closed
+maps of reductions with explicit result/contraction selectors. LLVM translates
+them to nested loops and the normal `{ptr,dimension}` Vector owner layout.
+No Matrix×Matrix, Matrix×Row, Column×Matrix, Row×Row, Column×Column, dot, Hadamard,
+matmul function, BLAS or user impl is admitted. Advanced decompositions remain
+future LinearAlgebra STD work.
+
+See [the V32 report](../docs/architecture/NEXT_VERTICAL_32_REPORT.md) and
+[the normative contract](../docs/architecture/AETHER_V1_SEMANTIC_CONTRACT.md#next-vertical-32--native-matrixcolumn-and-rowmatrix).
+Compilation snapshots: `python3 tests/measure-v32.py --runs 10`.
+The numbered sections below describe admission at their original boundaries.
 
 ## Native algebraic Vector multiplication (V31)
 

@@ -2226,3 +2226,43 @@ queries and checked indexing already support independent zero axes. Source []
 literal syntax still constructs only 0×0. Qualification includes subsequent
 scaling/addition and empty row/column projections from runtime-produced shapes.
 See [NEXT_VERTICAL_31_REPORT.md](NEXT_VERTICAL_31_REPORT.md).
+
+## Confirmation 49 — independent output and contraction extents (V32)
+
+The existing closed algebraic HIR family now includes VectorProduct::MatrixVector
+with matrix_side, exact shape_check, result_extent, contraction_extent,
+accumulate_op and Zero. Source families independently determine Column or Row
+result identity. HIR verification reconstructs the complete recipe and checks
+Storable+Copy+Add+Mul+Zero, including unused symbolic bodies. V31 substitution
+concretizes both operations and Zero. Existing borrowing, temporary cleanup and
+mathematical descriptor lowering support both input ranks unchanged.
+
+MIR/SSA VectorProductKernel adds MatrixColumnKernel and RowMatrixKernel.
+ShapeGuardPair explicitly compares unlike descriptor axes. SelectSourceExtent
+retains source-axis selection; EmptyResultBypass explicitly names only the
+output axis, then Allocate uses that same axis. The outer loop binds output,
+AccumulatorInit resets Zero per output, and the inner loop binds contraction.
+Two strided loads precede Mul and Accumulate(Add); InitializeNext follows the
+inner loop and YieldOwner follows complete initialization. Both IR verifiers
+resolve their own operand/result types and compare the entire schedule to the
+closed contract. No MemorySSA or capability metadata is needed.
+
+LLVM extracts five MatrixView fields and three VectorView fields, translates
+independent offsets and nested control flow, and binds one scalar phi to the
+inner loop. Its incoming Zero is reset on every outer iteration. An empty inner
+loop reaches the output store with that zero; an empty outer extent branches
+around allocation and all loops. Vector result allocation uses the existing
+checked fixed-storage helper and `{ptr,dimension}` layout. Checked Mul and Add
+have distinct overflow edges; floating operations have no contraction flags.
+No Matrix transpose or projected VectorView temporary is created.
+
+V31's generic product names are retained to avoid duplicating traversal,
+ownership, MIR-to-SSA renaming and verification integration. The closed variants
+carry the two ranks explicitly; naming is historical, not a vector-only input
+assumption. Code that inspects product kinds must treat map reductions as both
+owner-producing and accumulating. The backend previously placed an accumulator
+phi in every loop whenever Zero existed; V32 restricts it to the reduction loop.
+Allocation cannot infer emptiness from total term count, because positive output
+with zero contraction still requires storage. Corruption and native counter
+qualification cover those two extension hazards.
+See [NEXT_VERTICAL_32_REPORT.md](NEXT_VERTICAL_32_REPORT.md).

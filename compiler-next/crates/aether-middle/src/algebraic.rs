@@ -8,12 +8,27 @@ use aether_frontend::{FloatType, FloatValue, Orientation, TypeArena, TypeId};
 pub enum ProductKind {
     ReductionKernel,
     OuterProductKernel,
+    MatrixColumnKernel,
+    RowMatrixKernel,
 }
 
-/// Single accumulator or fully initialized owner; never both.
+/// Scalar reduction or fully initialized owner, with scoped ordered accumulators.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum ProductStep {
+    ShapeGuardPair {
+        left_axis: MathAxis,
+        right_axis: MathAxis,
+        trap: TrapKind,
+    },
+    SelectSourceExtent {
+        axis: MathAxis,
+        input: MathInput,
+        source_axis: MathAxis,
+    },
+    EmptyResultBypass {
+        axis: MathAxis,
+    },
     SelectExtent {
         axis: MathAxis,
         input: MathInput,
@@ -148,6 +163,114 @@ impl VectorProductKernel {
         }
     }
 
+    /// Map of reductions. Result and contraction axes are independent; only the
+    /// result axis controls allocation and the overall empty bypass.
+    #[must_use]
+    pub fn new_matrix_vector(
+        element_type: TypeId,
+        product_op: BinaryOp,
+        accumulate_op: BinaryOp,
+        zero: Operand,
+        matrix: MathInput,
+    ) -> Self {
+        use MathAxis::{Columns, Dimension, Rows};
+        use MathInput::{Left, Right};
+        let left = matrix == Left;
+        let result = if left { Rows } else { Columns };
+        let contraction = if left { Columns } else { Rows };
+        let trap = matches!(product_op, BinaryOp::MultiplyIntegerChecked)
+            .then_some(TrapKind::IntegerOverflow);
+        let load = |input| {
+            ProductStep::Math(MathStep::StridedLoad {
+                input,
+                offset: if input == matrix {
+                    vec![
+                        (Rows, MathStride::RowStride),
+                        (Columns, MathStride::ColumnStride),
+                    ]
+                } else {
+                    vec![(contraction, MathStride::Stride)]
+                },
+            })
+        };
+        let program = vec![
+            ProductStep::ShapeGuardPair {
+                left_axis: if left { Columns } else { Dimension },
+                right_axis: if left { Dimension } else { Rows },
+                trap: TrapKind::ShapeMismatch,
+            },
+            ProductStep::SelectSourceExtent {
+                axis: result,
+                input: matrix,
+                source_axis: result,
+            },
+            ProductStep::SelectSourceExtent {
+                axis: contraction,
+                input: matrix,
+                source_axis: contraction,
+            },
+            ProductStep::EmptyResultBypass { axis: result },
+            ProductStep::Math(MathStep::Allocate {
+                extents: vec![result],
+                size_trap: TrapKind::AllocationSizeOverflow,
+                failure_trap: TrapKind::AllocationFailure,
+            }),
+            ProductStep::For {
+                axis: result,
+                start: 0,
+                step: 1,
+                body: vec![
+                    ProductStep::AccumulatorInit {
+                        value: zero.clone(),
+                    },
+                    ProductStep::For {
+                        axis: contraction,
+                        start: 0,
+                        step: 1,
+                        body: vec![
+                            load(Left),
+                            load(Right),
+                            ProductStep::Math(MathStep::ScalarBinary {
+                                op: product_op,
+                                element_type,
+                                trap,
+                            }),
+                            ProductStep::Accumulate {
+                                op: accumulate_op,
+                                element_type,
+                                trap,
+                            },
+                        ],
+                    },
+                    ProductStep::Math(MathStep::InitializeNext),
+                ],
+            },
+            ProductStep::Math(MathStep::YieldOwner),
+        ];
+        Self {
+            kind: if left {
+                ProductKind::MatrixColumnKernel
+            } else {
+                ProductKind::RowMatrixKernel
+            },
+            element_type,
+            product_op,
+            accumulate_op: Some(accumulate_op),
+            zero: Some(zero),
+            program,
+        }
+    }
+
+    /// Matrix source for the two map-reduction families.
+    #[must_use]
+    pub fn matrix_input(&self) -> Option<MathInput> {
+        match self.kind {
+            ProductKind::MatrixColumnKernel => Some(MathInput::Left),
+            ProductKind::RowMatrixKernel => Some(MathInput::Right),
+            _ => None,
+        }
+    }
+
     /// Check concrete types, orientation, independent strides, extents, guard
     /// dominance, exactly one accumulator and ordered complete initialization.
     pub fn verify(
@@ -192,6 +315,24 @@ impl VectorProductKernel {
                 ty: e,
             }
         };
+        if let Some(matrix) = self.matrix_input() {
+            let (mt, vt, orientation) = if matrix == MathInput::Left {
+                (left, right, Orientation::Column)
+            } else {
+                (right, left, Orientation::Row)
+            };
+            if !types.supports_builtin_multiply(e)
+                || types.needs_drop(e)
+                || types.matrix_view_info(mt).is_none_or(|(t, _)| t != e)
+                || !input(vt, orientation)
+                || types.vector_element(result) != Some(e)
+                || types.vector_like_info(result) != Some((e, orientation))
+                || *self != Self::new_matrix_vector(e, mul, add, zero, matrix)
+            {
+                return Err("algebraic map-reduction source/result orientation, result/contraction extent, guard/allocation/stride/zero/ordered initialization schedule invalid".into());
+            }
+            return Ok(());
+        }
         if !types.supports_builtin_multiply(e)
             || types.needs_drop(e)
             || !input(left, lo)

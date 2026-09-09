@@ -1169,7 +1169,7 @@ fn emit_function(
                     right,
                     kernel,
                 } => {
-                    shape_trap |= kernel.kind == aether_middle::ProductKind::ReductionKernel;
+                    shape_trap |= kernel.kind != aether_middle::ProductKind::OuterProductKernel;
                     overflow_trap |= types.integer_info(kernel.element_type).is_some();
                     algebraic::emit(
                         output,
