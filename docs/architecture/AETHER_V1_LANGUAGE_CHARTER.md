@@ -526,3 +526,29 @@ initialization region extends to one descriptor and one invariant scalar.
 Pairwise mathematical multiplication, dot/outer/matmul/Hadamard, division,
 broadcasting, promotion, public Mul/Numeric traits, BLAS, slicing, methods and
 lifetime changes remain outside this vertical.
+
+## NEXT-VERTICAL-29 — behavioral scalar generic guarantees
+
+The isolated compiler admits independent `Add`, `Sub`, `Mul` constraints using
+the existing inline conjunction syntax. The bootstrap signatures MUST remain
+homogeneous: T + T -> T, T - T -> T, T * T -> T. Compiler-provided satisfaction
+is limited to existing built-in integer and float scalars, through canonical
+aliases. bool, aggregates, containers and references MUST NOT acquire behavior
+by structural derivation. A nominal declaration's constraint restricts its
+argument and MUST NOT confer that behavior on the nominal type itself.
+
+Structural Copy/Relocatable/Storable retain their representation and ownership
+rules. The only non-reflexive implication is Copy => Relocatable. Behavioral
+constraints MUST NOT change type properties or turn a symbolic parameter into
+a concrete numeric type. Ordinary move/Copy rules still govern operands.
+
+All generic bodies, including unused bodies and forwarding calls, MUST validate
+against declared guarantees before instantiation. Unsatisfied arguments MUST
+fail before InstanceId allocation/caching. Parametric HIR preserves the required
+behavior; monomorphization selects existing checked integer or IEEE float
+operations before MIR. There are no hidden capability parameters, runtime
+dictionaries, indirect dispatch or new arithmetic runtime operations.
+
+User implementations, traits/interfaces, associated types, heterogeneous
+operators, generic container arithmetic, Numeric, Zero/One and dot/outer/matmul
+remain deferred. See [NEXT_VERTICAL_29_REPORT.md](NEXT_VERTICAL_29_REPORT.md).

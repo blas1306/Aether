@@ -14,10 +14,10 @@
 )]
 use crate::{
     AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstMatchArm, AstMatchMode,
-    AstStmtKind, AstType, AstUnaryOp, Capability, CollectionElementAdmission, CollectionKind,
-    Diagnostic, DiagnosticCategory, EnumId, FieldId, FloatType, GenericOwner, GenericParamId,
-    IntegerType, ParsedAst, Phase, SourceId, Span, StructId, Substitution, TargetProperties,
-    TypeArena, TypeData, TypeId, VariantId,
+    AstStmtKind, AstType, AstUnaryOp, BehavioralCapability, Capability, CollectionElementAdmission,
+    CollectionKind, Diagnostic, DiagnosticCategory, EnumId, FieldId, FloatType, GenericOwner,
+    GenericParamId, IntegerType, ParsedAst, Phase, SourceId, Span, StructId, Substitution,
+    TargetProperties, TypeArena, TypeData, TypeId, VariantId,
 };
 use crate::{IndexSemantics, Orientation};
 use std::collections::{BTreeMap, BTreeSet};
@@ -435,6 +435,9 @@ impl TypedHir {
                 .map(|capability| capability.to_string())
                 .collect::<Vec<_>>()
                 .join(" + ");
+                let behaviors = BehavioralCapability::ALL.into_iter()
+                    .filter(|behavior| self.types.guarantees_behavior(id, *behavior))
+                    .map(|behavior| behavior.to_string()).collect::<Vec<_>>().join(", ");
                 let collection = self
                     .types
                     .array_element(id)
@@ -462,7 +465,7 @@ impl TypedHir {
                     )
                 });
                 format!(
-                    "  {id:?} = {}; properties={:?}; guarantees={}{}",
+                    "  {id:?} = {}; properties={:?}; guarantees={}; structural guarantees=[{}]; behavioral guarantees=[{}]{}",
                     format_type(&self.types, id, &self.structs, &self.enums),
                     self.types
                         .properties(id)
@@ -472,6 +475,8 @@ impl TypedHir {
                     } else {
                         &guarantees
                     },
+                    guarantees,
+                    behaviors,
                     admission
                 )
             })
@@ -758,6 +763,13 @@ pub enum ScalarSide {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HirExprKind {
+    /// Parametric homogeneous T op T -> T; behavior is the sole operator tag.
+    /// Monomorphization must reify this before concrete HIR crosses into MIR.
+    CapabilityBinary {
+        behavior: BehavioralCapability,
+        left: Box<HirExpr>,
+        right: Box<HirExpr>,
+    },
     VectorScalarMultiply {
         left: Box<HirExpr>,
         right: Box<HirExpr>,
@@ -2165,6 +2177,9 @@ fn collect_generic_parameters(
                     "Copy" => Capability::Copy,
                     "Relocatable" => Capability::Relocatable,
                     "Storable" => Capability::Storable,
+                    "Add" => Capability::Behavioral(BehavioralCapability::Add),
+                    "Sub" => Capability::Behavioral(BehavioralCapability::Sub),
+                    "Mul" => Capability::Behavioral(BehavioralCapability::Mul),
                     _ => {
                         return Err(Diagnostic::new(
                             "E0314",
@@ -2242,6 +2257,7 @@ fn validate_generic_constraints(
                     Capability::Storable,
                 ]
                 .into_iter()
+                .chain(BehavioralCapability::ALL.map(Capability::Behavioral))
                 .filter(|available| types.guarantees_capability(*argument, *available))
                 .map(|available| available.to_string())
                 .collect::<Vec<_>>()
@@ -2822,6 +2838,13 @@ pub fn analyze_bodies_for_target(
         }
     }
     let generic_functions = functions;
+    verify_parametric_hir(
+        &generic_functions,
+        &d.signatures,
+        &d.structs,
+        &d.enums,
+        &types,
+    )?;
     let (instances, functions, entry) = monomorphize(
         &mut types,
         &d.signatures,
@@ -3573,6 +3596,26 @@ impl Monomorphizer<'_> {
                 right: Box::new(self.substitute_expr(right, substitution)?),
                 element_type: self.substitute_type(*element_type, substitution, expression.span)?,
             },
+            HirExprKind::CapabilityBinary {
+                behavior,
+                left,
+                right,
+            } => {
+                let op = concrete_behavior_op(self.types, ty, *behavior).ok_or_else(|| {
+                    vec![Diagnostic::new(
+                        "E0348",
+                        Phase::Semantic,
+                        DiagnosticCategory::Verification,
+                        "capability operation did not resolve to a concrete built-in scalar",
+                        Some(expression.span),
+                    )]
+                })?;
+                HirExprKind::Binary {
+                    op,
+                    left: Box::new(self.substitute_expr(left, substitution)?),
+                    right: Box::new(self.substitute_expr(right, substitution)?),
+                }
+            }
             HirExprKind::Binary { op, left, right } => HirExprKind::Binary {
                 op: *op,
                 left: Box::new(self.substitute_expr(left, substitution)?),
@@ -4616,7 +4659,8 @@ impl OwnershipAnalysis<'_> {
                 }
                 Ok(())
             }
-            HirExprKind::Binary { left, right, .. } => {
+            HirExprKind::CapabilityBinary { left, right, .. }
+            | HirExprKind::Binary { left, right, .. } => {
                 self.expr(left)?;
                 self.expr(right)
             }
@@ -7794,6 +7838,52 @@ impl Analyzer<'_> {
         if self.types.generic_param(l.expr.ty).is_some()
             || self.types.generic_param(r.expr.ty).is_some()
         {
+            let behavior = match op {
+                AstBinaryOp::Add => Some(BehavioralCapability::Add),
+                AstBinaryOp::Subtract => Some(BehavioralCapability::Sub),
+                AstBinaryOp::Multiply => Some(BehavioralCapability::Mul),
+                _ => None,
+            };
+            if let Some(behavior) = behavior {
+                let ty = l.expr.ty;
+                if ty != r.expr.ty {
+                    return Err(vec![Diagnostic::new(
+                        "E0347",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        format!(
+                            "capability {behavior} requires homogeneous T {} T -> T operands",
+                            behavior.symbol()
+                        ),
+                        Some(span),
+                    )]);
+                }
+                if !self.types.guarantees_behavior(ty, behavior) {
+                    return Err(vec![Diagnostic::new(
+                        "E0268",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        format!(
+                            "operator '{}' on generic parameter {} requires capability {behavior}",
+                            behavior.symbol(),
+                            self.type_name(ty)
+                        ),
+                        Some(span),
+                    )]);
+                }
+                return Ok(Checked {
+                    expr: HirExpr {
+                        kind: HirExprKind::CapabilityBinary {
+                            behavior,
+                            left: Box::new(l.expr),
+                            right: Box::new(r.expr),
+                        },
+                        ty,
+                        span,
+                    },
+                    constant: None,
+                });
+            }
             return Err(vec![Diagnostic::new(
                 "E0268",
                 Phase::Semantic,
@@ -8040,6 +8130,25 @@ fn cast_range(value: impl std::fmt::Display, target: TypeId, span: Span) -> Diag
         Some(span),
     )
 }
+/// Reification of a behavioral contract into the existing concrete scalar IR.
+fn concrete_behavior_op(
+    types: &TypeArena,
+    ty: TypeId,
+    behavior: BehavioralCapability,
+) -> Option<HirBinaryOp> {
+    if !types.satisfies_behavior(ty, behavior) {
+        return None;
+    }
+    Some(match (behavior, types.float_info(ty).is_some()) {
+        (BehavioralCapability::Add, false) => HirBinaryOp::AddIntegerChecked,
+        (BehavioralCapability::Sub, false) => HirBinaryOp::SubtractIntegerChecked,
+        (BehavioralCapability::Mul, false) => HirBinaryOp::MultiplyIntegerChecked,
+        (BehavioralCapability::Add, true) => HirBinaryOp::AddFloat,
+        (BehavioralCapability::Sub, true) => HirBinaryOp::SubtractFloat,
+        (BehavioralCapability::Mul, true) => HirBinaryOp::MultiplyFloat,
+    })
+}
+
 fn bin_result(
     types: &TypeArena,
     aop: AstBinaryOp,
@@ -8321,6 +8430,13 @@ fn validate_program(p: &ParsedProgram) -> Result<(), Vec<Diagnostic>> {
 }
 
 pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
+    verify_parametric_hir(
+        &h.generic_functions,
+        &h.signatures,
+        &h.structs,
+        &h.enums,
+        &h.types,
+    )?;
     let fail = |m: String| {
         vec![Diagnostic::new(
             "E0290",
@@ -8457,9 +8573,9 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
         }
         verify_block(
             &f.body,
-            f,
+            &VerificationFunction { locals: &f.locals },
             s.return_type,
-            &h.instances,
+            VerificationSignatures::Concrete(&h.instances),
             &h.structs,
             &h.enums,
             &h.types,
@@ -8468,11 +8584,79 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
     }
     Ok(())
 }
+/// Shared borrowed body context; generic verification creates no `InstanceId`.
+struct VerificationFunction<'a> {
+    locals: &'a [HirLocal],
+}
+
+#[derive(Clone, Copy)]
+enum VerificationSignatures<'a> {
+    Concrete(&'a [FunctionInstanceInfo]),
+    Parametric(&'a [FunctionSignature]),
+}
+
+fn verify_parametric_hir(
+    declarations: &[GenericHirFunction],
+    signatures: &[FunctionSignature],
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+    types: &TypeArena,
+) -> Result<(), Vec<Diagnostic>> {
+    let fail = |message: String| {
+        vec![Diagnostic::new(
+            "E0348",
+            Phase::Semantic,
+            DiagnosticCategory::Verification,
+            message,
+            None,
+        )]
+    };
+    for parameter in signatures
+        .iter()
+        .flat_map(|s| &s.generic_parameters)
+        .chain(structs.iter().flat_map(|s| &s.generic_parameters))
+        .chain(enums.iter().flat_map(|s| &s.generic_parameters))
+    {
+        if types.generic_param(parameter.ty) != Some(parameter.id)
+            || types.generic_capabilities(parameter.id) != Some(&parameter.capabilities)
+            || types.generic_name(parameter.id) != Some(parameter.name.as_str())
+        {
+            return Err(fail(
+                "HIR generic capability declaration/arena metadata mismatch".into(),
+            ));
+        }
+    }
+    if declarations.len() != signatures.len() {
+        return Err(fail(
+            "HIR parametric declaration cardinality invalid".into(),
+        ));
+    }
+    for (index, (declaration, signature)) in declarations.iter().zip(signatures).enumerate() {
+        if declaration.id != signature.id || declaration.id.0 as usize != index {
+            return Err(fail("HIR parametric declaration identity invalid".into()));
+        }
+        let function = VerificationFunction {
+            locals: &declaration.locals,
+        };
+        verify_block(
+            &declaration.body,
+            &function,
+            signature.return_type,
+            VerificationSignatures::Parametric(signatures),
+            structs,
+            enums,
+            types,
+            &fail,
+        )?;
+    }
+    Ok(())
+}
+
 fn verify_block(
     b: &HirBlock,
-    f: &HirFunction,
+    f: &VerificationFunction<'_>,
     ret: TypeId,
-    sigs: &[FunctionInstanceInfo],
+    sigs: VerificationSignatures<'_>,
     structs: &[StructInfo],
     enums: &[EnumInfo],
     types: &TypeArena,
@@ -8672,8 +8856,8 @@ fn verify_block(
 }
 fn verify_expr(
     e: &HirExpr,
-    f: &HirFunction,
-    sigs: &[FunctionInstanceInfo],
+    f: &VerificationFunction<'_>,
+    sigs: VerificationSignatures<'_>,
     structs: &[StructInfo],
     enums: &[EnumInfo],
     types: &TypeArena,
@@ -9034,19 +9218,76 @@ fn verify_expr(
                 return Err(fail("HIR View type/capability mismatch".into()));
             }
         }
-        HirExprKind::Call { callee, args, .. } => {
-            let HirCallTarget::Instance(callee) = callee else {
-                return Err(fail("concrete HIR contains declaration call".into()));
+        HirExprKind::Call {
+            callee,
+            type_arguments,
+            args,
+        } => {
+            let (return_type, parameters) = match (sigs, callee) {
+                (VerificationSignatures::Concrete(signatures), HirCallTarget::Instance(callee)) => {
+                    let s = signatures
+                        .get(callee.0 as usize)
+                        .ok_or_else(|| fail("HIR callee missing".into()))?;
+                    if type_arguments != &s.type_arguments {
+                        return Err(fail("HIR call type arguments mismatch".into()));
+                    }
+                    (
+                        s.return_type,
+                        s.parameters.iter().map(|p| p.ty).collect::<Vec<_>>(),
+                    )
+                }
+                (
+                    VerificationSignatures::Parametric(signatures),
+                    HirCallTarget::Declaration(callee),
+                ) => {
+                    let s = signatures
+                        .get(callee.0 as usize)
+                        .ok_or_else(|| fail("HIR generic callee missing".into()))?;
+                    if type_arguments.len() != s.generic_parameters.len() {
+                        return Err(fail("HIR generic call arity invalid".into()));
+                    }
+                    validate_generic_constraints(
+                        types,
+                        &s.generic_parameters,
+                        type_arguments,
+                        &s.name,
+                        structs,
+                        enums,
+                        e.span,
+                        false,
+                    )
+                    .map_err(|_| {
+                        fail("HIR generic call missing required capability guarantee".into())
+                    })?;
+                    let substitution = Substitution::new(
+                        s.generic_parameters.iter().map(|p| p.id),
+                        type_arguments.iter().copied(),
+                    );
+                    let substitute = |ty| {
+                        types
+                            .substituted_existing(ty, &substitution)
+                            .map_err(|_| fail("HIR generic call substitution incomplete".into()))
+                    };
+                    (
+                        substitute(s.return_type)?,
+                        s.parameters
+                            .iter()
+                            .map(|p| substitute(p.ty))
+                            .collect::<Result<Vec<_>, _>>()?,
+                    )
+                }
+                _ => {
+                    return Err(fail(
+                        "HIR call target does not match verification stage".into(),
+                    ));
+                }
             };
-            let Some(s) = sigs.get(callee.0 as usize) else {
-                return Err(fail("HIR callee missing".into()));
-            };
-            if s.return_type != e.ty || args.len() != s.parameters.len() {
+            if return_type != e.ty || args.len() != parameters.len() {
                 return Err(fail("HIR call mismatch".into()));
             }
-            for (a, p) in args.iter().zip(&s.parameters) {
+            for (a, ty) in args.iter().zip(parameters) {
                 verify_expr(a, f, sigs, structs, enums, types, fail)?;
-                if a.ty != p.ty {
+                if a.ty != ty {
                     return Err(fail("HIR argument mismatch".into()));
                 }
             }
@@ -9261,6 +9502,25 @@ fn verify_expr(
                 ));
             }
         }
+        HirExprKind::CapabilityBinary {
+            behavior,
+            left,
+            right,
+        } => {
+            verify_expr(left, f, sigs, structs, enums, types, fail)?;
+            verify_expr(right, f, sigs, structs, enums, types, fail)?;
+            if left.ty != right.ty || e.ty != left.ty || !types.guarantees_behavior(e.ty, *behavior)
+            {
+                return Err(fail(
+                    "HIR CapabilityBinary homogeneous type/behavior guarantee invalid".into(),
+                ));
+            }
+            if matches!(sigs, VerificationSignatures::Concrete(_)) {
+                return Err(fail(
+                    "unresolved CapabilityBinary reached concrete HIR".into(),
+                ));
+            }
+        }
         HirExprKind::Binary { op, left, right } => {
             verify_expr(left, f, sigs, structs, enums, types, fail)?;
             verify_expr(right, f, sigs, structs, enums, types, fail)?;
@@ -9312,7 +9572,7 @@ fn verify_expr(
 
 fn hir_place_writable(
     place: &HirPlace,
-    f: &HirFunction,
+    f: &VerificationFunction<'_>,
     types: &TypeArena,
     structs: &[StructInfo],
     enums: &[EnumInfo],
@@ -9359,8 +9619,8 @@ fn hir_place_writable(
 
 fn verify_place(
     place: &HirPlace,
-    function: &HirFunction,
-    sigs: &[FunctionInstanceInfo],
+    function: &VerificationFunction<'_>,
+    sigs: VerificationSignatures<'_>,
     structs: &[StructInfo],
     enums: &[EnumInfo],
     types: &TypeArena,
@@ -10174,5 +10434,218 @@ mod tests {
                 }
             }
         }
+    }
+    #[test]
+    fn vertical29_behavior_is_separate_from_structural_properties() {
+        let h = check("struct Point{double x;double y;}struct Holder<T:Add>{T value;}enum E<T:Mul>{Some(T)}T unused<T:Add+Sub+Mul>(T a,T b,T c,T d){return (a+b)*c-d;}int main(){Holder<int> h=Holder<int>(1);E<int> e=E<int>.Some(1);Buffer<int> b=Buffer<int>(0,0);Array<int> a={};List<int> l={};Vector<int,Row> v=[];Matrix<int> m=[];ref int r=&h.value;return 0;}").unwrap();
+        let types = &h.types;
+        for (ty, data) in types.entries() {
+            for behavior in BehavioralCapability::ALL {
+                let numeric = matches!(data, TypeData::Integer(_) | TypeData::Float(_));
+                assert_eq!(types.satisfies_behavior(ty, behavior), numeric, "{data:?}");
+                if !matches!(data, TypeData::GenericParam(_)) {
+                    assert_eq!(types.guarantees_behavior(ty, behavior), numeric, "{data:?}");
+                }
+            }
+        }
+        let mut arena = TypeArena::default();
+        let parameter = GenericParamId {
+            owner: GenericOwner::Function(0),
+            index: 0,
+        };
+        let ty = arena.intern(TypeData::GenericParam(parameter));
+        let properties = arena.properties(ty);
+        arena.register_generic_capabilities(
+            parameter,
+            "T".into(),
+            BehavioralCapability::ALL.map(Capability::Behavioral),
+        );
+        assert_eq!(arena.properties(ty), properties);
+        assert!(!arena.is_numeric(ty));
+        assert!(!arena.guarantees_copy(ty));
+        assert!(!arena.guarantees_relocatable(ty));
+        assert!(!arena.guarantees_storable(ty));
+        let all = [
+            Capability::Copy,
+            Capability::Relocatable,
+            Capability::Storable,
+        ]
+        .into_iter()
+        .chain(BehavioralCapability::ALL.map(Capability::Behavioral))
+        .collect::<Vec<_>>();
+        for from in &all {
+            for to in &all {
+                assert_eq!(
+                    from.implies(*to),
+                    from == to || (*from == Capability::Copy && *to == Capability::Relocatable)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn vertical29_hir_rejects_corrupt_parametric_and_concrete_operations() {
+        let h = check("T add<T:Add>(T a,T b){return a+b;}int main(){return add(20,22);}").unwrap();
+        for case in 0..8 {
+            let mut bad = h.clone();
+            let HirStmtKind::Return { value, .. } =
+                &mut bad.generic_functions[0].body.statements[0].kind
+            else {
+                panic!()
+            };
+            let HirExprKind::CapabilityBinary {
+                behavior,
+                left,
+                right,
+            } = &mut value.kind
+            else {
+                panic!()
+            };
+            match case {
+                0 => *behavior = BehavioralCapability::Sub,
+                1 => *behavior = BehavioralCapability::Mul,
+                2 => value.ty = TypeId::BOOL,
+                3 => left.ty = TypeId::INT64,
+                4 => right.ty = TypeId::FLOAT64,
+                5 => {
+                    value.kind = HirExprKind::Binary {
+                        op: HirBinaryOp::AddIntegerChecked,
+                        left: left.clone(),
+                        right: right.clone(),
+                    }
+                }
+                6 => bad.signatures[0].generic_parameters[0].capabilities.clear(),
+                7 => {
+                    let id = bad.signatures[0].generic_parameters[0].id;
+                    bad.types.register_generic_capabilities(id, "T".into(), []);
+                }
+                _ => unreachable!(),
+            }
+            let errors = verify_hir(&bad).unwrap_err();
+            assert_eq!(errors[0].code, "E0348", "case {case}");
+        }
+        // A correct concrete-capability node is legal only in parametric HIR;
+        // the post-monomorphization border insists on reified scalar operations.
+        let mut bad = check("int main(){int a=20;int b=22;return a+b;}").unwrap();
+        let HirStmtKind::Return { value, .. } = &mut bad.functions[0].body.statements[2].kind
+        else {
+            panic!()
+        };
+        let HirExprKind::Binary { left, right, .. } = &value.kind else {
+            panic!()
+        };
+        value.kind = HirExprKind::CapabilityBinary {
+            behavior: BehavioralCapability::Add,
+            left: left.clone(),
+            right: right.clone(),
+        };
+        assert!(
+            verify_hir(&bad).unwrap_err()[0]
+                .message
+                .contains("unresolved CapabilityBinary")
+        );
+        // Concrete bool cannot acquire behavior, even in the parametric tree.
+        let mut bad = check("bool eq(bool a,bool b){return a==b;}int main(){return 0;}").unwrap();
+        let HirStmtKind::Return { value, .. } =
+            &mut bad.generic_functions[0].body.statements[0].kind
+        else {
+            panic!()
+        };
+        let HirExprKind::Binary { left, right, .. } = &value.kind else {
+            panic!()
+        };
+        value.kind = HirExprKind::CapabilityBinary {
+            behavior: BehavioralCapability::Add,
+            left: left.clone(),
+            right: right.clone(),
+        };
+        assert!(verify_hir(&bad).is_err());
+    }
+
+    #[test]
+    fn vertical29_invalid_requirements_never_allocate_or_cache_instance_ids() {
+        for cap in ["Add", "Sub", "Mul"] {
+            let h = check(&format!(
+                "T keep<T:{cap}>(T a){{return a;}}int main(){{return 0;}}"
+            ))
+            .unwrap();
+            let mut types = h.types.clone();
+            let buffer = types.intern_buffer(TypeId::INT64);
+            let mut mono = Monomorphizer {
+                types: &mut types,
+                signatures: &h.signatures,
+                declarations: &h.generic_functions,
+                structs: &h.structs,
+                enums: &h.enums,
+                ids: BTreeMap::new(),
+                queue: vec![],
+                parents: vec![],
+                current: None,
+                instances: vec![],
+                functions: vec![],
+            };
+            for argument in [TypeId::BOOL, buffer, TypeId::BOOL] {
+                let errors = mono
+                    .request(
+                        InstanceKey {
+                            function: FunctionId(0),
+                            arguments: vec![argument],
+                        },
+                        h.signatures[0].span,
+                    )
+                    .unwrap_err();
+                assert_eq!(errors[0].code, "E0316");
+                assert!(errors[0].message.contains(cap));
+                assert!(mono.ids.is_empty() && mono.queue.is_empty() && mono.parents.is_empty());
+                assert!(mono.instances.is_empty() && mono.functions.is_empty());
+            }
+            let valid = InstanceKey {
+                function: FunctionId(0),
+                arguments: vec![TypeId::INT64],
+            };
+            assert_eq!(
+                mono.request(valid.clone(), h.signatures[0].span).unwrap(),
+                crate::InstanceId(0)
+            );
+            assert_eq!(
+                mono.request(valid, h.signatures[0].span).unwrap(),
+                crate::InstanceId(0)
+            );
+            assert!(
+                mono.request(
+                    InstanceKey {
+                        function: FunctionId(0),
+                        arguments: vec![buffer]
+                    },
+                    h.signatures[0].span
+                )
+                .is_err()
+            );
+            assert_eq!(mono.ids.len(), 1);
+            assert_eq!(mono.queue.len(), 1);
+            assert_eq!(mono.parents.len(), 1);
+        }
+    }
+
+    #[test]
+    fn vertical29_forwarding_metadata_is_independently_verified() {
+        let mut h = check("T inner<T:Add>(T a,T b){return a+b;}T outer<T:Add>(T a,T b){return inner(a,b);}int main(){return 0;}").unwrap();
+        // Corrupt callee constraints consistently in both declaration and arena;
+        // the operator itself is still valid, but forwarding must now fail.
+        let parameter = &mut h.signatures[0].generic_parameters[0];
+        parameter
+            .capabilities
+            .insert(Capability::Behavioral(BehavioralCapability::Mul));
+        h.types.register_generic_capabilities(
+            parameter.id,
+            parameter.name.clone(),
+            parameter.capabilities.iter().copied(),
+        );
+        let errors = verify_hir(&h).unwrap_err();
+        assert!(
+            errors[0]
+                .message
+                .contains("call missing required capability")
+        );
     }
 }

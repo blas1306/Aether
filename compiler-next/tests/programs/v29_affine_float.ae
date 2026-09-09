@@ -1,0 +1,2 @@
+T affine<T:Add+Mul>(T a,T b,T c){return a*b+c;}
+int main(){double x=affine<double>(1.5,2.0,0.5);if(x!=3.5){return 1;}return 0;}

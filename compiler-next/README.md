@@ -1,10 +1,64 @@
-# Aether NEXT-VERTICAL-28
+# Aether NEXT-VERTICAL-29
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. The current mathematical foundation includes Matrix<T> owners and borrowed strided MatrixView/MatrixViewMut and oriented VectorView/VectorViewMut with zero-copy transpose; the numbered
 Vertical-9..17 sections below retain historical qualification context.
 It does not replace the production `aether` CLI or import any legacy
 Python object, JSON schema, Initial IR, or SSA representation.
+
+## Behavioral scalar generic capabilities (V29)
+
+```aether
+T add<T:Add>(T a, T b) { return a + b; }
+T subtract<T:Sub>(T a, T b) { return a - b; }
+T multiply<T:Mul>(T a, T b) { return a * b; }
+T affine<T:Add + Mul>(T a, T b, T c) { return a * b + c; }
+T forward<T:Add>(T a, T b) { return add(a, b); }
+struct Holder<T:Add> { T value; }
+```
+
+`Add`, `Sub` and `Mul` are independent behavioral guarantees with homogeneous
+bootstrap contracts `T + T -> T`, `T - T -> T` and `T * T -> T`. All built-in
+signed/unsigned integers (including isize/usize), float32 and float64 satisfy
+each contract. Transparent aliases use the same canonical TypeId: `int` is
+int64, `float` is float32 and `double` is float64. Explicit and inferred calls,
+nested forwarding and imported helpers use the same constraint checking.
+Struct and enum binders accept these constraints too; `Holder<int>` is valid,
+`Holder<bool>` is rejected, and `Holder<int>` itself does not satisfy Add.
+
+Structural `Copy`, `Relocatable` and `Storable` describe representation and
+ownership; they may derive through fields/payloads. Behavioral guarantees never
+derive through fields, payloads, elements or nominal constraints. bool,
+references, views, structs, enums and containers have no scalar behavioral
+satisfaction. The only cross-capability implication remains Copy => Relocatable.
+`T:Add` does not imply Copy, Storable, numeric classification or known layout.
+Operands follow ordinary ownership: `a+b` consumes each unknown non-Copy T;
+`a+a` requires an additional Copy guarantee. A generic literal identity is not
+provided by these constraints.
+
+The existing `T: Copy + Storable + Add` syntax composes both families. Every
+body is checked before instantiation, including unused functions. Missing
+operator guarantees identify the required capability. Forwarding must prove
+all callee requirements; invalid concrete arguments fail before InstanceId
+allocation/caching. HIR retains `CapabilityBinary { behavior: Add/Sub/Mul }`
+and prints structural and behavioral guarantees separately. Its verifier checks
+parametric bodies and call guarantees independently before monomorphization.
+
+Substitution reifies each capability expression to the existing concrete scalar
+operation: checked integer Add/Subtract/Multiply with IntegerOverflow, or IEEE
+fadd/fsub/fmul without fast-math. Concrete HIR rejects residual CapabilityBinary;
+MIR/SSA have no capability operation, and reject unresolved symbolic runtime
+types. LLVM has ordinary static instances and direct scalar instructions, with
+no dictionaries, hidden capability parameters, indirect dispatch or runtime
+capability metadata. Constraint ordering does not change the existing instance
+ABI or mangling, which depends only on declaration and concrete type arguments.
+
+V27/V28 concrete container arithmetic stays available. V29 does not admit
+arithmetic on generic Vector<T>/Matrix<T>, user operator implementations,
+traits/interfaces, associated types, heterogeneous operands/results, Numeric,
+Zero/One, dot/outer/matmul or runtime dispatch.
+See [the V29 report](../docs/architecture/NEXT_VERTICAL_29_REPORT.md).
+Compilation snapshots: `python3 tests/measure-v29.py --runs 10`.
 
 ## Built-in scalar multiplication (V28)
 
@@ -323,7 +377,7 @@ The workspace has no third-party Rust dependencies. This is intentional: the
 closed grammar and compact IR do not justify a parser framework, serialization,
 LLVM binding, or general CLI dependency yet.
 
-## Vertical-23 grammar
+## Current bootstrap grammar (through V29)
 
 ```text
 program    := import* (alias | struct | enum | function)+ EOF
@@ -336,7 +390,7 @@ variant    := IDENT | IDENT "(" type ("," type)* ")"
 function   := type IDENT generic-params? "(" parameters? ")" block
 generic-params := "<" generic-param ("," generic-param)* ">"
 generic-param  := IDENT (":" capability ("+" capability)*)?
-capability     := "Copy" | "Relocatable" | "Storable"
+capability     := "Copy" | "Relocatable" | "Storable" | "Add" | "Sub" | "Mul"
 parameters := parameter ("," parameter)*
 parameter  := type IDENT
 type       := "ref" "mut"? type
@@ -414,8 +468,8 @@ constraints, dictionaries, vtables or runtime dispatch.
 `GenericParamInfo` owns the resolved capability set for its exact
 `GenericParamId`; `TypeData::GenericParam` identity does not include it.
 Concrete `TypeProperties` remain actual facts, while a separate symbolic query
-uses declaration guarantees and recursively substituted struct fields or enum
-payloads. Calls and nominal applications validate inferred, explicit and
+uses declaration guarantees and, for structural capabilities only, recursively
+substituted struct fields or enum payloads. Calls and nominal applications validate inferred, explicit and
 forwarded arguments before an `InstanceId` is requested. Constraints disappear
 before MIR/SSA/LLVM.
 

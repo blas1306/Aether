@@ -9258,3 +9258,347 @@ fn vertical28_noninvalidating_scalar_effects_follow_existing_alias_policy() {
         assert_eq!(v23_execute(&v27_instrument(&c.llvm, 2)).code(), Some(0));
     }
 }
+
+#[test]
+fn vertical29_native_behavior_and_cross_module_forwarding() {
+    for path in [
+        program("v29_behavior.ae"),
+        program("v29_add_int.ae"),
+        program("v29_affine_int.ae"),
+        program("v29_affine_float.ae"),
+        module_program("v29_behavior"),
+    ] {
+        let (compiled, status) = run_path(
+            &path,
+            &[Emit::Hir, Emit::Mir, Emit::Ssa],
+            &ClangToolchain::default(),
+        )
+        .unwrap();
+        assert_eq!(status.code(), Some(0), "{}", path.display());
+        assert!(compiled.dumps[&Emit::Hir].contains("CapabilityBinary"));
+        assert!(compiled.dumps[&Emit::Hir].contains("behavioral guarantees=[Add"));
+        for phase in [Emit::Mir, Emit::Ssa] {
+            assert!(!compiled.dumps[&phase].contains("CapabilityBinary"));
+        }
+        assert!(!compiled.llvm.contains("Capability"));
+        assert!(!compiled.llvm.contains("vtable"));
+        assert!(!compiled.llvm.contains("witness"));
+    }
+}
+
+#[test]
+fn vertical29_all_builtin_scalars_reify_each_independent_behavior() {
+    for ty in [
+        "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32", "uint64", "isize", "usize",
+        "float32", "float64", "int", "float", "double",
+    ] {
+        let source = format!(
+            "T add<T:Add>(T a,T b){{return a+b;}}T sub<T:Sub>(T a,T b){{return a-b;}}T mul<T:Mul>(T a,T b){{return a*b;}}int main(){{if(add<{ty}>(6,2)!=8){{return 1;}}if(sub<{ty}>(6,2)!=4){{return 2;}}if(mul<{ty}>(6,2)!=12){{return 3;}}return 0;}}"
+        );
+        let compiled =
+            compile_source(&SourceFile::new("scalars.ae", source), &[Emit::Hir]).unwrap();
+        let float = ty.starts_with("float") || ty == "double";
+        for op in if float {
+            ["AddFloat", "SubtractFloat", "MultiplyFloat"]
+        } else {
+            [
+                "AddIntegerChecked",
+                "SubtractIntegerChecked",
+                "MultiplyIntegerChecked",
+            ]
+        } {
+            assert!(compiled.dumps[&Emit::Hir].contains(op), "{ty} {op}");
+        }
+        assert_eq!(v23_execute(&compiled.llvm).code(), Some(0), "{ty}");
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)] // One table keeps the diagnostic contract together.
+fn vertical29_structured_rejections_even_without_instances() {
+    for (caps, op, required) in [
+        ("Storable", "+", "Add"),
+        ("Copy", "+", "Add"),
+        ("Add", "-", "Sub"),
+        ("Mul", "+", "Add"),
+        ("Add", "*", "Mul"),
+        ("Sub", "*", "Mul"),
+        ("Sub", "+", "Add"),
+    ] {
+        let source = format!("T bad<T:{caps}>(T a,T b){{return a{op}b;}}int main(){{return 0;}}");
+        let errors = compile_source(&SourceFile::new("missing.ae", source), &[]).unwrap_err();
+        assert_eq!(errors[0].code, "E0268");
+        assert!(
+            errors[0]
+                .message
+                .contains(&format!("requires capability {required}"))
+        );
+        assert!(errors[0].message.contains(&format!("operator '{op}'")));
+        assert_eq!(
+            errors[0].category,
+            aether_frontend::DiagnosticCategory::Type
+        );
+    }
+    for (source, code, detail) in [
+        (
+            "T add<T:Add>(T a,T b){return a+b;}int main(){bool b=add<bool>(true,false);return 0;}",
+            "E0316",
+            "Add",
+        ),
+        (
+            "T add<T:Add>(T a,T b){return a+b;}int main(){bool b=add(true,false);return 0;}",
+            "E0317",
+            "Add",
+        ),
+        (
+            "T mul<T:Mul>(T a,T b){return a*b;}int main(){Buffer<int> b=mul(Buffer<int>(0,0),Buffer<int>(0,0));return 0;}",
+            "E0317",
+            "Mul",
+        ),
+        (
+            "struct Point{double x;double y;}T add<T:Add>(T a,T b){return a+b;}int main(){Point p=add(Point(1.0,2.0),Point(3.0,4.0));return 0;}",
+            "E0317",
+            "Add",
+        ),
+        (
+            "T inner<T:Add>(T a,T b){return a+b;}T outer<T:Storable>(T a,T b){return inner(a,b);}int main(){return 0;}",
+            "E0317",
+            "Add",
+        ),
+        (
+            "T inner<T:Add+Mul>(T a,T b){return a*b;}T outer<T:Add>(T a,T b){return inner<T>(a,b);}int main(){return 0;}",
+            "E0316",
+            "Mul",
+        ),
+        (
+            "T bad<T:Numeric>(T a){return a;}int main(){return 0;}",
+            "E0314",
+            "Numeric",
+        ),
+        (
+            "T bad<T:Add+Add>(T a){return a;}int main(){return 0;}",
+            "E0315",
+            "Add",
+        ),
+        (
+            "struct Holder<T:Add>{T value;}int main(){Holder<bool> h=Holder<bool>(true);return 0;}",
+            "E0316",
+            "Add",
+        ),
+        (
+            "enum E<T:Mul>{Some(T)}int main(){E<bool> e=E<bool>.Some(true);return 0;}",
+            "E0316",
+            "Mul",
+        ),
+        (
+            "struct Holder<T:Add>{T value;}T add<T:Add>(T a,T b){return a+b;}int main(){Holder<int> h=add(Holder<int>(1),Holder<int>(2));return 0;}",
+            "E0317",
+            "Add",
+        ),
+        (
+            "T bad<T:Add,U:Add>(T a,U b){return a+b;}int main(){return 0;}",
+            "E0347",
+            "homogeneous",
+        ),
+        (
+            "T bad<T:Add>(T a,int b){return a+b;}int main(){return 0;}",
+            "E0347",
+            "homogeneous",
+        ),
+        (
+            "Vector<T,Row> bad<T:Storable+Add>(Vector<T,Row> a,Vector<T,Row> b){return a+b;}int main(){return 0;}",
+            "E0346",
+            "built-in",
+        ),
+        (
+            "T twice<T:Add>(T a){return a+a;}int main(){return 0;}",
+            "E0291",
+            "use after move",
+        ),
+    ] {
+        let errors = compile_source(&SourceFile::new("bad.ae", source), &[]).unwrap_err();
+        assert_eq!(errors[0].code, code, "{source}: {errors:?}");
+        assert!(errors[0].message.contains(detail), "{source}: {errors:?}");
+    }
+}
+
+#[test]
+fn vertical29_integer_overflow_and_underflow_remain_checked() {
+    use std::os::unix::process::ExitStatusExt;
+    for (ty, max, min) in [
+        ("int8", "127", "-128"),
+        ("int16", "32767", "-32768"),
+        ("int32", "2147483647", "-2147483648"),
+        ("int64", "9223372036854775807", "-9223372036854775808"),
+        ("uint8", "255", "0"),
+        ("uint16", "65535", "0"),
+        ("uint32", "4294967295", "0"),
+        ("uint64", "18446744073709551615", "0"),
+        ("isize", "9223372036854775807", "-9223372036854775808"),
+        ("usize", "18446744073709551615", "0"),
+    ] {
+        for (cap, op, lhs, rhs, intrinsic) in [
+            ("Add", "+", max, "1", "add"),
+            ("Sub", "-", min, "1", "sub"),
+            ("Mul", "*", max, "2", "mul"),
+        ] {
+            let source = format!(
+                "T operation<T:{cap}>(T a,T b){{return a{op}b;}}int main(){{{ty} x=operation<{ty}>({lhs},{rhs});return int(x);}}"
+            );
+            let compiled = compile_source(
+                &SourceFile::new("overflow.ae", source),
+                &[Emit::Mir, Emit::Ssa],
+            )
+            .unwrap();
+            let signed = if ty.starts_with('u') { 'u' } else { 's' };
+            assert!(
+                compiled
+                    .llvm
+                    .contains(&format!("llvm.{signed}{intrinsic}.with.overflow"))
+            );
+            for phase in [Emit::Mir, Emit::Ssa] {
+                assert!(compiled.dumps[&phase].contains("IntegerOverflow"));
+            }
+            assert_eq!(v23_execute(&compiled.llvm).signal(), Some(4), "{ty} {cap}");
+        }
+    }
+}
+
+#[test]
+fn vertical29_ieee_zero_infinity_nan_and_no_fast_math() {
+    for ty in ["float32", "float64", "float", "double"] {
+        for (cap, op, exprs, instruction) in [
+            (
+                "Add",
+                "+",
+                [
+                    "operation(-z,-z)",
+                    "operation(z,z)",
+                    "operation(inf,z)",
+                    "operation(-inf,z)",
+                    "operation(inf,-inf)",
+                ],
+                "fadd",
+            ),
+            (
+                "Sub",
+                "-",
+                [
+                    "operation(-z,z)",
+                    "operation(z,z)",
+                    "operation(inf,z)",
+                    "operation(-inf,z)",
+                    "operation(inf,inf)",
+                ],
+                "fsub",
+            ),
+            (
+                "Mul",
+                "*",
+                [
+                    "operation(-z,one)",
+                    "operation(z,one)",
+                    "operation(inf,one)",
+                    "operation(-inf,one)",
+                    "operation(inf,z)",
+                ],
+                "fmul",
+            ),
+        ] {
+            let [nz, pz, pi, ni, nan] = exprs;
+            let source = format!(
+                "T operation<T:{cap}>(T a,T b){{return a{op}b;}}int main(){{{ty} z=0.0;{ty} one=1.0;{ty} inf=one/z;{ty} a={nz};{ty} b={pz};{ty} c={pi};{ty} d={ni};{ty} n={nan};if(one/a!=-inf){{return 1;}}if(one/b!=inf){{return 2;}}if(c!=inf){{return 3;}}if(d!=-inf){{return 4;}}if(n==n){{return 5;}}return 0;}}"
+            );
+            let compiled = compile_source(&SourceFile::new("ieee.ae", source), &[]).unwrap();
+            for line in compiled
+                .llvm
+                .lines()
+                .filter(|line| line.contains(&format!(" = {instruction} ")))
+            {
+                assert!(
+                    line.contains(&format!(
+                        "{instruction} {} ",
+                        if ty == "float32" || ty == "float" {
+                            "float"
+                        } else {
+                            "double"
+                        }
+                    )),
+                    "{line}"
+                );
+            }
+            assert!(compiled.llvm.contains(&format!(" = {instruction} ")));
+            assert_eq!(v23_execute(&compiled.llvm).code(), Some(0), "{ty} {cap}");
+        }
+    }
+}
+
+#[test]
+fn vertical29_deterministic_dumps_and_unchanged_instance_abi() {
+    let text = fs::read_to_string(program("v29_behavior.ae")).unwrap();
+    let source = SourceFile::new("determinism.ae", text);
+    let phases = [Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm];
+    let first = compile_source(&source, &phases).unwrap();
+    let second = compile_source(&source, &phases).unwrap();
+    assert_eq!(first.dumps, second.dumps);
+    let compile = |caps| {
+        compile_source(
+            &SourceFile::new(
+                "abi.ae",
+                format!("T add<T:{caps}>(T a,T b){{return a+b;}}int main(){{return add(20,22);}}"),
+            ),
+            &[],
+        )
+        .unwrap()
+        .llvm
+    };
+    assert_eq!(compile("Add"), compile("Copy+Storable+Add+Mul"));
+    assert_eq!(compile("Add+Mul"), compile("Mul+Add"));
+}
+
+#[test]
+fn vertical29_mir_ssa_reject_unresolved_behavioral_scalar_types() {
+    use aether_middle::{Rvalue, SsaOp, build_ssa, lower_hir, verify_mir, verify_ssa};
+    for (capability, operator) in [("Add", "+"), ("Sub", "-"), ("Mul", "*")] {
+        let source = SourceFile::new(
+            "v29-runtime.ae",
+            format!(
+                "T operation<T:{capability}>(T a,T b){{return a{operator}b;}}int main(){{return operation(6,2);}}"
+            ),
+        );
+        let hir = analyze(parse_source(&source).unwrap()).unwrap();
+        let symbolic = hir.signatures()[0].generic_parameters[0].ty;
+        let raw = lower_hir(hir);
+        let function = raw
+            .functions
+            .iter()
+            .position(|f| {
+                f.blocks
+                    .iter()
+                    .flat_map(|b| &b.instructions)
+                    .any(|i| matches!(i.value, Rvalue::Binary { .. }))
+            })
+            .unwrap();
+        let mut corrupt = raw.clone();
+        corrupt.functions[function].locals[0].ty = symbolic;
+        assert!(
+            verify_mir(corrupt).unwrap_err()[0]
+                .message
+                .contains("unresolved generic")
+        );
+        let mir = verify_mir(raw).unwrap();
+        let mut ssa = build_ssa(&mir);
+        let operation = ssa.functions[function]
+            .blocks
+            .iter_mut()
+            .flat_map(|b| &mut b.instructions)
+            .find(|i| matches!(i.op, SsaOp::Binary { .. }))
+            .unwrap();
+        operation.ty = symbolic;
+        assert!(
+            verify_ssa(ssa).unwrap_err()[0]
+                .message
+                .contains("unresolved generic")
+        );
+    }
+}

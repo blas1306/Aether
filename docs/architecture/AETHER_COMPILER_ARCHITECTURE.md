@@ -2100,3 +2100,49 @@ The initialization proof and lexical provenance authority remain V27's closed
 contracts. The operation-specific supports_builtin_multiply query does not
 expose a Numeric/Mul trait. Pairwise mathematical multiplication remains open.
 See [NEXT_VERTICAL_28_REPORT.md](NEXT_VERTICAL_28_REPORT.md) for qualification.
+
+## Confirmation 46 — behavioral generic scalar foundation (V29)
+
+The source capability vocabulary is a tagged union: existing structural
+Capability::Copy/Relocatable/Storable and Capability::Behavioral wrapping the
+closed BehavioralCapability::{Add,Sub,Mul}. GenericParamInfo and TypeArena keep
+deterministic BTreeSets keyed by declaration-owned GenericParamId. The behavior
+tag prevents conflation with structural guarantees without adding redundant
+sets to synchronize. Copy => Relocatable remains the only non-reflexive rule.
+
+TypeArena::satisfies_behavior answers concrete built-in integer/float satisfaction
+per operation; guarantees_behavior consults an exact symbolic parameter or
+that concrete query. Behavioral queries never enter recursive field/payload
+property derivation. V27/V28 concrete admission predicates delegate to the same
+query while retaining concrete-only restrictions. TypeProperties and numeric
+classification do not change with declared behavioral guarantees.
+
+The scalar resolver emits CapabilityBinary for homogeneous symbolic operands
+with the required guarantee. The behavior tag is the sole operator identity,
+so no second op cache can disagree. Ordinary concrete scalar resolution is
+unchanged. Existing ownership traversal visits the operands in order and keeps
+move/Copy obligations independent of behavior.
+
+The independent HIR verifier now checks declaration bodies before instantiation,
+and again when auditing TypedHir. A borrowed local-table context lets the same
+expression/block/place verifier inspect both parametric and concrete bodies
+without cloning trees or creating artificial InstanceIds. Parametric call
+verification substitutes declaration signatures and rechecks all constraints;
+concrete verification requires instance targets. Declaration capability sets
+must agree with arena metadata. This also covers unused bodies and forwarding.
+
+The existing constraint validator applies uniformly to functions and nominal
+types. The monomorphizer validates requests before allocating/caching InstanceId;
+substitution resolves CapabilityBinary to Add/Subtract/MultiplyIntegerChecked or
+Add/Subtract/MultiplyFloat. Concrete HIR rejects any residual capability operation.
+MIR has no corresponding runtime op, and its exhaustive lowering arm treats a
+residual node as an internal invariant violation. MIR/SSA independently reject
+symbolic runtime types. Backend code and arithmetic traps/IEEE emission are
+unchanged: no runtime dictionaries or dispatch are introduced.
+
+BTreeSet order is structural Copy/Relocatable/Storable followed by behavioral
+Add/Sub/Mul; dumps show both families separately. Neither constraint order nor
+additional satisfied constraints alter TypeId identity or existing instance
+mangling/ABI. Tests compare complete LLVM output for these variants.
+See [NEXT_VERTICAL_29_REPORT.md](NEXT_VERTICAL_29_REPORT.md) for exact tests,
+invalid-instance/corruption evidence, compile snapshots and deferred decisions.

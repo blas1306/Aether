@@ -1,0 +1,3 @@
+T add<T:Add>(T a,T b){return a+b;}
+T affine<T:Add+Mul>(T a,T b,T c){return add(a*b,c);}
+T outer<T:Add+Mul>(T a,T b,T c){return affine(a,b,c);}

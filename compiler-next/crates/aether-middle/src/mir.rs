@@ -2058,6 +2058,9 @@ impl Builder<'_> {
                 }
                 Operand::Local(destination)
             }
+            HirExprKind::CapabilityBinary { .. } => {
+                unreachable!("verified concrete HIR cannot contain CapabilityBinary")
+            }
             HirExprKind::Binary { op, left, right } => {
                 let left = self.lower_expr(left);
                 let right = self.lower_expr(right);

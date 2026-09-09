@@ -31,13 +31,46 @@ pub struct GenericParamId {
     pub index: u32,
 }
 
-/// Compiler-derived semantic capability available to generic constraints.
+/// Closed constraint vocabulary. Structural capabilities derive through storage;
+/// behavioral capabilities have a separate, non-structural satisfaction rule.
 /// This is intentionally a closed set, not a user-implementable trait system.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Capability {
     Copy,
     Relocatable,
     Storable,
+    Behavioral(BehavioralCapability),
+}
+
+/// Homogeneous executable contracts, independent of representation properties.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum BehavioralCapability {
+    Add,
+    Sub,
+    Mul,
+}
+
+impl BehavioralCapability {
+    pub const ALL: [Self; 3] = [Self::Add, Self::Sub, Self::Mul];
+
+    #[must_use]
+    pub fn symbol(self) -> &'static str {
+        match self {
+            Self::Add => "+",
+            Self::Sub => "-",
+            Self::Mul => "*",
+        }
+    }
+}
+
+impl fmt::Display for BehavioralCapability {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Add => "Add",
+            Self::Sub => "Sub",
+            Self::Mul => "Mul",
+        })
+    }
 }
 
 impl Capability {
@@ -50,7 +83,11 @@ impl Capability {
 
 impl fmt::Display for Capability {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Self::Behavioral(behavior) = self {
+            return behavior.fmt(f);
+        }
         f.write_str(match self {
+            Self::Behavioral(_) => unreachable!(),
             Self::Copy => "Copy",
             Self::Relocatable => "Relocatable",
             Self::Storable => "Storable",
@@ -915,13 +952,38 @@ impl TypeArena {
     /// Copy, Relocatable and Storable never establish arithmetic behavior.
     #[must_use]
     pub fn supports_builtin_add_sub(&self, id: TypeId) -> bool {
-        self.is_numeric(id)
+        self.satisfies_behavior(id, BehavioralCapability::Add)
+            && self.satisfies_behavior(id, BehavioralCapability::Sub)
     }
 
     /// Compiler-internal multiplication proof, restricted to concrete scalars.
     #[must_use]
     pub fn supports_builtin_multiply(&self, id: TypeId) -> bool {
-        self.is_numeric(id)
+        self.satisfies_behavior(id, BehavioralCapability::Mul)
+    }
+
+    /// Concrete built-in satisfaction only: never derives through fields or
+    /// treats a symbolic guarantee as concrete numeric classification.
+    #[must_use]
+    pub fn satisfies_behavior(&self, id: TypeId, behavior: BehavioralCapability) -> bool {
+        match behavior {
+            BehavioralCapability::Add | BehavioralCapability::Sub | BehavioralCapability::Mul => {
+                matches!(
+                    self.get(id),
+                    Some(TypeData::Integer(_) | TypeData::Float(_))
+                )
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn guarantees_behavior(&self, id: TypeId, behavior: BehavioralCapability) -> bool {
+        match self.get(id) {
+            Some(TypeData::GenericParam(parameter)) => self
+                .generic_capabilities(*parameter)
+                .is_some_and(|caps| caps.contains(&Capability::Behavioral(behavior))),
+            _ => self.satisfies_behavior(id, behavior),
+        }
     }
 
     #[must_use]
@@ -1328,10 +1390,14 @@ impl TypeArena {
     /// a capability in its current declaration context.
     #[must_use]
     pub fn guarantees_capability(&self, id: TypeId, capability: Capability) -> bool {
+        if let Capability::Behavioral(behavior) = capability {
+            return self.guarantees_behavior(id, behavior);
+        }
         if !self.contains_generic(id) {
             return self
                 .properties(id)
                 .is_some_and(|properties| match capability {
+                    Capability::Behavioral(_) => unreachable!("behavior is not layout"),
                     Capability::Copy => properties.is_copy,
                     Capability::Relocatable => properties.is_relocatable,
                     Capability::Storable => properties.is_storable,
@@ -1423,6 +1489,7 @@ impl TypeArena {
                 | TypeData::Array { element }
                 | TypeData::List { element },
             ) => match capability {
+                Capability::Behavioral(_) => unreachable!("behavior cannot derive structurally"),
                 Capability::Copy => false,
                 Capability::Relocatable => true,
                 Capability::Storable => self.guarantees_capability_with_substitution(
@@ -1521,7 +1588,9 @@ impl TypeArena {
                 return match requirement {
                     Capability::Storable => CollectionElementAdmission::MissingStorable,
                     Capability::Relocatable => CollectionElementAdmission::MissingRelocatable,
-                    Capability::Copy => unreachable!("storage does not require duplication"),
+                    Capability::Copy | Capability::Behavioral(_) => {
+                        unreachable!("storage requires only structural admission")
+                    }
                 };
             }
         }

@@ -1,0 +1,8 @@
+import helper;
+T forward<T:Add>(T a,T b){return helper.add(a,b);}
+int main(){
+    if(forward(20,22)!=42){return 1;}
+    if(helper.outer(6,7,2)!=44){return 2;}
+    if(helper.outer<double>(1.5,2.0,0.5)!=3.5){return 3;}
+    return 0;
+}

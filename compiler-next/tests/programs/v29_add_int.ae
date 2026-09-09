@@ -1,0 +1,2 @@
+T add<T:Add>(T a,T b){return a+b;}
+int main(){return add(19,23)-42;}

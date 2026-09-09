@@ -1441,6 +1441,61 @@ lifetime parameters, self-references, pinning, user capability implementations,
 behavioral traits, Vector or Matrix are introduced. Zero-based collection and
 future one-based mathematical indexing remain separate.
 
+### 10.8 Behavioral scalar constraints — NEXT-VERTICAL-29 IMPLEMENTED
+
+V29 extends the closed source vocabulary with Add, Sub and Mul. Structural
+Copy/Relocatable/Storable remain compiler-derived representation guarantees;
+behavioral capabilities prove executable homogeneous scalar contracts:
+
+| Guarantee | Bootstrap signature | Concrete integer operation | Concrete float operation |
+|---|---|---|---|
+| Add | T + T -> T | AddIntegerChecked | AddFloat |
+| Sub | T - T -> T | SubtractIntegerChecked | SubtractFloat |
+| Mul | T * T -> T | MultiplyIntegerChecked | MultiplyFloat |
+
+Every built-in signed/unsigned integer, isize/usize, float32/float64 and their
+transparent aliases satisfies all three separately. bool, references, views,
+structs, enums, Buffer, Array, List, Vector and Matrix do not satisfy these
+scalar capabilities. Fields supporting Add do not confer Add on a struct.
+Constraints on struct/enum arguments do not confer behavior on that nominal
+instance. No user implementation or structural behavioral derivation exists.
+
+The existing inline syntax accepts `T:Add`, `T:Add+Mul` and
+`T:Copy+Storable+Add` in functions, structs and enums. Guarantees belong to the
+exact GenericParamId and remain distinct from concrete classification and
+TypeProperties. No cross-family implication is admitted; Copy => Relocatable
+remains the only non-reflexive implication. Add does not prove Sub or Mul.
+
+A symbolic T may use only its guaranteed operators with operands/result of the
+same canonical T. Generic literals are not identities or arbitrary T values.
+Ordinary ownership applies: without Copy, separate operands are consumed, and
+reusing one operand requires an independent Copy proof. Missing guarantees are
+errors during parametric checking, even for functions never instantiated.
+Forwarding, including inferred calls and cross-module calls, must prove all
+callee constraints. Concrete arguments failing a constraint are rejected before
+InstanceId creation/caching, with the missing capability in the diagnostic.
+
+HIR CapabilityBinary retains a single authoritative Add/Sub/Mul tag, both
+operands and the enclosing result T. Independent verification checks equal
+operand/result types, symbolic guarantees or concrete built-in satisfaction,
+and agreement between generic declaration metadata and the type arena. A
+concrete HIR tree after monomorphization MUST contain only reified scalar ops.
+Checked integer overflow/underflow raises IntegerOverflow without wrapping;
+floats use IEEE fadd/fsub/fmul without fast-math, preserving signed zeros,
+infinities and NaNs. MIR/SSA keep their existing scalar semantics and reject
+unresolved symbolic types before codegen.
+
+Capabilities have no runtime representation, dictionaries, witness/vtables,
+hidden arguments or indirect operator calls. Ordered sets use structural
+Copy, Relocatable, Storable then behavioral Add, Sub, Mul order. Constraints do
+not enter TypeId identity or instance mangling/ABI: declaration plus concrete
+type arguments remains authoritative. HIR dumps display both guarantee families.
+
+V27/V28 concrete container arithmetic is unchanged. Generic container arithmetic,
+user operator implementations, traits/interfaces, associated types, Rhs/Output
+parameters, heterogeneous operators, Numeric, Zero/One, dot/outer/matmul and
+dynamic dispatch remain outside V29.
+
 ## 11. Layout, ABI and FFI
 
 ### 11.1 Layout — DECIDED/OPEN

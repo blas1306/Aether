@@ -1,0 +1,2 @@
+T affine<T:Add+Mul>(T a,T b,T c){return a*b+c;}
+int main(){return affine(6,7,2)-44;}

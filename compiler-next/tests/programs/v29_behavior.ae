@@ -1,0 +1,28 @@
+alias Real=double;
+struct Holder<T:Add>{T value;}
+enum Maybe<T:Add>{None,Some(T)}
+T add<T:Add>(T a,T b){return a+b;}
+T subtract<T:Sub>(T a,T b){return a-b;}
+T multiply<T:Mul>(T a,T b){return a*b;}
+T affine<T:Add+Mul>(T a,T b,T c){return a*b+c;}
+T forward<T:Add>(T a,T b){return add(a,b);}
+T nested<T:Add+Mul>(T a,T b,T c){return forward(multiply(a,b),c);}
+T unused<T:Add+Sub+Mul>(T a,T b,T c,T d){return (a+b)*c-d;}
+T copy_add<T:Copy+Storable+Add>(T a,T b){T other=a;return other+b;}
+int main(){
+    if(add<int>(20,22)!=42){return 1;}
+    if(add<double>(1.5,2.5)!=4.0){return 2;}
+    if(subtract<int8>(7,3)!=4){return 3;}
+    if(subtract<uint8>(7,3)!=4){return 4;}
+    if(multiply<int>(6,7)!=42){return 5;}
+    if(multiply<float32>(1.5,2.0)!=3.0){return 6;}
+    if(affine(6,7,2)!=44){return 7;}
+    if(affine<double>(1.5,2.0,0.5)!=3.5){return 8;}
+    if(forward(20,22)!=42){return 9;}
+    if(nested(6,7,2)!=44){return 10;}
+    if(add<Real>(1.5,2.5)!=4.0){return 11;}
+    Holder<int> h=Holder<int>(42);
+    Maybe<int> m=Maybe<int>.Some(h.value);
+    if(copy_add(20,22)!=42){return 12;}
+    match(m){Maybe<int>.None=>{return 13;}Maybe<int>.Some(value)=>{return value-42;}}
+}
