@@ -1,0 +1,1 @@
+int main(){Vector<int,Column>c=[2,3];Vector<int,Row>r=[4,5,6];Matrix<int>m=c*r;if(rows(m)!=2){return 1;}if(columns(m)!=3){return 2;}if(m[2,3]!=18){return 3;}return c[1]+r[1]-6;}

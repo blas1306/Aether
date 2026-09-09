@@ -10021,3 +10021,5 @@ fn vertical30_cross_module_strided_kernels() {
     .unwrap();
     assert_eq!(status.code(), Some(0));
 }
+
+mod vertical31;

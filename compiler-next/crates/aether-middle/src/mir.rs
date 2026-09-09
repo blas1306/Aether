@@ -251,6 +251,12 @@ pub enum BinaryOp {
 #[allow(missing_docs)]
 pub enum Rvalue {
     /// Readable descriptor operands and an explicit structured initialization loop.
+    /// Native oriented algebraic product with a closed concrete schedule.
+    VectorProduct {
+        left: Operand,
+        right: Operand,
+        kernel: crate::VectorProductKernel,
+    },
     ElementwiseBinary {
         left: Operand,
         right: Operand,
@@ -1964,6 +1970,69 @@ impl Builder<'_> {
                 );
                 Operand::Local(destination)
             }
+            HirExprKind::VectorAlgebraicProduct {
+                left,
+                right,
+                element_type,
+                product_op,
+                product,
+            } => {
+                let concrete = |op| match op {
+                    aether_frontend::MathElementOp::Concrete(
+                        HirBinaryOp::MultiplyIntegerChecked,
+                    ) => BinaryOp::MultiplyIntegerChecked,
+                    aether_frontend::MathElementOp::Concrete(HirBinaryOp::MultiplyFloat) => {
+                        BinaryOp::MultiplyFloat
+                    }
+                    aether_frontend::MathElementOp::Concrete(HirBinaryOp::AddIntegerChecked) => {
+                        BinaryOp::AddIntegerChecked
+                    }
+                    aether_frontend::MathElementOp::Concrete(HirBinaryOp::AddFloat) => {
+                        BinaryOp::AddFloat
+                    }
+                    _ => unreachable!("verified concrete algebraic operation"),
+                };
+                let (left, left_owner) = self.lower_math_read(left);
+                let (right, right_owner) = self.lower_math_read(right);
+                let reduction = match product {
+                    aether_frontend::VectorProduct::Inner {
+                        accumulate_op,
+                        zero,
+                        ..
+                    } => Some((concrete(*accumulate_op), self.lower_expr(zero))),
+                    aether_frontend::VectorProduct::Outer { .. } => None,
+                };
+                let kernel = crate::VectorProductKernel::new(
+                    *element_type,
+                    concrete(*product_op),
+                    reduction,
+                );
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::VectorProduct {
+                        left,
+                        right,
+                        kernel,
+                    },
+                    expression.span,
+                );
+                for owner in [right_owner, left_owner].into_iter().flatten() {
+                    let token = self.temporary(TypeId::BOOL);
+                    self.assign(
+                        Place {
+                            base: PlaceBase::Local(token),
+                            projections: vec![],
+                        },
+                        Rvalue::Drop { owner },
+                        expression.span,
+                    );
+                }
+                Operand::Local(destination)
+            }
             HirExprKind::VectorScalarMultiply {
                 left,
                 right,
@@ -2067,7 +2136,7 @@ impl Builder<'_> {
                 }
                 Operand::Local(destination)
             }
-            HirExprKind::CapabilityBinary { .. } => {
+            HirExprKind::AlgebraicValue { .. } | HirExprKind::CapabilityBinary { .. } => {
                 unreachable!("verified concrete HIR cannot contain CapabilityBinary")
             }
             HirExprKind::Binary { op, left, right } => {
@@ -3033,7 +3102,8 @@ fn verify_ownership(
                     )?;
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
-                Rvalue::ElementwiseBinary { .. }
+                Rvalue::VectorProduct { .. }
+                | Rvalue::ElementwiseBinary { .. }
                 | Rvalue::BufferAlloc { .. }
                 | Rvalue::ArrayFill { .. } => {
                     initialize_owner(function, types, &mut state, destination, fail)?;
@@ -3403,6 +3473,20 @@ fn validate_rvalue(
             {
                 return Err("MIR borrowed local is not address-taken".into());
             }
+        }
+        Rvalue::VectorProduct {
+            left,
+            right,
+            kernel,
+        } => {
+            validate_operand(function, left, initialized)?;
+            validate_operand(function, right, initialized)?;
+            kernel.verify(
+                types,
+                operand_type(function, left)?,
+                operand_type(function, right)?,
+                destination,
+            )?;
         }
         Rvalue::ElementwiseBinary {
             left,

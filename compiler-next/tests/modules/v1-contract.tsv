@@ -36,3 +36,4 @@ v25_vector_views	accept:0	oriented shared/mutable borrowed vector views across m
 v26_matrix_axes	accept:0	Matrix full-axis projections to oriented VectorView across modules
 v29_behavior	accept:0	cross-module homogeneous Add and Add+Mul guarantees with nested forwarding
 v30_kernels	accept:0	generic Add/Sub/Mul mathematical kernels and strided forwarding across modules
+v31_products	accept:0	algebraic Vector products with Zero, strided aliases and generic module forwarding

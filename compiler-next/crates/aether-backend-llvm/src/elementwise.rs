@@ -85,7 +85,25 @@ impl Emitter<'_> {
                 }
                 MathStep::Allocate { extents, .. } => {
                     let axis = extents[0];
-                    writeln!(self.output, "  %{p}_empty = icmp eq i64 %{p}_{source}_{axis:?}, 0\n  br i1 %{p}_empty, label %{p}_empty_result, label %{p}_allocate\n{p}_empty_result:\n  br label %{}\n{p}_allocate:", continuation_label(self.block,self.id)).unwrap();
+                    if self.kernel.matrix {
+                        writeln!(self.output, "  %{p}_empty_rows = icmp eq i64 %{p}_{source}_Rows, 0\n  %{p}_empty_columns = icmp eq i64 %{p}_{source}_Columns, 0\n  %{p}_empty = or i1 %{p}_empty_rows, %{p}_empty_columns").unwrap();
+                    } else {
+                        writeln!(
+                            self.output,
+                            "  %{p}_empty = icmp eq i64 %{p}_{source}_{axis:?}, 0"
+                        )
+                        .unwrap();
+                    }
+                    writeln!(self.output, "  br i1 %{p}_empty, label %{p}_empty_result, label %{p}_allocate\n{p}_empty_result:").unwrap();
+                    if self.kernel.matrix {
+                        writeln!(self.output, "  %{p}_empty_r = insertvalue {} zeroinitializer, i64 %{p}_{source}_Rows, 1\n  %{p}_empty_owner = insertvalue {} %{p}_empty_r, i64 %{p}_{source}_Columns, 2", self.result_ty, self.result_ty).unwrap();
+                    }
+                    writeln!(
+                        self.output,
+                        "  br label %{}\n{p}_allocate:",
+                        continuation_label(self.block, self.id)
+                    )
+                    .unwrap();
                     let suffix = mangle_type(self.types, self.kernel.element_type);
                     let args = extents
                         .iter()
@@ -181,7 +199,12 @@ impl Emitter<'_> {
                 }
                 MathStep::YieldOwner => {
                     let cont = continuation_label(self.block, self.id);
-                    writeln!(self.output, "  br label %{cont}\n{cont}:\n  %v{} = phi {} [ zeroinitializer, %{p}_empty_result ], [ %{p}_allocated, %{current} ]\n  ; ElementwiseEnd {}",self.id,self.result_ty,self.id).unwrap();
+                    let empty = if self.kernel.matrix {
+                        format!("%{p}_empty_owner")
+                    } else {
+                        "zeroinitializer".into()
+                    };
+                    writeln!(self.output, "  br label %{cont}\n{cont}:\n  %v{} = phi {} [ {empty}, %{p}_empty_result ], [ %{p}_allocated, %{current} ]\n  ; ElementwiseEnd {}",self.id,self.result_ty,self.id).unwrap();
                     *current = cont;
                 }
             }

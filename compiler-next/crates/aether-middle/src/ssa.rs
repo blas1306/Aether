@@ -105,6 +105,12 @@ pub enum SsaPlaceBase {
 #[allow(missing_docs)]
 pub enum SsaOp {
     /// Structured mathematical loop; inputs are Copy readable descriptors.
+    /// Native oriented algebraic product with a closed concrete schedule.
+    VectorProduct {
+        left: SsaOperand,
+        right: SsaOperand,
+        kernel: crate::VectorProductKernel,
+    },
     ElementwiseBinary {
         left: SsaOperand,
         right: SsaOperand,
@@ -999,6 +1005,15 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             size_trap: *size_trap,
             failure_trap: *failure_trap,
         },
+        Rvalue::VectorProduct {
+            left,
+            right,
+            kernel,
+        } => SsaOp::VectorProduct {
+            left: rename_operand(left, stacks),
+            right: rename_operand(right, stacks),
+            kernel: kernel.clone(),
+        },
         Rvalue::ElementwiseBinary {
             left,
             right,
@@ -1509,12 +1524,12 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
         Rvalue::EnumDiscriminant { value, .. } | Rvalue::EnumPayload { value, .. } => {
             operand_local(value).into_iter().collect()
         }
-        Rvalue::ElementwiseBinary { left, right, .. } | Rvalue::Binary { left, right, .. } => {
-            operand_local(left)
-                .into_iter()
-                .chain(operand_local(right))
-                .collect()
-        }
+        Rvalue::VectorProduct { left, right, .. }
+        | Rvalue::ElementwiseBinary { left, right, .. }
+        | Rvalue::Binary { left, right, .. } => operand_local(left)
+            .into_iter()
+            .chain(operand_local(right))
+            .collect(),
         Rvalue::Call { args, .. } => args.iter().filter_map(operand_local).collect(),
     }
 }
@@ -2124,6 +2139,13 @@ fn verify_op(
             if *mutable && !writable(place)? {
                 return Err("SSA mutable borrow through shared reference".into());
             }
+        }
+        SsaOp::VectorProduct {
+            left,
+            right,
+            kernel,
+        } => {
+            kernel.verify(types, operand_ty(left)?, operand_ty(right)?, result)?;
         }
         SsaOp::ElementwiseBinary {
             left,
@@ -2963,7 +2985,9 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
             aggregate, value, ..
         } => vec![aggregate, value],
         SsaOp::Unary { operand, .. } => vec![operand],
-        SsaOp::ElementwiseBinary { left, right, .. } | SsaOp::Binary { left, right, .. } => {
+        SsaOp::VectorProduct { left, right, .. }
+        | SsaOp::ElementwiseBinary { left, right, .. }
+        | SsaOp::Binary { left, right, .. } => {
             vec![left, right]
         }
         SsaOp::Call { args, .. } => args.iter().collect(),

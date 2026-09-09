@@ -1,10 +1,51 @@
-# Aether NEXT-VERTICAL-30
+# Aether NEXT-VERTICAL-31
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. The current mathematical foundation includes Matrix<T> owners and borrowed strided MatrixView/MatrixViewMut and oriented VectorView/VectorViewMut with zero-copy transpose; the numbered
 Vertical-9..17 sections below retain historical qualification context.
 It does not replace the production `aether` CLI or import any legacy
 Python object, JSON schema, Initial IR, or SSA representation.
+
+## Native algebraic Vector multiplication (V31)
+
+```aether
+T inner<T:Copy+Add+Mul+Zero>(VectorView<T,Row> r, VectorView<T,Column> c) {
+    return r * c;
+}
+Matrix<T> product<T:Storable+Copy+Mul>(VectorView<T,Column> c, VectorView<T,Row> r) {
+    return c * r;
+}
+```
+
+Row(n) represents 1×n, including Row(0)=1×0; Column(n) represents n×1,
+including Column(0)=0×1. Native Row×Column returns exactly T after checking
+matching dimensions. It starts from canonical Zero<T> and executes n ordered
+multiplications and n additions, with no allocation. Column(n)×Row(m) returns
+an owning Matrix<T> of exactly n×m, including 0×m and n×0. It performs n*m
+multiplications/stores, with one nonempty backing allocation and none for empty
+results. Row×Row and Column×Column remain invalid.
+
+Zero is a separate algebraic value guarantee, satisfied only by built-in
+integers/floats and their transparent aliases. It implies no binary behavior or
+storage property. All readable owner/view/mutable-view combinations preserve
+orientation, independent strides and input usability. Inner views require
+Copy+Add+Mul+Zero without Storable; outer needs Storable+Copy+Mul without Add or
+Zero. Unused generic bodies and forwarding are checked before instantiation.
+
+HIR represents symbolic behaviors and Zero explicitly, then concretizes them
+before MIR. MIR and SSA independently verify closed ReductionKernel and
+OuterProductKernel schedules. LLVM emits checked integers or strict separate
+fmul/fadd, with no FMA, reassociation, fast-math or runtime capability dispatch.
+The initial positive-zero addition is observable and is never omitted.
+
+No dot(Vector,Vector), outer()/matmul() function, Hadamard, Matrix products,
+One, user implementations, widened accumulator or generic orientation is added.
+`dot` remains a possible future Array/List sequence operation. Existing consuming
+transpose is unchanged; transpose_view changes orientation without consuming.
+See [the V31 report](../docs/architecture/NEXT_VERTICAL_31_REPORT.md) and the
+[normative contract](../docs/architecture/AETHER_V1_SEMANTIC_CONTRACT.md#next-vertical-31--algebraic-zero-and-native-vector-multiplication).
+Compilation snapshots: `python3 tests/measure-v31.py --runs 10`.
+Historical version sections below describe admission at their original boundary.
 
 ## Generic mathematical arithmetic kernels (V30)
 

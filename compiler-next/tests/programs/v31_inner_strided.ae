@@ -1,0 +1,1 @@
+T inner<T:Copy+Add+Mul+Zero>(VectorView<T,Row>r,VectorView<T,Column>c){return r*c;} int main(){Matrix<int>a=[1,2,3;4,5,6];Matrix<int>b=[7,8;9,10];VectorView<int,Column>ac=column(a,2);VectorView<int,Row>r=transpose_view(ac);VectorView<int,Column>c=column(b,1);if(inner(r,c)!=59){return 1;}Matrix<int>d=[1,2;3,4;5,6];if(row(a,1)*column(d,2)!=28){return 2;}return 0;}

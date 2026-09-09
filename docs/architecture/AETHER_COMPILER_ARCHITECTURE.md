@@ -2177,3 +2177,52 @@ normalizing only the function symbol. Native instrumentation checks exact heap,
 scalar-operation and initialization counts for generic strided and empty cases.
 See [NEXT_VERTICAL_30_REPORT.md](NEXT_VERTICAL_30_REPORT.md) for qualification,
 compilation snapshots, accepted debt and remaining decisions.
+
+
+## Confirmation 48 — algebraic identities and oriented products (V31)
+
+Capability::Algebraic(AlgebraicCapability::Zero) has a separate satisfaction
+branch before structural property derivation. The existing constraint parser,
+sets, forwarding verifier and pre-cache instantiation checks remain the authority.
+HIR AlgebraicValue(Zero) carries the exact T in its enclosing typed expression;
+substitution replaces it with an ordinary Int(0) or positive FloatValue. No
+algebraic value tag survives the concrete-HIR boundary.
+
+VectorAlgebraicProduct contains source-ordered operands, element TypeId,
+product_op and VectorProduct::{Inner,Outer}. Inner retains Dimension shape-check,
+accumulate_op and typed zero; Outer retains independent left/right selectors for
+result rows/columns. The shared recipe authority states independent requirements;
+the HIR verifier independently reconstructs and compares metadata, operand
+families, orientations and scalar/Matrix result. Generic metadata concretizes via
+V29's central operation mapping. Ownership captures/protects lhs through rhs
+and checks known inner dimension mismatch. Both temporary-owner cleanup and
+borrowed descriptor lowering reuse V27/V30 rules.
+
+MIR/SSA VectorProduct contains a VectorProductKernel with explicit ProductKind
+ReductionKernel or OuterProductKernel. Its closed ProductStep tree reuses scalar
+MathStep instructions but has its own nested loops, extent selectors, accumulator
+initialization/update and scalar yield. This is separate from owner-producing
+ElementwiseKernel. Both verifiers independently check their concrete operand and
+result types and compare the entire executable schedule against its canonical
+contract. They reject changed guards, strides, extents, loop bounds, operations,
+zero, accumulator or initialization counts and inappropriate yield/allocation.
+The shared verifier operates on each IR's independently resolved operand types.
+
+LLVM translates that verified tree to nested CFG. Inner uses one loop-carried
+scalar phi initialized by the concrete zero constant. Product and accumulator
+have separate checked overflow edges or separate plain fmul/fadd. Outer uses
+the normal Matrix allocation/drop representation and row-major initialization;
+built-in Mul admission explicitly excludes needs_drop elements. There is no
+runtime dispatch, bitmap, noalias promise or capability metadata.
+
+Zero-axis audit found two previously unreachable assumptions. The matrix helper
+called fixed allocation even for zero count; the allocator deliberately reserves
+one byte for zero-byte requests, supporting existing zero-sized element storage.
+The Matrix helper now bypasses that allocator for zero *element count* and joins
+a null pointer with both original extents. Existing elementwise LLVM empty paths
+also needed to preserve both extents and detect either zero axis. Fixed storage
+and the allocator themselves remain unchanged. Matrix descriptors, views, drop,
+queries and checked indexing already support independent zero axes. Source []
+literal syntax still constructs only 0×0. Qualification includes subsequent
+scaling/addition and empty row/column projections from runtime-produced shapes.
+See [NEXT_VERTICAL_31_REPORT.md](NEXT_VERTICAL_31_REPORT.md).

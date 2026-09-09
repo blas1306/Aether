@@ -1,0 +1,2 @@
+T inner<T:Copy+Add+Mul+Zero>(VectorView<T,Row> r,VectorView<T,Column> c){return r*c;}
+Matrix<T> product<T:Storable+Copy+Mul>(VectorView<T,Column> c,VectorView<T,Row> r){return c*r;}

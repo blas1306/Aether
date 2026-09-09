@@ -1,0 +1,1 @@
+T inner<T:Copy+Add+Mul+Zero>(VectorView<T,Row>r,VectorView<T,Column>c){return r*c;} int main(){Vector<double,Row>r=[1.5,2.5];Vector<double,Column>c=[2,4];if(inner(vector_view(r),vector_view(c))!=13){return 1;}return 0;}

@@ -1,0 +1,12 @@
+import helper;
+T forward<T:Copy+Add+Mul+Zero>(VectorView<T,Row> r,VectorView<T,Column> c){return helper.inner(r,c);}
+int main(){
+    Matrix<int> a=[1,2,3;4,5,6];
+    VectorView<int,Column> c=column(a,2);
+    VectorView<int,Row> r=transpose_view(c);
+    if(forward(r,c)!=29){return 1;}
+    Matrix<int> m=helper.product(c,r);
+    if(m[1,1]!=4){return 2;}if(m[1,2]!=10){return 3;}
+    if(m[2,1]!=10){return 4;}if(m[2,2]!=25){return 5;}
+    return 0;
+}

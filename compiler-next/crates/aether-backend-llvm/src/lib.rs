@@ -1,5 +1,6 @@
 //! LLVM backend for verified Vertical-16 program SSA.
 
+mod algebraic;
 mod elementwise;
 
 use std::collections::BTreeSet;
@@ -1162,6 +1163,31 @@ fn emit_function(
                         llvm_type(types, ty),
                     )
                     .unwrap();
+                }
+                SsaOp::VectorProduct {
+                    left,
+                    right,
+                    kernel,
+                } => {
+                    shape_trap |= kernel.kind == aether_middle::ProductKind::ReductionKernel;
+                    overflow_trap |= types.integer_info(kernel.element_type).is_some();
+                    algebraic::emit(
+                        output,
+                        types,
+                        kernel,
+                        [
+                            (
+                                &llvm_type(types, operand_type(function, left)),
+                                &llvm_operand(left),
+                            ),
+                            (
+                                &llvm_type(types, operand_type(function, right)),
+                                &llvm_operand(right),
+                            ),
+                        ],
+                        instruction.result.0,
+                        block.id,
+                    );
                 }
                 SsaOp::ElementwiseBinary {
                     left,
@@ -2740,7 +2766,8 @@ fn emit_integer_division(
 fn is_checked(op: &SsaOp) -> bool {
     matches!(
         op,
-        SsaOp::ElementwiseBinary { .. }
+        SsaOp::VectorProduct { .. }
+            | SsaOp::ElementwiseBinary { .. }
             | SsaOp::MatrixAxisVectorView { .. }
             | SsaOp::Unary {
                 op: UnaryOp::NegateIntegerChecked,
@@ -3525,8 +3552,16 @@ trap_allocation_size_overflow:
   call void @llvm.trap()
   unreachable
 allocate:
+  %empty = icmp eq i64 %count, 0
+  br i1 %empty, label %empty_result, label %nonempty
+empty_result:
+  br label %shape
+nonempty:
   %storage = call {{ ptr, i64 }} @aether_fixed_new_{suffix}(i64 %count)
-  %ptr = extractvalue {{ ptr, i64 }} %storage, 0
+  %allocated_ptr = extractvalue {{ ptr, i64 }} %storage, 0
+  br label %shape
+shape:
+  %ptr = phi ptr [ null, %empty_result ], [ %allocated_ptr, %nonempty ]
   %d0 = insertvalue {{ ptr, i64, i64 }} zeroinitializer, ptr %ptr, 0
   %d1 = insertvalue {{ ptr, i64, i64 }} %d0, i64 %rows, 1
   %d2 = insertvalue {{ ptr, i64, i64 }} %d1, i64 %columns, 2

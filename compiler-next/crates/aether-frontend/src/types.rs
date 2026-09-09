@@ -40,6 +40,13 @@ pub enum Capability {
     Relocatable,
     Storable,
     Behavioral(BehavioralCapability),
+    Algebraic(AlgebraicCapability),
+}
+
+/// Canonical algebraic values, independent of binary behavior and storage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum AlgebraicCapability {
+    Zero,
 }
 
 /// Homogeneous executable contracts, independent of representation properties.
@@ -87,6 +94,7 @@ impl fmt::Display for Capability {
             return behavior.fmt(f);
         }
         f.write_str(match self {
+            Self::Algebraic(AlgebraicCapability::Zero) => "Zero",
             Self::Behavioral(_) => unreachable!(),
             Self::Copy => "Copy",
             Self::Relocatable => "Relocatable",
@@ -1390,6 +1398,15 @@ impl TypeArena {
     /// a capability in its current declaration context.
     #[must_use]
     pub fn guarantees_capability(&self, id: TypeId, capability: Capability) -> bool {
+        if let Capability::Algebraic(AlgebraicCapability::Zero) = capability {
+            return match self.get(id) {
+                Some(TypeData::GenericParam(parameter)) => self
+                    .generic_capabilities(*parameter)
+                    .is_some_and(|caps| caps.contains(&capability)),
+                Some(TypeData::Integer(_) | TypeData::Float(_)) => true,
+                _ => false,
+            };
+        }
         if let Capability::Behavioral(behavior) = capability {
             return self.guarantees_behavior(id, behavior);
         }
@@ -1397,7 +1414,9 @@ impl TypeArena {
             return self
                 .properties(id)
                 .is_some_and(|properties| match capability {
-                    Capability::Behavioral(_) => unreachable!("behavior is not layout"),
+                    Capability::Behavioral(_) | Capability::Algebraic(_) => {
+                        unreachable!("behavior is not layout")
+                    }
                     Capability::Copy => properties.is_copy,
                     Capability::Relocatable => properties.is_relocatable,
                     Capability::Storable => properties.is_storable,
@@ -1489,7 +1508,9 @@ impl TypeArena {
                 | TypeData::Array { element }
                 | TypeData::List { element },
             ) => match capability {
-                Capability::Behavioral(_) => unreachable!("behavior cannot derive structurally"),
+                Capability::Behavioral(_) | Capability::Algebraic(_) => {
+                    unreachable!("behavior cannot derive structurally")
+                }
                 Capability::Copy => false,
                 Capability::Relocatable => true,
                 Capability::Storable => self.guarantees_capability_with_substitution(
@@ -1588,7 +1609,7 @@ impl TypeArena {
                 return match requirement {
                     Capability::Storable => CollectionElementAdmission::MissingStorable,
                     Capability::Relocatable => CollectionElementAdmission::MissingRelocatable,
-                    Capability::Copy | Capability::Behavioral(_) => {
+                    Capability::Copy | Capability::Behavioral(_) | Capability::Algebraic(_) => {
                         unreachable!("storage requires only structural admission")
                     }
                 };

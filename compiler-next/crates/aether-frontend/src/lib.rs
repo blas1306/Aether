@@ -22,17 +22,18 @@ pub use hir::{
     HirStmtKind, HirUnaryOp, InvalidationShape, LocalId, MatchMode, MathElementOp, MathShapeCheck,
     ModuleId, ModuleInfo, MutationEffect, ParameterSignature, ParsedModule, ParsedProgram,
     ResolvedImport, ScalarSide, StructInfo, StructuralMutation, TypeAliasInfo, TypeLayout,
-    TypedHir, VariantInfo, VariantPayloadInfo, analyze, analyze_bodies, analyze_bodies_for_target,
-    collect_program_signatures, collect_signatures, format_type, layout_of, verify_hir,
+    TypedHir, VariantInfo, VariantPayloadInfo, VectorProduct, analyze, analyze_bodies,
+    analyze_bodies_for_target, collect_program_signatures, collect_signatures, format_type,
+    layout_of, verify_hir,
 };
 pub use lexer::{Token, TokenKind, lex};
 pub use parser::parse;
 pub use types::{
-    BehavioralCapability, Capability, CollectionElementAdmission, CollectionKind, EnumId, FieldId,
-    FloatType, GenericOwner, GenericParamId, IndexSemantics, InstanceId, IntegerType,
-    MatrixAxisVectorViewDescriptor, MatrixViewDescriptor, MatrixViewField, Orientation, StructId,
-    Substitution, TargetProperties, TypeArena, TypeArgsId, TypeData, TypeId, TypeProperties,
-    VariantId, VectorViewDescriptor, VectorViewField,
+    AlgebraicCapability, BehavioralCapability, Capability, CollectionElementAdmission,
+    CollectionKind, EnumId, FieldId, FloatType, GenericOwner, GenericParamId, IndexSemantics,
+    InstanceId, IntegerType, MatrixAxisVectorViewDescriptor, MatrixViewDescriptor, MatrixViewField,
+    Orientation, StructId, Substitution, TargetProperties, TypeArena, TypeArgsId, TypeData, TypeId,
+    TypeProperties, VariantId, VectorViewDescriptor, VectorViewField,
 };
 
 /// Lexes and parses one source file.

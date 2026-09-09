@@ -2001,3 +2001,78 @@ once. Empty results bypass allocation and iteration; source-order scalar
 expression evaluation still occurs. Checked integer traps, IEEE operations
 without fast-math, abortive overflow after partial initialization, and storage
 failure traps remain unchanged. No runtime capability machinery is emitted.
+
+
+## NEXT-VERTICAL-31 — algebraic Zero and native Vector multiplication
+
+Vector orientation is algebraic shape and remains part of canonical TypeId:
+Row(n) means 1×n and Column(n) means n×1. This includes Row(0)=1×0 and
+Column(0)=0×1. Dimension and physical stride remain value metadata.
+
+Native `*` additionally admits exactly these readable Vector products:
+
+| Operands | Result | Independent generic element guarantees |
+|---|---|---|
+| Row(n) × Column(n) | exact T scalar | Copy + Add + Mul + Zero |
+| Column(n) × Row(m) | owning Matrix<T>, shape n×m | Storable + Copy + Mul |
+
+Each side independently accepts Vector, VectorView or VectorViewMut with the
+specified orientation. Mutable views are only read. Elements and result have
+exactly the same canonical T; no promotion or widened accumulator is introduced.
+Owners in signatures independently need Storable for type formation; the inner
+product of views itself MUST NOT require Storable. Every generic body and each
+forwarding call MUST prove all requirements before instantiation, even unused
+bodies. Unsatisfied arguments fail before InstanceId/cache insertion.
+
+`Zero` is an algebraic value capability, separate from structural
+Copy/Relocatable/Storable and binary behavioral Add/Sub/Mul. Built-in signed and
+unsigned integers, including isize/usize, provide exact typed 0; float32 and
+float64 provide canonical positive zero. Transparent aliases share satisfaction.
+Bool, nominal aggregates, containers, references and views do not satisfy Zero.
+There is no structural derivation and no implication to or from Add, Copy or
+Storable; Copy => Relocatable remains the only nonreflexive implication. Source
+constraints use existing syntax, e.g. `T:Copy+Add+Mul+Zero`. There is no public
+`zero()` function in this vertical; algebraic identity is explicit generic HIR
+metadata, concretized to an ordinary typed scalar constant before MIR.
+
+Row×Column checks exact dimension equality. Known mismatch is E0345; dynamic
+mismatch traps ShapeMismatch before any element load, multiplication or addition.
+After the guard, initialize one accumulator from Zero<T>. Iterate increasing
+logical indices 0..n, load both values using their independent strides, multiply,
+then add the product to the accumulator. There are exactly n multiplications and
+n additions, including the first addition to positive zero. Empty reduction
+returns canonical Zero<T>, with no loads or operations. No allocation, freeing
+or relocation belongs to the reduction itself.
+
+Integer product and accumulation use separate checked operations and trap
+IntegerOverflow without widening or wrapping. Float32/float64 use separate fmul
+then fadd in logical order, with no fast-math, reassociation, tree reduction, FMA
+contraction or conjugation. Signed zero, infinity and NaN follow those exact IEEE
+operations. Traps retain the existing abortive, non-unwinding semantics.
+
+Column×Row has no compatibility guard. Result rows come from the left dimension,
+columns from the right dimension, including 0×m, n×0 and 0×0. The normal owning
+Matrix descriptor preserves both axes independently. Checked result-size
+calculation precedes one backing allocation for a nonempty result; a zero-size
+result uses null storage and allocates nothing. Nested increasing row/column
+loops load each source with its own stride and initialize each contiguous
+row-major result slot once from their product. Exactly n*m multiplications and
+stores, no additions or Zero requirement. Bootstrap row-major layout is not
+public mathematical identity. Matrix +/−/scaling preserve zero axes too. Literal
+`Matrix<T> []` continues to mean only 0×0; no literal syntax is extended.
+
+Operands evaluate in source order and both are captured before the kernel.
+Existing borrow/provenance rules protect the left backing while evaluating the
+right expression; successful products leave existing input owners usable.
+Aliasing is permitted, with no noalias assertion. Expression-created owners get
+normal cleanup after the kernel. Existing consuming `transpose(Vector)` is
+unchanged; use `transpose_view` for a nonconsuming orientation change.
+
+Row×Row and Column×Column remain errors, with no implicit transpose or Hadamard
+interpretation. Matrix×Vector, Vector×Matrix, Matrix×Matrix remain deferred;
+existing scalar multiplication and +/− are unchanged. There is no dot(Vector,
+Vector), outer() or matmul() intrinsic. `dot` is reserved as a possible future
+sequence operation for Array/List, which is not implemented here. One, user
+implementations, heterogeneous output, generic orientation, slicing, lifetime
+extensions, BLAS and SIMD remain outside scope. Advanced decompositions remain
+future STD LinearAlgebra concerns.

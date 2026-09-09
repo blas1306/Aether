@@ -1,0 +1,1 @@
+T inner<T:Copy+Add+Mul+Zero>(VectorView<T,Row>r,VectorView<T,Column>c){return r*c;} T forward<T:Copy+Add+Mul+Zero>(VectorView<T,Row>r,VectorView<T,Column>c){return inner(r,c);} int main(){Vector<int,Row>r=[1,2,3];Vector<int,Column>c=[4,5,6];return forward(vector_view(r),vector_view(c))-32;}

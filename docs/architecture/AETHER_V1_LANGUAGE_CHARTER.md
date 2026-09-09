@@ -576,3 +576,27 @@ dictionaries, hidden operator arguments or behavioral layout metadata is allowed
 No user implementations, structural nominal behavior derivation, heterogeneous
 operators, generic orientation, identities, dot/outer/matmul, promotion, in-place
 arithmetic, BLAS or lifetime extensions are admitted by V30.
+
+
+## V31 admission — native oriented Vector products and Zero
+
+The mathematical foundation now admits Row(n)×Column(n) -> T and
+Column(n)×Row(m) -> Matrix<T> of exact shape n×m. Orientation denotes 1×n or
+n×1, even at dimension zero, and stays semantic TypeId identity. Both products
+accept readable owners and strided shared/mutable views. Same-orientation
+products remain rejected. There is no implicit transpose or Hadamard meaning.
+
+Zero is a closed algebraic value capability for built-in integers and floats,
+independent of structural and binary behavioral guarantees. Inner reduction
+requires Copy+Add+Mul+Zero, starts at canonical positive zero, and runs in exact
+logical order using separate checked/IEEE multiplication and addition. It needs
+no allocation. Outer needs Storable+Copy+Mul, preserves zero axes and initializes
+one nonempty Matrix backing with n*m multiplications/stores. Generic contracts
+are checked parametrically, then operations/Zero concretize before MIR.
+
+Matrix products remain later verticals. dot(Vector,Vector), Array/List dot,
+outer()/matmul() functions, One, user implementations, widened accumulators,
+generic orientation, BLAS and SIMD/reassociation remain unimplemented. A future
+dot may concern Array/List sequences; advanced decompositions belong to future
+STD LinearAlgebra. No lifetime, slicing or legacy behavior changes are admitted.
+See [NEXT_VERTICAL_31_REPORT.md](NEXT_VERTICAL_31_REPORT.md).
