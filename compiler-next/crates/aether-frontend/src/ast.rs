@@ -10,9 +10,15 @@ pub struct ParsedAst {
     pub(crate) structs: Vec<AstStruct>,
     pub(crate) enums: Vec<AstEnum>,
     pub(crate) functions: Vec<AstFunction>,
+    pub(crate) classes: Vec<crate::AstClass>,
 }
 
 impl ParsedAst {
+    /// Concrete class declarations in source order.
+    #[must_use]
+    pub fn classes(&self) -> &[crate::AstClass] {
+        &self.classes
+    }
     /// Functions in deterministic source order.
     #[must_use]
     pub fn functions(&self) -> &[AstFunction] {
@@ -47,8 +53,8 @@ impl ParsedAst {
     #[must_use]
     pub fn dump(&self) -> String {
         format!(
-            "imports: {:#?}\naliases: {:#?}\nstructs: {:#?}\nenums: {:#?}\nfunctions: {:#?}",
-            self.imports, self.aliases, self.structs, self.enums, self.functions
+            "imports: {:#?}\naliases: {:#?}\nstructs: {:#?}\nenums: {:#?}\nclasses: {:#?}\nfunctions: {:#?}",
+            self.imports, self.aliases, self.structs, self.enums, self.classes, self.functions
         )
     }
 }
@@ -333,6 +339,12 @@ pub enum AstExprKind {
         variant: String,
         args: Vec<AstExpr>,
         parenthesized: bool,
+    },
+    /// Direct instance call with an expression receiver.
+    MethodCall {
+        receiver: Box<AstExpr>,
+        method: String,
+        args: Vec<AstExpr>,
     },
     /// Unresolved field projection.
     Field {

@@ -1,4 +1,59 @@
-# Aether native compiler — LANGUAGE-PARITY-1
+# Aether native compiler — OOP-V1
+
+
+## Concrete class identity and lifecycle (OOP-V1)
+
+The native Linux x86-64 bootstrap admits concrete non-generic classes with
+non-null owning handles, shared identity, non-atomic strong ARC and direct
+instance methods. Class handles are **not Copy**: an owning lvalue aliases
+(retains once), while a fresh result transfers its ownership. Structs retain
+their existing inline value semantics.
+
+```aether
+class Counter {
+    int value;
+    public init(int value) { this.value = value; }
+    public mut int increment() { value = value + 1; return value; }
+    public int get() { return value; }
+}
+int main() {
+    Counter a = Counter(0);
+    Counter b = a;
+    b.increment();
+    return a.get(); // 1: both handles identify the same object
+}
+```
+
+Members default to private; classes default to module-internal. `public class`
+permits imported use. Read receivers are the default; receiver-derived writes
+require a declared `mut` method. Every method call acquires a receiver keepalive
+before evaluating arguments; fresh read receivers transfer their existing token.
+`==` and `!=` compare object identity for the same concrete class.
+
+A nonempty class requires one `init` that initializes every field before
+publication. Empty classes may omit `init`. Fields admit supported primitive
+scalars, aliases, finite concrete Copy/no-drop value types with available layout,
+and a private `Buffer<int>`. The last release destroys owning fields in reverse
+declaration order and frees the object. Initializers have no source result or
+value return; `this` is a nonescaping borrowed receiver.
+
+Inheritance, interfaces, generic classes, class graph fields, class-containing
+aggregates/containers/generic applications, interior refs/views, class-slot refs,
+nullable handles and user destructors remain outside this admission. Mut methods
+require an addressable writable receiver. Temporary field access is rejected;
+`Counter(0).get()` is supported. Initializer loops cannot establish new field
+initialization, and owning-field initialization must agree at branch joins.
+
+HIR/MIR/SSA expose and independently verify class identity, Alias/Transfer,
+publication, receiver capability, keepalive and cleanup. LLVM uses a private
+one-pointer handle and an eight-byte strong-count header; no public class ABI
+is promised. Programs without class use acquire no ARC runtime.
+
+See [the OOP-V1 report](../docs/architecture/OOP_V1_REPORT.md) for exact counter,
+corruption, regression and O0/O2 evidence. [OOP-ARCH-1](../docs/architecture/OOP_ARCH_1.md)
+remains the broader design. Run `cargo test -p aether-driver --test oop_v1` for
+the qualification and `python3 tests/measure-oop-v1.py --runs 7` for descriptive
+native cost samples. Executable examples are in `tests/programs/oop_v1_*.ae`.
 
 ## Program entry and source comments
 

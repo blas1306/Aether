@@ -1,0 +1,12 @@
+// The last Owner release destroys data and frees its backing before the object.
+class Owner {
+    Buffer<int> data;
+    public init(Buffer<int> data) { this.data = data; }
+    public int marker() { return 1; }
+}
+int main() {
+    Buffer<int> data = Buffer<int>(4, 8);
+    Owner x = Owner(data);
+    Owner y = x;
+    return y.marker();
+}

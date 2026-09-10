@@ -1,6 +1,7 @@
 //! LLVM backend for verified Vertical-16 program SSA.
 
 mod algebraic;
+mod classes;
 mod elementwise;
 mod mathematical;
 
@@ -59,6 +60,19 @@ impl Backend for LlvmTextBackend {
 pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let program = ssa.as_ssa();
     let types = &program.types;
+    let reachable = (!types.classes().is_empty()).then(|| classes::reachable_functions(program));
+    let has_class_runtime = reachable.as_ref().is_some_and(|reachable| {
+        program
+            .functions
+            .iter()
+            .filter(|f| reachable.contains(&f.id))
+            .any(|f| {
+                f.blocks
+                    .iter()
+                    .flat_map(|b| &b.instructions)
+                    .any(|i| matches!(i.op, SsaOp::Class(_)))
+            })
+    });
     let buffer_elements = types
         .entries()
         .filter_map(|(ty, data)| match data {
@@ -113,7 +127,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             _ => None,
         })
         .collect::<BTreeSet<_>>();
-    let has_owners = !fixed_elements.is_empty() || !list_elements.is_empty();
+    let has_owners = !fixed_elements.is_empty() || !list_elements.is_empty() || has_class_runtime;
     let mut output = String::new();
     writeln!(output, "; Aether NEXT-VERTICAL-18").unwrap();
     writeln!(
@@ -133,6 +147,9 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     writeln!(output, "declare void @llvm.trap() cold noreturn nounwind\n").unwrap();
     if has_owners {
         emit_runtime_boundary(&mut output);
+        if has_class_runtime {
+            classes::runtime(&mut output, types);
+        }
     }
 
     for (ty, data) in types.entries() {
@@ -201,12 +218,14 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     for (ty, _) in types.entries().filter(|(ty, _)| {
         is_codegen_concrete_type(types, *ty, &program.structs, &program.enums)
             && types.is_relocatable(*ty)
+            && (has_class_runtime || types.object_class(*ty).is_none())
     }) {
         emit_relocation_glue(&mut output, types, ty, &program.structs, &program.enums);
     }
     for (ty, _) in types.entries().filter(|(ty, _)| {
         is_codegen_concrete_type(types, *ty, &program.structs, &program.enums)
             && types.needs_drop(*ty)
+            && (has_class_runtime || types.object_class(*ty).is_none())
     }) {
         emit_drop_glue(&mut output, types, ty, &program.structs, &program.enums);
     }
@@ -265,6 +284,13 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     }
 
     for function in &program.functions {
+        if !has_class_runtime
+            && reachable
+                .as_ref()
+                .is_some_and(|r| !r.contains(&function.id))
+        {
+            continue;
+        }
         let signature = &program.signatures[function.id.0 as usize];
         emit_function(
             &mut output,
@@ -398,7 +424,9 @@ fn emit_relocation_glue(
     .unwrap();
     writeln!(output, "entry:").unwrap();
     match types.get(ty).expect("concrete relocation type") {
-        TypeData::Bool
+        TypeData::Class(_)
+        | TypeData::ClassToken { .. }
+        | TypeData::Bool
         | TypeData::Integer(_)
         | TypeData::Float(_)
         | TypeData::Reference { .. }
@@ -472,6 +500,9 @@ fn emit_drop_glue(
     .unwrap();
     writeln!(output, "entry:").unwrap();
     match types.get(ty).expect("concrete drop type") {
+        TypeData::Class(class) | TypeData::ClassToken { class, .. } => {
+            classes::drop_body(output, types, *class);
+        }
         TypeData::Buffer { element } => {
             emit_descriptor_free(output, types, *element, false, structs, enums);
         }
@@ -1066,6 +1097,16 @@ fn emit_function(
         }
         for instruction in &block.instructions {
             match &instruction.op {
+                SsaOp::Class(op) => classes::emit_op(
+                    output,
+                    op,
+                    instruction.result.0,
+                    types,
+                    signatures,
+                    modules,
+                    structs,
+                    enums,
+                ),
                 SsaOp::Use(operand) => writeln!(
                     output,
                     "  %v{} = select i1 true, {} {}, {} {}",
@@ -2827,6 +2868,10 @@ fn mangle_symbol_type(
         format!("{prefix}{}_{module}{}_{name}", module.len(), name.len())
     };
     match types.get(ty).expect("verified symbol type") {
+        TypeData::Class(id) | TypeData::ClassToken { class: id, .. } => {
+            let c = &types.classes()[id.0 as usize];
+            nominal(c.module, &c.name, 'c')
+        }
         TypeData::Bool => "b".into(),
         TypeData::Integer(integer) => format!("i{integer:?}"),
         TypeData::Float(float) => format!("f{float:?}"),
@@ -2965,7 +3010,9 @@ fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
             id.0,
             mangle_type_arguments(types, *args)
         ),
-        TypeData::Reference { .. } => "ptr".into(),
+        TypeData::Class(_) | TypeData::ClassToken { .. } | TypeData::Reference { .. } => {
+            "ptr".into()
+        }
         TypeData::Buffer { .. }
         | TypeData::Vector { .. }
         | TypeData::Array { .. }
@@ -2990,6 +3037,10 @@ fn mangle_type_arguments(types: &TypeArena, args: aether_frontend::TypeArgsId) -
 
 fn mangle_type(types: &TypeArena, ty: TypeId) -> String {
     match types.get(ty).expect("verified mangle type") {
+        TypeData::Class(id) => format!("c{}", id.0),
+        TypeData::ClassToken { class, kind } => {
+            format!("c{}_{}", class.0, classes::token_suffix(*kind))
+        }
         TypeData::Bool => "b".into(),
         TypeData::Integer(integer) => format!("i{integer:?}"),
         TypeData::Float(float) => format!("f{float:?}"),

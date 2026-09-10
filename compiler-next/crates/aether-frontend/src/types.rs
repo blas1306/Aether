@@ -328,6 +328,13 @@ impl IndexSemantics {
 /// not have a variant here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeData {
+    /// Nominal owning class handle, never structural Copy.
+    Class(crate::ClassId),
+    /// Non-source construction and receiver lifetime states.
+    ClassToken {
+        class: crate::ClassId,
+        kind: crate::ClassTokenKind,
+    },
     Bool,
     Integer(IntegerType),
     Float(FloatType),
@@ -485,6 +492,8 @@ impl TypeData {
 impl fmt::Display for TypeData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Class(id) => write!(f, "class#{}", id.0),
+            Self::ClassToken { class, kind } => write!(f, "class#{}::{kind:?}", class.0),
             Self::Bool => f.write_str("bool"),
             Self::Integer(v) => v.fmt(f),
             Self::Float(v) => v.fmt(f),
@@ -564,6 +573,7 @@ impl Drop for SemanticTimer<'_> {
 /// Production phase transitions move it forward with the program context.
 #[derive(Debug)]
 pub struct TypeArena {
+    pub(crate) classes: Vec<crate::ClassInfo>,
     data: Vec<TypeData>,
     ids: HashMap<TypeData, TypeId>,
     argument_lists: Vec<Vec<TypeId>>,
@@ -580,6 +590,7 @@ pub struct TypeArena {
 impl Clone for TypeArena {
     fn clone(&self) -> Self {
         Self {
+            classes: self.classes.clone(),
             data: self.data.clone(),
             ids: self.ids.clone(),
             argument_lists: self.argument_lists.clone(),
@@ -602,7 +613,8 @@ impl Clone for TypeArena {
 
 impl PartialEq for TypeArena {
     fn eq(&self, other: &Self) -> bool {
-        self.data == other.data
+        self.classes == other.classes
+            && self.data == other.data
             && self.ids == other.ids
             && self.argument_lists == other.argument_lists
             && self.argument_ids == other.argument_ids
@@ -623,11 +635,63 @@ impl Default for TypeArena {
 }
 
 impl TypeArena {
+    #[must_use]
+    pub fn classes(&self) -> &[crate::ClassInfo] {
+        &self.classes
+    }
+
+    /// Install a collected or completed class definition during unverified IR
+    /// assembly. Identities must be allocated in order; every phase verifier
+    /// independently validates fields, layout, methods and the destruction recipe.
+    pub fn register_class_definition(&mut self, definition: crate::ClassInfo) {
+        let index = definition.id.0 as usize;
+        if index == self.classes.len() {
+            self.classes.push(definition);
+        } else {
+            self.classes[index] = definition;
+        }
+    }
+
+    #[must_use]
+    pub fn class_id(&self, ty: TypeId) -> Option<crate::ClassId> {
+        match self.get(ty)? {
+            TypeData::Class(id) => Some(*id),
+            _ => None,
+        }
+    }
+    #[must_use]
+    pub fn object_class(&self, ty: TypeId) -> Option<crate::ClassId> {
+        match self.get(ty)? {
+            TypeData::Class(id) | TypeData::ClassToken { class: id, .. } => Some(*id),
+            _ => None,
+        }
+    }
+    #[must_use]
+    pub fn class_field(&self, id: crate::FieldId) -> Option<&crate::ClassFieldInfo> {
+        self.classes
+            .iter()
+            .flat_map(|c| &c.fields)
+            .find(|f| f.id == id)
+    }
+    #[must_use]
+    pub fn class_method(
+        &self,
+        id: crate::FunctionId,
+    ) -> Option<(crate::ClassId, &crate::ClassMethodInfo)> {
+        self.classes.iter().find_map(|c| {
+            c.methods
+                .iter()
+                .find(|m| m.function == id)
+                .map(|m| (c.id, m))
+        })
+    }
+
     /// Creates an arena with the complete scalar baseline interned in a stable
     /// order so same-source debugging dumps remain deterministic.
     #[must_use]
     pub fn new() -> Self {
         let mut arena = Self {
+            classes: Vec::new(),
             data: Vec::new(),
             ids: HashMap::new(),
             argument_lists: Vec::new(),
@@ -1216,6 +1280,17 @@ impl TypeArena {
         };
         let aggregate_ty = id;
         match data {
+            TypeData::Class(_)
+            | TypeData::ClassToken {
+                kind: crate::ClassTokenKind::Unpublished | crate::ClassTokenKind::Keepalive { .. },
+                ..
+            } => TypeProperties {
+                is_known: true,
+                is_copy: false,
+                is_relocatable: true,
+                is_storable: matches!(data, TypeData::Class(_)),
+                needs_drop: true,
+            },
             TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_) => TypeProperties {
                 is_known: true,
                 is_copy: true,
@@ -1223,7 +1298,8 @@ impl TypeArena {
                 is_storable: true,
                 needs_drop: false,
             },
-            TypeData::Reference { .. }
+            TypeData::ClassToken { .. }
+            | TypeData::Reference { .. }
             | TypeData::View { .. }
             | TypeData::VectorView { .. }
             | TypeData::MatrixView { .. } => TypeProperties {
@@ -1494,13 +1570,19 @@ impl TypeArena {
                     substitution,
                     visiting,
                 ),
+            Some(TypeData::Class(_)) => capability != Capability::Copy,
             Some(TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_)) => true,
             Some(
                 TypeData::Reference { .. }
                 | TypeData::View { .. }
                 | TypeData::VectorView { .. }
-                | TypeData::MatrixView { .. },
+                | TypeData::MatrixView { .. }
+                | TypeData::ClassToken {
+                    kind: crate::ClassTokenKind::Receiver { .. },
+                    ..
+                },
             ) => capability != Capability::Storable,
+            Some(TypeData::ClassToken { .. }) => capability == Capability::Relocatable,
             Some(
                 TypeData::Buffer { element }
                 | TypeData::Matrix { element }
@@ -1600,6 +1682,9 @@ impl TypeArena {
         kind: CollectionKind,
         id: TypeId,
     ) -> CollectionElementAdmission {
+        if self.contains_class(id) {
+            return CollectionElementAdmission::InvalidType;
+        }
         let _timer = self.semantic_timer("frontend.detail.collection_admission");
         if !self.is_valid(id) {
             return CollectionElementAdmission::InvalidType;
@@ -1648,6 +1733,11 @@ impl TypeArena {
     pub fn may_contain_list(&self, id: TypeId) -> bool {
         self.contains_generic(id)
             || self.contains_capability(id, 3, &HashMap::new(), &mut BTreeSet::new())
+    }
+
+    #[must_use]
+    pub fn contains_class(&self, id: TypeId) -> bool {
+        self.contains_capability(id, 4, &HashMap::new(), &mut BTreeSet::new())
     }
 
     #[must_use]
@@ -1740,6 +1830,8 @@ impl TypeArena {
                 substitution,
                 visiting,
             ),
+            Some(TypeData::Class(_)) => capability == 2 || capability == 4,
+            Some(TypeData::ClassToken { .. }) => capability == 0,
             Some(TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_)) | None => false,
         }
     }

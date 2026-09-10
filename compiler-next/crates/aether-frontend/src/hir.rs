@@ -12,7 +12,9 @@
     clippy::too_many_lines,
     clippy::unused_self
 )]
+mod classes;
 mod mathematical;
+use crate::{ClassId, ClassOp, ClassTokenKind};
 use mathematical::{
     concrete_behavior_op, math_element_op, matrix_matrix_recipe, matrix_vector_recipe,
     vector_product_recipe, verify_math_element_op, zero_value,
@@ -143,10 +145,12 @@ pub fn layout_of(
             let (size, align) = types.cached_layout(ty)?;
             TypeLayout { size, align }
         }
-        TypeData::Reference { .. } => TypeLayout {
-            size: u64::from(target.pointer_width / 8),
-            align: u64::from(target.pointer_width / 8),
-        },
+        TypeData::Class(_) | TypeData::ClassToken { .. } | TypeData::Reference { .. } => {
+            TypeLayout {
+                size: u64::from(target.pointer_width / 8),
+                align: u64::from(target.pointer_width / 8),
+            }
+        }
         TypeData::Buffer { .. }
         | TypeData::Vector { .. }
         | TypeData::Array { .. }
@@ -501,6 +505,9 @@ impl TypedHir {
             self.generic_functions,
             self.instances
         );
+        if !self.types.classes().is_empty() {
+            write!(d, "\nclasses: {:#?}", self.types.classes()).unwrap();
+        }
         for m in &self.modules {
             let f: Vec<_> = self.functions.iter().filter(|f| f.module == m.id).collect();
             write!(d, "\nmodule {:?} `{}` functions: {f:#?}", m.id, m.name).unwrap();
@@ -825,6 +832,8 @@ pub enum AlgebraicProductKind {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HirExprKind {
+    /// Resolved class identities, ownership uses and direct member effects.
+    Class(Box<ClassOp<HirExpr>>),
     AlgebraicValue {
         capability: AlgebraicCapability,
     },
@@ -1098,8 +1107,9 @@ pub fn collect_signatures(ast: ParsedAst) -> Result<DeclaredProgram, Vec<Diagnos
     })
 }
 pub fn collect_program_signatures(
-    program: ParsedProgram,
+    mut program: ParsedProgram,
 ) -> Result<DeclaredProgram, Vec<Diagnostic>> {
+    classes::expand_methods(&mut program)?;
     validate_program(&program)?;
     let imports: Vec<BTreeMap<String, ModuleId>> = program
         .modules
@@ -1133,6 +1143,13 @@ pub fn collect_program_signatures(
                     .structs()
                     .iter()
                     .map(|d| ("struct", &d.name, d.span)),
+            )
+            .chain(
+                module
+                    .ast
+                    .classes()
+                    .iter()
+                    .map(|d| ("class", &d.name, d.span)),
             )
             .chain(module.ast.enums().iter().map(|d| ("enum", &d.name, d.span)))
             .chain(
@@ -1199,6 +1216,7 @@ pub fn collect_program_signatures(
     // Allocation order is deterministic for dumps but has no semantic or ABI
     // meaning. Declaration identities make nominality explicit in TypeData.
     let mut types = TypeArena::new();
+    classes::register_identities(&program, &mut types);
     for (id, _, _) in &struct_decls {
         types.intern(TypeData::Struct(*id));
     }
@@ -1594,11 +1612,11 @@ pub fn collect_program_signatures(
         return Err(vec![diagnostic]);
     }
     for info in &structs {
-        if let Some(field) = info
-            .fields
-            .iter()
-            .find(|field| types.contains_reference(field.ty) || types.contains_view(field.ty))
-        {
+        if let Some(field) = info.fields.iter().find(|field| {
+            types.contains_class(field.ty)
+                || types.contains_reference(field.ty)
+                || types.contains_view(field.ty)
+        }) {
             return Err(vec![src(
                 Diagnostic::new(
                     "E0274",
@@ -1616,7 +1634,11 @@ pub fn collect_program_signatures(
             .variants
             .iter()
             .flat_map(|variant| &variant.payloads)
-            .find(|payload| types.contains_reference(payload.ty) || types.contains_view(payload.ty))
+            .find(|payload| {
+                types.contains_class(payload.ty)
+                    || types.contains_reference(payload.ty)
+                    || types.contains_view(payload.ty)
+            })
         {
             return Err(vec![src(
                 Diagnostic::new(
@@ -1650,7 +1672,7 @@ pub fn collect_program_signatures(
                 .iter()
                 .map(|parameter| (parameter.name.clone(), parameter.ty))
                 .collect::<BTreeMap<_, _>>();
-            let parameters = f
+            let mut parameters = f
                 .parameters
                 .iter()
                 .map(|p| {
@@ -1675,6 +1697,13 @@ pub fn collect_program_signatures(
                 })
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|d| vec![src(d, module)])?;
+            if let Some((class, method)) = types.class_method(id) {
+                let kind = ClassTokenKind::Receiver {
+                    mutable: method.mutable,
+                    initializing: method.initializing,
+                };
+                parameters[0].ty = types.intern(TypeData::ClassToken { class, kind });
+            }
             let return_type = resolve_type_in_module(
                 &f.return_type,
                 module.info.id,
@@ -1726,6 +1755,62 @@ pub fn collect_program_signatures(
                 return_type,
                 span: f.span,
             });
+        }
+    }
+    // Resolve class fields after the existing aggregate declarations.
+    for module in &program.modules {
+        for class in module.ast.classes() {
+            let cid = types
+                .classes
+                .iter()
+                .find(|c| c.module == module.info.id && c.name == class.name)
+                .unwrap()
+                .id;
+            for (public, field) in &class.fields {
+                let ty = resolve_type_in_module(
+                    &field.ty,
+                    module.info.id,
+                    &aliases,
+                    &struct_names,
+                    &enum_names,
+                    &imports,
+                    &module_names,
+                    &mut types,
+                    &BTreeMap::new(),
+                    &struct_arities,
+                    &enum_arities,
+                )
+                .map_err(|d| vec![src(d, module)])?;
+                let narrow_buffer = types.buffer_element(ty) == Some(TypeId::INT64) && !public;
+                if !narrow_buffer
+                    && (!types.guarantees_copy(ty)
+                        || types.contains_owning(ty)
+                        || types.contains_reference(ty)
+                        || types.contains_view(ty)
+                        || types.contains_generic(ty))
+                {
+                    return Err(vec![classes::error(
+                        "E0401",
+                        "class field requires a scalar/Copy value or private Buffer<int>; class graphs and interior storage are unavailable",
+                        field.span,
+                    )]);
+                }
+                let fields = &mut types.classes[cid.0 as usize].fields;
+                if fields.iter().any(|f| f.name == field.name) {
+                    return Err(vec![duplicate("class field", &field.name, field.span)]);
+                }
+                fields.push(crate::ClassFieldInfo {
+                    id: FieldId(next_field),
+                    class: cid,
+                    name: field.name.clone(),
+                    ty,
+                    public: *public,
+                    index: fields.len() as u32,
+                    offset: 0,
+                    span: field.span,
+                });
+                next_field += 1;
+            }
         }
     }
     let em = &program.modules[program.entry.0 as usize];
@@ -1891,6 +1976,13 @@ fn resolve_type_in_module(
             struct_arities,
             enum_arities,
         )?;
+        if types.contains_class(pointee) {
+            return Err(classes::error(
+                "E0406",
+                "class handle slot references require separate qualification",
+                ty.span,
+            ));
+        }
         return Ok(types.intern_reference(pointee, reference.mutable));
     }
     let target = if let Some(module) = &ty.module {
@@ -2138,6 +2230,23 @@ fn resolve_type_in_module(
             _ => unreachable!(),
         };
     }
+    if let Some(class) = types
+        .classes
+        .iter()
+        .find(|c| c.module == target && c.name == ty.name)
+    {
+        if !arguments.is_empty() {
+            return Err(generic_arity(ty, 0));
+        }
+        if target != current && !class.public {
+            return Err(classes::error(
+                "E0402",
+                "class is internal to its module",
+                ty.span,
+            ));
+        }
+        return Ok(types.id_of(TypeData::Class(class.id)).unwrap());
+    }
     if let Some(id) = struct_names[target.0 as usize].get(&ty.name).copied() {
         let expected = struct_arities[id.0 as usize];
         if arguments.len() != expected {
@@ -2322,6 +2431,14 @@ fn validate_generic_constraints(
     span: Span,
     inferred: bool,
 ) -> Result<(), Vec<Diagnostic>> {
+    if arguments.iter().any(|ty| types.contains_class(*ty)) {
+        return Err(vec![classes::error(
+            "E0409",
+            "class-containing generic applications require separate Alias qualification",
+            span,
+        )]);
+    }
+
     for (parameter, argument) in parameters.iter().zip(arguments) {
         for capability in &parameter.capabilities {
             if !types.guarantees_capability(*argument, *capability) {
@@ -2704,7 +2821,7 @@ fn compute_aggregate_layouts(
                 .map_or(TypeLayout { size: 0, align: 1 }, |(size, align)| {
                     TypeLayout { size, align }
                 }),
-            TypeData::Reference { .. } => {
+            TypeData::Class(_) | TypeData::ClassToken { .. } | TypeData::Reference { .. } => {
                 let bytes = u64::from(target.pointer_width / 8);
                 TypeLayout {
                     size: bytes,
@@ -2907,6 +3024,7 @@ pub fn analyze_bodies_for_target(
     )?;
     let mut functions = vec![];
     let mut types = std::mem::take(&mut d.types);
+    classes::compute_layouts(&mut types, &d.structs, &d.enums, target)?;
     for m in &d.program.modules {
         for f in m.ast.functions() {
             let id = FunctionId(functions.len() as u32);
@@ -3386,6 +3504,25 @@ impl Monomorphizer<'_> {
     ) -> Result<HirExpr, Vec<Diagnostic>> {
         let ty = self.substitute_type(expression.ty, substitution, expression.span)?;
         let kind = match &expression.kind {
+            HirExprKind::Class(op) => {
+                let mapped = op.map(|e| self.substitute_expr(e, substitution), |f| Ok(*f))?;
+                let mapped = mapped.map(
+                    |e| Ok(e.clone()),
+                    |target| match target {
+                        HirCallTarget::Declaration(function) => self
+                            .request(
+                                InstanceKey {
+                                    function: *function,
+                                    arguments: Vec::new(),
+                                },
+                                expression.span,
+                            )
+                            .map(HirCallTarget::Instance),
+                        HirCallTarget::Instance(_) => Ok(*target),
+                    },
+                )?;
+                HirExprKind::Class(Box::new(mapped))
+            }
             HirExprKind::Int(value) => HirExprKind::Int(*value),
             HirExprKind::Float(value) => HirExprKind::Float(*value),
             HirExprKind::Bool(value) => HirExprKind::Bool(*value),
@@ -3917,7 +4054,7 @@ fn compute_concrete_layouts(
             TypeData::Float(FloatType::Float64) => Some(TypeLayout { size: 8, align: 8 }),
             TypeData::Struct(id) => Some(structs[id.0 as usize].layout),
             TypeData::Enum(id) => Some(enums[id.0 as usize].layout),
-            TypeData::Reference { .. } => {
+            TypeData::Class(_) | TypeData::ClassToken { .. } | TypeData::Reference { .. } => {
                 let bytes = u64::from(target.pointer_width / 8);
                 Some(TypeLayout {
                     size: bytes,
@@ -4071,6 +4208,15 @@ fn analyze_function(
     target: TargetProperties,
 ) -> Result<GenericHirFunction, Vec<Diagnostic>> {
     let sig = &d.signatures[id.0 as usize];
+    crate::verify_class_signature(
+        types,
+        id,
+        module,
+        &sig.parameters.iter().map(|p| p.ty).collect::<Vec<_>>(),
+        sig.return_type,
+    )
+    .map_err(|m| vec![classes::error("E0402", m, sig.span)])?;
+    let class_method = types.class_method(id).map(|(c, m)| (c, m.clone()));
     let mut a = Analyzer {
         scopes: vec![BTreeMap::new()],
         locals: vec![],
@@ -4095,6 +4241,8 @@ fn analyze_function(
         enum_arities: &d.enum_arities,
         module,
         return_type: sig.return_type,
+        class_method,
+        initialized_fields: BTreeSet::new(),
         target,
     };
     let mut parameters = vec![];
@@ -4565,6 +4713,12 @@ impl OwnershipAnalysis<'_> {
 
     fn expr(&mut self, expr: &HirExpr) -> Result<(), Vec<Diagnostic>> {
         match &expr.kind {
+            HirExprKind::Class(op) => {
+                for operand in op.operands() {
+                    self.expr(operand)?;
+                }
+                Ok(())
+            }
             HirExprKind::Move(local) => self.move_local(*local, expr.span),
             HirExprKind::Local(local) => {
                 if self.types.guarantees_copy(expr.ty) {
@@ -5255,6 +5409,8 @@ struct Analyzer<'a> {
     module: ModuleId,
     return_type: TypeId,
     target: TargetProperties,
+    class_method: Option<(ClassId, crate::ClassMethodInfo)>,
+    initialized_fields: BTreeSet<FieldId>,
 }
 #[derive(Clone)]
 struct Checked {
@@ -5428,6 +5584,16 @@ impl Analyzer<'_> {
                     Some(s.span),
                 )]);
             }
+            if let AstStmtKind::Assign { place, .. } = &s.kind
+                && matches!(&place.kind,AstExprKind::Name(n) if n == "this")
+                && self.class_method.is_some()
+            {
+                return Err(vec![classes::error(
+                    "E0404",
+                    "this cannot be rebound",
+                    s.span,
+                )]);
+            }
             if let AstStmtKind::Assign { place, value } = &s.kind
                 && let (AstExprKind::Name(destination), AstExprKind::Name(source)) =
                     (&place.kind, &value.kind)
@@ -5448,6 +5614,13 @@ impl Analyzer<'_> {
                     name,
                     initializer,
                 } => {
+                    if name == "this" && self.class_method.is_some() {
+                        return Err(vec![classes::error(
+                            "E0404",
+                            "this cannot be rebound or shadowed",
+                            s.span,
+                        )]);
+                    }
                     if self.scopes.last().is_some_and(|x| x.contains_key(name)) {
                         return Err(vec![duplicate("local", name, s.span)]);
                     }
@@ -5466,6 +5639,16 @@ impl Analyzer<'_> {
                     HirStmtKind::Local { local, initializer }
                 }
                 AstStmtKind::Assign { place, value } => {
+                    if let Some(initializer) = self.class_field_write(place, value) {
+                        let initializer = initializer?;
+                        let kind = self.class_sink(initializer, s.span);
+                        statements.push(HirStmt {
+                            kind,
+                            span: s.span,
+                            compiler_generated: false,
+                        });
+                        continue;
+                    }
                     let place = self.resolve_expr_place(place, true)?;
                     if !self.types.guarantees_copy(place.ty)
                         && (!place.projections.is_empty()
@@ -5521,27 +5704,76 @@ impl Analyzer<'_> {
                     condition,
                     then_block,
                     else_block,
-                } => HirStmtKind::If {
-                    condition: self.expression(condition, Some(TypeId::BOOL))?.expr,
-                    then_block: self.block(then_block, true)?,
-                    else_block: else_block
+                } => {
+                    let condition = self.expression(condition, Some(TypeId::BOOL))?.expr;
+                    let before = self.initialized_fields.clone();
+                    let then_block = self.block(then_block, true)?;
+                    let then_fields = self.initialized_fields.clone();
+                    self.initialized_fields.clone_from(&before);
+                    let else_block = else_block
                         .as_ref()
-                        .map(|x| self.block(x, true))
-                        .transpose()?,
-                },
-                AstStmtKind::While { condition, body } => HirStmtKind::While {
-                    condition: self.expression(condition, Some(TypeId::BOOL))?.expr,
-                    body: self.block(body, true)?,
-                },
+                        .map(|b| self.block(b, true))
+                        .transpose()?;
+                    let else_fields = self.initialized_fields.clone();
+                    self.initialized_fields =
+                        then_fields.intersection(&else_fields).copied().collect();
+                    // An owning field cannot have a path-dependent replacement state.
+                    for field in then_fields.symmetric_difference(&else_fields) {
+                        if self
+                            .types
+                            .class_field(*field)
+                            .is_some_and(|f| self.types.needs_drop(f.ty))
+                        {
+                            return Err(vec![classes::error(
+                                "E0403",
+                                "owning field initialization must agree at a branch join",
+                                s.span,
+                            )]);
+                        }
+                    }
+                    HirStmtKind::If {
+                        condition,
+                        then_block,
+                        else_block,
+                    }
+                }
+                AstStmtKind::While { condition, body } => {
+                    let condition = self.expression(condition, Some(TypeId::BOOL))?.expr;
+                    let before = self.initialized_fields.clone();
+                    let body = self.block(body, true)?;
+                    if before != self.initialized_fields {
+                        return Err(vec![classes::error(
+                            "E0403",
+                            "field initialization inside a potentially repeated loop is unavailable",
+                            s.span,
+                        )]);
+                    }
+                    HirStmtKind::While { condition, body }
+                }
                 AstStmtKind::Match {
                     mode,
                     scrutinee,
                     arms,
                 } => self.match_statement(*mode, scrutinee, arms)?,
-                AstStmtKind::Return(v) => HirStmtKind::Return {
-                    value: self.expression(v, Some(self.return_type))?.expr,
-                    drops: Vec::new(),
-                },
+                AstStmtKind::Return(v) => {
+                    if let Some((class, method)) = &self.class_method
+                        && method.initializing
+                        && self.types.classes[class.0 as usize]
+                            .fields
+                            .iter()
+                            .any(|f| !self.initialized_fields.contains(&f.id))
+                    {
+                        return Err(vec![classes::error(
+                            "E0403",
+                            "init completes with uninitialized fields",
+                            s.span,
+                        )]);
+                    }
+                    HirStmtKind::Return {
+                        value: self.expression(v, Some(self.return_type))?.expr,
+                        drops: Vec::new(),
+                    }
+                }
             };
             let hs = HirStmt {
                 kind,
@@ -5566,8 +5798,10 @@ impl Analyzer<'_> {
             if matches!(callee.as_str(), "push" | "reserve"))
         {
             let initializer = self.expression(expression, None)?.expr;
-            if !matches!(initializer.kind, HirExprKind::Call { .. })
-                || !self.types.guarantees_copy(initializer.ty)
+            if !matches!(
+                initializer.kind,
+                HirExprKind::Call { .. } | HirExprKind::Class(_)
+            ) || !self.types.guarantees_copy(initializer.ty)
             {
                 return Err(vec![Diagnostic::new(
                     "E0311",
@@ -6052,6 +6286,9 @@ impl Analyzer<'_> {
         e: &AstExpr,
         expected: Option<TypeId>,
     ) -> Result<Checked, Vec<Diagnostic>> {
+        if let Some(result) = self.class_expression(e, expected) {
+            return result;
+        }
         if let AstExprKind::Call {
             callee,
             type_arguments,
@@ -6173,6 +6410,13 @@ impl Analyzer<'_> {
                 constant: None,
             },
             AstExprKind::Name(n) => {
+                if n == "this" && self.class_method.is_some() {
+                    return Err(vec![classes::error(
+                        "E0404",
+                        "borrowed this cannot escape or become an owning source value",
+                        e.span,
+                    )]);
+                }
                 if self.names[self.module.0 as usize].contains_key(n) {
                     return Err(vec![Diagnostic::new(
                         "E0215",
@@ -6189,6 +6433,14 @@ impl Analyzer<'_> {
                     expr: HirExpr {
                         kind: if self.types.guarantees_copy(self.locals[l.0 as usize].ty) {
                             HirExprKind::Local(l)
+                        } else if self.types.class_id(self.locals[l.0 as usize].ty).is_some() {
+                            HirExprKind::Class(Box::new(ClassOp::HandleAlias {
+                                source: HirExpr {
+                                    kind: HirExprKind::Local(l),
+                                    ty: self.locals[l.0 as usize].ty,
+                                    span: e.span,
+                                },
+                            }))
                         } else {
                             HirExprKind::Move(l)
                         },
@@ -6396,6 +6648,13 @@ impl Analyzer<'_> {
                 {
                     self.locals[local.0 as usize].address_taken = true;
                 }
+                if self.types.object_class(place.ty).is_some() {
+                    return Err(vec![classes::error(
+                        "E0406",
+                        "class handle/receiver references are unavailable in OOP-V1",
+                        e.span,
+                    )]);
+                }
                 let ty = self.types.intern_reference(place.ty, mutable);
                 Checked {
                     expr: HirExpr {
@@ -6558,7 +6817,9 @@ impl Analyzer<'_> {
             }
             Some(TypeData::Float(_)) => HirUnaryOp::NegateFloat,
             Some(
-                TypeData::Bool
+                TypeData::Class(_)
+                | TypeData::ClassToken { .. }
+                | TypeData::Bool
                 | TypeData::Struct(_)
                 | TypeData::Enum(_)
                 | TypeData::GenericParam(_)
@@ -8787,6 +9048,24 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
                 return Err(fail("HIR local identity invalid".into()));
             }
         }
+        crate::verify_class_signature(
+            &h.types,
+            s.function_id,
+            s.module,
+            &s.parameters.iter().map(|p| p.ty).collect::<Vec<_>>(),
+            s.return_type,
+        )
+        .map_err(&fail)?;
+        classes::verify_body(
+            &f.body,
+            &f.locals,
+            &f.parameters,
+            f.function_id,
+            s.module,
+            &h.types,
+            VerificationSignatures::Concrete(&h.instances),
+        )
+        .map_err(&fail)?;
         verify_block(
             &f.body,
             &VerificationFunction { locals: &f.locals },
@@ -8827,6 +9106,7 @@ fn verify_parametric_hir(
             None,
         )]
     };
+    crate::verify_class_metadata(types, structs, enums).map_err(&fail)?;
     for parameter in signatures
         .iter()
         .flat_map(|s| &s.generic_parameters)
@@ -8851,9 +9131,31 @@ fn verify_parametric_hir(
         if declaration.id != signature.id || declaration.id.0 as usize != index {
             return Err(fail("HIR parametric declaration identity invalid".into()));
         }
+        crate::verify_class_signature(
+            types,
+            signature.id,
+            signature.module,
+            &signature
+                .parameters
+                .iter()
+                .map(|p| p.ty)
+                .collect::<Vec<_>>(),
+            signature.return_type,
+        )
+        .map_err(&fail)?;
         let function = VerificationFunction {
             locals: &declaration.locals,
         };
+        classes::verify_body(
+            &declaration.body,
+            &declaration.locals,
+            &declaration.parameters,
+            declaration.id,
+            signature.module,
+            types,
+            VerificationSignatures::Parametric(signatures),
+        )
+        .map_err(&fail)?;
         verify_block(
             &declaration.body,
             &function,
@@ -9086,6 +9388,55 @@ fn verify_expr(
         )));
     }
     match &e.kind {
+        HirExprKind::Class(op) => {
+            for operand in op.operands() {
+                verify_expr(operand, f, sigs, structs, enums, types, fail)?;
+            }
+            crate::verify_class_op(
+                op,
+                e.ty,
+                types,
+                |e| Ok(e.ty),
+                |target| {
+                    match (sigs, target) {
+                        (
+                            VerificationSignatures::Parametric(ss),
+                            HirCallTarget::Declaration(id),
+                        ) => ss.get(id.0 as usize).filter(|s| s.id == *id).map(|s| {
+                            (
+                                s.id,
+                                s.parameters.iter().map(|p| p.ty).collect(),
+                                s.return_type,
+                            )
+                        }),
+                        (VerificationSignatures::Concrete(ss), HirCallTarget::Instance(id)) => {
+                            ss.get(id.0 as usize).filter(|s| s.id == *id).map(|s| {
+                                (
+                                    s.function_id,
+                                    s.parameters.iter().map(|p| p.ty).collect(),
+                                    s.return_type,
+                                )
+                            })
+                        }
+                        _ => None,
+                    }
+                    .ok_or_else(|| "invalid class call target".into())
+                },
+            )
+            .map_err(fail)?;
+            if let ClassOp::HandleAlias { source } = op.as_ref()
+                && !matches!(source.kind, HirExprKind::Local(_))
+            {
+                return Err(fail("HIR Alias requires a class lvalue".into()));
+            }
+            if let ClassOp::HandleTransfer { source } = op.as_ref()
+                && matches!(source.kind, HirExprKind::Local(_) | HirExprKind::Load(_))
+            {
+                return Err(fail(
+                    "HIR Transfer cannot consume an ordinary class lvalue".into(),
+                ));
+            }
+        }
         HirExprKind::Int(_) if types.integer_info(e.ty).is_none() => {
             return Err(fail("HIR integer literal mismatch".into()));
         }

@@ -1,7 +1,8 @@
 //! Explicit control-flow MIR and fail-closed verification.
 #![allow(missing_docs)]
 
-use aether_frontend::IndexSemantics;
+use aether_frontend::{ClassOp, ClassTokenKind, IndexSemantics};
+mod classes;
 use std::collections::{BTreeSet, VecDeque};
 use std::fmt::Write;
 use std::sync::Arc;
@@ -250,6 +251,8 @@ pub enum BinaryOp {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum Rvalue {
+    /// Ordered concrete object lifecycle/member operation.
+    Class(Box<ClassOp<Operand, InstanceId>>),
     /// Readable descriptor operands and an explicit structured initialization loop.
     /// Native oriented algebraic product with a closed concrete schedule.
     AlgebraicProduct {
@@ -579,6 +582,14 @@ impl FlowMir {
             "types (session-local):\n{type_table}\nentry: {:#?}\nmodules: {:#?}\nstructs: {:#?}\nenums: {:#?}\nsignatures: {:#?}",
             self.entry, self.modules, self.structs, self.enums, self.signatures
         );
+        if !self.types.classes().is_empty() {
+            write!(
+                dump,
+                "\nclasses (fields, capabilities, destruction): {:#?}",
+                self.types.classes()
+            )
+            .unwrap();
+        }
         for module in &self.modules {
             let functions: Vec<_> = self
                 .functions
@@ -794,6 +805,38 @@ impl Builder<'_> {
                             PlaceBase::Local(local) if place.projections.is_empty() => Some(*local),
                             _ => None,
                         };
+                        if self
+                            .types
+                            .class_id(value_type(&self.function, &value))
+                            .is_some()
+                        {
+                            let old = self.temporary(value_type(&self.function, &value));
+                            self.assign(
+                                Place {
+                                    base: PlaceBase::Local(old),
+                                    projections: vec![],
+                                },
+                                Rvalue::Move {
+                                    source: place.clone(),
+                                },
+                                statement.span,
+                            );
+                            self.assign(
+                                place,
+                                Rvalue::Move {
+                                    source: operand_place(&value),
+                                },
+                                statement.span,
+                            );
+                            self.emit_drop(
+                                Place {
+                                    base: PlaceBase::Local(old),
+                                    projections: vec![],
+                                },
+                                statement.span,
+                            );
+                            continue;
+                        }
                         if self.types.needs_drop(value_type(&self.function, &value)) {
                             self.emit_drop(place.clone(), statement.span);
                         }
@@ -1073,6 +1116,7 @@ impl Builder<'_> {
     #[allow(clippy::too_many_lines)]
     fn lower_expr(&mut self, expression: &HirExpr) -> Operand {
         match &expression.kind {
+            HirExprKind::Class(op) => self.lower_class(op, expression.ty, expression.span),
             HirExprKind::Int(value) => Operand::Int {
                 value: *value,
                 ty: expression.ty,
@@ -2683,6 +2727,8 @@ fn verify_mir_function(
         return Err(fail("MIR contains an unreachable block".into()));
     }
     verify_drop_flag_contract(function, signatures, types, fail)?;
+    aether_frontend::verify_class_metadata(types, structs, enums).map_err(fail)?;
+    classes::verify(function, signatures, types).map_err(fail)?;
     verify_ownership(function, signatures, types, fail)?;
     let all = vec![true; function.locals.len()];
     let mut initialized_in = vec![all.clone(); function.blocks.len()];
@@ -3107,6 +3153,47 @@ fn verify_ownership(
         for instruction in &block.instructions {
             let destination = place_root_local(&instruction.destination);
             match &instruction.value {
+                Rvalue::Class(op) => {
+                    for operand in op.operands() {
+                        if let Operand::Local(local) = operand
+                            && !types.is_copy(function.locals[local.0 as usize].ty)
+                            && state[local.0 as usize] != MirOwnerState::Owned
+                        {
+                            return Err(fail(
+                                "class operation uses a released/transferred owner".into(),
+                            ));
+                        }
+                    }
+                    let consumed = match op.as_ref() {
+                        ClassOp::PublishObject { object: source, .. }
+                        | ClassOp::HandleTransfer { source }
+                        | ClassOp::ReceiverKeepalive {
+                            source,
+                            transfer: true,
+                            ..
+                        } => vec![source],
+                        ClassOp::InitCall { args, .. } | ClassOp::DirectMethodCall { args, .. } => {
+                            args.iter().collect()
+                        }
+                        ClassOp::FieldWrite { value, .. } => vec![value],
+                        _ => Vec::new(),
+                    };
+                    for operand in consumed {
+                        if let Operand::Local(local) = operand
+                            && !types.is_copy(function.locals[local.0 as usize].ty)
+                        {
+                            consume_owner(
+                                function,
+                                types,
+                                &mut state,
+                                *local,
+                                "class transfer",
+                                fail,
+                            )?;
+                        }
+                    }
+                    initialize_owner(function, types, &mut state, destination, fail)?;
+                }
                 Rvalue::Move { source } => {
                     let source = place_root_local(source)
                         .ok_or_else(|| fail("MIR Move source has no owning local".into()))?;
@@ -3486,6 +3573,33 @@ fn validate_rvalue(
     initialized: &[bool],
 ) -> Result<(), String> {
     match value {
+        Rvalue::Class(op) => {
+            for operand in op.operands() {
+                validate_operand(function, operand, initialized)?;
+            }
+            if matches!(op.as_ref(), ClassOp::Construct { .. }) {
+                return Err("unlowered ClassInit reached MIR".into());
+            }
+            aether_frontend::verify_class_op(
+                op,
+                destination,
+                types,
+                |o| operand_type(function, o),
+                |id| {
+                    signatures
+                        .get(id.0 as usize)
+                        .filter(|s| s.id == *id)
+                        .map(|s| {
+                            (
+                                s.function_id,
+                                s.parameters.iter().map(|p| p.ty).collect(),
+                                s.return_type,
+                            )
+                        })
+                        .ok_or_else(|| "unknown class method target".into())
+                },
+            )?;
+        }
         Rvalue::Use(operand) => {
             validate_operand(function, operand, initialized)?;
             if operand_type(function, operand)? != destination {

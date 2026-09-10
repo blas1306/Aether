@@ -29,6 +29,32 @@ compiler or runtime implementation is part of that milestone; the existing
 pipeline remains unchanged. Its [report](OOP_ARCH_1_REPORT.md) records the
 evidence and recommends concrete class lifecycle before interface dispatch.
 
+[OOP-V1](OOP_V1_REPORT.md) implements that first bounded lifecycle vertical in
+`compiler-next`. The frontend owns ClassId/TypeData::Class, exact field/method
+identities, receiver token kinds, concrete layouts and verified reverse field
+drop recipes. A shared ClassOp vocabulary carries explicit Alias, Transfer,
+keepalive, field access, direct calls and identity equality. HIR ownership
+synthesis extends the existing central cleanup dataflow. MIR splits construction
+into ObjectAlloc → InitCall → PublishObject; borrowed initialization identity
+cannot become an owning class value prematurely. Ordinary Move/Drop operations
+carry transfer/release where their existing contracts apply.
+
+MIR and SSA independently recheck class metadata, access and receiver signatures,
+initialization and ordered lifecycle obligations. SSA maintains path-sensitive
+class/keepalive and direct Buffer ownership, including incoming phi transfers,
+without requiring MemorySSA. Backend lowering consumes verified effects and
+uses the existing allocation boundary plus private non-atomic ARC helpers.
+The one-pointer handle points to an eight-byte strong header followed by
+aligned fields. Static class drop glue makes a descriptor unnecessary. Strong
+underflow/overflow traps; final release destroys nested Buffer ownership before
+freeing the object. The helpers include private qualification counters.
+
+All bodies remain semantically verified. For class declarations with no reachable
+class use, closed direct-call reachability omits unreachable functions needing
+class helpers and suppresses class runtime/glue. Programs without class
+declarations preserve their existing emission path. No public ABI, interface
+carrier, virtual dispatch, inheritance or class graph storage is admitted.
+
 ## 1. Scope and evidence
 
 The repository contained 1,328 tracked files: 609 Python, 82 Rust, 169 Aether,

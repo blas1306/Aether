@@ -1,0 +1,1 @@
+class Counter{int value;public init(int n){value=n;}public mut int increment(){value=value+1;return value;}public int get(){return value;}}int main(){Counter a=Counter(0);int i=0;while(i<1000000){Counter b=a;b.increment();i=i+1;}if(a.get()==1000000){return 0;}return 1;}

@@ -1,7 +1,8 @@
 //! MIR-to-SSA promotion, phi construction, dominance and verification.
 #![allow(missing_docs)]
 
-use aether_frontend::IndexSemantics;
+use aether_frontend::{ClassOp, IndexSemantics};
+mod classes;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 use std::sync::Arc;
@@ -104,6 +105,8 @@ pub enum SsaPlaceBase {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum SsaOp {
+    /// Ordered concrete object lifecycle/member operation.
+    Class(Box<ClassOp<SsaOperand, InstanceId>>),
     /// Structured mathematical loop; inputs are Copy readable descriptors.
     /// Native oriented algebraic product with a closed concrete schedule.
     AlgebraicProduct {
@@ -448,6 +451,14 @@ impl SsaIr {
             "types (session-local):\n{type_table}\nentry: {:#?}\nmodules: {:#?}\nstructs: {:#?}\nenums: {:#?}\nsignatures: {:#?}",
             self.entry, self.modules, self.structs, self.enums, self.signatures
         );
+        if !self.types.classes().is_empty() {
+            write!(
+                dump,
+                "\nclasses (fields, capabilities, destruction): {:#?}",
+                self.types.classes()
+            )
+            .unwrap();
+        }
         for module in &self.modules {
             let functions: Vec<_> = self
                 .functions
@@ -786,6 +797,13 @@ fn rename_block(
 #[allow(clippy::too_many_lines)]
 fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> SsaOp {
     match value {
+        Rvalue::Class(op) => SsaOp::Class(Box::new(
+            op.map(
+                |o| Ok::<_, std::convert::Infallible>(rename_operand(o, stacks)),
+                |f| Ok(*f),
+            )
+            .unwrap(),
+        )),
         Rvalue::Use(operand) => SsaOp::Use(rename_operand(operand, stacks)),
         Rvalue::Load(place) => match &place.base {
             PlaceBase::Local(local)
@@ -1530,6 +1548,11 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
             .into_iter()
             .chain(operand_local(right))
             .collect(),
+        Rvalue::Class(op) => op
+            .operands()
+            .into_iter()
+            .filter_map(operand_local)
+            .collect(),
         Rvalue::Call { args, .. } => args.iter().filter_map(operand_local).collect(),
     }
 }
@@ -2040,6 +2063,8 @@ fn verify_ssa_function(
             SsaTerminator::Goto(_) | SsaTerminator::Trap(_) => {}
         }
     }
+    aether_frontend::verify_class_metadata(types, structs, enums).map_err(fail)?;
+    classes::verify(function, signatures, types, &operand_ty).map_err(fail)?;
     verify_vector_transpose_ownership(function, fail)?;
     verify_matrix_literal_ownership(function, types, fail)?;
     verify_take_protocol(function, types, fail)?;
@@ -2085,6 +2110,25 @@ fn verify_op(
         Ok(true)
     };
     match op {
+        SsaOp::Class(op) => {
+            if matches!(op.as_ref(), ClassOp::Construct { .. }) {
+                return Err("unlowered ClassInit reached SSA".into());
+            }
+            aether_frontend::verify_class_op(op, result, types, operand_ty, |id| {
+                signatures
+                    .get(id.0 as usize)
+                    .filter(|s| s.id == *id)
+                    .map(|s| {
+                        (
+                            s.function_id,
+                            s.parameters.iter().map(|p| p.ty).collect(),
+                            s.return_type,
+                        )
+                    })
+                    .ok_or_else(|| "unknown class method target".into())
+            })?;
+        }
+
         SsaOp::Use(operand) => {
             if operand_ty(operand)? != result || !types.is_copy(result) {
                 return Err("SSA copy type mismatch".into());
@@ -2990,6 +3034,7 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         | SsaOp::Binary { left, right, .. } => {
             vec![left, right]
         }
+        SsaOp::Class(op) => op.operands(),
         SsaOp::Call { args, .. } => args.iter().collect(),
     }
 }

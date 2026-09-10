@@ -12,8 +12,16 @@ authority for the existing compiler.
 
 [OOP-ARCH-1](OOP_ARCH_1.md) recommends the future struct/class/interface
 distinction, shared class ownership, receiver capabilities and bounded native
-implementation steps. It is design-only and admits no new language features.
-See the [design report](OOP_ARCH_1_REPORT.md) for scope and evidence.
+implementation steps. That milestone is design-only. [OOP-V1](OOP_V1_REPORT.md) now admits only concrete
+non-generic classes on the native Linux x86-64 bootstrap: non-null shared
+identity, non-atomic strong ARC, explicit Alias versus Transfer, direct methods,
+declared read/mut receiver capabilities and generated final field destruction.
+Class handles are not structural Copy; structs remain inline value types.
+A private Buffer<int> field qualifies recursive cleanup. No inheritance,
+interfaces, class graph fields, interior references, nullability, user destructors
+or generic class storage is admitted. See the [design report](OOP_ARCH_1_REPORT.md)
+for the broader future scope and the [semantic contract](AETHER_V1_SEMANTIC_CONTRACT.md#oop-v1--concrete-class-identity-and-lifecycle)
+for the bounded implemented rules.
 
 ## Identity
 

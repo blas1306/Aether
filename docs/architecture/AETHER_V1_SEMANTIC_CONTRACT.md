@@ -22,9 +22,9 @@ Keywords:
 
 [OOP-ARCH-1](OOP_ARCH_1.md) records proposed class/interface semantics, including
 ARC aliasing distinct from structural Copy and declared receiver capabilities.
-It is not implemented admission and does not replace the existing contracts
-below. Future verticals must qualify and explicitly incorporate the relevant
-rules. See the [design report](OOP_ARCH_1_REPORT.md).
+That proposal is not itself admission. The OOP-V1 section below incorporates
+only the qualified concrete class subset; interfaces and inheritance remain
+future work. See the [design report](OOP_ARCH_1_REPORT.md).
 
 ## 1. Values and fundamental types
 
@@ -2312,3 +2312,84 @@ scanning must consume a complete literal before trivia is consulted again.
 
 Qualification, exact position assertions, deterministic dumps and semantic
 comparisons are recorded in [LANGUAGE_PARITY_1_REPORT.md](LANGUAGE_PARITY_1_REPORT.md).
+
+
+## OOP-V1 — concrete class identity and lifecycle
+
+Status: **ADMITTED** in `compiler-next`, native Linux x86-64, single-threaded,
+abortive traps with no unwind. [Qualification and limitations](OOP_V1_REPORT.md).
+
+`class C { ... }` declares a module-owned nominal concrete class. It is effectively
+final: no inheritance syntax exists. Top-level visibility is internal by default;
+`public class` exports the type. Members default to private and may use `public`
+or `private`. Fields admit supported primitive scalars, transparent aliases,
+finite concrete Copy/no-drop structs/enums with available layout, and private
+`Buffer<int>`. Owning class edges, class-containing aggregates/containers,
+refs/views, generic class applications and other owning fields are rejected.
+Transparent aliases preserve ClassId. Public class APIs cannot expose internal
+class types.
+
+Each source class value denotes a live, fully initialized, non-null object.
+Its structural properties are Copy=false, Relocatable=true, needs_drop=true,
+and Storable=true only in admitted positions. This does not widen `T:Copy` or
+container admission. Struct, enum and mathematical value semantics are unchanged.
+
+One explicit `init(parameters) { ... }` is permitted, with no source result type
+or return value. Nonempty classes require it; empty classes may synthesize a
+zero-argument init. Construction `C(args)` evaluates arguments, allocates one
+complete object with one initial strong obligation, invokes the resolved init,
+and publishes only after all required fields are initialized. Storage bytes do
+not count as initialization. Reads before initialization and incomplete normal
+paths are errors. Copy-field replacement is allowed. Owning-field state must
+agree at joins; loops cannot establish previously uninitialized fields. Traps
+abort the process and may bypass cleanup of unpublished objects.
+
+`this` is a compiler-known borrowed identity, never an owning source value.
+It cannot be returned, rebound, aliased into a handle, stored, passed as an
+ordinary argument or used to create escaping references. During init it may
+initialize fields and read initialized Copy fields; it cannot invoke methods.
+Within methods, unshadowed field names and `this.field` resolve to the same
+FieldId, with locals/parameters taking precedence over implicit field names.
+
+Methods use `public int get()` or `public mut int increment()`. Read is the
+default and forbids receiver-derived writes and mut calls. Declared mut grants
+write capability, not uniqueness, exclusivity, purity or noalias. Other owning
+aliases can mutate the same object. All methods dispatch directly to resolved
+function identities. A receiver is evaluated once, before arguments. An explicit
+strong keepalive covers argument evaluation and the call; it is released after
+the result is obtained. A fresh receiver transfers its existing token instead
+of retaining. Read calls on temporary objects are admitted; mut calls require
+an addressable writable receiver. Field reads/writes on local handles obey
+visibility; temporary field access, owning-field extraction and all interior
+references/views are rejected.
+
+An owning class lvalue used by value performs **Alias**: evaluate once and retain
+once while preserving the source obligation. This applies to local bindings,
+by-value concrete parameters and lvalue returns. Fresh owned results perform
+**Transfer**, consuming their existing obligation without an extra retain.
+A borrowed receiver is a separate compiler-only use category. Assignment acquires
+the RHS, installs the new owner and then releases the old owner. Exact
+self-assignment is a no-op. Owning Buffer field replacement similarly evaluates
+the RHS, installs the new owner and destroys the previous field without leaving
+a source-visible hole. Returning an lvalue acquires the result before local
+cleanup; parameters and locals each release their own remaining obligation in
+reverse scope cleanup order on every normal path.
+
+`==` and `!=` compare identity for two values of the same ClassId. No field
+comparison, ordering, hashing or cross-class conversion is admitted.
+
+The last strong release executes the verified reverse owning-field drop recipe,
+including exactly one destruction of each initialized Buffer field, then frees
+the object exactly once. No user destructor exists. Strong counter zero on
+retain/release or maximum count on retain traps instead of wrapping. ARC is
+non-atomic; no weak reference, tracing GC, cycle collector, descriptor/vtable,
+RTTI API or public object ABI is added. The current private layout is one pointer
+per handle, an eight-byte strong-count header and target-aligned field payload.
+Semantic Alias/Transfer, publication and keepalive exist before backend lowering;
+correctness does not depend on optimization eliminating balanced ARC operations.
+
+HIR, MIR and SSA independently validate identities, signatures, access,
+receiver capabilities, initialization, publication and ownership cleanup.
+MIR/SSA preserve ordered object effects and verify normal-path token balance;
+SSA joins transfer one incoming obligation, never duplicate it. Programs with
+no reachable class use emit no ARC runtime, including unused class declarations.

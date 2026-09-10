@@ -22,8 +22,14 @@ pub fn parse(_source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<
     let mut structs = Vec::new();
     let mut enums = Vec::new();
     let mut functions = Vec::new();
+    let mut classes = Vec::new();
     while !parser.at(TokenKind::Eof) {
-        if parser.at(TokenKind::KwAlias) {
+        if parser.current().lexeme == "class" || parser.current().lexeme == "public" {
+            match parser.class_decl() {
+                Ok(class) => classes.push(class),
+                Err(error) => return Err(vec![error]),
+            }
+        } else if parser.at(TokenKind::KwAlias) {
             match parser.alias() {
                 Ok(alias) => aliases.push(alias),
                 Err(error) => return Err(vec![error]),
@@ -45,7 +51,12 @@ pub fn parse(_source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<
             }
         }
     }
-    if aliases.is_empty() && structs.is_empty() && enums.is_empty() && functions.is_empty() {
+    if classes.is_empty()
+        && aliases.is_empty()
+        && structs.is_empty()
+        && enums.is_empty()
+        && functions.is_empty()
+    {
         Err(vec![parser.error(
             "E0101",
             "expected at least one top-level declaration",
@@ -57,6 +68,7 @@ pub fn parse(_source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<
             structs,
             enums,
             functions,
+            classes,
         })
     }
 }
@@ -67,6 +79,108 @@ struct Parser {
 }
 
 impl Parser {
+    fn class_decl(&mut self) -> Result<crate::AstClass, Diagnostic> {
+        let start = self.current().span;
+        let public = if self.current().lexeme == "public" {
+            self.advance();
+            true
+        } else {
+            false
+        };
+        if self.current().lexeme != "class" {
+            return Err(self.error("E0400", "expected concrete class declaration"));
+        }
+        self.advance();
+        let name = self
+            .expect(TokenKind::Identifier, "expected class name")?
+            .lexeme;
+        self.expect(
+            TokenKind::LeftBrace,
+            "OOP-V1 class requires `{`; generics and inheritance are unavailable",
+        )?;
+        let mut fields = Vec::new();
+        let mut methods = Vec::new();
+        let mut initializer = None;
+        while !self.at(TokenKind::RightBrace) && !self.at(TokenKind::Eof) {
+            let public = match self.current().lexeme.as_str() {
+                "public" => {
+                    self.advance();
+                    true
+                }
+                "private" => {
+                    self.advance();
+                    false
+                }
+                _ => false,
+            };
+            let mutable = self.consume(TokenKind::KwMut).is_some();
+            if self.current().lexeme == "init" {
+                if mutable || initializer.is_some() {
+                    return Err(self.error(
+                        "E0400",
+                        "one initializer without a mut modifier is permitted",
+                    ));
+                }
+                let token = self.advance();
+                // Reuse parameter/block parsing, keeping init's source role explicit.
+                let function = self.function_tail(
+                    AstType {
+                        module: None,
+                        name: "int".into(),
+                        arguments: Vec::new(),
+                        reference: None,
+                        span: token.span,
+                    },
+                    "init".into(),
+                    token.span,
+                )?;
+                initializer = Some(crate::AstClassMethod {
+                    public,
+                    mutable: true,
+                    function,
+                });
+            } else {
+                let start = self.current().span;
+                let ty = self.ty()?;
+                let member = self.expect(TokenKind::Identifier, "expected field or method name")?;
+                if self.at(TokenKind::LeftParen) {
+                    let function = self.function_tail(ty, member.lexeme, start)?;
+                    methods.push(crate::AstClassMethod {
+                        public,
+                        mutable,
+                        function,
+                    });
+                } else {
+                    if mutable {
+                        return Err(self.error("E0400", "mut is a method receiver modifier"));
+                    }
+                    let end = self
+                        .expect(TokenKind::Semicolon, "expected `;` after class field")?
+                        .span;
+                    fields.push((
+                        public,
+                        AstField {
+                            ty,
+                            name: member.lexeme,
+                            span: start.through(end),
+                        },
+                    ));
+                }
+            }
+        }
+        let end = self
+            .expect(TokenKind::RightBrace, "expected `}` after class")?
+            .span;
+        Ok(crate::AstClass {
+            name,
+            public,
+            fields,
+            methods,
+            initializer,
+            span: start.through(end),
+        })
+    }
+
     fn enum_decl(&mut self) -> Result<AstEnum, Diagnostic> {
         let start = self.expect(TokenKind::KwEnum, "expected `enum`")?.span;
         let name = self
@@ -189,6 +303,15 @@ impl Parser {
         let name = self
             .expect(TokenKind::Identifier, "expected function name")?
             .lexeme;
+        self.function_tail(return_type, name, start)
+    }
+
+    fn function_tail(
+        &mut self,
+        return_type: AstType,
+        name: String,
+        start: crate::Span,
+    ) -> Result<AstFunction, Diagnostic> {
         let generic_parameters = self.generic_parameters()?;
         self.expect(TokenKind::LeftParen, "expected `(` after function name")?;
         let mut parameters = Vec::new();
@@ -761,6 +884,19 @@ impl Parser {
         loop {
             if self.consume(TokenKind::Dot).is_some() {
                 let member = self.expect(TokenKind::Identifier, "expected field name after `.`")?;
+                if self.consume(TokenKind::LeftParen).is_some() {
+                    let (args, end) = self.arguments()?;
+                    let span = expr.span.through(end);
+                    expr = AstExpr {
+                        kind: AstExprKind::MethodCall {
+                            receiver: Box::new(expr),
+                            method: member.lexeme,
+                            args,
+                        },
+                        span,
+                    };
+                    continue;
+                }
                 let span = expr.span.through(member.span);
                 expr = AstExpr {
                     kind: AstExprKind::Field {

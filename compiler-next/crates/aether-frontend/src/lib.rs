@@ -4,8 +4,10 @@ mod ast;
 mod diagnostic;
 mod hir;
 mod lexer;
+mod oop;
 mod parser;
 mod types;
+pub use oop::*;
 
 pub use ast::{
     AstAlias, AstBinaryOp, AstBlock, AstCapabilityConstraint, AstEnum, AstExpr, AstExprKind,
