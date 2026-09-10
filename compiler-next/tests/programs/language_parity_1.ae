@@ -1,0 +1,6 @@
+// program entry
+int main() {
+    /*
+     * no explicit return is required here
+     */
+}

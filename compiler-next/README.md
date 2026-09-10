@@ -1,4 +1,38 @@
-# Aether native compiler — MATH-ARCH-1
+# Aether native compiler — LANGUAGE-PARITY-1
+
+## Program entry and source comments
+
+The entry module selects exactly one non-generic `int main()` with zero
+parameters. `int` is canonical int64; existing transparent spellings such as
+`int64` and user aliases remain equivalent. Only that resolved entry function
+gets an implicit `return 0;` when normal control flow reaches its closing brace.
+Explicit returns remain valid and preserve their exit codes. Ordinary functions,
+including imported functions named `main`, still require explicit returns on
+every reachable path. There is no script mode, top-level execution or global
+executable initialization.
+
+```aether
+// program entry
+int main() {
+    /* No explicit return is required here. */
+}
+```
+
+`//` skips through the line ending or EOF; `/* ... */` skips through the first
+closing delimiter and does not nest. Comments are whitespace between tokens,
+never semantic nodes. An unterminated block comment produces lexer error E0002
+at its opening `/*`. Spans retain original UTF-8 byte offsets and source IDs;
+diagnostic lines and character columns come from the unchanged source. LF and
+CRLF remain supported. Division/multiplication and contiguous multi-character
+operators retain their tokenization. Strings remain outside the admitted slice.
+
+HIR shows an ordinary zero return marked `compiler_generated: true`, located
+at the closing brace and inserted before ownership cleanup. MIR/SSA/LLVM reuse
+ordinary returns; no runtime helper or backend fallthrough rule is added.
+See [LANGUAGE_PARITY_1_REPORT.md](../docs/architecture/LANGUAGE_PARITY_1_REPORT.md)
+for native exit-code, equivalence, diagnostic and regression evidence.
+
+## Mathematical architecture consolidation
 
 MATH-ARCH-1 consolidates the mathematical architecture through V33 without
 adding source features. Native multiplication resolves through

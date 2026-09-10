@@ -574,6 +574,8 @@ pub struct HirBlock {
 pub struct HirStmt {
     pub kind: HirStmtKind,
     pub span: Span,
+    /// Provenance only; generated returns use ordinary typing and lowering.
+    pub compiler_generated: bool,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HirStmtKind {
@@ -1740,7 +1742,10 @@ pub fn collect_program_signatures(
         )]);
     };
     let main = &signatures[entry.0 as usize];
-    if main.return_type != TypeId::INT64 || !main.parameters.is_empty() {
+    if main.return_type != TypeId::INT64
+        || !main.parameters.is_empty()
+        || !main.generic_parameters.is_empty()
+    {
         return Err(vec![src(
             Diagnostic::new(
                 "E0201",
@@ -3299,6 +3304,7 @@ impl Monomorphizer<'_> {
                     Ok(HirStmt {
                         kind,
                         span: statement.span,
+                        compiler_generated: statement.compiler_generated,
                     })
                 })
                 .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?,
@@ -4113,6 +4119,23 @@ fn analyze_function(
         });
     }
     let mut body = a.block(&f.body, false)?;
+    if id == d.entry && !definitely_returns(&body) {
+        // The parser's block span ends immediately after its closing `}`.
+        // Normalize before ownership so ordinary return cleanup is synthesized.
+        let span = Span::in_source(body.span.source, body.span.end - 1, body.span.end);
+        body.statements.push(HirStmt {
+            kind: HirStmtKind::Return {
+                value: HirExpr {
+                    kind: HirExprKind::Int(0),
+                    ty: TypeId::INT64,
+                    span,
+                },
+                drops: Vec::new(),
+            },
+            span,
+            compiler_generated: true,
+        });
+    }
     if !definitely_returns(&body) {
         return Err(vec![Diagnostic::new(
             "E0207",
@@ -5415,6 +5438,7 @@ impl Analyzer<'_> {
                 statements.push(HirStmt {
                     kind: HirStmtKind::Nop,
                     span: s.span,
+                    compiler_generated: false,
                 });
                 continue;
             }
@@ -5519,7 +5543,11 @@ impl Analyzer<'_> {
                     drops: Vec::new(),
                 },
             };
-            let hs = HirStmt { kind, span: s.span };
+            let hs = HirStmt {
+                kind,
+                span: s.span,
+                compiler_generated: false,
+            };
             ended = statement_returns(&hs);
             statements.push(hs)
         }

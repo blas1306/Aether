@@ -649,3 +649,24 @@ scaling and +/− remain unchanged. Row×Row, Column×Column, Matrix×Row and
 Column×Matrix remain rejected. Advanced decompositions belong to future STD
 LinearAlgebra. See [NEXT_VERTICAL_33_REPORT.md](NEXT_VERTICAL_33_REPORT.md)
 and the complete table in [compiler-next/README.md](../../compiler-next/README.md).
+
+
+## LANGUAGE-PARITY-1 — explicit program entry and source comments
+
+A program MUST have exactly one selected, non-generic `int main()` with zero
+parameters in its entry module. Canonical type identity remains authoritative:
+`int`, `int64` and transparent aliases of that type are equivalent spellings.
+Only this resolved function receives implicit `return 0;` on normal fallthrough.
+Explicit zero and nonzero returns remain valid and preserve the existing process
+exit-status path. Other non-void functions, including imported helpers named
+`main`, MUST retain missing-return rejection. No script mode, top-level
+executable statements, global executable initialization or synthetic main exists.
+
+Source comments are whitespace: `//` ends at the line ending or EOF, and
+`/* ... */` ends at the first `*/`, without nesting. Unterminated block comments
+MUST receive structured lexer diagnostic E0002 at the opening delimiter.
+Original source byte spans, source identities, diagnostic line numbers and
+character columns MUST be preserved, including LF and CRLF within comments.
+Comments MUST NOT become semantic IR nodes. The generated main return is
+explicit in HIR before ownership cleanup and ordinary MIR/SSA/LLVM lowering.
+See [LANGUAGE_PARITY_1_REPORT.md](LANGUAGE_PARITY_1_REPORT.md).

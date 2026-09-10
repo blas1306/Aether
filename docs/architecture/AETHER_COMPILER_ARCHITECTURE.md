@@ -2377,3 +2377,44 @@ Each requires an explicit decision about observable order, traps, aliasing,
 allocation and numeric behavior; none is designed here or implied by an
 optimization level. Full evidence and remaining risks are recorded in
 [MATH_ARCH_1_REPORT.md](MATH_ARCH_1_REPORT.md).
+
+
+## LANGUAGE-PARITY-1 — entry normalization and centralized trivia
+
+`aether-frontend/src/lexer.rs::skip_trivia` is the single authority for existing
+space/tab/CR/LF whitespace, `//` line comments (including EOF), and non-nesting
+`/* ... */` block comments. It advances the original UTF-8 byte cursor and emits
+E0002 at the opening `/*` if no closing delimiter exists. Token spans continue
+to slice the physical source; SourceFile remains the sole line/character-column
+authority, including LF/CRLF and Unicode comment content. `/`, `*` and contiguous
+multi-character operator scanners are unchanged. Comments do not reach parser,
+HIR, MIR or SSA. Strings remain unadmitted; future literal scanning must consume
+the whole token before reentering trivia skipping.
+
+`collect_program_signatures` selects the root module's main FunctionId and
+validates canonical int64, zero value parameters and zero generic parameters.
+This preserves transparent int/int64/user aliases and imported helper authority.
+Rejecting generic main here closes a prior monomorphizer assumption that could
+panic when the entry had no seeded non-generic instance. Existing missing-entry,
+conflict and invalid-signature diagnostic routes remain authoritative. Modules
+still have no script mode, top-level execution or global executable initializers.
+
+`analyze_function` normalizes only `id == DeclaredProgram.entry` when the existing
+`definitely_returns` predicate is false. It adds ordinary HirStmtKind::Return
+with HirExprKind::Int(0), canonical int64 and the block's final one-byte `}` span.
+HirStmt.compiler_generated is provenance visible in dumps and preserved during
+substitution; it never controls downstream semantic behavior. The return is
+inserted before synthesize_ownership, so local destruction follows the existing
+return cleanup path. Other non-void functions still reject fallthrough with
+E0207; explicit returns and definitely terminating if/match bodies stay intact.
+Nested control blocks work under the existing grammar; no standalone-block
+statement syntax is added.
+
+MIR lowers the value, performs the normal drop list and emits Return; SSA carries
+that terminator through ordinary construction and verification. LLVM is unchanged:
+its platform main calls the internal int64 entry, truncates to i32 and returns
+the process status. There is no backend-only implicit epilogue or new runtime
+facility. Tests compare complete LLVM byte-for-byte for explicit/implicit zero
+returns, including conditional fallthrough and Buffer cleanup. Comment insertion
+compares HIR/MIR/SSA after excluding only physical Span fields, and compares
+complete LLVM unchanged. See [LANGUAGE_PARITY_1_REPORT.md](LANGUAGE_PARITY_1_REPORT.md).

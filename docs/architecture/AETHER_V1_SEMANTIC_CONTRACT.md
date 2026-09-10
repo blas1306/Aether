@@ -2250,3 +2250,57 @@ separately from compilation snapshots. V0..V32 contracts remain unchanged.
 No new Vector product, Array/List dot, Hadamard, matmul function, One, user impl,
 BLAS, SIMD, reassociation or FMA is introduced. Advanced decompositions remain
 future STD LinearAlgebra work. See [NEXT_VERTICAL_33_REPORT.md](NEXT_VERTICAL_33_REPORT.md).
+
+
+## LANGUAGE-PARITY-1 — main fallthrough and source comments
+
+**ADMITTED** in compiler-next. The entry module MUST select exactly one function
+with signature `int main()`, zero parameters and no generic parameters. Return
+type checking uses canonical int64 identity: existing `int64` and transparent
+user aliases remain valid, as required by sections 1.2–1.3. bool, double/int32,
+parameterized and generic entry functions MUST be rejected with E0201. `void`
+and undeclared return types remain unsupported through existing type/parser
+diagnostics. Missing and conflicting entry declarations retain existing errors;
+empty/comment-only input retains the parser's E0101 rejection.
+
+Normal fallthrough in the resolved entry function MUST mean `return 0;`.
+Conditional explicit returns preserve their values; only the continuing path
+returns zero. An already definitely returning body receives no additional return.
+Ordinary non-void functions, including imported functions named `main`, MUST
+still fail with E0207 when the existing return analysis finds possible normal
+fallthrough. The analysis remains structural and conservative for loops; this
+milestone adds no general control-flow theorem proving. Modules remain
+containing declarations only: no script mode, synthesized main, top-level
+execution or global executable initialization is admitted.
+
+The implicit return MUST be explicit in HIR before ownership analysis. It uses
+an ordinary typed int64 zero, normal return cleanup, a compiler-generated
+provenance marker and the actual closing-brace span. The marker provides no
+verification or lowering exemption. MIR and SSA use their ordinary Return
+terminators. LLVM retains the platform wrapper that calls the Aether int64
+entry and truncates its result to i32; the platform exposes its usual process
+status. Explicit `return 0;` and `return 7;` remain valid, yielding native status
+0 and 7 on the admitted Linux x86-64 target. No runtime helper is introduced.
+
+`//` MUST ignore all content through the line ending or EOF without requiring a
+trailing newline. `/* ... */` MUST ignore content through the first `*/`,
+including source-looking code, quotes and `//`. Block comments do not nest:
+`/* outer /* inner */ tail */` leaves `tail */` for ordinary tokenization.
+Unterminated block comments MUST produce E0002, Phase::Lex, Syntax, with message
+`unterminated block comment` and the opening two-byte delimiter span.
+
+Whitespace and comments share one lexer trivia authority. Skipping MUST operate
+on the original source: no preprocessed buffer may shift offsets. Spans remain
+half-open UTF-8 byte ranges with SourceId. SourceFile derives one-based lines
+from LF and columns from Unicode scalar counts in the original line; CRLF is
+preserved. Existing CR whitespace handling is unchanged. Comments may appear
+where whitespace is legal, including generic binders, type arguments and math
+syntax, but MUST NOT join source token fragments: `< /*...*/ =` is not `<=`.
+Exact `//` and `/*` start comments; other `/` and `*` remain operators. A division
+slash directly followed by a comment opener needs separating whitespace to
+avoid forming `//`. Comments produce no parser-visible or semantic IR nodes.
+Strings remain unadmitted; this milestone adds no string syntax. Future string
+scanning must consume a complete literal before trivia is consulted again.
+
+Qualification, exact position assertions, deterministic dumps and semantic
+comparisons are recorded in [LANGUAGE_PARITY_1_REPORT.md](LANGUAGE_PARITY_1_REPORT.md).

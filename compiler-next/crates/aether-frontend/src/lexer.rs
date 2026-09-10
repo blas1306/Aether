@@ -112,9 +112,15 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
     let mut diagnostics = Vec::new();
     let mut cursor = 0;
     while cursor < bytes.len() {
+        if let Err(diagnostic) = skip_trivia(source, &mut cursor) {
+            diagnostics.push(diagnostic);
+            break;
+        }
+        if cursor == bytes.len() {
+            break;
+        }
         let start = cursor;
         match bytes[cursor] {
-            b' ' | b'\t' | b'\r' | b'\n' => cursor += 1,
             b'0'..=b'9' => {
                 cursor += 1;
                 while cursor < bytes.len() && bytes[cursor].is_ascii_digit() {
@@ -257,6 +263,47 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
     }
 }
 
+/// Skip trivia directly in the original byte buffer. Coordinates continue to
+/// come from `SourceFile`; no rewritten source or parser-visible trivia is used.
+fn skip_trivia(source: &SourceFile, cursor: &mut usize) -> Result<(), Diagnostic> {
+    let bytes = source.text.as_bytes();
+    loop {
+        match bytes.get(*cursor) {
+            Some(b' ' | b'\t' | b'\r' | b'\n') => *cursor += 1,
+            Some(b'/') if bytes.get(*cursor + 1) == Some(&b'/') => {
+                *cursor += 2;
+                while bytes
+                    .get(*cursor)
+                    .is_some_and(|b| !matches!(b, b'\r' | b'\n'))
+                {
+                    *cursor += 1;
+                }
+            }
+            Some(b'/') if bytes.get(*cursor + 1) == Some(&b'*') => {
+                let start = *cursor;
+                *cursor += 2;
+                // Non-nesting: only the first closing delimiter has meaning.
+                while *cursor < bytes.len()
+                    && !(bytes[*cursor] == b'*' && bytes.get(*cursor + 1) == Some(&b'/'))
+                {
+                    *cursor += 1;
+                }
+                if *cursor == bytes.len() {
+                    return Err(Diagnostic::new(
+                        "E0002",
+                        Phase::Lex,
+                        DiagnosticCategory::Syntax,
+                        "unterminated block comment",
+                        Some(Span::in_source(source.id, start, start + 2)),
+                    ));
+                }
+                *cursor += 2;
+            }
+            _ => return Ok(()),
+        }
+    }
+}
+
 fn push(tokens: &mut Vec<Token>, kind: TokenKind, source: &SourceFile, start: usize, end: usize) {
     tokens.push(Token {
         kind,
@@ -307,5 +354,133 @@ mod tests {
         let tokens = lex(&SourceFile::new("ops.ae", "int main(){return 4/2%1;}")).unwrap();
         assert!(tokens.iter().any(|token| token.kind == TokenKind::Slash));
         assert!(tokens.iter().any(|token| token.kind == TokenKind::Percent));
+    }
+
+    #[test]
+    fn comments_are_whitespace_with_physical_spans() {
+        for newline in ["\n", "\r\n"] {
+            let text = format!(
+                "// whole line{newline}int /* type */ x = 1; // trailing{newline}\
+                 /* λ{newline}int main() {{ return 7; }} // \"string\" + - * /{newline}*/\
+                 x/*between*/+1; x// adjacent{newline}+1; // EOF"
+            );
+            let source = SourceFile::with_id(crate::SourceId(7), "comments.ae", text);
+            let tokens = lex(&source).unwrap();
+            let plain = lex(&SourceFile::new("plain.ae", "int x = 1; x+1; x+1;")).unwrap();
+            assert_eq!(
+                tokens
+                    .iter()
+                    .map(|t| (t.kind, &t.lexeme))
+                    .collect::<Vec<_>>(),
+                plain
+                    .iter()
+                    .map(|t| (t.kind, &t.lexeme))
+                    .collect::<Vec<_>>()
+            );
+            for token in &tokens {
+                assert_eq!(token.span.source, source.id);
+                assert_eq!(&source.text[token.span.start..token.span.end], token.lexeme);
+            }
+            assert_eq!(source.line_column(tokens[5].span.start), (5, 3));
+            assert_eq!(tokens.last().unwrap().span.start, source.text.len());
+        }
+    }
+
+    #[test]
+    fn comments_do_not_merge_operators_or_nest() {
+        use TokenKind::{Equal, Greater, Identifier, Less};
+
+        let source = SourceFile::new(
+            "operators.ae",
+            "a / b * c <= d >= e == f != g => h & i < /*gap*/ = >/**/= =/**/= !/**/=",
+        );
+        // `!` alone remains invalid, even with a following separated `=`.
+        let error = lex(&source).unwrap_err();
+        assert_eq!(error.len(), 1);
+        assert_eq!(error[0].message, "unexpected character `!`");
+        let valid = SourceFile::new("operators.ae", source.text.replace("!/**/=", ""));
+        let kinds = lex(&valid)
+            .unwrap()
+            .iter()
+            .map(|t| t.kind)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            kinds,
+            vec![
+                Identifier,
+                TokenKind::Slash,
+                Identifier,
+                TokenKind::Star,
+                Identifier,
+                TokenKind::LessEqual,
+                Identifier,
+                TokenKind::GreaterEqual,
+                Identifier,
+                TokenKind::EqualEqual,
+                Identifier,
+                TokenKind::BangEqual,
+                Identifier,
+                TokenKind::FatArrow,
+                Identifier,
+                TokenKind::Ampersand,
+                Identifier,
+                Less,
+                Equal,
+                Greater,
+                Equal,
+                Equal,
+                Equal,
+                TokenKind::Eof,
+            ]
+        );
+        let tokens = lex(&SourceFile::new("nest.ae", "/* outer /* inner */ tail */")).unwrap();
+        assert_eq!(
+            tokens.iter().map(|t| t.lexeme.as_str()).collect::<Vec<_>>(),
+            ["tail", "*", "/", ""]
+        );
+    }
+
+    #[test]
+    fn unterminated_block_comment_points_to_opening() {
+        for text in ["/*", "/* never closed", "/* λ\n*", "/* outer /* inner"] {
+            let source =
+                SourceFile::with_id(crate::SourceId(3), "open.ae", format!(" \r\n  {text}"));
+            let errors = lex(&source).unwrap_err();
+            assert_eq!(errors.len(), 1);
+            let error = &errors[0];
+            assert_eq!(error.code, "E0002");
+            assert_eq!(error.phase, Phase::Lex);
+            assert_eq!(error.category, DiagnosticCategory::Syntax);
+            assert_eq!(error.span, Some(Span::in_source(source.id, 5, 7)));
+            assert_eq!(
+                error.render(Some(&source)),
+                "open.ae:2:3: error[E0002] (lex): unterminated block comment"
+            );
+        }
+    }
+
+    #[test]
+    fn diagnostic_after_multiline_comment_has_exact_position() {
+        for newline in ["\n", "\r\n"] {
+            let source = SourceFile::new(
+                "position.ae",
+                format!("/*{newline}line 2{newline}line 3{newline}*/{newline}@"),
+            );
+            let error = &lex(&source).unwrap_err()[0];
+            assert_eq!(
+                error.span,
+                Some(Span::new(source.text.len() - 1, source.text.len()))
+            );
+            assert_eq!(source.line_column(error.span.unwrap().start), (5, 1));
+            assert_eq!(
+                error.render(Some(&source)),
+                "position.ae:5:1: error[E0001] (lex): unexpected character `@`"
+            );
+            let unicode = SourceFile::new("unicode.ae", "/*λ*/ @");
+            assert_eq!(
+                unicode.line_column(lex(&unicode).unwrap_err()[0].span.unwrap().start),
+                (1, 7)
+            );
+        }
     }
 }
