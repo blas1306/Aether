@@ -8,6 +8,13 @@ in this reconstruction is implemented and qualified, the current
 [`AETHER_LANGUAGE_SPEC_V1.md`](../aether/AETHER_LANGUAGE_SPEC_V1.md) remains the
 authority for the existing compiler.
 
+## OOP architecture proposal
+
+[OOP-ARCH-1](OOP_ARCH_1.md) recommends the future struct/class/interface
+distinction, shared class ownership, receiver capabilities and bounded native
+implementation steps. It is design-only and admits no new language features.
+See the [design report](OOP_ARCH_1_REPORT.md) for scope and evidence.
+
 ## Identity
 
 Aether is a general-purpose, statically typed, ahead-of-time compiled language

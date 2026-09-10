@@ -18,6 +18,14 @@ Keywords:
 - **OPEN DECISION**: insufficient evidence to choose safely.  Alternatives and
   their consequences are stated; implementation MUST NOT choose accidentally.
 
+## OOP architecture proposal boundary
+
+[OOP-ARCH-1](OOP_ARCH_1.md) records proposed class/interface semantics, including
+ARC aliasing distinct from structural Copy and declared receiver capabilities.
+It is not implemented admission and does not replace the existing contracts
+below. Future verticals must qualify and explicitly incorporate the relevant
+rules. See the [design report](OOP_ARCH_1_REPORT.md).
+
 ## 1. Values and fundamental types
 
 ### 1.1 Primitive set — DECIDED

@@ -21,6 +21,14 @@ This document complements the normative
 [`AETHER_V1_SEMANTIC_CONTRACT.md`](AETHER_V1_SEMANTIC_CONTRACT.md).  “Current”
 always means the audited commit.  “Candidate” is design, not implemented fact.
 
+## OOP architecture proposal
+
+[OOP-ARCH-1](OOP_ARCH_1.md) designs future class identity, interface carriers,
+ownership operations and HIR/MIR/SSA/LLVM verification responsibilities. No
+compiler or runtime implementation is part of that milestone; the existing
+pipeline remains unchanged. Its [report](OOP_ARCH_1_REPORT.md) records the
+evidence and recommends concrete class lifecycle before interface dispatch.
+
 ## 1. Scope and evidence
 
 The repository contained 1,328 tracked files: 609 Python, 82 Rust, 169 Aether,
