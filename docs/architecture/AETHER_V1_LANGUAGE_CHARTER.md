@@ -12,13 +12,20 @@ authority for the existing compiler.
 
 [OOP-ARCH-1](OOP_ARCH_1.md) recommends the future struct/class/interface
 distinction, shared class ownership, receiver capabilities and bounded native
-implementation steps. That milestone is design-only. [OOP-V1](OOP_V1_REPORT.md) now admits only concrete
+implementation steps. That milestone is design-only. [OOP-V1](OOP_V1_REPORT.md) admits concrete
 non-generic classes on the native Linux x86-64 bootstrap: non-null shared
 identity, non-atomic strong ARC, explicit Alias versus Transfer, direct methods,
 declared read/mut receiver capabilities and generated final field destruction.
 Class handles are not structural Copy; structs remain inline value types.
-A private Buffer<int> field qualifies recursive cleanup. No inheritance,
-interfaces, class graph fields, interior references, nullability, user destructors
+A private Buffer<int> field qualifies recursive cleanup. [OOP-V2](OOP_V2_REPORT.md)
+admits flat, non-generic, nominal interfaces implemented explicitly by classes
+with `class C : I1, I2`. Public implementations match all requirement types and
+receiver modes exactly. Interface values own the same object through a private
+object/witness carrier, with Alias/Transfer and keepalive semantics, static
+immutable witnesses, indirect interface calls and concrete final destruction.
+Locals, concrete parameters and returns are admitted; interface equality,
+aggregate/container storage, struct boxing and default bodies are not.
+No inheritance, class graph fields, interior references, nullability, user destructors
 or generic class storage is admitted. See the [design report](OOP_ARCH_1_REPORT.md)
 for the broader future scope and the [semantic contract](AETHER_V1_SEMANTIC_CONTRACT.md#oop-v1--concrete-class-identity-and-lifecycle)
 for the bounded implemented rules.

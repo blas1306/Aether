@@ -1,0 +1,19 @@
+interface Access {
+    int get();
+    mut int increment();
+}
+class Counter : Access {
+    int value;
+    public init(int value) { this.value = value; }
+    public int get() { return value; }
+    public mut int increment() { value = value + 1; return value; }
+}
+int main() {
+    Access i = Counter(0);
+    int n = 0;
+    while (n < 10000) {
+        Access j = i;
+        n = n + 1;
+    }
+    return 0;
+}

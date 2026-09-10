@@ -60,7 +60,8 @@ impl Backend for LlvmTextBackend {
 pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let program = ssa.as_ssa();
     let types = &program.types;
-    let reachable = (!types.classes().is_empty()).then(|| classes::reachable_functions(program));
+    let reachable = (!types.classes().is_empty() || !types.interfaces().is_empty())
+        .then(|| classes::reachable_functions(program));
     let has_class_runtime = reachable.as_ref().is_some_and(|reachable| {
         program
             .functions
@@ -73,6 +74,24 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
                     .any(|i| matches!(i.op, SsaOp::Class(_)))
             })
     });
+    let has_interface_runtime = program
+        .functions
+        .iter()
+        .filter(|f| reachable.as_ref().is_none_or(|r| r.contains(&f.id)))
+        .any(|f| {
+            let signature = &program.signatures[f.id.0 as usize];
+            signature
+                .parameters
+                .iter()
+                .map(|p| p.ty)
+                .chain(std::iter::once(signature.return_type))
+                .any(|ty| types.interface_identity(ty).is_some())
+                || f.blocks
+                    .iter()
+                    .flat_map(|b| &b.instructions)
+                    .any(|i| types.interface_identity(i.ty).is_some())
+        });
+    let has_class_runtime = has_class_runtime || has_interface_runtime;
     let buffer_elements = types
         .entries()
         .filter_map(|(ty, data)| match data {
@@ -149,6 +168,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         emit_runtime_boundary(&mut output);
         if has_class_runtime {
             classes::runtime(&mut output, types);
+            classes::witnesses(&mut output, program);
         }
     }
 
@@ -219,6 +239,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         is_codegen_concrete_type(types, *ty, &program.structs, &program.enums)
             && types.is_relocatable(*ty)
             && (has_class_runtime || types.object_class(*ty).is_none())
+            && (has_interface_runtime || types.interface_identity(*ty).is_none())
     }) {
         emit_relocation_glue(&mut output, types, ty, &program.structs, &program.enums);
     }
@@ -226,6 +247,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         is_codegen_concrete_type(types, *ty, &program.structs, &program.enums)
             && types.needs_drop(*ty)
             && (has_class_runtime || types.object_class(*ty).is_none())
+            && (has_interface_runtime || types.interface_identity(*ty).is_none())
     }) {
         emit_drop_glue(&mut output, types, ty, &program.structs, &program.enums);
     }
@@ -284,10 +306,9 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     }
 
     for function in &program.functions {
-        if !has_class_runtime
-            && reachable
-                .as_ref()
-                .is_some_and(|r| !r.contains(&function.id))
+        if reachable
+            .as_ref()
+            .is_some_and(|r| !r.contains(&function.id))
         {
             continue;
         }
@@ -424,7 +445,9 @@ fn emit_relocation_glue(
     .unwrap();
     writeln!(output, "entry:").unwrap();
     match types.get(ty).expect("concrete relocation type") {
-        TypeData::Class(_)
+        TypeData::Interface(_)
+        | TypeData::InterfaceKeepalive { .. }
+        | TypeData::Class(_)
         | TypeData::ClassToken { .. }
         | TypeData::Bool
         | TypeData::Integer(_)
@@ -484,6 +507,7 @@ fn emit_relocation_glue(
 
 /// Emit centralized recursive destruction glue. Collection elements are
 /// destroyed in reverse index order and only the initialized prefix is read.
+#[allow(clippy::too_many_lines)]
 fn emit_drop_glue(
     output: &mut String,
     types: &TypeArena,
@@ -500,6 +524,9 @@ fn emit_drop_glue(
     .unwrap();
     writeln!(output, "entry:").unwrap();
     match types.get(ty).expect("concrete drop type") {
+        TypeData::Interface(_) | TypeData::InterfaceKeepalive { .. } => {
+            output.push_str("  %object = extractvalue { ptr, ptr } %value, 0\n  %witness = extractvalue { ptr, ptr } %value, 1\n  %release = load ptr, ptr %witness\n  call void %release(ptr %object)\n  ret void\n}\n");
+        }
         TypeData::Class(class) | TypeData::ClassToken { class, .. } => {
             classes::drop_body(output, types, *class);
         }
@@ -1101,6 +1128,7 @@ fn emit_function(
                     output,
                     op,
                     instruction.result.0,
+                    instruction.ty,
                     types,
                     signatures,
                     modules,
@@ -2856,6 +2884,7 @@ fn bootstrap_symbol(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn mangle_symbol_type(
     types: &TypeArena,
     ty: TypeId,
@@ -2868,6 +2897,10 @@ fn mangle_symbol_type(
         format!("{prefix}{}_{module}{}_{name}", module.len(), name.len())
     };
     match types.get(ty).expect("verified symbol type") {
+        TypeData::Interface(id) | TypeData::InterfaceKeepalive { interface: id, .. } => {
+            let i = &types.interfaces()[id.0 as usize];
+            nominal(i.module, &i.name, 'j')
+        }
         TypeData::Class(id) | TypeData::ClassToken { class: id, .. } => {
             let c = &types.classes()[id.0 as usize];
             nominal(c.module, &c.name, 'c')
@@ -3010,6 +3043,7 @@ fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
             id.0,
             mangle_type_arguments(types, *args)
         ),
+        TypeData::Interface(_) | TypeData::InterfaceKeepalive { .. } => "{ ptr, ptr }".into(),
         TypeData::Class(_) | TypeData::ClassToken { .. } | TypeData::Reference { .. } => {
             "ptr".into()
         }
@@ -3037,6 +3071,10 @@ fn mangle_type_arguments(types: &TypeArena, args: aether_frontend::TypeArgsId) -
 
 fn mangle_type(types: &TypeArena, ty: TypeId) -> String {
     match types.get(ty).expect("verified mangle type") {
+        TypeData::Interface(id) => format!("iface{}", id.0),
+        TypeData::InterfaceKeepalive { interface, mutable } => {
+            format!("iface{}_keepalive_{mutable}", interface.0)
+        }
         TypeData::Class(id) => format!("c{}", id.0),
         TypeData::ClassToken { class, kind } => {
             format!("c{}_{}", class.0, classes::token_suffix(*kind))

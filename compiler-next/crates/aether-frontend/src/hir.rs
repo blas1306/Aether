@@ -145,6 +145,13 @@ pub fn layout_of(
             let (size, align) = types.cached_layout(ty)?;
             TypeLayout { size, align }
         }
+        TypeData::Interface(_) | TypeData::InterfaceKeepalive { .. } => {
+            let size = u64::from(target.pointer_width / 8);
+            TypeLayout {
+                size: size * 2,
+                align: size,
+            }
+        }
         TypeData::Class(_) | TypeData::ClassToken { .. } | TypeData::Reference { .. } => {
             TypeLayout {
                 size: u64::from(target.pointer_width / 8),
@@ -1155,6 +1162,13 @@ pub fn collect_program_signatures(
             .chain(
                 module
                     .ast
+                    .interfaces()
+                    .iter()
+                    .map(|d| ("interface", &d.name, d.span)),
+            )
+            .chain(
+                module
+                    .ast
                     .functions()
                     .iter()
                     .map(|d| ("function", &d.name, d.span)),
@@ -1217,6 +1231,28 @@ pub fn collect_program_signatures(
     // meaning. Declaration identities make nominality explicit in TypeData.
     let mut types = TypeArena::new();
     classes::register_identities(&program, &mut types);
+    for module in &program.modules {
+        for i in module.ast.interfaces() {
+            let id = crate::InterfaceId(types.interfaces.len() as u32);
+            types.register_interface_definition(crate::InterfaceInfo {
+                id,
+                module: module.info.id,
+                name: i.name.clone(),
+                public: i.public,
+                requirements: Vec::new(),
+                span: i.span,
+            });
+            types.intern(TypeData::Interface(id));
+            types.intern(TypeData::InterfaceKeepalive {
+                interface: id,
+                mutable: false,
+            });
+            types.intern(TypeData::InterfaceKeepalive {
+                interface: id,
+                mutable: true,
+            });
+        }
+    }
     for (id, _, _) in &struct_decls {
         types.intern(TypeData::Struct(*id));
     }
@@ -1757,6 +1793,175 @@ pub fn collect_program_signatures(
             });
         }
     }
+    for c in &mut types.classes {
+        for m in &mut c.methods {
+            let s = &signatures[m.function.0 as usize];
+            m.parameters = s.parameters[1..].iter().map(|p| p.ty).collect();
+            m.result = s.return_type;
+        }
+    }
+    // Resolve interface contracts and explicit nominal relations.
+    for module in &program.modules {
+        for source in module.ast.interfaces() {
+            let iid = types
+                .interfaces
+                .iter()
+                .find(|i| i.module == module.info.id && i.name == source.name)
+                .unwrap()
+                .id;
+            let mut requirements = Vec::new();
+            for (index, r) in source.requirements.iter().enumerate() {
+                let mut resolve = |ty: &AstType| {
+                    resolve_type_in_module(
+                        ty,
+                        module.info.id,
+                        &aliases,
+                        &struct_names,
+                        &enum_names,
+                        &imports,
+                        &module_names,
+                        &mut types,
+                        &BTreeMap::new(),
+                        &struct_arities,
+                        &enum_arities,
+                    )
+                    .map_err(|d| vec![src(d, module)])
+                };
+                let parameters = r
+                    .parameters
+                    .iter()
+                    .map(|p| resolve(&p.ty))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result = resolve(&r.result)?;
+                for ty in parameters.iter().chain(std::iter::once(&result)) {
+                    validate_type_constraints(&types, *ty, &structs, &enums, r.span)
+                        .map_err(|ds| ds.into_iter().map(|d| src(d, module)).collect::<Vec<_>>())?;
+                }
+                requirements.push(crate::RequirementInfo {
+                    id: crate::RequirementId {
+                        interface: iid,
+                        index: index as u32,
+                    },
+                    name: r.name.clone(),
+                    mutable: r.mutable,
+                    parameters,
+                    result,
+                    span: r.span,
+                });
+            }
+            types.interfaces[iid.0 as usize].requirements = requirements;
+        }
+    }
+    for module in &program.modules {
+        for source in module.ast.classes() {
+            let cid = types
+                .classes
+                .iter()
+                .find(|c| c.module == module.info.id && c.name == source.name)
+                .unwrap()
+                .id;
+            for relation in &source.relations {
+                let ty = resolve_type_in_module(
+                    relation,
+                    module.info.id,
+                    &aliases,
+                    &struct_names,
+                    &enum_names,
+                    &imports,
+                    &module_names,
+                    &mut types,
+                    &BTreeMap::new(),
+                    &struct_arities,
+                    &enum_arities,
+                )
+                .map_err(|d| vec![src(d, module)])?;
+                let iid = types.interface_id(ty).ok_or_else(|| {
+                    vec![classes::error(
+                        "E0411",
+                        if types.class_id(ty).is_some() {
+                            "inheritance not yet admitted"
+                        } else {
+                            "class relation target must be an interface"
+                        },
+                        relation.span,
+                    )]
+                })?;
+                if types.classes[cid.0 as usize].interfaces.contains(&iid) {
+                    return Err(vec![src(
+                        classes::error(
+                            "E0412",
+                            "duplicate canonical interface conformance",
+                            relation.span,
+                        ),
+                        module,
+                    )]);
+                }
+                if source.public && !types.interfaces[iid.0 as usize].public {
+                    return Err(vec![src(
+                        classes::error(
+                            "E0412",
+                            "public class conformance exposes internal interface",
+                            relation.span,
+                        ),
+                        module,
+                    )]);
+                }
+                types.classes[cid.0 as usize].interfaces.push(iid);
+                let mut slots = Vec::new();
+                for r in &types.interfaces[iid.0 as usize].requirements {
+                    let m = types.classes[cid.0 as usize]
+                        .methods
+                        .iter()
+                        .find(|m| m.name == r.name && !m.initializing)
+                        .ok_or_else(|| {
+                            vec![classes::error(
+                                "E0412",
+                                format!("missing interface requirement {}", r.name),
+                                source.span,
+                            )]
+                        })?;
+                    if !m.public
+                        || m.mutable != r.mutable
+                        || m.parameters != r.parameters
+                        || m.result != r.result
+                    {
+                        return Err(vec![src(
+                            classes::error(
+                                "E0412",
+                                format!(
+                                    "requirement {} needs an exact public method with matching receiver, parameters and result",
+                                    r.name
+                                ),
+                                relation.span,
+                            ),
+                            module,
+                        )]);
+                    }
+                    slots.push(crate::WitnessSlot {
+                        requirement: r.id,
+                        method: m.function,
+                    });
+                }
+                types.register_witness(crate::WitnessInfo {
+                    id: crate::WitnessId(types.witnesses.len() as u32),
+                    class: cid,
+                    interface: iid,
+                    slots,
+                });
+            }
+        }
+    }
+    crate::verify_interface_metadata(&types).map_err(|m| {
+        vec![classes::error(
+            "E0412",
+            m,
+            program.modules[0]
+                .ast
+                .interfaces()
+                .first()
+                .map_or(Span::new(0, 0), |i| i.span),
+        )]
+    })?;
     // Resolve class fields after the existing aggregate declarations.
     for module in &program.modules {
         for class in module.ast.classes() {
@@ -2229,6 +2434,23 @@ fn resolve_type_in_module(
             "ViewMut" => Ok(types.intern_view(element, true)),
             _ => unreachable!(),
         };
+    }
+    if let Some(i) = types
+        .interfaces
+        .iter()
+        .find(|i| i.module == target && i.name == ty.name)
+    {
+        if !arguments.is_empty() {
+            return Err(generic_arity(ty, 0));
+        }
+        if target != current && !i.public {
+            return Err(classes::error(
+                "E0412",
+                "interface is internal to its module",
+                ty.span,
+            ));
+        }
+        return Ok(types.id_of(TypeData::Interface(i.id)).unwrap());
     }
     if let Some(class) = types
         .classes
@@ -2821,7 +3043,11 @@ fn compute_aggregate_layouts(
                 .map_or(TypeLayout { size: 0, align: 1 }, |(size, align)| {
                     TypeLayout { size, align }
                 }),
-            TypeData::Class(_) | TypeData::ClassToken { .. } | TypeData::Reference { .. } => {
+            TypeData::Class(_)
+            | TypeData::ClassToken { .. }
+            | TypeData::Interface(_)
+            | TypeData::InterfaceKeepalive { .. }
+            | TypeData::Reference { .. } => {
                 let bytes = u64::from(target.pointer_width / 8);
                 TypeLayout {
                     size: bytes,
@@ -4054,7 +4280,11 @@ fn compute_concrete_layouts(
             TypeData::Float(FloatType::Float64) => Some(TypeLayout { size: 8, align: 8 }),
             TypeData::Struct(id) => Some(structs[id.0 as usize].layout),
             TypeData::Enum(id) => Some(enums[id.0 as usize].layout),
-            TypeData::Class(_) | TypeData::ClassToken { .. } | TypeData::Reference { .. } => {
+            TypeData::Class(_)
+            | TypeData::ClassToken { .. }
+            | TypeData::Interface(_)
+            | TypeData::InterfaceKeepalive { .. }
+            | TypeData::Reference { .. } => {
                 let bytes = u64::from(target.pointer_width / 8);
                 Some(TypeLayout {
                     size: bytes,
@@ -6433,7 +6663,7 @@ impl Analyzer<'_> {
                     expr: HirExpr {
                         kind: if self.types.guarantees_copy(self.locals[l.0 as usize].ty) {
                             HirExprKind::Local(l)
-                        } else if self.types.class_id(self.locals[l.0 as usize].ty).is_some() {
+                        } else if self.types.is_object_owner(self.locals[l.0 as usize].ty) {
                             HirExprKind::Class(Box::new(ClassOp::HandleAlias {
                                 source: HirExpr {
                                     kind: HirExprKind::Local(l),
@@ -6817,7 +7047,9 @@ impl Analyzer<'_> {
             }
             Some(TypeData::Float(_)) => HirUnaryOp::NegateFloat,
             Some(
-                TypeData::Class(_)
+                TypeData::Interface(_)
+                | TypeData::InterfaceKeepalive { .. }
+                | TypeData::Class(_)
                 | TypeData::ClassToken { .. }
                 | TypeData::Bool
                 | TypeData::Struct(_)
@@ -8199,6 +8431,15 @@ impl Analyzer<'_> {
                 self.readable_math_operand(ra, None)?,
             )
         };
+        if self.types.interface_id(l.expr.ty).is_some()
+            || self.types.interface_id(r.expr.ty).is_some()
+        {
+            return Err(vec![classes::error(
+                "E0414",
+                "interface operators are not admitted",
+                span,
+            )]);
+        }
         let lv = self.types.vector_like_info(l.expr.ty);
         let rv = self.types.vector_like_info(r.expr.ty);
         let lm = self.types.matrix_like_element(l.expr.ty);
@@ -8444,6 +8685,46 @@ impl Analyzer<'_> {
         let Some(to) = expected else { return Ok(c) };
         if c.expr.ty == to {
             return Ok(c);
+        }
+        if let (Some(class), Some(interface)) =
+            (self.types.class_id(c.expr.ty), self.types.interface_id(to))
+        {
+            let w = self
+                .types
+                .witnesses()
+                .iter()
+                .find(|w| w.class == class && w.interface == interface)
+                .ok_or_else(|| {
+                    vec![classes::error(
+                        "E0413",
+                        "class has no declared conformance to target interface",
+                        c.expr.span,
+                    )]
+                })?;
+            let span = c.expr.span;
+            let (source, transfer) = match c.expr.kind {
+                HirExprKind::Class(op) if matches!(op.as_ref(), ClassOp::HandleAlias { .. }) => {
+                    let ClassOp::HandleAlias { source } = *op else {
+                        unreachable!()
+                    };
+                    (source, false)
+                }
+                _ => (c.expr, true),
+            };
+            return Ok(Checked {
+                expr: HirExpr {
+                    kind: HirExprKind::Class(Box::new(ClassOp::InterfaceAdapt {
+                        class,
+                        interface,
+                        witness: w.id,
+                        source,
+                        transfer,
+                    })),
+                    ty: to,
+                    span,
+                },
+                constant: None,
+            });
         }
         let kind = match (self.types.get(c.expr.ty), self.types.get(to)) {
             (Some(TypeData::Integer(a)), Some(TypeData::Integer(b))) if a.can_widen_to(*b) => {

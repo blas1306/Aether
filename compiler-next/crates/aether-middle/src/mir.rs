@@ -807,8 +807,7 @@ impl Builder<'_> {
                         };
                         if self
                             .types
-                            .class_id(value_type(&self.function, &value))
-                            .is_some()
+                            .is_object_owner(value_type(&self.function, &value))
                         {
                             let old = self.temporary(value_type(&self.function, &value));
                             self.assign(
@@ -3166,15 +3165,20 @@ fn verify_ownership(
                     }
                     let consumed = match op.as_ref() {
                         ClassOp::PublishObject { object: source, .. }
+                        | ClassOp::InterfaceAdapt {
+                            source,
+                            transfer: true,
+                            ..
+                        }
                         | ClassOp::HandleTransfer { source }
                         | ClassOp::ReceiverKeepalive {
                             source,
                             transfer: true,
                             ..
                         } => vec![source],
-                        ClassOp::InitCall { args, .. } | ClassOp::DirectMethodCall { args, .. } => {
-                            args.iter().collect()
-                        }
+                        ClassOp::InitCall { args, .. }
+                        | ClassOp::DirectMethodCall { args, .. }
+                        | ClassOp::InterfaceCall { args, .. } => args.iter().collect(),
                         ClassOp::FieldWrite { value, .. } => vec![value],
                         _ => Vec::new(),
                     };

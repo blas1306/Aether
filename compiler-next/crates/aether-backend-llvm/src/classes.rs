@@ -19,6 +19,18 @@ pub(super) fn reachable_functions(
             match &instruction.op {
                 SsaOp::Call { callee, .. } => pending.push(*callee),
                 SsaOp::Class(op) => match op.as_ref() {
+                    ClassOp::InterfaceAdapt { witness, .. } => {
+                        for slot in &program.types.witnesses()[witness.0 as usize].slots {
+                            pending.push(
+                                program
+                                    .signatures
+                                    .iter()
+                                    .find(|s| s.function_id == slot.method)
+                                    .unwrap()
+                                    .id,
+                            );
+                        }
+                    }
                     ClassOp::DirectMethodCall { method, .. } => pending.push(*method),
                     ClassOp::InitCall { initializer, .. } => pending.push(*initializer),
                     _ => (),
@@ -76,13 +88,82 @@ pub(super) fn emit_op(
     output: &mut String,
     op: &ClassOp<SsaOperand, aether_frontend::InstanceId>,
     result: u32,
+    result_type: TypeId,
     types: &TypeArena,
     signatures: &[FunctionInstanceInfo],
     modules: &[ModuleInfo],
     structs: &[StructInfo],
     enums: &[EnumInfo],
 ) {
+    if types.interface_identity(result_type).is_some() {
+        match op {
+            ClassOp::HandleAlias { source }
+            | ClassOp::ReceiverKeepalive {
+                source,
+                transfer: false,
+                ..
+            } => {
+                writeln!(output, "  %obj{result} = extractvalue {{ ptr, ptr }} {}, 0\n  call void @aether_object_retain(ptr %obj{result})\n  %v{result} = select i1 true, {{ ptr, ptr }} {}, {{ ptr, ptr }} {}",llvm_operand(source),llvm_operand(source),llvm_operand(source)).unwrap();
+                return;
+            }
+            ClassOp::HandleTransfer { source }
+            | ClassOp::ReceiverKeepalive {
+                source,
+                transfer: true,
+                ..
+            } => {
+                writeln!(
+                    output,
+                    "  %v{result} = select i1 true, {{ ptr, ptr }} {}, {{ ptr, ptr }} {}",
+                    llvm_operand(source),
+                    llvm_operand(source)
+                )
+                .unwrap();
+                return;
+            }
+            _ => (),
+        }
+    }
     match op {
+        ClassOp::InterfaceAdapt {
+            witness,
+            source,
+            transfer,
+            ..
+        } => {
+            if !transfer {
+                writeln!(
+                    output,
+                    "  call void @aether_object_retain(ptr {})",
+                    llvm_operand(source)
+                )
+                .unwrap();
+            }
+            writeln!(output,"  %carrier{result} = insertvalue {{ ptr, ptr }} poison, ptr {}, 0\n  %v{result} = insertvalue {{ ptr, ptr }} %carrier{result}, ptr @aether_witness_{}, 1",llvm_operand(source),witness.0).unwrap();
+        }
+        ClassOp::InterfaceCall {
+            requirement,
+            slot,
+            receiver,
+            args,
+        } => {
+            let r = types.requirement(*requirement).unwrap();
+            writeln!(output,"  %obj{result} = extractvalue {{ ptr, ptr }} {}, 0\n  %wit{result} = extractvalue {{ ptr, ptr }} {}, 1\n  %slot{result} = getelementptr ptr, ptr %wit{result}, i64 {}\n  %target{result} = load ptr, ptr %slot{result}",llvm_operand(receiver),llvm_operand(receiver),slot+1).unwrap();
+            let arguments = std::iter::once(format!("ptr %obj{result}"))
+                .chain(
+                    args.iter()
+                        .zip(&r.parameters)
+                        .map(|(a, t)| format!("{} {}", llvm_type(types, *t), llvm_operand(a))),
+                )
+                .collect::<Vec<_>>()
+                .join(", ");
+            writeln!(
+                output,
+                "  %v{result} = call {} %target{result}({arguments})",
+                llvm_type(types, r.result)
+            )
+            .unwrap();
+        }
         ClassOp::ObjectAlloc { class } => writeln!(
             output,
             "  %v{result} = call ptr @aether_object_alloc_{}()",
@@ -191,5 +272,60 @@ pub(super) fn emit_op(
         )
         .unwrap(),
         ClassOp::Construct { .. } => unreachable!("ClassInit must be lowered before LLVM"),
+    }
+}
+
+pub(super) fn witnesses(output: &mut String, program: &aether_middle::SsaIr) {
+    let reachable = reachable_functions(program);
+    let used = program
+        .functions
+        .iter()
+        .filter(|f| reachable.contains(&f.id))
+        .flat_map(|f| &f.blocks)
+        .flat_map(|b| &b.instructions)
+        .filter_map(|i| {
+            if let SsaOp::Class(op) = &i.op
+                && let ClassOp::InterfaceAdapt { witness, .. } = op.as_ref()
+            {
+                Some(*witness)
+            } else {
+                None
+            }
+        })
+        .collect::<BTreeSet<_>>();
+    for id in used {
+        let w = &program.types.witnesses()[id.0 as usize];
+        let ty = program.types.id_of(TypeData::Class(w.class)).unwrap();
+        let mut slots = vec![format!(
+            "ptr @aether_drop_{}",
+            mangle_type(&program.types, ty)
+        )];
+        for s in &w.slots {
+            let sig = program
+                .signatures
+                .iter()
+                .find(|f| f.function_id == s.method)
+                .unwrap();
+            // The erased and concrete receivers both lower to ptr. All remaining
+            // parameter/result types are exact; no ABI adaptation thunk is needed.
+            slots.push(format!(
+                "ptr @{}",
+                bootstrap_symbol(
+                    sig,
+                    &program.modules,
+                    &program.structs,
+                    &program.enums,
+                    &program.types
+                )
+            ));
+        }
+        writeln!(
+            output,
+            "@aether_witness_{} = internal constant [{} x ptr] [{}]",
+            id.0,
+            slots.len(),
+            slots.join(", ")
+        )
+        .unwrap();
     }
 }

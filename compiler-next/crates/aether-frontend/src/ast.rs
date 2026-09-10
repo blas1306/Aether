@@ -11,9 +11,15 @@ pub struct ParsedAst {
     pub(crate) enums: Vec<AstEnum>,
     pub(crate) functions: Vec<AstFunction>,
     pub(crate) classes: Vec<crate::AstClass>,
+    pub(crate) interfaces: Vec<crate::AstInterface>,
 }
 
 impl ParsedAst {
+    /// Flat interface declarations in source order.
+    #[must_use]
+    pub fn interfaces(&self) -> &[crate::AstInterface] {
+        &self.interfaces
+    }
     /// Concrete class declarations in source order.
     #[must_use]
     pub fn classes(&self) -> &[crate::AstClass] {
@@ -53,8 +59,14 @@ impl ParsedAst {
     #[must_use]
     pub fn dump(&self) -> String {
         format!(
-            "imports: {:#?}\naliases: {:#?}\nstructs: {:#?}\nenums: {:#?}\nclasses: {:#?}\nfunctions: {:#?}",
-            self.imports, self.aliases, self.structs, self.enums, self.classes, self.functions
+            "imports: {:#?}\naliases: {:#?}\nstructs: {:#?}\nenums: {:#?}\nclasses: {:#?}\ninterfaces: {:#?}\nfunctions: {:#?}",
+            self.imports,
+            self.aliases,
+            self.structs,
+            self.enums,
+            self.classes,
+            self.interfaces,
+            self.functions
         )
     }
 }

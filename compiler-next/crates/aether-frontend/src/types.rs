@@ -330,6 +330,15 @@ impl IndexSemantics {
 pub enum TypeData {
     /// Nominal owning class handle, never structural Copy.
     Class(crate::ClassId),
+    /// Nominal owning adapted view of a class object.
+    Interface(crate::InterfaceId),
+    /// Internal owning receiver stability token.
+    InterfaceKeepalive {
+        /// Exact contract identity.
+        interface: crate::InterfaceId,
+        /// Writable object access, never exclusivity.
+        mutable: bool,
+    },
     /// Non-source construction and receiver lifetime states.
     ClassToken {
         class: crate::ClassId,
@@ -492,6 +501,10 @@ impl TypeData {
 impl fmt::Display for TypeData {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Interface(id) => write!(f, "interface#{}", id.0),
+            Self::InterfaceKeepalive { interface, mutable } => {
+                write!(f, "interface#{}::keepalive({mutable})", interface.0)
+            }
             Self::Class(id) => write!(f, "class#{}", id.0),
             Self::ClassToken { class, kind } => write!(f, "class#{}::{kind:?}", class.0),
             Self::Bool => f.write_str("bool"),
@@ -574,6 +587,8 @@ impl Drop for SemanticTimer<'_> {
 #[derive(Debug)]
 pub struct TypeArena {
     pub(crate) classes: Vec<crate::ClassInfo>,
+    pub(crate) interfaces: Vec<crate::InterfaceInfo>,
+    pub(crate) witnesses: Vec<crate::WitnessInfo>,
     data: Vec<TypeData>,
     ids: HashMap<TypeData, TypeId>,
     argument_lists: Vec<Vec<TypeId>>,
@@ -591,6 +606,8 @@ impl Clone for TypeArena {
     fn clone(&self) -> Self {
         Self {
             classes: self.classes.clone(),
+            interfaces: self.interfaces.clone(),
+            witnesses: self.witnesses.clone(),
             data: self.data.clone(),
             ids: self.ids.clone(),
             argument_lists: self.argument_lists.clone(),
@@ -613,7 +630,9 @@ impl Clone for TypeArena {
 
 impl PartialEq for TypeArena {
     fn eq(&self, other: &Self) -> bool {
-        self.classes == other.classes
+        self.interfaces == other.interfaces
+            && self.witnesses == other.witnesses
+            && self.classes == other.classes
             && self.data == other.data
             && self.ids == other.ids
             && self.argument_lists == other.argument_lists
@@ -692,6 +711,8 @@ impl TypeArena {
     pub fn new() -> Self {
         let mut arena = Self {
             classes: Vec::new(),
+            interfaces: Vec::new(),
+            witnesses: Vec::new(),
             data: Vec::new(),
             ids: HashMap::new(),
             argument_lists: Vec::new(),
@@ -1281,6 +1302,8 @@ impl TypeArena {
         let aggregate_ty = id;
         match data {
             TypeData::Class(_)
+            | TypeData::Interface(_)
+            | TypeData::InterfaceKeepalive { .. }
             | TypeData::ClassToken {
                 kind: crate::ClassTokenKind::Unpublished | crate::ClassTokenKind::Keepalive { .. },
                 ..
@@ -1288,7 +1311,7 @@ impl TypeArena {
                 is_known: true,
                 is_copy: false,
                 is_relocatable: true,
-                is_storable: matches!(data, TypeData::Class(_)),
+                is_storable: matches!(data, TypeData::Class(_) | TypeData::Interface(_)),
                 needs_drop: true,
             },
             TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_) => TypeProperties {
@@ -1570,7 +1593,7 @@ impl TypeArena {
                     substitution,
                     visiting,
                 ),
-            Some(TypeData::Class(_)) => capability != Capability::Copy,
+            Some(TypeData::Class(_) | TypeData::Interface(_)) => capability != Capability::Copy,
             Some(TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_)) => true,
             Some(
                 TypeData::Reference { .. }
@@ -1582,7 +1605,9 @@ impl TypeArena {
                     ..
                 },
             ) => capability != Capability::Storable,
-            Some(TypeData::ClassToken { .. }) => capability == Capability::Relocatable,
+            Some(TypeData::ClassToken { .. } | TypeData::InterfaceKeepalive { .. }) => {
+                capability == Capability::Relocatable
+            }
             Some(
                 TypeData::Buffer { element }
                 | TypeData::Matrix { element }
@@ -1830,8 +1855,10 @@ impl TypeArena {
                 substitution,
                 visiting,
             ),
-            Some(TypeData::Class(_)) => capability == 2 || capability == 4,
-            Some(TypeData::ClassToken { .. }) => capability == 0,
+            Some(TypeData::Class(_) | TypeData::Interface(_)) => capability == 2 || capability == 4,
+            Some(TypeData::ClassToken { .. } | TypeData::InterfaceKeepalive { .. }) => {
+                capability == 0
+            }
             Some(TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_)) | None => false,
         }
     }

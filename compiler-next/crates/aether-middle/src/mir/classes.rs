@@ -66,7 +66,9 @@ impl Builder<'_> {
             )
             .unwrap();
         let mut drops = Vec::new();
-        if let ClassOp::DirectMethodCall { receiver, .. } = &mapped {
+        if let ClassOp::DirectMethodCall { receiver, .. }
+        | ClassOp::InterfaceCall { receiver, .. } = &mapped
+        {
             drops.push(receiver.clone());
         }
         if let (

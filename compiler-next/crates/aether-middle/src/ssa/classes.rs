@@ -29,19 +29,23 @@ pub(super) fn verify(
     if !function
         .parameters
         .iter()
-        .any(|p| types.object_class(p.ty).is_some())
+        .any(|p| types.object_class(p.ty).is_some() || types.interface_identity(p.ty).is_some())
         && !function
             .blocks
             .iter()
             .flat_map(|b| &b.instructions)
-            .any(|i| matches!(i.op, SsaOp::Class(_)))
+            .any(|i| {
+                matches!(i.op, SsaOp::Class(_))
+                    || types.object_class(i.ty).is_some()
+                    || types.interface_identity(i.ty).is_some()
+            })
     {
         return Ok(());
     }
     if function
         .memory_locals
         .iter()
-        .any(|l| types.object_class(l.ty).is_some())
+        .any(|l| types.object_class(l.ty).is_some() || types.interface_identity(l.ty).is_some())
     {
         return Err("SSA class handle slot borrowing is unavailable in OOP-V1".into());
     }
@@ -53,7 +57,9 @@ pub(super) fn verify(
     // SSA ledger. Other value/container protocols retain their existing verifiers.
     let tracked = |ty| {
         !types.is_copy(ty)
-            && (types.object_class(ty).is_some() || types.buffer_element(ty).is_some())
+            && (types.object_class(ty).is_some()
+                || types.interface_identity(ty).is_some()
+                || types.buffer_element(ty).is_some())
     };
     let initial = State {
         owned: function
@@ -171,13 +177,19 @@ pub(super) fn verify(
                             }
                             consume(object, &mut state)?;
                         }
-                        ClassOp::HandleTransfer { source }
+                        ClassOp::InterfaceAdapt {
+                            source,
+                            transfer: true,
+                            ..
+                        }
+                        | ClassOp::HandleTransfer { source }
                         | ClassOp::ReceiverKeepalive {
                             source,
                             transfer: true,
                             ..
                         } => consume(source, &mut state)?,
-                        ClassOp::DirectMethodCall { args, .. } => {
+                        ClassOp::DirectMethodCall { args, .. }
+                        | ClassOp::InterfaceCall { args, .. } => {
                             for arg in args {
                                 consume(arg, &mut state)?;
                             }

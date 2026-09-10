@@ -3,8 +3,10 @@
 mod ast;
 mod diagnostic;
 mod hir;
+mod interfaces;
 mod lexer;
 mod oop;
+pub use interfaces::*;
 mod parser;
 mod types;
 pub use oop::*;

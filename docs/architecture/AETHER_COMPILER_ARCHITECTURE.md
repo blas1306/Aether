@@ -52,8 +52,38 @@ freeing the object. The helpers include private qualification counters.
 All bodies remain semantically verified. For class declarations with no reachable
 class use, closed direct-call reachability omits unreachable functions needing
 class helpers and suppresses class runtime/glue. Programs without class
-declarations preserve their existing emission path. No public ABI, interface
-carrier, virtual dispatch, inheritance or class graph storage is admitted.
+declarations preserve their existing emission path. OOP-V1 itself adds no public
+ABI, interface carrier, virtual dispatch, inheritance or class graph storage.
+
+[OOP-V2](OOP_V2_REPORT.md) adds flat nominal class-backed interfaces. Frontend
+`interfaces.rs` owns InterfaceId, RequirementId, WitnessId, exact requirement
+contracts and witness recipes. TypeData has distinct Interface and internal
+InterfaceKeepalive variants; carriers remain typed semantic values through SSA.
+The declared canonical interface list in ClassInfo is conformance authority.
+ClassMethodInfo records canonical parameters/results, independently rebound to
+phase-local function signatures. Every phase checks exact public implementations,
+nominal witness pairs, requirement identities and declaration-order slots.
+
+The shared ClassOp vocabulary adds InterfaceAdapt with explicit Alias/Transfer
+mode and InterfaceCall with requirement/slot/receiver/arguments. Existing typed
+HandleAlias, HandleTransfer, ReceiverKeepalive and Move/Drop carry interface
+ownership. SSA's ordered owner ledger includes interface values and keepalives;
+phis transfer whole carriers and cannot duplicate strong obligations. No raw
+object/witness pairing or wrapper-allocation operation is admitted.
+
+LLVM lowers a carrier to private `{ ptr, ptr }`. Each reachable adaptation uses
+an immutable witness containing concrete class release glue followed by exact
+method targets. The current erased and concrete receiver ABIs both use `ptr`,
+so no forwarding thunk is needed; remaining parameter/result types are exact.
+Calls extract the witness, load the verified slot and invoke the typed target.
+Interface release calls the concrete drop function with the original object
+pointer. The class header and one-pointer class handle are unchanged.
+
+Closed reachability follows direct calls and method targets of reachable witness
+adaptations. Unused interfaces add no carrier helpers or witnesses to programs
+that never adapt or dispatch through them. All omitted functions still undergo
+semantic verification. Static witnesses need no ARC, RTTI or runtime lookup.
+No inheritance, boxing, graph storage or public ABI is added.
 
 ## 1. Scope and evidence
 

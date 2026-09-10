@@ -1,0 +1,16 @@
+interface CounterAccess {
+    int get();
+    mut int increment();
+}
+class Counter : CounterAccess {
+    int value;
+    public init(int value) { this.value = value; }
+    public int get() { return value; }
+    public mut int increment() { value = value + 1; return value; }
+}
+int main() {
+    Counter c = Counter(0);
+    CounterAccess access = c;
+    access.increment();
+    return c.get();
+}

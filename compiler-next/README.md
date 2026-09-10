@@ -1,5 +1,55 @@
-# Aether native compiler — OOP-V1
+# Aether native compiler — OOP-V2
 
+
+## Flat nominal class-backed interfaces (OOP-V2)
+
+The native Linux x86-64 bootstrap admits flat, non-generic interfaces implemented
+explicitly by concrete OOP-V1 classes. Requirements are implicitly public and
+must match a public class method exactly, including canonical parameter/result
+types and read/mut receiver capability.
+
+```aether
+interface CounterAccess {
+    int get();
+    mut int increment();
+}
+class Counter : CounterAccess {
+    int value;
+    public init(int value) { this.value = value; }
+    public int get() { return value; }
+    public mut int increment() { value = value + 1; return value; }
+}
+int main() {
+    Counter c = Counter(0);
+    CounterAccess access = c;
+    access.increment();
+    return c.get(); // 1: the same underlying object
+}
+```
+
+`class C : I1, I2` is the only conformance syntax. Matching methods alone do not
+conform. Interface identity is module-nominal; transparent aliases preserve it.
+Interfaces default to internal visibility; `public interface` permits imports.
+Empty interfaces and redundant `public` on requirements are supported.
+
+Interface values are owning, non-Copy, relocatable carriers admitted as locals,
+concrete by-value parameters and returns. Class lvalue adaptation and interface
+lvalue aliasing retain once; fresh adaptation/results transfer the existing
+token. Adaptation allocates no wrapper. Interface calls acquire a keepalive
+before arguments and dispatch through immutable, verified witness slots. Class
+calls remain direct. Final release through an interface destroys the concrete
+object and its owning fields, including the qualified private `Buffer<int>`.
+
+Interface equality, interface-containing fields/aggregates/containers, generic
+applications, refs/views into carriers, struct boxing, interface inheritance,
+default bodies, generic interfaces, class inheritance, `implements`, `extends`,
+`open` and `override` remain excluded. No public carrier ABI is promised.
+
+See [OOP_V2_REPORT.md](../docs/architecture/OOP_V2_REPORT.md) for the bounded
+contract, independent corruption tests and exact O0/O2 counters. Run
+`cargo test -p aether-driver --test oop_v2`; cost observations are reproducible
+with `python3 tests/measure-oop-v2.py --runs 7`. Native fixtures include
+`tests/programs/oop_v2_counter.ae` and `tests/programs/oop_v2_owner.ae`.
 
 ## Concrete class identity and lifecycle (OOP-V1)
 
@@ -37,7 +87,7 @@ and a private `Buffer<int>`. The last release destroys owning fields in reverse
 declaration order and frees the object. Initializers have no source result or
 value return; `this` is a nonescaping borrowed receiver.
 
-Inheritance, interfaces, generic classes, class graph fields, class-containing
+Inheritance, generic classes, class graph fields, class-containing
 aggregates/containers/generic applications, interior refs/views, class-slot refs,
 nullable handles and user destructors remain outside this admission. Mut methods
 require an addressable writable receiver. Temporary field access is rejected;

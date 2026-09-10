@@ -17,6 +17,7 @@ pub enum ClassTokenKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AstClass {
+    pub relations: Vec<crate::AstType>,
     pub name: String,
     pub public: bool,
     pub fields: Vec<(bool, AstField)>,
@@ -43,6 +44,8 @@ pub struct ClassFieldInfo {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClassMethodInfo {
+    pub parameters: Vec<TypeId>,
+    pub result: TypeId,
     pub function: FunctionId,
     pub name: String,
     pub public: bool,
@@ -51,6 +54,7 @@ pub struct ClassMethodInfo {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClassInfo {
+    pub interfaces: Vec<crate::InterfaceId>,
     pub id: ClassId,
     pub module: ModuleId,
     pub name: String,
@@ -67,6 +71,19 @@ pub struct ClassInfo {
 /// HIR alone uses `Construct`; its lowering materializes `ObjectAlloc`, `InitCall`, `PublishObject`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClassOp<O, F = HirCallTarget> {
+    InterfaceAdapt {
+        class: ClassId,
+        interface: crate::InterfaceId,
+        witness: crate::WitnessId,
+        source: O,
+        transfer: bool,
+    },
+    InterfaceCall {
+        requirement: crate::RequirementId,
+        slot: u32,
+        receiver: O,
+        args: Vec<O>,
+    },
     Construct {
         class: ClassId,
         initializer: F,
@@ -122,20 +139,22 @@ pub enum ClassOp<O, F = HirCallTarget> {
 impl<O, F> ClassOp<O, F> {
     pub fn operands(&self) -> Vec<&O> {
         match self {
+            Self::InterfaceCall { receiver, args, .. }
+            | Self::DirectMethodCall { receiver, args, .. } => {
+                std::iter::once(receiver).chain(args).collect()
+            }
             Self::Construct { args, .. } => args.iter().collect(),
             Self::ObjectAlloc { .. } => vec![],
             Self::InitCall { object, args, .. } => std::iter::once(object).chain(args).collect(),
             Self::PublishObject { object, .. } => vec![object],
-            Self::HandleAlias { source }
+            Self::InterfaceAdapt { source, .. }
+            | Self::HandleAlias { source }
             | Self::HandleTransfer { source }
             | Self::ReceiverKeepalive { source, .. } => vec![source],
             Self::FieldRead { receiver, .. } => vec![receiver],
             Self::FieldWrite {
                 receiver, value, ..
             } => vec![receiver, value],
-            Self::DirectMethodCall { receiver, args, .. } => {
-                std::iter::once(receiver).chain(args).collect()
-            }
             Self::IdentityEq { left, right, .. } => vec![left, right],
         }
     }
@@ -145,6 +164,30 @@ impl<O, F> ClassOp<O, F> {
         mut function: impl FnMut(&F) -> Result<G, E>,
     ) -> Result<ClassOp<P, G>, E> {
         Ok(match self {
+            Self::InterfaceAdapt {
+                class,
+                interface,
+                witness,
+                source,
+                transfer,
+            } => ClassOp::InterfaceAdapt {
+                class: *class,
+                interface: *interface,
+                witness: *witness,
+                source: operand(source)?,
+                transfer: *transfer,
+            },
+            Self::InterfaceCall {
+                requirement,
+                slot,
+                receiver,
+                args,
+            } => ClassOp::InterfaceCall {
+                requirement: *requirement,
+                slot: *slot,
+                receiver: operand(receiver)?,
+                args: args.iter().map(&mut operand).collect::<Result<_, _>>()?,
+            },
             Self::Construct {
                 class,
                 initializer,
@@ -284,6 +327,51 @@ pub fn verify_class_op<O, F>(
             Ok((class, method.mutable))
         };
     match op {
+        ClassOp::InterfaceAdapt {
+            class,
+            interface,
+            witness,
+            source,
+            ..
+        } => {
+            let w = types
+                .witnesses()
+                .get(witness.0 as usize)
+                .ok_or("invalid witness identity")?;
+            require(
+                w.id == *witness
+                    && w.class == *class
+                    && w.interface == *interface
+                    && types.class_id(operand_ty(source)?) == Some(*class)
+                    && types.interface_id(result) == Some(*interface),
+                "interface adaptation identity/witness mismatch",
+            )?;
+            crate::verify_interface_metadata(types)?;
+        }
+        ClassOp::InterfaceCall {
+            requirement,
+            slot,
+            receiver,
+            args,
+        } => {
+            let r = types
+                .requirement(*requirement)
+                .ok_or("invalid interface requirement identity")?;
+            require(
+                *slot == r.id.index && result == r.result && args.len() == r.parameters.len(),
+                "interface call slot/result/arity mismatch",
+            )?;
+            require(
+                matches!(types.get(operand_ty(receiver)?), Some(TypeData::InterfaceKeepalive { interface, mutable }) if *interface == r.id.interface && (!r.mutable || *mutable)),
+                "interface call requires exact live receiver capability",
+            )?;
+            for (arg, param) in args.iter().zip(&r.parameters) {
+                require(
+                    operand_ty(arg)? == *param,
+                    "interface argument contract mismatch",
+                )?;
+            }
+        }
         ClassOp::Construct {
             class,
             initializer,
@@ -326,13 +414,13 @@ pub fn verify_class_op<O, F>(
             "invalid publication identity/state",
         )?,
         ClassOp::HandleAlias { source } => require(
-            types.class_id(result).is_some()
+            types.is_object_owner(result)
                 && operand_ty(source)? == result
                 && !types.guarantees_copy(result),
             "Alias requires an owning class lvalue; class is not Copy",
         )?,
         ClassOp::HandleTransfer { source } => require(
-            types.class_id(result).is_some() && operand_ty(source)? == result,
+            types.is_object_owner(result) && operand_ty(source)? == result,
             "Transfer class mismatch",
         )?,
         ClassOp::ReceiverKeepalive {
@@ -341,6 +429,17 @@ pub fn verify_class_op<O, F>(
             transfer,
         } => {
             let ty = operand_ty(source)?;
+            if let Some(interface) = types.interface_id(ty) {
+                require(
+                    types.get(result)
+                        == Some(&TypeData::InterfaceKeepalive {
+                            interface,
+                            mutable: *mutable,
+                        }),
+                    "interface keepalive capability mismatch",
+                )?;
+                return Ok(());
+            }
             let class = types
                 .object_class(ty)
                 .ok_or("keepalive requires class identity")?;
@@ -514,6 +613,7 @@ pub fn verify_class_metadata(
     enums: &[crate::EnumInfo],
 ) -> Result<(), String> {
     use crate::TypeData;
+    crate::verify_interface_metadata(types)?;
     let mut fields = std::collections::BTreeSet::new();
     let mut methods = std::collections::BTreeSet::new();
     for (index, c) in types.classes().iter().enumerate() {
@@ -593,7 +693,7 @@ pub fn verify_class_metadata(
         }
     }
     for (id, ty) in types.entries() {
-        if types.contains_class(id) && types.class_id(id).is_none() {
+        if types.contains_class(id) && !types.is_object_owner(id) {
             return Err(
                 "class-containing storage/reference type requires separate admission".into(),
             );
@@ -633,6 +733,9 @@ pub fn verify_class_signature(
                 "class method receiver or declaring module differs from declaration".into(),
             );
         }
+        if parameters.get(1..) != Some(m.parameters.as_slice()) || result != m.result {
+            return Err("class method signature differs from declaration contract".into());
+        }
         if m.initializing && result != TypeId::INT64 {
             return Err("initializer internal completion result mismatch".into());
         }
@@ -643,6 +746,14 @@ pub fn verify_class_signature(
                 .copied()
                 .chain(std::iter::once(result))
             {
+                if let Some(i) = types.interface_id(ty)
+                    && types
+                        .interfaces()
+                        .get(i.0 as usize)
+                        .is_none_or(|i| !i.public)
+                {
+                    return Err("public class API exposes an inaccessible interface".into());
+                }
                 if let Some(c) = types.class_id(ty)
                     && !types.classes()[c.0 as usize].public
                 {
@@ -657,10 +768,13 @@ pub fn verify_class_signature(
         .copied()
         .chain(std::iter::once(result))
     {
-        if matches!(types.get(ty), Some(TypeData::ClassToken { .. })) {
+        if matches!(
+            types.get(ty),
+            Some(TypeData::ClassToken { .. } | TypeData::InterfaceKeepalive { .. })
+        ) {
             return Err("internal class tokens cannot occur in source parameters/results".into());
         }
-        if types.contains_class(ty) && types.class_id(ty).is_none() {
+        if types.contains_class(ty) && !types.is_object_owner(ty) {
             return Err("class-containing references and aggregates are unavailable".into());
         }
     }

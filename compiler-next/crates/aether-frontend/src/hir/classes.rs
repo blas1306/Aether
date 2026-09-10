@@ -123,6 +123,8 @@ pub(super) fn register_identities(program: &ParsedProgram, types: &mut TypeArena
                         class.methods.iter().find(|m| m.function.name == name)
                     };
                     methods.push(ClassMethodInfo {
+                        parameters: Vec::new(),
+                        result: TypeId::INT64,
                         function: FunctionId((function_base + index) as u32),
                         name: name.into(),
                         public: source.is_none_or(|m| m.public),
@@ -132,6 +134,7 @@ pub(super) fn register_identities(program: &ParsedProgram, types: &mut TypeArena
                 }
             }
             types.register_class_definition(ClassInfo {
+                interfaces: Vec::new(),
                 id,
                 module: module.info.id,
                 name: class.name.clone(),
@@ -249,10 +252,11 @@ impl Analyzer<'_> {
     fn raw_receiver(&mut self, e: &AstExpr) -> Result<HirExpr, Vec<Diagnostic>> {
         if let AstExprKind::Name(n) = &e.kind
             && let Some(l) = self.lookup(n)
-            && self
-                .types
-                .object_class(self.locals[l.0 as usize].ty)
-                .is_some()
+            && (self.types.is_object_owner(self.locals[l.0 as usize].ty)
+                || self
+                    .types
+                    .object_class(self.locals[l.0 as usize].ty)
+                    .is_some())
         {
             return Ok(HirExpr {
                 kind: HirExprKind::Local(l),
@@ -600,6 +604,59 @@ impl Analyzer<'_> {
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
         let source = self.raw_receiver(receiver)?;
+        if let Some(interface) = self.types.interface_id(source.ty) {
+            let r = self.types.interfaces()[interface.0 as usize]
+                .requirements
+                .iter()
+                .find(|r| r.name == name)
+                .cloned()
+                .ok_or_else(|| vec![error("E0414", "unknown interface requirement", span)])?;
+            let mutable = matches!(source.kind, HirExprKind::Local(_));
+            if r.mutable && !mutable {
+                return Err(vec![error(
+                    "E0414",
+                    "mut interface requirement needs writable local receiver",
+                    span,
+                )]);
+            }
+            let ty = self
+                .types
+                .id_of(TypeData::InterfaceKeepalive { interface, mutable })
+                .unwrap();
+            let receiver = self
+                .class_checked(
+                    ClassOp::ReceiverKeepalive {
+                        source,
+                        mutable,
+                        transfer: !mutable,
+                    },
+                    ty,
+                    span,
+                )
+                .expr;
+            if args.len() != r.parameters.len() {
+                return Err(vec![error(
+                    "E0414",
+                    "interface argument count mismatch",
+                    span,
+                )]);
+            }
+            let args = args
+                .iter()
+                .zip(&r.parameters)
+                .map(|(a, t)| self.expression(a, Some(*t)).map(|c| c.expr))
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(self.class_checked(
+                ClassOp::InterfaceCall {
+                    requirement: r.id,
+                    slot: r.id.index,
+                    receiver,
+                    args,
+                },
+                r.result,
+                span,
+            ));
+        }
         let class = self.types.object_class(source.ty).ok_or_else(|| {
             vec![error(
                 "E0408",
@@ -780,7 +837,7 @@ pub(super) fn verify_body(
     types: &TypeArena,
     signatures: VerificationSignatures<'_>,
 ) -> Result<(), String> {
-    if types.classes().is_empty() {
+    if types.classes().is_empty() && types.interfaces().is_empty() {
         return Ok(());
     }
     let init_class = types
@@ -799,8 +856,9 @@ pub(super) fn verify_body(
             for operand in op.operands() {
                 visit_expr(operand, state, types, function, module, signatures)?;
             }
-            if let ClassOp::Construct { args, .. } | ClassOp::DirectMethodCall { args, .. } =
-                op.as_ref()
+            if let ClassOp::Construct { args, .. }
+            | ClassOp::DirectMethodCall { args, .. }
+            | ClassOp::InterfaceCall { args, .. } = op.as_ref()
             {
                 for arg in args {
                     owning_use(arg, types)?;
@@ -860,6 +918,9 @@ pub(super) fn verify_body(
                 }
                 ClassOp::ReceiverKeepalive {
                     source, transfer, ..
+                }
+                | ClassOp::InterfaceAdapt {
+                    source, transfer, ..
                 } if *transfer == matches!(source.kind, HirExprKind::Local(_)) => {
                     return Err(
                         "HIR keepalive must alias lvalues and transfer fresh results".into(),
@@ -876,7 +937,7 @@ pub(super) fn verify_body(
         Ok(())
     }
     fn owning_use(e: &HirExpr, types: &TypeArena) -> Result<(), String> {
-        if types.class_id(e.ty).is_some()
+        if types.is_object_owner(e.ty)
             && matches!(
                 e.kind,
                 HirExprKind::Local(_) | HirExprKind::Load(_) | HirExprKind::Move(_)
@@ -1017,6 +1078,50 @@ mod tests {
             return false;
         };
         match (kind, op.as_mut()) {
+            (20, ClassOp::InterfaceAdapt { interface, .. }) => {
+                *interface = crate::InterfaceId(1);
+                return true;
+            }
+            (21, ClassOp::InterfaceAdapt { witness, .. }) => {
+                *witness = crate::WitnessId(1);
+                return true;
+            }
+            (22, ClassOp::InterfaceAdapt { transfer, .. }) => {
+                *transfer = true;
+                return true;
+            }
+            (23, ClassOp::InterfaceCall { requirement, .. }) => {
+                requirement.index = 0;
+                return true;
+            }
+            (24, ClassOp::InterfaceCall { .. }) => {
+                e.ty = TypeId::BOOL;
+                return true;
+            }
+            (25, ClassOp::ReceiverKeepalive { mutable, .. }) => {
+                *mutable = false;
+                return true;
+            }
+            (26, ClassOp::InterfaceCall { slot, .. }) => {
+                *slot = 0;
+                return true;
+            }
+            (27, ClassOp::InterfaceCall { receiver, .. }) => {
+                receiver.ty = TypeId::INT64;
+                return true;
+            }
+            (28, ClassOp::DirectMethodCall { receiver, args, .. }) => {
+                **op = ClassOp::InterfaceCall {
+                    requirement: crate::RequirementId {
+                        interface: crate::InterfaceId(0),
+                        index: 0,
+                    },
+                    slot: 0,
+                    receiver: receiver.clone(),
+                    args: args.clone(),
+                };
+                return true;
+            }
             (0, ClassOp::Construct { class, .. }) => {
                 *class = ClassId(999);
                 return true;
@@ -1161,6 +1266,92 @@ mod tests {
             assert!(
                 crate::verify_class_metadata(&types, &h.structs, &h.enums).is_err(),
                 "metadata mutation {mutation}"
+            );
+        }
+    }
+    const INTERFACE_SOURCE: &str = "interface I{int get();mut int inc();}interface J{int get();}class C:I,J{int n;public init(){n=0;}public int get(){return n;}public mut int inc(){n=n+1;return n;}}int main(){C c=C();I i=c;int n=i.inc();return c.get();}";
+    #[test]
+    fn hir_interface_corruptions_reject_without_lowering() {
+        let valid = analyze(
+            crate::parse_source(&crate::SourceFile::new("interfaces.ae", INTERFACE_SOURCE))
+                .unwrap(),
+        )
+        .unwrap();
+        for kind in 20..29 {
+            let mut bad = valid.clone();
+            assert!(
+                bad.functions
+                    .iter_mut()
+                    .any(|f| mutate_block(&mut f.body, kind)),
+                "mutation {kind} not applied"
+            );
+            assert!(verify_hir(&bad).is_err(), "HIR interface mutation {kind}");
+        }
+    }
+    #[test]
+    fn interface_metadata_corruptions_reject_independently() {
+        let valid = analyze(
+            crate::parse_source(&crate::SourceFile::new("interfaces.ae", INTERFACE_SOURCE))
+                .unwrap(),
+        )
+        .unwrap();
+        for mutation in 0..15 {
+            let mut bad = valid.clone();
+            let types = &mut bad.types;
+            match mutation {
+                0 => types.witnesses[0].class = ClassId(999),
+                1 => types.witnesses[0].interface = crate::InterfaceId(999),
+                2 => {
+                    types.witnesses[0].slots.pop();
+                }
+                3 => types.witnesses[0].slots[1] = types.witnesses[0].slots[0].clone(),
+                4 => types.witnesses[0].slots[0].requirement.interface = crate::InterfaceId(1),
+                5 => types.witnesses[0].slots[0].method = FunctionId(999),
+                6 => {
+                    types.classes[0]
+                        .methods
+                        .iter_mut()
+                        .find(|m| m.name == "get")
+                        .unwrap()
+                        .public = false
+                }
+                7 => {
+                    types.classes[0]
+                        .methods
+                        .iter_mut()
+                        .find(|m| m.name == "get")
+                        .unwrap()
+                        .mutable = true
+                }
+                8 => types.classes[0]
+                    .methods
+                    .iter_mut()
+                    .find(|m| m.name == "get")
+                    .unwrap()
+                    .parameters
+                    .push(TypeId::BOOL),
+                9 => {
+                    types.classes[0]
+                        .methods
+                        .iter_mut()
+                        .find(|m| m.name == "get")
+                        .unwrap()
+                        .result = TypeId::BOOL
+                }
+                10 => types.witnesses[0].slots.reverse(),
+                11 => types.classes[0].interfaces.clear(),
+                12 => types.classes[0].interfaces.push(crate::InterfaceId(0)),
+                13 => types.interfaces[0].requirements[0].id.index = 1,
+                14 => types.witnesses[0].id = crate::WitnessId(999),
+                _ => unreachable!(),
+            }
+            assert!(
+                crate::verify_interface_metadata(types).is_err(),
+                "metadata mutation {mutation}"
+            );
+            assert!(
+                verify_hir(&bad).is_err(),
+                "HIR metadata mutation {mutation}"
             );
         }
     }

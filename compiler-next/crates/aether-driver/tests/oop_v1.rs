@@ -316,7 +316,10 @@ fn negative_source_boundaries() {
         ),
         ("generic_container", "class C{}int main(){List<C> c={C()};}"),
         ("inheritance", "class A{}class B:A{}int main(){}"),
-        ("interface", "interface I{int get();}int main(){}"),
+        (
+            "generic_interface",
+            "interface I<T>{int get();}int main(){}",
+        ),
         ("open", "open class C{}int main(){}"),
         (
             "override",

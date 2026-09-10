@@ -23,8 +23,20 @@ pub fn parse(_source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<
     let mut enums = Vec::new();
     let mut functions = Vec::new();
     let mut classes = Vec::new();
+    let mut interfaces = Vec::new();
     while !parser.at(TokenKind::Eof) {
-        if parser.current().lexeme == "class" || parser.current().lexeme == "public" {
+        if parser.current().lexeme == "interface"
+            || (parser.current().lexeme == "public"
+                && parser
+                    .tokens
+                    .get(parser.cursor + 1)
+                    .is_some_and(|t| t.lexeme == "interface"))
+        {
+            match parser.interface_decl() {
+                Ok(i) => interfaces.push(i),
+                Err(e) => return Err(vec![e]),
+            }
+        } else if parser.current().lexeme == "class" || parser.current().lexeme == "public" {
             match parser.class_decl() {
                 Ok(class) => classes.push(class),
                 Err(error) => return Err(vec![error]),
@@ -51,7 +63,8 @@ pub fn parse(_source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<
             }
         }
     }
-    if classes.is_empty()
+    if interfaces.is_empty()
+        && classes.is_empty()
         && aliases.is_empty()
         && structs.is_empty()
         && enums.is_empty()
@@ -69,6 +82,7 @@ pub fn parse(_source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<
             enums,
             functions,
             classes,
+            interfaces,
         })
     }
 }
@@ -79,6 +93,89 @@ struct Parser {
 }
 
 impl Parser {
+    fn interface_decl(&mut self) -> Result<crate::AstInterface, Diagnostic> {
+        let start = self.current().span;
+        let public = self.current().lexeme == "public";
+        if public {
+            self.advance();
+        }
+        self.advance();
+        let name = self
+            .expect(TokenKind::Identifier, "expected interface name")?
+            .lexeme;
+        self.expect(
+            TokenKind::LeftBrace,
+            "flat interface requires `{`; generics and inheritance are unavailable",
+        )?;
+        let mut requirements = Vec::new();
+        while !self.at(TokenKind::RightBrace) && !self.at(TokenKind::Eof) {
+            if self.current().lexeme == "public" {
+                self.advance();
+            }
+            let mutable = self.consume(TokenKind::KwMut).is_some();
+            let span = self.current().span;
+            if matches!(
+                self.current().lexeme.as_str(),
+                "private"
+                    | "static"
+                    | "abstract"
+                    | "override"
+                    | "open"
+                    | "init"
+                    | "deinit"
+                    | "protected"
+            ) {
+                return Err(self.error(
+                    "E0410",
+                    "unsupported interface member; requirements are implicitly public",
+                ));
+            }
+            let result = self.ty()?;
+            let method = self
+                .expect(TokenKind::Identifier, "expected requirement name")?
+                .lexeme;
+            self.expect(
+                TokenKind::LeftParen,
+                "interface members must be non-generic method requirements",
+            )?;
+            let mut parameters = Vec::new();
+            if !self.at(TokenKind::RightParen) {
+                loop {
+                    let ty = self.ty()?;
+                    let token = self.expect(TokenKind::Identifier, "expected parameter name")?;
+                    parameters.push(AstParameter {
+                        ty,
+                        name: token.lexeme,
+                        span: token.span,
+                    });
+                    if self.consume(TokenKind::Comma).is_none() {
+                        break;
+                    }
+                }
+            }
+            self.expect(TokenKind::RightParen, "expected `)`")?;
+            self.expect(
+                TokenKind::Semicolon,
+                "interface requirement must end with `;`; bodies are unavailable",
+            )?;
+            requirements.push(crate::AstRequirement {
+                name: method,
+                mutable,
+                parameters,
+                result,
+                span,
+            });
+        }
+        let end = self.expect(TokenKind::RightBrace, "expected `}`")?.span;
+        Ok(crate::AstInterface {
+            name,
+            public,
+            requirements,
+            span: start.through(end),
+        })
+    }
+
+    #[allow(clippy::too_many_lines)]
     fn class_decl(&mut self) -> Result<crate::AstClass, Diagnostic> {
         let start = self.current().span;
         let public = if self.current().lexeme == "public" {
@@ -94,9 +191,18 @@ impl Parser {
         let name = self
             .expect(TokenKind::Identifier, "expected class name")?
             .lexeme;
+        let mut relations = Vec::new();
+        if self.consume(TokenKind::Colon).is_some() {
+            loop {
+                relations.push(self.ty()?);
+                if self.consume(TokenKind::Comma).is_none() {
+                    break;
+                }
+            }
+        }
         self.expect(
             TokenKind::LeftBrace,
-            "OOP-V1 class requires `{`; generics and inheritance are unavailable",
+            "class requires `{`; generics, implements and extends are unavailable",
         )?;
         let mut fields = Vec::new();
         let mut methods = Vec::new();
@@ -172,6 +278,7 @@ impl Parser {
             .expect(TokenKind::RightBrace, "expected `}` after class")?
             .span;
         Ok(crate::AstClass {
+            relations,
             name,
             public,
             fields,

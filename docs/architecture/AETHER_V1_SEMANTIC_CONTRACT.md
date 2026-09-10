@@ -23,8 +23,8 @@ Keywords:
 [OOP-ARCH-1](OOP_ARCH_1.md) records proposed class/interface semantics, including
 ARC aliasing distinct from structural Copy and declared receiver capabilities.
 That proposal is not itself admission. The OOP-V1 section below incorporates
-only the qualified concrete class subset; interfaces and inheritance remain
-future work. See the [design report](OOP_ARCH_1_REPORT.md).
+the qualified concrete class subset; OOP-V2 adds flat nominal class-backed
+interfaces. Inheritance remains future work. See the [design report](OOP_ARCH_1_REPORT.md).
 
 ## 1. Values and fundamental types
 
@@ -2393,3 +2393,73 @@ receiver capabilities, initialization, publication and ownership cleanup.
 MIR/SSA preserve ordered object effects and verify normal-path token balance;
 SSA joins transfer one incoming obligation, never duplicate it. Programs with
 no reachable class use emit no ARC runtime, including unused class declarations.
+
+
+## OOP-V2 — flat nominal class-backed interfaces
+
+Status: **ADMITTED** in `compiler-next`, native Linux x86-64, under OOP-V1's
+single-thread, non-null, non-atomic ARC and abortive-trap restrictions.
+[Qualification and limitations](OOP_V2_REPORT.md).
+
+`interface I { int read(); mut int change(int x); }` declares a module-nominal
+InterfaceId. Requirements are implicitly public; redundant `public` is accepted,
+while `private` and unsupported modifiers are rejected. Top-level interfaces
+are internal unless `public interface` is specified. Empty interfaces are
+allowed. Transparent aliases preserve the underlying identity. Identical names
+and requirement shapes in different modules do not create type equivalence.
+
+`class C : I1, I2` establishes explicit conformance. Each canonical target must
+be an interface, and must occur once, including through aliases. A class target
+produces an inheritance-not-yet-admitted diagnostic. A matching method without
+the declared relation provides no conversion authority. Every requirement needs
+one public method of the exact concrete class with matching name, parameter
+count, canonical parameter types (including reference ownership/access modes),
+result type and read/mut receiver mode. No variance, overload selection or
+receiver weakening is applied. A method may satisfy identical requirements in
+multiple interfaces. Conflicting same-name contracts are rejected. Public class
+conformance and public class/interface APIs cannot expose internal object types.
+
+A value of I owns a strong obligation on the original concrete class object.
+It is non-Copy, Relocatable and needs_drop, and is storable only in admitted
+positions: locals, concrete by-value parameters and concrete returns. A class
+lvalue adapted to I retains once and preserves the original class obligation.
+A fresh class result transfers its obligation into I with no conversion retain.
+Interface lvalue use aliases once; fresh interface results transfer. Assignment
+publishes the acquired replacement before releasing the previous owner; exact
+self-assignment is a no-op. Returns acquire/transfer their result before local
+cleanup. These rules do not expand generic or aggregate storage admission.
+
+The private carrier contains the original object pointer and an immutable static
+witness pointer for the exact (ClassId, InterfaceId) association. No wrapper,
+field copy, boxing or per-value witness allocation exists. Requirement identity
+is semantic authority; declaration-order numeric slots are privately verified
+layout. Each witness includes the exact concrete class release function and
+one verified implementation per requirement. Witness metadata owns no strong
+reference and is never retained or released.
+
+An interface call resolves InterfaceId, RequirementId, exact signature and
+receiver capability before MIR. A strong receiver keepalive is acquired before
+argument evaluation and released after the indirect call. It preserves both
+carrier components independently of rebinding the source local. Read calls
+admit local or fresh receivers; mut calls require a writable local carrier and
+do not imply exclusivity, uniqueness or noalias. Shared mutation is visible to
+class and interface aliases. Known-class calls continue to dispatch directly.
+
+Dropping an interface owner or its keepalive releases exactly one obligation
+on its object. The witness's concrete release function performs the OOP-V1
+final destruction protocol when the count reaches zero, dropping nested owning
+fields once and freeing the object once. HIR, MIR and SSA independently validate
+nominal metadata, signatures, witness association, exact slots, carrier types,
+keepalive capabilities and ownership accounting. SSA owners remain whole typed
+values; each executed phi edge transfers one obligation. Arbitrary object/witness
+pair construction and witness release are not semantic operations.
+
+Interface `==`/`!=`, null, interface-to-interface conversions across distinct
+InterfaceIds, fields in classes/structs/enums, container/generic storage,
+carrier refs/views and interior references are rejected. Scalar references and
+supported values may appear in exact method parameters under their existing
+contracts; borrowed method results remain forbidden. No interface inheritance,
+fields, init/deinit, generic methods, default bodies, statics, properties,
+associated types, generic interfaces, struct conformance, class inheritance,
+`implements`, `extends`, `open`, `override`, RTTI surface, exceptions or threading
+change is admitted. The carrier and witness layout are not public ABI.

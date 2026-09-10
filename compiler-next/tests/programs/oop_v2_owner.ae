@@ -1,0 +1,15 @@
+interface OwnerAccess { int marker(); }
+class Owner : OwnerAccess {
+    Buffer<int> data;
+    public init(Buffer<int> data) { this.data = data; }
+    public int marker() { return 7; }
+}
+OwnerAccess make() {
+    Owner c = Owner(Buffer<int>(4, 3));
+    OwnerAccess i = c;
+    return i;
+}
+int main() {
+    OwnerAccess i = make();
+    return i.marker();
+}

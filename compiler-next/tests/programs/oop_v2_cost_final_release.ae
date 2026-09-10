@@ -1,0 +1,14 @@
+interface OwnerAccess { int marker(); }
+class Owner : OwnerAccess {
+    Buffer<int> data;
+    public init(Buffer<int> data) { this.data = data; }
+    public int marker() { return 7; }
+}
+int main() {
+    int n = 0;
+    while (n < 10000) {
+        OwnerAccess i = Owner(Buffer<int>(4, 3));
+        n = n + 1;
+    }
+    return 0;
+}
