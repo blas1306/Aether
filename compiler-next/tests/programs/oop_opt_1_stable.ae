@@ -1,0 +1,18 @@
+interface I { int get(); mut int inc(); }
+class C : I {
+    int n;
+    public init(int n) { this.n = n; }
+    public int get() { return n; }
+    public mut int inc() { n = n + 1; return n; }
+}
+int main() {
+    C c = C(0);
+    I i = c;
+    int n = 0;
+    while (n < 10000) {
+        i.inc();
+        c.get();
+        n = n + 1;
+    }
+    return i.get() - 10000;
+}

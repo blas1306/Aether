@@ -1,0 +1,9 @@
+interface I { int get(); }
+class C : I { public int get() { return 7; } }
+class D : I { public int get() { return 9; } }
+int read(bool flag) {
+    I i = C();
+    if (flag) { i = C(); } else { i = D(); }
+    return i.get();
+}
+int main() { return read(true) + read(false) - 16; }

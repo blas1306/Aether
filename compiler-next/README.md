@@ -1,4 +1,42 @@
-# Aether native compiler — OOP-V2
+# Aether native compiler — OOP-OPT-1
+
+
+## Verified OOP optimization (OOP-OPT-1)
+
+`build` and `run` accept `-O0` (the default) and `-O2`. O2 runs a verified SSA
+pass for physical ARC elimination and exact-value interface devirtualization,
+then selects clang O2. O0 preserves inspectable semantic ownership operations.
+
+```bash
+cargo run -p aether-driver --bin aether-next -- build tests/programs/oop_opt_1_stable.ae \
+  -O2 -o /tmp/oop-stable --emit ssa --emit llvm
+cargo test -p aether-driver --test oop_opt_1
+python3 tests/measure-oop-opt-1.py --runs 7
+```
+
+HIR Alias/Transfer, MIR lifecycle order and SSA's logical owner ledger remain
+unchanged. SSA physical decisions pair one Alias/keepalive with its same-block
+cleanup only when an independent physical owner remains alive throughout.
+Escapes, owner replacement, unknown effects and unproven intervals retain ARC.
+A conservative nonrecursive call-graph bound also preserves checked strong-count
+overflow behavior. Unknown-class interface owners currently retain ARC.
+
+Interface calls become direct only from recomputed value provenance through
+adaptation, Alias/Transfer and exact-class phi joins. Unknown parameters/returns
+and mixed-class joins remain indirect in emitted LLVM before clang. There is
+no implementer-count assumption, source class cast, wrapper allocation or new
+language feature. Final interface release still uses its verified witness.
+
+Every pass output is raw SSA and passes ordinary independent verification again,
+including recomputation of its physical decisions. `--emit ssa` reports paired
+IDs, ownership proof reasons and exact requirement/class/method identities.
+The default in-process APIs retain O0 behavior; explicit
+`compile_source_with_optimization` / `compile_session_with_optimization` select
+O2. Old OOP-V1/V2 tests still measure semantic lowering at both clang levels;
+new tests and measurements separately measure optimized physical ARC events.
+
+See [OOP_OPT_1_REPORT.md](../docs/architecture/OOP_OPT_1_REPORT.md) for rules,
+corruptions, measurements, supported cases and conservative limits.
 
 
 ## Flat nominal class-backed interfaces (OOP-V2)
@@ -718,6 +756,7 @@ entry SourceFile
   -> deduplicated concrete-instance worklist -> monomorphized TypedHir
   -> CFG/lifecycle lowering -> FlowMir -> VerifiedMir
   -> selective local promotion + explicit memory/ownership effects -> SsaIr -> VerifiedSsa
+  -> optional OOP physical decisions -> raw SSA -> independently reverified SSA
   -> LLVM backend -> textual LLVM
   -> clang toolchain -> Linux x86_64 executable
 ```

@@ -89,12 +89,52 @@ pub(super) fn emit_op(
     op: &ClassOp<SsaOperand, aether_frontend::InstanceId>,
     result: u32,
     result_type: TypeId,
+    decisions: &aether_middle::OopOptimizations,
     types: &TypeArena,
     signatures: &[FunctionInstanceInfo],
     modules: &[ModuleInfo],
     structs: &[StructInfo],
     enums: &[EnumInfo],
 ) {
+    if let Some(pair) = decisions.arc.get(&aether_middle::ValueId(result)) {
+        let (ClassOp::HandleAlias { source } | ClassOp::ReceiverKeepalive { source, .. }) = op
+        else {
+            unreachable!("verified ARC acquisition")
+        };
+        let ty = llvm_type(types, result_type);
+        writeln!(output, "  ; OOP-OPT-1 ARC elision: retain v{result}, release {:?}; independent owner {:?} through cleanup\n  %v{result} = select i1 true, {ty} {}, {ty} {}", pair.release, pair.owner, llvm_operand(source), llvm_operand(source)).unwrap();
+        return;
+    }
+    if let Some(direct) = decisions.direct.get(&aether_middle::ValueId(result)) {
+        let ClassOp::InterfaceCall {
+            receiver,
+            args,
+            requirement,
+            ..
+        } = op
+        else {
+            unreachable!("verified devirtualized interface call");
+        };
+        let r = types.requirement(*requirement).unwrap();
+        let sig = &signatures[direct.method.0 as usize];
+        let name = bootstrap_symbol(sig, modules, structs, enums, types);
+        writeln!(output, "  ; OOP-OPT-1 devirtualization: {:?} -> {:?} {:?}\n  %obj{result} = extractvalue {{ ptr, ptr }} {}, 0", direct.requirement, direct.class, direct.method, llvm_operand(receiver)).unwrap();
+        let arguments = std::iter::once(format!("ptr %obj{result}"))
+            .chain(
+                args.iter()
+                    .zip(&r.parameters)
+                    .map(|(a, t)| format!("{} {}", llvm_type(types, *t), llvm_operand(a))),
+            )
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(
+            output,
+            "  %v{result} = call {} @{name}({arguments})",
+            llvm_type(types, r.result)
+        )
+        .unwrap();
+        return;
+    }
     if types.interface_identity(result_type).is_some() {
         match op {
             ClassOp::HandleAlias { source }

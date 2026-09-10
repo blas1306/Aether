@@ -12,7 +12,17 @@ use aether_frontend::{
     Phase, ResolvedImport, SourceFile, SourceId, analyze_bodies_for_target,
     collect_program_signatures, collect_signatures, parse_source,
 };
-use aether_middle::{build_ssa, lower_hir, verify_mir, verify_ssa};
+use aether_middle::{build_ssa, lower_hir, optimize_oop, verify_mir, verify_ssa};
+
+/// Native compilation profile; semantics and verification are identical.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OptimizationLevel {
+    /// Inspectable semantic lowering, without physical OOP elision.
+    #[default]
+    O0,
+    /// Verified OOP optimization followed by clang O2.
+    O2,
+}
 
 /// Inspectable compiler phase.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -216,6 +226,15 @@ impl CompilationSession {
 
 /// Compiles one owned source through verified SSA and LLVM.
 pub fn compile_source(source: &SourceFile, emits: &[Emit]) -> Result<Compilation, Vec<Diagnostic>> {
+    compile_source_with_optimization(source, emits, OptimizationLevel::O0)
+}
+
+/// Compiles a source with an explicit physical optimization profile.
+pub fn compile_source_with_optimization(
+    source: &SourceFile,
+    emits: &[Emit],
+    optimization: OptimizationLevel,
+) -> Result<Compilation, Vec<Diagnostic>> {
     let mut timings_ns = BTreeMap::new();
     let mut dumps = BTreeMap::new();
 
@@ -257,6 +276,14 @@ pub fn compile_source(source: &SourceFile, emits: &[Emit]) -> Result<Compilation
     let started = Instant::now();
     let ssa = verify_ssa(ssa)?;
     timings_ns.insert("middle.ssa_verify", started.elapsed().as_nanos());
+    let ssa = if optimization == OptimizationLevel::O2 {
+        let started = Instant::now();
+        let optimized = optimize_oop(&ssa)?;
+        timings_ns.insert("middle.oop_opt_verify", started.elapsed().as_nanos());
+        optimized
+    } else {
+        ssa
+    };
     if emits.contains(&Emit::Ssa) {
         dumps.insert(Emit::Ssa, ssa.dump());
     }
@@ -279,6 +306,15 @@ pub fn compile_source(source: &SourceFile, emits: &[Emit]) -> Result<Compilation
 pub fn compile_session(
     session: CompilationSession,
     emits: &[Emit],
+) -> Result<Compilation, Vec<Diagnostic>> {
+    compile_session_with_optimization(session, emits, OptimizationLevel::O0)
+}
+
+/// Compiles a complete module session with an explicit optimization profile.
+pub fn compile_session_with_optimization(
+    session: CompilationSession,
+    emits: &[Emit],
+    optimization: OptimizationLevel,
 ) -> Result<Compilation, Vec<Diagnostic>> {
     let mut timings_ns = BTreeMap::from([
         ("module.discovery", session.discovery_ns),
@@ -321,6 +357,14 @@ pub fn compile_session(
     let started = Instant::now();
     let ssa = verify_ssa(ssa)?;
     timings_ns.insert("middle.ssa_verify", started.elapsed().as_nanos());
+    let ssa = if optimization == OptimizationLevel::O2 {
+        let started = Instant::now();
+        let optimized = optimize_oop(&ssa)?;
+        timings_ns.insert("middle.oop_opt_verify", started.elapsed().as_nanos());
+        optimized
+    } else {
+        ssa
+    };
     if emits.contains(&Emit::Ssa) {
         dumps.insert(Emit::Ssa, ssa.dump());
     }
@@ -342,12 +386,14 @@ pub fn compile_session(
 #[derive(Clone, Debug)]
 pub struct ClangToolchain {
     executable: String,
+    optimization: OptimizationLevel,
 }
 
 impl Default for ClangToolchain {
     fn default() -> Self {
         Self {
             executable: "clang".to_owned(),
+            optimization: OptimizationLevel::O0,
         }
     }
 }
@@ -358,7 +404,15 @@ impl ClangToolchain {
     pub fn new(executable: impl Into<String>) -> Self {
         Self {
             executable: executable.into(),
+            optimization: OptimizationLevel::O0,
         }
+    }
+
+    /// Selects the same profile for middle-end optimization and native linking.
+    #[must_use]
+    pub const fn with_optimization(mut self, optimization: OptimizationLevel) -> Self {
+        self.optimization = optimization;
+        self
     }
 
     /// Converts LLVM text into a retained native executable.
@@ -370,6 +424,10 @@ impl ClangToolchain {
             ))]
         })?;
         let result = Command::new(&self.executable)
+            .arg(match self.optimization {
+                OptimizationLevel::O0 => "-O0",
+                OptimizationLevel::O2 => "-O2",
+            })
             .arg("-x")
             .arg("ir")
             .arg(&llvm_path)
@@ -411,7 +469,7 @@ pub fn build_path(
     toolchain: &ClangToolchain,
 ) -> Result<Compilation, Vec<Diagnostic>> {
     let session = CompilationSession::discover(source_path)?;
-    let compilation = compile_session(session, emits)?;
+    let compilation = compile_session_with_optimization(session, emits, toolchain.optimization)?;
     toolchain.link_executable(&compilation.llvm, output)?;
     Ok(compilation)
 }

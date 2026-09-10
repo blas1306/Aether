@@ -16,7 +16,7 @@ pub use mir::{
     VerifiedMir, lower_hir, verify_mir,
 };
 pub use ssa::{
-    Phi, SsaBlock, SsaFunction, SsaInstruction, SsaIr, SsaMemoryLocal, SsaOp, SsaOperand,
-    SsaParameter, SsaPlace, SsaPlaceBase, SsaPlaceProjection, SsaTerminator, ValueId, VerifiedSsa,
-    build_ssa, verify_ssa,
+    ArcElision, Devirtualization, OopOptimizations, Phi, SsaBlock, SsaFunction, SsaInstruction,
+    SsaIr, SsaMemoryLocal, SsaOp, SsaOperand, SsaParameter, SsaPlace, SsaPlaceBase,
+    SsaPlaceProjection, SsaTerminator, ValueId, VerifiedSsa, build_ssa, optimize_oop, verify_ssa,
 };

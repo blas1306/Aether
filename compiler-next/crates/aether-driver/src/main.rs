@@ -4,7 +4,9 @@ use std::env;
 use std::path::PathBuf;
 use std::process;
 
-use aether_driver::{ClangToolchain, Compilation, Emit, build_path, default_output, run_path};
+use aether_driver::{
+    ClangToolchain, Compilation, Emit, OptimizationLevel, build_path, default_output, run_path,
+};
 use aether_frontend::SourceFile;
 
 fn main() {
@@ -33,6 +35,7 @@ fn run_cli(args: &[String]) -> Result<i32, String> {
     let mut output = None;
     let mut emits = Vec::new();
     let mut timings = false;
+    let mut optimization = OptimizationLevel::O0;
     let mut cursor = 2;
     while cursor < args.len() {
         match args[cursor].as_str() {
@@ -48,13 +51,15 @@ fn run_cli(args: &[String]) -> Result<i32, String> {
                 );
             }
             "--timings" => timings = true,
+            "-O0" => optimization = OptimizationLevel::O0,
+            "-O2" => optimization = OptimizationLevel::O2,
             value => return Err(format!("unknown argument `{value}`\n{}", usage())),
         }
         cursor += 1;
     }
     emits.sort();
     emits.dedup();
-    let toolchain = ClangToolchain::default();
+    let toolchain = ClangToolchain::default().with_optimization(optimization);
     let result = if command == "build" {
         let output = output.unwrap_or_else(|| default_output(&source_path));
         build_path(&source_path, &output, &emits, &toolchain).map(|compilation| {
@@ -113,5 +118,5 @@ fn render_outputs(compilation: &Compilation, timings: bool) {
 }
 
 fn usage() -> String {
-    "usage: aether-next build <source.ae> [-o artifact] [--emit ast|hir|mir|ssa|llvm] [--timings]\n       aether-next run <source.ae> [--emit ast|hir|mir|ssa|llvm] [--timings]".to_owned()
+    "usage: aether-next build <source.ae> [-o artifact] [--emit ast|hir|mir|ssa|llvm] [-O0|-O2] [--timings]\n       aether-next run <source.ae> [--emit ast|hir|mir|ssa|llvm] [-O0|-O2] [--timings]".to_owned()
 }

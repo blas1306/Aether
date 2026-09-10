@@ -3,6 +3,8 @@
 
 use aether_frontend::{ClassOp, IndexSemantics};
 mod classes;
+mod oop_opt;
+pub use oop_opt::{ArcElision, Devirtualization, OopOptimizations, optimize_oop};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 use std::sync::Arc;
@@ -395,6 +397,8 @@ pub struct SsaBlock {
 /// Raw SSA function.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SsaFunction {
+    /// Independently verified physical emission decisions.
+    pub oop_optimizations: OopOptimizations,
     /// Globally unambiguous session-local function identity.
     pub id: InstanceId,
     pub function_id: aether_frontend::FunctionId,
@@ -471,6 +475,14 @@ impl SsaIr {
                 module.id, module.name
             )
             .unwrap();
+        }
+        for function in &self.functions {
+            for (retain, pair) in &function.oop_optimizations.arc {
+                writeln!(dump, "\nARC elision {:?}: retain {retain:?}, release {:?}; independent owner {:?} stays owned through same-block cleanup; nonescaping token; strong count bounded", function.id, pair.release, pair.owner).unwrap();
+            }
+            for (call, direct) in &function.oop_optimizations.direct {
+                writeln!(dump, "\ninterface devirtualization {:?} {call:?}: {:?} {:?} -> exact {:?}, direct {:?}", function.id, direct.requirement.interface, direct.requirement, direct.class, direct.method).unwrap();
+            }
         }
         dump
     }
@@ -623,6 +635,7 @@ fn build_function_ssa(
         }
     }
     SsaFunction {
+        oop_optimizations: OopOptimizations::default(),
         id: function.id,
         function_id: function.function_id,
         parameters,
@@ -1736,6 +1749,7 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
             &fail,
         )?;
     }
+    oop_opt::verify(&ssa).map_err(fail)?;
     Ok(VerifiedSsa(ssa))
 }
 

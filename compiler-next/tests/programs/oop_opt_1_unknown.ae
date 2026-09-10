@@ -1,0 +1,13 @@
+interface I { int get(); }
+class C : I { public int get() { return 7; } }
+int read(I i) { return i.get(); }
+int main() {
+    I i = C();
+    int n = 0;
+    int sum = 0;
+    while (n < 10000) {
+        sum = sum + read(i);
+        n = n + 1;
+    }
+    return sum - 70000;
+}

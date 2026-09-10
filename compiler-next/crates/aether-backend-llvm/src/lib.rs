@@ -1129,6 +1129,7 @@ fn emit_function(
                     op,
                     instruction.result.0,
                     instruction.ty,
+                    &function.oop_optimizations,
                     types,
                     signatures,
                     modules,
@@ -1484,6 +1485,15 @@ fn emit_function(
                     }
                 }
                 SsaOp::Drop { owner } => {
+                    if function
+                        .oop_optimizations
+                        .arc
+                        .values()
+                        .any(|p| p.release == instruction.result)
+                    {
+                        writeln!(output, "  ; OOP-OPT-1 paired release elision\n  %v{} = select i1 true, i1 true, i1 true", instruction.result.0).unwrap();
+                        continue;
+                    }
                     let (value, owner_ty) = emit_place_value(
                         output,
                         function,

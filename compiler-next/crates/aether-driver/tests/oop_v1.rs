@@ -616,6 +616,20 @@ fn receiver_keepalive_survives_rebound_owner_in_mir_native_fixture() {
     for opt in ["-O0", "-O2"] {
         execute(&instrument(&llvm, 5, [2, 1, 3, 2, 0, 2, 2]), opt);
     }
+    let optimized = aether_middle::optimize_oop(&ssa).unwrap();
+    assert!(
+        optimized.as_ssa().functions[optimized.as_ssa().entry.0 as usize]
+            .oop_optimizations
+            .arc
+            .is_empty()
+    );
+    let llvm = aether_backend_llvm::emit_llvm(
+        &optimized,
+        &aether_backend_llvm::TargetDescriptor::linux_x86_64(),
+    );
+    for opt in ["-O0", "-O2"] {
+        execute(&instrument(&llvm, 5, [2, 1, 3, 2, 0, 2, 2]), opt);
+    }
 }
 
 #[test]

@@ -85,6 +85,39 @@ that never adapt or dispatch through them. All omitted functions still undergo
 semantic verification. Static witnesses need no ARC, RTTI or runtime lookup.
 No inheritance, boxing, graph storage or public ABI is added.
 
+### OOP-OPT-1 physical optimization authority
+
+`aether-middle/src/ssa/oop_opt.rs` owns physical ARC and dispatch decisions.
+`optimize_oop(&VerifiedSsa)` creates raw SSA with an untrusted per-function
+`OopOptimizations` plan, then calls `verify_ssa` again. Logical ClassOp, Move,
+Drop, types and instruction order stay intact. This separates the original
+ownership proof from whether a retain/release must execute physically.
+
+The ordinary verifier first checks the complete semantic SSA graph and owner
+ledger, then recomputes all requested optimization preconditions. No stored
+Exact fact or previous verified wrapper authorizes a modified graph. ARC pairs
+require a nonescaping same-block interval and a live independent physical owner;
+previously elided tokens cannot themselves supply that independent ownership.
+A static acyclic call-graph/token bound excludes strong-count overflow changes.
+Opaque effects, cross-block intervals and recursive programs retain ARC.
+
+Exact dynamic-class provenance is a local fixed point through verified
+adaptations, aliases, transfers and phis. Parameters/opaque returns are Unknown;
+unlike-class merges remain Unknown. A direct dispatch decision resolves the
+exact requirement's verified witness implementation. Backend lowering extracts
+the same carrier object and emits that concrete call, preserving read/mut,
+arguments, result ownership, effects and logical receiver keepalive. The semantic
+InterfaceCall remains available for independent checking rather than being
+retyped into a class receiver. Interface final release and witness reachability
+remain unchanged. Separate ClassId/InterfaceId representations stay authoritative;
+only physical ownership decision vocabulary is shared.
+
+The driver enables this boundary for explicit `-O2`, with `-O0` as the inspectable
+default. Existing unoptimized compilation APIs and semantic qualification
+counters retain their meaning. The [report](OOP_OPT_1_REPORT.md) distinguishes
+semantic obligations, emitted physical sites, runtime events and clang's own
+later optimizations. No source-language admission is changed.
+
 ## 1. Scope and evidence
 
 The repository contained 1,328 tracked files: 609 Python, 82 Rust, 169 Aether,
