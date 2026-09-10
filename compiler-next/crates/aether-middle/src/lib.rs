@@ -1,10 +1,12 @@
 //! Flow MIR and SSA middle-end.
 
 mod algebraic;
-pub use algebraic::{ProductKind, ProductStep, VectorProductKernel};
+pub use algebraic::{AlgebraicProductKernel, ProductKind, ProductStep};
 mod elementwise;
 mod mir;
-pub use elementwise::{ElementwiseKernel, MathAxis, MathInput, MathStep, MathStride};
+pub use elementwise::ElementwiseKernel;
+mod mathematical;
+pub use mathematical::{MathAxis, MathInput, MathStep, MathStride};
 mod ssa;
 
 pub use mir::{

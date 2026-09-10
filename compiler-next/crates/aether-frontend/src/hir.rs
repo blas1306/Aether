@@ -12,6 +12,12 @@
     clippy::too_many_lines,
     clippy::unused_self
 )]
+mod mathematical;
+use mathematical::{
+    concrete_behavior_op, math_element_op, matrix_matrix_recipe, matrix_vector_recipe,
+    vector_product_recipe, verify_math_element_op, zero_value,
+};
+
 use crate::AlgebraicCapability;
 use crate::{
     AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstMatchArm, AstMatchMode,
@@ -769,7 +775,7 @@ pub enum MatrixProductExtent {
     Rows,
     Columns,
 }
-/// Source position of the loop-invariant scalar operand.
+/// Source operand position, used by scaling and algebraic extent selectors.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScalarSide {
     Left,
@@ -781,11 +787,12 @@ pub enum MathElementOp {
     Concrete(HirBinaryOp),
     Behavioral(BehavioralCapability),
 }
-/// Algebraic orientation and result-shape evidence retained until lowering.
+/// Closed semantic products with distinct orientation and result-shape contracts.
+/// Computational loop forms are selected only after scalar concretization.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum VectorProduct {
+pub enum AlgebraicProductKind {
     /// Two-dimensional map of ordered reductions producing an owning Matrix.
-    MatrixAlgebraicProduct {
+    MatrixMatrix {
         shape_check: MathShapeCheck,
         output_rows: (ScalarSide, MatrixProductExtent),
         output_columns: (ScalarSide, MatrixProductExtent),
@@ -802,11 +809,13 @@ pub enum VectorProduct {
         accumulate_op: MathElementOp,
         zero: Box<HirExpr>,
     },
+    /// Row × Column scalar reduction, including canonical Zero for dimension 0.
     Inner {
         shape_check: MathShapeCheck,
         accumulate_op: MathElementOp,
         zero: Box<HirExpr>,
     },
+    /// Column × Row owning Matrix map; no accumulation or Zero requirement.
     Outer {
         rows: ScalarSide,
         columns: ScalarSide,
@@ -817,12 +826,13 @@ pub enum HirExprKind {
     AlgebraicValue {
         capability: AlgebraicCapability,
     },
-    VectorAlgebraicProduct {
+    /// Native algebraic multiplication; the kind fixes the exact result family.
+    AlgebraicProduct {
         left: Box<HirExpr>,
         right: Box<HirExpr>,
         element_type: TypeId,
         product_op: MathElementOp,
-        product: VectorProduct,
+        product: AlgebraicProductKind,
     },
     /// Parametric homogeneous T op T -> T; behavior is the sole operator tag.
     /// Monomorphization must reify this before concrete HIR crosses into MIR.
@@ -3640,13 +3650,13 @@ impl Monomorphizer<'_> {
                     .expect("verified Zero substitution")
                     .kind
             }
-            HirExprKind::VectorAlgebraicProduct {
+            HirExprKind::AlgebraicProduct {
                 left,
                 right,
                 element_type,
                 product_op,
                 product,
-            } => HirExprKind::VectorAlgebraicProduct {
+            } => HirExprKind::AlgebraicProduct {
                 left: Box::new(self.substitute_expr(left, substitution)?),
                 right: Box::new(self.substitute_expr(right, substitution)?),
                 element_type: self.substitute_type(*element_type, substitution, expression.span)?,
@@ -3657,14 +3667,14 @@ impl Monomorphizer<'_> {
                     expression.span,
                 )?,
                 product: match product {
-                    VectorProduct::MatrixAlgebraicProduct {
+                    AlgebraicProductKind::MatrixMatrix {
                         shape_check,
                         output_rows,
                         output_columns,
                         contraction_extent,
                         accumulate_op,
                         zero,
-                    } => VectorProduct::MatrixAlgebraicProduct {
+                    } => AlgebraicProductKind::MatrixMatrix {
                         shape_check: *shape_check,
                         output_rows: *output_rows,
                         output_columns: *output_columns,
@@ -3677,14 +3687,14 @@ impl Monomorphizer<'_> {
                         )?,
                         zero: Box::new(self.substitute_expr(zero, substitution)?),
                     },
-                    VectorProduct::MatrixVector {
+                    AlgebraicProductKind::MatrixVector {
                         matrix_side,
                         shape_check,
                         result_extent,
                         contraction_extent,
                         accumulate_op,
                         zero,
-                    } => VectorProduct::MatrixVector {
+                    } => AlgebraicProductKind::MatrixVector {
                         matrix_side: *matrix_side,
                         shape_check: *shape_check,
                         result_extent: *result_extent,
@@ -3697,11 +3707,11 @@ impl Monomorphizer<'_> {
                         )?,
                         zero: Box::new(self.substitute_expr(zero, substitution)?),
                     },
-                    VectorProduct::Inner {
+                    AlgebraicProductKind::Inner {
                         shape_check,
                         accumulate_op,
                         zero,
-                    } => VectorProduct::Inner {
+                    } => AlgebraicProductKind::Inner {
                         shape_check: *shape_check,
                         accumulate_op: self.substitute_math_op(
                             *accumulate_op,
@@ -3711,7 +3721,7 @@ impl Monomorphizer<'_> {
                         )?,
                         zero: Box::new(self.substitute_expr(zero, substitution)?),
                     },
-                    VectorProduct::Outer { rows, columns } => VectorProduct::Outer {
+                    AlgebraicProductKind::Outer { rows, columns } => AlgebraicProductKind::Outer {
                         rows: *rows,
                         columns: *columns,
                     },
@@ -4785,7 +4795,7 @@ impl OwnershipAnalysis<'_> {
             | HirExprKind::Coerce { operand, .. }
             | HirExprKind::ExplicitCast { operand, .. }
             | HirExprKind::Unary { operand, .. } => self.expr(operand),
-            HirExprKind::VectorAlgebraicProduct {
+            HirExprKind::AlgebraicProduct {
                 left,
                 right,
                 product,
@@ -4801,7 +4811,7 @@ impl OwnershipAnalysis<'_> {
                 self.borrowed.pop();
                 self.storage_borrowed.pop();
                 self.storage_ranges.pop();
-                if matches!(product, VectorProduct::MatrixAlgebraicProduct { .. }) {
+                if matches!(product, AlgebraicProductKind::MatrixMatrix { .. }) {
                     if let Some(((_, a), (b, _))) = self
                         .known_matrix_shape(left)
                         .zip(self.known_matrix_shape(right))
@@ -4810,7 +4820,7 @@ impl OwnershipAnalysis<'_> {
                         return Err(self.error("E0345", format!("ShapeMismatch for algebraic multiplication: contraction dimension {a} versus {b}"), expr.span));
                     }
                 }
-                if let VectorProduct::MatrixVector { matrix_side, .. } = product {
+                if let AlgebraicProductKind::MatrixVector { matrix_side, .. } = product {
                     let dimensions = if *matrix_side == ScalarSide::Left {
                         self.known_matrix_shape(left)
                             .map(|(_, c)| c)
@@ -4823,7 +4833,7 @@ impl OwnershipAnalysis<'_> {
                         return Err(self.error("E0345", format!("ShapeMismatch for algebraic multiplication: contraction dimension {a} versus {b}"), expr.span));
                     }
                 }
-                if matches!(product, VectorProduct::Inner { .. }) {
+                if matches!(product, AlgebraicProductKind::Inner { .. }) {
                     if let Some((a, b)) = self
                         .known_length(left)
                         .zip(self.known_length(right))
@@ -5061,19 +5071,19 @@ impl OwnershipAnalysis<'_> {
 
     fn known_matrix_shape(&self, expr: &HirExpr) -> Option<(u64, u64)> {
         match &expr.kind {
-            HirExprKind::VectorAlgebraicProduct {
+            HirExprKind::AlgebraicProduct {
                 left,
                 right,
-                product: VectorProduct::MatrixAlgebraicProduct { .. },
+                product: AlgebraicProductKind::MatrixMatrix { .. },
                 ..
             } => self
                 .known_matrix_shape(left)
                 .zip(self.known_matrix_shape(right))
                 .map(|((r, _), (_, c))| (r, c)),
-            HirExprKind::VectorAlgebraicProduct {
+            HirExprKind::AlgebraicProduct {
                 left,
                 right,
-                product: VectorProduct::Outer { .. },
+                product: AlgebraicProductKind::Outer { .. },
                 ..
             } => self.known_length(left).zip(self.known_length(right)),
             HirExprKind::MatrixScalarMultiply {
@@ -5109,10 +5119,10 @@ impl OwnershipAnalysis<'_> {
 
     fn known_length(&self, expr: &HirExpr) -> Option<u64> {
         match &expr.kind {
-            HirExprKind::VectorAlgebraicProduct {
+            HirExprKind::AlgebraicProduct {
                 left,
                 right,
-                product: VectorProduct::MatrixVector { matrix_side, .. },
+                product: AlgebraicProductKind::MatrixVector { matrix_side, .. },
                 ..
             } => {
                 if *matrix_side == ScalarSide::Left {
@@ -7926,174 +7936,7 @@ impl Analyzer<'_> {
                 )]
             };
             if op == AstBinaryOp::Multiply {
-                if let (Some((element, lo)), Some((re, ro))) = (lv, rv) {
-                    if lo == ro {
-                        return Err(error(
-                            "E0342",
-                            "algebraic Vector multiplication requires Row × Column or Column × Row",
-                        ));
-                    }
-                    if element != re {
-                        return Err(error(
-                            "E0343",
-                            "algebraic multiplication requires identical canonical element types",
-                        ));
-                    }
-                    let inner = lo == crate::types::Orientation::Row;
-                    let (product_op, product) =
-                        vector_product_recipe(self.types, element, inner, span)
-                            .map_err(|reason| error("E0346", &reason))?;
-                    self.types.intern_vector_view(element, lo, false);
-                    self.types.intern_vector_view(element, ro, false);
-                    let ty = if inner {
-                        element
-                    } else {
-                        self.types.intern_matrix(element)
-                    };
-                    return Ok(Checked {
-                        expr: HirExpr {
-                            kind: HirExprKind::VectorAlgebraicProduct {
-                                left: Box::new(l.expr),
-                                right: Box::new(r.expr),
-                                element_type: element,
-                                product_op,
-                                product,
-                            },
-                            ty,
-                            span,
-                        },
-                        constant: None,
-                    });
-                }
-                if let (Some(element), Some(right_element)) = (lm, rm) {
-                    if element != right_element {
-                        return Err(error(
-                            "E0343",
-                            "algebraic multiplication requires identical canonical element types",
-                        ));
-                    }
-                    let (product_op, product) = matrix_matrix_recipe(self.types, element, span)
-                        .map_err(|reason| error("E0346", &reason))?;
-                    self.types.intern_matrix_view(element, false);
-                    let ty = self.types.intern_matrix(element);
-                    return Ok(Checked {
-                        expr: HirExpr {
-                            kind: HirExprKind::VectorAlgebraicProduct {
-                                left: Box::new(l.expr),
-                                right: Box::new(r.expr),
-                                element_type: element,
-                                product_op,
-                                product,
-                            },
-                            ty,
-                            span,
-                        },
-                        constant: None,
-                    });
-                }
-                let matrix_pair = match (lm, rv, lv, rm) {
-                    (Some(e), Some((v, crate::types::Orientation::Column)), _, _) => {
-                        Some((e, v, ScalarSide::Left))
-                    }
-                    (_, _, Some((v, crate::types::Orientation::Row)), Some(e)) => {
-                        Some((e, v, ScalarSide::Right))
-                    }
-                    _ => None,
-                };
-                if let Some((element, vector_element, side)) = matrix_pair {
-                    if element != vector_element {
-                        return Err(error(
-                            "E0343",
-                            "algebraic multiplication requires identical canonical element types",
-                        ));
-                    }
-                    let (product_op, product) =
-                        matrix_vector_recipe(self.types, element, side, span)
-                            .map_err(|reason| error("E0346", &reason))?;
-                    let orientation = if side == ScalarSide::Left {
-                        crate::types::Orientation::Column
-                    } else {
-                        crate::types::Orientation::Row
-                    };
-                    self.types.intern_matrix_view(element, false);
-                    self.types.intern_vector_view(element, orientation, false);
-                    let ty = self.types.intern_vector(element, orientation);
-                    return Ok(Checked {
-                        expr: HirExpr {
-                            kind: HirExprKind::VectorAlgebraicProduct {
-                                left: Box::new(l.expr),
-                                right: Box::new(r.expr),
-                                element_type: element,
-                                product_op,
-                                product,
-                            },
-                            ty,
-                            span,
-                        },
-                        constant: None,
-                    });
-                }
-                let left_math = lv.is_some() || lm.is_some();
-                let right_math = rv.is_some() || rm.is_some();
-                if left_math == right_math {
-                    return Err(error(
-                        "E0342",
-                        "algebraic multiplication pairing unsupported; expected scaling, Row × Column, Column × Row, Matrix × Column, Row × Matrix or Matrix × Matrix",
-                    ));
-                }
-                let (element, orientation, scalar_ty, scalar_side) = if left_math {
-                    (
-                        lv.map_or_else(|| lm.unwrap(), |v| v.0),
-                        lv.map(|v| v.1),
-                        r.expr.ty,
-                        ScalarSide::Right,
-                    )
-                } else {
-                    (
-                        rv.map_or_else(|| rm.unwrap(), |v| v.0),
-                        rv.map(|v| v.1),
-                        l.expr.ty,
-                        ScalarSide::Left,
-                    )
-                };
-                let element_op = math_element_op(self.types, element, BehavioralCapability::Mul)
-                    .map_err(|reason| error("E0346", &reason))?;
-                if scalar_ty != element {
-                    return Err(error(
-                        "E0343",
-                        "scalar and element canonical types must match exactly; no promotion",
-                    ));
-                }
-                let (ty, kind) = if let Some(orientation) = orientation {
-                    self.types.intern_vector_view(element, orientation, false);
-                    (
-                        self.types.intern_vector(element, orientation),
-                        HirExprKind::VectorScalarMultiply {
-                            left: Box::new(l.expr),
-                            right: Box::new(r.expr),
-                            scalar_side,
-                            element_type: element,
-                            op: element_op,
-                            orientation,
-                        },
-                    )
-                } else {
-                    self.types.intern_matrix_view(element, false);
-                    (
-                        self.types.intern_matrix(element),
-                        HirExprKind::MatrixScalarMultiply {
-                            left: Box::new(l.expr),
-                            right: Box::new(r.expr),
-                            scalar_side,
-                            element_type: element,
-                            op: element_op,
-                        },
-                    )
-                };
-                return Ok(Checked {
-                    expr: HirExpr { kind, ty, span },
-                    constant: None,
-                });
+                return self.resolve_native_multiplication(l, r, span);
             }
             if !matches!(op, AstBinaryOp::Add | AstBinaryOp::Subtract) {
                 return Err(error(
@@ -8492,225 +8335,6 @@ fn cast_range(value: impl std::fmt::Display, target: TypeId, span: Span) -> Diag
         format!("constant value `{value}` is outside the representable range of {target}"),
         Some(span),
     )
-}
-/// Independent storage, non-consuming read/reuse and operator obligations.
-fn zero_value(types: &TypeArena, ty: TypeId, span: Span) -> Option<HirExpr> {
-    if !types.guarantees_capability(ty, Capability::Algebraic(AlgebraicCapability::Zero)) {
-        return None;
-    }
-    let kind = match types.get(ty)? {
-        TypeData::GenericParam(_) => HirExprKind::AlgebraicValue {
-            capability: AlgebraicCapability::Zero,
-        },
-        TypeData::Integer(_) => HirExprKind::Int(0),
-        TypeData::Float(FloatType::Float32) => HirExprKind::Float(FloatValue::Float32(0)),
-        TypeData::Float(FloatType::Float64) => HirExprKind::Float(FloatValue::Float64(0)),
-        _ => return None,
-    };
-    Some(HirExpr { kind, ty, span })
-}
-
-fn matrix_matrix_recipe(
-    types: &TypeArena,
-    element: TypeId,
-    span: Span,
-) -> Result<(MathElementOp, VectorProduct), String> {
-    if !types.guarantees_capability(element, Capability::Storable) {
-        return Err("algebraic multiplication missing capability Storable".into());
-    }
-    let (mul, inner) = vector_product_recipe(types, element, true, span)?;
-    let VectorProduct::Inner {
-        accumulate_op,
-        zero,
-        ..
-    } = inner
-    else {
-        unreachable!()
-    };
-    Ok((
-        mul,
-        VectorProduct::MatrixAlgebraicProduct {
-            shape_check: MathShapeCheck::MatrixColumnsMatrixRows,
-            output_rows: (ScalarSide::Left, MatrixProductExtent::Rows),
-            output_columns: (ScalarSide::Right, MatrixProductExtent::Columns),
-            contraction_extent: (ScalarSide::Left, MatrixProductExtent::Columns),
-            accumulate_op,
-            zero,
-        },
-    ))
-}
-
-fn matrix_vector_recipe(
-    types: &TypeArena,
-    element: TypeId,
-    side: ScalarSide,
-    span: Span,
-) -> Result<(MathElementOp, VectorProduct), String> {
-    if !types.guarantees_capability(element, Capability::Storable) {
-        return Err("algebraic multiplication missing capability Storable".into());
-    }
-    let (mul, inner) = vector_product_recipe(types, element, true, span)?;
-    let VectorProduct::Inner {
-        accumulate_op,
-        zero,
-        ..
-    } = inner
-    else {
-        unreachable!()
-    };
-    let left = side == ScalarSide::Left;
-    Ok((
-        mul,
-        VectorProduct::MatrixVector {
-            matrix_side: side,
-            shape_check: if left {
-                MathShapeCheck::MatrixColumnsVectorDimension
-            } else {
-                MathShapeCheck::VectorDimensionMatrixRows
-            },
-            result_extent: if left {
-                MatrixProductExtent::Rows
-            } else {
-                MatrixProductExtent::Columns
-            },
-            contraction_extent: if left {
-                MatrixProductExtent::Columns
-            } else {
-                MatrixProductExtent::Rows
-            },
-            accumulate_op,
-            zero,
-        },
-    ))
-}
-
-fn vector_product_recipe(
-    types: &TypeArena,
-    element: TypeId,
-    inner: bool,
-    span: Span,
-) -> Result<(MathElementOp, VectorProduct), String> {
-    let mut requirements = vec![
-        Capability::Copy,
-        Capability::Behavioral(BehavioralCapability::Mul),
-    ];
-    if inner {
-        requirements.extend([
-            Capability::Behavioral(BehavioralCapability::Add),
-            Capability::Algebraic(AlgebraicCapability::Zero),
-        ]);
-    } else {
-        requirements.push(Capability::Storable);
-    }
-    let missing = requirements
-        .into_iter()
-        .filter(|c| !types.guarantees_capability(element, *c))
-        .map(|c| c.to_string())
-        .collect::<Vec<_>>();
-    if !missing.is_empty() {
-        return Err(format!(
-            "algebraic multiplication missing capabilities {}",
-            missing.join(" + ")
-        ));
-    }
-    let op = |behavior| {
-        if types.generic_param(element).is_some() {
-            MathElementOp::Behavioral(behavior)
-        } else {
-            MathElementOp::Concrete(
-                concrete_behavior_op(types, element, behavior).expect("proved built-in behavior"),
-            )
-        }
-    };
-    Ok((
-        op(BehavioralCapability::Mul),
-        if inner {
-            VectorProduct::Inner {
-                shape_check: MathShapeCheck::VectorDimension,
-                accumulate_op: op(BehavioralCapability::Add),
-                zero: Box::new(zero_value(types, element, span).expect("proved Zero")),
-            }
-        } else {
-            VectorProduct::Outer {
-                rows: ScalarSide::Left,
-                columns: ScalarSide::Right,
-            }
-        },
-    ))
-}
-
-fn math_element_op(
-    types: &TypeArena,
-    element: TypeId,
-    behavior: BehavioralCapability,
-) -> Result<MathElementOp, String> {
-    if matches!(types.get(element), Some(TypeData::GenericParam(_))) {
-        let missing = [
-            Capability::Storable,
-            Capability::Copy,
-            Capability::Behavioral(behavior),
-        ]
-        .into_iter()
-        .filter(|cap| !types.guarantees_capability(element, *cap))
-        .map(|cap| cap.to_string())
-        .collect::<Vec<_>>();
-        if !missing.is_empty() {
-            return Err(format!(
-                "element type {} for mathematical {:?} requires Storable + Copy + {}; missing {}",
-                format_type(types, element, &[], &[]),
-                behavior,
-                behavior,
-                missing.join(" + "),
-            ));
-        }
-        Ok(MathElementOp::Behavioral(behavior))
-    } else {
-        concrete_behavior_op(types, element, behavior)
-            .map(MathElementOp::Concrete)
-            .ok_or_else(|| {
-                format!(
-                    "element must be a concrete built-in arithmetic scalar supporting {behavior}"
-                )
-            })
-    }
-}
-
-fn verify_math_element_op(
-    types: &TypeArena,
-    element: TypeId,
-    op: MathElementOp,
-    behavior: BehavioralCapability,
-    sigs: VerificationSignatures<'_>,
-) -> Result<(), String> {
-    if matches!(op, MathElementOp::Behavioral(_))
-        && matches!(sigs, VerificationSignatures::Concrete(_))
-    {
-        return Err("unresolved behavioral mathematical kernel reached concrete HIR".into());
-    }
-    let expected = math_element_op(types, element, behavior)?;
-    if op != expected {
-        return Err("HIR mathematical element operation/source operator metadata invalid".into());
-    }
-    Ok(())
-}
-
-/// Reification of a behavioral contract into the existing concrete scalar IR.
-fn concrete_behavior_op(
-    types: &TypeArena,
-    ty: TypeId,
-    behavior: BehavioralCapability,
-) -> Option<HirBinaryOp> {
-    if !types.satisfies_behavior(ty, behavior) {
-        return None;
-    }
-    Some(match (behavior, types.float_info(ty).is_some()) {
-        (BehavioralCapability::Add, false) => HirBinaryOp::AddIntegerChecked,
-        (BehavioralCapability::Sub, false) => HirBinaryOp::SubtractIntegerChecked,
-        (BehavioralCapability::Mul, false) => HirBinaryOp::MultiplyIntegerChecked,
-        (BehavioralCapability::Add, true) => HirBinaryOp::AddFloat,
-        (BehavioralCapability::Sub, true) => HirBinaryOp::SubtractFloat,
-        (BehavioralCapability::Mul, true) => HirBinaryOp::MultiplyFloat,
-    })
 }
 
 fn bin_result(
@@ -9964,7 +9588,7 @@ fn verify_expr(
                 return Err(fail("HIR unresolved/invalid algebraic value".into()));
             }
         }
-        HirExprKind::VectorAlgebraicProduct {
+        HirExprKind::AlgebraicProduct {
             left,
             right,
             element_type,
@@ -9973,12 +9597,12 @@ fn verify_expr(
         } => {
             verify_expr(left, f, sigs, structs, enums, types, fail)?;
             verify_expr(right, f, sigs, structs, enums, types, fail)?;
-            if let VectorProduct::MatrixAlgebraicProduct { zero, .. } = product {
+            if let AlgebraicProductKind::MatrixMatrix { zero, .. } = product {
                 let (expected_op, expected) =
                     matrix_matrix_recipe(types, *element_type, e.span).map_err(fail)?;
                 verify_expr(zero, f, sigs, structs, enums, types, fail)?;
                 let mut normalized = product.clone();
-                if let VectorProduct::MatrixAlgebraicProduct { zero: z, .. } = &mut normalized {
+                if let AlgebraicProductKind::MatrixMatrix { zero: z, .. } = &mut normalized {
                     z.span = e.span;
                 }
                 if normalized != expected
@@ -10000,7 +9624,7 @@ fn verify_expr(
                 }
                 return Ok(());
             }
-            if let VectorProduct::MatrixVector {
+            if let AlgebraicProductKind::MatrixVector {
                 matrix_side, zero, ..
             } = product
             {
@@ -10015,7 +9639,7 @@ fn verify_expr(
                 };
                 // Spans are not evidence. Compare the symbolic/concrete zero's type and value separately.
                 let mut normalized = product.clone();
-                if let VectorProduct::MatrixVector { zero: z, .. } = &mut normalized {
+                if let AlgebraicProductKind::MatrixVector { zero: z, .. } = &mut normalized {
                     z.span = e.span;
                 }
                 if normalized != expected
@@ -10038,7 +9662,7 @@ fn verify_expr(
                 }
                 return Ok(());
             }
-            let inner = matches!(product, VectorProduct::Inner { .. });
+            let inner = matches!(product, AlgebraicProductKind::Inner { .. });
             let lo = if inner {
                 crate::types::Orientation::Row
             } else {
@@ -10053,12 +9677,12 @@ fn verify_expr(
                 vector_product_recipe(types, *element_type, inner, e.span).map_err(fail)?;
             let product_valid = match (product, expected_product) {
                 (
-                    VectorProduct::Inner {
+                    AlgebraicProductKind::Inner {
                         shape_check,
                         accumulate_op,
                         zero,
                     },
-                    VectorProduct::Inner {
+                    AlgebraicProductKind::Inner {
                         shape_check: sc,
                         accumulate_op: ao,
                         zero: z,
@@ -10071,8 +9695,8 @@ fn verify_expr(
                         && zero.kind == z.kind
                 }
                 (
-                    VectorProduct::Outer { rows, columns },
-                    VectorProduct::Outer {
+                    AlgebraicProductKind::Outer { rows, columns },
+                    AlgebraicProductKind::Outer {
                         rows: r,
                         columns: c,
                     },
@@ -11552,7 +11176,7 @@ mod tests {
                 else {
                     panic!()
                 };
-                let HirExprKind::VectorAlgebraicProduct {
+                let HirExprKind::AlgebraicProduct {
                     left,
                     right,
                     element_type,
@@ -11572,9 +11196,9 @@ mod tests {
                     3 => *element_type = TypeId::INT64,
                     4 => left.ty = bad.types.intern_matrix_view(t, false),
                     5..=9 => match product {
-                        VectorProduct::MatrixVector { .. }
-                        | VectorProduct::MatrixAlgebraicProduct { .. } => unreachable!(),
-                        VectorProduct::Inner {
+                        AlgebraicProductKind::MatrixVector { .. }
+                        | AlgebraicProductKind::MatrixMatrix { .. } => unreachable!(),
+                        AlgebraicProductKind::Inner {
                             shape_check,
                             accumulate_op,
                             zero,
@@ -11587,19 +11211,19 @@ mod tests {
                             7 => zero.kind = HirExprKind::Int(0),
                             8 => *shape_check = MathShapeCheck::MatrixRowsThenColumns,
                             9 => {
-                                *product = VectorProduct::Outer {
+                                *product = AlgebraicProductKind::Outer {
                                     rows: ScalarSide::Left,
                                     columns: ScalarSide::Right,
                                 }
                             }
                             _ => unreachable!(),
                         },
-                        VectorProduct::Outer { rows, columns } => match case {
+                        AlgebraicProductKind::Outer { rows, columns } => match case {
                             5 => *rows = ScalarSide::Right,
                             6 => *columns = ScalarSide::Left,
                             7 => std::mem::swap(rows, columns),
                             8 => {
-                                *product = VectorProduct::Inner {
+                                *product = AlgebraicProductKind::Inner {
                                     shape_check: MathShapeCheck::VectorDimension,
                                     accumulate_op: MathElementOp::Behavioral(
                                         BehavioralCapability::Add,
@@ -11651,10 +11275,10 @@ mod tests {
                 else {
                     panic!()
                 };
-                let HirExprKind::VectorAlgebraicProduct {
+                let HirExprKind::AlgebraicProduct {
                     product_op,
                     product:
-                        VectorProduct::Inner {
+                        AlgebraicProductKind::Inner {
                             accumulate_op,
                             zero,
                             ..
@@ -11718,7 +11342,7 @@ mod vertical32_tests {
                 else {
                     panic!()
                 };
-                let HirExprKind::VectorAlgebraicProduct {
+                let HirExprKind::AlgebraicProduct {
                     left,
                     right,
                     element_type,
@@ -11728,7 +11352,7 @@ mod vertical32_tests {
                 else {
                     panic!()
                 };
-                let VectorProduct::MatrixVector {
+                let AlgebraicProductKind::MatrixVector {
                     matrix_side,
                     shape_check,
                     result_extent,
@@ -11766,7 +11390,7 @@ mod vertical32_tests {
                     11 => *element_type = TypeId::INT64,
                     12 => value.ty = t,
                     13 => {
-                        *product = VectorProduct::Outer {
+                        *product = AlgebraicProductKind::Outer {
                             rows: crate::ScalarSide::Left,
                             columns: crate::ScalarSide::Right,
                         }
@@ -11796,10 +11420,10 @@ mod vertical32_tests {
                     else {
                         panic!()
                     };
-                    let HirExprKind::VectorAlgebraicProduct {
+                    let HirExprKind::AlgebraicProduct {
                         product_op,
                         product:
-                            VectorProduct::MatrixVector {
+                            AlgebraicProductKind::MatrixVector {
                                 zero,
                                 accumulate_op,
                                 ..
@@ -11851,7 +11475,7 @@ mod vertical33_tests {
             else {
                 panic!()
             };
-            let HirExprKind::VectorAlgebraicProduct {
+            let HirExprKind::AlgebraicProduct {
                 left,
                 right,
                 element_type,
@@ -11861,7 +11485,7 @@ mod vertical33_tests {
             else {
                 panic!()
             };
-            let VectorProduct::MatrixAlgebraicProduct {
+            let AlgebraicProductKind::MatrixMatrix {
                 shape_check,
                 output_rows,
                 output_columns,
@@ -11890,7 +11514,7 @@ mod vertical33_tests {
                 14 => contraction_extent.0 = ScalarSide::Right,
                 15 => *element_type = TypeId::INT64,
                 16 => {
-                    *product = VectorProduct::Outer {
+                    *product = AlgebraicProductKind::Outer {
                         rows: ScalarSide::Left,
                         columns: ScalarSide::Right,
                     }
@@ -11920,12 +11544,12 @@ mod vertical33_tests {
                 else {
                     panic!()
                 };
-                let HirExprKind::VectorAlgebraicProduct {
+                let HirExprKind::AlgebraicProduct {
                     left,
                     right,
                     product_op,
                     product:
-                        VectorProduct::MatrixAlgebraicProduct {
+                        AlgebraicProductKind::MatrixMatrix {
                             zero,
                             accumulate_op,
                             ..

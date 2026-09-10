@@ -4,65 +4,8 @@
 //! counter in [0, extent), stepping by one. `InitializeNext` writes and advances
 //! an initially zero prefix. `YieldOwner` requires the prefix to equal the
 //! validated extent product. No instruction can mutate or consume an input.
-use crate::{BinaryOp, TrapKind};
+use crate::{BinaryOp, MathAxis, MathInput, MathStep, MathStride, TrapKind};
 use aether_frontend::{TypeArena, TypeData, TypeId};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(missing_docs)]
-pub enum MathAxis {
-    Dimension,
-    Contraction,
-    Rows,
-    Columns,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(missing_docs)]
-pub enum MathStride {
-    Stride,
-    RowStride,
-    ColumnStride,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(missing_docs)]
-pub enum MathInput {
-    Left,
-    Right,
-}
-
-/// Explicit structured control flow and initialization instructions.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[allow(missing_docs)]
-pub enum MathStep {
-    ShapeGuard {
-        axis: MathAxis,
-        trap: TrapKind,
-    },
-    Allocate {
-        extents: Vec<MathAxis>,
-        size_trap: TrapKind,
-        failure_trap: TrapKind,
-    },
-    For {
-        axis: MathAxis,
-        start: u64,
-        step: u64,
-        body: Vec<MathStep>,
-    },
-    StridedLoad {
-        input: MathInput,
-        offset: Vec<(MathAxis, MathStride)>,
-    },
-    InvariantScalar {
-        input: MathInput,
-    },
-    ScalarBinary {
-        op: BinaryOp,
-        element_type: TypeId,
-        trap: Option<TrapKind>,
-    },
-    InitializeNext,
-    YieldOwner,
-}
 
 /// A region whose only escaping value is a completely initialized fresh owner.
 #[derive(Clone, Debug, PartialEq, Eq)]

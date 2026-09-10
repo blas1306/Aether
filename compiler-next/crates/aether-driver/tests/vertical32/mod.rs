@@ -1,7 +1,8 @@
 //! V32 native, diagnostic, schedule-corruption and cost qualification.
 use super::*;
 use aether_middle::{
-    BinaryOp, MathAxis, MathInput, MathStep, MathStride, Operand, ProductStep, VectorProductKernel,
+    AlgebraicProductKernel, BinaryOp, MathAxis, MathInput, MathStep, MathStride, Operand,
+    ProductStep,
 };
 use std::os::unix::process::ExitStatusExt;
 
@@ -366,20 +367,20 @@ fn vertical32_ieee_order_zero_infinity_nan() {
     }
 }
 
-fn outer(kernel: &mut VectorProductKernel) -> &mut Vec<ProductStep> {
+fn outer(kernel: &mut AlgebraicProductKernel) -> &mut Vec<ProductStep> {
     let ProductStep::For { body, .. } = &mut kernel.program[5] else {
         panic!()
     };
     body
 }
-fn inner(kernel: &mut VectorProductKernel) -> &mut Vec<ProductStep> {
+fn inner(kernel: &mut AlgebraicProductKernel) -> &mut Vec<ProductStep> {
     let ProductStep::For { body, .. } = &mut outer(kernel)[1] else {
         panic!()
     };
     body
 }
 #[allow(clippy::too_many_lines)]
-fn corrupt(kernel: &mut VectorProductKernel, case: usize) {
+fn corrupt(kernel: &mut AlgebraicProductKernel, case: usize) {
     let result = if kernel.matrix_input() == Some(MathInput::Left) {
         MathAxis::Rows
     } else {
@@ -530,7 +531,7 @@ fn vertical32_mir_ssa_independent_corruption_rejection() {
                     f.blocks
                         .iter()
                         .flat_map(|b| &b.instructions)
-                        .any(|i| matches!(i.value, Rvalue::VectorProduct { .. }))
+                        .any(|i| matches!(i.value, Rvalue::AlgebraicProduct { .. }))
                 })
                 .unwrap();
             let wrong = f.parameters[usize::from(column)].local;
@@ -538,9 +539,9 @@ fn vertical32_mir_ssa_independent_corruption_rejection() {
                 .blocks
                 .iter_mut()
                 .flat_map(|b| &mut b.instructions)
-                .find(|i| matches!(i.value, Rvalue::VectorProduct { .. }))
+                .find(|i| matches!(i.value, Rvalue::AlgebraicProduct { .. }))
                 .unwrap();
-            let Rvalue::VectorProduct { left, kernel, .. } = &mut inst.value else {
+            let Rvalue::AlgebraicProduct { left, kernel, .. } = &mut inst.value else {
                 panic!()
             };
             if case == 28 {
@@ -559,7 +560,7 @@ fn vertical32_mir_ssa_independent_corruption_rejection() {
                     f.blocks
                         .iter()
                         .flat_map(|b| &b.instructions)
-                        .any(|i| matches!(i.op, SsaOp::VectorProduct { .. }))
+                        .any(|i| matches!(i.op, SsaOp::AlgebraicProduct { .. }))
                 })
                 .unwrap();
             let wrong = f.parameters[usize::from(column)].value;
@@ -567,9 +568,9 @@ fn vertical32_mir_ssa_independent_corruption_rejection() {
                 .blocks
                 .iter_mut()
                 .flat_map(|b| &mut b.instructions)
-                .find(|i| matches!(i.op, SsaOp::VectorProduct { .. }))
+                .find(|i| matches!(i.op, SsaOp::AlgebraicProduct { .. }))
                 .unwrap();
-            let SsaOp::VectorProduct { left, kernel, .. } = &mut inst.op else {
+            let SsaOp::AlgebraicProduct { left, kernel, .. } = &mut inst.op else {
                 panic!()
             };
             if case == 28 {
@@ -655,7 +656,7 @@ fn vertical32_deterministic_dumps_and_constraint_order_abi() {
             compile(source.replace("Storable+Copy+Add+Mul+Zero", "Zero+Mul+Storable+Add+Copy"));
         assert_eq!(a.llvm, reordered.llvm);
         for text in [
-            "VectorAlgebraicProduct",
+            "AlgebraicProduct",
             "MatrixVector",
             "shape_check",
             "result_extent",

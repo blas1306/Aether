@@ -15,14 +15,14 @@ pub use ast::{
 };
 pub use diagnostic::{Diagnostic, DiagnosticCategory, Phase, SourceFile, SourceId, Span};
 pub use hir::{
-    CastKind, CoercionKind, DeclaredProgram, EnumInfo, FieldInfo, FloatValue, FunctionId,
-    FunctionInstanceInfo, FunctionSignature, GenericHirFunction, GenericParamInfo, HirBinaryOp,
-    HirBlock, HirCallTarget, HirDrop, HirExpr, HirExprKind, HirFunction, HirLocal, HirMatchArm,
-    HirMatchBinding, HirParameter, HirPlace, HirPlaceBase, HirPlaceProjection, HirStmt,
-    HirStmtKind, HirUnaryOp, InvalidationShape, LocalId, MatchMode, MathElementOp, MathShapeCheck,
-    MatrixProductExtent, ModuleId, ModuleInfo, MutationEffect, ParameterSignature, ParsedModule,
-    ParsedProgram, ResolvedImport, ScalarSide, StructInfo, StructuralMutation, TypeAliasInfo,
-    TypeLayout, TypedHir, VariantInfo, VariantPayloadInfo, VectorProduct, analyze, analyze_bodies,
+    AlgebraicProductKind, CastKind, CoercionKind, DeclaredProgram, EnumInfo, FieldInfo, FloatValue,
+    FunctionId, FunctionInstanceInfo, FunctionSignature, GenericHirFunction, GenericParamInfo,
+    HirBinaryOp, HirBlock, HirCallTarget, HirDrop, HirExpr, HirExprKind, HirFunction, HirLocal,
+    HirMatchArm, HirMatchBinding, HirParameter, HirPlace, HirPlaceBase, HirPlaceProjection,
+    HirStmt, HirStmtKind, HirUnaryOp, InvalidationShape, LocalId, MatchMode, MathElementOp,
+    MathShapeCheck, MatrixProductExtent, ModuleId, ModuleInfo, MutationEffect, ParameterSignature,
+    ParsedModule, ParsedProgram, ResolvedImport, ScalarSide, StructInfo, StructuralMutation,
+    TypeAliasInfo, TypeLayout, TypedHir, VariantInfo, VariantPayloadInfo, analyze, analyze_bodies,
     analyze_bodies_for_target, collect_program_signatures, collect_signatures, format_type,
     layout_of, verify_hir,
 };

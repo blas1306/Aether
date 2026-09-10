@@ -3,6 +3,7 @@
 use crate::{BinaryOp, MathAxis, MathInput, MathStep, MathStride, Operand, TrapKind};
 use aether_frontend::{FloatType, FloatValue, Orientation, TypeArena, TypeId};
 
+/// Closed computational forms, distinct from frontend semantic product metadata.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum ProductKind {
@@ -58,7 +59,7 @@ pub enum ProductStep {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
-pub struct VectorProductKernel {
+pub struct AlgebraicProductKernel {
     pub kind: ProductKind,
     pub element_type: TypeId,
     pub product_op: BinaryOp,
@@ -67,7 +68,7 @@ pub struct VectorProductKernel {
     pub program: Vec<ProductStep>,
 }
 
-impl VectorProductKernel {
+impl AlgebraicProductKernel {
     /// Build a closed schedule from concretized HIR metadata.
     #[must_use]
     pub fn new(
@@ -368,7 +369,9 @@ impl VectorProductKernel {
         }
     }
 
-    /// The single logical loop binding the ordered accumulator, if present.
+    /// The contraction loop binding the ordered accumulator, if present.
+    /// This is never an authority for result emptiness or allocation size:
+    /// those use the separate output selectors in the canonical recipe.
     #[must_use]
     pub fn reduction_axis(&self) -> Option<MathAxis> {
         match self.kind {

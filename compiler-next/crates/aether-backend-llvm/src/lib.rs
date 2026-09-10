@@ -2,6 +2,7 @@
 
 mod algebraic;
 mod elementwise;
+mod mathematical;
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -1164,7 +1165,7 @@ fn emit_function(
                     )
                     .unwrap();
                 }
-                SsaOp::VectorProduct {
+                SsaOp::AlgebraicProduct {
                     left,
                     right,
                     kernel,
@@ -2766,7 +2767,7 @@ fn emit_integer_division(
 fn is_checked(op: &SsaOp) -> bool {
     matches!(
         op,
-        SsaOp::VectorProduct { .. }
+        SsaOp::AlgebraicProduct { .. }
             | SsaOp::ElementwiseBinary { .. }
             | SsaOp::MatrixAxisVectorView { .. }
             | SsaOp::Unary {
@@ -3562,10 +3563,9 @@ nonempty:
   br label %shape
 shape:
   %ptr = phi ptr [ null, %empty_result ], [ %allocated_ptr, %nonempty ]
-  %d0 = insertvalue {{ ptr, i64, i64 }} zeroinitializer, ptr %ptr, 0
-  %d1 = insertvalue {{ ptr, i64, i64 }} %d0, i64 %rows, 1
-  %d2 = insertvalue {{ ptr, i64, i64 }} %d1, i64 %columns, 2
-  ret {{ ptr, i64, i64 }} %d2
+  %d0 = insertvalue {{ ptr, i64, i64 }} zeroinitializer, ptr %ptr, 0" ).unwrap();
+    mathematical::emit_matrix_shape(output, "%d0", "%rows", "%columns", ["%d1", "%d2"]);
+    writeln!(output, r"  ret {{ ptr, i64, i64 }} %d2
 }}
 define internal ptr @aether_matrix_index_{suffix}({{ ptr, i64, i64 }} %matrix, i64 %row, i64 %column) {{
 entry:

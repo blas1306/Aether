@@ -1,4 +1,19 @@
-# Aether NEXT-VERTICAL-33
+# Aether native compiler — MATH-ARCH-1
+
+MATH-ARCH-1 consolidates the mathematical architecture through V33 without
+adding source features. Native multiplication resolves through
+`Analyzer::resolve_native_multiplication` in `hir/mathematical.rs`; HIR uses
+`AlgebraicProduct` / `AlgebraicProductKind`, and MIR/SSA use
+`AlgebraicProductKernel`. Elementwise and algebraic kernels retain separate
+closed recipes and independent verification at both boundaries. Shared
+mathematical modules own kernel vocabulary, stride reads and Matrix shape
+construction. Checked integers, strict IEEE reductions, borrowed inputs, fresh
+results and zero-axis allocation behavior remain the reference semantics.
+
+See [the consolidation report](../docs/architecture/MATH_ARCH_1_REPORT.md) for
+the authority inventory, qualification, LLVM equivalence, and native-core versus
+future `LinearAlgebra` STD boundary. Numbered sections below remain historical
+feature-admission records; their internal names describe the original milestone.
 
 This directory is the isolated Rust implementation of the first reconstruction
 slice. The current mathematical foundation includes Matrix<T> owners and borrowed strided MatrixView/MatrixViewMut and oriented VectorView/VectorViewMut with zero-copy transpose; the numbered

@@ -2307,3 +2307,73 @@ semantics rather than exposing arbitrary result offsets. Closed common recipes
 remain the MIR/SSA verifier authority, with CFG translation in LLVM; no MemorySSA,
 runtime generic operation, matmul helper, row/column materialization or BLAS.
 See [NEXT_VERTICAL_33_REPORT.md](NEXT_VERTICAL_33_REPORT.md).
+
+## MATH-ARCH-1 — consolidated native mathematical authorities
+
+This is an architecture consolidation of V21..V33, with no new source behavior.
+The historical product names in confirmations 48..50 are superseded by
+`HirExprKind::AlgebraicProduct`, `AlgebraicProductKind`,
+`Rvalue::AlgebraicProduct`, `SsaOp::AlgebraicProduct` and
+`AlgebraicProductKernel`. HIR semantic kinds (Inner, Outer, MatrixVector,
+MatrixMatrix) retain distinct metadata and exact result families. Middle-end
+`ProductKind` describes five computational forms: scalar reduction, outer map,
+Matrix×Column map of reductions, Row×Matrix map of reductions and Matrix×Matrix
+map of reductions. Elementwise maps remain separate.
+
+`hir/mathematical.rs::Analyzer::resolve_native_multiplication` owns the complete
+native mathematical `*` decision, including orientation, exact canonical element,
+capabilities and owning/scalar result. Its return is a typed closed HIR node;
+there is no redundant dispatch enum. Literal typing and readable operand capture
+precede this resolution. Known shape facts remain in frontend ownership analysis,
+which has descriptor provenance and emits E0345; runtime compatibility remains
+in the exact HIR/MIR recipe. Scalar-only multiplication retains ordinary scalar
+coercion. `concrete_behavior_op` and `zero_value` in the same module remain the
+unique symbolic-to-concrete authorities, used by all mathematical operations and
+scalar generic expressions. Capability satisfaction stays in TypeArena.
+
+`aether-middle/src/mathematical.rs` owns the shared MathAxis/Input/Stride/Step
+vocabulary. `elementwise.rs` and `algebraic.rs` still own separate canonical
+constructors and full-tree verifiers. MIR and SSA each resolve their own actual
+operand/result types and invoke those verifiers independently, with no success
+flag. Output and contraction roles are recipe-specific; `reduction_axis()` binds
+the accumulator and never determines allocation or an empty-output bypass.
+No unrestricted schedules, dynamic rank or tensor-kernel DSL are admitted.
+
+`aether-backend-llvm/src/mathematical.rs` shares strided kernel loads and
+`emit_matrix_shape`. The latter writes both axes whether the base pointer is
+null or allocated. Matrix empty bypasses and the Matrix allocation helper all
+use it. Literal Matrix `[]` is still 0×0 and Vector dimension 0 still permits
+the exact null/zero constant. Empty output allocates nothing; zero contraction
+with positive output still allocates and stores Zero. Checked source indexing
+and projection remain separate from already-bounded kernel loads.
+
+### Native core and future LinearAlgebra STD boundary
+
+The core owns Vector/Matrix identity, Row/Column orientation, one-based indexing,
+runtime dimensions/shapes, borrowed readable/writable views, transpose views,
+row/column projections, elementwise +/−, scalar scaling and native algebraic `*`.
+Buffer/Array/List retain zero-based computational-container semantics. Existing
+consuming Vector transpose retains its separate ownership contract.
+
+Advanced algorithms belong to a future `LinearAlgebra` STD: LU, QR, Cholesky,
+SVD, Schur, Hessenberg, eigendecomposition, solve, least squares, rank, condition
+number, iterative solvers and advanced decompositions. This boundary neither
+implements those algorithms nor fixes a complete STD API. Their contracts must
+build on the native core rather than silently changing its operators.
+
+### Strict numeric reference and OPEN DECISIONS
+
+Native integers remain checked with IntegerOverflow; floats retain strict IEEE
+operations. Reductions begin with canonical Zero, visit the contraction index
+in increasing logical order, and execute separate multiplication then addition
+for every term, including the first. Native source owners are read through
+borrowed descriptors and fresh owning results retain existing allocation costs.
+No consuming optimization, FMA contraction, reassociation, BLAS replacement or
+SIMD reduction reordering is enabled by this refactoring.
+
+OPEN DECISIONS for independent future work: fast-math modes, BLAS lowering,
+SIMD, loop tiling/blocking, parallel reductions, FMA and reproducibility modes.
+Each requires an explicit decision about observable order, traps, aliasing,
+allocation and numeric behavior; none is designed here or implied by an
+optimization level. Full evidence and remaining risks are recorded in
+[MATH_ARCH_1_REPORT.md](MATH_ARCH_1_REPORT.md).

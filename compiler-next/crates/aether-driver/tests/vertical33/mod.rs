@@ -1,7 +1,8 @@
 //! V33 native, diagnostic, schedule-corruption and cost qualification.
 use super::*;
 use aether_middle::{
-    BinaryOp, MathAxis, MathInput, MathStep, MathStride, Operand, ProductStep, VectorProductKernel,
+    AlgebraicProductKernel, BinaryOp, MathAxis, MathInput, MathStep, MathStride, Operand,
+    ProductStep,
 };
 use std::os::unix::process::ExitStatusExt;
 
@@ -381,7 +382,7 @@ fn vertical33_deterministic_dumps_and_constraint_order_abi() {
                 .llvm
         );
         for text in [
-            "MatrixAlgebraicProduct",
+            "MatrixMatrix",
             "output_rows",
             "output_columns",
             "contraction_extent",
@@ -427,26 +428,26 @@ fn vertical33_composition_preserves_result_families() {
     assert_eq!(v23_execute(&instrument(&c.llvm, 8)).code(), Some(0));
 }
 
-fn rows_body(k: &mut VectorProductKernel) -> &mut Vec<ProductStep> {
+fn rows_body(k: &mut AlgebraicProductKernel) -> &mut Vec<ProductStep> {
     let ProductStep::For { body, .. } = &mut k.program[6] else {
         panic!()
     };
     body
 }
-fn cells(k: &mut VectorProductKernel) -> &mut Vec<ProductStep> {
+fn cells(k: &mut AlgebraicProductKernel) -> &mut Vec<ProductStep> {
     let ProductStep::For { body, .. } = &mut rows_body(k)[0] else {
         panic!()
     };
     body
 }
-fn terms(k: &mut VectorProductKernel) -> &mut Vec<ProductStep> {
+fn terms(k: &mut AlgebraicProductKernel) -> &mut Vec<ProductStep> {
     let ProductStep::For { body, .. } = &mut cells(k)[1] else {
         panic!()
     };
     body
 }
 #[allow(clippy::too_many_lines)]
-fn corrupt(k: &mut VectorProductKernel, case: usize) {
+fn corrupt(k: &mut AlgebraicProductKernel, case: usize) {
     use MathAxis::{Columns, Contraction, Rows};
     match case {
         0 => {
@@ -631,7 +632,7 @@ fn vertical33_mir_ssa_independent_corruption_rejection() {
                     f.blocks
                         .iter()
                         .flat_map(|b| &b.instructions)
-                        .any(|i| matches!(i.value, Rvalue::VectorProduct { .. }))
+                        .any(|i| matches!(i.value, Rvalue::AlgebraicProduct { .. }))
                 })
                 .unwrap();
             let wrong = f.parameters[2].local;
@@ -639,9 +640,9 @@ fn vertical33_mir_ssa_independent_corruption_rejection() {
                 .blocks
                 .iter_mut()
                 .flat_map(|b| &mut b.instructions)
-                .find(|i| matches!(i.value, Rvalue::VectorProduct { .. }))
+                .find(|i| matches!(i.value, Rvalue::AlgebraicProduct { .. }))
                 .unwrap();
-            let Rvalue::VectorProduct {
+            let Rvalue::AlgebraicProduct {
                 left,
                 right,
                 kernel,
@@ -678,7 +679,7 @@ fn vertical33_mir_ssa_independent_corruption_rejection() {
                     f.blocks
                         .iter()
                         .flat_map(|b| &b.instructions)
-                        .any(|i| matches!(i.op, SsaOp::VectorProduct { .. }))
+                        .any(|i| matches!(i.op, SsaOp::AlgebraicProduct { .. }))
                 })
                 .unwrap();
             let wrong = f.parameters[2].value;
@@ -686,9 +687,9 @@ fn vertical33_mir_ssa_independent_corruption_rejection() {
                 .blocks
                 .iter_mut()
                 .flat_map(|b| &mut b.instructions)
-                .find(|i| matches!(i.op, SsaOp::VectorProduct { .. }))
+                .find(|i| matches!(i.op, SsaOp::AlgebraicProduct { .. }))
                 .unwrap();
-            let SsaOp::VectorProduct {
+            let SsaOp::AlgebraicProduct {
                 left,
                 right,
                 kernel,

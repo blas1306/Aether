@@ -3,15 +3,15 @@
 use super::{continuation_label, float_operand, llvm_type, mangle_type};
 use aether_frontend::TypeArena;
 use aether_middle::{
-    BinaryOp, BlockId, MathAxis, MathInput, MathStep, Operand, ProductKind, ProductStep,
-    VectorProductKernel,
+    AlgebraicProductKernel, BinaryOp, BlockId, MathAxis, MathInput, MathStep, Operand, ProductKind,
+    ProductStep,
 };
 use std::fmt::Write;
 
 pub(super) fn emit(
     output: &mut String,
     types: &TypeArena,
-    kernel: &VectorProductKernel,
+    kernel: &AlgebraicProductKernel,
     inputs: [(&str, &str); 2],
     id: u32,
     block: BlockId,
@@ -53,7 +53,7 @@ pub(super) fn emit(
 struct Emitter<'a> {
     output: &'a mut String,
     types: &'a TypeArena,
-    kernel: &'a VectorProductKernel,
+    kernel: &'a AlgebraicProductKernel,
     prefix: String,
     id: u32,
     block: BlockId,
@@ -109,7 +109,15 @@ impl Emitter<'_> {
                 }
                 ProductStep::EmptyMatrixResultBypass { rows, columns } => {
                     let cont = continuation_label(self.block, self.id);
-                    writeln!(self.output, "  %{p}_empty_rows = icmp eq i64 %{p}_extent_{rows:?}, 0\n  %{p}_empty_columns = icmp eq i64 %{p}_extent_{columns:?}, 0\n  %{p}_empty = or i1 %{p}_empty_rows, %{p}_empty_columns\n  br i1 %{p}_empty, label %{p}_empty_result, label %{p}_allocate\n{p}_empty_result:\n  %{p}_empty_shape = insertvalue {{ ptr, i64, i64 }} zeroinitializer, i64 %{p}_extent_{rows:?}, 1\n  %{p}_empty_owner = insertvalue {{ ptr, i64, i64 }} %{p}_empty_shape, i64 %{p}_extent_{columns:?}, 2\n  br label %{cont}\n{p}_allocate:").unwrap();
+                    writeln!(self.output, "  %{p}_empty_rows = icmp eq i64 %{p}_extent_{rows:?}, 0\n  %{p}_empty_columns = icmp eq i64 %{p}_extent_{columns:?}, 0\n  %{p}_empty = or i1 %{p}_empty_rows, %{p}_empty_columns\n  br i1 %{p}_empty, label %{p}_empty_result, label %{p}_allocate\n{p}_empty_result:").unwrap();
+                    super::mathematical::emit_matrix_shape(
+                        self.output,
+                        "zeroinitializer",
+                        &format!("%{p}_extent_{rows:?}"),
+                        &format!("%{p}_extent_{columns:?}"),
+                        [&format!("%{p}_empty_shape"), &format!("%{p}_empty_owner")],
+                    );
+                    writeln!(self.output, "  br label %{cont}\n{p}_allocate:").unwrap();
                     *current = format!("{p}_allocate");
                 }
                 ProductStep::EmptyResultBypass { axis } => {
@@ -163,92 +171,79 @@ impl Emitter<'_> {
                     writeln!(self.output, "  br label %{cont}\n{cont}:\n  %v{} = phi {et} [ %{p}_accumulator, %{current} ]\n  ; AlgebraicEnd {}", self.id, self.id).unwrap();
                     *current = cont;
                 }
-                ProductStep::Math(math) => {
-                    match math {
-                        MathStep::ShapeGuard { axis, .. } => {
-                            let next = format!("{p}_shape_ok");
-                            writeln!(self.output, "  %{p}_equal = icmp eq i64 %{p}_Left_{axis:?}, %{p}_Right_{axis:?}\n  br i1 %{p}_equal, label %{next}, label %trap_shape_mismatch\n{next}:").unwrap();
-                            *current = next;
-                        }
-                        MathStep::Allocate { extents, .. } => {
-                            if self.kernel.kind == ProductKind::MatrixMatrixKernel {
-                                let suffix = mangle_type(self.types, self.kernel.element_type);
-                                writeln!(self.output, "  %{p}_allocated = call {{ ptr, i64, i64 }} @aether_matrix_new_{suffix}(i64 %{p}_extent_Rows, i64 %{p}_extent_Columns)\n  %{p}_data = extractvalue {{ ptr, i64, i64 }} %{p}_allocated, 0").unwrap();
-                                continue;
-                            }
-                            if self.kernel.matrix_input().is_some() {
-                                let suffix = mangle_type(self.types, self.kernel.element_type);
-                                let axis = extents[0];
-                                writeln!(self.output, "  %{p}_allocated = call {{ ptr, i64 }} @aether_fixed_new_{suffix}(i64 %{p}_extent_{axis:?})\n  %{p}_data = extractvalue {{ ptr, i64 }} %{p}_allocated, 0").unwrap();
-                                continue;
-                            }
-                            let suffix = mangle_type(self.types, self.kernel.element_type);
-                            let cont = continuation_label(self.block, self.id);
-                            writeln!(self.output, "  %{p}_allocated = call {{ ptr, i64, i64 }} @aether_matrix_new_{suffix}(i64 %{p}_extent_Rows, i64 %{p}_extent_Columns)\n  %{p}_data = extractvalue {{ ptr, i64, i64 }} %{p}_allocated, 0\n  %{p}_empty_rows = icmp eq i64 %{p}_extent_Rows, 0\n  %{p}_empty_columns = icmp eq i64 %{p}_extent_Columns, 0\n  %{p}_empty = or i1 %{p}_empty_rows, %{p}_empty_columns\n  br i1 %{p}_empty, label %{p}_empty_result, label %{p}_nonempty\n{p}_empty_result:\n  br label %{cont}\n{p}_nonempty:").unwrap();
-                            *current = format!("{p}_nonempty");
-                        }
-                        MathStep::StridedLoad { input, offset } => {
-                            let mut terms = Vec::new();
-                            for (axis, stride) in offset {
-                                let term = format!("%{p}_{input:?}_{axis:?}_offset");
-                                writeln!(self.output, "  {term} = mul i64 %{p}_{axis:?}_index, %{p}_{input:?}_{stride:?}").unwrap();
-                                terms.push(term);
-                            }
-                            let offset = if terms.len() == 1 {
-                                terms[0].clone()
-                            } else {
-                                writeln!(
-                                    self.output,
-                                    "  %{p}_{input:?}_offset = add i64 {}, {}",
-                                    terms[0], terms[1]
-                                )
-                                .unwrap();
-                                format!("%{p}_{input:?}_offset")
-                            };
-                            writeln!(self.output, "  %{p}_{input:?}_slot = getelementptr {et}, ptr %{p}_{input:?}_ptr, i64 {offset}\n  %{p}_{input:?}_value = load {et}, ptr %{p}_{input:?}_slot").unwrap();
-                        }
-                        MathStep::ScalarBinary { op, .. } => self.scalar(
-                            *op,
-                            "product",
-                            &format!("%{p}_Left_value"),
-                            &format!("%{p}_Right_value"),
-                            current,
-                        ),
-                        MathStep::InitializeNext => {
-                            if let Some(matrix) = self.kernel.matrix_input() {
-                                let axis = if matrix == MathInput::Left {
-                                    MathAxis::Rows
-                                } else {
-                                    MathAxis::Columns
-                                };
-                                writeln!(self.output, "  %{p}_result_slot = getelementptr {et}, ptr %{p}_data, i64 %{p}_{axis:?}_index\n  store {et} %{p}_accumulator, ptr %{p}_result_slot ; InitializeNext").unwrap();
-                                continue;
-                            }
-                            let value = if self.kernel.kind == ProductKind::MatrixMatrixKernel {
-                                "accumulator"
-                            } else {
-                                "product"
-                            };
-                            writeln!(self.output, "  %{p}_row_base = mul i64 %{p}_Rows_index, %{p}_extent_Columns\n  %{p}_initialized_prefix = add i64 %{p}_row_base, %{p}_Columns_index\n  %{p}_result_slot = getelementptr {et}, ptr %{p}_data, i64 %{p}_initialized_prefix\n  store {et} %{p}_{value}, ptr %{p}_result_slot ; InitializeNext").unwrap();
-                        }
-                        MathStep::YieldOwner => {
-                            let cont = continuation_label(self.block, self.id);
-                            if self.kernel.matrix_input().is_some() {
-                                writeln!(self.output, "  br label %{cont}\n{cont}:\n  %v{} = phi {{ ptr, i64 }} [ zeroinitializer, %{p}_empty_result ], [ %{p}_allocated, %{current} ]\n  ; AlgebraicEnd {}", self.id, self.id).unwrap();
-                                *current = cont;
-                                continue;
-                            }
-                            let empty = if self.kernel.kind == ProductKind::MatrixMatrixKernel {
-                                "empty_owner"
-                            } else {
-                                "allocated"
-                            };
-                            writeln!(self.output, "  br label %{cont}\n{cont}:\n  %v{} = phi {{ ptr, i64, i64 }} [ %{p}_{empty}, %{p}_empty_result ], [ %{p}_allocated, %{current} ]\n  ; AlgebraicEnd {}", self.id, self.id).unwrap();
-                            *current = cont;
-                        }
-                        _ => unreachable!("verified closed algebraic schedule"),
+                ProductStep::Math(math) => match math {
+                    MathStep::ShapeGuard { axis, .. } => {
+                        let next = format!("{p}_shape_ok");
+                        writeln!(self.output, "  %{p}_equal = icmp eq i64 %{p}_Left_{axis:?}, %{p}_Right_{axis:?}\n  br i1 %{p}_equal, label %{next}, label %trap_shape_mismatch\n{next}:").unwrap();
+                        *current = next;
                     }
-                }
+                    MathStep::Allocate { extents, .. } => {
+                        if self.kernel.kind == ProductKind::MatrixMatrixKernel {
+                            let suffix = mangle_type(self.types, self.kernel.element_type);
+                            writeln!(self.output, "  %{p}_allocated = call {{ ptr, i64, i64 }} @aether_matrix_new_{suffix}(i64 %{p}_extent_Rows, i64 %{p}_extent_Columns)\n  %{p}_data = extractvalue {{ ptr, i64, i64 }} %{p}_allocated, 0").unwrap();
+                            continue;
+                        }
+                        if self.kernel.matrix_input().is_some() {
+                            let suffix = mangle_type(self.types, self.kernel.element_type);
+                            let axis = extents[0];
+                            writeln!(self.output, "  %{p}_allocated = call {{ ptr, i64 }} @aether_fixed_new_{suffix}(i64 %{p}_extent_{axis:?})\n  %{p}_data = extractvalue {{ ptr, i64 }} %{p}_allocated, 0").unwrap();
+                            continue;
+                        }
+                        let suffix = mangle_type(self.types, self.kernel.element_type);
+                        let cont = continuation_label(self.block, self.id);
+                        writeln!(self.output, "  %{p}_allocated = call {{ ptr, i64, i64 }} @aether_matrix_new_{suffix}(i64 %{p}_extent_Rows, i64 %{p}_extent_Columns)\n  %{p}_data = extractvalue {{ ptr, i64, i64 }} %{p}_allocated, 0\n  %{p}_empty_rows = icmp eq i64 %{p}_extent_Rows, 0\n  %{p}_empty_columns = icmp eq i64 %{p}_extent_Columns, 0\n  %{p}_empty = or i1 %{p}_empty_rows, %{p}_empty_columns\n  br i1 %{p}_empty, label %{p}_empty_result, label %{p}_nonempty\n{p}_empty_result:\n  br label %{cont}\n{p}_nonempty:").unwrap();
+                        *current = format!("{p}_nonempty");
+                    }
+                    MathStep::StridedLoad { input, offset } => {
+                        super::mathematical::emit_strided_load(
+                            self.output,
+                            &p,
+                            &et,
+                            *input,
+                            offset,
+                        );
+                    }
+                    MathStep::ScalarBinary { op, .. } => self.scalar(
+                        *op,
+                        "product",
+                        &format!("%{p}_Left_value"),
+                        &format!("%{p}_Right_value"),
+                        current,
+                    ),
+                    MathStep::InitializeNext => {
+                        if let Some(matrix) = self.kernel.matrix_input() {
+                            let axis = if matrix == MathInput::Left {
+                                MathAxis::Rows
+                            } else {
+                                MathAxis::Columns
+                            };
+                            writeln!(self.output, "  %{p}_result_slot = getelementptr {et}, ptr %{p}_data, i64 %{p}_{axis:?}_index\n  store {et} %{p}_accumulator, ptr %{p}_result_slot ; InitializeNext").unwrap();
+                            continue;
+                        }
+                        let value = if self.kernel.kind == ProductKind::MatrixMatrixKernel {
+                            "accumulator"
+                        } else {
+                            "product"
+                        };
+                        writeln!(self.output, "  %{p}_row_base = mul i64 %{p}_Rows_index, %{p}_extent_Columns\n  %{p}_initialized_prefix = add i64 %{p}_row_base, %{p}_Columns_index\n  %{p}_result_slot = getelementptr {et}, ptr %{p}_data, i64 %{p}_initialized_prefix\n  store {et} %{p}_{value}, ptr %{p}_result_slot ; InitializeNext").unwrap();
+                    }
+                    MathStep::YieldOwner => {
+                        let cont = continuation_label(self.block, self.id);
+                        if self.kernel.matrix_input().is_some() {
+                            writeln!(self.output, "  br label %{cont}\n{cont}:\n  %v{} = phi {{ ptr, i64 }} [ zeroinitializer, %{p}_empty_result ], [ %{p}_allocated, %{current} ]\n  ; AlgebraicEnd {}", self.id, self.id).unwrap();
+                            *current = cont;
+                            continue;
+                        }
+                        let empty = if self.kernel.kind == ProductKind::MatrixMatrixKernel {
+                            "empty_owner"
+                        } else {
+                            "allocated"
+                        };
+                        writeln!(self.output, "  br label %{cont}\n{cont}:\n  %v{} = phi {{ ptr, i64, i64 }} [ %{p}_{empty}, %{p}_empty_result ], [ %{p}_allocated, %{current} ]\n  ; AlgebraicEnd {}", self.id, self.id).unwrap();
+                        *current = cont;
+                    }
+                    _ => unreachable!("verified closed algebraic schedule"),
+                },
             }
         }
     }

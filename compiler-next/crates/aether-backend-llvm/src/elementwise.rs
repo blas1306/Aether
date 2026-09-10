@@ -96,7 +96,13 @@ impl Emitter<'_> {
                     }
                     writeln!(self.output, "  br i1 %{p}_empty, label %{p}_empty_result, label %{p}_allocate\n{p}_empty_result:").unwrap();
                     if self.kernel.matrix {
-                        writeln!(self.output, "  %{p}_empty_r = insertvalue {} zeroinitializer, i64 %{p}_{source}_Rows, 1\n  %{p}_empty_owner = insertvalue {} %{p}_empty_r, i64 %{p}_{source}_Columns, 2", self.result_ty, self.result_ty).unwrap();
+                        super::mathematical::emit_matrix_shape(
+                            self.output,
+                            "zeroinitializer",
+                            &format!("%{p}_{source}_Rows"),
+                            &format!("%{p}_{source}_Columns"),
+                            [&format!("%{p}_empty_r"), &format!("%{p}_empty_owner")],
+                        );
                     }
                     writeln!(
                         self.output,
@@ -132,28 +138,7 @@ impl Emitter<'_> {
                     *current = format!("{a}_done");
                 }
                 MathStep::StridedLoad { input, offset } => {
-                    let mut terms = Vec::new();
-                    for (axis, stride) in offset {
-                        let term = format!("%{p}_{input:?}_{axis:?}_offset");
-                        writeln!(
-                            self.output,
-                            "  {term} = mul i64 %{p}_{axis:?}_index, %{p}_{input:?}_{stride:?}"
-                        )
-                        .unwrap();
-                        terms.push(term);
-                    }
-                    let offset = if terms.len() == 1 {
-                        terms[0].clone()
-                    } else {
-                        writeln!(
-                            self.output,
-                            "  %{p}_{input:?}_offset = add i64 {}, {}",
-                            terms[0], terms[1]
-                        )
-                        .unwrap();
-                        format!("%{p}_{input:?}_offset")
-                    };
-                    writeln!(self.output, "  %{p}_{input:?}_slot = getelementptr {et}, ptr %{p}_{input:?}_ptr, i64 {offset}\n  %{p}_{input:?}_value = load {et}, ptr %{p}_{input:?}_slot").unwrap();
+                    super::mathematical::emit_strided_load(self.output, &p, &et, *input, offset);
                 }
                 MathStep::InvariantScalar { .. } => {} // Captured before the region; no per-element load.
                 MathStep::ScalarBinary { op, .. } => {

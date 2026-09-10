@@ -252,10 +252,10 @@ pub enum BinaryOp {
 pub enum Rvalue {
     /// Readable descriptor operands and an explicit structured initialization loop.
     /// Native oriented algebraic product with a closed concrete schedule.
-    VectorProduct {
+    AlgebraicProduct {
         left: Operand,
         right: Operand,
-        kernel: crate::VectorProductKernel,
+        kernel: crate::AlgebraicProductKernel,
     },
     ElementwiseBinary {
         left: Operand,
@@ -1970,7 +1970,7 @@ impl Builder<'_> {
                 );
                 Operand::Local(destination)
             }
-            HirExprKind::VectorAlgebraicProduct {
+            HirExprKind::AlgebraicProduct {
                 left,
                 right,
                 element_type,
@@ -1995,64 +1995,65 @@ impl Builder<'_> {
                 let (left, left_owner) = self.lower_math_read(left);
                 let (right, right_owner) = self.lower_math_read(right);
                 let reduction = match product {
-                    aether_frontend::VectorProduct::Inner {
+                    aether_frontend::AlgebraicProductKind::Inner {
                         accumulate_op,
                         zero,
                         ..
                     }
-                    | aether_frontend::VectorProduct::MatrixAlgebraicProduct {
+                    | aether_frontend::AlgebraicProductKind::MatrixMatrix {
                         accumulate_op,
                         zero,
                         ..
                     }
-                    | aether_frontend::VectorProduct::MatrixVector {
+                    | aether_frontend::AlgebraicProductKind::MatrixVector {
                         accumulate_op,
                         zero,
                         ..
                     } => Some((concrete(*accumulate_op), self.lower_expr(zero))),
-                    aether_frontend::VectorProduct::Outer { .. } => None,
+                    aether_frontend::AlgebraicProductKind::Outer { .. } => None,
                 };
-                let kernel =
-                    if let aether_frontend::VectorProduct::MatrixVector { matrix_side, .. } =
-                        product
-                    {
-                        let (add, zero) = reduction.expect("verified map-reduction");
-                        crate::VectorProductKernel::new_matrix_vector(
-                            *element_type,
-                            concrete(*product_op),
-                            add,
-                            zero,
-                            if *matrix_side == aether_frontend::ScalarSide::Left {
-                                crate::MathInput::Left
-                            } else {
-                                crate::MathInput::Right
-                            },
-                        )
-                    } else if matches!(
-                        product,
-                        aether_frontend::VectorProduct::MatrixAlgebraicProduct { .. }
-                    ) {
-                        let (add, zero) = reduction.expect("verified Matrix map-reduction");
-                        crate::VectorProductKernel::new_matrix_matrix(
-                            *element_type,
-                            concrete(*product_op),
-                            add,
-                            zero,
-                        )
-                    } else {
-                        crate::VectorProductKernel::new(
-                            *element_type,
-                            concrete(*product_op),
-                            reduction,
-                        )
-                    };
+                let kernel = if let aether_frontend::AlgebraicProductKind::MatrixVector {
+                    matrix_side,
+                    ..
+                } = product
+                {
+                    let (add, zero) = reduction.expect("verified map-reduction");
+                    crate::AlgebraicProductKernel::new_matrix_vector(
+                        *element_type,
+                        concrete(*product_op),
+                        add,
+                        zero,
+                        if *matrix_side == aether_frontend::ScalarSide::Left {
+                            crate::MathInput::Left
+                        } else {
+                            crate::MathInput::Right
+                        },
+                    )
+                } else if matches!(
+                    product,
+                    aether_frontend::AlgebraicProductKind::MatrixMatrix { .. }
+                ) {
+                    let (add, zero) = reduction.expect("verified Matrix map-reduction");
+                    crate::AlgebraicProductKernel::new_matrix_matrix(
+                        *element_type,
+                        concrete(*product_op),
+                        add,
+                        zero,
+                    )
+                } else {
+                    crate::AlgebraicProductKernel::new(
+                        *element_type,
+                        concrete(*product_op),
+                        reduction,
+                    )
+                };
                 let destination = self.temporary(expression.ty);
                 self.assign(
                     Place {
                         base: PlaceBase::Local(destination),
                         projections: vec![],
                     },
-                    Rvalue::VectorProduct {
+                    Rvalue::AlgebraicProduct {
                         left,
                         right,
                         kernel,
@@ -3141,7 +3142,7 @@ fn verify_ownership(
                     )?;
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
-                Rvalue::VectorProduct { .. }
+                Rvalue::AlgebraicProduct { .. }
                 | Rvalue::ElementwiseBinary { .. }
                 | Rvalue::BufferAlloc { .. }
                 | Rvalue::ArrayFill { .. } => {
@@ -3513,7 +3514,7 @@ fn validate_rvalue(
                 return Err("MIR borrowed local is not address-taken".into());
             }
         }
-        Rvalue::VectorProduct {
+        Rvalue::AlgebraicProduct {
             left,
             right,
             kernel,

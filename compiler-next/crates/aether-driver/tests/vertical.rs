@@ -10030,3 +10030,14 @@ mod vertical31;
 mod vertical32;
 
 mod vertical33;
+
+#[test]
+fn math_arch_1_double_transpose_preserves_product_and_owners() {
+    let (_, status) = run_path(
+        &program("math_arch_1_double_transpose.ae"),
+        &[],
+        &ClangToolchain::default(),
+    )
+    .unwrap();
+    assert_eq!(status.code(), Some(0));
+}

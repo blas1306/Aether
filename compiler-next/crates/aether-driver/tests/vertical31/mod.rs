@@ -1,7 +1,8 @@
 //! V31 native, diagnostic, schedule-corruption and cost qualification.
 use super::*;
 use aether_middle::{
-    BinaryOp, MathAxis, MathInput, MathStep, MathStride, Operand, ProductStep, VectorProductKernel,
+    AlgebraicProductKernel, BinaryOp, MathAxis, MathInput, MathStep, MathStride, Operand,
+    ProductStep,
 };
 use std::os::unix::process::ExitStatusExt;
 
@@ -304,7 +305,7 @@ Vector<{ty},Row>a=[{large},1.0,-{large}];Vector<{ty},Column>b=[1.0,1.0,1.0];if(a
 }
 
 #[allow(clippy::too_many_lines)]
-fn corrupt(kernel: &mut VectorProductKernel, case: usize) {
+fn corrupt(kernel: &mut AlgebraicProductKernel, case: usize) {
     fn leaf(program: &mut [ProductStep]) -> &mut Vec<ProductStep> {
         let body = program
             .iter_mut()
@@ -470,7 +471,7 @@ fn vertical31_mir_ssa_independent_corruption_rejection() {
                     f.blocks
                         .iter()
                         .flat_map(|b| &b.instructions)
-                        .any(|i| matches!(i.value, Rvalue::VectorProduct { .. }))
+                        .any(|i| matches!(i.value, Rvalue::AlgebraicProduct { .. }))
                 })
                 .unwrap();
             let input = m.functions[fi].parameters[0].local;
@@ -478,9 +479,9 @@ fn vertical31_mir_ssa_independent_corruption_rejection() {
                 .blocks
                 .iter_mut()
                 .flat_map(|b| &mut b.instructions)
-                .find(|i| matches!(i.value, Rvalue::VectorProduct { .. }))
+                .find(|i| matches!(i.value, Rvalue::AlgebraicProduct { .. }))
                 .unwrap();
-            let Rvalue::VectorProduct { left, kernel, .. } = &mut inst.value else {
+            let Rvalue::AlgebraicProduct { left, kernel, .. } = &mut inst.value else {
                 panic!()
             };
             if case == 19 {
@@ -497,9 +498,9 @@ fn vertical31_mir_ssa_independent_corruption_rejection() {
                 .blocks
                 .iter_mut()
                 .flat_map(|b| &mut b.instructions)
-                .find(|i| matches!(i.op, SsaOp::VectorProduct { .. }))
+                .find(|i| matches!(i.op, SsaOp::AlgebraicProduct { .. }))
                 .unwrap();
-            let SsaOp::VectorProduct { left, kernel, .. } = &mut inst.op else {
+            let SsaOp::AlgebraicProduct { left, kernel, .. } = &mut inst.op else {
                 panic!()
             };
             if case == 19 {
@@ -552,7 +553,7 @@ fn vertical31_deterministic_dumps_and_constraint_order_abi() {
     assert_eq!(a.llvm, reordered.llvm);
     let h = &a.dumps[&Emit::Hir];
     for text in [
-        "VectorAlgebraicProduct",
+        "AlgebraicProduct",
         "Behavioral(",
         "AlgebraicValue",
         "Zero",
