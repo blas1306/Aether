@@ -256,12 +256,17 @@ pub enum AstStmtKind {
     },
     /// Value return.
     Return(AstExpr),
+    /// Exit the innermost loop.
+    Break,
+    /// Continue the innermost loop.
+    Continue,
     /// Throw a new class exception, or bare-rethrow the lexical catch event.
     Throw(Option<AstExpr>),
     /// Lexically protected block and ordered typed handlers.
     Try {
         body: AstBlock,
         catches: Vec<AstCatch>,
+        finally: Option<AstBlock>,
     },
 }
 

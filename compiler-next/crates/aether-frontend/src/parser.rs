@@ -645,6 +645,14 @@ impl Parser {
                 self.advance();
                 AstStmtKind::Return(self.expression()?)
             }
+            TokenKind::KwBreak => {
+                self.advance();
+                AstStmtKind::Break
+            }
+            TokenKind::KwContinue => {
+                self.advance();
+                AstStmtKind::Continue
+            }
             TokenKind::KwThrow => {
                 self.advance();
                 AstStmtKind::Throw(if self.at(TokenKind::Semicolon) {
@@ -721,18 +729,32 @@ impl Parser {
                 body: handler,
             });
         }
-        let Some(last) = catches.last() else {
+        let finally = if self.consume(TokenKind::KwFinally).is_some() {
+            Some(self.block()?)
+        } else {
+            None
+        };
+        if catches.is_empty() && finally.is_none() {
             return Err(Diagnostic::new(
                 "E0430",
                 Phase::Parse,
                 DiagnosticCategory::Syntax,
-                "try requires at least one typed catch",
+                "try requires at least one typed catch or a finally block",
                 Some(body.span),
             ));
-        };
+        }
+        let end = finally
+            .as_ref()
+            .map(|block| block.span)
+            .or_else(|| catches.last().map(|catch| catch.span))
+            .expect("try has a catch or finally");
         Ok(AstStmt {
-            span: start.through(last.span),
-            kind: AstStmtKind::Try { body, catches },
+            span: start.through(end),
+            kind: AstStmtKind::Try {
+                body,
+                catches,
+                finally,
+            },
         })
     }
 

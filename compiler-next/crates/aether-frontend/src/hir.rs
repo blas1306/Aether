@@ -65,6 +65,8 @@ pub struct FunctionId(pub u32);
 pub struct LocalId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CatchId(pub u32);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FinallyId(pub u32);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParameterSignature {
     pub name: String,
@@ -636,6 +638,12 @@ pub enum HirStmtKind {
         value: HirExpr,
         drops: Vec<HirDrop>,
     },
+    Break {
+        drops: Vec<HirDrop>,
+    },
+    Continue {
+        drops: Vec<HirDrop>,
+    },
     Throw {
         value: HirExpr,
         class: ClassId,
@@ -649,6 +657,7 @@ pub enum HirStmtKind {
     Try {
         body: HirBlock,
         catches: Vec<HirCatch>,
+        finally: Option<HirFinally>,
     },
 }
 
@@ -657,6 +666,13 @@ pub struct HirCatch {
     pub id: CatchId,
     pub class: ClassId,
     pub binding: LocalId,
+    pub body: HirBlock,
+    pub span: Span,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HirFinally {
+    pub id: FinallyId,
     pub body: HirBlock,
     pub span: Span,
 }
@@ -3651,6 +3667,12 @@ impl Monomorphizer<'_> {
                             value: self.substitute_expr(value, substitution)?,
                             drops: drops.clone(),
                         },
+                        HirStmtKind::Break { drops } => HirStmtKind::Break {
+                            drops: drops.clone(),
+                        },
+                        HirStmtKind::Continue { drops } => HirStmtKind::Continue {
+                            drops: drops.clone(),
+                        },
                         HirStmtKind::Throw {
                             value,
                             class,
@@ -3666,7 +3688,11 @@ impl Monomorphizer<'_> {
                             catch: *catch,
                             drops: drops.clone(),
                         },
-                        HirStmtKind::Try { body, catches } => HirStmtKind::Try {
+                        HirStmtKind::Try {
+                            body,
+                            catches,
+                            finally,
+                        } => HirStmtKind::Try {
                             body: self.substitute_block(body, substitution)?,
                             catches: catches
                                 .iter()
@@ -3680,6 +3706,16 @@ impl Monomorphizer<'_> {
                                     })
                                 })
                                 .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?,
+                            finally: finally
+                                .as_ref()
+                                .map(|finally| {
+                                    Ok::<HirFinally, Vec<Diagnostic>>(HirFinally {
+                                        id: finally.id,
+                                        body: self.substitute_block(&finally.body, substitution)?,
+                                        span: finally.span,
+                                    })
+                                })
+                                .transpose()?,
                         },
                     };
                     Ok(HirStmt {
@@ -4512,6 +4548,9 @@ fn analyze_function(
         initialized_fields: BTreeSet::new(),
         active_catches: Vec::new(),
         next_catch: 0,
+        loop_depth: 0,
+        inside_finally: 0,
+        next_finally: 0,
         target,
     };
     let mut parameters = vec![];
@@ -4620,6 +4659,7 @@ struct OwnershipAnalysis<'a> {
     storage_ranges: Vec<Vec<(LocalId, Option<u64>)>>,
     borrow_indices: Vec<Option<u64>>,
     storage_references: Vec<bool>,
+    loop_boundaries: Vec<usize>,
 }
 
 fn synthesize_ownership(
@@ -4641,6 +4681,7 @@ fn synthesize_ownership(
         storage_ranges: Vec::new(),
         borrow_indices: vec![None; locals.len()],
         storage_references: vec![false; locals.len()],
+        loop_boundaries: Vec::new(),
     };
     for parameter in parameters {
         // An incoming view borrows caller storage. Its parameter is the local
@@ -4814,6 +4855,30 @@ impl OwnershipAnalysis<'_> {
                         self.state[local.0 as usize] = OwnerState::Dropped;
                     }
                 }
+                HirStmtKind::Break { drops } | HirStmtKind::Continue { drops } => {
+                    let boundary = *self
+                        .loop_boundaries
+                        .last()
+                        .expect("verified HIR loop transfer has a loop");
+                    *drops = self.active[boundary..]
+                        .iter()
+                        .rev()
+                        .copied()
+                        .filter_map(|local| {
+                            if !self.types.needs_drop(self.locals[local.0 as usize].ty) {
+                                return None;
+                            }
+                            match self.state[local.0 as usize] {
+                                OwnerState::Owned => Some(HirDrop::Unconditional(local)),
+                                OwnerState::MaybeMoved => Some(HirDrop::Conditional(local)),
+                                _ => None,
+                            }
+                        })
+                        .collect();
+                    for local in drops.iter().copied().map(HirDrop::local) {
+                        self.state[local.0 as usize] = OwnerState::Dropped;
+                    }
+                }
                 HirStmtKind::Throw { value, drops, .. } => {
                     self.expr(value)?;
                     *drops = self
@@ -4857,7 +4922,11 @@ impl OwnershipAnalysis<'_> {
                         self.state[local.0 as usize] = OwnerState::Dropped;
                     }
                 }
-                HirStmtKind::Try { body, catches } => {
+                HirStmtKind::Try {
+                    body,
+                    catches,
+                    finally,
+                } => {
                     let before = self.state.clone();
                     let before_active = self.active.len();
                     self.block(body, true)?;
@@ -4895,6 +4964,9 @@ impl OwnershipAnalysis<'_> {
                     }
                     self.state = continuing.unwrap_or(before);
                     self.active.truncate(before_active);
+                    if let Some(finally) = finally {
+                        self.block(&mut finally.body, true)?;
+                    }
                 }
                 HirStmtKind::If {
                     condition,
@@ -4955,7 +5027,9 @@ impl OwnershipAnalysis<'_> {
                     self.expr(condition)?;
                     let before = self.state.clone();
                     let before_lengths = self.buffer_lengths.clone();
+                    self.loop_boundaries.push(self.active.len());
                     self.block(body, true)?;
+                    self.loop_boundaries.pop();
                     let after_lengths = self.buffer_lengths.clone();
                     for local in &self.active {
                         let index = local.0 as usize;
@@ -5786,6 +5860,9 @@ struct Analyzer<'a> {
     initialized_fields: BTreeSet<FieldId>,
     active_catches: Vec<CatchId>,
     next_catch: u32,
+    loop_depth: usize,
+    inside_finally: usize,
+    next_finally: u32,
 }
 #[derive(Clone)]
 struct Checked {
@@ -6122,7 +6199,9 @@ impl Analyzer<'_> {
                 AstStmtKind::While { condition, body } => {
                     let condition = self.expression(condition, Some(TypeId::BOOL))?.expr;
                     let before = self.initialized_fields.clone();
+                    self.loop_depth += 1;
                     let body = self.block(body, true)?;
+                    self.loop_depth -= 1;
                     if before != self.initialized_fields {
                         return Err(vec![classes::error(
                             "E0403",
@@ -6138,6 +6217,13 @@ impl Analyzer<'_> {
                     arms,
                 } => self.match_statement(*mode, scrutinee, arms)?,
                 AstStmtKind::Throw(value) => {
+                    if self.inside_finally != 0 {
+                        return Err(vec![classes::error(
+                            "E0438",
+                            "finally must be non-throwing; throw and bare throw are unavailable",
+                            s.span,
+                        )]);
+                    }
                     if let Some(value) = value {
                         let value = self.expression(value, None)?.expr;
                         let Some(class) = self.types.class_id(value.ty) else {
@@ -6179,7 +6265,11 @@ impl Analyzer<'_> {
                         }
                     }
                 }
-                AstStmtKind::Try { body, catches } => {
+                AstStmtKind::Try {
+                    body,
+                    catches,
+                    finally,
+                } => {
                     if self
                         .class_method
                         .as_ref()
@@ -6187,7 +6277,7 @@ impl Analyzer<'_> {
                     {
                         return Err(vec![classes::error(
                             "E0436",
-                            "try/catch is unavailable inside init until partial-construction rollback is implemented",
+                            "try/catch/finally is unavailable inside init until local handler rollback is implemented",
                             s.span,
                         )]);
                     }
@@ -6252,12 +6342,51 @@ impl Analyzer<'_> {
                             span: catch.span,
                         });
                     }
+                    let finally = if let Some(finally) = finally {
+                        if !matches!(
+                            self.types.get(self.return_type),
+                            Some(TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_))
+                        ) {
+                            return Err(vec![classes::error(
+                                "E0438",
+                                "EXCEPTION-V4 finally currently preserves scalar return payloads only",
+                                finally.span,
+                            )]);
+                        }
+                        if ast_block_has_call(finally) {
+                            return Err(vec![classes::error(
+                                "E0438",
+                                "finally must be non-throwing in EXCEPTION-V4; calls and construction are unavailable",
+                                finally.span,
+                            )]);
+                        }
+                        let id = FinallyId(self.next_finally);
+                        self.next_finally += 1;
+                        self.inside_finally += 1;
+                        let body = self.block(finally, true)?;
+                        self.inside_finally -= 1;
+                        Some(HirFinally {
+                            id,
+                            body,
+                            span: finally.span,
+                        })
+                    } else {
+                        None
+                    };
                     HirStmtKind::Try {
                         body,
                         catches: handlers,
+                        finally,
                     }
                 }
                 AstStmtKind::Return(v) => {
+                    if self.inside_finally != 0 {
+                        return Err(vec![classes::error(
+                            "E0438",
+                            "return is unavailable inside finally",
+                            s.span,
+                        )]);
+                    }
                     if let Some((class, method)) = &self.class_method
                         && method.initializing
                         && self.types.classes[class.0 as usize]
@@ -6276,13 +6405,47 @@ impl Analyzer<'_> {
                         drops: Vec::new(),
                     }
                 }
+                AstStmtKind::Break => {
+                    if self.inside_finally != 0 {
+                        return Err(vec![classes::error(
+                            "E0438",
+                            "break is unavailable inside finally",
+                            s.span,
+                        )]);
+                    }
+                    if self.loop_depth == 0 {
+                        return Err(vec![classes::error(
+                            "E0209",
+                            "break is legal only inside a loop",
+                            s.span,
+                        )]);
+                    }
+                    HirStmtKind::Break { drops: Vec::new() }
+                }
+                AstStmtKind::Continue => {
+                    if self.inside_finally != 0 {
+                        return Err(vec![classes::error(
+                            "E0438",
+                            "continue is unavailable inside finally",
+                            s.span,
+                        )]);
+                    }
+                    if self.loop_depth == 0 {
+                        return Err(vec![classes::error(
+                            "E0209",
+                            "continue is legal only inside a loop",
+                            s.span,
+                        )]);
+                    }
+                    HirStmtKind::Continue { drops: Vec::new() }
+                }
             };
             let hs = HirStmt {
                 kind,
                 span: s.span,
                 compiler_generated: false,
             };
-            ended = statement_returns(&hs);
+            ended = statement_abrupt(&hs);
             statements.push(hs)
         }
         if nested {
@@ -9661,6 +9824,7 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
             &h.types,
         )
         .map_err(&fail)?;
+        verify_finally_identities(&f.body, &fail)?;
         verify_block(
             &f.body,
             &VerificationFunction { locals: &f.locals },
@@ -9760,6 +9924,7 @@ fn verify_parametric_hir(
             types,
         )
         .map_err(&fail)?;
+        verify_finally_identities(&declaration.body, &fail)?;
         verify_block(
             &declaration.body,
             &function,
@@ -10004,6 +10169,18 @@ fn verify_block(
                     return Err(fail("HIR return mismatch".into()));
                 }
             }
+            HirStmtKind::Break { drops } | HirStmtKind::Continue { drops } => {
+                let mut seen = BTreeSet::new();
+                if drops.iter().any(|drop| {
+                    let local = drop.local();
+                    !seen.insert(local)
+                        || !f.locals.get(local.0 as usize).is_some_and(|info| {
+                            !types.guarantees_copy(info.ty) && types.needs_drop(info.ty)
+                        })
+                }) {
+                    return Err(fail("HIR loop transfer cleanup contract is invalid".into()));
+                }
+            }
             HirStmtKind::Throw {
                 value,
                 class,
@@ -10045,7 +10222,11 @@ fn verify_block(
                     return Err(fail("HIR rethrow cleanup contract is invalid".into()));
                 }
             }
-            HirStmtKind::Try { body, catches } => {
+            HirStmtKind::Try {
+                body,
+                catches,
+                finally,
+            } => {
                 verify_block(
                     body,
                     f,
@@ -10057,8 +10238,8 @@ fn verify_block(
                     active_catches,
                     fail,
                 )?;
-                if catches.is_empty() {
-                    return Err(fail("HIR try has no catches".into()));
+                if catches.is_empty() && finally.is_none() {
+                    return Err(fail("HIR try has neither catches nor finally".into()));
                 }
                 let mut ids = BTreeSet::new();
                 let mut previous = Vec::new();
@@ -10087,6 +10268,24 @@ fn verify_block(
                         &nested_catches,
                         fail,
                     )?;
+                }
+                if let Some(finally) = finally {
+                    verify_block(
+                        &finally.body,
+                        f,
+                        ret,
+                        sigs,
+                        structs,
+                        enums,
+                        types,
+                        active_catches,
+                        fail,
+                    )?;
+                    if block_may_throw_or_transfer(&finally.body) {
+                        return Err(fail(
+                            "HIR finally is not a non-throwing normal region".into(),
+                        ));
+                    }
                 }
             }
         }
@@ -11170,7 +11369,7 @@ fn statement_returns(s: &HirStmt) -> bool {
         HirStmtKind::Match { arms, .. } => {
             !arms.is_empty() && arms.iter().all(|arm| definitely_returns(&arm.body))
         }
-        HirStmtKind::Try { body, catches } => {
+        HirStmtKind::Try { body, catches, .. } => {
             definitely_returns(body) && catches.iter().all(|catch| definitely_returns(&catch.body))
         }
         _ => false,
@@ -11178,6 +11377,197 @@ fn statement_returns(s: &HirStmt) -> bool {
 }
 fn definitely_returns(b: &HirBlock) -> bool {
     b.statements.last().is_some_and(statement_returns)
+}
+
+fn statement_abrupt(statement: &HirStmt) -> bool {
+    match &statement.kind {
+        HirStmtKind::Return { .. }
+        | HirStmtKind::Break { .. }
+        | HirStmtKind::Continue { .. }
+        | HirStmtKind::Throw { .. }
+        | HirStmtKind::Rethrow { .. } => true,
+        HirStmtKind::If {
+            then_block,
+            else_block: Some(else_block),
+            ..
+        } => definitely_abrupt(then_block) && definitely_abrupt(else_block),
+        HirStmtKind::Match { arms, .. } => {
+            !arms.is_empty() && arms.iter().all(|arm| definitely_abrupt(&arm.body))
+        }
+        HirStmtKind::Try { body, catches, .. } => {
+            definitely_abrupt(body)
+                && (catches.is_empty()
+                    || catches.iter().all(|catch| definitely_abrupt(&catch.body)))
+        }
+        _ => false,
+    }
+}
+
+fn definitely_abrupt(block: &HirBlock) -> bool {
+    block.statements.last().is_some_and(statement_abrupt)
+}
+
+fn verify_finally_identities(
+    block: &HirBlock,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    fn collect(block: &HirBlock, ids: &mut Vec<FinallyId>) {
+        for statement in &block.statements {
+            match &statement.kind {
+                HirStmtKind::If {
+                    then_block,
+                    else_block,
+                    ..
+                } => {
+                    collect(then_block, ids);
+                    if let Some(else_block) = else_block {
+                        collect(else_block, ids);
+                    }
+                }
+                HirStmtKind::While { body, .. } => collect(body, ids),
+                HirStmtKind::Match { arms, .. } => {
+                    for arm in arms {
+                        collect(&arm.body, ids);
+                    }
+                }
+                HirStmtKind::Try {
+                    body,
+                    catches,
+                    finally,
+                } => {
+                    collect(body, ids);
+                    for catch in catches {
+                        collect(&catch.body, ids);
+                    }
+                    if let Some(finally) = finally {
+                        ids.push(finally.id);
+                        collect(&finally.body, ids);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut ids = Vec::new();
+    collect(block, &mut ids);
+    ids.sort();
+    if ids
+        .iter()
+        .enumerate()
+        .any(|(index, id)| id.0 as usize != index)
+    {
+        return Err(fail("HIR finally identities are not canonical".into()));
+    }
+    Ok(())
+}
+
+fn block_may_throw_or_transfer(block: &HirBlock) -> bool {
+    block.statements.iter().any(|statement| {
+        matches!(
+            statement.kind,
+            HirStmtKind::Return { .. }
+                | HirStmtKind::Break { .. }
+                | HirStmtKind::Continue { .. }
+                | HirStmtKind::Throw { .. }
+                | HirStmtKind::Rethrow { .. }
+        ) || {
+            let debug = format!("{:?}", statement.kind);
+            debug.contains("Call") || debug.contains("Construct")
+        } || match &statement.kind {
+            HirStmtKind::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                block_may_throw_or_transfer(then_block)
+                    || else_block.as_ref().is_some_and(block_may_throw_or_transfer)
+            }
+            HirStmtKind::While { body, .. } => block_may_throw_or_transfer(body),
+            HirStmtKind::Match { arms, .. } => arms
+                .iter()
+                .any(|arm| block_may_throw_or_transfer(&arm.body)),
+            HirStmtKind::Try {
+                body,
+                catches,
+                finally,
+            } => {
+                block_may_throw_or_transfer(body)
+                    || catches
+                        .iter()
+                        .any(|catch| block_may_throw_or_transfer(&catch.body))
+                    || finally
+                        .as_ref()
+                        .is_some_and(|finally| block_may_throw_or_transfer(&finally.body))
+            }
+            _ => false,
+        }
+    })
+}
+
+fn ast_expr_has_call(expr: &AstExpr) -> bool {
+    match &expr.kind {
+        AstExprKind::Call { .. }
+        | AstExprKind::QualifiedCall { .. }
+        | AstExprKind::VariantCall { .. }
+        | AstExprKind::MethodCall { .. } => true,
+        AstExprKind::CollectionLiteral(values) => values.iter().any(ast_expr_has_call),
+        AstExprKind::MathematicalLiteral { rows } => rows.iter().flatten().any(ast_expr_has_call),
+        AstExprKind::Field { base, .. } => ast_expr_has_call(base),
+        AstExprKind::Index { base, indices } => {
+            ast_expr_has_call(base) || indices.iter().any(ast_expr_has_call)
+        }
+        AstExprKind::Unary { operand, .. } => ast_expr_has_call(operand),
+        AstExprKind::Binary { left, right, .. } => {
+            ast_expr_has_call(left) || ast_expr_has_call(right)
+        }
+        AstExprKind::Integer(_)
+        | AstExprKind::Float(_)
+        | AstExprKind::Bool(_)
+        | AstExprKind::Name(_)
+        | AstExprKind::QualifiedName { .. } => false,
+    }
+}
+
+fn ast_block_has_call(block: &AstBlock) -> bool {
+    block
+        .statements
+        .iter()
+        .any(|statement| match &statement.kind {
+            AstStmtKind::Local { initializer, .. } => ast_expr_has_call(initializer),
+            AstStmtKind::Assign { place, value } => {
+                ast_expr_has_call(place) || ast_expr_has_call(value)
+            }
+            AstStmtKind::Expr(expr) | AstStmtKind::Return(expr) => ast_expr_has_call(expr),
+            AstStmtKind::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                ast_expr_has_call(condition)
+                    || ast_block_has_call(then_block)
+                    || else_block.as_ref().is_some_and(ast_block_has_call)
+            }
+            AstStmtKind::While { condition, body } => {
+                ast_expr_has_call(condition) || ast_block_has_call(body)
+            }
+            AstStmtKind::Match {
+                scrutinee, arms, ..
+            } => {
+                ast_expr_has_call(scrutinee) || arms.iter().any(|arm| ast_block_has_call(&arm.body))
+            }
+            AstStmtKind::Try {
+                body,
+                catches,
+                finally,
+            } => {
+                ast_block_has_call(body)
+                    || catches.iter().any(|catch| ast_block_has_call(&catch.body))
+                    || finally.as_ref().is_some_and(ast_block_has_call)
+            }
+            AstStmtKind::Throw(value) => value.as_ref().is_some_and(ast_expr_has_call),
+            AstStmtKind::Break | AstStmtKind::Continue => false,
+        })
 }
 
 fn valid_matrix_literal_shape(rows: u64, columns: u64, row_ends: &[u64], count: usize) -> bool {
@@ -11196,6 +11586,28 @@ mod tests {
     use crate::{SourceFile, parse_source};
     fn check(s: &str) -> Result<TypedHir, Vec<Diagnostic>> {
         analyze(parse_source(&SourceFile::new("test.ae", s)).unwrap())
+    }
+    #[test]
+    fn verifier_rejects_duplicate_finally_identity() {
+        let mut hir =
+            check("int main(){try{try{}finally{int x=1;}}finally{int y=2;}return 0;}").unwrap();
+        let HirStmtKind::Try {
+            body,
+            finally: Some(outer),
+            ..
+        } = &mut hir.functions[0].body.statements[0].kind
+        else {
+            panic!("expected outer finally");
+        };
+        let HirStmtKind::Try {
+            finally: Some(inner),
+            ..
+        } = &body.statements[0].kind
+        else {
+            panic!("expected inner finally");
+        };
+        outer.id = inner.id;
+        assert!(verify_hir(&hir).is_err());
     }
     #[test]
     fn scalar_aliases() {

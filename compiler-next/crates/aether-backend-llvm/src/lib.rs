@@ -2547,6 +2547,22 @@ fn emit_function(
                     )
                     .unwrap();
                 }
+                SsaOp::SetPendingFinally { tag, .. } => {
+                    writeln!(
+                        output,
+                        "  %v{} = select i1 true, i32 {}, i32 {}",
+                        instruction.result.0, tag, tag
+                    )
+                    .unwrap();
+                }
+                SsaOp::EnterFinally { .. } | SsaOp::ExitFinally { .. } => {
+                    writeln!(
+                        output,
+                        "  %v{} = select i1 true, i1 true, i1 false",
+                        instruction.result.0
+                    )
+                    .unwrap();
+                }
             }
         }
         match &block.terminator {

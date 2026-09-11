@@ -13,12 +13,12 @@ use std::sync::Arc;
 
 use aether_frontend::{
     CastKind, CatchId, ClassId, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo,
-    FieldId, FloatValue, FunctionInstanceInfo, InstanceId, LocalId, MatchMode, ModuleInfo, Phase,
-    Span, StructId, StructInfo, StructuralMutation, Substitution, TypeArena, TypeData, TypeId,
-    VariantId, format_type,
+    FieldId, FinallyId, FloatValue, FunctionInstanceInfo, InstanceId, LocalId, MatchMode,
+    ModuleInfo, Phase, Span, StructId, StructInfo, StructuralMutation, Substitution, TypeArena,
+    TypeData, TypeId, VariantId, format_type,
 };
 
-use crate::mir::{ExceptionEventId, place_type};
+use crate::mir::{ExceptionEventId, FinallyRegion, place_type};
 use crate::{
     BinaryOp, BlockId, ElementInitialization, MirDropFlag, MirFunction, Operand, Place, PlaceBase,
     PlaceProjection, PushInit, Relocate, RelocationRange, Rvalue, SlotPlace, TakeState, Terminator,
@@ -356,6 +356,16 @@ pub enum SsaOp {
     EndCatch {
         event: ExceptionEventId,
     },
+    SetPendingFinally {
+        finally: FinallyId,
+        tag: u32,
+    },
+    EnterFinally {
+        finally: FinallyId,
+    },
+    ExitFinally {
+        finally: FinallyId,
+    },
 }
 
 /// One SSA definition.
@@ -450,6 +460,7 @@ pub struct SsaFunction {
     /// Blocks in stable MIR order.
     pub blocks: Vec<SsaBlock>,
     pub exception_events: Vec<ExceptionEventId>,
+    pub finally_regions: Vec<FinallyRegion>,
     pub constructor_unwind: Option<aether_frontend::ConstructorUnwindPlan>,
 }
 
@@ -694,6 +705,7 @@ fn build_function_ssa(
         entry: function.entry,
         blocks,
         exception_events: function.exception_events.clone(),
+        finally_regions: function.finally_regions.clone(),
         constructor_unwind: function.constructor_unwind.clone(),
     }
 }
@@ -1257,6 +1269,12 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             catch_class: *catch_class,
         },
         Rvalue::EndCatch { event } => SsaOp::EndCatch { event: *event },
+        Rvalue::SetPendingFinally { finally, tag } => SsaOp::SetPendingFinally {
+            finally: *finally,
+            tag: *tag,
+        },
+        Rvalue::EnterFinally { finally } => SsaOp::EnterFinally { finally: *finally },
+        Rvalue::ExitFinally { finally } => SsaOp::ExitFinally { finally: *finally },
     }
 }
 
@@ -1676,7 +1694,10 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
         Rvalue::Call { args, .. } => args.iter().filter_map(operand_local).collect(),
         Rvalue::ExceptionMatches { .. }
         | Rvalue::CatchBindAlias { .. }
-        | Rvalue::EndCatch { .. } => vec![],
+        | Rvalue::EndCatch { .. }
+        | Rvalue::SetPendingFinally { .. }
+        | Rvalue::EnterFinally { .. }
+        | Rvalue::ExitFinally { .. } => vec![],
     }
 }
 
@@ -1971,6 +1992,7 @@ fn verify_ssa_function(
     if reachable_ssa(function).iter().any(|value| !value) {
         return Err(fail("SSA contains unreachable blocks".into()));
     }
+    verify_ssa_finally_regions(function, &cfg, fail)?;
     let dominance = dominance_for_ssa(&cfg, function.entry);
 
     #[derive(Clone, Copy)]
@@ -2317,6 +2339,215 @@ fn verify_ssa_function(
     verify_vector_transpose_ownership(function, fail)?;
     verify_matrix_literal_ownership(function, types, fail)?;
     verify_take_protocol(function, types, fail)?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+fn verify_ssa_finally_regions(
+    function: &SsaFunction,
+    cfg: &Cfg,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let known = function
+        .finally_regions
+        .iter()
+        .map(|region| region.id)
+        .collect::<BTreeSet<_>>();
+    if known.len() != function.finally_regions.len()
+        || function
+            .finally_regions
+            .iter()
+            .enumerate()
+            .any(|(index, region)| region.id.0 as usize != index)
+    {
+        return Err(fail("SSA finally identities are not canonical".into()));
+    }
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            let marker = match instruction.op {
+                SsaOp::SetPendingFinally { finally, .. }
+                | SsaOp::EnterFinally { finally }
+                | SsaOp::ExitFinally { finally } => Some(finally),
+                _ => None,
+            };
+            if marker.is_some_and(|id| !known.contains(&id)) {
+                return Err(fail("SSA finally marker names an unknown region".into()));
+            }
+        }
+    }
+    for region in &function.finally_regions {
+        if region.body_blocks.is_empty()
+            || !region.body_blocks.contains(&region.entry)
+            || !region.body_blocks.contains(&region.dispatch)
+            || region.exits.is_empty()
+            || region
+                .body_blocks
+                .iter()
+                .chain(&region.exits)
+                .any(|block| block.0 as usize >= function.blocks.len())
+        {
+            return Err(fail("SSA finally region metadata is invalid".into()));
+        }
+        let entry = &function.blocks[region.entry.0 as usize];
+        let dispatch = &function.blocks[region.dispatch.0 as usize];
+        let selector = entry
+            .phis
+            .iter()
+            .find(|phi| phi.local == region.selector)
+            .filter(|phi| phi.ty == TypeId::UINT32);
+        let SsaTerminator::Switch {
+            discriminant: SsaOperand::Value(discriminant),
+            cases,
+            otherwise: None,
+            exhaustive_enum: None,
+        } = &dispatch.terminator
+        else {
+            return Err(fail("SSA finally dispatch is not canonical".into()));
+        };
+        let expected = region
+            .exits
+            .iter()
+            .enumerate()
+            .map(|(tag, target)| {
+                (
+                    u32::try_from(tag).expect("verified finally exit count fits u32"),
+                    *target,
+                )
+            })
+            .collect::<Vec<_>>();
+        if cases != &expected {
+            return Err(fail("SSA finally exit ordering is invalid".into()));
+        }
+        let enters = function
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter(|instruction| {
+                matches!(instruction.op, SsaOp::EnterFinally { finally } if finally == region.id)
+            })
+            .count();
+        let exits = function
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter(|instruction| {
+                matches!(instruction.op, SsaOp::ExitFinally { finally } if finally == region.id)
+            })
+            .count();
+        if enters != 1
+            || exits != 1
+            || !entry.instructions.iter().any(
+                |instruction| matches!(instruction.op, SsaOp::EnterFinally { finally } if finally == region.id),
+            )
+            || !dispatch.instructions.iter().any(
+                |instruction| matches!(instruction.op, SsaOp::ExitFinally { finally } if finally == region.id),
+            )
+        {
+            return Err(fail("SSA finally enter/exit markers are invalid".into()));
+        }
+        let pending = function
+            .blocks
+            .iter()
+            .flat_map(|block| {
+                block.instructions.iter().filter_map(move |instruction| {
+                    if let SsaOp::SetPendingFinally { finally, tag } = instruction.op
+                        && finally == region.id
+                    {
+                        Some((block.id, tag, instruction.result, instruction.ty))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        let phi_incoming = selector
+            .map(|phi| phi.incoming.iter().copied().collect::<BTreeSet<_>>())
+            .unwrap_or_default();
+        let selector_is_valid = selector.map_or_else(
+            || {
+                pending
+                    .as_slice()
+                    .first()
+                    .is_some_and(|(block, _, result, _)| {
+                        pending.len() == 1
+                            && *discriminant == *result
+                            && cfg.predecessors[region.entry.0 as usize] == [*block]
+                    })
+            },
+            |phi| *discriminant == phi.result,
+        );
+        if pending.len() != region.exits.len()
+            || !selector_is_valid
+            || pending.iter().any(|(block, tag, result, ty)| {
+                *tag as usize >= region.exits.len()
+                    || *ty != TypeId::UINT32
+                    || !matches!(
+                        function.blocks[block.0 as usize].terminator,
+                        SsaTerminator::Goto(target) if target == region.entry
+                    )
+                    || (selector.is_some() && !phi_incoming.contains(&(*block, *result)))
+            })
+            || pending
+                .iter()
+                .map(|(_, tag, _, _)| *tag)
+                .collect::<BTreeSet<_>>()
+                .len()
+                != region.exits.len()
+            || (selector.is_some() && phi_incoming.len() != pending.len())
+        {
+            return Err(fail(
+                "SSA pending control does not enter finally exactly once".into(),
+            ));
+        }
+        let pending_blocks = pending
+            .iter()
+            .map(|(block, _, _, _)| *block)
+            .collect::<BTreeSet<_>>();
+        if cfg.predecessors[region.entry.0 as usize]
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>()
+            != pending_blocks
+            || region.body_blocks.iter().any(|body| {
+                *body != region.entry
+                    && cfg.predecessors[body.0 as usize]
+                        .iter()
+                        .any(|predecessor| !region.body_blocks.contains(predecessor))
+            })
+            || region.body_blocks.iter().any(|body| {
+                *body != region.dispatch
+                    && ssa_targets(&function.blocks[body.0 as usize].terminator)
+                        .iter()
+                        .any(|target| !region.body_blocks.contains(target))
+            })
+        {
+            return Err(fail("SSA finally region has a bypass edge".into()));
+        }
+        for exit in &region.exits {
+            if cfg.predecessors[exit.0 as usize] != [region.dispatch] {
+                return Err(fail(
+                    "SSA finally exit has a noncanonical predecessor".into(),
+                ));
+            }
+        }
+        for block in &region.body_blocks {
+            let block = &function.blocks[block.0 as usize];
+            if block.instructions.iter().any(|instruction| {
+                instruction.unwind.is_some()
+                    || matches!(instruction.op, SsaOp::Call { .. })
+                    || matches!(instruction.op, SsaOp::Class(ref op) if matches!(op.as_ref(), ClassOp::DirectMethodCall { .. } | ClassOp::BaseMethodCall { .. } | ClassOp::VirtualCall { .. } | ClassOp::InterfaceCall { .. } | ClassOp::InitCall { .. } | ClassOp::BaseInit { .. }))
+            }) || matches!(
+                block.terminator,
+                SsaTerminator::Return(_)
+                    | SsaTerminator::Throw { .. }
+                    | SsaTerminator::Rethrow { .. }
+                    | SsaTerminator::ResumeUnwind { .. }
+                    | SsaTerminator::ForwardUnwind { .. }
+            ) {
+                return Err(fail("SSA finally region can throw or transfer control".into()));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -3047,8 +3278,16 @@ fn verify_op(
                 return Err(format!("invalid SSA catch binding for event {event:?}"));
             }
         }
-        SsaOp::EndCatch { .. } if result == TypeId::BOOL => {}
+        SsaOp::EndCatch { .. } | SsaOp::EnterFinally { .. } | SsaOp::ExitFinally { .. }
+            if result == TypeId::BOOL => {}
         SsaOp::EndCatch { .. } => return Err("SSA end-catch result is not bool".into()),
+        SsaOp::SetPendingFinally { .. } if result == TypeId::UINT32 => {}
+        SsaOp::SetPendingFinally { .. } => {
+            return Err("SSA pending-finally tag result is not uint32".into());
+        }
+        SsaOp::EnterFinally { .. } | SsaOp::ExitFinally { .. } => {
+            return Err("SSA finally marker result is not bool".into());
+        }
     }
     Ok(())
 }
@@ -3301,9 +3540,12 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         }
         SsaOp::Class(op) => op.operands(),
         SsaOp::Call { args, .. } => args.iter().collect(),
-        SsaOp::ExceptionMatches { .. } | SsaOp::CatchBindAlias { .. } | SsaOp::EndCatch { .. } => {
-            vec![]
-        }
+        SsaOp::ExceptionMatches { .. }
+        | SsaOp::CatchBindAlias { .. }
+        | SsaOp::EndCatch { .. }
+        | SsaOp::SetPendingFinally { .. }
+        | SsaOp::EnterFinally { .. }
+        | SsaOp::ExitFinally { .. } => vec![],
     }
 }
 

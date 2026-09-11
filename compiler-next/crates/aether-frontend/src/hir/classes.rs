@@ -31,8 +31,14 @@ fn has_return(block: &AstBlock) -> bool {
         } => has_return(then_block) || else_block.as_ref().is_some_and(has_return),
         AstStmtKind::While { body, .. } => has_return(body),
         AstStmtKind::Match { arms, .. } => arms.iter().any(|a| has_return(&a.body)),
-        AstStmtKind::Try { body, catches } => {
-            has_return(body) || catches.iter().any(|catch| has_return(&catch.body))
+        AstStmtKind::Try {
+            body,
+            catches,
+            finally,
+        } => {
+            has_return(body)
+                || catches.iter().any(|catch| has_return(&catch.body))
+                || finally.as_ref().is_some_and(has_return)
         }
         _ => false,
     })
@@ -52,7 +58,7 @@ fn ast_definitely_terminates(block: &AstBlock) -> bool {
             AstStmtKind::Match { arms, .. } => {
                 !arms.is_empty() && arms.iter().all(|arm| ast_definitely_terminates(&arm.body))
             }
-            AstStmtKind::Try { body, catches } => {
+            AstStmtKind::Try { body, catches, .. } => {
                 ast_definitely_terminates(body)
                     && catches
                         .iter()
@@ -1445,7 +1451,11 @@ pub(super) fn verify_body(
                         }
                     }
                 }
-                HirStmtKind::Try { body, catches } => {
+                HirStmtKind::Try {
+                    body,
+                    catches,
+                    finally,
+                } => {
                     block(body, state, init, types, function, module, sigs)?;
                     for catch in catches {
                         let mut catch_state = state.clone();
@@ -1458,6 +1468,9 @@ pub(super) fn verify_body(
                             module,
                             sigs,
                         )?;
+                    }
+                    if let Some(finally) = finally {
+                        block(&finally.body, state, init, types, function, module, sigs)?;
                     }
                 }
                 HirStmtKind::ListPush { target, value, .. } => {
@@ -1476,7 +1489,10 @@ pub(super) fn verify_body(
                     }
                     visit_expr(requested_capacity, state, types, function, module, sigs)?;
                 }
-                HirStmtKind::Nop | HirStmtKind::Rethrow { .. } => (),
+                HirStmtKind::Nop
+                | HirStmtKind::Break { .. }
+                | HirStmtKind::Continue { .. }
+                | HirStmtKind::Rethrow { .. } => (),
             }
         }
         Ok(())

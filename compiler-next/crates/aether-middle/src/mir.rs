@@ -1,18 +1,18 @@
 //! Explicit control-flow MIR and fail-closed verification.
 #![allow(missing_docs)]
 
-use aether_frontend::{CatchId, ClassId, ClassOp, ClassTokenKind, IndexSemantics};
+use aether_frontend::{CatchId, ClassId, ClassOp, ClassTokenKind, FinallyId, IndexSemantics};
 mod classes;
 use std::collections::{BTreeSet, VecDeque};
 use std::fmt::Write;
 use std::sync::Arc;
 
 use aether_frontend::{
-    CastKind, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId, FloatValue,
-    FunctionInstanceInfo, HirBinaryOp, HirBlock, HirCallTarget, HirDrop, HirExpr, HirExprKind,
-    HirFunction, HirMatchArm, HirPlace, HirPlaceBase, HirPlaceProjection, HirStmtKind, HirUnaryOp,
-    InstanceId, LocalId, MatchMode, ModuleInfo, Phase, Span, StructId, StructInfo,
-    StructuralMutation, Substitution, TypeArena, TypeData, TypeId, TypedHir, VariantId,
+    CastKind, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId, FloatType,
+    FloatValue, FunctionInstanceInfo, HirBinaryOp, HirBlock, HirCallTarget, HirDrop, HirExpr,
+    HirExprKind, HirFinally, HirFunction, HirMatchArm, HirPlace, HirPlaceBase, HirPlaceProjection,
+    HirStmtKind, HirUnaryOp, InstanceId, LocalId, MatchMode, ModuleInfo, Phase, Span, StructId,
+    StructInfo, StructuralMutation, Substitution, TypeArena, TypeData, TypeId, TypedHir, VariantId,
     format_type,
 };
 
@@ -489,6 +489,16 @@ pub enum Rvalue {
     EndCatch {
         event: ExceptionEventId,
     },
+    SetPendingFinally {
+        finally: FinallyId,
+        tag: u32,
+    },
+    EnterFinally {
+        finally: FinallyId,
+    },
+    ExitFinally {
+        finally: FinallyId,
+    },
 }
 
 /// One typed assignment.
@@ -583,7 +593,18 @@ pub struct MirFunction {
     /// Entry identity.
     pub entry: BlockId,
     pub exception_events: Vec<ExceptionEventId>,
+    pub finally_regions: Vec<FinallyRegion>,
     pub constructor_unwind: Option<aether_frontend::ConstructorUnwindPlan>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FinallyRegion {
+    pub id: FinallyId,
+    pub entry: BlockId,
+    pub dispatch: BlockId,
+    pub selector: LocalId,
+    pub body_blocks: Vec<BlockId>,
+    pub exits: Vec<BlockId>,
 }
 
 /// Unverified flow MIR.
@@ -724,13 +745,22 @@ fn conditional_drop_roots(block: &HirBlock) -> BTreeSet<LocalId> {
                         visit(&arm.body, roots);
                     }
                 }
-                HirStmtKind::Try { body, catches } => {
+                HirStmtKind::Try {
+                    body,
+                    catches,
+                    finally,
+                } => {
                     visit(body, roots);
                     for catch in catches {
                         visit(&catch.body, roots);
                     }
+                    if let Some(finally) = finally {
+                        visit(&finally.body, roots);
+                    }
                 }
                 HirStmtKind::Return { drops, .. }
+                | HirStmtKind::Break { drops }
+                | HirStmtKind::Continue { drops }
                 | HirStmtKind::Throw { drops, .. }
                 | HirStmtKind::Rethrow { drops, .. } => {
                     for drop in drops {
@@ -812,6 +842,7 @@ fn lower_function(
             }],
             entry: BlockId(0),
             exception_events: Vec::new(),
+            finally_regions: Vec::new(),
             constructor_unwind: function.constructor_unwind.clone(),
         },
         current: Some(BlockId(0)),
@@ -828,6 +859,8 @@ fn lower_function(
             .constructor_unwind
             .as_ref()
             .map(|_| aether_frontend::ClassInitializationState::default()),
+        loops: Vec::new(),
+        finalizers: Vec::new(),
     };
     for owner in conditional_roots {
         let flag = builder.temporary(TypeId::BOOL);
@@ -847,6 +880,10 @@ fn lower_function(
         );
     }
     builder.lower_block(&function.body);
+    builder
+        .function
+        .finally_regions
+        .sort_by_key(|region| region.id);
     builder.function
 }
 
@@ -863,6 +900,8 @@ struct Builder<'a> {
     root_event: Option<ExceptionEventId>,
     active_temporary_owners: Vec<LocalId>,
     construction_state: Option<aether_frontend::ClassInitializationState>,
+    loops: Vec<(BlockId, BlockId, usize)>,
+    finalizers: Vec<FinalizerContext>,
 }
 
 #[derive(Clone, Copy)]
@@ -871,6 +910,36 @@ struct HandlerContext {
     dispatch: Option<BlockId>,
     cleanup_boundary: usize,
     catch_boundary: usize,
+    finalizer_depth: usize,
+}
+
+#[derive(Clone)]
+enum PendingAction {
+    Goto {
+        target: BlockId,
+        drops: Vec<HirDrop>,
+        remaining_finalizers: usize,
+    },
+    Return {
+        value: Operand,
+        drops: Vec<HirDrop>,
+        remaining_finalizers: usize,
+    },
+    Resume(ExceptionEventId),
+    Forward {
+        event: ExceptionEventId,
+        target_event: ExceptionEventId,
+        target: BlockId,
+    },
+}
+
+struct FinalizerContext {
+    id: FinallyId,
+    entry: BlockId,
+    selector: LocalId,
+    return_slot: LocalId,
+    cleanup_boundary: usize,
+    actions: Vec<PendingAction>,
 }
 
 impl Builder<'_> {
@@ -883,6 +952,143 @@ impl Builder<'_> {
         event
     }
 
+    fn route_through_finally(&mut self, action: PendingAction, span: Span) {
+        let (tag, id, return_slot, selector, entry) = self
+            .finalizers
+            .last()
+            .map(|context| {
+                (
+                    u32::try_from(context.actions.len()).expect("finally action count fits u32"),
+                    context.id,
+                    context.return_slot,
+                    context.selector,
+                    context.entry,
+                )
+            })
+            .expect("pending control requires an active finally");
+        let action = match action {
+            PendingAction::Return {
+                value,
+                drops,
+                remaining_finalizers,
+            } => {
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(return_slot),
+                        projections: Vec::new(),
+                    },
+                    Rvalue::Use(value),
+                    span,
+                );
+                PendingAction::Return {
+                    value: Operand::Local(return_slot),
+                    drops,
+                    remaining_finalizers,
+                }
+            }
+            action => action,
+        };
+        let context = self.finalizers.last_mut().unwrap();
+        context.actions.push(action);
+        self.assign(
+            Place {
+                base: PlaceBase::Local(selector),
+                projections: Vec::new(),
+            },
+            Rvalue::SetPendingFinally { finally: id, tag },
+            span,
+        );
+        self.terminate(Terminator::Goto(entry));
+    }
+
+    fn emit_pending_action(&mut self, action: PendingAction, span: Span) {
+        match action {
+            PendingAction::Goto {
+                target,
+                drops,
+                remaining_finalizers,
+            } if remaining_finalizers != 0 => {
+                let (now, later) = self.split_finally_drops(drops);
+                for drop in now {
+                    self.emit_hir_drop(drop, span);
+                }
+                self.route_through_finally(
+                    PendingAction::Goto {
+                        target,
+                        drops: later,
+                        remaining_finalizers: remaining_finalizers - 1,
+                    },
+                    span,
+                );
+            }
+            PendingAction::Return {
+                value,
+                drops,
+                remaining_finalizers,
+            } if remaining_finalizers != 0 => {
+                let (now, later) = self.split_finally_drops(drops);
+                for drop in now {
+                    self.emit_hir_drop(drop, span);
+                }
+                self.route_through_finally(
+                    PendingAction::Return {
+                        value,
+                        drops: later,
+                        remaining_finalizers: remaining_finalizers - 1,
+                    },
+                    span,
+                );
+            }
+            PendingAction::Goto { target, drops, .. } => {
+                for drop in drops {
+                    self.emit_hir_drop(drop, span);
+                }
+                self.terminate(Terminator::Goto(target));
+            }
+            PendingAction::Return { value, drops, .. } => {
+                for drop in drops {
+                    self.emit_hir_drop(drop, span);
+                }
+                for event in self.active_catches.clone().into_iter().rev() {
+                    let token = self.temporary(TypeId::BOOL);
+                    self.assign(
+                        operand_place(&Operand::Local(token)),
+                        Rvalue::EndCatch { event },
+                        span,
+                    );
+                }
+                self.terminate(Terminator::Return(value));
+            }
+            PendingAction::Resume(event) => {
+                self.terminate(Terminator::ResumeUnwind { event });
+            }
+            PendingAction::Forward {
+                event,
+                target_event,
+                target,
+            } => self.terminate(Terminator::ForwardUnwind {
+                event,
+                target_event,
+                target,
+            }),
+        }
+    }
+
+    fn split_finally_drops(&self, drops: Vec<HirDrop>) -> (Vec<HirDrop>, Vec<HirDrop>) {
+        let boundary = self
+            .finalizers
+            .last()
+            .map_or(0, |context| context.cleanup_boundary);
+        let outer = self.active_owners[..boundary]
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>();
+        drops
+            .into_iter()
+            .partition(|drop| !outer.contains(&drop.local()))
+    }
+
+    #[allow(clippy::too_many_lines)]
     fn make_unwind_pad(
         &mut self,
         span: Span,
@@ -973,11 +1179,23 @@ impl Builder<'_> {
             );
         }
         if let Some(handler) = handler {
-            self.terminate(Terminator::Goto(
-                handler.dispatch.expect("unwind allocated handler dispatch"),
-            ));
-        } else {
+            let target = handler.dispatch.expect("unwind allocated handler dispatch");
+            if self.finalizers.len() > handler.finalizer_depth {
+                self.route_through_finally(
+                    PendingAction::Forward {
+                        event,
+                        target_event: handler.event,
+                        target,
+                    },
+                    span,
+                );
+            } else {
+                self.terminate(Terminator::Goto(target));
+            }
+        } else if self.finalizers.is_empty() {
             self.terminate(Terminator::ResumeUnwind { event });
+        } else {
+            self.route_through_finally(PendingAction::Resume(event), span);
         }
         self.current = saved;
         pad
@@ -1126,18 +1344,71 @@ impl Builder<'_> {
                 }
                 HirStmtKind::Return { value, drops } => {
                     let value = self.lower_expr(value);
-                    for drop in drops {
-                        self.emit_hir_drop(*drop, statement.span);
-                    }
-                    for event in self.active_catches.clone().into_iter().rev() {
-                        let token = self.temporary(TypeId::BOOL);
-                        self.assign(
-                            operand_place(&Operand::Local(token)),
-                            Rvalue::EndCatch { event },
+                    if self.finalizers.is_empty() {
+                        for drop in drops {
+                            self.emit_hir_drop(*drop, statement.span);
+                        }
+                        for event in self.active_catches.clone().into_iter().rev() {
+                            let token = self.temporary(TypeId::BOOL);
+                            self.assign(
+                                operand_place(&Operand::Local(token)),
+                                Rvalue::EndCatch { event },
+                                statement.span,
+                            );
+                        }
+                        self.terminate(Terminator::Return(value));
+                    } else {
+                        let (now, later) = self.split_finally_drops(drops.clone());
+                        for drop in now {
+                            self.emit_hir_drop(drop, statement.span);
+                        }
+                        for event in self.active_catches.clone().into_iter().rev() {
+                            let token = self.temporary(TypeId::BOOL);
+                            self.assign(
+                                operand_place(&Operand::Local(token)),
+                                Rvalue::EndCatch { event },
+                                statement.span,
+                            );
+                        }
+                        self.route_through_finally(
+                            PendingAction::Return {
+                                value,
+                                drops: later,
+                                remaining_finalizers: self.finalizers.len() - 1,
+                            },
                             statement.span,
                         );
                     }
-                    self.terminate(Terminator::Return(value));
+                }
+                HirStmtKind::Break { drops } | HirStmtKind::Continue { drops } => {
+                    let (continue_target, break_target, loop_finalizer_depth) = *self
+                        .loops
+                        .last()
+                        .expect("verified HIR loop transfer has MIR loop targets");
+                    let target = if matches!(statement.kind, HirStmtKind::Break { .. }) {
+                        break_target
+                    } else {
+                        continue_target
+                    };
+                    if self.finalizers.len() == loop_finalizer_depth {
+                        for drop in drops {
+                            self.emit_hir_drop(*drop, statement.span);
+                        }
+                        self.terminate(Terminator::Goto(target));
+                    } else {
+                        let (now, later) = self.split_finally_drops(drops.clone());
+                        for drop in now {
+                            self.emit_hir_drop(drop, statement.span);
+                        }
+                        self.route_through_finally(
+                            PendingAction::Goto {
+                                target,
+                                drops: later,
+                                remaining_finalizers: self.finalizers.len() - 1,
+                            },
+                            statement.span,
+                        );
+                    }
                 }
                 HirStmtKind::Throw {
                     value,
@@ -1175,7 +1446,11 @@ impl Builder<'_> {
                     enum_id,
                     arms,
                 } => self.lower_match(*mode, scrutinee, *enum_type, *enum_id, arms),
-                HirStmtKind::Try { body, catches } => self.lower_try(body, catches, statement.span),
+                HirStmtKind::Try {
+                    body,
+                    catches,
+                    finally,
+                } => self.lower_try(body, catches, finally.as_ref(), statement.span),
             }
         }
         if self.current.is_some() {
@@ -1186,7 +1461,48 @@ impl Builder<'_> {
         self.active_owners.truncate(active_start);
     }
 
-    fn lower_try(&mut self, body: &HirBlock, catches: &[aether_frontend::HirCatch], span: Span) {
+    #[allow(clippy::too_many_lines)]
+    fn lower_try(
+        &mut self,
+        body: &HirBlock,
+        catches: &[aether_frontend::HirCatch],
+        finally: Option<&HirFinally>,
+        span: Span,
+    ) {
+        if let Some(finally) = finally {
+            let entry = self.new_block();
+            let selector = self.temporary(TypeId::UINT32);
+            let return_slot = self.temporary(self.function.return_type);
+            let default = match self.types.get(self.function.return_type) {
+                Some(TypeData::Bool) => Operand::Bool(false),
+                Some(TypeData::Integer(_)) => Operand::Int {
+                    value: 0,
+                    ty: self.function.return_type,
+                },
+                Some(TypeData::Float(FloatType::Float32)) => Operand::Float {
+                    value: FloatValue::Float32(0),
+                    ty: self.function.return_type,
+                },
+                Some(TypeData::Float(FloatType::Float64)) => Operand::Float {
+                    value: FloatValue::Float64(0),
+                    ty: self.function.return_type,
+                },
+                _ => unreachable!("frontend restricts finally return payload storage"),
+            };
+            self.assign(
+                operand_place(&Operand::Local(return_slot)),
+                Rvalue::Use(default),
+                span,
+            );
+            self.finalizers.push(FinalizerContext {
+                id: finally.id,
+                entry,
+                selector,
+                return_slot,
+                cleanup_boundary: self.active_owners.len(),
+                actions: Vec::new(),
+            });
+        }
         let event = self.new_event();
         let mut join = None;
         let context = HandlerContext {
@@ -1194,100 +1510,195 @@ impl Builder<'_> {
             dispatch: None,
             cleanup_boundary: self.active_owners.len(),
             catch_boundary: self.active_catches.len(),
+            finalizer_depth: self.finalizers.len(),
         };
         self.handlers.push(context);
         self.lower_block(body);
         if self.current.is_some() {
             let target = self.new_block();
             join = Some(target);
-            self.terminate(Terminator::Goto(target));
-        }
-        let context = self.handlers.pop().unwrap();
-        let Some(dispatch) = context.dispatch else {
-            return;
-        };
-
-        let mut test = dispatch;
-        for catch in catches {
-            self.current = Some(test);
-            let matched = Operand::Local(self.temporary(TypeId::BOOL));
-            self.assign(
-                operand_place(&matched),
-                Rvalue::ExceptionMatches {
-                    event,
-                    catch_class: catch.class,
-                },
-                catch.span,
-            );
-            let handler_block = self.new_block();
-            let next = self.new_block();
-            self.terminate(Terminator::Branch {
-                condition: matched,
-                then_block: handler_block,
-                else_block: next,
-            });
-            self.current = Some(handler_block);
-            self.assign(
-                Place {
-                    base: PlaceBase::Local(catch.binding),
-                    projections: Vec::new(),
-                },
-                Rvalue::CatchBindAlias {
-                    event,
-                    catch: catch.id,
-                    catch_class: catch.class,
-                },
-                catch.span,
-            );
-            self.set_drop_flag(catch.binding, true, catch.span);
-            self.active_owners.push(catch.binding);
-            self.active_catches.push(event);
-            self.lower_block(&catch.body);
-            self.active_catches.pop();
-            self.active_owners.pop();
-            if self.current.is_some() {
-                let token = self.temporary(TypeId::BOOL);
-                self.assign(
-                    operand_place(&Operand::Local(token)),
-                    Rvalue::EndCatch { event },
-                    catch.span,
-                );
-                let target = if let Some(target) = join {
-                    target
-                } else {
-                    let target = self.new_block();
-                    join = Some(target);
-                    target
-                };
-                self.terminate(Terminator::Goto(target));
-            }
-            test = next;
-        }
-        self.current = Some(test);
-        if self.handlers.is_empty() {
-            self.terminate(Terminator::ResumeUnwind { event });
-        } else {
-            if self.handlers.last().unwrap().dispatch.is_none() {
-                let outer_dispatch = self.new_block();
-                self.handlers.last_mut().unwrap().dispatch = Some(outer_dispatch);
-            }
-            let outer = *self.handlers.last().unwrap();
-            let catches_to_end = self.active_catches[outer.catch_boundary..].to_vec();
-            for caught in catches_to_end.into_iter().rev() {
-                let token = self.temporary(TypeId::BOOL);
-                self.assign(
-                    operand_place(&Operand::Local(token)),
-                    Rvalue::EndCatch { event: caught },
+            if finally.is_some() {
+                self.route_through_finally(
+                    PendingAction::Goto {
+                        target,
+                        drops: Vec::new(),
+                        remaining_finalizers: 0,
+                    },
                     span,
                 );
+            } else {
+                self.terminate(Terminator::Goto(target));
             }
-            self.terminate(Terminator::ForwardUnwind {
-                event,
-                target_event: outer.event,
-                target: outer.dispatch.unwrap(),
-            });
+        }
+        let context = self.handlers.pop().unwrap();
+        if let Some(dispatch) = context.dispatch {
+            let mut test = dispatch;
+            for catch in catches {
+                self.current = Some(test);
+                let matched = Operand::Local(self.temporary(TypeId::BOOL));
+                self.assign(
+                    operand_place(&matched),
+                    Rvalue::ExceptionMatches {
+                        event,
+                        catch_class: catch.class,
+                    },
+                    catch.span,
+                );
+                let handler_block = self.new_block();
+                let next = self.new_block();
+                self.terminate(Terminator::Branch {
+                    condition: matched,
+                    then_block: handler_block,
+                    else_block: next,
+                });
+                self.current = Some(handler_block);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(catch.binding),
+                        projections: Vec::new(),
+                    },
+                    Rvalue::CatchBindAlias {
+                        event,
+                        catch: catch.id,
+                        catch_class: catch.class,
+                    },
+                    catch.span,
+                );
+                self.set_drop_flag(catch.binding, true, catch.span);
+                self.active_owners.push(catch.binding);
+                self.active_catches.push(event);
+                self.lower_block(&catch.body);
+                self.active_catches.pop();
+                self.active_owners.pop();
+                if self.current.is_some() {
+                    let token = self.temporary(TypeId::BOOL);
+                    self.assign(
+                        operand_place(&Operand::Local(token)),
+                        Rvalue::EndCatch { event },
+                        catch.span,
+                    );
+                    let target = if let Some(target) = join {
+                        target
+                    } else {
+                        let target = self.new_block();
+                        join = Some(target);
+                        target
+                    };
+                    if finally.is_some() {
+                        self.route_through_finally(
+                            PendingAction::Goto {
+                                target,
+                                drops: Vec::new(),
+                                remaining_finalizers: 0,
+                            },
+                            catch.span,
+                        );
+                    } else {
+                        self.terminate(Terminator::Goto(target));
+                    }
+                }
+                test = next;
+            }
+            self.current = Some(test);
+            if self.handlers.is_empty() {
+                if finally.is_some() {
+                    self.route_through_finally(PendingAction::Resume(event), span);
+                } else {
+                    self.terminate(Terminator::ResumeUnwind { event });
+                }
+            } else {
+                if self.handlers.last().unwrap().dispatch.is_none() {
+                    let outer_dispatch = self.new_block();
+                    self.handlers.last_mut().unwrap().dispatch = Some(outer_dispatch);
+                }
+                let outer = *self.handlers.last().unwrap();
+                let catches_to_end = self.active_catches[outer.catch_boundary..].to_vec();
+                for caught in catches_to_end.into_iter().rev() {
+                    let token = self.temporary(TypeId::BOOL);
+                    self.assign(
+                        operand_place(&Operand::Local(token)),
+                        Rvalue::EndCatch { event: caught },
+                        span,
+                    );
+                }
+                let action = PendingAction::Forward {
+                    event,
+                    target_event: outer.event,
+                    target: outer.dispatch.unwrap(),
+                };
+                if finally.is_some() {
+                    self.route_through_finally(action, span);
+                } else if let PendingAction::Forward {
+                    event,
+                    target_event,
+                    target,
+                } = action
+                {
+                    self.terminate(Terminator::ForwardUnwind {
+                        event,
+                        target_event,
+                        target,
+                    });
+                }
+            }
         }
         self.current = join;
+        if let Some(finally) = finally {
+            let context = self.finalizers.pop().unwrap();
+            let body_start = self.function.blocks.len();
+            self.current = Some(context.entry);
+            let enter = self.temporary(TypeId::BOOL);
+            self.assign(
+                operand_place(&Operand::Local(enter)),
+                Rvalue::EnterFinally {
+                    finally: context.id,
+                },
+                finally.span,
+            );
+            self.lower_block(&finally.body);
+            let exit = self.temporary(TypeId::BOOL);
+            self.assign(
+                operand_place(&Operand::Local(exit)),
+                Rvalue::ExitFinally {
+                    finally: context.id,
+                },
+                finally.span,
+            );
+            let finalizer_end = self.current;
+            let action_start = self.function.blocks.len();
+            let mut cases = Vec::new();
+            let mut exits = Vec::new();
+            for (tag, action) in context.actions.into_iter().enumerate() {
+                let target = self.new_block();
+                cases.push((u32::try_from(tag).expect("finally tag fits u32"), target));
+                exits.push(target);
+                self.current = Some(target);
+                self.emit_pending_action(action, finally.span);
+            }
+            self.current = finalizer_end;
+            self.terminate(Terminator::Switch {
+                discriminant: Operand::Local(context.selector),
+                cases,
+                otherwise: None,
+                exhaustive_enum: None,
+            });
+            let mut body_blocks = vec![context.entry];
+            body_blocks.extend(
+                (body_start..action_start)
+                    .map(|block| BlockId(u32::try_from(block).expect("block count fits u32"))),
+            );
+            body_blocks.sort();
+            body_blocks.dedup();
+            self.function.finally_regions.push(FinallyRegion {
+                id: context.id,
+                entry: context.entry,
+                dispatch: finalizer_end.expect("verified finally completes normally"),
+                selector: context.selector,
+                body_blocks,
+                exits,
+            });
+            self.current = join;
+        }
     }
 
     fn lower_if(
@@ -1364,7 +1775,9 @@ impl Builder<'_> {
             else_block: exit,
         });
         self.current = Some(body_id);
+        self.loops.push((header, exit, self.finalizers.len()));
         self.lower_block(body);
+        self.loops.pop();
         if let Some(end) = self.current {
             self.current = Some(end);
             self.terminate(Terminator::Goto(header));
@@ -3280,6 +3693,7 @@ fn verify_mir_function(
     if reachable.iter().any(|value| !value) {
         return Err(fail("MIR contains an unreachable block".into()));
     }
+    verify_finally_regions(function, &predecessors, fail)?;
     verify_drop_flag_contract(function, signatures, types, fail)?;
     aether_frontend::verify_class_metadata(types, structs, enums).map_err(fail)?;
     classes::verify(function, signatures, types).map_err(fail)?;
@@ -3692,6 +4106,205 @@ fn verify_drop_flag_contract(
                 && !allowed_writes.contains(&(block.id, index))
             {
                 return Err(fail("MIR contains an unpaired drop-flag transition".into()));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+fn verify_finally_regions(
+    function: &MirFunction,
+    predecessors: &[Vec<BlockId>],
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let known = function
+        .finally_regions
+        .iter()
+        .map(|region| region.id)
+        .collect::<BTreeSet<_>>();
+    if known.len() != function.finally_regions.len()
+        || function
+            .finally_regions
+            .iter()
+            .enumerate()
+            .any(|(index, region)| region.id.0 as usize != index)
+    {
+        return Err(fail("MIR finally identities are not canonical".into()));
+    }
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            let marker = match instruction.value {
+                Rvalue::SetPendingFinally { finally, .. }
+                | Rvalue::EnterFinally { finally }
+                | Rvalue::ExitFinally { finally } => Some(finally),
+                _ => None,
+            };
+            if marker.is_some_and(|id| !known.contains(&id)) {
+                return Err(fail("MIR finally marker names an unknown region".into()));
+            }
+        }
+    }
+    for region in &function.finally_regions {
+        if function
+            .locals
+            .get(region.selector.0 as usize)
+            .map(|local| local.ty)
+            != Some(TypeId::UINT32)
+            || region.body_blocks.is_empty()
+            || !region.body_blocks.contains(&region.entry)
+            || !region.body_blocks.contains(&region.dispatch)
+            || region.exits.is_empty()
+            || region
+                .body_blocks
+                .iter()
+                .chain(&region.exits)
+                .any(|block| block.0 as usize >= function.blocks.len())
+        {
+            return Err(fail("MIR finally region metadata is invalid".into()));
+        }
+        let dispatch = &function.blocks[region.dispatch.0 as usize];
+        let Some(Terminator::Switch {
+            discriminant: Operand::Local(selector),
+            cases,
+            otherwise: None,
+            exhaustive_enum: None,
+        }) = &dispatch.terminator
+        else {
+            return Err(fail("MIR finally dispatch is not canonical".into()));
+        };
+        let expected = region
+            .exits
+            .iter()
+            .enumerate()
+            .map(|(tag, target)| {
+                (
+                    u32::try_from(tag).expect("verified finally exit count fits u32"),
+                    *target,
+                )
+            })
+            .collect::<Vec<_>>();
+        if selector != &region.selector || cases != &expected {
+            return Err(fail("MIR finally exit ordering is invalid".into()));
+        }
+        let enters = function
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter(|instruction| {
+                matches!(instruction.value, Rvalue::EnterFinally { finally } if finally == region.id)
+            })
+            .count();
+        let exits = function
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter(|instruction| {
+                matches!(instruction.value, Rvalue::ExitFinally { finally } if finally == region.id)
+            })
+            .count();
+        if enters != 1
+            || exits != 1
+            || !function.blocks[region.entry.0 as usize]
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction.value, Rvalue::EnterFinally { finally } if finally == region.id))
+            || !dispatch
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction.value, Rvalue::ExitFinally { finally } if finally == region.id))
+        {
+            return Err(fail("MIR finally enter/exit markers are invalid".into()));
+        }
+        let pending = function
+            .blocks
+            .iter()
+            .flat_map(|block| {
+                block.instructions.iter().filter_map(move |instruction| {
+                    if let Rvalue::SetPendingFinally { finally, tag } = instruction.value
+                        && finally == region.id
+                    {
+                        Some((block.id, tag, &instruction.destination))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        if pending.len() != region.exits.len()
+            || pending.iter().any(|(block, tag, destination)| {
+                *tag as usize >= region.exits.len()
+                    || place_root_local(destination) != Some(region.selector)
+                    || !destination.projections.is_empty()
+                    || !matches!(
+                        function.blocks[block.0 as usize].terminator,
+                        Some(Terminator::Goto(target)) if target == region.entry
+                    )
+            })
+            || pending
+                .iter()
+                .map(|(_, tag, _)| *tag)
+                .collect::<BTreeSet<_>>()
+                .len()
+                != region.exits.len()
+        {
+            return Err(fail(
+                "MIR pending control does not enter finally exactly once".into(),
+            ));
+        }
+        let pending_blocks = pending
+            .iter()
+            .map(|(block, _, _)| *block)
+            .collect::<BTreeSet<_>>();
+        if predecessors[region.entry.0 as usize]
+            .iter()
+            .copied()
+            .collect::<BTreeSet<_>>()
+            != pending_blocks
+            || region.body_blocks.iter().any(|body| {
+                *body != region.entry
+                    && predecessors[body.0 as usize]
+                        .iter()
+                        .any(|predecessor| !region.body_blocks.contains(predecessor))
+            })
+            || region.body_blocks.iter().any(|body| {
+                *body != region.dispatch
+                    && targets(
+                        function.blocks[body.0 as usize]
+                            .terminator
+                            .as_ref()
+                            .expect("verified MIR block"),
+                    )
+                    .iter()
+                    .any(|target| !region.body_blocks.contains(target))
+            })
+        {
+            return Err(fail("MIR finally region has a bypass edge".into()));
+        }
+        for exit in &region.exits {
+            if predecessors[exit.0 as usize] != [region.dispatch] {
+                return Err(fail(
+                    "MIR finally exit has a noncanonical predecessor".into(),
+                ));
+            }
+        }
+        for block in &region.body_blocks {
+            let block = &function.blocks[block.0 as usize];
+            if block.instructions.iter().any(|instruction| {
+                instruction.unwind.is_some()
+                    || matches!(instruction.value, Rvalue::Call { .. })
+                    || matches!(instruction.value, Rvalue::Class(ref op) if matches!(op.as_ref(), ClassOp::DirectMethodCall { .. } | ClassOp::BaseMethodCall { .. } | ClassOp::VirtualCall { .. } | ClassOp::InterfaceCall { .. } | ClassOp::InitCall { .. } | ClassOp::BaseInit { .. }))
+            }) || matches!(
+                block.terminator,
+                Some(
+                    Terminator::Return(_)
+                        | Terminator::Throw { .. }
+                        | Terminator::Rethrow { .. }
+                        | Terminator::ResumeUnwind { .. }
+                        | Terminator::ForwardUnwind { .. }
+                )
+            ) {
+                return Err(fail("MIR finally region can throw or transfer control".into()));
             }
         }
     }
@@ -4921,6 +5534,16 @@ fn validate_rvalue(
                 return Err("MIR end-catch contract is invalid".into());
             }
         }
+        Rvalue::SetPendingFinally { .. } => {
+            if destination != TypeId::UINT32 {
+                return Err("MIR pending-finally tag result must be uint32".into());
+            }
+        }
+        Rvalue::EnterFinally { .. } | Rvalue::ExitFinally { .. } => {
+            if destination != TypeId::BOOL {
+                return Err("MIR finally marker result must be bool".into());
+            }
+        }
     }
     Ok(())
 }
@@ -6054,6 +6677,7 @@ mod tests {
                 }],
                 entry: BlockId(0),
                 exception_events: vec![],
+                finally_regions: vec![],
                 constructor_unwind: None,
             }],
             entry: InstanceId(0),

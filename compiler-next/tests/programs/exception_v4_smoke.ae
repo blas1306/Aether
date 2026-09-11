@@ -1,0 +1,22 @@
+open class Problem : Exception {
+    public init() {}
+}
+
+int main() {
+    int value = 0;
+    try {
+        try {
+            throw Problem();
+        }
+        finally {
+            value = value + 1;
+        }
+    }
+    catch (Problem problem) {
+        value = value + 1;
+    }
+    finally {
+        value = value + 2;
+    }
+    return value - 4;
+}
