@@ -31,8 +31,96 @@ fn has_return(block: &AstBlock) -> bool {
         } => has_return(then_block) || else_block.as_ref().is_some_and(has_return),
         AstStmtKind::While { body, .. } => has_return(body),
         AstStmtKind::Match { arms, .. } => arms.iter().any(|a| has_return(&a.body)),
+        AstStmtKind::Try { body, catches } => {
+            has_return(body) || catches.iter().any(|catch| has_return(&catch.body))
+        }
         _ => false,
     })
+}
+
+fn block_uses_exceptions(block: &AstBlock) -> bool {
+    block
+        .statements
+        .iter()
+        .any(|statement| match &statement.kind {
+            AstStmtKind::Throw(_) | AstStmtKind::Try { .. } => true,
+            AstStmtKind::If {
+                then_block,
+                else_block,
+                ..
+            } => {
+                block_uses_exceptions(then_block)
+                    || else_block.as_ref().is_some_and(block_uses_exceptions)
+            }
+            AstStmtKind::While { body, .. } => block_uses_exceptions(body),
+            AstStmtKind::Match { arms, .. } => {
+                arms.iter().any(|arm| block_uses_exceptions(&arm.body))
+            }
+            _ => false,
+        })
+}
+
+pub(super) fn inject_exception_core(program: &mut ParsedProgram) -> Result<(), Vec<Diagnostic>> {
+    let needed = program.modules.iter().any(|module| {
+        module
+            .ast
+            .functions
+            .iter()
+            .any(|function| block_uses_exceptions(&function.body))
+            || module.ast.classes.iter().any(|class| {
+                class
+                    .relations
+                    .iter()
+                    .any(|relation| relation.module.is_none() && relation.name == "Exception")
+            })
+    });
+    if !needed {
+        return Ok(());
+    }
+    if let Some(class) = program
+        .modules
+        .iter()
+        .flat_map(|module| &module.ast.classes)
+        .find(|class| class.name == "Exception")
+    {
+        return Err(vec![error(
+            "E0431",
+            "Exception is a core-owned open class and cannot be redeclared",
+            class.span,
+        )]);
+    }
+    let module = &mut program.modules[program.entry.0 as usize];
+    let span = Span::in_source(module.info.source, 0, 0);
+    module.ast.classes.insert(
+        0,
+        crate::AstClass {
+            open: true,
+            relations: Vec::new(),
+            name: "Exception".into(),
+            public: true,
+            fields: Vec::new(),
+            methods: Vec::new(),
+            initializer: Some(crate::AstClassMethod {
+                open: false,
+                overriding: false,
+                public: true,
+                mutable: true,
+                function: AstFunction {
+                    return_type: ast_type("int", span),
+                    name: "init".into(),
+                    generic_parameters: Vec::new(),
+                    parameters: Vec::new(),
+                    body: AstBlock {
+                        statements: Vec::new(),
+                        span,
+                    },
+                    span,
+                },
+            }),
+            span,
+        },
+    );
+    Ok(())
 }
 pub(super) fn expand_methods(program: &mut ParsedProgram) -> Result<(), Vec<Diagnostic>> {
     for module in &mut program.modules {
@@ -161,6 +249,9 @@ pub(super) fn register_identities(program: &ParsedProgram, types: &mut TypeArena
                 span: class.span,
             });
             types.intern(TypeData::Class(id));
+            if class.name == "Exception" && module.info.id == program.entry {
+                types.set_exception_class(id);
+            }
             for kind in [
                 ClassTokenKind::Unpublished,
                 ClassTokenKind::Keepalive { mutable: false },
@@ -353,6 +444,11 @@ impl Analyzer<'_> {
                     .iter()
                     .find(|c| c.module == module && c.name == name)
                     .map(|c| c.id)
+            })
+            .or_else(|| {
+                (name == "Exception")
+                    .then(|| self.types.exception_class())
+                    .flatten()
             })
     }
     fn class_source_type(&self, e: &AstExpr) -> Option<ClassId> {
@@ -873,7 +969,26 @@ impl Analyzer<'_> {
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
         let source = self.raw_receiver(receiver)?;
+        if self.types.exception_class().is_some()
+            && self
+                .class_method
+                .as_ref()
+                .is_some_and(|(_, method)| method.initializing)
+        {
+            return Err(vec![error(
+                "E0436",
+                "a potentially throwing method call is unavailable during initialization until constructor rollback is implemented",
+                span,
+            )]);
+        }
         if let Some(interface) = self.types.interface_id(source.ty) {
+            if self.types.exception_class().is_some() {
+                return Err(vec![error(
+                    "E0437",
+                    "interface invokes are outside EXCEPTION-V1",
+                    span,
+                )]);
+            }
             let r = self.types.interfaces()[interface.0 as usize]
                 .requirements
                 .iter()
@@ -989,6 +1104,13 @@ impl Analyzer<'_> {
             .expr;
         let args = self.class_arguments(method.function, args, span)?;
         let result = self.signatures[method.function.0 as usize].return_type;
+        if method.virtual_slot.is_some() && self.types.exception_class().is_some() {
+            return Err(vec![error(
+                "E0437",
+                "virtual invokes are outside EXCEPTION-V1",
+                span,
+            )]);
+        }
         Ok(self.class_checked(
             if let Some(slot) = method.virtual_slot {
                 ClassOp::VirtualCall {
@@ -1259,7 +1381,8 @@ pub(super) fn verify_body(
                     initializer: value, ..
                 }
                 | HirStmtKind::Assign { value, .. }
-                | HirStmtKind::Return { value, .. } => {
+                | HirStmtKind::Return { value, .. }
+                | HirStmtKind::Throw { value, .. } => {
                     owning_use(value, types)?;
                     visit_expr(value, state, types, function, module, sigs)?;
                     if matches!(s.kind, HirStmtKind::Return { .. })
@@ -1322,6 +1445,21 @@ pub(super) fn verify_body(
                         }
                     }
                 }
+                HirStmtKind::Try { body, catches } => {
+                    block(body, state, init, types, function, module, sigs)?;
+                    for catch in catches {
+                        let mut catch_state = state.clone();
+                        block(
+                            &catch.body,
+                            &mut catch_state,
+                            init,
+                            types,
+                            function,
+                            module,
+                            sigs,
+                        )?;
+                    }
+                }
                 HirStmtKind::ListPush { target, value, .. } => {
                     for e in place_children(target) {
                         visit_expr(e, state, types, function, module, sigs)?;
@@ -1338,7 +1476,7 @@ pub(super) fn verify_body(
                     }
                     visit_expr(requested_capacity, state, types, function, module, sigs)?;
                 }
-                HirStmtKind::Nop => (),
+                HirStmtKind::Nop | HirStmtKind::Rethrow { .. } => (),
             }
         }
         Ok(())

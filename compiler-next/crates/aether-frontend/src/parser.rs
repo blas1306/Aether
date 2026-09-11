@@ -1,11 +1,11 @@
 //! Recursive-descent parser for the deliberately closed Vertical-16 grammar.
 
 use crate::{
-    AstAlias, AstBinaryOp, AstBlock, AstCapabilityConstraint, AstEnum, AstExpr, AstExprKind,
-    AstField, AstFunction, AstGenericParam, AstImport, AstMatchArm, AstMatchMode, AstParameter,
-    AstReferenceType, AstStmt, AstStmtKind, AstStruct, AstType, AstUnaryOp, AstVariant,
-    AstVariantPattern, Diagnostic, DiagnosticCategory, ParsedAst, Phase, SourceFile, Token,
-    TokenKind,
+    AstAlias, AstBinaryOp, AstBlock, AstCapabilityConstraint, AstCatch, AstEnum, AstExpr,
+    AstExprKind, AstField, AstFunction, AstGenericParam, AstImport, AstMatchArm, AstMatchMode,
+    AstParameter, AstReferenceType, AstStmt, AstStmtKind, AstStruct, AstType, AstUnaryOp,
+    AstVariant, AstVariantPattern, Diagnostic, DiagnosticCategory, ParsedAst, Phase, SourceFile,
+    Token, TokenKind,
 };
 
 /// Parses an already tokenized source file.
@@ -645,6 +645,14 @@ impl Parser {
                 self.advance();
                 AstStmtKind::Return(self.expression()?)
             }
+            TokenKind::KwThrow => {
+                self.advance();
+                AstStmtKind::Throw(if self.at(TokenKind::Semicolon) {
+                    None
+                } else {
+                    Some(self.expression()?)
+                })
+            }
             TokenKind::KwIf => {
                 self.advance();
                 self.expect(TokenKind::LeftParen, "expected `(` after `if`")?;
@@ -683,12 +691,48 @@ impl Parser {
                 });
             }
             TokenKind::KwMatch => return self.match_statement(start),
+            TokenKind::KwTry => return self.try_statement(start),
             _ => return Err(self.error("E0102", "expected a Vertical-16 statement")),
         };
         let semicolon = self.expect(TokenKind::Semicolon, "expected `;` after statement")?;
         Ok(AstStmt {
             kind,
             span: start.through(semicolon.span),
+        })
+    }
+
+    fn try_statement(&mut self, start: crate::Span) -> Result<AstStmt, Diagnostic> {
+        self.expect(TokenKind::KwTry, "expected `try`")?;
+        let body = self.block()?;
+        let mut catches = Vec::new();
+        while self.consume(TokenKind::KwCatch).is_some() {
+            let catch_start = self.tokens[self.cursor - 1].span;
+            self.expect(TokenKind::LeftParen, "expected `(` after `catch`")?;
+            let ty = self.ty()?;
+            let name = self
+                .expect(TokenKind::Identifier, "expected catch binding")?
+                .lexeme;
+            self.expect(TokenKind::RightParen, "expected `)` after catch binding")?;
+            let handler = self.block()?;
+            catches.push(AstCatch {
+                ty,
+                name,
+                span: catch_start.through(handler.span),
+                body: handler,
+            });
+        }
+        let Some(last) = catches.last() else {
+            return Err(Diagnostic::new(
+                "E0430",
+                Phase::Parse,
+                DiagnosticCategory::Syntax,
+                "try requires at least one typed catch",
+                Some(body.span),
+            ));
+        };
+        Ok(AstStmt {
+            span: start.through(last.span),
+            kind: AstStmtKind::Try { body, catches },
         })
     }
 

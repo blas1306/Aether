@@ -256,6 +256,26 @@ pub enum AstStmtKind {
     },
     /// Value return.
     Return(AstExpr),
+    /// Throw a new class exception, or bare-rethrow the lexical catch event.
+    Throw(Option<AstExpr>),
+    /// Lexically protected block and ordered typed handlers.
+    Try {
+        body: AstBlock,
+        catches: Vec<AstCatch>,
+    },
+}
+
+/// One ordered typed exception handler.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AstCatch {
+    /// Written exception class.
+    pub ty: AstType,
+    /// Owning handler binding.
+    pub name: String,
+    /// Handler body.
+    pub body: AstBlock,
+    /// Clause provenance.
+    pub span: Span,
 }
 
 /// Explicit source ownership mode for an enum match.

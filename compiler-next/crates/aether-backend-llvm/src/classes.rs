@@ -203,6 +203,8 @@ pub(super) fn emit_op(
     modules: &[ModuleInfo],
     structs: &[StructInfo],
     enums: &[EnumInfo],
+    unwind: Option<BlockId>,
+    block: BlockId,
 ) {
     if let Some(pair) = decisions.arc.get(&aether_middle::ValueId(result)) {
         let (ClassOp::HandleAlias { source } | ClassOp::ReceiverKeepalive { source, .. }) = op
@@ -434,6 +436,16 @@ pub(super) fn emit_op(
             let name = bootstrap_symbol(sig, modules, structs, enums, types);
             if matches!(op, ClassOp::InitCall { .. } | ClassOp::BaseInit { .. }) {
                 writeln!(output,"  %init{result} = call {} @{name}({arguments})\n  %v{result} = or i1 false, true",llvm_type(types,sig.return_type)).unwrap();
+            } else if let Some(unwind) = unwind {
+                writeln!(
+                    output,
+                    "  %v{result} = invoke {} @{name}({arguments}) to label %{} unwind label %{}",
+                    llvm_type(types, sig.return_type),
+                    continuation_label(block, result),
+                    block_label(unwind)
+                )
+                .unwrap();
+                writeln!(output, "{}:", continuation_label(block, result)).unwrap();
             } else {
                 writeln!(
                     output,

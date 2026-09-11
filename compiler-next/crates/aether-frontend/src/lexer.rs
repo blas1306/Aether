@@ -27,6 +27,12 @@ pub enum TokenKind {
     KwWhile,
     /// `return`.
     KwReturn,
+    /// `throw`.
+    KwThrow,
+    /// `try`.
+    KwTry,
+    /// `catch`.
+    KwCatch,
     /// `import`.
     KwImport,
     /// `alias`.
@@ -175,6 +181,9 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                     "else" => TokenKind::KwElse,
                     "while" => TokenKind::KwWhile,
                     "return" => TokenKind::KwReturn,
+                    "throw" => TokenKind::KwThrow,
+                    "try" => TokenKind::KwTry,
+                    "catch" => TokenKind::KwCatch,
                     "import" => TokenKind::KwImport,
                     "alias" => TokenKind::KwAlias,
                     "struct" => TokenKind::KwStruct,

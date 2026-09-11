@@ -1,0 +1,20 @@
+open class Problem: Exception {
+    public init() {}
+}
+
+int fail() {
+    throw Problem();
+}
+
+int main() {
+    try {
+        fail();
+    }
+    catch (Problem problem) {
+        return 17;
+    }
+    catch (Exception problem) {
+        return 18;
+    }
+    return 19;
+}

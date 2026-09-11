@@ -1,7 +1,7 @@
 //! Explicit control-flow MIR and fail-closed verification.
 #![allow(missing_docs)]
 
-use aether_frontend::{ClassOp, ClassTokenKind, IndexSemantics};
+use aether_frontend::{CatchId, ClassId, ClassOp, ClassTokenKind, IndexSemantics};
 mod classes;
 use std::collections::{BTreeSet, VecDeque};
 use std::fmt::Write;
@@ -19,6 +19,10 @@ use aether_frontend::{
 /// Basic-block identity, equal to its stable vector index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct BlockId(pub u32);
+
+/// Function-local linear exception record identity. It is never a source value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ExceptionEventId(pub u32);
 
 /// Compiler-internal initialization state for physical collection slots.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -473,6 +477,18 @@ pub enum Rvalue {
         callee: InstanceId,
         args: Vec<Operand>,
     },
+    ExceptionMatches {
+        event: ExceptionEventId,
+        catch_class: ClassId,
+    },
+    CatchBindAlias {
+        event: ExceptionEventId,
+        catch: CatchId,
+        catch_class: ClassId,
+    },
+    EndCatch {
+        event: ExceptionEventId,
+    },
 }
 
 /// One typed assignment.
@@ -484,6 +500,9 @@ pub struct MirInstruction {
     pub value: Rvalue,
     /// Source provenance.
     pub span: Span,
+    /// Present exactly for a potentially-throwing operation. The result exists
+    /// only on the block's ordinary terminator edge.
+    pub unwind: Option<BlockId>,
 }
 
 /// Required final instruction of every verified block.
@@ -510,6 +529,24 @@ pub enum Terminator {
     Return(Operand),
     /// Explicit unconditional failure.
     Trap(TrapKind),
+    Throw {
+        payload: Operand,
+        class: ClassId,
+        transfer: bool,
+        unwind: Option<BlockId>,
+    },
+    Rethrow {
+        event: ExceptionEventId,
+        unwind: Option<BlockId>,
+    },
+    ResumeUnwind {
+        event: ExceptionEventId,
+    },
+    ForwardUnwind {
+        event: ExceptionEventId,
+        target_event: ExceptionEventId,
+        target: BlockId,
+    },
 }
 
 /// Raw basic block. A raw block may lack a terminator until verification.
@@ -521,6 +558,10 @@ pub struct BasicBlock {
     pub instructions: Vec<MirInstruction>,
     /// Control-flow terminator.
     pub terminator: Option<Terminator>,
+    /// Native landing-pad entry materializes this owned event.
+    pub landing_pad: Option<ExceptionEventId>,
+    /// True only when this landing pad dispatches to a source `catch` list.
+    pub landing_pad_catches: bool,
 }
 
 /// Raw function CFG.
@@ -541,6 +582,7 @@ pub struct MirFunction {
     pub blocks: Vec<BasicBlock>,
     /// Entry identity.
     pub entry: BlockId,
+    pub exception_events: Vec<ExceptionEventId>,
 }
 
 /// Unverified flow MIR.
@@ -560,6 +602,7 @@ pub struct FlowMir {
     pub functions: Vec<MirFunction>,
     /// Entry function identity.
     pub entry: InstanceId,
+    pub exceptions_enabled: bool,
 }
 
 impl FlowMir {
@@ -629,11 +672,18 @@ impl VerifiedMir {
 #[must_use]
 pub fn lower_hir(hir: TypedHir) -> FlowMir {
     let (modules, mut types, structs, enums, signatures, functions, entry) = hir.into_parts();
+    let exceptions_enabled = types.exception_class().is_some();
     let functions = functions
         .iter()
         .map(|function| {
             let return_type = signatures[function.id.0 as usize].return_type;
-            lower_function(function, return_type, &enums, &mut types)
+            lower_function(
+                function,
+                return_type,
+                &enums,
+                &mut types,
+                exceptions_enabled,
+            )
         })
         .collect();
     FlowMir {
@@ -644,6 +694,7 @@ pub fn lower_hir(hir: TypedHir) -> FlowMir {
         signatures,
         functions,
         entry,
+        exceptions_enabled,
     }
 }
 
@@ -672,7 +723,15 @@ fn conditional_drop_roots(block: &HirBlock) -> BTreeSet<LocalId> {
                         visit(&arm.body, roots);
                     }
                 }
-                HirStmtKind::Return { drops, .. } => {
+                HirStmtKind::Try { body, catches } => {
+                    visit(body, roots);
+                    for catch in catches {
+                        visit(&catch.body, roots);
+                    }
+                }
+                HirStmtKind::Return { drops, .. }
+                | HirStmtKind::Throw { drops, .. }
+                | HirStmtKind::Rethrow { drops, .. } => {
                     for drop in drops {
                         if let HirDrop::Conditional(local) = drop {
                             roots.insert(*local);
@@ -698,6 +757,7 @@ fn lower_function(
     return_type: TypeId,
     enums: &[EnumInfo],
     types: &mut TypeArena,
+    exceptions_enabled: bool,
 ) -> MirFunction {
     let locals = function
         .locals
@@ -718,7 +778,22 @@ fn lower_function(
             ty: parameter.ty,
         })
         .collect();
-    let conditional_roots = conditional_drop_roots(&function.body);
+    let mut conditional_roots = conditional_drop_roots(&function.body);
+    if exceptions_enabled {
+        conditional_roots.extend(
+            function
+                .locals
+                .iter()
+                .filter(|local| types.needs_drop(local.ty))
+                .map(|local| local.id),
+        );
+    }
+    let parameter_owners = function
+        .parameters
+        .iter()
+        .filter(|parameter| types.needs_drop(parameter.ty))
+        .map(|parameter| parameter.local)
+        .collect();
     let mut builder = Builder {
         function: MirFunction {
             id: function.id,
@@ -731,13 +806,21 @@ fn lower_function(
                 id: BlockId(0),
                 instructions: Vec::new(),
                 terminator: None,
+                landing_pad: None,
+                landing_pad_catches: false,
             }],
             entry: BlockId(0),
+            exception_events: Vec::new(),
         },
         current: Some(BlockId(0)),
         enums,
         types,
         drop_flag_by_owner: vec![None; function.locals.len()],
+        exceptions_enabled,
+        handlers: Vec::new(),
+        active_owners: parameter_owners,
+        active_catches: Vec::new(),
+        root_event: None,
     };
     for owner in conditional_roots {
         let flag = builder.temporary(TypeId::BOOL);
@@ -766,11 +849,89 @@ struct Builder<'a> {
     enums: &'a [EnumInfo],
     types: &'a mut TypeArena,
     drop_flag_by_owner: Vec<Option<LocalId>>,
+    exceptions_enabled: bool,
+    handlers: Vec<HandlerContext>,
+    active_owners: Vec<LocalId>,
+    active_catches: Vec<ExceptionEventId>,
+    root_event: Option<ExceptionEventId>,
+}
+
+#[derive(Clone, Copy)]
+struct HandlerContext {
+    event: ExceptionEventId,
+    dispatch: Option<BlockId>,
+    cleanup_boundary: usize,
+    catch_boundary: usize,
 }
 
 impl Builder<'_> {
+    fn new_event(&mut self) -> ExceptionEventId {
+        let event = ExceptionEventId(
+            u32::try_from(self.function.exception_events.len())
+                .expect("exception event count fits u32"),
+        );
+        self.function.exception_events.push(event);
+        event
+    }
+
+    fn make_unwind_pad(&mut self, span: Span) -> BlockId {
+        let saved = self.current;
+        if self
+            .handlers
+            .last()
+            .is_some_and(|handler| handler.dispatch.is_none())
+        {
+            let dispatch = self.new_block();
+            self.handlers.last_mut().unwrap().dispatch = Some(dispatch);
+        }
+        let handler = self.handlers.last().copied();
+        let event = if let Some(handler) = handler {
+            handler.event
+        } else if let Some(event) = self.root_event {
+            event
+        } else {
+            let event = self.new_event();
+            self.root_event = Some(event);
+            event
+        };
+        let pad = self.new_block();
+        self.function.blocks[pad.0 as usize].landing_pad = Some(event);
+        self.function.blocks[pad.0 as usize].landing_pad_catches = handler.is_some();
+        self.current = Some(pad);
+        let cleanup_boundary = handler.map_or(0, |handler| handler.cleanup_boundary);
+        let owners = self.active_owners[cleanup_boundary..].to_vec();
+        for owner in owners.into_iter().rev() {
+            if self
+                .types
+                .needs_drop(self.function.locals[owner.0 as usize].ty)
+            {
+                self.emit_hir_drop(HirDrop::Conditional(owner), span);
+            }
+        }
+        let catch_boundary = handler.map_or(0, |handler| handler.catch_boundary);
+        let catches = self.active_catches[catch_boundary..].to_vec();
+        for caught in catches.into_iter().rev() {
+            let token = self.temporary(TypeId::BOOL);
+            self.assign(
+                operand_place(&Operand::Local(token)),
+                Rvalue::EndCatch { event: caught },
+                span,
+            );
+        }
+        if let Some(handler) = handler {
+            self.terminate(Terminator::Goto(
+                handler.dispatch.expect("unwind allocated handler dispatch"),
+            ));
+        } else {
+            self.terminate(Terminator::ResumeUnwind { event });
+        }
+        self.current = saved;
+        pad
+    }
+
     #[allow(clippy::too_many_lines)]
     fn lower_block(&mut self, block: &HirBlock) {
+        let active_start = self.active_owners.len();
         for statement in &block.statements {
             match &statement.kind {
                 HirStmtKind::Nop => {}
@@ -793,6 +954,9 @@ impl Builder<'_> {
                     );
                     if !self.types.is_copy(initializer.ty) {
                         self.set_drop_flag(*local, true, statement.span);
+                        if self.types.needs_drop(initializer.ty) {
+                            self.active_owners.push(*local);
+                        }
                     }
                 }
                 HirStmtKind::Assign { place, value } => {
@@ -905,7 +1069,38 @@ impl Builder<'_> {
                     for drop in drops {
                         self.emit_hir_drop(*drop, statement.span);
                     }
+                    for event in self.active_catches.clone().into_iter().rev() {
+                        let token = self.temporary(TypeId::BOOL);
+                        self.assign(
+                            operand_place(&Operand::Local(token)),
+                            Rvalue::EndCatch { event },
+                            statement.span,
+                        );
+                    }
                     self.terminate(Terminator::Return(value));
+                }
+                HirStmtKind::Throw {
+                    value,
+                    class,
+                    transfer,
+                    ..
+                } => {
+                    let payload = self.lower_expr(value);
+                    let unwind = Some(self.make_unwind_pad(statement.span));
+                    self.terminate(Terminator::Throw {
+                        payload,
+                        class: *class,
+                        transfer: *transfer,
+                        unwind,
+                    });
+                }
+                HirStmtKind::Rethrow { .. } => {
+                    let event = *self
+                        .active_catches
+                        .last()
+                        .expect("verified HIR rethrow has an active catch");
+                    let unwind = Some(self.make_unwind_pad(statement.span));
+                    self.terminate(Terminator::Rethrow { event, unwind });
                 }
                 HirStmtKind::If {
                     condition,
@@ -920,6 +1115,7 @@ impl Builder<'_> {
                     enum_id,
                     arms,
                 } => self.lower_match(*mode, scrutinee, *enum_type, *enum_id, arms),
+                HirStmtKind::Try { body, catches } => self.lower_try(body, catches, statement.span),
             }
         }
         if self.current.is_some() {
@@ -927,6 +1123,111 @@ impl Builder<'_> {
                 self.emit_hir_drop(*drop, block.span);
             }
         }
+        self.active_owners.truncate(active_start);
+    }
+
+    fn lower_try(&mut self, body: &HirBlock, catches: &[aether_frontend::HirCatch], span: Span) {
+        let event = self.new_event();
+        let mut join = None;
+        let context = HandlerContext {
+            event,
+            dispatch: None,
+            cleanup_boundary: self.active_owners.len(),
+            catch_boundary: self.active_catches.len(),
+        };
+        self.handlers.push(context);
+        self.lower_block(body);
+        if self.current.is_some() {
+            let target = self.new_block();
+            join = Some(target);
+            self.terminate(Terminator::Goto(target));
+        }
+        let context = self.handlers.pop().unwrap();
+        let Some(dispatch) = context.dispatch else {
+            return;
+        };
+
+        let mut test = dispatch;
+        for catch in catches {
+            self.current = Some(test);
+            let matched = Operand::Local(self.temporary(TypeId::BOOL));
+            self.assign(
+                operand_place(&matched),
+                Rvalue::ExceptionMatches {
+                    event,
+                    catch_class: catch.class,
+                },
+                catch.span,
+            );
+            let handler_block = self.new_block();
+            let next = self.new_block();
+            self.terminate(Terminator::Branch {
+                condition: matched,
+                then_block: handler_block,
+                else_block: next,
+            });
+            self.current = Some(handler_block);
+            self.assign(
+                Place {
+                    base: PlaceBase::Local(catch.binding),
+                    projections: Vec::new(),
+                },
+                Rvalue::CatchBindAlias {
+                    event,
+                    catch: catch.id,
+                    catch_class: catch.class,
+                },
+                catch.span,
+            );
+            self.set_drop_flag(catch.binding, true, catch.span);
+            self.active_owners.push(catch.binding);
+            self.active_catches.push(event);
+            self.lower_block(&catch.body);
+            self.active_catches.pop();
+            self.active_owners.pop();
+            if self.current.is_some() {
+                let token = self.temporary(TypeId::BOOL);
+                self.assign(
+                    operand_place(&Operand::Local(token)),
+                    Rvalue::EndCatch { event },
+                    catch.span,
+                );
+                let target = if let Some(target) = join {
+                    target
+                } else {
+                    let target = self.new_block();
+                    join = Some(target);
+                    target
+                };
+                self.terminate(Terminator::Goto(target));
+            }
+            test = next;
+        }
+        self.current = Some(test);
+        if self.handlers.is_empty() {
+            self.terminate(Terminator::ResumeUnwind { event });
+        } else {
+            if self.handlers.last().unwrap().dispatch.is_none() {
+                let outer_dispatch = self.new_block();
+                self.handlers.last_mut().unwrap().dispatch = Some(outer_dispatch);
+            }
+            let outer = *self.handlers.last().unwrap();
+            let catches_to_end = self.active_catches[outer.catch_boundary..].to_vec();
+            for caught in catches_to_end.into_iter().rev() {
+                let token = self.temporary(TypeId::BOOL);
+                self.assign(
+                    operand_place(&Operand::Local(token)),
+                    Rvalue::EndCatch { event: caught },
+                    span,
+                );
+            }
+            self.terminate(Terminator::ForwardUnwind {
+                event,
+                target_event: outer.event,
+                target: outer.dispatch.unwrap(),
+            });
+        }
+        self.current = join;
     }
 
     fn lower_if(
@@ -2367,6 +2668,8 @@ impl Builder<'_> {
             id,
             instructions: Vec::new(),
             terminator: None,
+            landing_pad: None,
+            landing_pad_catches: false,
         });
         id
     }
@@ -2375,13 +2678,65 @@ impl Builder<'_> {
         let block = self
             .current
             .expect("typed HIR has no unreachable statements");
+        let may_throw = self.exceptions_enabled
+            && match &value {
+                Rvalue::Call { .. } => true,
+                Rvalue::Class(op) => matches!(
+                    op.as_ref(),
+                    ClassOp::DirectMethodCall { .. } | ClassOp::BaseMethodCall { .. }
+                ),
+                _ => false,
+            };
+        let exceptional_receiver = match &value {
+            Rvalue::Class(op) => match op.as_ref() {
+                ClassOp::DirectMethodCall { receiver, .. }
+                | ClassOp::BaseMethodCall { receiver, .. } => {
+                    operand_local_id(receiver).filter(|local| {
+                        self.types
+                            .needs_drop(self.function.locals[local.0 as usize].ty)
+                    })
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        let unwind = may_throw.then(|| {
+            let pad = self.make_unwind_pad(span);
+            if let Some(receiver) = exceptional_receiver {
+                let token = self.temporary(TypeId::BOOL);
+                self.function.blocks[pad.0 as usize].instructions.insert(
+                    0,
+                    MirInstruction {
+                        destination: Place {
+                            base: PlaceBase::Local(token),
+                            projections: vec![],
+                        },
+                        value: Rvalue::Drop {
+                            owner: Place {
+                                base: PlaceBase::Local(receiver),
+                                projections: vec![],
+                            },
+                        },
+                        span,
+                        unwind: None,
+                    },
+                );
+            }
+            pad
+        });
         self.function.blocks[block.0 as usize]
             .instructions
             .push(MirInstruction {
                 destination,
                 value,
                 span,
+                unwind,
             });
+        if unwind.is_some() {
+            let normal = self.new_block();
+            self.function.blocks[block.0 as usize].terminator = Some(Terminator::Goto(normal));
+            self.current = Some(normal);
+        }
     }
 
     fn emit_drop(&mut self, owner: Place, span: Span) {
@@ -2703,6 +3058,15 @@ fn verify_mir_function(
         }
     }
     let mut predecessors = vec![Vec::new(); function.blocks.len()];
+    let mut unwind_predecessors = vec![0_usize; function.blocks.len()];
+    let mut ordinary_predecessors = vec![0_usize; function.blocks.len()];
+    for (index, event) in function.exception_events.iter().enumerate() {
+        if event.0 as usize != index {
+            return Err(fail(
+                "MIR exception event identities are not canonical".into(),
+            ));
+        }
+    }
     for (index, block) in function.blocks.iter().enumerate() {
         if block.id.0 as usize != index {
             return Err(fail(format!(
@@ -2713,11 +3077,71 @@ fn verify_mir_function(
         let Some(terminator) = &block.terminator else {
             return Err(fail(format!("MIR block {:?} has no terminator", block.id)));
         };
+        if let Some(event) = block.landing_pad
+            && function.exception_events.get(event.0 as usize) != Some(&event)
+        {
+            return Err(fail(
+                "MIR landing pad names an unknown exception event".into(),
+            ));
+        }
+        if block.landing_pad_catches && block.landing_pad.is_none() {
+            return Err(fail("MIR catch landing marker has no landing pad".into()));
+        }
+        for instruction in &block.instructions {
+            if let Some(target) = instruction.unwind {
+                if target.0 as usize >= function.blocks.len() {
+                    return Err(fail(format!("MIR unwind target {target:?} does not exist")));
+                }
+                predecessors[target.0 as usize].push(block.id);
+                unwind_predecessors[target.0 as usize] += 1;
+            }
+            let may_throw = matches!(instruction.value, Rvalue::Call { .. })
+                || matches!(
+                    instruction.value,
+                    Rvalue::Class(ref op)
+                        if matches!(
+                            op.as_ref(),
+                            ClassOp::DirectMethodCall { .. } | ClassOp::BaseMethodCall { .. }
+                        )
+                );
+            if instruction.unwind.is_some() != may_throw && !function.exception_events.is_empty() {
+                return Err(fail(
+                    "MIR potentially-throwing instruction/unwind edge mismatch".into(),
+                ));
+            }
+        }
         for target in targets(terminator) {
             if target.0 as usize >= function.blocks.len() {
                 return Err(fail(format!("MIR target {target:?} does not exist")));
             }
             predecessors[target.0 as usize].push(block.id);
+            let exceptional = matches!(
+                terminator,
+                Terminator::Throw {
+                    unwind: Some(edge),
+                    ..
+                } | Terminator::Rethrow {
+                    unwind: Some(edge),
+                    ..
+                } if *edge == target
+            );
+            if exceptional {
+                unwind_predecessors[target.0 as usize] += 1;
+            } else {
+                ordinary_predecessors[target.0 as usize] += 1;
+            }
+        }
+    }
+    for block in &function.blocks {
+        let index = block.id.0 as usize;
+        if block.landing_pad.is_some() {
+            if unwind_predecessors[index] == 0 || ordinary_predecessors[index] != 0 {
+                return Err(fail(
+                    "MIR landing pads require only explicit unwind predecessors".into(),
+                ));
+            }
+        } else if unwind_predecessors[index] != 0 {
+            return Err(fail("MIR unwind edge does not target a landing pad".into()));
         }
     }
 
@@ -2905,6 +3329,46 @@ fn verify_mir_function(
                     return Err(fail("MIR return operand has wrong type".into()));
                 }
             }
+            Terminator::Throw {
+                payload,
+                class,
+                unwind,
+                ..
+            } => {
+                validate_operand(function, payload, &initialized).map_err(&fail)?;
+                if types.class_id(operand_type(function, payload).map_err(&fail)?) != Some(*class)
+                    || !types.is_exception_class(*class)
+                    || unwind.is_none()
+                {
+                    return Err(fail(
+                        "MIR throw violates its exception class/edge contract".into(),
+                    ));
+                }
+            }
+            Terminator::Rethrow { event, unwind } => {
+                if function.exception_events.get(event.0 as usize) != Some(event)
+                    || unwind.is_none()
+                {
+                    return Err(fail("MIR rethrow names an invalid event/edge".into()));
+                }
+            }
+            Terminator::ResumeUnwind { event } => {
+                if function.exception_events.get(event.0 as usize) != Some(event) {
+                    return Err(fail("MIR resume names an invalid exception event".into()));
+                }
+            }
+            Terminator::ForwardUnwind {
+                event,
+                target_event,
+                target,
+            } => {
+                if function.exception_events.get(event.0 as usize) != Some(event)
+                    || function.exception_events.get(target_event.0 as usize) != Some(target_event)
+                    || function.blocks[target.0 as usize].landing_pad.is_some()
+                {
+                    return Err(fail("MIR exception forwarding contract is invalid".into()));
+                }
+            }
             Terminator::Goto(_) | Terminator::Trap(_) => {}
         }
     }
@@ -3017,7 +3481,8 @@ fn verify_drop_flag_contract(
                 | Rvalue::EnumPayload {
                     mode: MatchMode::Value,
                     ..
-                } => {
+                }
+                | Rvalue::CatchBindAlias { .. } => {
                     if let Some(owner) = destination
                         && let Some(flag) = flag_for(owner)
                     {
@@ -3181,10 +3646,11 @@ fn verify_ownership(
                             transfer: true,
                             ..
                         } => vec![source],
-                        ClassOp::BaseInit { args, .. }
-                        | ClassOp::BaseMethodCall { args, .. }
+                        ClassOp::BaseInit { args, .. } | ClassOp::InitCall { args, .. } => {
+                            args.iter().collect()
+                        }
+                        ClassOp::BaseMethodCall { args, .. }
                         | ClassOp::VirtualCall { args, .. }
-                        | ClassOp::InitCall { args, .. }
                         | ClassOp::DirectMethodCall { args, .. }
                         | ClassOp::InterfaceCall { args, .. } => args.iter().collect(),
                         ClassOp::FieldWrite { value, .. } => vec![value],
@@ -3244,7 +3710,8 @@ fn verify_ownership(
                 Rvalue::AlgebraicProduct { .. }
                 | Rvalue::ElementwiseBinary { .. }
                 | Rvalue::BufferAlloc { .. }
-                | Rvalue::ArrayFill { .. } => {
+                | Rvalue::ArrayFill { .. }
+                | Rvalue::CatchBindAlias { .. } => {
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
                 Rvalue::MatrixInit { elements, .. }
@@ -3395,6 +3862,11 @@ fn verify_ownership(
             }
         }
         let terminator = block.terminator.as_ref().expect("CFG verified");
+        if let Terminator::Throw { payload, .. } = terminator {
+            let local = operand_local_id(payload)
+                .ok_or_else(|| fail("MIR thrown payload is not materialized".into()))?;
+            consume_owner(function, types, &mut state, local, "throw", fail)?;
+        }
         if let Terminator::Return(value) = terminator {
             if !types.is_copy(function.return_type) {
                 let local = operand_local_id(value)
@@ -4293,6 +4765,31 @@ fn validate_rvalue(
                 }
             }
         }
+        Rvalue::ExceptionMatches { event, catch_class } => {
+            if destination != TypeId::BOOL
+                || function.exception_events.get(event.0 as usize) != Some(event)
+                || !types.is_exception_class(*catch_class)
+            {
+                return Err("MIR exception match contract is invalid".into());
+            }
+        }
+        Rvalue::CatchBindAlias {
+            event, catch_class, ..
+        } => {
+            if function.exception_events.get(event.0 as usize) != Some(event)
+                || types.class_id(destination) != Some(*catch_class)
+                || !types.is_exception_class(*catch_class)
+            {
+                return Err("MIR catch binding contract is invalid".into());
+            }
+        }
+        Rvalue::EndCatch { event } => {
+            if destination != TypeId::BOOL
+                || function.exception_events.get(event.0 as usize) != Some(event)
+            {
+                return Err("MIR end-catch contract is invalid".into());
+            }
+        }
     }
     Ok(())
 }
@@ -4670,7 +5167,7 @@ pub(crate) fn cast_can_fail(types: &TypeArena, from: TypeId, to: TypeId) -> bool
 
 fn targets(terminator: &Terminator) -> Vec<BlockId> {
     match terminator {
-        Terminator::Goto(target) => vec![*target],
+        Terminator::Goto(target) | Terminator::ForwardUnwind { target, .. } => vec![*target],
         Terminator::Branch {
             then_block,
             else_block,
@@ -4685,7 +5182,10 @@ fn targets(terminator: &Terminator) -> Vec<BlockId> {
             targets.dedup();
             targets
         }
-        Terminator::Return(_) | Terminator::Trap(_) => Vec::new(),
+        Terminator::Return(_) | Terminator::Trap(_) | Terminator::ResumeUnwind { .. } => Vec::new(),
+        Terminator::Throw { unwind, .. } | Terminator::Rethrow { unwind, .. } => {
+            unwind.iter().copied().collect()
+        }
     }
 }
 
@@ -4697,6 +5197,13 @@ fn reachability(function: &MirFunction) -> Vec<bool> {
             continue;
         }
         reachable[block.0 as usize] = true;
+        for unwind in function.blocks[block.0 as usize]
+            .instructions
+            .iter()
+            .filter_map(|instruction| instruction.unwind)
+        {
+            queue.push_back(unwind);
+        }
         if let Some(terminator) = &function.blocks[block.0 as usize].terminator {
             queue.extend(targets(terminator));
         }
@@ -5411,10 +5918,14 @@ mod tests {
                     id: BlockId(0),
                     instructions: vec![],
                     terminator: Some(Terminator::Trap(TrapKind::DivisionByZero)),
+                    landing_pad: None,
+                    landing_pad_catches: false,
                 }],
                 entry: BlockId(0),
+                exception_events: vec![],
             }],
             entry: InstanceId(0),
+            exceptions_enabled: false,
         };
         verify_mir(raw).unwrap();
     }

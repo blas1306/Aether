@@ -91,7 +91,8 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
                     .flat_map(|b| &b.instructions)
                     .any(|i| types.interface_identity(i.ty).is_some())
         });
-    let has_class_runtime = has_class_runtime || has_interface_runtime;
+    let has_class_runtime =
+        has_class_runtime || has_interface_runtime || program.exceptions_enabled;
     let buffer_elements = types
         .entries()
         .filter_map(|(ty, data)| match data {
@@ -170,6 +171,9 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             classes::runtime(&mut output, program);
             classes::witnesses(&mut output, program);
         }
+    }
+    if program.exceptions_enabled {
+        emit_exception_runtime(&mut output, types);
     }
 
     for (ty, data) in types.entries() {
@@ -326,20 +330,30 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     }
 
     let entry = &program.signatures[program.entry.0 as usize];
-    writeln!(output, "define i32 @main() {{").unwrap();
-    writeln!(output, "entry:").unwrap();
     writeln!(
         output,
-        "  %aether_result = call i64 @{}()",
-        bootstrap_symbol(
-            entry,
-            &program.modules,
-            &program.structs,
-            &program.enums,
-            types
-        )
+        "define i32 @main(){} {{",
+        if program.exceptions_enabled {
+            " personality ptr @__gxx_personality_v0"
+        } else {
+            ""
+        }
     )
     .unwrap();
+    writeln!(output, "entry:").unwrap();
+    let entry_symbol = bootstrap_symbol(
+        entry,
+        &program.modules,
+        &program.structs,
+        &program.enums,
+        types,
+    );
+    if program.exceptions_enabled {
+        writeln!(output, "  %aether_result = invoke i64 @{entry_symbol}() to label %aether_success unwind label %aether_unhandled").unwrap();
+        writeln!(output, "aether_success:").unwrap();
+    } else {
+        writeln!(output, "  %aether_result = call i64 @{entry_symbol}()").unwrap();
+    }
     writeln!(
         output,
         "  %process_status = trunc i64 %aether_result to i32"
@@ -369,8 +383,114 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     } else {
         writeln!(output, "  ret i32 %process_status").unwrap();
     }
+    if program.exceptions_enabled {
+        writeln!(output, "aether_unhandled:").unwrap();
+        writeln!(
+            output,
+            "  %root_event = landingpad {{ ptr, i32 }} cleanup catch ptr null"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "  %root_header = extractvalue {{ ptr, i32 }} %root_event, 0"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "  %root_record = call ptr @__cxa_begin_catch(ptr %root_header)"
+        )
+        .unwrap();
+        writeln!(output, "  %root_payload = load ptr, ptr %root_record").unwrap();
+        writeln!(
+            output,
+            "  call void @aether_report_unhandled(ptr %root_payload)"
+        )
+        .unwrap();
+        writeln!(output, "  call void @__cxa_end_catch()").unwrap();
+        writeln!(output, "  ret i32 70").unwrap();
+    }
     writeln!(output, "}}").unwrap();
     output
+}
+
+fn emit_exception_runtime(output: &mut String, types: &TypeArena) {
+    output.push_str(
+        "declare i32 @__gxx_personality_v0(...)\n\
+         declare ptr @__cxa_allocate_exception(i64)\n\
+         declare void @__cxa_throw(ptr, ptr, ptr) noreturn\n\
+         declare ptr @__cxa_get_exception_ptr(ptr) nounwind\n\
+         declare ptr @__cxa_begin_catch(ptr) nounwind\n\
+         declare void @__cxa_end_catch()\n\
+         declare void @__cxa_rethrow() noreturn\n\
+         declare i64 @write(i32, ptr, i64)\n\
+         @_ZTIPv = external constant ptr\n\
+         @aether_unhandled_message = private constant [27 x i8] c\"unhandled Aether exception\\0A\"\n\
+         define internal void @aether_exception_record_destroy(ptr %record) nounwind {\n\
+         entry:\n\
+           %payload = load ptr, ptr %record\n\
+           call void @aether_object_release(ptr %payload)\n\
+           ret void\n\
+         }\n\
+         define internal void @aether_throw(ptr %payload) noreturn {\n\
+         entry:\n\
+           %record = call ptr @__cxa_allocate_exception(i64 8)\n\
+           store ptr %payload, ptr %record\n\
+           call void @__cxa_throw(ptr %record, ptr @_ZTIPv, ptr @aether_exception_record_destroy)\n\
+           unreachable\n\
+         }\n\
+         define internal void @aether_report_unhandled(ptr %payload) nounwind {\n\
+         entry:\n\
+           %ignored = call i64 @write(i32 2, ptr @aether_unhandled_message, i64 27)\n\
+           ret void\n\
+         }\n\n",
+    );
+    output.push_str("define internal i1 @aether_exception_matches(ptr %payload, ptr %catch_descriptor) nounwind {\nentry:\n  %descriptor_address = getelementptr i8, ptr %payload, i64 8\n  %dynamic_descriptor = load ptr, ptr %descriptor_address\n");
+    for class in types.classes() {
+        writeln!(
+            output,
+            "  %dynamic_is_{} = icmp eq ptr %dynamic_descriptor, @aether_descriptor_{}\n  br i1 %dynamic_is_{}, label %dynamic_{}, label %dynamic_next_{}\ndynamic_{}:",
+            class.id.0,
+            class.id.0,
+            class.id.0,
+            class.id.0,
+            class.id.0,
+            class.id.0
+        )
+        .unwrap();
+        let mut accepted = vec![class.id];
+        let mut base = class.base;
+        while let Some(id) = base {
+            accepted.push(id);
+            base = types.classes()[id.0 as usize].base;
+        }
+        for (index, id) in accepted.iter().enumerate() {
+            writeln!(
+                output,
+                "  %catch_{}_{} = icmp eq ptr %catch_descriptor, @aether_descriptor_{}",
+                class.id.0, index, id.0
+            )
+            .unwrap();
+        }
+        let expression = (0..accepted.len())
+            .map(|index| format!("%catch_{}_{}", class.id.0, index))
+            .reduce(|left, right| {
+                let name = format!(
+                    "%catch_or_{}_{}",
+                    class.id.0,
+                    right.rsplit('_').next().unwrap()
+                );
+                writeln!(output, "  {name} = or i1 {left}, {right}").unwrap();
+                name
+            })
+            .unwrap();
+        writeln!(
+            output,
+            "  ret i1 {expression}\ndynamic_next_{}:",
+            class.id.0
+        )
+        .unwrap();
+    }
+    output.push_str("  ret i1 false\n}\n\n");
 }
 
 fn emit_runtime_boundary(output: &mut String) {
@@ -1034,16 +1154,24 @@ fn emit_function(
         .join(", ");
     writeln!(
         output,
-        "define {} @{}({parameters}) {{",
+        "define {} @{}({parameters}){} {{",
         llvm_type(types, signature.return_type),
-        bootstrap_symbol(signature, modules, structs, enums, types)
+        bootstrap_symbol(signature, modules, structs, enums, types),
+        if function.exception_events.is_empty() {
+            ""
+        } else {
+            " personality ptr @__gxx_personality_v0"
+        }
     )
     .unwrap();
 
     let take_storage = function.blocks.iter().flat_map(|b| &b.instructions).filter(|instruction| {
         matches!(&instruction.op, SsaOp::Take { slot, .. } if types.struct_id(slot.type_id).is_some() || types.enum_id(slot.type_id).is_some())
     }).collect::<Vec<_>>();
-    if !function.memory_locals.is_empty() || !take_storage.is_empty() {
+    if !function.memory_locals.is_empty()
+        || !take_storage.is_empty()
+        || !function.exception_events.is_empty()
+    {
         writeln!(output, "entry.storage:").unwrap();
         for memory in &function.memory_locals {
             writeln!(
@@ -1073,6 +1201,14 @@ fn emit_function(
             )
             .unwrap();
         }
+        for event in &function.exception_events {
+            writeln!(
+                output,
+                "  %exception_event{} = alloca {{ ptr, i32 }}",
+                event.0
+            )
+            .unwrap();
+        }
         writeln!(output, "  br label %{}", block_label(function.entry)).unwrap();
     }
 
@@ -1084,7 +1220,7 @@ fn emit_function(
                 .instructions
                 .iter()
                 .rev()
-                .find(|instruction| is_checked(&instruction.op))
+                .find(|instruction| is_checked(&instruction.op) || instruction.unwind.is_some())
                 .map_or_else(
                     || block_label(block.id),
                     |instruction| continuation_label(block.id, instruction.result.0),
@@ -1122,6 +1258,25 @@ fn emit_function(
             )
             .unwrap();
         }
+        if let Some(event) = block.landing_pad {
+            writeln!(
+                output,
+                "  %landingpad_bb{} = landingpad {{ ptr, i32 }} cleanup{}",
+                block.id.0,
+                if block.landing_pad_catches {
+                    " catch ptr null"
+                } else {
+                    ""
+                }
+            )
+            .unwrap();
+            writeln!(
+                output,
+                "  store {{ ptr, i32 }} %landingpad_bb{}, ptr %exception_event{}",
+                block.id.0, event.0
+            )
+            .unwrap();
+        }
         for instruction in &block.instructions {
             match &instruction.op {
                 SsaOp::Class(op) => classes::emit_op(
@@ -1135,6 +1290,8 @@ fn emit_function(
                     modules,
                     structs,
                     enums,
+                    instruction.unwind,
+                    block.id,
                 ),
                 SsaOp::Use(operand) => writeln!(
                     output,
@@ -2303,12 +2460,90 @@ fn emit_function(
                         })
                         .collect::<Vec<_>>()
                         .join(", ");
+                    let symbol = bootstrap_symbol(callee_signature, modules, structs, enums, types);
+                    if let Some(unwind) = instruction.unwind {
+                        writeln!(
+                            output,
+                            "  %v{} = invoke {} @{}({arguments}) to label %{} unwind label %{}",
+                            instruction.result.0,
+                            llvm_type(types, callee_signature.return_type),
+                            symbol,
+                            continuation_label(block.id, instruction.result.0),
+                            block_label(unwind)
+                        )
+                        .unwrap();
+                        writeln!(
+                            output,
+                            "{}:",
+                            continuation_label(block.id, instruction.result.0)
+                        )
+                        .unwrap();
+                    } else {
+                        writeln!(
+                            output,
+                            "  %v{} = call {} @{}({arguments})",
+                            instruction.result.0,
+                            llvm_type(types, callee_signature.return_type),
+                            symbol
+                        )
+                        .unwrap();
+                    }
+                }
+                SsaOp::ExceptionMatches { event, catch_class } => {
                     writeln!(
                         output,
-                        "  %v{} = call {} @{}({arguments})",
-                        instruction.result.0,
-                        llvm_type(types, callee_signature.return_type),
-                        bootstrap_symbol(callee_signature, modules, structs, enums, types)
+                        "  %event_match_{} = load {{ ptr, i32 }}, ptr %exception_event{}",
+                        instruction.result.0, event.0
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  %event_header_{} = extractvalue {{ ptr, i32 }} %event_match_{}, 0",
+                        instruction.result.0, instruction.result.0
+                    )
+                    .unwrap();
+                    writeln!(output, "  %event_record_{} = call ptr @__cxa_get_exception_ptr(ptr %event_header_{})", instruction.result.0, instruction.result.0).unwrap();
+                    writeln!(
+                        output,
+                        "  %event_payload_{} = load ptr, ptr %event_record_{}",
+                        instruction.result.0, instruction.result.0
+                    )
+                    .unwrap();
+                    writeln!(output, "  %v{} = call i1 @aether_exception_matches(ptr %event_payload_{}, ptr @aether_descriptor_{})", instruction.result.0, instruction.result.0, catch_class.0).unwrap();
+                }
+                SsaOp::CatchBindAlias { event, .. } => {
+                    writeln!(
+                        output,
+                        "  %event_bind_{} = load {{ ptr, i32 }}, ptr %exception_event{}",
+                        instruction.result.0, event.0
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  %event_bind_header_{} = extractvalue {{ ptr, i32 }} %event_bind_{}, 0",
+                        instruction.result.0, instruction.result.0
+                    )
+                    .unwrap();
+                    writeln!(output, "  %event_bind_record_{} = call ptr @__cxa_begin_catch(ptr %event_bind_header_{})", instruction.result.0, instruction.result.0).unwrap();
+                    writeln!(
+                        output,
+                        "  %v{} = load ptr, ptr %event_bind_record_{}",
+                        instruction.result.0, instruction.result.0
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  call void @aether_object_retain(ptr %v{})",
+                        instruction.result.0
+                    )
+                    .unwrap();
+                }
+                SsaOp::EndCatch { .. } => {
+                    writeln!(output, "  call void @__cxa_end_catch()").unwrap();
+                    writeln!(
+                        output,
+                        "  %v{} = select i1 true, i1 true, i1 false",
+                        instruction.result.0
                     )
                     .unwrap();
                 }
@@ -2399,6 +2634,56 @@ fn emit_function(
             SsaTerminator::Trap(TrapKind::IndexOutOfBounds) => {
                 bounds_trap = true;
                 writeln!(output, "  br label %trap_index_out_of_bounds").unwrap();
+            }
+            SsaTerminator::Throw {
+                payload, unwind, ..
+            } => {
+                let unwind = unwind.expect("verified throw has unwind edge");
+                writeln!(output, "  invoke void @aether_throw(ptr {}) to label %throw_unreachable_bb{} unwind label %{}", llvm_operand(payload), block.id.0, block_label(unwind)).unwrap();
+                writeln!(output, "throw_unreachable_bb{}:\n  unreachable", block.id.0).unwrap();
+            }
+            SsaTerminator::Rethrow { unwind, .. } => {
+                let unwind = unwind.expect("verified rethrow has unwind edge");
+                writeln!(output, "  invoke void @__cxa_rethrow() to label %rethrow_unreachable_bb{} unwind label %{}", block.id.0, block_label(unwind)).unwrap();
+                writeln!(
+                    output,
+                    "rethrow_unreachable_bb{}:\n  unreachable",
+                    block.id.0
+                )
+                .unwrap();
+            }
+            SsaTerminator::ResumeUnwind { event } => {
+                writeln!(
+                    output,
+                    "  %resume_event_bb{} = load {{ ptr, i32 }}, ptr %exception_event{}",
+                    block.id.0, event.0
+                )
+                .unwrap();
+                writeln!(
+                    output,
+                    "  resume {{ ptr, i32 }} %resume_event_bb{}",
+                    block.id.0
+                )
+                .unwrap();
+            }
+            SsaTerminator::ForwardUnwind {
+                event,
+                target_event,
+                target,
+            } => {
+                writeln!(
+                    output,
+                    "  %forward_event_bb{} = load {{ ptr, i32 }}, ptr %exception_event{}",
+                    block.id.0, event.0
+                )
+                .unwrap();
+                writeln!(
+                    output,
+                    "  store {{ ptr, i32 }} %forward_event_bb{}, ptr %exception_event{}",
+                    block.id.0, target_event.0
+                )
+                .unwrap();
+                writeln!(output, "  br label %{}", block_label(*target)).unwrap();
             }
         }
     }

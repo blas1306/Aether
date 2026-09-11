@@ -63,6 +63,8 @@ pub struct ParsedProgram {
 pub struct FunctionId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LocalId(pub u32);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CatchId(pub u32);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParameterSignature {
     pub name: String,
@@ -632,6 +634,29 @@ pub enum HirStmtKind {
         value: HirExpr,
         drops: Vec<HirDrop>,
     },
+    Throw {
+        value: HirExpr,
+        class: ClassId,
+        transfer: bool,
+        drops: Vec<HirDrop>,
+    },
+    Rethrow {
+        catch: CatchId,
+        drops: Vec<HirDrop>,
+    },
+    Try {
+        body: HirBlock,
+        catches: Vec<HirCatch>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HirCatch {
+    pub id: CatchId,
+    pub class: ClassId,
+    pub binding: LocalId,
+    pub body: HirBlock,
+    pub span: Span,
 }
 
 /// Semantic collection mutation identity. `effect()` distinguishes backing
@@ -1116,6 +1141,7 @@ pub fn collect_signatures(ast: ParsedAst) -> Result<DeclaredProgram, Vec<Diagnos
 pub fn collect_program_signatures(
     mut program: ParsedProgram,
 ) -> Result<DeclaredProgram, Vec<Diagnostic>> {
+    classes::inject_exception_core(&mut program)?;
     classes::expand_methods(&mut program)?;
     validate_program(&program)?;
     let imports: Vec<BTreeMap<String, ModuleId>> = program
@@ -2435,6 +2461,15 @@ fn resolve_type_in_module(
         }
         return Ok(types.id_of(TypeData::Class(class.id)).unwrap());
     }
+    if ty.module.is_none()
+        && ty.name == "Exception"
+        && let Some(class) = types.exception_class()
+    {
+        if !arguments.is_empty() {
+            return Err(generic_arity(ty, 0));
+        }
+        return Ok(types.id_of(TypeData::Class(class)).unwrap());
+    }
     if let Some(id) = struct_names[target.0 as usize].get(&ty.name).copied() {
         let expected = struct_arities[id.0 as usize];
         if arguments.len() != expected {
@@ -3610,6 +3645,36 @@ impl Monomorphizer<'_> {
                             value: self.substitute_expr(value, substitution)?,
                             drops: drops.clone(),
                         },
+                        HirStmtKind::Throw {
+                            value,
+                            class,
+                            transfer,
+                            drops,
+                        } => HirStmtKind::Throw {
+                            value: self.substitute_expr(value, substitution)?,
+                            class: *class,
+                            transfer: *transfer,
+                            drops: drops.clone(),
+                        },
+                        HirStmtKind::Rethrow { catch, drops } => HirStmtKind::Rethrow {
+                            catch: *catch,
+                            drops: drops.clone(),
+                        },
+                        HirStmtKind::Try { body, catches } => HirStmtKind::Try {
+                            body: self.substitute_block(body, substitution)?,
+                            catches: catches
+                                .iter()
+                                .map(|catch| {
+                                    Ok(HirCatch {
+                                        id: catch.id,
+                                        class: catch.class,
+                                        binding: catch.binding,
+                                        body: self.substitute_block(&catch.body, substitution)?,
+                                        span: catch.span,
+                                    })
+                                })
+                                .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?,
+                        },
                     };
                     Ok(HirStmt {
                         kind,
@@ -4439,6 +4504,8 @@ fn analyze_function(
         return_type: sig.return_type,
         class_method,
         initialized_fields: BTreeSet::new(),
+        active_catches: Vec::new(),
+        next_catch: 0,
         target,
     };
     let mut parameters = vec![];
@@ -4723,6 +4790,88 @@ impl OwnershipAnalysis<'_> {
                     for local in drops.iter().copied().map(HirDrop::local) {
                         self.state[local.0 as usize] = OwnerState::Dropped;
                     }
+                }
+                HirStmtKind::Throw { value, drops, .. } => {
+                    self.expr(value)?;
+                    *drops = self
+                        .active
+                        .iter()
+                        .rev()
+                        .copied()
+                        .filter_map(|local| {
+                            if !self.types.needs_drop(self.locals[local.0 as usize].ty) {
+                                return None;
+                            }
+                            match self.state[local.0 as usize] {
+                                OwnerState::Owned => Some(HirDrop::Unconditional(local)),
+                                OwnerState::MaybeMoved => Some(HirDrop::Conditional(local)),
+                                _ => None,
+                            }
+                        })
+                        .collect();
+                    for local in drops.iter().copied().map(HirDrop::local) {
+                        self.state[local.0 as usize] = OwnerState::Dropped;
+                    }
+                }
+                HirStmtKind::Rethrow { drops, .. } => {
+                    *drops = self
+                        .active
+                        .iter()
+                        .rev()
+                        .copied()
+                        .filter_map(|local| {
+                            if !self.types.needs_drop(self.locals[local.0 as usize].ty) {
+                                return None;
+                            }
+                            match self.state[local.0 as usize] {
+                                OwnerState::Owned => Some(HirDrop::Unconditional(local)),
+                                OwnerState::MaybeMoved => Some(HirDrop::Conditional(local)),
+                                _ => None,
+                            }
+                        })
+                        .collect();
+                    for local in drops.iter().copied().map(HirDrop::local) {
+                        self.state[local.0 as usize] = OwnerState::Dropped;
+                    }
+                }
+                HirStmtKind::Try { body, catches } => {
+                    let before = self.state.clone();
+                    let before_active = self.active.len();
+                    self.block(body, true)?;
+                    let mut continuing = (!definitely_returns(body)).then(|| self.state.clone());
+                    for catch in catches {
+                        self.state.clone_from(&before);
+                        self.active.truncate(before_active);
+                        self.state[catch.binding.0 as usize] = OwnerState::Owned;
+                        self.active.push(catch.binding);
+                        self.block(&mut catch.body, true)?;
+                        if definitely_returns(&catch.body) {
+                            self.active.pop();
+                        } else {
+                            if self
+                                .types
+                                .needs_drop(self.locals[catch.binding.0 as usize].ty)
+                            {
+                                catch
+                                    .body
+                                    .exit_drops
+                                    .push(HirDrop::Unconditional(catch.binding));
+                                self.state[catch.binding.0 as usize] = OwnerState::Dropped;
+                            }
+                            self.active.pop();
+                            if let Some(merged) = &mut continuing {
+                                for local in &self.active {
+                                    let index = local.0 as usize;
+                                    merged[index] =
+                                        merge_owner_state(merged[index], self.state[index]);
+                                }
+                            } else {
+                                continuing = Some(self.state.clone());
+                            }
+                        }
+                    }
+                    self.state = continuing.unwrap_or(before);
+                    self.active.truncate(before_active);
                 }
                 HirStmtKind::If {
                     condition,
@@ -5612,6 +5761,8 @@ struct Analyzer<'a> {
     target: TargetProperties,
     class_method: Option<(ClassId, crate::ClassMethodInfo)>,
     initialized_fields: BTreeSet<FieldId>,
+    active_catches: Vec<CatchId>,
+    next_catch: u32,
 }
 #[derive(Clone)]
 struct Checked {
@@ -5963,6 +6114,137 @@ impl Analyzer<'_> {
                     scrutinee,
                     arms,
                 } => self.match_statement(*mode, scrutinee, arms)?,
+                AstStmtKind::Throw(value) => {
+                    if self
+                        .class_method
+                        .as_ref()
+                        .is_some_and(|(_, method)| method.initializing)
+                    {
+                        return Err(vec![classes::error(
+                            "E0436",
+                            "potentially throwing operations are unavailable inside init; partial-construction rollback is deferred",
+                            s.span,
+                        )]);
+                    }
+                    if let Some(value) = value {
+                        let value = self.expression(value, None)?.expr;
+                        let Some(class) = self.types.class_id(value.ty) else {
+                            return Err(vec![classes::error(
+                                "E0432",
+                                "throw requires an owning class value derived from Exception",
+                                s.span,
+                            )]);
+                        };
+                        if !self.types.is_exception_class(class) {
+                            return Err(vec![classes::error(
+                                "E0432",
+                                "only nominal subclasses of Exception can be thrown",
+                                s.span,
+                            )]);
+                        }
+                        let transfer = matches!(
+                            value.kind,
+                            HirExprKind::Class(ref op)
+                                if matches!(op.as_ref(), ClassOp::Construct { .. } | ClassOp::HandleTransfer { .. } | ClassOp::ClassUpcast { transfer: true, .. })
+                        );
+                        HirStmtKind::Throw {
+                            value,
+                            class,
+                            transfer,
+                            drops: Vec::new(),
+                        }
+                    } else {
+                        let Some(catch) = self.active_catches.last().copied() else {
+                            return Err(vec![classes::error(
+                                "E0434",
+                                "bare `throw;` is legal only inside a lexical catch",
+                                s.span,
+                            )]);
+                        };
+                        HirStmtKind::Rethrow {
+                            catch,
+                            drops: Vec::new(),
+                        }
+                    }
+                }
+                AstStmtKind::Try { body, catches } => {
+                    if self
+                        .class_method
+                        .as_ref()
+                        .is_some_and(|(_, method)| method.initializing)
+                    {
+                        return Err(vec![classes::error(
+                            "E0436",
+                            "try/catch is unavailable inside init until partial-construction rollback is implemented",
+                            s.span,
+                        )]);
+                    }
+                    let body = self.block(body, true)?;
+                    let mut previous = Vec::new();
+                    let mut handlers = Vec::new();
+                    for catch in catches {
+                        let ty = self.resolve_source_type(&catch.ty)?;
+                        let Some(class) = self.types.class_id(ty) else {
+                            return Err(vec![classes::error(
+                                "E0433",
+                                "catch type must be Exception or a nominal subclass",
+                                catch.ty.span,
+                            )]);
+                        };
+                        if !self.types.is_exception_class(class) {
+                            return Err(vec![classes::error(
+                                "E0433",
+                                "catch type must be Exception or a nominal subclass",
+                                catch.ty.span,
+                            )]);
+                        }
+                        if previous
+                            .iter()
+                            .any(|earlier| self.types.is_subclass(class, *earlier))
+                        {
+                            return Err(vec![classes::error(
+                                "E0435",
+                                "catch is unreachable because an earlier handler covers it",
+                                catch.span,
+                            )]);
+                        }
+                        previous.push(class);
+                        let id = CatchId(self.next_catch);
+                        self.next_catch += 1;
+                        self.scopes.push(BTreeMap::new());
+                        if self.scopes.last().unwrap().contains_key(&catch.name) {
+                            unreachable!();
+                        }
+                        let binding = LocalId(self.locals.len() as u32);
+                        self.locals.push(HirLocal {
+                            id: binding,
+                            name: catch.name.clone(),
+                            ty,
+                            span: catch.span,
+                            parameter: false,
+                            address_taken: false,
+                        });
+                        self.scopes
+                            .last_mut()
+                            .unwrap()
+                            .insert(catch.name.clone(), binding);
+                        self.active_catches.push(id);
+                        let handler = self.block(&catch.body, false)?;
+                        self.active_catches.pop();
+                        self.scopes.pop();
+                        handlers.push(HirCatch {
+                            id,
+                            class,
+                            binding,
+                            body: handler,
+                            span: catch.span,
+                        });
+                    }
+                    HirStmtKind::Try {
+                        body,
+                        catches: handlers,
+                    }
+                }
                 AstStmtKind::Return(v) => {
                     if let Some((class, method)) = &self.class_method
                         && method.initializing
@@ -7956,6 +8238,18 @@ impl Analyzer<'_> {
         args: &[AstExpr],
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
+        if self.types.exception_class().is_some()
+            && self
+                .class_method
+                .as_ref()
+                .is_some_and(|(_, method)| method.initializing)
+        {
+            return Err(vec![classes::error(
+                "E0436",
+                "a potentially throwing call is unavailable during initialization until constructor rollback is implemented",
+                span,
+            )]);
+        }
         let Some(id) = self.names[self.module.0 as usize].get(n).copied() else {
             return Err(vec![Diagnostic::new(
                 "E0212",
@@ -8030,6 +8324,18 @@ impl Analyzer<'_> {
             )]);
         }
         if let Some(id) = self.names[mid.0 as usize].get(f).copied() {
+            if self.types.exception_class().is_some()
+                && self
+                    .class_method
+                    .as_ref()
+                    .is_some_and(|(_, method)| method.initializing)
+            {
+                return Err(vec![classes::error(
+                    "E0436",
+                    "a potentially throwing call is unavailable during initialization until constructor rollback is implemented",
+                    span,
+                )]);
+            }
             return self.call_id(id, &format!("{m}.{f}"), type_arguments, args, span);
         }
         if let Some(id) = self.struct_names[mid.0 as usize].get(f).copied() {
@@ -9367,6 +9673,7 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
             &h.structs,
             &h.enums,
             &h.types,
+            &[],
             &fail,
         )?
     }
@@ -9457,6 +9764,7 @@ fn verify_parametric_hir(
             structs,
             enums,
             types,
+            &[],
             &fail,
         )?;
     }
@@ -9471,6 +9779,7 @@ fn verify_block(
     structs: &[StructInfo],
     enums: &[EnumInfo],
     types: &TypeArena,
+    active_catches: &[CatchId],
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
     let mut seen_exit_drops = BTreeSet::new();
@@ -9548,9 +9857,19 @@ fn verify_block(
                 if condition.ty != TypeId::BOOL {
                     return Err(fail("HIR condition not bool".into()));
                 }
-                verify_block(then_block, f, ret, sigs, structs, enums, types, fail)?;
+                verify_block(
+                    then_block,
+                    f,
+                    ret,
+                    sigs,
+                    structs,
+                    enums,
+                    types,
+                    active_catches,
+                    fail,
+                )?;
                 if let Some(x) = else_block {
-                    verify_block(x, f, ret, sigs, structs, enums, types, fail)?
+                    verify_block(x, f, ret, sigs, structs, enums, types, active_catches, fail)?
                 }
             }
             HirStmtKind::While { condition, body } => {
@@ -9558,7 +9877,17 @@ fn verify_block(
                 if condition.ty != TypeId::BOOL {
                     return Err(fail("HIR condition not bool".into()));
                 }
-                verify_block(body, f, ret, sigs, structs, enums, types, fail)?
+                verify_block(
+                    body,
+                    f,
+                    ret,
+                    sigs,
+                    structs,
+                    enums,
+                    types,
+                    active_catches,
+                    fail,
+                )?
             }
             HirStmtKind::Match {
                 mode,
@@ -9643,7 +9972,17 @@ fn verify_block(
                             return Err(fail("HIR match payload binding invalid".into()));
                         }
                     }
-                    verify_block(&arm.body, f, ret, sigs, structs, enums, types, fail)?;
+                    verify_block(
+                        &arm.body,
+                        f,
+                        ret,
+                        sigs,
+                        structs,
+                        enums,
+                        types,
+                        active_catches,
+                        fail,
+                    )?;
                 }
             }
             HirStmtKind::Return { value, drops } => {
@@ -9659,6 +9998,91 @@ fn verify_block(
                     })
                 {
                     return Err(fail("HIR return mismatch".into()));
+                }
+            }
+            HirStmtKind::Throw {
+                value,
+                class,
+                transfer,
+                drops,
+            } => {
+                verify_expr(value, f, sigs, structs, enums, types, fail)?;
+                let actual_transfer = matches!(
+                    value.kind,
+                    HirExprKind::Class(ref op)
+                        if matches!(op.as_ref(), ClassOp::Construct { .. } | ClassOp::HandleTransfer { .. } | ClassOp::ClassUpcast { transfer: true, .. })
+                );
+                let mut seen = BTreeSet::new();
+                if types.class_id(value.ty) != Some(*class)
+                    || !types.is_exception_class(*class)
+                    || actual_transfer != *transfer
+                    || drops.iter().any(|drop| {
+                        let local = drop.local();
+                        !seen.insert(local)
+                            || !f.locals.get(local.0 as usize).is_some_and(|info| {
+                                !types.guarantees_copy(info.ty) && types.needs_drop(info.ty)
+                            })
+                    })
+                {
+                    return Err(fail("HIR throw ownership/type contract is invalid".into()));
+                }
+            }
+            HirStmtKind::Rethrow { catch, drops } => {
+                let mut seen = BTreeSet::new();
+                if active_catches.last() != Some(catch)
+                    || drops.iter().any(|drop| {
+                        let local = drop.local();
+                        !seen.insert(local)
+                            || !f.locals.get(local.0 as usize).is_some_and(|info| {
+                                !types.guarantees_copy(info.ty) && types.needs_drop(info.ty)
+                            })
+                    })
+                {
+                    return Err(fail("HIR rethrow cleanup contract is invalid".into()));
+                }
+            }
+            HirStmtKind::Try { body, catches } => {
+                verify_block(
+                    body,
+                    f,
+                    ret,
+                    sigs,
+                    structs,
+                    enums,
+                    types,
+                    active_catches,
+                    fail,
+                )?;
+                if catches.is_empty() {
+                    return Err(fail("HIR try has no catches".into()));
+                }
+                let mut ids = BTreeSet::new();
+                let mut previous = Vec::new();
+                for catch in catches {
+                    let binding_ty = f.locals.get(catch.binding.0 as usize).map(|local| local.ty);
+                    if !ids.insert(catch.id)
+                        || binding_ty.and_then(|ty| types.class_id(ty)) != Some(catch.class)
+                        || !types.is_exception_class(catch.class)
+                        || previous
+                            .iter()
+                            .any(|earlier| types.is_subclass(catch.class, *earlier))
+                    {
+                        return Err(fail("HIR catch identity/order contract is invalid".into()));
+                    }
+                    previous.push(catch.class);
+                    let mut nested_catches = active_catches.to_vec();
+                    nested_catches.push(catch.id);
+                    verify_block(
+                        &catch.body,
+                        f,
+                        ret,
+                        sigs,
+                        structs,
+                        enums,
+                        types,
+                        &nested_catches,
+                        fail,
+                    )?;
                 }
             }
         }
@@ -10731,7 +11155,9 @@ fn concrete_member_type(
 }
 fn statement_returns(s: &HirStmt) -> bool {
     match &s.kind {
-        HirStmtKind::Return { .. } => true,
+        HirStmtKind::Return { .. } | HirStmtKind::Throw { .. } | HirStmtKind::Rethrow { .. } => {
+            true
+        }
         HirStmtKind::If {
             then_block,
             else_block: Some(e),
@@ -10739,6 +11165,9 @@ fn statement_returns(s: &HirStmt) -> bool {
         } => definitely_returns(then_block) && definitely_returns(e),
         HirStmtKind::Match { arms, .. } => {
             !arms.is_empty() && arms.iter().all(|arm| definitely_returns(&arm.body))
+        }
+        HirStmtKind::Try { body, catches } => {
+            definitely_returns(body) && catches.iter().all(|catch| definitely_returns(&catch.body))
         }
         _ => false,
     }
@@ -11976,6 +12405,37 @@ mod tests {
                 assert!(verify_hir(&bad).is_err(), "{scalar} {case}");
             }
         }
+    }
+
+    #[test]
+    fn exception_hir_rejects_event_and_ownership_corruption() {
+        let hir = check(
+            "class P:Exception{public init(){}}int main(){try{throw P();}catch(P e){throw;}}",
+        )
+        .unwrap();
+
+        let mut bad_rethrow = hir.clone();
+        let HirStmtKind::Try { catches, .. } =
+            &mut bad_rethrow.functions[0].body.statements[0].kind
+        else {
+            panic!("expected try")
+        };
+        let HirStmtKind::Rethrow { catch, .. } = &mut catches[0].body.statements[0].kind else {
+            panic!("expected rethrow")
+        };
+        *catch = CatchId(u32::MAX);
+        assert!(verify_hir(&bad_rethrow).is_err());
+
+        let mut bad_transfer = hir;
+        let HirStmtKind::Try { body, .. } = &mut bad_transfer.functions[0].body.statements[0].kind
+        else {
+            panic!("expected try")
+        };
+        let HirStmtKind::Throw { transfer, .. } = &mut body.statements[0].kind else {
+            panic!("expected throw")
+        };
+        *transfer = false;
+        assert!(verify_hir(&bad_transfer).is_err());
     }
 }
 

@@ -12,13 +12,13 @@ use std::fmt::Write;
 use std::sync::Arc;
 
 use aether_frontend::{
-    CastKind, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId, FloatValue,
-    FunctionInstanceInfo, InstanceId, LocalId, MatchMode, ModuleInfo, Phase, Span, StructId,
-    StructInfo, StructuralMutation, Substitution, TypeArena, TypeData, TypeId, VariantId,
-    format_type,
+    CastKind, CatchId, ClassId, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo,
+    FieldId, FloatValue, FunctionInstanceInfo, InstanceId, LocalId, MatchMode, ModuleInfo, Phase,
+    Span, StructId, StructInfo, StructuralMutation, Substitution, TypeArena, TypeData, TypeId,
+    VariantId, format_type,
 };
 
-use crate::mir::place_type;
+use crate::mir::{ExceptionEventId, place_type};
 use crate::{
     BinaryOp, BlockId, ElementInitialization, MirDropFlag, MirFunction, Operand, Place, PlaceBase,
     PlaceProjection, PushInit, Relocate, RelocationRange, Rvalue, SlotPlace, TakeState, Terminator,
@@ -344,6 +344,18 @@ pub enum SsaOp {
         callee: InstanceId,
         args: Vec<SsaOperand>,
     },
+    ExceptionMatches {
+        event: ExceptionEventId,
+        catch_class: ClassId,
+    },
+    CatchBindAlias {
+        event: ExceptionEventId,
+        catch: CatchId,
+        catch_class: ClassId,
+    },
+    EndCatch {
+        event: ExceptionEventId,
+    },
 }
 
 /// One SSA definition.
@@ -357,6 +369,7 @@ pub struct SsaInstruction {
     pub op: SsaOp,
     /// Source provenance.
     pub span: Span,
+    pub unwind: Option<BlockId>,
 }
 
 /// SSA control-flow terminator.
@@ -381,6 +394,24 @@ pub enum SsaTerminator {
     Return(SsaOperand),
     /// Explicit failure.
     Trap(TrapKind),
+    Throw {
+        payload: SsaOperand,
+        class: ClassId,
+        transfer: bool,
+        unwind: Option<BlockId>,
+    },
+    Rethrow {
+        event: ExceptionEventId,
+        unwind: Option<BlockId>,
+    },
+    ResumeUnwind {
+        event: ExceptionEventId,
+    },
+    ForwardUnwind {
+        event: ExceptionEventId,
+        target_event: ExceptionEventId,
+        target: BlockId,
+    },
 }
 
 /// SSA basic block.
@@ -394,6 +425,8 @@ pub struct SsaBlock {
     pub instructions: Vec<SsaInstruction>,
     /// Required terminator.
     pub terminator: SsaTerminator,
+    pub landing_pad: Option<ExceptionEventId>,
+    pub landing_pad_catches: bool,
 }
 
 /// Raw SSA function.
@@ -416,6 +449,7 @@ pub struct SsaFunction {
     pub entry: BlockId,
     /// Blocks in stable MIR order.
     pub blocks: Vec<SsaBlock>,
+    pub exception_events: Vec<ExceptionEventId>,
 }
 
 /// Unverified SSA type-state.
@@ -435,6 +469,7 @@ pub struct SsaIr {
     pub functions: Vec<SsaFunction>,
     /// Entry function identity.
     pub entry: InstanceId,
+    pub exceptions_enabled: bool,
 }
 
 impl SsaIr {
@@ -532,6 +567,7 @@ pub fn build_ssa(mir: &VerifiedMir) -> SsaIr {
             .map(|function| build_function_ssa(function, &mir.types, &mir.structs))
             .collect(),
         entry: mir.entry,
+        exceptions_enabled: mir.exceptions_enabled,
     }
 }
 
@@ -621,6 +657,8 @@ fn build_function_ssa(
                 .collect(),
             instructions: Vec::new(),
             terminator: placeholder.clone(),
+            landing_pad: block.landing_pad,
+            landing_pad_catches: block.landing_pad_catches,
         })
         .collect();
     let mut stacks = vec![Vec::<ValueId>::new(); function.locals.len()];
@@ -654,6 +692,7 @@ fn build_function_ssa(
         return_type: function.return_type,
         entry: function.entry,
         blocks,
+        exception_events: function.exception_events.clone(),
     }
 }
 
@@ -703,6 +742,7 @@ fn rename_block(
                 ty: value_ty,
                 op: rename_rvalue(&instruction.value, stacks, mir),
                 span: instruction.span,
+                unwind: instruction.unwind,
             });
             let store_result = ValueId(*next_value);
             *next_value += 1;
@@ -719,6 +759,7 @@ fn rename_block(
                     value: SsaOperand::Value(value_result),
                 },
                 span: instruction.span,
+                unwind: None,
             });
             continue;
         }
@@ -746,6 +787,7 @@ fn rename_block(
                     ty: value_ty,
                     op: rename_rvalue(&instruction.value, stacks, mir),
                     span: instruction.span,
+                    unwind: instruction.unwind,
                 });
                 SsaOperand::Value(value_result)
             };
@@ -777,6 +819,11 @@ fn rename_block(
             ty,
             op,
             span: instruction.span,
+            unwind: if instruction.destination.projections.is_empty() {
+                instruction.unwind
+            } else {
+                None
+            },
         });
         stacks[destination_local.0 as usize].push(result);
         pushes[destination_local.0 as usize] += 1;
@@ -1194,6 +1241,20 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
                 .map(|argument| rename_operand(argument, stacks))
                 .collect(),
         },
+        Rvalue::ExceptionMatches { event, catch_class } => SsaOp::ExceptionMatches {
+            event: *event,
+            catch_class: *catch_class,
+        },
+        Rvalue::CatchBindAlias {
+            event,
+            catch,
+            catch_class,
+        } => SsaOp::CatchBindAlias {
+            event: *event,
+            catch: *catch,
+            catch_class: *catch_class,
+        },
+        Rvalue::EndCatch { event } => SsaOp::EndCatch { event: *event },
     }
 }
 
@@ -1310,6 +1371,31 @@ fn rename_terminator(terminator: &Terminator, stacks: &[Vec<ValueId>]) -> SsaTer
         },
         Terminator::Return(value) => SsaTerminator::Return(rename_operand(value, stacks)),
         Terminator::Trap(kind) => SsaTerminator::Trap(*kind),
+        Terminator::Throw {
+            payload,
+            class,
+            transfer,
+            unwind,
+        } => SsaTerminator::Throw {
+            payload: rename_operand(payload, stacks),
+            class: *class,
+            transfer: *transfer,
+            unwind: *unwind,
+        },
+        Terminator::Rethrow { event, unwind } => SsaTerminator::Rethrow {
+            event: *event,
+            unwind: *unwind,
+        },
+        Terminator::ResumeUnwind { event } => SsaTerminator::ResumeUnwind { event: *event },
+        Terminator::ForwardUnwind {
+            event,
+            target_event,
+            target,
+        } => SsaTerminator::ForwardUnwind {
+            event: *event,
+            target_event: *target_event,
+            target: *target,
+        },
     }
 }
 
@@ -1323,7 +1409,15 @@ impl Cfg {
         let mut successors = vec![Vec::new(); function.blocks.len()];
         let mut predecessors = vec![Vec::new(); function.blocks.len()];
         for block in &function.blocks {
-            let targets = mir_targets(block.terminator.as_ref().expect("verified MIR"));
+            let mut targets = mir_targets(block.terminator.as_ref().expect("verified MIR"));
+            targets.extend(
+                block
+                    .instructions
+                    .iter()
+                    .filter_map(|instruction| instruction.unwind),
+            );
+            targets.sort();
+            targets.dedup();
             successors[block.id.0 as usize].clone_from(&targets);
             for target in targets {
                 predecessors[target.0 as usize].push(block.id);
@@ -1478,6 +1572,7 @@ fn mir_liveness(function: &MirFunction, cfg: &Cfg) -> Vec<BTreeSet<LocalId>> {
     live_in
 }
 
+#[allow(clippy::too_many_lines)]
 fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
     match value {
         Rvalue::Use(operand)
@@ -1577,6 +1672,9 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
             .filter_map(operand_local)
             .collect(),
         Rvalue::Call { args, .. } => args.iter().filter_map(operand_local).collect(),
+        Rvalue::ExceptionMatches { .. }
+        | Rvalue::CatchBindAlias { .. }
+        | Rvalue::EndCatch { .. } => vec![],
     }
 }
 
@@ -1606,7 +1704,12 @@ fn terminator_locals(terminator: &Terminator) -> Vec<LocalId> {
         Terminator::Switch { discriminant, .. } => {
             operand_local(discriminant).into_iter().collect()
         }
-        Terminator::Goto(_) | Terminator::Trap(_) => vec![],
+        Terminator::Throw { payload, .. } => operand_local(payload).into_iter().collect(),
+        Terminator::Goto(_)
+        | Terminator::Trap(_)
+        | Terminator::Rethrow { .. }
+        | Terminator::ResumeUnwind { .. }
+        | Terminator::ForwardUnwind { .. } => vec![],
     }
 }
 
@@ -1781,6 +1884,13 @@ fn verify_ssa_function(
     if function.blocks.is_empty() || function.entry.0 as usize >= function.blocks.len() {
         return Err(fail("SSA entry block does not exist".into()));
     }
+    for (index, event) in function.exception_events.iter().enumerate() {
+        if event.0 as usize != index {
+            return Err(fail("SSA exception event identity is not canonical".into()));
+        }
+    }
+    let mut unwind_predecessors = vec![0_usize; function.blocks.len()];
+    let mut ordinary_predecessors = vec![0_usize; function.blocks.len()];
     for (index, block) in function.blocks.iter().enumerate() {
         if block.id.0 as usize != index {
             return Err(fail("SSA block identity is not canonical".into()));
@@ -1789,6 +1899,65 @@ fn verify_ssa_function(
             if target.0 as usize >= function.blocks.len() {
                 return Err(fail(format!("SSA target {target:?} does not exist")));
             }
+            let exceptional = matches!(
+                &block.terminator,
+                SsaTerminator::Throw {
+                    unwind: Some(edge),
+                    ..
+                } | SsaTerminator::Rethrow {
+                    unwind: Some(edge),
+                    ..
+                } if *edge == target
+            );
+            if exceptional {
+                unwind_predecessors[target.0 as usize] += 1;
+            } else {
+                ordinary_predecessors[target.0 as usize] += 1;
+            }
+        }
+        if block
+            .landing_pad
+            .is_some_and(|event| function.exception_events.get(event.0 as usize) != Some(&event))
+        {
+            return Err(fail("SSA landing pad names an unknown event".into()));
+        }
+        if block.landing_pad_catches && block.landing_pad.is_none() {
+            return Err(fail("SSA catch landing marker has no landing pad".into()));
+        }
+        for instruction in &block.instructions {
+            if instruction
+                .unwind
+                .is_some_and(|target| target.0 as usize >= function.blocks.len())
+            {
+                return Err(fail("SSA instruction unwind target does not exist".into()));
+            }
+            if let Some(target) = instruction.unwind {
+                unwind_predecessors[target.0 as usize] += 1;
+            }
+            let may_throw = matches!(instruction.op, SsaOp::Call { .. })
+                || matches!(
+                    instruction.op,
+                    SsaOp::Class(ref op)
+                        if matches!(
+                            op.as_ref(),
+                            ClassOp::DirectMethodCall { .. } | ClassOp::BaseMethodCall { .. }
+                        )
+                );
+            if !function.exception_events.is_empty() && instruction.unwind.is_some() != may_throw {
+                return Err(fail("SSA invoke/unwind edge contract is invalid".into()));
+            }
+        }
+    }
+    for block in &function.blocks {
+        let index = block.id.0 as usize;
+        if block.landing_pad.is_some() {
+            if unwind_predecessors[index] == 0 || ordinary_predecessors[index] != 0 {
+                return Err(fail(
+                    "SSA landing pads require only explicit unwind predecessors".into(),
+                ));
+            }
+        } else if unwind_predecessors[index] != 0 {
+            return Err(fail("SSA unwind edge does not target a landing pad".into()));
         }
     }
     let cfg = ssa_cfg(function);
@@ -1866,17 +2035,16 @@ fn verify_ssa_function(
                 Ok(phi.result)
             })
             .collect::<Result<BTreeSet<_>, Vec<Diagnostic>>>()?;
-        if phi_results.is_empty()
-            || !function.blocks.iter().any(|block| {
-                matches!(
-                    &block.terminator,
-                    SsaTerminator::Branch {
-                        condition: SsaOperand::Value(value),
-                        ..
-                    } if phi_results.contains(value)
-                )
-            })
-        {
+        let has_cleanup_branch = function.blocks.iter().any(|block| {
+            matches!(
+                &block.terminator,
+                SsaTerminator::Branch {
+                    condition: SsaOperand::Value(value),
+                    ..
+                } if phi_results.contains(value) || !function.exception_events.is_empty()
+            )
+        });
+        if function.exception_events.is_empty() && (phi_results.is_empty() || !has_cleanup_branch) {
             return Err(fail(
                 "SSA conditional cleanup is disconnected from its drop flag".into(),
             ));
@@ -2004,6 +2172,19 @@ fn verify_ssa_function(
             }
         }
         for (index, instruction) in block.instructions.iter().enumerate() {
+            let event = match &instruction.op {
+                SsaOp::ExceptionMatches { event, .. }
+                | SsaOp::CatchBindAlias { event, .. }
+                | SsaOp::EndCatch { event } => Some(*event),
+                _ => None,
+            };
+            if event.is_some_and(|event| {
+                function.exception_events.get(event.0 as usize) != Some(&event)
+            }) {
+                return Err(fail(
+                    "SSA exception operation names an unknown event".into(),
+                ));
+            }
             for operand in op_operands(&instruction.op) {
                 validate_use(operand, block.id, Some(index)).map_err(&fail)?;
             }
@@ -2082,6 +2263,43 @@ fn verify_ssa_function(
                 validate_use(value, block.id, Some(block.instructions.len())).map_err(&fail)?;
                 if operand_ty(value).map_err(&fail)? != function.return_type {
                     return Err(fail("SSA return type mismatch".into()));
+                }
+            }
+            SsaTerminator::Throw {
+                payload,
+                class,
+                unwind,
+                ..
+            } => {
+                validate_use(payload, block.id, Some(block.instructions.len())).map_err(&fail)?;
+                if types.class_id(operand_ty(payload).map_err(&fail)?) != Some(*class)
+                    || !types.is_exception_class(*class)
+                    || unwind.is_none()
+                {
+                    return Err(fail("SSA throw class/edge contract is invalid".into()));
+                }
+            }
+            SsaTerminator::Rethrow { event, unwind } => {
+                if function.exception_events.get(event.0 as usize) != Some(event)
+                    || unwind.is_none()
+                {
+                    return Err(fail("SSA rethrow event/edge contract is invalid".into()));
+                }
+            }
+            SsaTerminator::ResumeUnwind { event } => {
+                if function.exception_events.get(event.0 as usize) != Some(event) {
+                    return Err(fail("SSA resume names an unknown event".into()));
+                }
+            }
+            SsaTerminator::ForwardUnwind {
+                event,
+                target_event,
+                ..
+            } => {
+                if function.exception_events.get(event.0 as usize) != Some(event)
+                    || function.exception_events.get(target_event.0 as usize) != Some(target_event)
+                {
+                    return Err(fail("SSA forward names an unknown event".into()));
                 }
             }
             SsaTerminator::Goto(_) | SsaTerminator::Trap(_) => {}
@@ -2808,6 +3026,22 @@ fn verify_op(
                 }
             }
         }
+        SsaOp::ExceptionMatches { event, catch_class } => {
+            if result != TypeId::BOOL || !types.is_exception_class(*catch_class) {
+                return Err(format!("invalid SSA exception match for event {event:?}"));
+            }
+        }
+        SsaOp::CatchBindAlias {
+            event, catch_class, ..
+        } => {
+            if types.class_id(result) != Some(*catch_class)
+                || !types.is_exception_class(*catch_class)
+            {
+                return Err(format!("invalid SSA catch binding for event {event:?}"));
+            }
+        }
+        SsaOp::EndCatch { .. } if result == TypeId::BOOL => {}
+        SsaOp::EndCatch { .. } => return Err("SSA end-catch result is not bool".into()),
     }
     Ok(())
 }
@@ -3060,6 +3294,9 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         }
         SsaOp::Class(op) => op.operands(),
         SsaOp::Call { args, .. } => args.iter().collect(),
+        SsaOp::ExceptionMatches { .. } | SsaOp::CatchBindAlias { .. } | SsaOp::EndCatch { .. } => {
+            vec![]
+        }
     }
 }
 
@@ -3083,7 +3320,7 @@ fn place_operands(place: &SsaPlace) -> Vec<&SsaOperand> {
 
 fn mir_targets(terminator: &Terminator) -> Vec<BlockId> {
     match terminator {
-        Terminator::Goto(target) => vec![*target],
+        Terminator::Goto(target) | Terminator::ForwardUnwind { target, .. } => vec![*target],
         Terminator::Branch {
             then_block,
             else_block,
@@ -3098,13 +3335,16 @@ fn mir_targets(terminator: &Terminator) -> Vec<BlockId> {
             targets.dedup();
             targets
         }
-        Terminator::Return(_) | Terminator::Trap(_) => vec![],
+        Terminator::Throw { unwind, .. } | Terminator::Rethrow { unwind, .. } => {
+            unwind.iter().copied().collect()
+        }
+        Terminator::Return(_) | Terminator::Trap(_) | Terminator::ResumeUnwind { .. } => vec![],
     }
 }
 
 fn ssa_targets(terminator: &SsaTerminator) -> Vec<BlockId> {
     match terminator {
-        SsaTerminator::Goto(target) => vec![*target],
+        SsaTerminator::Goto(target) | SsaTerminator::ForwardUnwind { target, .. } => vec![*target],
         SsaTerminator::Branch {
             then_block,
             else_block,
@@ -3119,7 +3359,12 @@ fn ssa_targets(terminator: &SsaTerminator) -> Vec<BlockId> {
             targets.dedup();
             targets
         }
-        SsaTerminator::Return(_) | SsaTerminator::Trap(_) => vec![],
+        SsaTerminator::Throw { unwind, .. } | SsaTerminator::Rethrow { unwind, .. } => {
+            unwind.iter().copied().collect()
+        }
+        SsaTerminator::Return(_) | SsaTerminator::Trap(_) | SsaTerminator::ResumeUnwind { .. } => {
+            vec![]
+        }
     }
 }
 
@@ -3127,7 +3372,7 @@ fn ssa_cfg(function: &SsaFunction) -> Cfg {
     let mut successors = vec![Vec::new(); function.blocks.len()];
     let mut predecessors = vec![Vec::new(); function.blocks.len()];
     for block in &function.blocks {
-        successors[block.id.0 as usize] = ssa_targets(&block.terminator);
+        successors[block.id.0 as usize] = ssa_block_targets(block);
         for target in &successors[block.id.0 as usize] {
             predecessors[target.0 as usize].push(block.id);
         }
@@ -3154,9 +3399,22 @@ fn reachable_ssa(function: &SsaFunction) -> Vec<bool> {
             continue;
         }
         reachable[block.0 as usize] = true;
-        queue.extend(ssa_targets(&function.blocks[block.0 as usize].terminator));
+        queue.extend(ssa_block_targets(&function.blocks[block.0 as usize]));
     }
     reachable
+}
+
+fn ssa_block_targets(block: &SsaBlock) -> Vec<BlockId> {
+    let mut targets = ssa_targets(&block.terminator);
+    targets.extend(
+        block
+            .instructions
+            .iter()
+            .filter_map(|instruction| instruction.unwind),
+    );
+    targets.sort();
+    targets.dedup();
+    targets
 }
 
 /// Recognize only the bounded indexed extraction diamond. The two outgoing

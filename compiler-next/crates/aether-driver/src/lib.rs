@@ -423,7 +423,8 @@ impl ClangToolchain {
                 "could not write temporary LLVM: {error}"
             ))]
         })?;
-        let result = Command::new(&self.executable)
+        let mut command = Command::new(&self.executable);
+        command
             .arg(match self.optimization {
                 OptimizationLevel::O0 => "-O0",
                 OptimizationLevel::O2 => "-O2",
@@ -432,8 +433,11 @@ impl ClangToolchain {
             .arg("ir")
             .arg(&llvm_path)
             .arg("-o")
-            .arg(output)
-            .output();
+            .arg(output);
+        if llvm.contains("@__gxx_personality_v0") {
+            command.arg("-lstdc++");
+        }
+        let result = command.output();
         let _ = fs::remove_file(&llvm_path);
         let output_result = result.map_err(|error| {
             vec![Diagnostic::new(

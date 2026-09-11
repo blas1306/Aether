@@ -315,9 +315,15 @@ pub(super) fn verify(
                 }
                 _ => (),
             }
+            if let Some(unwind) = i.unwind {
+                work.push_back((unwind, state.clone()));
+            }
             if tracked(i.ty) && !state.owned.insert(i.result) {
                 return Err("SSA duplicates an owning result token".into());
             }
+        }
+        if let SsaTerminator::Throw { payload, .. } = &block.terminator {
+            consume(payload, &mut state)?;
         }
         if let SsaTerminator::Return(value) = &block.terminator {
             if let Some(c) = init {

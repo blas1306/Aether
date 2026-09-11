@@ -587,6 +587,7 @@ impl Drop for SemanticTimer<'_> {
 #[derive(Debug)]
 pub struct TypeArena {
     pub(crate) classes: Vec<crate::ClassInfo>,
+    exception_class: Option<crate::ClassId>,
     pub(crate) interfaces: Vec<crate::InterfaceInfo>,
     pub(crate) witnesses: Vec<crate::WitnessInfo>,
     data: Vec<TypeData>,
@@ -606,6 +607,7 @@ impl Clone for TypeArena {
     fn clone(&self) -> Self {
         Self {
             classes: self.classes.clone(),
+            exception_class: self.exception_class,
             interfaces: self.interfaces.clone(),
             witnesses: self.witnesses.clone(),
             data: self.data.clone(),
@@ -633,6 +635,7 @@ impl PartialEq for TypeArena {
         self.interfaces == other.interfaces
             && self.witnesses == other.witnesses
             && self.classes == other.classes
+            && self.exception_class == other.exception_class
             && self.data == other.data
             && self.ids == other.ids
             && self.argument_lists == other.argument_lists
@@ -654,6 +657,23 @@ impl Default for TypeArena {
 }
 
 impl TypeArena {
+    /// Canonical core exception root, present only for exception-enabled programs.
+    #[must_use]
+    pub const fn exception_class(&self) -> Option<crate::ClassId> {
+        self.exception_class
+    }
+
+    pub(crate) fn set_exception_class(&mut self, class: crate::ClassId) {
+        self.exception_class = Some(class);
+    }
+
+    /// Whether `class` is nominally below the core Exception class.
+    #[must_use]
+    pub fn is_exception_class(&self, class: crate::ClassId) -> bool {
+        self.exception_class
+            .is_some_and(|root| self.is_subclass(class, root))
+    }
+
     #[must_use]
     pub fn classes(&self) -> &[crate::ClassInfo] {
         &self.classes
@@ -786,6 +806,7 @@ impl TypeArena {
     pub fn new() -> Self {
         let mut arena = Self {
             classes: Vec::new(),
+            exception_class: None,
             interfaces: Vec::new(),
             witnesses: Vec::new(),
             data: Vec::new(),
