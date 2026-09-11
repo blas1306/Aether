@@ -171,6 +171,15 @@ pub fn verify_interface_metadata(types: &TypeArena) -> Result<(), String> {
     }
     let mut pairs = BTreeSet::new();
     for c in types.classes() {
+        if let Some(base) = c.base {
+            let base = types
+                .classes()
+                .get(base.0 as usize)
+                .ok_or("unknown inherited class")?;
+            if base.interfaces.iter().any(|i| !c.interfaces.contains(i)) {
+                return Err("missing inherited conformance".into());
+            }
+        }
         let mut seen = BTreeSet::new();
         for i in &c.interfaces {
             let info = types
@@ -215,7 +224,10 @@ pub fn verify_interface_metadata(types: &TypeArena) -> Result<(), String> {
                 .class_method(slot.method)
                 .ok_or("invalid witness MethodId")?;
             if slot.requirement != r.id
-                || owner != c.id
+                || !types.is_subclass(c.id, owner)
+                || types
+                    .effective_method(c.id, &r.name)
+                    .is_none_or(|(_, m)| m.function != slot.method)
                 || m.initializing
                 || !m.public
                 || m.name != r.name

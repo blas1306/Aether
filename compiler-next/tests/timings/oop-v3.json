@@ -1,0 +1,422 @@
+[
+  {
+    "case": "oop_v3_cost_direct",
+    "profile": "O0",
+    "emitted_sites": {
+      "descriptor_load": 0,
+      "retain": 1,
+      "release": 2,
+      "method_witness_load": 0,
+      "indirect_method": 0,
+      "indirect_including_glue": 1,
+      "elided_pairs": 0,
+      "devirtualized": 0
+    },
+    "physical_events": {
+      "object_alloc": 1,
+      "object_retain": 10000,
+      "object_release": 10001,
+      "object_destroy": 1,
+      "object_buffer_drop": 0,
+      "heap_alloc": 1,
+      "heap_free": 1
+    },
+    "clang_indirect_sites": 1,
+    "elf_text_bytes": 4000,
+    "median_process_ms": 0.67,
+    "range_ms": [
+      0.604,
+      0.818
+    ]
+  },
+  {
+    "case": "oop_v3_cost_direct",
+    "profile": "O2",
+    "emitted_sites": {
+      "descriptor_load": 0,
+      "retain": 0,
+      "release": 1,
+      "method_witness_load": 0,
+      "indirect_method": 0,
+      "indirect_including_glue": 1,
+      "elided_pairs": 1,
+      "devirtualized": 0
+    },
+    "physical_events": {
+      "object_alloc": 1,
+      "object_retain": 0,
+      "object_release": 1,
+      "object_destroy": 1,
+      "object_buffer_drop": 0,
+      "heap_alloc": 1,
+      "heap_free": 1
+    },
+    "clang_indirect_sites": 0,
+    "elf_text_bytes": 1676,
+    "median_process_ms": 0.575,
+    "range_ms": [
+      0.509,
+      0.682
+    ]
+  },
+  {
+    "case": "oop_v3_cost_exact_virtual",
+    "profile": "O0",
+    "emitted_sites": {
+      "descriptor_load": 1,
+      "retain": 1,
+      "release": 2,
+      "method_witness_load": 1,
+      "indirect_method": 1,
+      "indirect_including_glue": 2,
+      "elided_pairs": 0,
+      "devirtualized": 0
+    },
+    "physical_events": {
+      "object_alloc": 1,
+      "object_retain": 10000,
+      "object_release": 10001,
+      "object_destroy": 1,
+      "object_buffer_drop": 0,
+      "heap_alloc": 1,
+      "heap_free": 1
+    },
+    "clang_indirect_sites": 2,
+    "elf_text_bytes": 4000,
+    "median_process_ms": 0.631,
+    "range_ms": [
+      0.583,
+      0.754
+    ]
+  },
+  {
+    "case": "oop_v3_cost_exact_virtual",
+    "profile": "O2",
+    "emitted_sites": {
+      "descriptor_load": 1,
+      "retain": 0,
+      "release": 1,
+      "method_witness_load": 1,
+      "indirect_method": 1,
+      "indirect_including_glue": 2,
+      "elided_pairs": 1,
+      "devirtualized": 0
+    },
+    "physical_events": {
+      "object_alloc": 1,
+      "object_retain": 0,
+      "object_release": 1,
+      "object_destroy": 1,
+      "object_buffer_drop": 0,
+      "heap_alloc": 1,
+      "heap_free": 1
+    },
+    "clang_indirect_sites": 4,
+    "elf_text_bytes": 2210,
+    "median_process_ms": 0.595,
+    "range_ms": [
+      0.548,
+      0.719
+    ]
+  },
+  {
+    "case": "oop_v3_cost_final_release",
+    "profile": "O0",
+    "emitted_sites": {
+      "descriptor_load": 0,
+      "retain": 0,
+      "release": 1,
+      "method_witness_load": 0,
+      "indirect_method": 0,
+      "indirect_including_glue": 1,
+      "elided_pairs": 0,
+      "devirtualized": 0
+    },
+    "physical_events": {
+      "object_alloc": 10000,
+      "object_retain": 0,
+      "object_release": 10000,
+      "object_destroy": 10000,
+      "object_buffer_drop": 20000,
+      "heap_alloc": 30000,
+      "heap_free": 30000
+    },
+    "clang_indirect_sites": 1,
+    "elf_text_bytes": 4348,
+    "median_process_ms": 1.185,
+    "range_ms": [
+      0.734,
+      1.348
+    ]
+  },
+  {
+    "case": "oop_v3_cost_final_release",
+    "profile": "O2",
+    "emitted_sites": {
+      "descriptor_load": 0,
+      "retain": 0,
+      "release": 1,
+      "method_witness_load": 0,
+      "indirect_method": 0,
+      "indirect_including_glue": 1,
+      "elided_pairs": 0,
+      "devirtualized": 0
+    },
+    "physical_events": {
+      "object_alloc": 10000,
+      "object_retain": 0,
+      "object_release": 10000,
+      "object_destroy": 10000,
+      "object_buffer_drop": 20000,
+      "heap_alloc": 30000,
+      "heap_free": 30000
+    },
+    "clang_indirect_sites": 0,
+    "elf_text_bytes": 2006,
+    "median_process_ms": 0.465,
+    "range_ms": [
+      0.342,
+      0.67
+    ]
+  },
+  {
+    "case": "oop_v3_cost_inherited_interface",
+    "profile": "O0",
+    "emitted_sites": {
+      "descriptor_load": 1,
+      "retain": 2,
+      "release": 3,
+      "method_witness_load": 1,
+      "indirect_method": 1,
+      "indirect_including_glue": 5,
+      "elided_pairs": 0,
+      "devirtualized": 0
+    },
+    "physical_events": {
+      "object_alloc": 1,
+      "object_retain": 10001,
+      "object_release": 10002,
+      "object_destroy": 1,
+      "object_buffer_drop": 0,
+      "heap_alloc": 1,
+      "heap_free": 1
+    },
+    "clang_indirect_sites": 5,
+    "elf_text_bytes": 4388,
+    "median_process_ms": 0.699,
+    "range_ms": [
+      0.406,
+      0.795
+    ]
+  },
+  {
+    "case": "oop_v3_cost_inherited_interface",
+    "profile": "O2",
+    "emitted_sites": {
+      "descriptor_load": 1,
+      "retain": 1,
+      "release": 2,
+      "method_witness_load": 0,
+      "indirect_method": 0,
+      "indirect_including_glue": 4,
+      "elided_pairs": 1,
+      "devirtualized": 1
+    },
+    "physical_events": {
+      "object_alloc": 1,
+      "object_retain": 1,
+      "object_release": 2,
+      "object_destroy": 1,
+      "object_buffer_drop": 0,
+      "heap_alloc": 1,
+      "heap_free": 1
+    },
+    "clang_indirect_sites": 0,
+    "elf_text_bytes": 1692,
+    "median_process_ms": 0.353,
+    "range_ms": [
+      0.323,
+      0.552
+    ]
+  },
+  {
+    "case": "oop_v3_cost_unknown_virtual",
+    "profile": "O0",
+    "emitted_sites": {
+      "descriptor_load": 1,
+      "retain": 2,
+      "release": 3,
+      "method_witness_load": 1,
+      "indirect_method": 1,
+      "indirect_including_glue": 2,
+      "elided_pairs": 0,
+      "devirtualized": 0
+    },
+    "physical_events": {
+      "object_alloc": 1,
+      "object_retain": 20000,
+      "object_release": 20001,
+      "object_destroy": 1,
+      "object_buffer_drop": 0,
+      "heap_alloc": 1,
+      "heap_free": 1
+    },
+    "clang_indirect_sites": 2,
+    "elf_text_bytes": 4080,
+    "median_process_ms": 0.438,
+    "range_ms": [
+      0.427,
+      0.597
+    ]
+  },
+  {
+    "case": "oop_v3_cost_unknown_virtual",
+    "profile": "O2",
+    "emitted_sites": {
+      "descriptor_load": 1,
+      "retain": 1,
+      "release": 2,
+      "method_witness_load": 1,
+      "indirect_method": 1,
+      "indirect_including_glue": 2,
+      "elided_pairs": 1,
+      "devirtualized": 0
+    },
+    "physical_events": {
+      "object_alloc": 1,
+      "object_retain": 10000,
+      "object_release": 10001,
+      "object_destroy": 1,
+      "object_buffer_drop": 0,
+      "heap_alloc": 1,
+      "heap_free": 1
+    },
+    "clang_indirect_sites": 5,
+    "elf_text_bytes": 2266,
+    "median_process_ms": 0.393,
+    "range_ms": [
+      0.353,
+      0.649
+    ]
+  },
+  {
+    "case": "oop_v3_cost_upcast_alias",
+    "profile": "O0",
+    "emitted_sites": {
+      "descriptor_load": 0,
+      "retain": 1,
+      "release": 2,
+      "method_witness_load": 0,
+      "indirect_method": 0,
+      "indirect_including_glue": 1,
+      "elided_pairs": 0,
+      "devirtualized": 0
+    },
+    "physical_events": {
+      "object_alloc": 1,
+      "object_retain": 10000,
+      "object_release": 10001,
+      "object_destroy": 1,
+      "object_buffer_drop": 0,
+      "heap_alloc": 1,
+      "heap_free": 1
+    },
+    "clang_indirect_sites": 1,
+    "elf_text_bytes": 3904,
+    "median_process_ms": 0.485,
+    "range_ms": [
+      0.416,
+      0.742
+    ]
+  },
+  {
+    "case": "oop_v3_cost_upcast_alias",
+    "profile": "O2",
+    "emitted_sites": {
+      "descriptor_load": 0,
+      "retain": 1,
+      "release": 2,
+      "method_witness_load": 0,
+      "indirect_method": 0,
+      "indirect_including_glue": 1,
+      "elided_pairs": 0,
+      "devirtualized": 0
+    },
+    "physical_events": {
+      "object_alloc": 1,
+      "object_retain": 10000,
+      "object_release": 10001,
+      "object_destroy": 1,
+      "object_buffer_drop": 0,
+      "heap_alloc": 1,
+      "heap_free": 1
+    },
+    "clang_indirect_sites": 0,
+    "elf_text_bytes": 1727,
+    "median_process_ms": 0.388,
+    "range_ms": [
+      0.341,
+      0.623
+    ]
+  },
+  {
+    "case": "oop_v3_cost_upcast_fresh",
+    "profile": "O0",
+    "emitted_sites": {
+      "descriptor_load": 0,
+      "retain": 0,
+      "release": 1,
+      "method_witness_load": 0,
+      "indirect_method": 0,
+      "indirect_including_glue": 1,
+      "elided_pairs": 0,
+      "devirtualized": 0
+    },
+    "physical_events": {
+      "object_alloc": 10000,
+      "object_retain": 0,
+      "object_release": 10000,
+      "object_destroy": 10000,
+      "object_buffer_drop": 0,
+      "heap_alloc": 10000,
+      "heap_free": 10000
+    },
+    "clang_indirect_sites": 1,
+    "elf_text_bytes": 3872,
+    "median_process_ms": 0.536,
+    "range_ms": [
+      0.469,
+      0.877
+    ]
+  },
+  {
+    "case": "oop_v3_cost_upcast_fresh",
+    "profile": "O2",
+    "emitted_sites": {
+      "descriptor_load": 0,
+      "retain": 0,
+      "release": 1,
+      "method_witness_load": 0,
+      "indirect_method": 0,
+      "indirect_including_glue": 1,
+      "elided_pairs": 0,
+      "devirtualized": 0
+    },
+    "physical_events": {
+      "object_alloc": 10000,
+      "object_retain": 0,
+      "object_release": 10000,
+      "object_destroy": 10000,
+      "object_buffer_drop": 0,
+      "heap_alloc": 10000,
+      "heap_free": 10000
+    },
+    "clang_indirect_sites": 0,
+    "elf_text_bytes": 1717,
+    "median_process_ms": 0.339,
+    "range_ms": [
+      0.333,
+      0.663
+    ]
+  }
+]

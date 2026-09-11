@@ -49,6 +49,8 @@ pub(super) fn expand_methods(program: &mut ParsedProgram) -> Result<(), Vec<Diag
                 .initializer
                 .clone()
                 .unwrap_or_else(|| crate::AstClassMethod {
+                    open: false,
+                    overriding: false,
                     public: true,
                     mutable: true,
                     function: AstFunction {
@@ -123,6 +125,10 @@ pub(super) fn register_identities(program: &ParsedProgram, types: &mut TypeArena
                         class.methods.iter().find(|m| m.function.name == name)
                     };
                     methods.push(ClassMethodInfo {
+                        open: source.is_some_and(|m| m.open),
+                        overriding: source.is_some_and(|m| m.overriding),
+                        virtual_slot: None,
+                        override_target: None,
                         parameters: Vec::new(),
                         result: TypeId::INT64,
                         function: FunctionId((function_base + index) as u32),
@@ -134,6 +140,8 @@ pub(super) fn register_identities(program: &ParsedProgram, types: &mut TypeArena
                 }
             }
             types.register_class_definition(ClassInfo {
+                open: class.open,
+                base: None,
                 interfaces: Vec::new(),
                 id,
                 module: module.info.id,
@@ -169,16 +177,123 @@ pub(super) fn register_identities(program: &ParsedProgram, types: &mut TypeArena
         function_base += module.ast.functions.len();
     }
 }
+pub(super) fn resolve_inheritance(types: &mut TypeArena) -> Result<(), Vec<Diagnostic>> {
+    let fail = |message, span| vec![error("E0420", message, span)];
+    let mut order = (0..types.classes.len()).collect::<Vec<_>>();
+    for c in &types.classes {
+        types.class_chain(c.id).map_err(|m| fail(m, c.span))?;
+        if let Some(base) = c.base {
+            let b = &types.classes[base.0 as usize];
+            if !b.open || (b.module != c.module && !b.public) || (c.public && !b.public) {
+                return Err(fail("base must be accessible and open".into(), c.span));
+            }
+        }
+    }
+    order.sort_by_key(|i| types.class_chain(ClassId(*i as u32)).unwrap().len());
+    for index in order {
+        let mut c = types.classes[index].clone();
+        if let Some(base) = c.base {
+            for i in &types.classes[base.0 as usize].interfaces {
+                if c.interfaces.contains(i) {
+                    return Err(fail(
+                        "duplicate inherited interface conformance".into(),
+                        c.span,
+                    ));
+                }
+                c.interfaces.push(*i);
+            }
+        }
+        for m in &mut c.methods {
+            let inherited = c.base.and_then(|b| types.effective_method(b, &m.name));
+            if let Some((_, target)) = inherited {
+                if !m.overriding
+                    || !target.public
+                    || target.virtual_slot.is_none()
+                    || m.initializing
+                    || !m.public
+                    || m.parameters != target.parameters
+                    || m.result != target.result
+                    || m.mutable != target.mutable
+                {
+                    return Err(fail("override requires an exact accessible open target, signature and receiver capability".into(), c.span));
+                }
+                m.override_target = Some(target.function);
+                m.virtual_slot = target.virtual_slot;
+            } else if m.overriding {
+                return Err(fail("override has no inherited target".into(), c.span));
+            } else if m.open {
+                if !c.open || !m.public || m.initializing {
+                    return Err(fail(
+                        "open method requires an open class and public non-initializer method"
+                            .into(),
+                        c.span,
+                    ));
+                }
+                m.virtual_slot = Some(crate::VirtualSlotId(m.function));
+            }
+        }
+        types.classes[index] = c.clone();
+        for iid in &c.interfaces {
+            let mut slots = Vec::new();
+            for r in &types.interfaces[iid.0 as usize].requirements {
+                let (_, m) = types.effective_method(c.id, &r.name).ok_or_else(|| {
+                    fail(format!("missing interface requirement {}", r.name), c.span)
+                })?;
+                if !m.public
+                    || m.mutable != r.mutable
+                    || m.parameters != r.parameters
+                    || m.result != r.result
+                {
+                    return Err(fail(
+                        "interface requires an exact public method contract".into(),
+                        c.span,
+                    ));
+                }
+                slots.push(crate::WitnessSlot {
+                    requirement: r.id,
+                    method: m.function,
+                });
+            }
+            types.register_witness(crate::WitnessInfo {
+                id: crate::WitnessId(types.witnesses.len() as u32),
+                class: c.id,
+                interface: *iid,
+                slots,
+            });
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn compute_layouts(
     types: &mut TypeArena,
     structs: &[StructInfo],
     enums: &[EnumInfo],
     target: TargetProperties,
 ) -> Result<(), Vec<Diagnostic>> {
-    for index in 0..types.classes.len() {
+    let mut order = (0..types.classes.len()).collect::<Vec<_>>();
+    order.sort_by_key(|i| types.class_chain(ClassId(*i as u32)).unwrap().len());
+    for index in order {
         let mut class = types.classes[index].clone();
-        let mut offset = u64::from(target.pointer_width / 8);
-        let mut alignment = offset;
+        let mut alignment = u64::from(target.pointer_width / 8);
+        // Private object header: one shared strong count and an immutable
+        // dynamic descriptor pointer. Source handles remain one pointer.
+        let mut offset = 2 * alignment;
+        if let Some(base) = class.base {
+            offset = types.classes[base.0 as usize].layout.size;
+            alignment = alignment.max(types.classes[base.0 as usize].layout.align);
+            for field in &class.fields {
+                if types.inherited_field(base, &field.name).is_some()
+                    || types.effective_method(base, &field.name).is_some()
+                {
+                    return Err(vec![error(
+                        "E0420",
+                        "inherited member hiding is unavailable",
+                        field.span,
+                    )]);
+                }
+            }
+        }
         for field in &mut class.fields {
             let layout = layout_of(types, field.ty, target, structs, enums).ok_or_else(|| {
                 vec![error(
@@ -205,6 +320,13 @@ pub(super) fn compute_layouts(
                 field: f.id,
                 ty: f.ty,
             })
+            .chain(class.base.into_iter().flat_map(|b| {
+                types.classes[b.0 as usize]
+                    .destruction
+                    .iter()
+                    .filter(|s| matches!(s, crate::ClassDropStep::Field { .. }))
+                    .cloned()
+            }))
             .chain(std::iter::once(crate::ClassDropStep::Free {
                 layout: class.layout,
             }))
@@ -281,10 +403,8 @@ impl Analyzer<'_> {
             _ => return None,
         };
         let class = self.class_source_type(&base)?;
-        self.types.classes[class.0 as usize]
-            .fields
-            .iter()
-            .find(|f| f.name == *name)
+        self.types
+            .inherited_field(class, name)
             .cloned()
             .map(|f| (base, f))
     }
@@ -381,6 +501,54 @@ impl Analyzer<'_> {
         e: &AstExpr,
         expected: Option<TypeId>,
     ) -> Option<Result<Checked, Vec<Diagnostic>>> {
+        if let AstExprKind::Call { callee, args, .. } = &e.kind
+            && callee == "$base"
+        {
+            return Some((|| {
+                let (class, method) = self
+                    .class_method
+                    .clone()
+                    .ok_or_else(|| vec![error("E0421", "base init outside initializer", e.span)])?;
+                let base = self.types.classes[class.0 as usize]
+                    .base
+                    .filter(|_| method.initializing)
+                    .ok_or_else(|| {
+                        vec![error(
+                            "E0421",
+                            "base init requires derived initializer",
+                            e.span,
+                        )]
+                    })?;
+                let init = self.types.classes[base.0 as usize]
+                    .methods
+                    .iter()
+                    .find(|m| m.initializing)
+                    .unwrap()
+                    .clone();
+                self.check_member_access(base, init.public, e.span)?;
+                let args = self.class_arguments(init.function, args, e.span)?;
+                let object = self.raw_receiver(&self.this_expr(e.span))?;
+                for id in self.types.class_chain(base).unwrap() {
+                    self.initialized_fields.extend(
+                        self.types.classes[id.0 as usize]
+                            .fields
+                            .iter()
+                            .map(|f| f.id),
+                    );
+                }
+                Ok(self.class_checked(
+                    ClassOp::BaseInit {
+                        class,
+                        base,
+                        initializer: HirCallTarget::Declaration(init.function),
+                        object,
+                        args,
+                    },
+                    TypeId::BOOL,
+                    e.span,
+                ))
+            })());
+        }
         if let Some((base, field)) = self.class_field_source(e) {
             return Some((|| {
                 if !matches!(base.kind, AstExprKind::Name(_)) {
@@ -457,10 +625,10 @@ impl Analyzer<'_> {
             } if self.class_method.is_some()
                 && type_arguments.is_empty()
                 && !self.names[self.module.0 as usize].contains_key(callee)
-                && self.types.classes[self.class_method.as_ref().unwrap().0.0 as usize]
-                    .methods
-                    .iter()
-                    .any(|m| m.name == *callee) =>
+                && self
+                    .types
+                    .effective_method(self.class_method.as_ref().unwrap().0, callee)
+                    .is_some() =>
             {
                 Some((self.this_expr(e.span), callee.as_str(), args.as_slice()))
             }
@@ -554,10 +722,17 @@ impl Analyzer<'_> {
                 }
                 let left = self.raw_receiver(left)?;
                 let right = self.raw_receiver(right)?;
-                if self.types.class_id(left.ty).is_none() || left.ty != right.ty {
+                if !self
+                    .types
+                    .class_id(left.ty)
+                    .zip(self.types.class_id(right.ty))
+                    .is_some_and(|(l, r)| {
+                        self.types.is_subclass(l, r) || self.types.is_subclass(r, l)
+                    })
+                {
                     return Err(vec![error(
                         "E0407",
-                        "identity comparison requires the same concrete class",
+                        "identity comparison requires compatible class views",
                         e.span,
                     )]);
                 }
@@ -664,13 +839,12 @@ impl Analyzer<'_> {
                 span,
             )]
         })?;
-        let method = self.types.classes[class.0 as usize]
-            .methods
-            .iter()
-            .find(|m| m.name == name && !m.initializing)
-            .cloned()
+        let (declaring, method) = self
+            .types
+            .effective_method(class, name)
+            .map(|(c, m)| (c, m.clone()))
             .ok_or_else(|| vec![error("E0408", "unknown direct class method", span)])?;
-        self.check_member_access(class, method.public, span)?;
+        self.check_member_access(declaring, method.public, span)?;
         let path_mutable = match self.types.get(source.ty) {
             Some(TypeData::ClassToken {
                 kind:
@@ -722,10 +896,20 @@ impl Analyzer<'_> {
         let args = self.class_arguments(method.function, args, span)?;
         let result = self.signatures[method.function.0 as usize].return_type;
         Ok(self.class_checked(
-            ClassOp::DirectMethodCall {
-                method: HirCallTarget::Declaration(method.function),
-                receiver,
-                args,
+            if let Some(slot) = method.virtual_slot {
+                ClassOp::VirtualCall {
+                    class,
+                    slot,
+                    method: HirCallTarget::Declaration(method.function),
+                    receiver,
+                    args,
+                }
+            } else {
+                ClassOp::DirectMethodCall {
+                    method: HirCallTarget::Declaration(method.function),
+                    receiver,
+                    args,
+                }
             },
             result,
             span,
@@ -846,7 +1030,7 @@ pub(super) fn verify_body(
         .map(|(c, _)| c);
     fn visit_expr(
         e: &HirExpr,
-        state: &mut BTreeSet<FieldId>,
+        state: &mut crate::ClassInitializationState,
         types: &TypeArena,
         function: FunctionId,
         module: ModuleId,
@@ -857,6 +1041,8 @@ pub(super) fn verify_body(
                 visit_expr(operand, state, types, function, module, signatures)?;
             }
             if let ClassOp::Construct { args, .. }
+            | ClassOp::BaseInit { args, .. }
+            | ClassOp::VirtualCall { args, .. }
             | ClassOp::DirectMethodCall { args, .. }
             | ClassOp::InterfaceCall { args, .. } = op.as_ref()
             {
@@ -885,6 +1071,7 @@ pub(super) fn verify_body(
                 return Err("low-level publication injected into HIR".into());
             }
             match op.as_ref() {
+                ClassOp::BaseInit { base, .. } => state.complete_base(types, *base)?,
                 ClassOp::FieldRead { receiver, field }
                 | ClassOp::FieldWrite {
                     receiver, field, ..
@@ -899,6 +1086,12 @@ pub(super) fn verify_body(
                     })
                 ) =>
                 {
+                    state.require_base(
+                        types,
+                        types
+                            .object_class(receiver.ty)
+                            .ok_or("invalid init receiver")?,
+                    )?;
                     if let ClassOp::FieldWrite { initialize, .. } = op.as_ref() {
                         if (!*initialize && !state.contains(field))
                             || (*initialize
@@ -917,6 +1110,9 @@ pub(super) fn verify_body(
                     }
                 }
                 ClassOp::ReceiverKeepalive {
+                    source, transfer, ..
+                }
+                | ClassOp::ClassUpcast {
                     source, transfer, ..
                 }
                 | ClassOp::InterfaceAdapt {
@@ -950,7 +1146,7 @@ pub(super) fn verify_body(
     #[allow(clippy::too_many_arguments)]
     fn block(
         b: &HirBlock,
-        state: &mut BTreeSet<FieldId>,
+        state: &mut crate::ClassInitializationState,
         init: Option<ClassId>,
         types: &TypeArena,
         function: FunctionId,
@@ -971,6 +1167,11 @@ pub(super) fn verify_body(
                 | HirStmtKind::Return { value, .. } => {
                     owning_use(value, types)?;
                     visit_expr(value, state, types, function, module, sigs)?;
+                    if matches!(s.kind, HirStmtKind::Return { .. })
+                        && let Some(c) = init
+                    {
+                        state.require_base(types, c)?;
+                    }
                     if matches!(s.kind, HirStmtKind::Return { .. })
                         && init.is_some_and(|c| {
                             types.classes[c.0 as usize]
@@ -995,7 +1196,8 @@ pub(super) fn verify_body(
                     if let Some(b) = else_block {
                         block(b, &mut other, init, types, function, module, sigs)?;
                     }
-                    *state = state.intersection(&other).copied().collect();
+                    state.fields = state.intersection(&other).copied().collect();
+                    state.base_completed &= other.base_completed;
                 }
                 HirStmtKind::While { condition, body } => {
                     visit_expr(condition, state, types, function, module, sigs)?;
@@ -1048,7 +1250,7 @@ pub(super) fn verify_body(
     }
     block(
         body,
-        &mut BTreeSet::new(),
+        &mut crate::ClassInitializationState::default(),
         init_class,
         types,
         function,
@@ -1353,6 +1555,96 @@ mod tests {
                 verify_hir(&bad).is_err(),
                 "HIR metadata mutation {mutation}"
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod inheritance_tests {
+    use super::*;
+    const SOURCE: &str = "interface I{int f();}open class A:I{Buffer<int> a;public init(Buffer<int> a){this.a=a;}public open int f(){return 1;}}class B:A{Buffer<int> b;public init(Buffer<int> a,Buffer<int> b):base(a){this.b=b;}public override int f(){return 7;}}int main(){B b=B(Buffer<int>(2,1),Buffer<int>(2,2));A a=b;I i=a;return a.f()+i.f();}";
+    fn mutate(e: &mut HirExpr, mutation: u32) -> bool {
+        if let HirExprKind::Class(op) = &mut e.kind {
+            match (mutation, op.as_mut()) {
+                (0, ClassOp::ClassUpcast { path, .. }) => {
+                    path.reverse();
+                    return true;
+                }
+                (1, ClassOp::ClassUpcast { transfer, .. }) => {
+                    *transfer = !*transfer;
+                    return true;
+                }
+                (2, ClassOp::BaseInit { base, .. }) => {
+                    *base = ClassId(999);
+                    return true;
+                }
+                (3, ClassOp::VirtualCall { slot, .. }) => {
+                    *slot = crate::VirtualSlotId(FunctionId(999));
+                    return true;
+                }
+                (4, ClassOp::VirtualCall { method, .. }) => {
+                    *method = HirCallTarget::Instance(crate::InstanceId(999));
+                    return true;
+                }
+                _ => (),
+            }
+            let mut changed = false;
+            **op = op
+                .map(
+                    |e| {
+                        let mut e = e.clone();
+                        if !changed {
+                            changed = mutate(&mut e, mutation);
+                        }
+                        Ok::<_, std::convert::Infallible>(e)
+                    },
+                    |f| Ok(*f),
+                )
+                .unwrap();
+            return changed;
+        }
+        if let HirExprKind::Binary { left, right, .. } = &mut e.kind {
+            return mutate(left, mutation) || mutate(right, mutation);
+        }
+        false
+    }
+    #[test]
+    fn hir_inheritance_corruptions_reject_independently() {
+        let valid = analyze(crate::parse_source(&crate::SourceFile::new("v3.ae", SOURCE)).unwrap())
+            .unwrap();
+        for mutation in 0..5 {
+            let mut bad = valid.clone();
+            assert!(
+                bad.functions
+                    .iter_mut()
+                    .flat_map(|f| &mut f.body.statements)
+                    .any(|s| match &mut s.kind {
+                        HirStmtKind::Local { initializer, .. }
+                        | HirStmtKind::Return {
+                            value: initializer, ..
+                        } => mutate(initializer, mutation),
+                        _ => false,
+                    })
+            );
+            assert!(verify_hir(&bad).is_err(), "HIR operation {mutation}");
+        }
+        for mutation in 0..9 {
+            let mut bad = valid.clone();
+            match mutation {
+                0 => bad.types.classes[0].open = false,
+                1 => bad.types.classes[1].base = Some(ClassId(1)),
+                2 => bad.types.classes[1].methods[1].virtual_slot = None,
+                3 => bad.types.classes[1].methods[1].override_target = None,
+                4 => bad.types.classes[1].interfaces.clear(),
+                5 => {
+                    bad.types.witnesses[1].slots[0].method = bad.types.witnesses[0].slots[0].method
+                }
+                6 => bad.types.classes[1].destruction = bad.types.classes[0].destruction.clone(),
+                7 => bad.types.classes[1].methods[1].mutable = true,
+                8 => bad.types.classes[1].base = None,
+                _ => unreachable!(),
+            }
+            assert!(verify_hir(&bad).is_err(), "HIR metadata {mutation}");
         }
     }
 }

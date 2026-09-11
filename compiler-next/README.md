@@ -1,4 +1,60 @@
-# Aether native compiler — OOP-OPT-1
+# Aether native compiler — OOP-V3
+
+## Single class inheritance and virtual dispatch (OOP-V3)
+
+The Linux x86-64 bootstrap admits one stateful base class together with any
+number of class-backed interfaces. Classes and methods are final/non-virtual by
+default; `open class`, `public open` methods and exact mandatory `override`
+declarations opt into inheritance and dynamic dispatch.
+
+```aether
+open class Animal {
+    public init() {}
+    public open int sound() { return 1; }
+}
+class Dog : Animal {
+    public init() : base() {}
+    public override int sound() { return 7; }
+}
+int main() {
+    Animal animal = Dog();
+    return animal.sound(); // 7
+}
+```
+
+`class Dog : Animal, Speaker` uses the existing relation list. At most one
+resolved relation may be a class. The base must be accessible and `open`; the
+inheritance graph is acyclic. A derived declaration cannot hide an inherited
+field or method. An override preserves the originating `VirtualSlotId` and must
+match visibility, parameter/result types and read/mut receiver capability
+exactly. Non-open methods remain direct even through a base-typed handle.
+
+Construction evaluates ordinary arguments first, allocates one complete object,
+installs its dynamic descriptor, initializes the immediate base on that same
+allocation, initializes derived fields and publishes once. An omitted
+`: base()` is synthesized only when the immediate base has an accessible
+zero-argument initializer. Fresh derived-to-base upcasts transfer ownership;
+lvalue upcasts alias and retain. The handle remains one pointer, with no slicing,
+base wrapper or second count.
+
+The private object header is now `{ strong_count, descriptor_ptr }`. Each
+concrete descriptor contains final destruction authority, virtual targets and
+dynamic interface witnesses. Final release through a derived, base or interface
+handle drops derived fields before base fields and frees the complete allocation
+once. Inherited interface adaptation reads the actual object's descriptor, so a
+`Dog` override remains visible through a conformance declared by `Animal`.
+
+HIR, MIR and SSA retain and independently validate base identity, initialization,
+upcast path/mode, virtual slot and effective method. OOP-OPT-1 still devirtualizes
+exact interface provenance and elides proven ARC pairs; unknown class parameters
+and mixed-class phis remain indirect. Class virtual-call devirtualization is
+accepted optimization debt rather than a semantic shortcut.
+
+Run `cargo test -p aether-driver --test oop_v3` for native, negative and
+corruption qualification. Reproduce descriptive O0/O2 costs with
+`python3 tests/measure-oop-v3.py --runs 7`. See
+[OOP_V3_REPORT.md](../docs/architecture/OOP_V3_REPORT.md) for the complete
+contract, counters, measurements and limits.
 
 
 ## Verified OOP optimization (OOP-OPT-1)
@@ -74,9 +130,11 @@ Interface values are owning, non-Copy, relocatable carriers admitted as locals,
 concrete by-value parameters and returns. Class lvalue adaptation and interface
 lvalue aliasing retain once; fresh adaptation/results transfer the existing
 token. Adaptation allocates no wrapper. Interface calls acquire a keepalive
-before arguments and dispatch through immutable, verified witness slots. Class
-calls remain direct. Final release through an interface destroys the concrete
-object and its owning fields, including the qualified private `Buffer<int>`.
+before arguments and dispatch through immutable, verified witness slots. Under
+OOP-V3, adaptation obtains the concrete witness from the dynamic descriptor.
+Nonvirtual class calls remain direct. Final release through an interface destroys
+the concrete object and its owning fields, including the qualified private
+`Buffer<int>`.
 
 Interface equality, interface-containing fields/aggregates/containers, generic
 applications, refs/views into carriers, struct boxing, interface inheritance,
@@ -134,8 +192,9 @@ initialization, and owning-field initialization must agree at branch joins.
 
 HIR/MIR/SSA expose and independently verify class identity, Alias/Transfer,
 publication, receiver capability, keepalive and cleanup. LLVM uses a private
-one-pointer handle and an eight-byte strong-count header; no public class ABI
-is promised. Programs without class use acquire no ARC runtime.
+one-pointer handle. OOP-V1 originally used an eight-byte strong-count header;
+OOP-V3 expands the private header to include a descriptor pointer. No public
+class ABI is promised. Programs without class use acquire no ARC runtime.
 
 See [the OOP-V1 report](../docs/architecture/OOP_V1_REPORT.md) for exact counter,
 corruption, regression and O0/O2 evidence. [OOP-ARCH-1](../docs/architecture/OOP_ARCH_1.md)

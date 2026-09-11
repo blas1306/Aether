@@ -44,8 +44,9 @@ initialization and ordered lifecycle obligations. SSA maintains path-sensitive
 class/keepalive and direct Buffer ownership, including incoming phi transfers,
 without requiring MemorySSA. Backend lowering consumes verified effects and
 uses the existing allocation boundary plus private non-atomic ARC helpers.
-The one-pointer handle points to an eight-byte strong header followed by
-aligned fields. Static class drop glue makes a descriptor unnecessary. Strong
+The original OOP-V1 one-pointer handle pointed to an eight-byte strong header
+followed by aligned fields. Static class drop glue made a descriptor unnecessary
+at that milestone; OOP-V3 below replaces this private layout. Strong
 underflow/overflow traps; final release destroys nested Buffer ownership before
 freeing the object. The helpers include private qualification counters.
 
@@ -77,7 +78,8 @@ method targets. The current erased and concrete receiver ABIs both use `ptr`,
 so no forwarding thunk is needed; remaining parameter/result types are exact.
 Calls extract the witness, load the verified slot and invoke the typed target.
 Interface release calls the concrete drop function with the original object
-pointer. The class header and one-pointer class handle are unchanged.
+pointer. OOP-V2 left the then-current class header and one-pointer handle
+unchanged; OOP-V3 retains the handle and expands the private header.
 
 Closed reachability follows direct calls and method targets of reachable witness
 adaptations. Unused interfaces add no carrier helpers or witnesses to programs
@@ -117,6 +119,46 @@ default. Existing unoptimized compilation APIs and semantic qualification
 counters retain their meaning. The [report](OOP_OPT_1_REPORT.md) distinguishes
 semantic obligations, emitted physical sites, runtime events and clang's own
 later optimizations. No source-language admission is changed.
+
+### OOP-V3 inheritance and descriptor authority
+
+[OOP-V3](OOP_V3_REPORT.md) adds one resolved class base to `ClassInfo`, explicit
+open/override facts, `VirtualSlotId`, override target identity and effective
+per-concrete-class interface witnesses. The resolver canonicalizes relation
+kinds, rejects multiple/final/inaccessible/cyclic bases, processes bases before
+derived classes, and preserves declaring field/method identities through lookup.
+
+HIR adds verified `ClassUpcast`, `BaseInit` and `VirtualCall` operations. Upcasts
+record source, target, complete base path and Alias/Transfer mode. MIR expands a
+derived constructor into one complete `ObjectAlloc`, descriptor initialization,
+same-object recursive base initialization and one publication. Its independent
+state records base completion separately from field initialization. SSA carries
+the same typed effects and verifies ownership across control-flow joins; static
+class TypeIds never stand in for dynamic provenance.
+
+All reachable classes now use a two-word private header: strong count followed
+by dynamic descriptor pointer. Base fields are a fixed prefix; derived fields
+follow the aligned complete base layout. Destruction recipes concatenate reverse
+derived owning fields with recursive base field recipes and exactly one final
+free. Every typed class drop invokes the common dynamic release helper; count
+zero loads the concrete descriptor's destruction slot. This is a private ABI
+change for OOP-V1/V2 classes. Non-class LLVM emission remains unchanged.
+
+Descriptors are immutable per concrete class. Their private physical table
+contains destruction authority, deterministic virtual targets keyed by semantic
+origin slots and dynamic witness references. A virtual class call loads the
+descriptor and slot before an indirect call. Interface adaptation loads the
+actual concrete witness from the same descriptor, preventing inherited
+conformance from freezing a base implementation. Witness calls retain the
+existing typed `{object,witness}` carrier and indirect requirement dispatch.
+
+Metadata verification independently reconstructs layout, destruction order,
+base accessibility/openness, slot continuity, exact overrides and effective
+witness targets. HIR/MIR/SSA reject corrupted base IDs, slots, paths,
+initialization order, witnesses and missing ownership cleanup. Backend emission
+still consumes only verified SSA. OOP-OPT-1's exact interface devirtualization
+continues to work across derived descriptors; unknown/mixed provenance remains
+indirect. Exact class-virtual devirtualization is deferred.
 
 ## 1. Scope and evidence
 

@@ -1,0 +1,1 @@
+open class A{} class B:A{Buffer<int> b;public init(Buffer<int> b){this.b=b;}} int main(){A a=B(Buffer<int>(2,2));return 0;}

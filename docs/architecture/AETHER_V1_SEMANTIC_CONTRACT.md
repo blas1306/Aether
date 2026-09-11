@@ -23,8 +23,9 @@ Keywords:
 [OOP-ARCH-1](OOP_ARCH_1.md) records proposed class/interface semantics, including
 ARC aliasing distinct from structural Copy and declared receiver capabilities.
 That proposal is not itself admission. The OOP-V1 section below incorporates
-the qualified concrete class subset; OOP-V2 adds flat nominal class-backed
-interfaces. Inheritance remains future work. See the [design report](OOP_ARCH_1_REPORT.md).
+the qualified concrete class subset; OOP-V2 adds nominal class-backed interfaces;
+OOP-V3 adds the bounded inheritance and dynamic-dispatch contract below. See the
+[design report](OOP_ARCH_1_REPORT.md).
 
 ## 1. Values and fundamental types
 
@@ -2463,3 +2464,79 @@ fields, init/deinit, generic methods, default bodies, statics, properties,
 associated types, generic interfaces, struct conformance, class inheritance,
 `implements`, `extends`, `open`, `override`, RTTI surface, exceptions or threading
 change is admitted. The carrier and witness layout are not public ABI.
+
+## OOP-V3 — single class inheritance and virtual dispatch
+
+Status: **ADMITTED** in `compiler-next` for the native Linux x86-64 bootstrap.
+[Qualification, counters and accepted debt](OOP_V3_REPORT.md).
+
+`open class Base` permits derivation. An ordinary class is final. The existing
+colon relation list accepts at most one canonical class base plus any number of
+interfaces; relation order has no semantic meaning. Bases must be accessible
+and open, the class graph must be acyclic, and a public derived class cannot
+expose an internal base. `extends` and `implements` remain invalid.
+
+Methods remain non-virtual by default even inside open classes. A `public open`
+method in an open class introduces a `VirtualSlotId` tied to its originating
+declaration. A derived same-name declaration is legal only as an exact
+`override`: its parameters, result, read/mut receiver capability and public
+visibility match, its target is inherited and open, and it reuses the original
+slot. Overrides remain overridable whenever the derived class is itself open.
+Private/open methods, open initializers and open methods in final classes fail.
+There are no overload, hiding, covariance, contravariance or `final override`
+rules in this admission.
+
+A complete derived allocation contains the private two-word header, base fields
+as a fixed prefix, then derived fields. The header holds one non-atomic strong
+count and one immutable descriptor pointer. Every base/derived/interface view
+points to that same allocation and count. Each concrete descriptor supplies the
+most-derived destruction function, effective virtual targets and effective
+interface witnesses. These layouts and numeric slot positions are private
+bootstrap ABI and expose no RTTI.
+
+Construction evaluates construction arguments left-to-right, allocates the
+complete most-derived object, installs count and descriptor, evaluates base
+arguments left-to-right, invokes the immediate base initializer on the same
+unpublished object, initializes derived fields/body, and publishes once. Base
+initialization recursively follows the same rule. Omitting `: base(...)` is
+legal only for an accessible zero-argument immediate-base initializer, for
+which the compiler inserts the call. No base allocation, handle or publication
+is created. `this` keeps OOP-V1's no-escape/no-call rules; inherited state is
+unavailable until base completion.
+
+Inherited fields preserve their declaring `ClassId`/`FieldId` and target offset.
+Private base members remain inaccessible to derived bodies. Derived fields and
+methods cannot hide inherited names. Public inherited methods are callable.
+Calls to non-open methods select the static inherited declaration directly.
+Calls to an open slot load the dynamic descriptor and most-derived effective
+implementation, including when the static receiver is the derived class.
+Receiver capability and keepalive rules are unchanged.
+
+An implicit derived-to-base conversion is a verified `ClassUpcast` with its
+exact nominal path. A fresh owner transfers its existing token; a derived
+lvalue aliases and retains one token. Transitive upcasts are supported. There
+is no slicing, allocation, payload copy or downcast. Equality accepts related
+base/derived static types and compares the shared object pointer.
+
+Derived classes inherit all nominal interface conformances from their base;
+redeclaring an inherited conformance is rejected. A per-concrete-class witness
+maps each requirement to the effective derived implementation. Class-to-interface
+adaptation loads that witness from the dynamic descriptor even when its source
+has a base static type. Interface dispatch therefore observes overrides, and
+the final interface release uses descriptor-based dynamic destruction.
+
+On the last release, the descriptor-selected concrete destructor drops the
+most-derived owning fields in reverse declaration order, then each base's fields
+in the same recursive order, then frees the complete allocation once. The
+static handle type never chooses partial destruction. HIR, MIR and SSA each
+rebuild and validate base graphs, overrides, slots, construction state, upcast
+paths, effective conformances and owner balance. MIR materializes one
+`ObjectAlloc`, same-object `BaseInit`, one `PublishObject`; SSA keeps static class
+types separate from exact/unknown dynamic provenance.
+
+Multiple stateful inheritance, abstract/sealed/protected/final modifiers,
+`base.method`, class-valued graph fields, generic inheritance, downcasts/type
+tests, source RTTI, nullability, user destructors and exceptions remain outside
+this admission. OOP-OPT-1 may devirtualize exact interface provenance; class
+virtual-call devirtualization is deferred. Unknown base parameters and mixed
+derived phis remain indirect.

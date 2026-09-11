@@ -1875,14 +1875,20 @@ pub fn collect_program_signatures(
                     &enum_arities,
                 )
                 .map_err(|d| vec![src(d, module)])?;
+                if let Some(base) = types.class_id(ty) {
+                    if types.classes[cid.0 as usize].base.replace(base).is_some() {
+                        return Err(vec![classes::error(
+                            "E0420",
+                            "at most one class base is permitted",
+                            relation.span,
+                        )]);
+                    }
+                    continue;
+                }
                 let iid = types.interface_id(ty).ok_or_else(|| {
                     vec![classes::error(
                         "E0411",
-                        if types.class_id(ty).is_some() {
-                            "inheritance not yet admitted"
-                        } else {
-                            "class relation target must be an interface"
-                        },
+                        "class relation requires a class or interface",
                         relation.span,
                     )]
                 })?;
@@ -1907,50 +1913,10 @@ pub fn collect_program_signatures(
                     )]);
                 }
                 types.classes[cid.0 as usize].interfaces.push(iid);
-                let mut slots = Vec::new();
-                for r in &types.interfaces[iid.0 as usize].requirements {
-                    let m = types.classes[cid.0 as usize]
-                        .methods
-                        .iter()
-                        .find(|m| m.name == r.name && !m.initializing)
-                        .ok_or_else(|| {
-                            vec![classes::error(
-                                "E0412",
-                                format!("missing interface requirement {}", r.name),
-                                source.span,
-                            )]
-                        })?;
-                    if !m.public
-                        || m.mutable != r.mutable
-                        || m.parameters != r.parameters
-                        || m.result != r.result
-                    {
-                        return Err(vec![src(
-                            classes::error(
-                                "E0412",
-                                format!(
-                                    "requirement {} needs an exact public method with matching receiver, parameters and result",
-                                    r.name
-                                ),
-                                relation.span,
-                            ),
-                            module,
-                        )]);
-                    }
-                    slots.push(crate::WitnessSlot {
-                        requirement: r.id,
-                        method: m.function,
-                    });
-                }
-                types.register_witness(crate::WitnessInfo {
-                    id: crate::WitnessId(types.witnesses.len() as u32),
-                    class: cid,
-                    interface: iid,
-                    slots,
-                });
             }
         }
     }
+    classes::resolve_inheritance(&mut types)?;
     crate::verify_interface_metadata(&types).map_err(|m| {
         vec![classes::error(
             "E0412",
@@ -4496,7 +4462,12 @@ fn analyze_function(
             span: p.span,
         });
     }
-    let mut body = a.block(&f.body, false)?;
+    let mut ast_body = f.body.clone();
+    if a.class_method.as_ref().is_some_and(|(c, m)| m.initializing && a.types.classes[c.0 as usize].base.is_some())
+        && !ast_body.statements.first().is_some_and(|s| matches!(&s.kind, AstStmtKind::Expr(AstExpr { kind: AstExprKind::Call { callee, .. }, .. }) if callee == "$base")) {
+        ast_body.statements.insert(0, crate::AstStmt { kind: AstStmtKind::Expr(AstExpr { kind: AstExprKind::Call { callee: "$base".into(), args: Vec::new(), type_arguments: Vec::new() }, span: f.span }), span: f.span });
+    }
+    let mut body = a.block(&ast_body, false)?;
     if id == d.entry && !definitely_returns(&body) {
         // The parser's block span ends immediately after its closing `}`.
         // Normalize before ownership so ordinary return cleanup is synthesized.
@@ -8685,6 +8656,40 @@ impl Analyzer<'_> {
         let Some(to) = expected else { return Ok(c) };
         if c.expr.ty == to {
             return Ok(c);
+        }
+        if let (Some(source_class), Some(target_base)) =
+            (self.types.class_id(c.expr.ty), self.types.class_id(to))
+        {
+            if let Ok(chain) = self.types.class_chain(source_class)
+                && let Some(end) = chain.iter().position(|c| *c == target_base)
+            {
+                let span = c.expr.span;
+                let (source, transfer) = match c.expr.kind {
+                    HirExprKind::Class(op)
+                        if matches!(op.as_ref(), ClassOp::HandleAlias { .. }) =>
+                    {
+                        let ClassOp::HandleAlias { source } = *op else {
+                            unreachable!()
+                        };
+                        (source, false)
+                    }
+                    _ => (c.expr, true),
+                };
+                return Ok(Checked {
+                    expr: HirExpr {
+                        kind: HirExprKind::Class(Box::new(ClassOp::ClassUpcast {
+                            source_class,
+                            target_base,
+                            path: chain[..=end].to_vec(),
+                            source,
+                            transfer,
+                        })),
+                        ty: to,
+                        span,
+                    },
+                    constant: None,
+                });
+            }
         }
         if let (Some(class), Some(interface)) =
             (self.types.class_id(c.expr.ty), self.types.interface_id(to))

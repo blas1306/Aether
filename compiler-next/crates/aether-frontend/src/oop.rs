@@ -7,6 +7,9 @@ use crate::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ClassId(pub u32);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct VirtualSlotId(pub FunctionId);
+
 /// Compiler-only states: none has a source type spelling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ClassTokenKind {
@@ -17,6 +20,7 @@ pub enum ClassTokenKind {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AstClass {
+    pub open: bool,
     pub relations: Vec<crate::AstType>,
     pub name: String,
     pub public: bool,
@@ -26,7 +30,10 @@ pub struct AstClass {
     pub span: Span,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)] // Orthogonal source modifiers.
 pub struct AstClassMethod {
+    pub open: bool,
+    pub overriding: bool,
     pub public: bool,
     pub mutable: bool,
     pub function: AstFunction,
@@ -43,7 +50,12 @@ pub struct ClassFieldInfo {
     pub span: Span,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(clippy::struct_excessive_bools)] // Extensibility, visibility and receiver capability are independent.
 pub struct ClassMethodInfo {
+    pub open: bool,
+    pub overriding: bool,
+    pub virtual_slot: Option<VirtualSlotId>,
+    pub override_target: Option<FunctionId>,
     pub parameters: Vec<TypeId>,
     pub result: TypeId,
     pub function: FunctionId,
@@ -54,6 +66,8 @@ pub struct ClassMethodInfo {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClassInfo {
+    pub open: bool,
+    pub base: Option<ClassId>,
     pub interfaces: Vec<crate::InterfaceId>,
     pub id: ClassId,
     pub module: ModuleId,
@@ -71,6 +85,27 @@ pub struct ClassInfo {
 /// HIR alone uses `Construct`; its lowering materializes `ObjectAlloc`, `InitCall`, `PublishObject`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClassOp<O, F = HirCallTarget> {
+    ClassUpcast {
+        source_class: ClassId,
+        target_base: ClassId,
+        path: Vec<ClassId>,
+        source: O,
+        transfer: bool,
+    },
+    VirtualCall {
+        class: ClassId,
+        slot: VirtualSlotId,
+        method: F,
+        receiver: O,
+        args: Vec<O>,
+    },
+    BaseInit {
+        class: ClassId,
+        base: ClassId,
+        initializer: F,
+        object: O,
+        args: Vec<O>,
+    },
     InterfaceAdapt {
         class: ClassId,
         interface: crate::InterfaceId,
@@ -139,15 +174,19 @@ pub enum ClassOp<O, F = HirCallTarget> {
 impl<O, F> ClassOp<O, F> {
     pub fn operands(&self) -> Vec<&O> {
         match self {
-            Self::InterfaceCall { receiver, args, .. }
+            Self::VirtualCall { receiver, args, .. }
+            | Self::InterfaceCall { receiver, args, .. }
             | Self::DirectMethodCall { receiver, args, .. } => {
                 std::iter::once(receiver).chain(args).collect()
             }
             Self::Construct { args, .. } => args.iter().collect(),
             Self::ObjectAlloc { .. } => vec![],
-            Self::InitCall { object, args, .. } => std::iter::once(object).chain(args).collect(),
+            Self::BaseInit { object, args, .. } | Self::InitCall { object, args, .. } => {
+                std::iter::once(object).chain(args).collect()
+            }
             Self::PublishObject { object, .. } => vec![object],
-            Self::InterfaceAdapt { source, .. }
+            Self::ClassUpcast { source, .. }
+            | Self::InterfaceAdapt { source, .. }
             | Self::HandleAlias { source }
             | Self::HandleTransfer { source }
             | Self::ReceiverKeepalive { source, .. } => vec![source],
@@ -158,12 +197,52 @@ impl<O, F> ClassOp<O, F> {
             Self::IdentityEq { left, right, .. } => vec![left, right],
         }
     }
+    #[allow(clippy::too_many_lines)]
     pub fn map<P, G, E>(
         &self,
         mut operand: impl FnMut(&O) -> Result<P, E>,
         mut function: impl FnMut(&F) -> Result<G, E>,
     ) -> Result<ClassOp<P, G>, E> {
         Ok(match self {
+            Self::ClassUpcast {
+                source_class,
+                target_base,
+                path,
+                source,
+                transfer,
+            } => ClassOp::ClassUpcast {
+                source_class: *source_class,
+                target_base: *target_base,
+                path: path.clone(),
+                source: operand(source)?,
+                transfer: *transfer,
+            },
+            Self::VirtualCall {
+                class,
+                slot,
+                method,
+                receiver,
+                args,
+            } => ClassOp::VirtualCall {
+                class: *class,
+                slot: *slot,
+                method: function(method)?,
+                receiver: operand(receiver)?,
+                args: args.iter().map(&mut operand).collect::<Result<_, _>>()?,
+            },
+            Self::BaseInit {
+                class,
+                base,
+                initializer,
+                object,
+                args,
+            } => ClassOp::BaseInit {
+                class: *class,
+                base: *base,
+                initializer: function(initializer)?,
+                object: operand(object)?,
+                args: args.iter().map(&mut operand).collect::<Result<_, _>>()?,
+            },
             Self::InterfaceAdapt {
                 class,
                 interface,
@@ -327,6 +406,71 @@ pub fn verify_class_op<O, F>(
             Ok((class, method.mutable))
         };
     match op {
+        ClassOp::ClassUpcast {
+            source_class,
+            target_base,
+            path,
+            source,
+            ..
+        } => {
+            let chain = types.class_chain(*source_class)?;
+            let end = chain
+                .iter()
+                .position(|c| c == target_base)
+                .ok_or("invalid upcast path")?;
+            require(
+                end > 0
+                    && *path == chain[..=end]
+                    && operand_ty(source)? == class_ty(*source_class)?
+                    && result == class_ty(*target_base)?,
+                "upcast identity/path mismatch",
+            )?;
+        }
+        ClassOp::BaseInit {
+            class,
+            base,
+            initializer,
+            object,
+            args,
+        } => {
+            require(
+                types
+                    .classes()
+                    .get(class.0 as usize)
+                    .is_some_and(|c| c.base == Some(*base))
+                    && call(initializer, args, true)?.0 == *base
+                    && operand_ty(object)?
+                        == token_ty(
+                            *class,
+                            ClassTokenKind::Receiver {
+                                mutable: true,
+                                initializing: true,
+                            },
+                        )?
+                    && result == TypeId::BOOL,
+                "base initialization requires the immediate base on the same initializer receiver",
+            )?;
+        }
+        ClassOp::VirtualCall {
+            class,
+            slot,
+            method,
+            receiver,
+            args,
+        } => {
+            let (owner, mutable) = call(method, args, false)?;
+            let (id, _, _) = signature(method)?;
+            let (_, m) = types.class_method(id).ok_or("invalid virtual target")?;
+            require(
+                types.is_subclass(*class, owner)
+                    && m.virtual_slot == Some(*slot)
+                    && types
+                        .effective_method(*class, &m.name)
+                        .is_some_and(|(_, effective)| effective.function == id)
+                    && matches!(types.get(operand_ty(receiver)?), Some(TypeData::ClassToken { class: c, kind: ClassTokenKind::Keepalive { mutable: cap } }) if c == class && (!mutable || *cap)),
+                "virtual slot/receiver/target contract mismatch",
+            )?;
+        }
         ClassOp::InterfaceAdapt {
             class,
             interface,
@@ -475,7 +619,9 @@ pub fn verify_class_op<O, F>(
             let info = types.class_field(*field).ok_or("invalid Class FieldId")?;
             let receiver_ty = operand_ty(receiver)?;
             require(
-                types.object_class(receiver_ty) == Some(info.class),
+                types
+                    .object_class(receiver_ty)
+                    .is_some_and(|c| types.is_subclass(c, info.class)),
                 "field belongs to a different class",
             )?;
             match types.get(receiver_ty) {
@@ -534,15 +680,26 @@ pub fn verify_class_op<O, F>(
             args,
         } => {
             let (class, mutable) = call(method, args, false)?;
+            let (id, _, _) = signature(method)?;
             require(
-                matches!(types.get(operand_ty(receiver)?),Some(TypeData::ClassToken { class:c, kind:ClassTokenKind::Keepalive { mutable:m } }) if *c == class && (!mutable || *m)),
+                types
+                    .class_method(id)
+                    .is_some_and(|(_, m)| m.virtual_slot.is_none()),
+                "virtual method cannot become a hard-coded direct call",
+            )?;
+            require(
+                matches!(types.get(operand_ty(receiver)?),Some(TypeData::ClassToken { class:c, kind:ClassTokenKind::Keepalive { mutable:m } }) if types.is_subclass(*c, class) && (!mutable || *m)),
                 "direct method requires a keepalive of the exact class and capability",
             )?;
         }
         ClassOp::IdentityEq { left, right, .. } => {
             let l = operand_ty(left)?;
             require(
-                types.class_id(l).is_some() && operand_ty(right)? == l && result == TypeId::BOOL,
+                types
+                    .class_id(l)
+                    .zip(types.class_id(operand_ty(right)?))
+                    .is_some_and(|(l, r)| types.is_subclass(l, r) || types.is_subclass(r, l))
+                    && result == TypeId::BOOL,
                 "identity equality class mismatch",
             )?;
         }
@@ -567,6 +724,24 @@ pub fn verify_class_access<O, F>(
         }
     };
     match op {
+        ClassOp::BaseInit {
+            class,
+            base,
+            initializer,
+            ..
+        } => {
+            if own_class != Some(*class)
+                || !types
+                    .class_method(caller)
+                    .is_some_and(|(_, m)| m.initializing)
+            {
+                return Err("base init outside derived initializer".into());
+            }
+            let (_, m) = types
+                .class_method(function(initializer)?)
+                .ok_or("unknown base initializer")?;
+            member(*base, m.public)
+        }
         ClassOp::Construct {
             class, initializer, ..
         }
@@ -585,7 +760,7 @@ pub fn verify_class_access<O, F>(
                 .ok_or("unknown initializer")?;
             member(*class, m.public)
         }
-        ClassOp::DirectMethodCall { method, .. } => {
+        ClassOp::VirtualCall { method, .. } | ClassOp::DirectMethodCall { method, .. } => {
             let (class, m) = types
                 .class_method(function(method)?)
                 .ok_or("unknown method")?;
@@ -607,6 +782,7 @@ pub enum ClassDropStep {
 }
 
 /// Validate object metadata independently at every verified boundary.
+#[allow(clippy::too_many_lines)]
 pub fn verify_class_metadata(
     types: &crate::TypeArena,
     structs: &[crate::StructInfo],
@@ -620,8 +796,24 @@ pub fn verify_class_metadata(
         if c.id.0 as usize != index || types.id_of(TypeData::Class(c.id)).is_none() {
             return Err("invalid nominal ClassId".into());
         }
-        let mut offset = 8_u64;
+        types.class_chain(c.id)?;
+        let mut offset = 16_u64;
         let mut align = 8;
+        if let Some(base) = c.base {
+            let b = types.classes().get(base.0 as usize).ok_or("unknown base")?;
+            if !b.open || (c.module != b.module && !b.public) || (c.public && !b.public) {
+                return Err("base must be open and accessible".into());
+            }
+            offset = b.layout.size;
+            align = b.layout.align;
+            for f in &c.fields {
+                if types.inherited_field(base, &f.name).is_some()
+                    || types.effective_method(base, &f.name).is_some()
+                {
+                    return Err("inherited member hiding".into());
+                }
+            }
+        }
         let mut names = std::collections::BTreeSet::new();
         for (index, f) in c.fields.iter().enumerate() {
             if f.class != c.id
@@ -675,6 +867,13 @@ pub fn verify_class_metadata(
                 field: f.id,
                 ty: f.ty,
             })
+            .chain(c.base.into_iter().flat_map(|b| {
+                types.classes()[b.0 as usize]
+                    .destruction
+                    .iter()
+                    .filter(|s| matches!(s, ClassDropStep::Field { .. }))
+                    .cloned()
+            }))
             .chain(std::iter::once(ClassDropStep::Free { layout: expected }))
             .collect::<Vec<_>>();
         if c.destruction != recipe {
@@ -687,6 +886,37 @@ pub fn verify_class_metadata(
             return Err("class requires one initializer target".into());
         }
         for m in &c.methods {
+            let target = c.base.and_then(|b| types.effective_method(b, &m.name));
+            if let Some((_, t)) = target {
+                if !m.overriding
+                    || !t.public
+                    || t.virtual_slot.is_none()
+                    || !m.public
+                    || m.initializing
+                    || m.parameters != t.parameters
+                    || m.result != t.result
+                    || m.mutable != t.mutable
+                    || m.virtual_slot != t.virtual_slot
+                    || m.override_target != Some(t.function)
+                {
+                    return Err(
+                        "invalid override target, signature or virtual slot continuity".into(),
+                    );
+                }
+            } else if m.overriding
+                || m.override_target.is_some()
+                || m.virtual_slot != m.open.then_some(VirtualSlotId(m.function))
+            {
+                return Err("invalid virtual declaration identity".into());
+            }
+            if m.open && (!c.open || !m.public || m.initializing) {
+                return Err("ineffective/private open method".into());
+            }
+            if c.base
+                .is_some_and(|b| types.inherited_field(b, &m.name).is_some())
+            {
+                return Err("method hides inherited field".into());
+            }
             if !methods.insert(m.function) || !names.insert(&m.name) {
                 return Err("invalid or conflicting class method identity".into());
             }
@@ -779,4 +1009,43 @@ pub fn verify_class_signature(
         }
     }
     Ok(())
+}
+
+/// Phase-local construction facts, rebuilt from each IR's actual control flow.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ClassInitializationState {
+    pub fields: std::collections::BTreeSet<FieldId>,
+    pub base_completed: bool,
+}
+impl std::ops::Deref for ClassInitializationState {
+    type Target = std::collections::BTreeSet<FieldId>;
+    fn deref(&self) -> &Self::Target {
+        &self.fields
+    }
+}
+impl std::ops::DerefMut for ClassInitializationState {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.fields
+    }
+}
+impl ClassInitializationState {
+    pub fn complete_base(&mut self, types: &crate::TypeArena, base: ClassId) -> Result<(), String> {
+        if self.base_completed || !self.fields.is_empty() {
+            return Err("base initialization duplicated or preceded by field access".into());
+        }
+        self.base_completed = true;
+        for id in types.class_chain(base)? {
+            self.fields
+                .extend(types.classes()[id.0 as usize].fields.iter().map(|f| f.id));
+        }
+        Ok(())
+    }
+    pub fn require_base(&self, types: &crate::TypeArena, class: ClassId) -> Result<(), String> {
+        if types.classes()[class.0 as usize].base.is_some() && !self.base_completed {
+            return Err(
+                "derived initializer uses fields or completes before base initialization".into(),
+            );
+        }
+        Ok(())
+    }
 }

@@ -36,7 +36,10 @@ pub fn parse(_source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<
                 Ok(i) => interfaces.push(i),
                 Err(e) => return Err(vec![e]),
             }
-        } else if parser.current().lexeme == "class" || parser.current().lexeme == "public" {
+        } else if parser.current().lexeme == "class"
+            || parser.current().lexeme == "public"
+            || parser.current().lexeme == "open"
+        {
             match parser.class_decl() {
                 Ok(class) => classes.push(class),
                 Err(error) => return Err(vec![error]),
@@ -184,6 +187,10 @@ impl Parser {
         } else {
             false
         };
+        let open = self.current().lexeme == "open";
+        if open {
+            self.advance();
+        }
         if self.current().lexeme != "class" {
             return Err(self.error("E0400", "expected concrete class declaration"));
         }
@@ -219,9 +226,14 @@ impl Parser {
                 }
                 _ => false,
             };
+            let method_open = self.current().lexeme == "open";
+            let overriding = self.current().lexeme == "override";
+            if method_open || overriding {
+                self.advance();
+            }
             let mutable = self.consume(TokenKind::KwMut).is_some();
             if self.current().lexeme == "init" {
-                if mutable || initializer.is_some() {
+                if mutable || method_open || overriding || initializer.is_some() {
                     return Err(self.error(
                         "E0400",
                         "one initializer without a mut modifier is permitted",
@@ -241,6 +253,8 @@ impl Parser {
                     token.span,
                 )?;
                 initializer = Some(crate::AstClassMethod {
+                    open: method_open,
+                    overriding,
                     public,
                     mutable: true,
                     function,
@@ -252,12 +266,14 @@ impl Parser {
                 if self.at(TokenKind::LeftParen) {
                     let function = self.function_tail(ty, member.lexeme, start)?;
                     methods.push(crate::AstClassMethod {
+                        open: method_open,
+                        overriding,
                         public,
                         mutable,
                         function,
                     });
                 } else {
-                    if mutable {
+                    if mutable || method_open || overriding {
                         return Err(self.error("E0400", "mut is a method receiver modifier"));
                     }
                     let end = self
@@ -278,6 +294,7 @@ impl Parser {
             .expect(TokenKind::RightBrace, "expected `}` after class")?
             .span;
         Ok(crate::AstClass {
+            open,
             relations,
             name,
             public,
@@ -441,7 +458,31 @@ impl Parser {
             }
         }
         self.expect(TokenKind::RightParen, "expected `)` after parameters")?;
-        let body = self.block()?;
+        let base = if name == "init" && self.consume(TokenKind::Colon).is_some() {
+            if self.current().lexeme != "base" {
+                return Err(self.error("E0421", "initializer must invoke immediate base(...)"));
+            }
+            self.advance();
+            self.expect(TokenKind::LeftParen, "expected base arguments")?;
+            let (args, span) = self.arguments()?;
+            Some(AstStmt {
+                kind: AstStmtKind::Expr(AstExpr {
+                    kind: AstExprKind::Call {
+                        callee: "$base".into(),
+                        type_arguments: Vec::new(),
+                        args,
+                    },
+                    span,
+                }),
+                span,
+            })
+        } else {
+            None
+        };
+        let mut body = self.block()?;
+        if let Some(base) = base {
+            body.statements.insert(0, base);
+        }
         Ok(AstFunction {
             return_type,
             name,

@@ -167,7 +167,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     if has_owners {
         emit_runtime_boundary(&mut output);
         if has_class_runtime {
-            classes::runtime(&mut output, types);
+            classes::runtime(&mut output, program);
             classes::witnesses(&mut output, program);
         }
     }
@@ -527,8 +527,8 @@ fn emit_drop_glue(
         TypeData::Interface(_) | TypeData::InterfaceKeepalive { .. } => {
             output.push_str("  %object = extractvalue { ptr, ptr } %value, 0\n  %witness = extractvalue { ptr, ptr } %value, 1\n  %release = load ptr, ptr %witness\n  call void %release(ptr %object)\n  ret void\n}\n");
         }
-        TypeData::Class(class) | TypeData::ClassToken { class, .. } => {
-            classes::drop_body(output, types, *class);
+        TypeData::Class(_) | TypeData::ClassToken { .. } => {
+            classes::drop_body(output);
         }
         TypeData::Buffer { element } => {
             emit_descriptor_free(output, types, *element, false, structs, enums);

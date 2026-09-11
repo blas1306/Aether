@@ -1,0 +1,1 @@
+open class Animal{public init(){} public open int sound(){return 1;} public int age(){return 3;}}class Dog:Animal{public init():base(){} public override int sound(){return 7;}}int main(){Dog d=Dog();return d.sound();}

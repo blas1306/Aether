@@ -149,7 +149,7 @@ fn nominal_properties_and_explicit_operations() {
     assert!(!h.types().is_admitted_list_element(ty));
     assert_eq!(
         h.types().classes()[0].layout,
-        aether_frontend::TypeLayout { size: 16, align: 8 }
+        aether_frontend::TypeLayout { size: 24, align: 8 }
     );
     let c = compile(&source.text);
     for phase in [Emit::Hir, Emit::Mir, Emit::Ssa] {
@@ -320,7 +320,7 @@ fn negative_source_boundaries() {
             "generic_interface",
             "interface I<T>{int get();}int main(){}",
         ),
-        ("open", "open class C{}int main(){}"),
+        ("final_modifier", "final class C{}int main(){}"),
         (
             "override",
             "class C{public override int get(){return 0;}}int main(){}",

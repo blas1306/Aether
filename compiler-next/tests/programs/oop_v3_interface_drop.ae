@@ -1,0 +1,1 @@
+interface I{int sound();} open class A:I{Buffer<int> a;public init(Buffer<int> a){this.a=a;}public open int sound(){return 1;}} class B:A{Buffer<int> b;public init(Buffer<int> a,Buffer<int> b):base(a){this.b=b;}public override int sound(){return 7;}} int main(){I i=B(Buffer<int>(2,1),Buffer<int>(2,2));return i.sound();}

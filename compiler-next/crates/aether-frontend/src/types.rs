@@ -705,6 +705,81 @@ impl TypeArena {
         })
     }
 
+    /// Exact nominal base chain, most derived first; corrupt graphs fail closed.
+    pub fn class_chain(&self, class: crate::ClassId) -> Result<Vec<crate::ClassId>, String> {
+        let mut chain = Vec::new();
+        let mut current = Some(class);
+        while let Some(id) = current {
+            if chain.contains(&id) {
+                return Err("cyclic class inheritance".into());
+            }
+            let c = self
+                .classes
+                .get(id.0 as usize)
+                .ok_or("unknown base ClassId")?;
+            chain.push(id);
+            current = c.base;
+        }
+        Ok(chain)
+    }
+    /// Whether one complete object admits this static base view.
+    pub fn is_subclass(&self, source: crate::ClassId, base: crate::ClassId) -> bool {
+        self.class_chain(source)
+            .is_ok_and(|chain| chain.contains(&base))
+    }
+    /// Resolve the effective declaration without changing its nominal identity.
+    pub fn effective_method(
+        &self,
+        class: crate::ClassId,
+        name: &str,
+    ) -> Option<(crate::ClassId, &crate::ClassMethodInfo)> {
+        for id in self.class_chain(class).ok()? {
+            if let Some(m) = self.classes[id.0 as usize]
+                .methods
+                .iter()
+                .find(|m| m.name == name && !m.initializing)
+            {
+                return Some((id, m));
+            }
+        }
+        None
+    }
+    /// Resolve a verified virtual slot using only nominal slot identity.
+    pub fn virtual_implementation(
+        &self,
+        class: crate::ClassId,
+        slot: crate::VirtualSlotId,
+    ) -> Option<&crate::ClassMethodInfo> {
+        for id in self.class_chain(class).ok()? {
+            if let Some(method) = self.classes[id.0 as usize]
+                .methods
+                .iter()
+                .find(|m| m.virtual_slot == Some(slot))
+            {
+                return Some(method);
+            }
+        }
+        None
+    }
+
+    /// Field lookup retains the original declaring `ClassId` and `FieldId`.
+    pub fn inherited_field(
+        &self,
+        class: crate::ClassId,
+        name: &str,
+    ) -> Option<&crate::ClassFieldInfo> {
+        for id in self.class_chain(class).ok()? {
+            if let Some(f) = self.classes[id.0 as usize]
+                .fields
+                .iter()
+                .find(|f| f.name == name)
+            {
+                return Some(f);
+            }
+        }
+        None
+    }
+
     /// Creates an arena with the complete scalar baseline interned in a stable
     /// order so same-source debugging dumps remain deterministic.
     #[must_use]

@@ -25,9 +25,16 @@ object/witness carrier, with Alias/Transfer and keepalive semantics, static
 immutable witnesses, indirect interface calls and concrete final destruction.
 Locals, concrete parameters and returns are admitted; interface equality,
 aggregate/container storage, struct boxing and default bodies are not.
-No inheritance, class graph fields, interior references, nullability, user destructors
-or generic class storage is admitted. See the [design report](OOP_ARCH_1_REPORT.md)
-for the broader future scope and the [semantic contract](AETHER_V1_SEMANTIC_CONTRACT.md#oop-v1--concrete-class-identity-and-lifecycle)
+OOP-V3 admits one explicitly open stateful base, exact mandatory overrides,
+class upcasts, base initialization on the same allocation, virtual dispatch,
+inherited interface conformances and most-derived destruction. The private
+object header contains one non-atomic strong count and a dynamic descriptor.
+Final classes and non-virtual methods remain the defaults. Multiple class
+inheritance, class graph fields, interior references, abstract/sealed/protected,
+downcasts/RTTI, nullability, user destructors and generic class storage remain
+unavailable. See [OOP_V3_REPORT.md](OOP_V3_REPORT.md) and the
+[design report](OOP_ARCH_1_REPORT.md) for the broader future scope and the
+[semantic contract](AETHER_V1_SEMANTIC_CONTRACT.md#oop-v3--single-class-inheritance-and-virtual-dispatch)
 for the bounded implemented rules.
 
 ## Identity

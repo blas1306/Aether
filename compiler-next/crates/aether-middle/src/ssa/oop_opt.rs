@@ -103,7 +103,9 @@ fn forwarding(op: &SsaOp) -> Option<ValueId> {
     match op {
         SsaOp::Move { source } => whole(source),
         SsaOp::Class(op) => match op.as_ref() {
-            ClassOp::HandleAlias { source }
+            ClassOp::ClassUpcast { source, .. }
+            | ClassOp::InterfaceAdapt { source, .. }
+            | ClassOp::HandleAlias { source }
             | ClassOp::HandleTransfer { source }
             | ClassOp::ReceiverKeepalive { source, .. } => value(source),
             _ => None,
@@ -132,9 +134,9 @@ fn provenance(function: &SsaFunction) -> BTreeMap<ValueId, Provenance> {
                     *facts.get(&source).unwrap_or(&Provenance::Bottom)
                 } else if let SsaOp::Class(op) = &i.op {
                     match op.as_ref() {
-                        ClassOp::ObjectAlloc { class }
-                        | ClassOp::PublishObject { class, .. }
-                        | ClassOp::InterfaceAdapt { class, .. } => Provenance::Exact(*class),
+                        ClassOp::ObjectAlloc { class } | ClassOp::PublishObject { class, .. } => {
+                            Provenance::Exact(*class)
+                        }
                         _ => Provenance::Unknown,
                     }
                 } else {
@@ -203,8 +205,13 @@ fn borrows(op: &SsaOp, id: ValueId) -> bool {
             }
             | ClassOp::InterfaceAdapt {
                 source, transfer, ..
+            }
+            | ClassOp::ClassUpcast {
+                source, transfer, ..
             } => !*transfer || !is(source),
-            ClassOp::DirectMethodCall { args, .. }
+            ClassOp::BaseInit { args, .. }
+            | ClassOp::VirtualCall { args, .. }
+            | ClassOp::DirectMethodCall { args, .. }
             | ClassOp::InterfaceCall { args, .. }
             | ClassOp::InitCall { args, .. } => !args.iter().any(is),
             ClassOp::FieldWrite { value, .. } => !is(value),
@@ -337,12 +344,27 @@ fn bounded_strong_counts(program: &SsaIr) -> bool {
                         edges[function.id.0 as usize].insert(*callee);
                     }
                     SsaOp::Class(op) => match op.as_ref() {
-                        ClassOp::DirectMethodCall { method, .. }
+                        ClassOp::BaseInit {
+                            initializer: method,
+                            ..
+                        }
+                        | ClassOp::DirectMethodCall { method, .. }
                         | ClassOp::InitCall {
                             initializer: method,
                             ..
                         } => {
                             edges[function.id.0 as usize].insert(*method);
+                        }
+                        ClassOp::VirtualCall { slot, .. } => {
+                            for s in &program.signatures {
+                                if program
+                                    .types
+                                    .class_method(s.function_id)
+                                    .is_some_and(|(_, m)| m.virtual_slot == Some(*slot))
+                                {
+                                    edges[function.id.0 as usize].insert(s.id);
+                                }
+                            }
                         }
                         ClassOp::InterfaceCall { requirement, .. } => {
                             for w in program.types.witnesses() {

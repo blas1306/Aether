@@ -1,0 +1,1 @@
+open class A{public int n;public init(int n){this.n=n;}public int direct(){return n;}public open int f(){return n;}}class B:A{public init(int n):base(n){}public override int f(){return n;}}int main(){A a=B(1);int i=0;int sum=0;while(i<10000){sum=sum+a.f();i=i+1;}return sum-10000;}

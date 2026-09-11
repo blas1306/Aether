@@ -66,7 +66,8 @@ impl Builder<'_> {
             )
             .unwrap();
         let mut drops = Vec::new();
-        if let ClassOp::DirectMethodCall { receiver, .. }
+        if let ClassOp::VirtualCall { receiver, .. }
+        | ClassOp::DirectMethodCall { receiver, .. }
         | ClassOp::InterfaceCall { receiver, .. } = &mapped
         {
             drops.push(receiver.clone());
@@ -118,7 +119,7 @@ pub(super) fn verify(
         .map(|(c, _)| c);
     let mut work = VecDeque::from([(
         function.entry,
-        BTreeSet::<FieldId>::new(),
+        aether_frontend::ClassInitializationState::default(),
         BTreeMap::<LocalId, bool>::new(),
     )]);
     let mut visited = BTreeSet::new();
@@ -142,6 +143,7 @@ pub(super) fn verify(
                         },
                     )?;
                     match op.as_ref() {
+                        ClassOp::BaseInit { base, .. } => fields.complete_base(types, *base)?,
                         ClassOp::ObjectAlloc { .. } => {
                             let result = place_root_local(&instruction.destination)
                                 .ok_or("allocation must own a local")?;
@@ -182,6 +184,10 @@ pub(super) fn verify(
                             })
                         ) =>
                         {
+                            fields.require_base(
+                                types,
+                                init.ok_or("base init outside initializer")?,
+                            )?;
                             if init != types.object_class(operand_type(function, receiver)?) {
                                 return Err(
                                     "MIR initializer receiver outside its constructor".into()
@@ -233,6 +239,9 @@ pub(super) fn verify(
             .as_ref()
             .unwrap();
         if matches!(term, Terminator::Return(_)) {
+            if let Some(c) = init {
+                fields.require_base(types, c)?;
+            }
             if !allocations.is_empty() {
                 return Err("MIR normal return leaves unpublished allocation".into());
             }

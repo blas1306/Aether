@@ -1,0 +1,1 @@
+interface Speaker{int sound();} open class Animal:Speaker{public init(){} public open int sound(){return 1;}}interface Extra{int age();}class Dog:Extra,Animal{public override int sound(){return 7;}public int age(){return 3;}}int main(){Dog d=Dog();Speaker s=d;Extra e=d;return s.sound()+e.age();}

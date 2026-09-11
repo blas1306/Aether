@@ -1,0 +1,1 @@
+open class A{public int n;public init(int n){this.n=n;}public open mut int inc(){n=n+1;return n;}public int get(){return n;}} class B:A{public int tag;public init(int n,int tag):base(n){this.tag=tag;}public override mut int inc(){n=n+2;return n;}public int sum(){return get()+tag;}}int main(){B b=B(4,5);return b.sum();}

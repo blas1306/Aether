@@ -8,7 +8,7 @@ struct State {
     owned: BTreeSet<ValueId>,
     memory: BTreeSet<LocalId>,
     booleans: BTreeMap<ValueId, bool>,
-    fields: BTreeSet<FieldId>,
+    fields: aether_frontend::ClassInitializationState,
     allocations: BTreeMap<ValueId, bool>,
 }
 #[allow(clippy::too_many_lines)]
@@ -81,7 +81,7 @@ pub(super) fn verify(
             .map(|m| m.local)
             .collect(),
         booleans: BTreeMap::new(),
-        fields: BTreeSet::new(),
+        fields: aether_frontend::ClassInitializationState::default(),
         allocations: BTreeMap::new(),
     };
     let mut work = VecDeque::from([(function.entry, initial)]);
@@ -149,6 +149,12 @@ pub(super) fn verify(
                         },
                     )?;
                     match op.as_ref() {
+                        ClassOp::BaseInit { base, args, .. } => {
+                            state.fields.complete_base(types, *base)?;
+                            for arg in args {
+                                consume(arg, &mut state)?;
+                            }
+                        }
                         ClassOp::ObjectAlloc { .. } => {
                             if state.allocations.insert(i.result, false).is_some() {
                                 return Err("SSA allocation overwrites unpublished object".into());
@@ -177,7 +183,12 @@ pub(super) fn verify(
                             }
                             consume(object, &mut state)?;
                         }
-                        ClassOp::InterfaceAdapt {
+                        ClassOp::ClassUpcast {
+                            source,
+                            transfer: true,
+                            ..
+                        }
+                        | ClassOp::InterfaceAdapt {
                             source,
                             transfer: true,
                             ..
@@ -188,7 +199,8 @@ pub(super) fn verify(
                             transfer: true,
                             ..
                         } => consume(source, &mut state)?,
-                        ClassOp::DirectMethodCall { args, .. }
+                        ClassOp::VirtualCall { args, .. }
+                        | ClassOp::DirectMethodCall { args, .. }
                         | ClassOp::InterfaceCall { args, .. } => {
                             for arg in args {
                                 consume(arg, &mut state)?;
@@ -211,6 +223,10 @@ pub(super) fn verify(
                                 if init != types.object_class(operand_ty(receiver)?) {
                                     return Err("SSA invalid initializing receiver".into());
                                 }
+                                state.fields.require_base(
+                                    types,
+                                    init.ok_or("base init outside initializer")?,
+                                )?;
                                 if let ClassOp::FieldWrite { initialize, .. } = op.as_ref() {
                                     if (!*initialize && !state.fields.contains(field))
                                         || (*initialize
@@ -303,6 +319,9 @@ pub(super) fn verify(
             }
         }
         if let SsaTerminator::Return(value) = &block.terminator {
+            if let Some(c) = init {
+                state.fields.require_base(types, c)?;
+            }
             consume(value, &mut state)?;
             if !state.owned.is_empty() || !state.memory.is_empty() || !state.allocations.is_empty()
             {

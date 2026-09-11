@@ -3165,6 +3165,11 @@ fn verify_ownership(
                     }
                     let consumed = match op.as_ref() {
                         ClassOp::PublishObject { object: source, .. }
+                        | ClassOp::ClassUpcast {
+                            source,
+                            transfer: true,
+                            ..
+                        }
                         | ClassOp::InterfaceAdapt {
                             source,
                             transfer: true,
@@ -3176,7 +3181,9 @@ fn verify_ownership(
                             transfer: true,
                             ..
                         } => vec![source],
-                        ClassOp::InitCall { args, .. }
+                        ClassOp::BaseInit { args, .. }
+                        | ClassOp::VirtualCall { args, .. }
+                        | ClassOp::InitCall { args, .. }
                         | ClassOp::DirectMethodCall { args, .. }
                         | ClassOp::InterfaceCall { args, .. } => args.iter().collect(),
                         ClassOp::FieldWrite { value, .. } => vec![value],
