@@ -1944,6 +1944,8 @@ fn verify_ssa_function(
                             op.as_ref(),
                             ClassOp::DirectMethodCall { .. }
                                 | ClassOp::BaseMethodCall { .. }
+                                | ClassOp::VirtualCall { .. }
+                                | ClassOp::InterfaceCall { .. }
                                 | ClassOp::BaseInit { .. }
                                 | ClassOp::InitCall { .. }
                         )

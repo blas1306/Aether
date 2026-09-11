@@ -235,14 +235,9 @@ fn malformed_hir_mir_and_ssa_constructor_cleanup_is_rejected() {
 }
 
 #[test]
-fn deferred_exception_surface_remains_rejected() {
+fn local_try_in_initializer_remains_rejected() {
     let try_in_init = format!(
         "{PREFIX} class Owner{{public init(){{try{{fail();}}catch(Problem e){{}}}}}}int main(){{return 0;}}"
     );
     assert!(diagnostic_codes(&try_in_init).contains(&"E0436"));
-
-    let virtual_invoke = format!(
-        "{PREFIX} open class Worker{{public init(){{}}public open int run(){{return 0;}}}}class Owner{{public init(){{Worker worker=Worker();worker.run();}}}}int main(){{return 0;}}"
-    );
-    assert!(diagnostic_codes(&virtual_invoke).contains(&"E0437"));
 }

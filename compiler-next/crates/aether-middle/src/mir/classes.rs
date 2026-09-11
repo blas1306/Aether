@@ -66,6 +66,115 @@ impl Builder<'_> {
                 span,
             );
         }
+        if matches!(
+            op,
+            ClassOp::VirtualCall { .. }
+                | ClassOp::DirectMethodCall { .. }
+                | ClassOp::BaseMethodCall { .. }
+                | ClassOp::InterfaceCall { .. }
+        ) {
+            let temporary_start = self.active_temporary_owners.len();
+            let (ClassOp::VirtualCall {
+                receiver,
+                args: arguments,
+                ..
+            }
+            | ClassOp::DirectMethodCall {
+                receiver,
+                args: arguments,
+                ..
+            }
+            | ClassOp::BaseMethodCall {
+                receiver,
+                args: arguments,
+                ..
+            }
+            | ClassOp::InterfaceCall {
+                receiver,
+                args: arguments,
+                ..
+            }) = op
+            else {
+                unreachable!()
+            };
+            let receiver = self.lower_expr(receiver);
+            if self.types.needs_drop(value_type(&self.function, &receiver))
+                && let Some(local) = operand_local_id(&receiver)
+                && !self.active_owners.contains(&local)
+            {
+                self.active_temporary_owners.push(local);
+            }
+            let mut args = Vec::with_capacity(arguments.len());
+            for argument in arguments {
+                let lowered = self.lower_expr(argument);
+                if self.types.needs_drop(argument.ty)
+                    && let Some(local) = operand_local_id(&lowered)
+                    && !self.active_owners.contains(&local)
+                {
+                    self.active_temporary_owners.push(local);
+                }
+                args.push(lowered);
+            }
+            let receiver_drop =
+                (!matches!(op, ClassOp::BaseMethodCall { .. })).then(|| receiver.clone());
+            let mapped = match op {
+                ClassOp::VirtualCall {
+                    class,
+                    slot,
+                    method,
+                    ..
+                } => ClassOp::VirtualCall {
+                    class: *class,
+                    slot: *slot,
+                    method: match method {
+                        HirCallTarget::Instance(id) => *id,
+                        HirCallTarget::Declaration(_) => unreachable!("verified concrete method"),
+                    },
+                    receiver,
+                    args,
+                },
+                ClassOp::DirectMethodCall { method, .. } => ClassOp::DirectMethodCall {
+                    method: match method {
+                        HirCallTarget::Instance(id) => *id,
+                        HirCallTarget::Declaration(_) => unreachable!("verified concrete method"),
+                    },
+                    receiver,
+                    args,
+                },
+                ClassOp::BaseMethodCall {
+                    class,
+                    base,
+                    slot,
+                    method,
+                    ..
+                } => ClassOp::BaseMethodCall {
+                    class: *class,
+                    base: *base,
+                    slot: *slot,
+                    method: match method {
+                        HirCallTarget::Instance(id) => *id,
+                        HirCallTarget::Declaration(_) => unreachable!("verified concrete method"),
+                    },
+                    receiver,
+                    args,
+                },
+                ClassOp::InterfaceCall {
+                    requirement, slot, ..
+                } => ClassOp::InterfaceCall {
+                    requirement: *requirement,
+                    slot: *slot,
+                    receiver,
+                    args,
+                },
+                _ => unreachable!(),
+            };
+            self.active_temporary_owners.truncate(temporary_start);
+            let result = self.class_value(mapped, ty, span);
+            if let Some(receiver) = receiver_drop {
+                self.emit_drop(operand_place(&receiver), span);
+            }
+            return result;
+        }
         // map evaluates receiver before arguments and each operand exactly once.
         let mapped = op
             .map(

@@ -230,7 +230,30 @@ pub(super) fn emit_op(
             .map(|(o, p)| format!("{} {}", llvm_type(types, p.ty), llvm_operand(o)))
             .collect::<Vec<_>>()
             .join(", ");
-        writeln!(output, "  ; OOP-POLISH-1 class devirtualization: {:?} -> {:?} {:?}\n  %v{result} = call {} @{name}({arguments})", direct.slot, direct.class, direct.method, llvm_type(types, sig.return_type)).unwrap();
+        writeln!(
+            output,
+            "  ; OOP-POLISH-1 class devirtualization: {:?} -> {:?} {:?}",
+            direct.slot, direct.class, direct.method
+        )
+        .unwrap();
+        if let Some(unwind) = unwind {
+            writeln!(
+                output,
+                "  %v{result} = invoke {} @{name}({arguments}) to label %{} unwind label %{}",
+                llvm_type(types, sig.return_type),
+                continuation_label(block, result),
+                block_label(unwind)
+            )
+            .unwrap();
+            writeln!(output, "{}:", continuation_label(block, result)).unwrap();
+        } else {
+            writeln!(
+                output,
+                "  %v{result} = call {} @{name}({arguments})",
+                llvm_type(types, sig.return_type)
+            )
+            .unwrap();
+        }
         return;
     }
     if let Some(direct) = decisions.direct.get(&aether_middle::ValueId(result)) {
@@ -255,12 +278,24 @@ pub(super) fn emit_op(
             )
             .collect::<Vec<_>>()
             .join(", ");
-        writeln!(
-            output,
-            "  %v{result} = call {} @{name}({arguments})",
-            llvm_type(types, r.result)
-        )
-        .unwrap();
+        if let Some(unwind) = unwind {
+            writeln!(
+                output,
+                "  %v{result} = invoke {} @{name}({arguments}) to label %{} unwind label %{}",
+                llvm_type(types, r.result),
+                continuation_label(block, result),
+                block_label(unwind)
+            )
+            .unwrap();
+            writeln!(output, "{}:", continuation_label(block, result)).unwrap();
+        } else {
+            writeln!(
+                output,
+                "  %v{result} = call {} @{name}({arguments})",
+                llvm_type(types, r.result)
+            )
+            .unwrap();
+        }
         return;
     }
     if types.interface_identity(result_type).is_some() {
@@ -343,12 +378,17 @@ pub(super) fn emit_op(
                 )
                 .collect::<Vec<_>>()
                 .join(", ");
-            writeln!(
-                output,
-                "  %v{result} = call {} %target{result}({arguments})",
-                llvm_type(types, r.result)
-            )
-            .unwrap();
+            if let Some(unwind) = unwind {
+                writeln!(output, "  %v{result} = invoke {} %target{result}({arguments}) to label %{} unwind label %{}", llvm_type(types, r.result), continuation_label(block, result), block_label(unwind)).unwrap();
+                writeln!(output, "{}:", continuation_label(block, result)).unwrap();
+            } else {
+                writeln!(
+                    output,
+                    "  %v{result} = call {} %target{result}({arguments})",
+                    llvm_type(types, r.result)
+                )
+                .unwrap();
+            }
         }
         ClassOp::VirtualCall {
             slot,
@@ -370,12 +410,17 @@ pub(super) fn emit_op(
                 .map(|(o, p)| format!("{} {}", llvm_type(types, p.ty), llvm_operand(o)))
                 .collect::<Vec<_>>()
                 .join(", ");
-            writeln!(
-                output,
-                "  %v{result} = call {} %target{result}({arguments})",
-                llvm_type(types, sig.return_type)
-            )
-            .unwrap();
+            if let Some(unwind) = unwind {
+                writeln!(output, "  %v{result} = invoke {} %target{result}({arguments}) to label %{} unwind label %{}", llvm_type(types, sig.return_type), continuation_label(block, result), block_label(unwind)).unwrap();
+                writeln!(output, "{}:", continuation_label(block, result)).unwrap();
+            } else {
+                writeln!(
+                    output,
+                    "  %v{result} = call {} %target{result}({arguments})",
+                    llvm_type(types, sig.return_type)
+                )
+                .unwrap();
+            }
         }
         ClassOp::ObjectAlloc { class } => writeln!(
             output,

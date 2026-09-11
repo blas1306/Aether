@@ -1038,6 +1038,9 @@ impl Builder<'_> {
                                 },
                                 statement.span,
                             );
+                            if let Some(local) = destination_owner {
+                                self.set_drop_flag(local, false, statement.span);
+                            }
                             self.assign(
                                 place,
                                 Rvalue::Move {
@@ -1045,6 +1048,9 @@ impl Builder<'_> {
                                 },
                                 statement.span,
                             );
+                            if let Some(local) = destination_owner {
+                                self.set_drop_flag(local, true, statement.span);
+                            }
                             self.emit_drop(
                                 Place {
                                     base: PlaceBase::Local(old),
@@ -2763,6 +2769,8 @@ impl Builder<'_> {
                     op.as_ref(),
                     ClassOp::DirectMethodCall { .. }
                         | ClassOp::BaseMethodCall { .. }
+                        | ClassOp::VirtualCall { .. }
+                        | ClassOp::InterfaceCall { .. }
                         | ClassOp::BaseInit { .. }
                         | ClassOp::InitCall { .. }
                 ),
@@ -2771,7 +2779,9 @@ impl Builder<'_> {
         let exceptional_receiver = match &value {
             Rvalue::Class(op) => match op.as_ref() {
                 ClassOp::DirectMethodCall { receiver, .. }
-                | ClassOp::BaseMethodCall { receiver, .. } => {
+                | ClassOp::BaseMethodCall { receiver, .. }
+                | ClassOp::VirtualCall { receiver, .. }
+                | ClassOp::InterfaceCall { receiver, .. } => {
                     operand_local_id(receiver).filter(|local| {
                         self.types
                             .needs_drop(self.function.locals[local.0 as usize].ty)
@@ -3191,6 +3201,8 @@ fn verify_mir_function(
                             op.as_ref(),
                             ClassOp::DirectMethodCall { .. }
                                 | ClassOp::BaseMethodCall { .. }
+                                | ClassOp::VirtualCall { .. }
+                                | ClassOp::InterfaceCall { .. }
                                 | ClassOp::BaseInit { .. }
                                 | ClassOp::InitCall { .. }
                         )
@@ -3199,6 +3211,34 @@ fn verify_mir_function(
                 return Err(fail(
                     "MIR potentially-throwing instruction/unwind edge mismatch".into(),
                 ));
+            }
+            if let (Rvalue::Class(op), Some(unwind)) = (&instruction.value, instruction.unwind)
+                && let ClassOp::VirtualCall { receiver, args, .. }
+                | ClassOp::InterfaceCall { receiver, args, .. } = op.as_ref()
+            {
+                let receiver = operand_local_id(receiver).ok_or_else(|| {
+                    fail("MIR dispatch invoke receiver is not materialized".into())
+                })?;
+                let pad = &function.blocks[unwind.0 as usize];
+                let receiver_drops = pad
+                    .instructions
+                    .iter()
+                    .filter(|cleanup| {
+                        matches!(&cleanup.value, Rvalue::Drop { owner } if place_root_local(owner) == Some(receiver))
+                    })
+                    .count();
+                let consumed_argument_drop = args.iter().any(|argument| {
+                    operand_local_id(argument).is_some_and(|argument| {
+                        pad.instructions.iter().any(|cleanup| {
+                            matches!(&cleanup.value, Rvalue::Drop { owner } if place_root_local(owner) == Some(argument))
+                        })
+                    })
+                });
+                if receiver_drops != 1 || consumed_argument_drop {
+                    return Err(fail(
+                        "MIR dispatch unwind cleanup violates receiver/argument ownership".into(),
+                    ));
+                }
             }
         }
         for target in targets(terminator) {

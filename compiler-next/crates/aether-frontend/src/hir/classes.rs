@@ -996,13 +996,6 @@ impl Analyzer<'_> {
     ) -> Result<Checked, Vec<Diagnostic>> {
         let source = self.raw_receiver(receiver)?;
         if let Some(interface) = self.types.interface_id(source.ty) {
-            if self.types.exception_class().is_some() {
-                return Err(vec![error(
-                    "E0437",
-                    "interface invokes are outside EXCEPTION-V1",
-                    span,
-                )]);
-            }
             let r = self.types.interfaces()[interface.0 as usize]
                 .requirements
                 .iter()
@@ -1118,13 +1111,6 @@ impl Analyzer<'_> {
             .expr;
         let args = self.class_arguments(method.function, args, span)?;
         let result = self.signatures[method.function.0 as usize].return_type;
-        if method.virtual_slot.is_some() && self.types.exception_class().is_some() {
-            return Err(vec![error(
-                "E0437",
-                "virtual invokes are outside EXCEPTION-V1",
-                span,
-            )]);
-        }
         Ok(self.class_checked(
             if let Some(slot) = method.virtual_slot {
                 ClassOp::VirtualCall {

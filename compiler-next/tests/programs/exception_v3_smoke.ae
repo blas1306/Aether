@@ -1,0 +1,27 @@
+interface Fallible {
+    int run();
+}
+
+open class Problem : Exception {
+    public init() {}
+}
+
+open class Base : Fallible {
+    public init() {}
+    public open int run() { return 1; }
+}
+
+class Derived : Base {
+    public init() : base() {}
+    public override int run() { throw Problem(); }
+}
+
+int main() {
+    Fallible value = Derived();
+    try {
+        return value.run();
+    }
+    catch (Problem problem) {
+        return 0;
+    }
+}
