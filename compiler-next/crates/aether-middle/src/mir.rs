@@ -3182,6 +3182,7 @@ fn verify_ownership(
                             ..
                         } => vec![source],
                         ClassOp::BaseInit { args, .. }
+                        | ClassOp::BaseMethodCall { args, .. }
                         | ClassOp::VirtualCall { args, .. }
                         | ClassOp::InitCall { args, .. }
                         | ClassOp::DirectMethodCall { args, .. }

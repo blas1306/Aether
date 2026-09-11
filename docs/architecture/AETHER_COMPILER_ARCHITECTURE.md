@@ -158,7 +158,31 @@ witness targets. HIR/MIR/SSA reject corrupted base IDs, slots, paths,
 initialization order, witnesses and missing ownership cleanup. Backend emission
 still consumes only verified SSA. OOP-OPT-1's exact interface devirtualization
 continues to work across derived descriptors; unknown/mixed provenance remains
-indirect. Exact class-virtual devirtualization is deferred.
+indirect.
+
+### OOP-POLISH-1 base-call and class-devirtualization authority
+
+[OOP-POLISH-1](OOP_POLISH_1_REPORT.md) adds `ClassOp::BaseMethodCall` as an
+explicit semantic operation. It records current and immediate-base ClassIds,
+the exact method identity and its optional originating VirtualSlotId. The
+frontend resolves the effective implementation on the immediate base and uses
+the current borrowed receiver token directly. Unlike an ordinary dot call it
+does not materialize `ReceiverKeepalive`, Alias, Transfer, ClassUpcast or a base
+handle: the keepalive of the enclosing method's caller already spans the whole
+body. HIR/MIR/SSA independently recheck relation, visibility, target, slot,
+signature, capability and argument ownership. LLVM emits a direct symbol call.
+
+The same milestone extends `ssa/oop_opt.rs` with a separate verified physical
+class-dispatch decision. The existing local Bottom/Exact/Unknown fixed point is
+reused unchanged through allocations, publication, upcasts, ownership
+forwarding and phis. An Exact class plus the semantic VirtualSlotId resolves
+the effective override; Unknown and unlike-class joins request nothing. The
+logical VirtualCall is retained. Optimization clones raw SSA, derives decisions
+and re-enters full SSA verification; the physical verifier recomputes the proof
+and rejects stale class, slot or method requests. Backend direct lowering keeps
+the same receiver, arguments, result and keepalive. Descriptor-based dynamic
+destruction is unaffected, and no implementer-count or closed-world dispatch
+rule is introduced.
 
 ## 1. Scope and evidence
 

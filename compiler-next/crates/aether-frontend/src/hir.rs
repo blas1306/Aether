@@ -5822,6 +5822,13 @@ impl Analyzer<'_> {
                             s.span,
                         )]);
                     }
+                    if name == "base" && self.class_method.is_some() {
+                        return Err(vec![classes::error(
+                            "E0422",
+                            "base is a contextual call designator and cannot be stored",
+                            s.span,
+                        )]);
+                    }
                     if self.scopes.last().is_some_and(|x| x.contains_key(name)) {
                         return Err(vec![duplicate("local", name, s.span)]);
                     }

@@ -1,0 +1,19 @@
+open class A {
+    public init() {}
+    public open int value() { return 1; }
+}
+
+open class B : A {
+    public override int value() { return 2; }
+    public int parentValue() { return base.value(); }
+}
+
+class C : B {
+    public override int value() { return 3; }
+    public int parentValueFromC() { return base.value(); }
+}
+
+int main() {
+    C c = C();
+    return c.parentValue() + c.parentValueFromC();
+}

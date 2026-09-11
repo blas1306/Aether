@@ -4,7 +4,7 @@
 //! graph and this module has reconstructed its proof from that graph.
 #![allow(clippy::wildcard_imports)]
 use super::*;
-use aether_frontend::{ClassId, RequirementId};
+use aether_frontend::{ClassId, RequirementId, VirtualSlotId};
 
 /// A balanced physical ARC interval; logical Alias/Drop remain in SSA.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,11 +21,20 @@ pub struct Devirtualization {
     pub method: InstanceId,
 }
 
+/// An exact implementation of a class virtual slot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClassDevirtualization {
+    pub slot: VirtualSlotId,
+    pub class: ClassId,
+    pub method: InstanceId,
+}
+
 /// Untrusted, deterministic physical lowering requests, independently rechecked.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OopOptimizations {
     pub arc: BTreeMap<ValueId, ArcElision>,
     pub direct: BTreeMap<ValueId, Devirtualization>,
+    pub virtual_direct: BTreeMap<ValueId, ClassDevirtualization>,
 }
 
 /// Optimizes only physical ownership/dispatch, then re-enters the verifier.
@@ -61,6 +70,11 @@ pub(super) fn verify(program: &SsaIr) -> Result<(), String> {
                 .direct
                 .iter()
                 .any(|(id, p)| expected.direct.get(id) != Some(p))
+            || function
+                .oop_optimizations
+                .virtual_direct
+                .iter()
+                .any(|(id, p)| expected.virtual_direct.get(id) != Some(p))
         {
             return Err("SSA OOP optimization lacks a current ownership/provenance proof".into());
         }
@@ -183,6 +197,27 @@ fn derive(
                 },
             );
         }
+        if let SsaOp::Class(op) = &i.op
+            && let ClassOp::VirtualCall {
+                class: static_class,
+                slot,
+                receiver,
+                ..
+            } = op.as_ref()
+            && let Some(Provenance::Exact(class)) = value(receiver).and_then(|v| facts.get(&v))
+            && types.is_subclass(*class, *static_class)
+            && let Some(target) = types.virtual_implementation(*class, *slot)
+            && let Some(method) = signatures.iter().find(|s| s.function_id == target.function)
+        {
+            result.virtual_direct.insert(
+                i.result,
+                ClassDevirtualization {
+                    slot: *slot,
+                    class: *class,
+                    method: method.id,
+                },
+            );
+        }
     }
     if bounded {
         result.arc = arc_pairs(function, types, &facts);
@@ -210,6 +245,7 @@ fn borrows(op: &SsaOp, id: ValueId) -> bool {
                 source, transfer, ..
             } => !*transfer || !is(source),
             ClassOp::BaseInit { args, .. }
+            | ClassOp::BaseMethodCall { args, .. }
             | ClassOp::VirtualCall { args, .. }
             | ClassOp::DirectMethodCall { args, .. }
             | ClassOp::InterfaceCall { args, .. }
@@ -348,6 +384,7 @@ fn bounded_strong_counts(program: &SsaIr) -> bool {
                             initializer: method,
                             ..
                         }
+                        | ClassOp::BaseMethodCall { method, .. }
                         | ClassOp::DirectMethodCall { method, .. }
                         | ClassOp::InitCall {
                             initializer: method,

@@ -4,7 +4,9 @@
 use aether_frontend::{ClassOp, IndexSemantics};
 mod classes;
 mod oop_opt;
-pub use oop_opt::{ArcElision, Devirtualization, OopOptimizations, optimize_oop};
+pub use oop_opt::{
+    ArcElision, ClassDevirtualization, Devirtualization, OopOptimizations, optimize_oop,
+};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 use std::sync::Arc;
@@ -482,6 +484,14 @@ impl SsaIr {
             }
             for (call, direct) in &function.oop_optimizations.direct {
                 writeln!(dump, "\ninterface devirtualization {:?} {call:?}: {:?} {:?} -> exact {:?}, direct {:?}", function.id, direct.requirement.interface, direct.requirement, direct.class, direct.method).unwrap();
+            }
+            for (call, direct) in &function.oop_optimizations.virtual_direct {
+                writeln!(
+                    dump,
+                    "\nclass devirtualization {:?} {call:?}: slot {:?} -> exact {:?}, direct {:?}",
+                    function.id, direct.slot, direct.class, direct.method
+                )
+                .unwrap();
             }
         }
         dump

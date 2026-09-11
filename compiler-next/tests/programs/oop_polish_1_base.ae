@@ -1,0 +1,16 @@
+open class A {
+    public int n;
+    public init(int n) { this.n = n; }
+    public open int value() { return n; }
+}
+
+class B : A {
+    public init(int n) : base(n) {}
+    public override int value() { return n + 10; }
+    public int baseValue() { return base.value(); }
+}
+
+int main() {
+    B b = B(7);
+    return b.baseValue();
+}

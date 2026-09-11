@@ -254,6 +254,60 @@ fn native_inheritance_o0_o2() {
 }
 
 #[test]
+fn base_method_calls_are_direct_nonowning_and_capability_checked() {
+    use aether_driver::{OptimizationLevel, compile_source_with_optimization};
+    let cases = [
+        (
+            "open class A{public int value(){return 5;}}class B:A{public int baseValue(){return base.value();}}int main(){B b=B();return b.baseValue();}",
+            5,
+            [1, 1, 2, 1, 0, 1, 1],
+        ),
+        (
+            include_str!("../../../tests/programs/oop_polish_1_base.ae"),
+            7,
+            [1, 1, 2, 1, 0, 1, 1],
+        ),
+        (
+            include_str!("../../../tests/programs/oop_polish_1_multilevel.ae"),
+            3,
+            [1, 2, 3, 1, 0, 1, 1],
+        ),
+        (
+            include_str!("../../../tests/programs/oop_polish_1_mut.ae"),
+            10,
+            [1, 2, 3, 1, 0, 1, 1],
+        ),
+    ];
+    for (source, result, counts) in cases {
+        let compilation = compile(source);
+        assert!(
+            compilation
+                .dumps
+                .iter()
+                .any(|(_, dump)| dump.contains("BaseMethodCall"))
+        );
+        assert!(!compilation.llvm.contains("base method indirect"));
+        // Only the main-to-method call acquires a keepalive. The nested base
+        // invocation borrows that method receiver and adds no retain/release.
+        let llvm = instrument(&compilation.llvm, result, counts);
+        for opt in ["-O0", "-O2"] {
+            execute(&llvm, opt);
+        }
+        let optimized = compile_source_with_optimization(
+            &SourceFile::new("base-method.ae", source),
+            &[],
+            OptimizationLevel::O2,
+        )
+        .unwrap();
+        let llvm = optimized.llvm.replace(
+            "  ret i32 %process_status",
+            &format!("  %ok = icmp eq i32 %process_status, {result}\n  %exit = select i1 %ok, i32 0, i32 99\n  ret i32 %exit"),
+        );
+        execute(&llvm, "-O2");
+    }
+}
+
+#[test]
 fn source_rejections() {
     let cases = [
         "class A{} class B:A{}",
@@ -299,6 +353,14 @@ fn source_rejections() {
         "open class A{public int n;public init(){n=1;}} class B:A{public override int n(){return 2;}}",
         "open class A{public init(int n){}} class B:A{int n;public init():base(n){n=2;}}",
         "open class A{public init(int n){}} class B:A{public init():base(this.f()){}public int f(){return 1;}}",
+        "int f(){return base.value();}",
+        "open class A{public int f(){return 1;}}class B:A{public init(){base.f();}}",
+        "class A{public int f(){return base.f();}}",
+        "open class A{private int f(){return 1;}}class B:A{public int g(){return base.f();}}",
+        "open class A{public mut int f(){return 1;}}class B:A{public int g(){return base.f();}}",
+        "open class A{}class B:A{public int g(){A a=base;return 0;}}",
+        "open class A{}class B:A{public int g(){return base;}}",
+        "open class A{}int use(A a){return 0;}class B:A{public int g(){return use(base);}}",
     ];
     for (index, source) in cases.iter().enumerate() {
         let source = format!("{source} int main(){{return 0;}}");
@@ -472,6 +534,60 @@ fn independent_mir_ssa_operation_corruptions() {
         assert!(verify_ssa(bad).is_err());
     }
 }
+
+#[test]
+fn base_method_target_is_independently_verified_in_mir_and_ssa() {
+    let source = include_str!("../../../tests/programs/oop_polish_1_base.ae");
+    let valid = mir(source);
+    let ssa = build_ssa(&verify_mir(valid.clone()).unwrap());
+    for mutation in 0..2 {
+        let mut bad = valid.clone();
+        assert!(
+            bad.functions
+                .iter_mut()
+                .flat_map(|f| &mut f.blocks)
+                .flat_map(|b| &mut b.instructions)
+                .any(|i| {
+                    let Rvalue::Class(op) = &mut i.value else {
+                        return false;
+                    };
+                    let ClassOp::BaseMethodCall { base, method, .. } = op.as_mut() else {
+                        return false;
+                    };
+                    if mutation == 0 {
+                        *base = ClassId(999);
+                    } else {
+                        *method = aether_frontend::InstanceId(999);
+                    }
+                    true
+                })
+        );
+        assert!(verify_mir(bad).is_err(), "MIR base mutation {mutation}");
+
+        let mut bad = ssa.clone();
+        assert!(
+            bad.functions
+                .iter_mut()
+                .flat_map(|f| &mut f.blocks)
+                .flat_map(|b| &mut b.instructions)
+                .any(|i| {
+                    let SsaOp::Class(op) = &mut i.op else {
+                        return false;
+                    };
+                    let ClassOp::BaseMethodCall { base, method, .. } = op.as_mut() else {
+                        return false;
+                    };
+                    if mutation == 0 {
+                        *base = ClassId(999);
+                    } else {
+                        *method = aether_frontend::InstanceId(999);
+                    }
+                    true
+                })
+        );
+        assert!(verify_ssa(bad).is_err(), "SSA base mutation {mutation}");
+    }
+}
 #[test]
 fn independent_inheritance_metadata_corruptions() {
     let valid = mir(CORRUPTION_SOURCE);
@@ -569,6 +685,106 @@ fn optimized_dynamic_provenance_and_dispatch() {
             execute(&llvm, opt);
         }
     }
+}
+
+#[test]
+fn exact_class_virtual_calls_devirtualize_but_unknown_and_mixed_stay_indirect() {
+    use aether_driver::{OptimizationLevel, compile_source_with_optimization};
+    let exact = "open class A{public open int f(){return 1;}}class B:A{public override int f(){return 7;}}int main(){A a=B();return a.f();}";
+    let same_phi = "open class A{public open int f(){return 1;}}class B:A{public override int f(){return 7;}}int call(bool b){A a=B();if(b){a=B();}return a.f();}int main(){return call(true);}";
+    let unknown = "open class A{public open int f(){return 1;}}class B:A{public override int f(){return 7;}}int call(A a){return a.f();}int main(){return call(B());}";
+    let mixed = "open class A{public open int f(){return 1;}}class B:A{public override int f(){return 7;}}class C:A{public override int f(){return 9;}}int call(bool b){A a=B();if(b){a=C();}return a.f();}int main(){return call(false);}";
+    for (source, result, direct) in [
+        (exact, 7, true),
+        (same_phi, 7, true),
+        (unknown, 7, false),
+        (mixed, 7, false),
+    ] {
+        let o0 = compile_source_with_optimization(
+            &SourceFile::new("class-devirt.ae", source),
+            &[],
+            OptimizationLevel::O0,
+        )
+        .unwrap();
+        assert!(!o0.llvm.contains("OOP-POLISH-1 class devirtualization"));
+        let o2 = compile_source_with_optimization(
+            &SourceFile::new("class-devirt.ae", source),
+            &[],
+            OptimizationLevel::O2,
+        )
+        .unwrap();
+        assert_eq!(
+            o2.llvm.contains("OOP-POLISH-1 class devirtualization"),
+            direct
+        );
+        let llvm = o2.llvm.replace(
+            "  ret i32 %process_status",
+            &format!("  %ok = icmp eq i32 %process_status, {result}\n  %exit = select i1 %ok, i32 0, i32 99\n  ret i32 %exit"),
+        );
+        for opt in ["-O0", "-O2"] {
+            execute(&llvm, opt);
+        }
+    }
+}
+
+#[test]
+fn class_devirtualization_rejects_wrong_override_slot_and_stale_provenance() {
+    let dog = "open class A{public open int f(){return 1;}}class B:A{public override int f(){return 7;}}class C:A{public override int f(){return 9;}}int main(){A a=B();return a.f();}";
+    let cat = dog.replace("A a=B()", "A a=C()");
+    let dog_ssa = verify_ssa(build_ssa(&verify_mir(mir(dog)).unwrap())).unwrap();
+    let optimized = aether_middle::optimize_oop(&dog_ssa).unwrap();
+    let base_method = optimized
+        .as_ssa()
+        .signatures
+        .iter()
+        .find(|s| {
+            optimized
+                .as_ssa()
+                .types
+                .class_method(s.function_id)
+                .is_some_and(|(class, method)| class == ClassId(0) && method.name == "f")
+        })
+        .unwrap()
+        .id;
+
+    let mut wrong_override = optimized.as_ssa().clone();
+    assert!(wrong_override.functions.iter_mut().any(|function| {
+        function
+            .oop_optimizations
+            .virtual_direct
+            .values_mut()
+            .next()
+            .is_some_and(|decision| {
+                decision.method = base_method;
+                true
+            })
+    }));
+    assert!(verify_ssa(wrong_override).is_err());
+
+    let mut wrong_slot = optimized.as_ssa().clone();
+    assert!(wrong_slot.functions.iter_mut().any(|function| {
+        function
+            .oop_optimizations
+            .virtual_direct
+            .values_mut()
+            .next()
+            .is_some_and(|decision| {
+                decision.slot = VirtualSlotId(FunctionId(999));
+                true
+            })
+    }));
+    assert!(verify_ssa(wrong_slot).is_err());
+
+    let cat_ssa = build_ssa(&verify_mir(mir(&cat)).unwrap());
+    let mut stale = cat_ssa;
+    for (target, old) in stale
+        .functions
+        .iter_mut()
+        .zip(&optimized.as_ssa().functions)
+    {
+        target.oop_optimizations = old.oop_optimizations.clone();
+    }
+    assert!(verify_ssa(stale).is_err());
 }
 
 #[test]

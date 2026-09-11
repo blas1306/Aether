@@ -30,6 +30,8 @@ pub(super) fn reachable_functions(
                     }
                     ClassOp::BaseInit { initializer, .. }
                     | ClassOp::InitCall { initializer, .. } => pending.push(*initializer),
+                    ClassOp::BaseMethodCall { method, .. }
+                    | ClassOp::DirectMethodCall { method, .. } => pending.push(*method),
                     ClassOp::VirtualCall { .. } => {
                         pending.extend(
                             program
@@ -51,7 +53,6 @@ pub(super) fn reachable_functions(
                             );
                         }
                     }
-                    ClassOp::DirectMethodCall { method, .. } => pending.push(*method),
                     _ => (),
                 },
                 _ => (),
@@ -210,6 +211,24 @@ pub(super) fn emit_op(
         };
         let ty = llvm_type(types, result_type);
         writeln!(output, "  ; OOP-OPT-1 ARC elision: retain v{result}, release {:?}; independent owner {:?} through cleanup\n  %v{result} = select i1 true, {ty} {}, {ty} {}", pair.release, pair.owner, llvm_operand(source), llvm_operand(source)).unwrap();
+        return;
+    }
+    if let Some(direct) = decisions
+        .virtual_direct
+        .get(&aether_middle::ValueId(result))
+    {
+        let ClassOp::VirtualCall { receiver, args, .. } = op else {
+            unreachable!("verified devirtualized class call");
+        };
+        let sig = &signatures[direct.method.0 as usize];
+        let name = bootstrap_symbol(sig, modules, structs, enums, types);
+        let arguments = std::iter::once(receiver)
+            .chain(args)
+            .zip(&sig.parameters)
+            .map(|(o, p)| format!("{} {}", llvm_type(types, p.ty), llvm_operand(o)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(output, "  ; OOP-POLISH-1 class devirtualization: {:?} -> {:?} {:?}\n  %v{result} = call {} @{name}({arguments})", direct.slot, direct.class, direct.method, llvm_type(types, sig.return_type)).unwrap();
         return;
     }
     if let Some(direct) = decisions.direct.get(&aether_middle::ValueId(result)) {
@@ -398,6 +417,12 @@ pub(super) fn emit_op(
             method,
             receiver,
             args,
+        }
+        | ClassOp::BaseMethodCall {
+            method,
+            receiver,
+            args,
+            ..
         } => {
             let sig = &signatures[method.0 as usize];
             let arguments = std::iter::once(receiver)

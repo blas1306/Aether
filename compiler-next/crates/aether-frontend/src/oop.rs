@@ -99,6 +99,17 @@ pub enum ClassOp<O, F = HirCallTarget> {
         receiver: O,
         args: Vec<O>,
     },
+    /// Direct invocation of the implementation selected on the immediate base.
+    /// The receiver is the current borrowed `this`; no base handle or keepalive
+    /// ownership token is created by this operation.
+    BaseMethodCall {
+        class: ClassId,
+        base: ClassId,
+        slot: Option<VirtualSlotId>,
+        method: F,
+        receiver: O,
+        args: Vec<O>,
+    },
     BaseInit {
         class: ClassId,
         base: ClassId,
@@ -175,6 +186,7 @@ impl<O, F> ClassOp<O, F> {
     pub fn operands(&self) -> Vec<&O> {
         match self {
             Self::VirtualCall { receiver, args, .. }
+            | Self::BaseMethodCall { receiver, args, .. }
             | Self::InterfaceCall { receiver, args, .. }
             | Self::DirectMethodCall { receiver, args, .. } => {
                 std::iter::once(receiver).chain(args).collect()
@@ -225,6 +237,21 @@ impl<O, F> ClassOp<O, F> {
                 args,
             } => ClassOp::VirtualCall {
                 class: *class,
+                slot: *slot,
+                method: function(method)?,
+                receiver: operand(receiver)?,
+                args: args.iter().map(&mut operand).collect::<Result<_, _>>()?,
+            },
+            Self::BaseMethodCall {
+                class,
+                base,
+                slot,
+                method,
+                receiver,
+                args,
+            } => ClassOp::BaseMethodCall {
+                class: *class,
+                base: *base,
                 slot: *slot,
                 method: function(method)?,
                 receiver: operand(receiver)?,
@@ -469,6 +496,31 @@ pub fn verify_class_op<O, F>(
                         .is_some_and(|(_, effective)| effective.function == id)
                     && matches!(types.get(operand_ty(receiver)?), Some(TypeData::ClassToken { class: c, kind: ClassTokenKind::Keepalive { mutable: cap } }) if c == class && (!mutable || *cap)),
                 "virtual slot/receiver/target contract mismatch",
+            )?;
+        }
+        ClassOp::BaseMethodCall {
+            class,
+            base,
+            slot,
+            method,
+            receiver,
+            args,
+        } => {
+            let (owner, mutable) = call(method, args, false)?;
+            let (id, _, _) = signature(method)?;
+            let (_, target) = types.class_method(id).ok_or("invalid base method target")?;
+            require(
+                types
+                    .classes()
+                    .get(class.0 as usize)
+                    .is_some_and(|c| c.base == Some(*base))
+                    && types
+                        .effective_method(*base, &target.name)
+                        .is_some_and(|(_, effective)| effective.function == id)
+                    && target.virtual_slot == *slot
+                    && types.is_subclass(*base, owner)
+                    && matches!(types.get(operand_ty(receiver)?), Some(TypeData::ClassToken { class: c, kind: ClassTokenKind::Receiver { mutable: cap, initializing: false } }) if c == class && (!mutable || *cap)),
+                "base method requires the immediate-base exact target and current receiver capability",
             )?;
         }
         ClassOp::InterfaceAdapt {
@@ -759,6 +811,19 @@ pub fn verify_class_access<O, F>(
                 .class_method(function(initializer)?)
                 .ok_or("unknown initializer")?;
             member(*class, m.public)
+        }
+        ClassOp::BaseMethodCall { class, method, .. } => {
+            if own_class != Some(*class)
+                || types
+                    .class_method(caller)
+                    .is_some_and(|(_, m)| m.initializing)
+            {
+                return Err("base method call outside derived method".into());
+            }
+            let (owner, m) = types
+                .class_method(function(method)?)
+                .ok_or("unknown base method")?;
+            member(owner, m.public)
         }
         ClassOp::VirtualCall { method, .. } | ClassOp::DirectMethodCall { method, .. } => {
             let (class, m) = types

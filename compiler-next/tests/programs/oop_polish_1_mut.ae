@@ -1,0 +1,17 @@
+open class A {
+    public int n;
+    public init(int n) { this.n = n; }
+    public open mut int increment() { n = n + 1; return n; }
+    public int get() { return n; }
+}
+
+class B : A {
+    public init(int n) : base(n) {}
+    public override mut int increment() { n = n + 2; return n; }
+    public mut int baseIncrement() { return base.increment(); }
+}
+
+int main() {
+    B b = B(4);
+    return b.baseIncrement() + b.get();
+}

@@ -24,7 +24,9 @@ Keywords:
 ARC aliasing distinct from structural Copy and declared receiver capabilities.
 That proposal is not itself admission. The OOP-V1 section below incorporates
 the qualified concrete class subset; OOP-V2 adds nominal class-backed interfaces;
-OOP-V3 adds the bounded inheritance and dynamic-dispatch contract below. See the
+OOP-V3 adds the bounded inheritance and dynamic-dispatch contract below;
+OOP-POLISH-1 adds explicit immediate-base calls and exact class-call
+devirtualization. See the
 [design report](OOP_ARCH_1_REPORT.md).
 
 ## 1. Values and fundamental types
@@ -2535,8 +2537,46 @@ paths, effective conformances and owner balance. MIR materializes one
 types separate from exact/unknown dynamic provenance.
 
 Multiple stateful inheritance, abstract/sealed/protected/final modifiers,
-`base.method`, class-valued graph fields, generic inheritance, downcasts/type
+class-valued graph fields, generic inheritance, downcasts/type
 tests, source RTTI, nullability, user destructors and exceptions remain outside
-this admission. OOP-OPT-1 may devirtualize exact interface provenance; class
-virtual-call devirtualization is deferred. Unknown base parameters and mixed
-derived phis remain indirect.
+this admission. Unknown base parameters and mixed derived phis remain indirect.
+
+## OOP-POLISH-1 — immediate-base calls and exact class dispatch
+
+Status: **ADMITTED** in `compiler-next` under all OOP-V1/V2/V3 ownership,
+capability, visibility, initialization and dynamic-destruction restrictions.
+[Qualification and limitations](OOP_POLISH_1_REPORT.md).
+
+`base.method(arguments)` is available only inside a non-initializer method of a
+class with an immediate base. It resolves the named method as seen on that
+immediate base and invokes that exact implementation directly, even when the
+method belongs to a virtual slot. Multilevel inheritance therefore selects the
+immediate base's effective override, not the root implementation and not the
+most-derived override. Private base methods are inaccessible. A mut base method
+requires a mut current receiver; read calls preserve read capability.
+
+`base` is a contextual call designator, not an expression value. It cannot be
+bound, assigned, returned, passed, stored, borrowed or converted. A base call
+uses the current borrowed `this` and creates no class handle, upcast, Alias,
+Transfer, retain or independent cleanup. The caller's existing receiver
+keepalive spans the complete current method, including left-to-right base-call
+argument evaluation and the direct nested invocation.
+
+HIR `BaseMethodCall` records the current ClassId, immediate base ClassId,
+optional originating VirtualSlotId, exact declaration target, borrowed receiver
+and arguments. MIR substitutes the exact InstanceId without changing that
+identity and adds no receiver owner cleanup. SSA preserves the same ordered
+effect. Every phase independently verifies immediate-base relation, effective
+target, slot, signature, result, receiver capability, visibility and argument
+ownership. LLVM calls the verified symbol directly and performs no descriptor
+or virtual-slot load for this operation.
+
+O2 extends OOP-OPT-1's existing Bottom/Exact/Unknown provenance fixed point to
+class `VirtualCall`. Only `Exact(ClassId)` authorizes a physical direct target,
+selected by that exact class and the preserved VirtualSlotId. Same-class phi
+joins remain Exact; different-class joins, parameters and opaque results are
+Unknown and remain indirect. No implementer count, subclass enumeration for
+dispatch choice or closed-world assumption is used. The logical VirtualCall,
+receiver capability, arguments, result ownership and keepalive remain unchanged,
+and the complete transformed SSA is re-verified. Dynamic release and
+descriptor-selected destruction are unchanged.

@@ -82,6 +82,13 @@ pub(super) fn expand_methods(program: &mut ParsedProgram) -> Result<(), Vec<Diag
                 if f.parameters.iter().any(|p| p.name == "this") {
                     return Err(vec![error("E0404", "this is an implicit receiver", f.span)]);
                 }
+                if f.parameters.iter().any(|p| p.name == "base") {
+                    return Err(vec![error(
+                        "E0422",
+                        "base is a contextual call designator, not a parameter value",
+                        f.span,
+                    )]);
+                }
                 if index == 0 {
                     if has_return(&f.body) {
                         return Err(vec![error("E0404", "init cannot return a value", f.span)]);
@@ -549,6 +556,15 @@ impl Analyzer<'_> {
                 ))
             })());
         }
+        if matches!(&e.kind, AstExprKind::Name(name) if name == "base")
+            && self.class_method.is_some()
+        {
+            return Some(Err(vec![error(
+                "E0422",
+                "base is not a value; only base.method(...) is valid",
+                e.span,
+            )]));
+        }
         if let Some((base, field)) = self.class_field_source(e) {
             return Some((|| {
                 if !matches!(base.kind, AstExprKind::Name(_)) {
@@ -592,6 +608,84 @@ impl Analyzer<'_> {
                             field: field.id,
                         },
                         field.ty,
+                        e.span,
+                    ),
+                    expected,
+                )
+            })());
+        }
+        let base_call = match &e.kind {
+            AstExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+            } if matches!(&receiver.kind, AstExprKind::Name(name) if name == "base") => {
+                Some((method.as_str(), args.as_slice()))
+            }
+            AstExprKind::QualifiedCall {
+                module,
+                function,
+                type_arguments,
+                args,
+                parenthesized: true,
+            } if module == "base" && type_arguments.is_empty() => {
+                Some((function.as_str(), args.as_slice()))
+            }
+            _ => None,
+        };
+        if let Some((name, args)) = base_call {
+            return Some((|| {
+                let (class, current) = self.class_method.clone().ok_or_else(|| {
+                    vec![error(
+                        "E0422",
+                        "base.method is available only inside a derived class method",
+                        e.span,
+                    )]
+                })?;
+                if current.initializing {
+                    return Err(vec![error(
+                        "E0422",
+                        "base.method is unavailable during initialization",
+                        e.span,
+                    )]);
+                }
+                let base = self.types.classes[class.0 as usize].base.ok_or_else(|| {
+                    vec![error(
+                        "E0422",
+                        "base.method requires an immediate base class",
+                        e.span,
+                    )]
+                })?;
+                let (declaring, target) = self
+                    .types
+                    .effective_method(base, name)
+                    .map(|(owner, method)| (owner, method.clone()))
+                    .ok_or_else(|| vec![error("E0422", "unknown base method", e.span)])?;
+                self.check_member_access(declaring, target.public, e.span)?;
+                if target.mutable && !current.mutable {
+                    return Err(vec![error(
+                        "E0405",
+                        "mut base method requires a mut current receiver",
+                        e.span,
+                    )]);
+                }
+                // The caller of the current method already owns the keepalive
+                // spanning this complete body. Keep `base` non-owning and invoke
+                // the selected immediate-base implementation on borrowed `this`.
+                let receiver = self.raw_receiver(&self.this_expr(e.span))?;
+                let args = self.class_arguments(target.function, args, e.span)?;
+                let result = self.signatures[target.function.0 as usize].return_type;
+                self.coerce(
+                    self.class_checked(
+                        ClassOp::BaseMethodCall {
+                            class,
+                            base,
+                            slot: target.virtual_slot,
+                            method: HirCallTarget::Declaration(target.function),
+                            receiver,
+                            args,
+                        },
+                        result,
                         e.span,
                     ),
                     expected,
@@ -1042,6 +1136,7 @@ pub(super) fn verify_body(
             }
             if let ClassOp::Construct { args, .. }
             | ClassOp::BaseInit { args, .. }
+            | ClassOp::BaseMethodCall { args, .. }
             | ClassOp::VirtualCall { args, .. }
             | ClassOp::DirectMethodCall { args, .. }
             | ClassOp::InterfaceCall { args, .. } = op.as_ref()
@@ -1324,6 +1419,10 @@ mod tests {
                 };
                 return true;
             }
+            (29, ClassOp::BaseMethodCall { base, .. }) => {
+                *base = ClassId(999);
+                return true;
+            }
             (0, ClassOp::Construct { class, .. }) => {
                 *class = ClassId(999);
                 return true;
@@ -1332,7 +1431,8 @@ mod tests {
                 *field = FieldId(999);
                 return true;
             }
-            (2, ClassOp::DirectMethodCall { method, .. }) => {
+            (2, ClassOp::DirectMethodCall { method, .. })
+            | (30, ClassOp::BaseMethodCall { method, .. }) => {
                 *method = HirCallTarget::Instance(crate::InstanceId(999));
                 return true;
             }
@@ -1555,6 +1655,24 @@ mod tests {
                 verify_hir(&bad).is_err(),
                 "HIR metadata mutation {mutation}"
             );
+        }
+    }
+
+    #[test]
+    fn hir_base_method_target_corruptions_reject_without_lowering() {
+        let source = "open class A{public open int f(){return 1;}}class B:A{public override int f(){return 2;}public int parent(){return base.f();}}int main(){B b=B();return b.parent();}";
+        let valid =
+            analyze(crate::parse_source(&crate::SourceFile::new("base.ae", source)).unwrap())
+                .unwrap();
+        for kind in 29..31 {
+            let mut bad = valid.clone();
+            assert!(
+                bad.functions
+                    .iter_mut()
+                    .any(|f| mutate_block(&mut f.body, kind)),
+                "mutation {kind} not applied"
+            );
+            assert!(verify_hir(&bad).is_err(), "HIR base mutation {kind}");
         }
     }
 }

@@ -1,4 +1,23 @@
-# Aether native compiler — OOP-V3
+# Aether native compiler — OOP-POLISH-1
+
+## Base calls and exact class devirtualization (OOP-POLISH-1)
+
+Inside a derived method, `base.method(args)` directly invokes the implementation
+selected on the immediate base class. HIR/MIR/SSA retain the current class,
+immediate base, exact MethodId/InstanceId and optional originating
+`VirtualSlotId`. `base` is never an owning value: the call creates no base
+handle, upcast, Alias/Transfer or receiver retain. It borrows the current `this`,
+whose caller keepalive already spans the method body. Private base members,
+read-to-mut escalation, initializer use and every attempt to store, return or
+pass `base` are rejected.
+
+At O2, OOP-OPT-1 also devirtualizes class `VirtualCall` operations when its
+existing local provenance fixed point proves `Exact(ClassId)`. The exact class
+and originating slot select the verified effective override. Equal-class phis
+stay exact; parameters, opaque returns and mixed-class phis remain indirect.
+The transformed SSA is fully re-verified, and no implementer-count or
+closed-world dispatch assumption is used. See
+[OOP_POLISH_1_REPORT.md](../docs/architecture/OOP_POLISH_1_REPORT.md).
 
 ## Single class inheritance and virtual dispatch (OOP-V3)
 
@@ -45,10 +64,9 @@ once. Inherited interface adaptation reads the actual object's descriptor, so a
 `Dog` override remains visible through a conformance declared by `Animal`.
 
 HIR, MIR and SSA retain and independently validate base identity, initialization,
-upcast path/mode, virtual slot and effective method. OOP-OPT-1 still devirtualizes
-exact interface provenance and elides proven ARC pairs; unknown class parameters
-and mixed-class phis remain indirect. Class virtual-call devirtualization is
-accepted optimization debt rather than a semantic shortcut.
+upcast path/mode, virtual slot and effective method. OOP-OPT-1 devirtualizes
+exact interface and class provenance and elides proven ARC pairs; unknown class
+parameters and mixed-class phis remain indirect.
 
 Run `cargo test -p aether-driver --test oop_v3` for native, negative and
 corruption qualification. Reproduce descriptive O0/O2 costs with
@@ -60,7 +78,7 @@ contract, counters, measurements and limits.
 ## Verified OOP optimization (OOP-OPT-1)
 
 `build` and `run` accept `-O0` (the default) and `-O2`. O2 runs a verified SSA
-pass for physical ARC elimination and exact-value interface devirtualization,
+pass for physical ARC elimination and exact-value interface/class devirtualization,
 then selects clang O2. O0 preserves inspectable semantic ownership operations.
 
 ```bash
@@ -77,11 +95,12 @@ Escapes, owner replacement, unknown effects and unproven intervals retain ARC.
 A conservative nonrecursive call-graph bound also preserves checked strong-count
 overflow behavior. Unknown-class interface owners currently retain ARC.
 
-Interface calls become direct only from recomputed value provenance through
+Interface and class virtual calls become direct only from recomputed value provenance through
 adaptation, Alias/Transfer and exact-class phi joins. Unknown parameters/returns
 and mixed-class joins remain indirect in emitted LLVM before clang. There is
 no implementer-count assumption, source class cast, wrapper allocation or new
-language feature. Final interface release still uses its verified witness.
+language shortcut. Final interface release and dynamic class destruction remain
+unchanged.
 
 Every pass output is raw SSA and passes ordinary independent verification again,
 including recomputation of its physical decisions. `--emit ssa` reports paired

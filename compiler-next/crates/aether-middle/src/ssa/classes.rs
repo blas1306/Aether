@@ -199,7 +199,8 @@ pub(super) fn verify(
                             transfer: true,
                             ..
                         } => consume(source, &mut state)?,
-                        ClassOp::VirtualCall { args, .. }
+                        ClassOp::BaseMethodCall { args, .. }
+                        | ClassOp::VirtualCall { args, .. }
                         | ClassOp::DirectMethodCall { args, .. }
                         | ClassOp::InterfaceCall { args, .. } => {
                             for arg in args {
