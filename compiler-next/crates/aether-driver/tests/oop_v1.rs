@@ -260,8 +260,8 @@ fn negative_source_boundaries() {
             "class C{init(){}}int main(){C c=C();}",
         ),
         (
-            "class_graph",
-            "class C{C next;public init(C n){next=n;}}int main(){}",
+            "public_class_graph",
+            "class C{public C next;public init(C n){next=n;}}int main(){}",
         ),
         ("struct_class_edge", "class C{}struct S{C c;}int main(){}"),
         ("enum_class_edge", "class C{}enum E{V(C)}int main(){}"),

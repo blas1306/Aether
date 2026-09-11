@@ -161,7 +161,7 @@ fn semantic_frontier_is_rejected() {
             "E0435",
         ),
         (
-            "class P:Exception{}int f(){throw P();}class C{public init(){f();}}int main(){}",
+            "class P:Exception{}class C{public init(){try{}catch(P p){}}}int main(){}",
             "E0436",
         ),
         (

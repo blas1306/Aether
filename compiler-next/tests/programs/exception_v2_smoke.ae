@@ -1,0 +1,34 @@
+open class ConstructionFailure : Exception {
+    public init() {}
+}
+
+int fail() {
+    throw ConstructionFailure();
+}
+
+open class BaseOwner {
+    Buffer<int> baseData;
+
+    public init() {
+        this.baseData = Buffer<int>(2, 1);
+    }
+}
+
+class DerivedOwner : BaseOwner {
+    Buffer<int> derivedData;
+
+    public init() : base() {
+        this.derivedData = Buffer<int>(3, 2);
+        fail();
+    }
+}
+
+int main() {
+    try {
+        DerivedOwner value = DerivedOwner();
+    }
+    catch (ConstructionFailure failure) {
+        return 0;
+    }
+    return 1;
+}

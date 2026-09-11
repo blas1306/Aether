@@ -403,6 +403,31 @@ pub(super) fn emit_op(
             llvm_operand(source)
         )
         .unwrap(),
+        ClassOp::ConstructionCleanup {
+            class,
+            object,
+            fields,
+            free_allocation,
+        } => {
+            for field_id in fields {
+                let field = types.class_field(*field_id).unwrap();
+                let ty = llvm_type(types, field.ty);
+                writeln!(output,"  %rollback_field{result}_{} = getelementptr i8, ptr {}, i64 {}\n  %rollback_owned{result}_{} = load {ty}, ptr %rollback_field{result}_{}\n  call void @aether_drop_{}({ty} %rollback_owned{result}_{})",field_id.0,llvm_operand(object),field.offset,field_id.0,field_id.0,mangle_type(types,field.ty),field_id.0).unwrap();
+                writeln!(output,"  %rollback_drops{result}_{} = load i64, ptr @aether_object_buffer_drop_count\n  %rollback_drops_next{result}_{} = add i64 %rollback_drops{result}_{}, 1\n  store i64 %rollback_drops_next{result}_{}, ptr @aether_object_buffer_drop_count",field_id.0,field_id.0,field_id.0,field_id.0).unwrap();
+            }
+            if *free_allocation {
+                let info = &types.classes()[class.0 as usize];
+                writeln!(
+                    output,
+                    "  call void @aether_free(ptr {}, i64 {}, i64 {})",
+                    llvm_operand(object),
+                    info.layout.size,
+                    info.layout.align
+                )
+                .unwrap();
+            }
+            writeln!(output, "  %v{result} = or i1 false, true").unwrap();
+        }
         ClassOp::BaseInit {
             initializer: method,
             object: receiver,
@@ -435,7 +460,18 @@ pub(super) fn emit_op(
                 .join(", ");
             let name = bootstrap_symbol(sig, modules, structs, enums, types);
             if matches!(op, ClassOp::InitCall { .. } | ClassOp::BaseInit { .. }) {
-                writeln!(output,"  %init{result} = call {} @{name}({arguments})\n  %v{result} = or i1 false, true",llvm_type(types,sig.return_type)).unwrap();
+                if let Some(unwind) = unwind {
+                    writeln!(output,"  %init{result} = invoke {} @{name}({arguments}) to label %{} unwind label %{}",llvm_type(types,sig.return_type),continuation_label(block,result),block_label(unwind)).unwrap();
+                    writeln!(output, "{}:", continuation_label(block, result)).unwrap();
+                } else {
+                    writeln!(
+                        output,
+                        "  %init{result} = call {} @{name}({arguments})",
+                        llvm_type(types, sig.return_type)
+                    )
+                    .unwrap();
+                }
+                writeln!(output, "  %v{result} = or i1 false, true").unwrap();
             } else if let Some(unwind) = unwind {
                 writeln!(
                     output,

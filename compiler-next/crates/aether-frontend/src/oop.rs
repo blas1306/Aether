@@ -81,6 +81,16 @@ pub struct ClassInfo {
     pub span: Span,
 }
 
+/// HIR-visible authority for unwinding an unpublished construction. The
+/// concrete initialized prefix is derived from control flow; this plan fixes
+/// the receiver identity and the only legal reverse cleanup order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConstructorUnwindPlan {
+    pub class: ClassId,
+    pub receiver: crate::LocalId,
+    pub cleanup_fields: Vec<FieldId>,
+}
+
 /// These operations survive as ordered semantic effects through MIR and SSA.
 /// HIR alone uses `Construct`; its lowering materializes `ObjectAlloc`, `InitCall`, `PublishObject`.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -148,6 +158,15 @@ pub enum ClassOp<O, F = HirCallTarget> {
         class: ClassId,
         object: O,
     },
+    /// Destroy the initialized owning subobjects of an unpublished object.
+    /// `free_allocation` is used only by the most-derived construction call;
+    /// initializer frames clean fields/base subobjects but never free storage.
+    ConstructionCleanup {
+        class: ClassId,
+        object: O,
+        fields: Vec<FieldId>,
+        free_allocation: bool,
+    },
     HandleAlias {
         source: O,
     },
@@ -196,7 +215,9 @@ impl<O, F> ClassOp<O, F> {
             Self::BaseInit { object, args, .. } | Self::InitCall { object, args, .. } => {
                 std::iter::once(object).chain(args).collect()
             }
-            Self::PublishObject { object, .. } => vec![object],
+            Self::PublishObject { object, .. } | Self::ConstructionCleanup { object, .. } => {
+                vec![object]
+            }
             Self::ClassUpcast { source, .. }
             | Self::InterfaceAdapt { source, .. }
             | Self::HandleAlias { source }
@@ -318,6 +339,17 @@ impl<O, F> ClassOp<O, F> {
             Self::PublishObject { class, object } => ClassOp::PublishObject {
                 class: *class,
                 object: operand(object)?,
+            },
+            Self::ConstructionCleanup {
+                class,
+                object,
+                fields,
+                free_allocation,
+            } => ClassOp::ConstructionCleanup {
+                class: *class,
+                object: operand(object)?,
+                fields: fields.clone(),
+                free_allocation: *free_allocation,
             },
             Self::HandleAlias { source } => ClassOp::HandleAlias {
                 source: operand(source)?,
@@ -609,6 +641,45 @@ pub fn verify_class_op<O, F>(
                 && result == class_ty(*class)?,
             "invalid publication identity/state",
         )?,
+        ClassOp::ConstructionCleanup {
+            class,
+            object,
+            fields,
+            free_allocation,
+        } => {
+            let expected_object = if *free_allocation {
+                token_ty(*class, ClassTokenKind::Unpublished)?
+            } else {
+                token_ty(
+                    *class,
+                    ClassTokenKind::Receiver {
+                        mutable: true,
+                        initializing: true,
+                    },
+                )?
+            };
+            let canonical = types.classes()[class.0 as usize]
+                .destruction
+                .iter()
+                .filter_map(|step| match step {
+                    ClassDropStep::Field { field, .. } => Some(*field),
+                    ClassDropStep::Free { .. } => None,
+                })
+                .collect::<Vec<_>>();
+            let mut cursor = 0;
+            for field in fields {
+                let Some(offset) = canonical[cursor..].iter().position(|id| id == field) else {
+                    return Err("construction cleanup field/order is not canonical".into());
+                };
+                cursor += offset + 1;
+            }
+            require(
+                operand_ty(object)? == expected_object
+                    && result == TypeId::BOOL
+                    && (!*free_allocation || fields.is_empty()),
+                "invalid unpublished construction cleanup",
+            )?;
+        }
         ClassOp::HandleAlias { source } => require(
             types.is_object_owner(result)
                 && operand_ty(source)? == result
@@ -892,7 +963,11 @@ pub fn verify_class_metadata(
             {
                 return Err("invalid class field identity".into());
             }
-            if (types.buffer_element(f.ty) != Some(TypeId::INT64) || f.public)
+            let narrow_buffer = types.buffer_element(f.ty) == Some(TypeId::INT64) && !f.public;
+            let narrow_class_owner =
+                types.class_id(f.ty).is_some_and(|owner| owner != c.id) && !f.public;
+            if !narrow_buffer
+                && !narrow_class_owner
                 && (!types.guarantees_copy(f.ty)
                     || types.contains_owning(f.ty)
                     || types.contains_reference(f.ty)

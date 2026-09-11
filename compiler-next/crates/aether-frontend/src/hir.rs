@@ -555,6 +555,7 @@ pub struct HirFunction {
     pub parameters: Vec<HirParameter>,
     pub locals: Vec<HirLocal>,
     pub body: HirBlock,
+    pub constructor_unwind: Option<crate::ConstructorUnwindPlan>,
     pub span: Span,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -564,6 +565,7 @@ pub struct GenericHirFunction {
     pub parameters: Vec<HirParameter>,
     pub locals: Vec<HirLocal>,
     pub body: HirBlock,
+    pub constructor_unwind: Option<crate::ConstructorUnwindPlan>,
     pub span: Span,
 }
 
@@ -1979,7 +1981,10 @@ pub fn collect_program_signatures(
                 )
                 .map_err(|d| vec![src(d, module)])?;
                 let narrow_buffer = types.buffer_element(ty) == Some(TypeId::INT64) && !public;
+                let narrow_class_owner =
+                    types.class_id(ty).is_some_and(|owner| owner != cid) && !public;
                 if !narrow_buffer
+                    && !narrow_class_owner
                     && (!types.guarantees_copy(ty)
                         || types.contains_owning(ty)
                         || types.contains_reference(ty)
@@ -1988,7 +1993,7 @@ pub fn collect_program_signatures(
                 {
                     return Err(vec![classes::error(
                         "E0401",
-                        "class field requires a scalar/Copy value or private Buffer<int>; class graphs and interior storage are unavailable",
+                        "class field requires a scalar/Copy value, private Buffer<int>, or a private non-self concrete class owner",
                         field.span,
                     )]);
                 }
@@ -3527,6 +3532,7 @@ impl Monomorphizer<'_> {
             parameters: hir_parameters,
             locals,
             body,
+            constructor_unwind: declaration.constructor_unwind.clone(),
             span: declaration.span,
         });
         Ok(())
@@ -4565,12 +4571,29 @@ fn analyze_function(
         )]);
     }
     synthesize_ownership(&mut body, &a.locals, &parameters, a.types)?;
+    let constructor_unwind = a
+        .class_method
+        .as_ref()
+        .filter(|(_, method)| method.initializing)
+        .map(|(class, _)| crate::ConstructorUnwindPlan {
+            class: *class,
+            receiver: parameters[0].local,
+            cleanup_fields: a.types.classes()[class.0 as usize]
+                .destruction
+                .iter()
+                .filter_map(|step| match step {
+                    crate::ClassDropStep::Field { field, .. } => Some(*field),
+                    crate::ClassDropStep::Free { .. } => None,
+                })
+                .collect(),
+        });
     Ok(GenericHirFunction {
         id,
         module,
         parameters,
         locals: a.locals,
         body,
+        constructor_unwind,
         span: f.span,
     })
 }
@@ -6115,17 +6138,6 @@ impl Analyzer<'_> {
                     arms,
                 } => self.match_statement(*mode, scrutinee, arms)?,
                 AstStmtKind::Throw(value) => {
-                    if self
-                        .class_method
-                        .as_ref()
-                        .is_some_and(|(_, method)| method.initializing)
-                    {
-                        return Err(vec![classes::error(
-                            "E0436",
-                            "potentially throwing operations are unavailable inside init; partial-construction rollback is deferred",
-                            s.span,
-                        )]);
-                    }
                     if let Some(value) = value {
                         let value = self.expression(value, None)?.expr;
                         let Some(class) = self.types.class_id(value.ty) else {
@@ -8238,18 +8250,6 @@ impl Analyzer<'_> {
         args: &[AstExpr],
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
-        if self.types.exception_class().is_some()
-            && self
-                .class_method
-                .as_ref()
-                .is_some_and(|(_, method)| method.initializing)
-        {
-            return Err(vec![classes::error(
-                "E0436",
-                "a potentially throwing call is unavailable during initialization until constructor rollback is implemented",
-                span,
-            )]);
-        }
         let Some(id) = self.names[self.module.0 as usize].get(n).copied() else {
             return Err(vec![Diagnostic::new(
                 "E0212",
@@ -8324,18 +8324,6 @@ impl Analyzer<'_> {
             )]);
         }
         if let Some(id) = self.names[mid.0 as usize].get(f).copied() {
-            if self.types.exception_class().is_some()
-                && self
-                    .class_method
-                    .as_ref()
-                    .is_some_and(|(_, method)| method.initializing)
-            {
-                return Err(vec![classes::error(
-                    "E0436",
-                    "a potentially throwing call is unavailable during initialization until constructor rollback is implemented",
-                    span,
-                )]);
-            }
             return self.call_id(id, &format!("{m}.{f}"), type_arguments, args, span);
         }
         if let Some(id) = self.struct_names[mid.0 as usize].get(f).copied() {
@@ -9665,6 +9653,14 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
             VerificationSignatures::Concrete(&h.instances),
         )
         .map_err(&fail)?;
+        classes::verify_constructor_unwind_plan(
+            f.constructor_unwind.as_ref(),
+            &f.locals,
+            &f.parameters,
+            f.function_id,
+            &h.types,
+        )
+        .map_err(&fail)?;
         verify_block(
             &f.body,
             &VerificationFunction { locals: &f.locals },
@@ -9754,6 +9750,14 @@ fn verify_parametric_hir(
             signature.module,
             types,
             VerificationSignatures::Parametric(signatures),
+        )
+        .map_err(&fail)?;
+        classes::verify_constructor_unwind_plan(
+            declaration.constructor_unwind.as_ref(),
+            &declaration.locals,
+            &declaration.parameters,
+            declaration.id,
+            types,
         )
         .map_err(&fail)?;
         verify_block(

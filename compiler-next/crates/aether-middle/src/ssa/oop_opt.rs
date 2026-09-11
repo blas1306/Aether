@@ -252,7 +252,9 @@ fn borrows(op: &SsaOp, id: ValueId) -> bool {
             | ClassOp::InitCall { args, .. } => !args.iter().any(is),
             ClassOp::FieldWrite { value, .. } => !is(value),
             ClassOp::HandleTransfer { source } => !is(source),
-            ClassOp::PublishObject { object, .. } => !is(object),
+            ClassOp::PublishObject { object, .. } | ClassOp::ConstructionCleanup { object, .. } => {
+                !is(object)
+            }
             ClassOp::Construct { .. } => false,
         },
         // Scalar/memory effects stay in exactly the same order. They cannot

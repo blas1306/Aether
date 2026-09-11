@@ -583,6 +583,7 @@ pub struct MirFunction {
     /// Entry identity.
     pub entry: BlockId,
     pub exception_events: Vec<ExceptionEventId>,
+    pub constructor_unwind: Option<aether_frontend::ConstructorUnwindPlan>,
 }
 
 /// Unverified flow MIR.
@@ -811,6 +812,7 @@ fn lower_function(
             }],
             entry: BlockId(0),
             exception_events: Vec::new(),
+            constructor_unwind: function.constructor_unwind.clone(),
         },
         current: Some(BlockId(0)),
         enums,
@@ -821,6 +823,11 @@ fn lower_function(
         active_owners: parameter_owners,
         active_catches: Vec::new(),
         root_event: None,
+        active_temporary_owners: Vec::new(),
+        construction_state: function
+            .constructor_unwind
+            .as_ref()
+            .map(|_| aether_frontend::ClassInitializationState::default()),
     };
     for owner in conditional_roots {
         let flag = builder.temporary(TypeId::BOOL);
@@ -854,6 +861,8 @@ struct Builder<'a> {
     active_owners: Vec<LocalId>,
     active_catches: Vec<ExceptionEventId>,
     root_event: Option<ExceptionEventId>,
+    active_temporary_owners: Vec<LocalId>,
+    construction_state: Option<aether_frontend::ClassInitializationState>,
 }
 
 #[derive(Clone, Copy)]
@@ -874,7 +883,11 @@ impl Builder<'_> {
         event
     }
 
-    fn make_unwind_pad(&mut self, span: Span) -> BlockId {
+    fn make_unwind_pad(
+        &mut self,
+        span: Span,
+        free_unpublished: Option<(ClassId, Operand)>,
+    ) -> BlockId {
         let saved = self.current;
         if self
             .handlers
@@ -898,6 +911,23 @@ impl Builder<'_> {
         self.function.blocks[pad.0 as usize].landing_pad = Some(event);
         self.function.blocks[pad.0 as usize].landing_pad_catches = handler.is_some();
         self.current = Some(pad);
+        if let Some((class, object)) = free_unpublished {
+            let token = self.temporary(TypeId::BOOL);
+            self.assign(
+                operand_place(&Operand::Local(token)),
+                Rvalue::Class(Box::new(ClassOp::ConstructionCleanup {
+                    class,
+                    object,
+                    fields: Vec::new(),
+                    free_allocation: true,
+                })),
+                span,
+            );
+        }
+        let temporaries = self.active_temporary_owners.clone();
+        for owner in temporaries.into_iter().rev() {
+            self.emit_hir_drop(HirDrop::Unconditional(owner), span);
+        }
         let cleanup_boundary = handler.map_or(0, |handler| handler.cleanup_boundary);
         let owners = self.active_owners[cleanup_boundary..].to_vec();
         for owner in owners.into_iter().rev() {
@@ -915,6 +945,30 @@ impl Builder<'_> {
             self.assign(
                 operand_place(&Operand::Local(token)),
                 Rvalue::EndCatch { event: caught },
+                span,
+            );
+        }
+        if handler.is_none()
+            && let (Some(plan), Some(state)) = (
+                self.function.constructor_unwind.clone(),
+                self.construction_state.clone(),
+            )
+        {
+            let fields = plan
+                .cleanup_fields
+                .iter()
+                .copied()
+                .filter(|field| state.contains(field))
+                .collect();
+            let token = self.temporary(TypeId::BOOL);
+            self.assign(
+                operand_place(&Operand::Local(token)),
+                Rvalue::Class(Box::new(ClassOp::ConstructionCleanup {
+                    class: plan.class,
+                    object: Operand::Local(plan.receiver),
+                    fields,
+                    free_allocation: false,
+                })),
                 span,
             );
         }
@@ -1086,7 +1140,7 @@ impl Builder<'_> {
                     ..
                 } => {
                     let payload = self.lower_expr(value);
-                    let unwind = Some(self.make_unwind_pad(statement.span));
+                    let unwind = Some(self.make_unwind_pad(statement.span, None));
                     self.terminate(Terminator::Throw {
                         payload,
                         class: *class,
@@ -1099,7 +1153,7 @@ impl Builder<'_> {
                         .active_catches
                         .last()
                         .expect("verified HIR rethrow has an active catch");
-                    let unwind = Some(self.make_unwind_pad(statement.span));
+                    let unwind = Some(self.make_unwind_pad(statement.span, None));
                     self.terminate(Terminator::Rethrow { event, unwind });
                 }
                 HirStmtKind::If {
@@ -1237,6 +1291,7 @@ impl Builder<'_> {
         else_block: Option<&HirBlock>,
     ) {
         let condition = self.lower_expr(condition);
+        let construction_before = self.construction_state.clone();
         let then_id = self.new_block();
         let else_id = self.new_block();
         self.terminate(Terminator::Branch {
@@ -1248,17 +1303,35 @@ impl Builder<'_> {
         self.current = Some(then_id);
         self.lower_block(then_block);
         let then_end = self.current;
+        let then_construction = self.construction_state.clone();
 
         self.current = Some(else_id);
+        self.construction_state = construction_before.clone();
         if let Some(block) = else_block {
             self.lower_block(block);
         }
         let else_end = self.current;
+        let else_construction = self.construction_state.clone();
 
         if then_end.is_none() && else_end.is_none() {
             self.current = None;
+            self.construction_state = construction_before;
             return;
         }
+        self.construction_state = match (then_end, else_end) {
+            (Some(_), None) => then_construction,
+            (None, Some(_)) => else_construction,
+            (Some(_), Some(_)) => match (then_construction, else_construction) {
+                (Some(mut left), Some(right)) => {
+                    left.fields = left.fields.intersection(&right.fields).copied().collect();
+                    left.base_completed &= right.base_completed;
+                    Some(left)
+                }
+                (None, None) => None,
+                _ => construction_before,
+            },
+            (None, None) => construction_before,
+        };
         let join = self.new_block();
         if let Some(block) = then_end {
             self.current = Some(block);
@@ -1272,6 +1345,7 @@ impl Builder<'_> {
     }
 
     fn lower_while(&mut self, condition: &HirExpr, body: &HirBlock) {
+        let construction_before = self.construction_state.clone();
         let header = self.new_block();
         let body_id = self.new_block();
         let exit = self.new_block();
@@ -1289,6 +1363,7 @@ impl Builder<'_> {
             self.current = Some(end);
             self.terminate(Terminator::Goto(header));
         }
+        self.construction_state = construction_before;
         self.current = Some(exit);
     }
 
@@ -1301,6 +1376,7 @@ impl Builder<'_> {
         enum_id: EnumId,
         arms: &[HirMatchArm],
     ) {
+        let construction_before = self.construction_state.clone();
         let enum_value = self.lower_expr(scrutinee);
         let tag = self.temporary(TypeId::UINT32);
         self.assign(
@@ -1333,6 +1409,7 @@ impl Builder<'_> {
         });
         let mut open_ends = Vec::new();
         for (arm, block_id) in arms.iter().zip(arm_blocks) {
+            self.construction_state = construction_before.clone();
             self.current = Some(block_id);
             let variant = &info.variants[arm.variant_id.index as usize];
             let consuming = mode == MatchMode::Value && !self.types.is_copy(enum_type);
@@ -1411,6 +1488,7 @@ impl Builder<'_> {
             }
             self.current = Some(join);
         }
+        self.construction_state = construction_before;
     }
 
     #[allow(clippy::too_many_lines)]
@@ -2683,7 +2761,10 @@ impl Builder<'_> {
                 Rvalue::Call { .. } => true,
                 Rvalue::Class(op) => matches!(
                     op.as_ref(),
-                    ClassOp::DirectMethodCall { .. } | ClassOp::BaseMethodCall { .. }
+                    ClassOp::DirectMethodCall { .. }
+                        | ClassOp::BaseMethodCall { .. }
+                        | ClassOp::BaseInit { .. }
+                        | ClassOp::InitCall { .. }
                 ),
                 _ => false,
             };
@@ -2700,8 +2781,15 @@ impl Builder<'_> {
             },
             _ => None,
         };
+        let free_unpublished = match &value {
+            Rvalue::Class(op) => match op.as_ref() {
+                ClassOp::InitCall { class, object, .. } => Some((*class, object.clone())),
+                _ => None,
+            },
+            _ => None,
+        };
         let unwind = may_throw.then(|| {
-            let pad = self.make_unwind_pad(span);
+            let pad = self.make_unwind_pad(span, free_unpublished);
             if let Some(receiver) = exceptional_receiver {
                 let token = self.temporary(TypeId::BOOL);
                 self.function.blocks[pad.0 as usize].instructions.insert(
@@ -3101,7 +3189,10 @@ fn verify_mir_function(
                     Rvalue::Class(ref op)
                         if matches!(
                             op.as_ref(),
-                            ClassOp::DirectMethodCall { .. } | ClassOp::BaseMethodCall { .. }
+                            ClassOp::DirectMethodCall { .. }
+                                | ClassOp::BaseMethodCall { .. }
+                                | ClassOp::BaseInit { .. }
+                                | ClassOp::InitCall { .. }
                         )
                 );
             if instruction.unwind.is_some() != may_throw && !function.exception_events.is_empty() {
@@ -5923,6 +6014,7 @@ mod tests {
                 }],
                 entry: BlockId(0),
                 exception_events: vec![],
+                constructor_unwind: None,
             }],
             entry: InstanceId(0),
             exceptions_enabled: false,

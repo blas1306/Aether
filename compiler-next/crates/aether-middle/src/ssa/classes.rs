@@ -10,6 +10,7 @@ struct State {
     booleans: BTreeMap<ValueId, bool>,
     fields: aether_frontend::ClassInitializationState,
     allocations: BTreeMap<ValueId, bool>,
+    construction_cleaned: bool,
 }
 #[allow(clippy::too_many_lines)]
 pub(super) fn verify(
@@ -53,6 +54,27 @@ pub(super) fn verify(
         .class_method(function.function_id)
         .filter(|(_, m)| m.initializing)
         .map(|(c, _)| c);
+    match (init, function.constructor_unwind.as_ref()) {
+        (None, None) => {}
+        (Some(class), Some(plan)) => {
+            let expected = types.classes()[class.0 as usize]
+                .destruction
+                .iter()
+                .filter_map(|step| match step {
+                    aether_frontend::ClassDropStep::Field { field, .. } => Some(*field),
+                    aether_frontend::ClassDropStep::Free { .. } => None,
+                })
+                .collect::<Vec<_>>();
+            if plan.class != class
+                || plan.cleanup_fields != expected
+                || function.parameters.first().map(|parameter| parameter.local)
+                    != Some(plan.receiver)
+            {
+                return Err("SSA constructor unwind plan is invalid".into());
+            }
+        }
+        _ => return Err("SSA constructor unwind plan presence is invalid".into()),
+    }
     // Class tokens and the narrowly admitted Buffer owner have this additional
     // SSA ledger. Other value/container protocols retain their existing verifiers.
     let tracked = |ty| {
@@ -83,6 +105,7 @@ pub(super) fn verify(
         booleans: BTreeMap::new(),
         fields: aether_frontend::ClassInitializationState::default(),
         allocations: BTreeMap::new(),
+        construction_cleaned: false,
     };
     let mut work = VecDeque::from([(function.entry, initial)]);
     let mut seen = BTreeSet::new();
@@ -105,6 +128,7 @@ pub(super) fn verify(
         }
         let block = &function.blocks[block_id.0 as usize];
         for i in &block.instructions {
+            let mut exceptional_state = None;
             for o in op_operands(&i.op) {
                 if tracked(operand_ty(o)?)
                     && let SsaOperand::Value(id) = o
@@ -150,10 +174,13 @@ pub(super) fn verify(
                     )?;
                     match op.as_ref() {
                         ClassOp::BaseInit { base, args, .. } => {
-                            state.fields.complete_base(types, *base)?;
                             for arg in args {
                                 consume(arg, &mut state)?;
                             }
+                            if i.unwind.is_some() {
+                                exceptional_state = Some(state.clone());
+                            }
+                            state.fields.complete_base(types, *base)?;
                         }
                         ClassOp::ObjectAlloc { .. } => {
                             if state.allocations.insert(i.result, false).is_some() {
@@ -169,10 +196,13 @@ pub(super) fn verify(
                                     "SSA initialization requires one preceding allocation".into()
                                 );
                             }
-                            state.allocations.insert(*object, true);
                             for arg in args {
                                 consume(arg, &mut state)?;
                             }
+                            if i.unwind.is_some() {
+                                exceptional_state = Some(state.clone());
+                            }
+                            state.allocations.insert(*object, true);
                         }
                         ClassOp::PublishObject { object, .. } => {
                             let SsaOperand::Value(id) = object else {
@@ -182,6 +212,44 @@ pub(super) fn verify(
                                 return Err("SSA publication before initialization or duplicate publication".into());
                             }
                             consume(object, &mut state)?;
+                        }
+                        ClassOp::ConstructionCleanup {
+                            class,
+                            object,
+                            fields,
+                            free_allocation,
+                        } => {
+                            if *free_allocation {
+                                let SsaOperand::Value(object_id) = object else {
+                                    return Err("SSA allocation cleanup has no object value".into());
+                                };
+                                if !fields.is_empty()
+                                    || state.allocations.remove(object_id) != Some(false)
+                                {
+                                    return Err("SSA allocation cleanup is not exactly once before publication".into());
+                                }
+                                consume(object, &mut state)?;
+                            } else {
+                                if init != Some(*class) || state.construction_cleaned {
+                                    return Err("SSA partial-construction cleanup is duplicated or outside init".into());
+                                }
+                                let expected =
+                                    types.classes()[class.0 as usize]
+                                        .destruction
+                                        .iter()
+                                        .filter_map(|step| match step {
+                                            aether_frontend::ClassDropStep::Field {
+                                                field, ..
+                                            } if state.fields.contains(field) => Some(*field),
+                                            _ => None,
+                                        })
+                                        .collect::<Vec<_>>();
+                                if *fields != expected {
+                                    return Err("SSA partial-construction cleanup omits, duplicates or reorders fields".into());
+                                }
+                                state.fields = aether_frontend::ClassInitializationState::default();
+                                state.construction_cleaned = true;
+                            }
                         }
                         ClassOp::ClassUpcast {
                             source,
@@ -316,7 +384,7 @@ pub(super) fn verify(
                 _ => (),
             }
             if let Some(unwind) = i.unwind {
-                work.push_back((unwind, state.clone()));
+                work.push_back((unwind, exceptional_state.unwrap_or_else(|| state.clone())));
             }
             if tracked(i.ty) && !state.owned.insert(i.result) {
                 return Err("SSA duplicates an owning result token".into());
@@ -337,6 +405,11 @@ pub(super) fn verify(
                     state.owned
                 ));
             }
+            if state.construction_cleaned {
+                return Err(
+                    "SSA normal initializer path used exceptional construction cleanup".into(),
+                );
+            }
             if init.is_some_and(|c| {
                 types.classes()[c.0 as usize]
                     .fields
@@ -344,6 +417,16 @@ pub(super) fn verify(
                     .any(|f| !state.fields.contains(&f.id))
             }) {
                 return Err("SSA initializer returns before complete field initialization".into());
+            }
+        }
+        if matches!(block.terminator, SsaTerminator::ResumeUnwind { .. }) {
+            if !state.allocations.is_empty() {
+                return Err("SSA exceptional exit leaks an unpublished allocation".into());
+            }
+            if init.is_some() && !state.construction_cleaned {
+                return Err(
+                    "SSA initializer exceptional exit omits partial-construction cleanup".into(),
+                );
             }
         }
         for target in ssa_targets(&block.terminator) {

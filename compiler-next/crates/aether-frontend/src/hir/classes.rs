@@ -38,6 +38,30 @@ fn has_return(block: &AstBlock) -> bool {
     })
 }
 
+fn ast_definitely_terminates(block: &AstBlock) -> bool {
+    block
+        .statements
+        .last()
+        .is_some_and(|statement| match &statement.kind {
+            AstStmtKind::Return(_) | AstStmtKind::Throw(_) => true,
+            AstStmtKind::If {
+                then_block,
+                else_block: Some(else_block),
+                ..
+            } => ast_definitely_terminates(then_block) && ast_definitely_terminates(else_block),
+            AstStmtKind::Match { arms, .. } => {
+                !arms.is_empty() && arms.iter().all(|arm| ast_definitely_terminates(&arm.body))
+            }
+            AstStmtKind::Try { body, catches } => {
+                ast_definitely_terminates(body)
+                    && catches
+                        .iter()
+                        .all(|catch| ast_definitely_terminates(&catch.body))
+            }
+            _ => false,
+        })
+}
+
 fn block_uses_exceptions(block: &AstBlock) -> bool {
     block
         .statements
@@ -181,13 +205,15 @@ pub(super) fn expand_methods(program: &mut ParsedProgram) -> Result<(), Vec<Diag
                     if has_return(&f.body) {
                         return Err(vec![error("E0404", "init cannot return a value", f.span)]);
                     }
-                    f.body.statements.push(AstStmt {
-                        kind: AstStmtKind::Return(AstExpr {
-                            kind: AstExprKind::Integer("0".into()),
+                    if !ast_definitely_terminates(&f.body) {
+                        f.body.statements.push(AstStmt {
+                            kind: AstStmtKind::Return(AstExpr {
+                                kind: AstExprKind::Integer("0".into()),
+                                span: f.span,
+                            }),
                             span: f.span,
-                        }),
-                        span: f.span,
-                    });
+                        });
+                    }
                 }
                 f.parameters.insert(
                     0,
@@ -969,18 +995,6 @@ impl Analyzer<'_> {
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
         let source = self.raw_receiver(receiver)?;
-        if self.types.exception_class().is_some()
-            && self
-                .class_method
-                .as_ref()
-                .is_some_and(|(_, method)| method.initializing)
-        {
-            return Err(vec![error(
-                "E0436",
-                "a potentially throwing method call is unavailable during initialization until constructor rollback is implemented",
-                span,
-            )]);
-        }
         if let Some(interface) = self.types.interface_id(source.ty) {
             if self.types.exception_class().is_some() {
                 return Err(vec![error(
@@ -1500,12 +1514,70 @@ pub(super) fn verify_body(
     Ok(())
 }
 
+pub(super) fn verify_constructor_unwind_plan(
+    plan: Option<&crate::ConstructorUnwindPlan>,
+    locals: &[HirLocal],
+    parameters: &[HirParameter],
+    function: FunctionId,
+    types: &TypeArena,
+) -> Result<(), String> {
+    let initializer = types
+        .class_method(function)
+        .filter(|(_, method)| method.initializing)
+        .map(|(class, _)| class);
+    let Some(class) = initializer else {
+        return if plan.is_none() {
+            Ok(())
+        } else {
+            Err("non-initializer carries a constructor unwind plan".into())
+        };
+    };
+    let plan = plan.ok_or("initializer is missing its constructor unwind plan")?;
+    let expected_fields = types.classes()[class.0 as usize]
+        .destruction
+        .iter()
+        .filter_map(|step| match step {
+            crate::ClassDropStep::Field { field, .. } => Some(*field),
+            crate::ClassDropStep::Free { .. } => None,
+        })
+        .collect::<Vec<_>>();
+    let receiver_ty = types
+        .id_of(TypeData::ClassToken {
+            class,
+            kind: ClassTokenKind::Receiver {
+                mutable: true,
+                initializing: true,
+            },
+        })
+        .ok_or("initializer receiver type is unavailable")?;
+    if plan.class != class
+        || plan.cleanup_fields != expected_fields
+        || parameters.first().map(|parameter| parameter.local) != Some(plan.receiver)
+        || locals.get(plan.receiver.0 as usize).map(|local| local.ty) != Some(receiver_ty)
+    {
+        return Err("constructor unwind plan does not match class metadata/receiver".into());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     const SOURCE: &str = "class C{int n;public init(){n=1;}public mut int inc(){n=n+1;return n;}public int get(){return n;}}class D{int n;public init(){n=1;}public int get(){return n;}} int main(){C a=C();C b=a;b.inc();if(a==b){return a.get();}return 0;}";
     fn valid() -> TypedHir {
         analyze(crate::parse_source(&crate::SourceFile::new("oop.ae", SOURCE)).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn constructor_unwind_plan_corruption_is_rejected() {
+        let mut hir = valid();
+        let plan = hir
+            .functions
+            .iter_mut()
+            .find_map(|function| function.constructor_unwind.as_mut())
+            .expect("class initializer plan");
+        plan.class = ClassId(999);
+        assert!(crate::verify_hir(&hir).is_err());
     }
     // Find a class expression recursively, without changing unrelated operands.
     fn mutate_expr(e: &mut HirExpr, kind: u32) -> bool {

@@ -14,6 +14,7 @@ impl Builder<'_> {
         );
         Operand::Local(result)
     }
+    #[allow(clippy::too_many_lines)]
     pub(super) fn lower_class(&mut self, op: &ClassOp<HirExpr>, ty: TypeId, span: Span) -> Operand {
         if let ClassOp::Construct {
             class,
@@ -21,7 +22,18 @@ impl Builder<'_> {
             args,
         } = op
         {
-            let args = args.iter().map(|e| self.lower_expr(e)).collect();
+            let temporary_start = self.active_temporary_owners.len();
+            let mut lowered_args = Vec::with_capacity(args.len());
+            for argument in args {
+                let lowered = self.lower_expr(argument);
+                if self.types.needs_drop(argument.ty)
+                    && let Some(local) = operand_local_id(&lowered)
+                    && !self.active_owners.contains(&local)
+                {
+                    self.active_temporary_owners.push(local);
+                }
+                lowered_args.push(lowered);
+            }
             let unpublished = self
                 .types
                 .id_of(TypeData::ClassToken {
@@ -34,12 +46,13 @@ impl Builder<'_> {
             let HirCallTarget::Instance(initializer) = initializer else {
                 unreachable!("verified concrete class initializer")
             };
+            self.active_temporary_owners.truncate(temporary_start);
             self.class_value(
                 ClassOp::InitCall {
                     class: *class,
                     initializer: *initializer,
                     object: object.clone(),
-                    args,
+                    args: lowered_args,
                 },
                 TypeId::BOOL,
                 span,
@@ -86,7 +99,28 @@ impl Builder<'_> {
                 drops.push(r.clone());
             }
         }
+        let state_change = match &mapped {
+            ClassOp::BaseInit { base, .. } => Some((Some(*base), None)),
+            ClassOp::FieldWrite {
+                field,
+                initialize: true,
+                ..
+            } => Some((None, Some(*field))),
+            _ => None,
+        };
         let result = self.class_value(mapped, ty, span);
+        if let Some((base, field)) = state_change
+            && let Some(state) = &mut self.construction_state
+        {
+            if let Some(base) = base {
+                state
+                    .complete_base(self.types, base)
+                    .expect("verified HIR base initialization state");
+            }
+            if let Some(field) = field {
+                state.insert(field);
+            }
+        }
         for drop in drops {
             self.emit_drop(operand_place(&drop), span);
         }
@@ -117,17 +151,54 @@ pub(super) fn verify(
         .class_method(function.function_id)
         .filter(|(_, m)| m.initializing)
         .map(|(c, _)| c);
+    match (init, function.constructor_unwind.as_ref()) {
+        (None, None) => {}
+        (Some(class), Some(plan)) => {
+            let expected = types.classes()[class.0 as usize]
+                .destruction
+                .iter()
+                .filter_map(|step| match step {
+                    aether_frontend::ClassDropStep::Field { field, .. } => Some(*field),
+                    aether_frontend::ClassDropStep::Free { .. } => None,
+                })
+                .collect::<Vec<_>>();
+            if plan.class != class
+                || plan.cleanup_fields != expected
+                || function.parameters.first().map(|parameter| parameter.local)
+                    != Some(plan.receiver)
+            {
+                return Err("MIR constructor unwind plan is invalid".into());
+            }
+        }
+        _ => return Err("MIR constructor unwind plan presence is invalid".into()),
+    }
     let mut work = VecDeque::from([(
         function.entry,
         aether_frontend::ClassInitializationState::default(),
         BTreeMap::<LocalId, bool>::new(),
+        false,
     )]);
     let mut visited = BTreeSet::new();
-    while let Some((block, mut fields, mut allocations)) = work.pop_front() {
-        if !visited.insert((block, fields.clone(), allocations.clone())) {
+    while let Some((block, mut fields, mut allocations, mut construction_cleaned)) =
+        work.pop_front()
+    {
+        if !visited.insert((
+            block,
+            fields.clone(),
+            allocations.clone(),
+            construction_cleaned,
+        )) {
             continue;
         }
         for instruction in &function.blocks[block.0 as usize].instructions {
+            let exceptional = instruction.unwind.map(|target| {
+                (
+                    target,
+                    fields.clone(),
+                    allocations.clone(),
+                    construction_cleaned,
+                )
+            });
             match &instruction.value {
                 Rvalue::Class(op) => {
                     aether_frontend::verify_class_access(
@@ -168,6 +239,41 @@ pub(super) fn verify(
                                 .ok_or("publication requires allocated object")?;
                             if allocations.remove(&object) != Some(true) {
                                 return Err("MIR publication requires completed initialization exactly once".into());
+                            }
+                        }
+                        ClassOp::ConstructionCleanup {
+                            class,
+                            object,
+                            fields: cleanup,
+                            free_allocation,
+                        } => {
+                            if *free_allocation {
+                                let object = operand_local_id(object)
+                                    .ok_or("allocation cleanup requires unpublished object")?;
+                                if !cleanup.is_empty() || allocations.remove(&object) != Some(false)
+                                {
+                                    return Err("MIR allocation cleanup is not exactly once before publication".into());
+                                }
+                            } else {
+                                if init != Some(*class) || construction_cleaned {
+                                    return Err("MIR partial-construction cleanup is duplicated or outside init".into());
+                                }
+                                let expected =
+                                    types.classes()[class.0 as usize]
+                                        .destruction
+                                        .iter()
+                                        .filter_map(|step| match step {
+                                            aether_frontend::ClassDropStep::Field {
+                                                field, ..
+                                            } if fields.contains(field) => Some(*field),
+                                            _ => None,
+                                        })
+                                        .collect::<Vec<_>>();
+                                if *cleanup != expected {
+                                    return Err("MIR partial-construction cleanup omits, duplicates or reorders fields".into());
+                                }
+                                fields = aether_frontend::ClassInitializationState::default();
+                                construction_cleaned = true;
                             }
                         }
                         ClassOp::FieldRead { receiver, field }
@@ -233,6 +339,9 @@ pub(super) fn verify(
                 }
                 _ => (),
             }
+            if let Some(edge) = exceptional {
+                work.push_back(edge);
+            }
         }
         let term = function.blocks[block.0 as usize]
             .terminator
@@ -245,6 +354,11 @@ pub(super) fn verify(
             if !allocations.is_empty() {
                 return Err("MIR normal return leaves unpublished allocation".into());
             }
+            if construction_cleaned {
+                return Err(
+                    "MIR normal initializer path used exceptional construction cleanup".into(),
+                );
+            }
             if init.is_some_and(|c| {
                 types.classes()[c.0 as usize]
                     .fields
@@ -254,8 +368,23 @@ pub(super) fn verify(
                 return Err("MIR initializer returns before every field is initialized".into());
             }
         }
+        if matches!(term, Terminator::ResumeUnwind { .. }) {
+            if !allocations.is_empty() {
+                return Err("MIR exceptional exit leaks an unpublished allocation".into());
+            }
+            if init.is_some() && !construction_cleaned {
+                return Err(
+                    "MIR initializer exceptional exit omits partial-construction cleanup".into(),
+                );
+            }
+        }
         for target in targets(term) {
-            work.push_back((target, fields.clone(), allocations.clone()));
+            work.push_back((
+                target,
+                fields.clone(),
+                allocations.clone(),
+                construction_cleaned,
+            ));
         }
     }
     Ok(())

@@ -450,6 +450,7 @@ pub struct SsaFunction {
     /// Blocks in stable MIR order.
     pub blocks: Vec<SsaBlock>,
     pub exception_events: Vec<ExceptionEventId>,
+    pub constructor_unwind: Option<aether_frontend::ConstructorUnwindPlan>,
 }
 
 /// Unverified SSA type-state.
@@ -693,6 +694,7 @@ fn build_function_ssa(
         entry: function.entry,
         blocks,
         exception_events: function.exception_events.clone(),
+        constructor_unwind: function.constructor_unwind.clone(),
     }
 }
 
@@ -1940,7 +1942,10 @@ fn verify_ssa_function(
                     SsaOp::Class(ref op)
                         if matches!(
                             op.as_ref(),
-                            ClassOp::DirectMethodCall { .. } | ClassOp::BaseMethodCall { .. }
+                            ClassOp::DirectMethodCall { .. }
+                                | ClassOp::BaseMethodCall { .. }
+                                | ClassOp::BaseInit { .. }
+                                | ClassOp::InitCall { .. }
                         )
                 );
             if !function.exception_events.is_empty() && instruction.unwind.is_some() != may_throw {
