@@ -343,6 +343,8 @@ pub enum AstExprKind {
     Integer(String),
     /// Exact source spelling, not yet rounded to a concrete IEEE format.
     Float(String),
+    /// Decoded, valid UTF-8 content. U+0000 is retained as an ordinary byte.
+    String(String),
     /// Boolean literal.
     Bool(bool),
     /// Collection literal. Its concrete collection kind is selected only from

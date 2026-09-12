@@ -11,6 +11,8 @@ pub enum TokenKind {
     Integer,
     /// Unsuffixed decimal floating literal.
     Float,
+    /// Immutable UTF-8 string literal. The lexeme retains the exact spelling.
+    String,
     /// `int`.
     KwInt,
     /// `bool`.
@@ -169,6 +171,59 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                     }
                 }
                 push(&mut tokens, kind, source, start, cursor);
+            }
+            b'"' => {
+                cursor += 1;
+                let mut terminated = false;
+                while cursor < bytes.len() {
+                    match bytes[cursor] {
+                        b'"' => {
+                            cursor += 1;
+                            terminated = true;
+                            break;
+                        }
+                        b'\\' => {
+                            cursor += 1;
+                            match bytes.get(cursor) {
+                                Some(b'0' | b'n' | b'r' | b't' | b'"' | b'\\') => cursor += 1,
+                                Some(_) => {
+                                    let end = (cursor + 1).min(bytes.len());
+                                    diagnostics.push(Diagnostic::new(
+                                        "E0003",
+                                        Phase::Lex,
+                                        DiagnosticCategory::Syntax,
+                                        "unsupported string escape",
+                                        Some(Span::in_source(source.id, cursor - 1, end)),
+                                    ));
+                                    cursor = end;
+                                }
+                                None => break,
+                            }
+                        }
+                        b'\n' | b'\r' => break,
+                        byte => {
+                            cursor += if byte.is_ascii() {
+                                1
+                            } else {
+                                source.text[cursor..]
+                                    .chars()
+                                    .next()
+                                    .map_or(1, char::len_utf8)
+                            };
+                        }
+                    }
+                }
+                if terminated {
+                    push(&mut tokens, TokenKind::String, source, start, cursor);
+                } else {
+                    diagnostics.push(Diagnostic::new(
+                        "E0003",
+                        Phase::Lex,
+                        DiagnosticCategory::Syntax,
+                        "unterminated string literal",
+                        Some(Span::in_source(source.id, start, cursor)),
+                    ));
+                }
             }
             b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
                 cursor += 1;

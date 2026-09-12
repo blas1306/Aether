@@ -1,8 +1,9 @@
 # GENERAL-ARCH-1 — reporte de decisión de `string`
 
-Estado: **ARQUITECTURA DISEÑADA; SIN IMPLEMENTACIÓN**, 2026-09-12. El contrato
-completo está en [GENERAL-ARCH-1](GENERAL_ARCH_1_STRING.md). No se modificaron
-parser, HIR, MIR, SSA, LLVM ni runtime.
+Estado: **ARQUITECTURA DISEÑADA; GENERAL-V1 IMPLEMENTADO**, 2026-09-12. El
+contrato completo está en [GENERAL-ARCH-1](GENERAL_ARCH_1_STRING.md); la
+implementación acotada y su evidencia están en
+[GENERAL-V1](GENERAL_V1_STRING_REPORT.md).
 
 ## Modelo elegido
 

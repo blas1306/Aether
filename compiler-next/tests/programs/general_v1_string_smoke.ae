@@ -1,0 +1,45 @@
+string identity(string value) {
+    return value;
+}
+
+string make() {
+    return "he" + "llo";
+}
+
+int main() {
+    string ascii = "hello";
+    string unicode = "hé";
+    string empty = "";
+    string nul = "A\0B";
+    string duplicate = ascii;
+    duplicate = duplicate;
+    string heap = make();
+    string heap_alias = heap;
+    string returned = identity(heap_alias);
+    string left_empty = empty + ascii;
+    string right_empty = ascii + empty;
+    if (int(byteLength(ascii)) != 5) {
+        return 11;
+    }
+    if (int(byteLength(unicode)) != 3) {
+        return 12;
+    }
+    if (int(byteLength(nul)) != 3) {
+        return 13;
+    }
+    if (ascii != "hello") {
+        return 14;
+    }
+    if (heap != "hello") {
+        return 15;
+    }
+    if (left_empty != right_empty) {
+        return 16;
+    }
+    if (returned != heap) {
+        return 17;
+    }
+    print(nul);
+    println(unicode);
+    return 0;
+}

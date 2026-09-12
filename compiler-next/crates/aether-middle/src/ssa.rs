@@ -111,6 +111,8 @@ pub enum SsaPlaceBase {
 pub enum SsaOp {
     /// Ordered concrete object lifecycle/member operation.
     Class(Box<ClassOp<SsaOperand, InstanceId>>),
+    /// Explicit immutable string lifecycle/content operation.
+    String(Box<aether_frontend::StringOp<SsaOperand>>),
     /// Structured mathematical loop; inputs are Copy readable descriptors.
     /// Native oriented algebraic product with a closed concrete schedule.
     AlgebraicProduct {
@@ -888,6 +890,11 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             )
             .unwrap(),
         )),
+        Rvalue::String(op) => SsaOp::String(Box::new(
+            op.clone()
+                .map(|operand| Ok::<_, std::convert::Infallible>(rename_operand(&operand, stacks)))
+                .unwrap(),
+        )),
         Rvalue::Use(operand) => SsaOp::Use(rename_operand(operand, stacks)),
         Rvalue::Load(place) => match &place.base {
             PlaceBase::Local(local)
@@ -1595,6 +1602,11 @@ fn mir_liveness(function: &MirFunction, cfg: &Cfg) -> Vec<BTreeSet<LocalId>> {
 #[allow(clippy::too_many_lines)]
 fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
     match value {
+        Rvalue::String(op) => op
+            .operands()
+            .into_iter()
+            .filter_map(operand_local)
+            .collect(),
         Rvalue::Use(operand)
         | Rvalue::VectorTransposeMove { operand, .. }
         | Rvalue::Coerce { operand, .. }
@@ -2336,9 +2348,107 @@ fn verify_ssa_function(
     }
     aether_frontend::verify_class_metadata(types, structs, enums).map_err(fail)?;
     classes::verify(function, signatures, types, &operand_ty).map_err(fail)?;
+    verify_string_ownership(function, fail)?;
     verify_vector_transpose_ownership(function, fail)?;
     verify_matrix_literal_ownership(function, types, fail)?;
     verify_take_protocol(function, types, fail)?;
+    Ok(())
+}
+
+/// Every SSA value carrying a GENERAL-V1 owner must have an explicit transfer
+/// or Drop site. Borrowing string operations (Alias source, concat operands,
+/// equality, byteLength and output) intentionally do not discharge ownership.
+fn verify_string_ownership(
+    function: &SsaFunction,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut owners = function
+        .parameters
+        .iter()
+        .filter(|parameter| parameter.ty == TypeId::STRING)
+        .map(|parameter| parameter.value)
+        .collect::<BTreeSet<_>>();
+    for block in &function.blocks {
+        owners.extend(
+            block
+                .phis
+                .iter()
+                .filter(|phi| phi.ty == TypeId::STRING)
+                .map(|phi| phi.result),
+        );
+        owners.extend(
+            block
+                .instructions
+                .iter()
+                .filter(|instruction| instruction.ty == TypeId::STRING)
+                .map(|instruction| instruction.result),
+        );
+    }
+    let mut consumed_on_path = BTreeSet::new();
+    let value_from_place = |place: &SsaPlace| match &place.base {
+        SsaPlaceBase::Value(SsaOperand::Value(value)) if place.projections.is_empty() => {
+            Some(*value)
+        }
+        _ => None,
+    };
+
+    for block in &function.blocks {
+        for phi in &block.phis {
+            if phi.ty == TypeId::STRING {
+                for (predecessor, value) in &phi.incoming {
+                    if !consumed_on_path.insert((*predecessor, *value)) {
+                        return Err(fail(
+                            "SSA string owner is consumed twice on one control-flow path".into(),
+                        ));
+                    }
+                }
+            }
+        }
+        for instruction in &block.instructions {
+            match &instruction.op {
+                SsaOp::Move { source } | SsaOp::Drop { owner: source } => {
+                    if let Some(value) = value_from_place(source)
+                        && !consumed_on_path.insert((block.id, value))
+                    {
+                        return Err(fail(
+                            "SSA string owner is consumed twice on one control-flow path".into(),
+                        ));
+                    }
+                }
+                SsaOp::Call { args, .. } => {
+                    for argument in args {
+                        if let SsaOperand::Value(value) = argument
+                            && owners.contains(value)
+                            && !consumed_on_path.insert((block.id, *value))
+                        {
+                            return Err(fail(
+                                "SSA string owner is consumed twice on one control-flow path"
+                                    .into(),
+                            ));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let SsaTerminator::Return(SsaOperand::Value(value)) = &block.terminator
+            && function.return_type == TypeId::STRING
+            && !consumed_on_path.insert((block.id, *value))
+        {
+            return Err(fail(
+                "SSA string owner is consumed twice on one control-flow path".into(),
+            ));
+        }
+    }
+    if owners.iter().any(|owner| {
+        !consumed_on_path
+            .iter()
+            .any(|(_, consumed)| consumed == owner)
+    }) {
+        return Err(fail(
+            "SSA string owner has no explicit Transfer or Drop".into(),
+        ));
+    }
     Ok(())
 }
 
@@ -2607,6 +2717,10 @@ fn verify_op(
                     })
                     .ok_or_else(|| "unknown class method target".into())
             })?;
+        }
+
+        SsaOp::String(op) => {
+            aether_frontend::verify_string_op(op, result, types, operand_ty)?;
         }
 
         SsaOp::Use(operand) => {
@@ -3455,6 +3569,7 @@ fn valid_coercion(types: &TypeArena, kind: CoercionKind, from: TypeId, to: TypeI
 
 fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
     match op {
+        SsaOp::String(op) => op.operands(),
         SsaOp::Use(value)
         | SsaOp::VectorTransposeMove { operand: value, .. }
         | SsaOp::Coerce { operand: value, .. }

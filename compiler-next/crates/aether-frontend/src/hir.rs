@@ -156,12 +156,13 @@ pub fn layout_of(
                 align: size,
             }
         }
-        TypeData::Class(_) | TypeData::ClassToken { .. } | TypeData::Reference { .. } => {
-            TypeLayout {
-                size: u64::from(target.pointer_width / 8),
-                align: u64::from(target.pointer_width / 8),
-            }
-        }
+        TypeData::String
+        | TypeData::Class(_)
+        | TypeData::ClassToken { .. }
+        | TypeData::Reference { .. } => TypeLayout {
+            size: u64::from(target.pointer_width / 8),
+            align: u64::from(target.pointer_width / 8),
+        },
         TypeData::Buffer { .. }
         | TypeData::Vector { .. }
         | TypeData::Array { .. }
@@ -618,6 +619,10 @@ pub enum HirStmtKind {
         requested_capacity: HirExpr,
         mutation: StructuralMutation,
     },
+    StringOutput {
+        value: HirExpr,
+        newline: bool,
+    },
     If {
         condition: HirExpr,
         then_block: HirBlock,
@@ -884,6 +889,8 @@ pub enum AlgebraicProductKind {
 pub enum HirExprKind {
     /// Resolved class identities, ownership uses and direct member effects.
     Class(Box<ClassOp<HirExpr>>),
+    /// Fundamental immutable string lifecycle and content operations.
+    String(Box<crate::StringOp<HirExpr>>),
     AlgebraicValue {
         capability: AlgebraicCapability,
     },
@@ -1378,6 +1385,18 @@ pub fn collect_program_signatures(
                 &enum_arities,
             )
             .map_err(|d| vec![src(d, module)])?;
+            if ty == TypeId::STRING {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0450",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "GENERAL-V1 string values cannot be stored in struct fields",
+                        Some(field.span),
+                    ),
+                    module,
+                )]);
+            }
             if types.contains_view(ty) {
                 return Err(vec![src(
                     Diagnostic::new(
@@ -1491,6 +1510,18 @@ pub fn collect_program_signatures(
                 })
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|d| vec![src(d, module)])?;
+            if let Some(payload) = payloads.iter().find(|payload| payload.ty == TypeId::STRING) {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0450",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "GENERAL-V1 string values cannot be stored in enum payloads",
+                        Some(payload.span),
+                    ),
+                    module,
+                )]);
+            }
             if let Some(payload) = payloads
                 .iter()
                 .find(|payload| types.contains_view(payload.ty))
@@ -1798,6 +1829,23 @@ pub fn collect_program_signatures(
                 &enum_arities,
             )
             .map_err(|d| vec![src(d, module)])?;
+            if !generic_parameters.is_empty()
+                && (return_type == TypeId::STRING
+                    || parameters
+                        .iter()
+                        .any(|parameter| parameter.ty == TypeId::STRING))
+            {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0450",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "GENERAL-V1 does not admit string in generic function signatures",
+                        Some(f.span),
+                    ),
+                    module,
+                )]);
+            }
             for parameter in &parameters {
                 validate_type_constraints(&types, parameter.ty, &structs, &enums, parameter.span)
                     .map_err(|diagnostics| {
@@ -2194,6 +2242,15 @@ fn resolve_type_in_module(
             struct_arities,
             enum_arities,
         )?;
+        if pointee == TypeId::STRING {
+            return Err(Diagnostic::new(
+                "E0450",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "GENERAL-V1 does not admit references to string",
+                Some(ty.span),
+            ));
+        }
         if types.contains_class(pointee) {
             return Err(classes::error(
                 "E0406",
@@ -2319,6 +2376,15 @@ fn resolve_type_in_module(
             struct_arities,
             enum_arities,
         )?);
+    }
+    if arguments.contains(&TypeId::STRING) {
+        return Err(Diagnostic::new(
+            "E0450",
+            Phase::Semantic,
+            DiagnosticCategory::Type,
+            "GENERAL-V1 does not admit string as a generic argument",
+            Some(ty.span),
+        ));
     }
     if ty.module.is_none()
         && let Some(expected) = intrinsic_type_arity(&ty.name)
@@ -3065,7 +3131,8 @@ fn compute_aggregate_layouts(
                 .map_or(TypeLayout { size: 0, align: 1 }, |(size, align)| {
                     TypeLayout { size, align }
                 }),
-            TypeData::Class(_)
+            TypeData::String
+            | TypeData::Class(_)
             | TypeData::ClassToken { .. }
             | TypeData::Interface(_)
             | TypeData::InterfaceKeepalive { .. }
@@ -3585,6 +3652,10 @@ impl Monomorphizer<'_> {
                             place: self.substitute_place(place, substitution)?,
                             value: self.substitute_expr(value, substitution)?,
                         },
+                        HirStmtKind::StringOutput { value, newline } => HirStmtKind::StringOutput {
+                            value: self.substitute_expr(value, substitution)?,
+                            newline: *newline,
+                        },
                         HirStmtKind::ListPush {
                             target,
                             value,
@@ -3822,6 +3893,9 @@ impl Monomorphizer<'_> {
                 )?;
                 HirExprKind::Class(Box::new(mapped))
             }
+            HirExprKind::String(op) => HirExprKind::String(Box::new(
+                op.clone().map(|e| self.substitute_expr(&e, substitution))?,
+            )),
             HirExprKind::Int(value) => HirExprKind::Int(*value),
             HirExprKind::Float(value) => HirExprKind::Float(*value),
             HirExprKind::Bool(value) => HirExprKind::Bool(*value),
@@ -4353,7 +4427,8 @@ fn compute_concrete_layouts(
             TypeData::Float(FloatType::Float64) => Some(TypeLayout { size: 8, align: 8 }),
             TypeData::Struct(id) => Some(structs[id.0 as usize].layout),
             TypeData::Enum(id) => Some(enums[id.0 as usize].layout),
-            TypeData::Class(_)
+            TypeData::String
+            | TypeData::Class(_)
             | TypeData::ClassToken { .. }
             | TypeData::Interface(_)
             | TypeData::InterfaceKeepalive { .. }
@@ -4833,6 +4908,7 @@ impl OwnershipAnalysis<'_> {
                     self.expr(requested_capacity)?;
                     self.structural_mutation(target, statement.span)?;
                 }
+                HirStmtKind::StringOutput { value, .. } => self.expr(value)?,
                 HirStmtKind::Return { value, drops } => {
                     self.expr(value)?;
                     *drops = self
@@ -5161,6 +5237,12 @@ impl OwnershipAnalysis<'_> {
     fn expr(&mut self, expr: &HirExpr) -> Result<(), Vec<Diagnostic>> {
         match &expr.kind {
             HirExprKind::Class(op) => {
+                for operand in op.operands() {
+                    self.expr(operand)?;
+                }
+                Ok(())
+            }
+            HirExprKind::String(op) => {
                 for operand in op.operands() {
                     self.expr(operand)?;
                 }
@@ -6459,6 +6541,25 @@ impl Analyzer<'_> {
     }
 
     fn effect_statement(&mut self, expression: &AstExpr) -> Result<HirStmtKind, Vec<Diagnostic>> {
+        if let AstExprKind::Call {
+            callee,
+            type_arguments,
+            args,
+        } = &expression.kind
+            && matches!(callee.as_str(), "print" | "println")
+        {
+            if !type_arguments.is_empty() || args.len() != 1 {
+                return Err(vec![type_error(
+                    "print/println accept exactly one string and no type arguments",
+                    expression.span,
+                )]);
+            }
+            let value = self.string_borrow_operand(&args[0])?;
+            return Ok(HirStmtKind::StringOutput {
+                value,
+                newline: callee == "println",
+            });
+        }
         if !matches!(&expression.kind, AstExprKind::Call { callee, .. }
             if matches!(callee.as_str(), "push" | "reserve"))
         {
@@ -6954,6 +7055,47 @@ impl Analyzer<'_> {
         if let Some(result) = self.class_expression(e, expected) {
             return result;
         }
+        if let AstExprKind::String(value) = &e.kind {
+            return self.coerce(
+                Checked {
+                    expr: HirExpr {
+                        kind: HirExprKind::String(Box::new(crate::StringOp::Literal {
+                            bytes: value.as_bytes().to_vec(),
+                        })),
+                        ty: TypeId::STRING,
+                        span: e.span,
+                    },
+                    constant: None,
+                },
+                expected,
+            );
+        }
+        if let AstExprKind::Call {
+            callee,
+            type_arguments,
+            args,
+        } = &e.kind
+            && callee == "byteLength"
+        {
+            if !type_arguments.is_empty() || args.len() != 1 {
+                return Err(vec![type_error(
+                    "byteLength expects exactly one string and no type arguments",
+                    e.span,
+                )]);
+            }
+            let source = self.string_borrow_operand(&args[0])?;
+            return self.coerce(
+                Checked {
+                    expr: HirExpr {
+                        kind: HirExprKind::String(Box::new(crate::StringOp::ByteLength { source })),
+                        ty: TypeId::USIZE,
+                        span: e.span,
+                    },
+                    constant: None,
+                },
+                expected,
+            );
+        }
         if let AstExprKind::Call {
             callee,
             type_arguments,
@@ -7096,7 +7238,15 @@ impl Analyzer<'_> {
                 };
                 Checked {
                     expr: HirExpr {
-                        kind: if self.types.guarantees_copy(self.locals[l.0 as usize].ty) {
+                        kind: if self.locals[l.0 as usize].ty == TypeId::STRING {
+                            HirExprKind::String(Box::new(crate::StringOp::Alias {
+                                source: HirExpr {
+                                    kind: HirExprKind::Local(l),
+                                    ty: TypeId::STRING,
+                                    span: e.span,
+                                },
+                            }))
+                        } else if self.types.guarantees_copy(self.locals[l.0 as usize].ty) {
                             HirExprKind::Local(l)
                         } else if self.types.is_object_owner(self.locals[l.0 as usize].ty) {
                             HirExprKind::Class(Box::new(ClassOp::HandleAlias {
@@ -7487,6 +7637,7 @@ impl Analyzer<'_> {
                 | TypeData::Class(_)
                 | TypeData::ClassToken { .. }
                 | TypeData::Bool
+                | TypeData::String
                 | TypeData::Struct(_)
                 | TypeData::Enum(_)
                 | TypeData::GenericParam(_)
@@ -8721,6 +8872,12 @@ impl Analyzer<'_> {
                 span,
             )]);
         }
+        if type_arguments.contains(&TypeId::STRING) {
+            return Err(vec![type_error(
+                "GENERAL-V1 does not admit string as a generic function argument",
+                span,
+            )]);
+        }
         validate_generic_constraints(
             self.types,
             &s.generic_parameters,
@@ -8842,6 +8999,42 @@ impl Analyzer<'_> {
         expected: Option<TypeId>,
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
+        if expected == Some(TypeId::STRING) || self.ast_is_string(la) || self.ast_is_string(ra) {
+            if !matches!(
+                op,
+                AstBinaryOp::Add | AstBinaryOp::Equal | AstBinaryOp::NotEqual
+            ) {
+                return Err(vec![type_error(
+                    "string admits only +, == and != in GENERAL-V1",
+                    span,
+                )]);
+            }
+            let left = self.string_borrow_operand(la)?;
+            let right = self.string_borrow_operand(ra)?;
+            let (kind, ty) = if op == AstBinaryOp::Add {
+                (crate::StringOp::Concat { left, right }, TypeId::STRING)
+            } else {
+                (
+                    crate::StringOp::Equal {
+                        left,
+                        right,
+                        negate: op == AstBinaryOp::NotEqual,
+                    },
+                    TypeId::BOOL,
+                )
+            };
+            return self.coerce(
+                Checked {
+                    expr: HirExpr {
+                        kind: HirExprKind::String(Box::new(kind)),
+                        ty,
+                        span,
+                    },
+                    constant: None,
+                },
+                expected,
+            );
+        }
         let ll = literal(la);
         let rl = literal(ra);
         let (l, r) = if ll && !rl {
@@ -9115,6 +9308,48 @@ impl Analyzer<'_> {
             check_value(self.types, v, common, span, self.target)?
         }
         Ok(bin_result(self.types, op, l, r, result, constant))
+    }
+
+    fn ast_is_string(&self, expression: &AstExpr) -> bool {
+        match &expression.kind {
+            AstExprKind::String(_) => true,
+            AstExprKind::Name(name) => self
+                .lookup(name)
+                .is_some_and(|local| self.locals[local.0 as usize].ty == TypeId::STRING),
+            AstExprKind::Binary {
+                op: AstBinaryOp::Add,
+                left,
+                right,
+            } => self.ast_is_string(left) || self.ast_is_string(right),
+            AstExprKind::Call { callee, .. } => self.names[self.module.0 as usize]
+                .get(callee)
+                .is_some_and(|id| self.signatures[id.0 as usize].return_type == TypeId::STRING),
+            AstExprKind::QualifiedCall {
+                module, function, ..
+            } => self
+                .module_names
+                .get(module)
+                .filter(|target| self.imports[self.module.0 as usize].get(module) == Some(target))
+                .and_then(|target| self.names[target.0 as usize].get(function))
+                .is_some_and(|id| self.signatures[id.0 as usize].return_type == TypeId::STRING),
+            _ => false,
+        }
+    }
+
+    fn string_borrow_operand(&mut self, expression: &AstExpr) -> Result<HirExpr, Vec<Diagnostic>> {
+        let checked = self.expression(expression, Some(TypeId::STRING))?;
+        let span = checked.expr.span;
+        match checked.expr.kind {
+            HirExprKind::String(op) => match *op {
+                crate::StringOp::Alias { source } => Ok(source),
+                other => Ok(HirExpr {
+                    kind: HirExprKind::String(Box::new(other)),
+                    ty: TypeId::STRING,
+                    span,
+                }),
+            },
+            _ => Ok(checked.expr),
+        }
     }
     fn coerce(&self, c: Checked, expected: Option<TypeId>) -> Result<Checked, Vec<Diagnostic>> {
         let Some(to) = expected else { return Ok(c) };
@@ -9483,6 +9718,7 @@ fn builtin(n: &str) -> Option<TypeId> {
         "usize" => TypeId::USIZE,
         "float32" | "float" => TypeId::FLOAT32,
         "float64" | "double" => TypeId::FLOAT64,
+        "string" => TypeId::STRING,
         _ => return None,
     })
 }
@@ -9982,6 +10218,12 @@ fn verify_block(
                     return Err(fail("HIR writes through a shared reference".into()));
                 }
             }
+            HirStmtKind::StringOutput { value, .. } => {
+                verify_expr(value, f, sigs, structs, enums, types, fail)?;
+                if value.ty != TypeId::STRING {
+                    return Err(fail("HIR string output operand is not string".into()));
+                }
+            }
             HirStmtKind::ListPush {
                 target,
                 value,
@@ -10355,6 +10597,17 @@ fn verify_expr(
                 return Err(fail(
                     "HIR Transfer cannot consume an ordinary class lvalue".into(),
                 ));
+            }
+        }
+        HirExprKind::String(op) => {
+            for operand in op.operands() {
+                verify_expr(operand, f, sigs, structs, enums, types, fail)?;
+            }
+            crate::verify_string_op(op, e.ty, types, |operand| Ok(operand.ty)).map_err(fail)?;
+            if let crate::StringOp::Alias { source } = op.as_ref()
+                && !matches!(source.kind, HirExprKind::Local(_) | HirExprKind::Load(_))
+            {
+                return Err(fail("HIR string Alias requires an lvalue".into()));
             }
         }
         HirExprKind::Int(_) if types.integer_info(e.ty).is_none() => {
@@ -11523,6 +11776,7 @@ fn ast_expr_has_call(expr: &AstExpr) -> bool {
         }
         AstExprKind::Integer(_)
         | AstExprKind::Float(_)
+        | AstExprKind::String(_)
         | AstExprKind::Bool(_)
         | AstExprKind::Name(_)
         | AstExprKind::QualifiedName { .. } => false,
@@ -11586,6 +11840,29 @@ mod tests {
     use crate::{SourceFile, parse_source};
     fn check(s: &str) -> Result<TypedHir, Vec<Diagnostic>> {
         analyze(parse_source(&SourceFile::new("test.ae", s)).unwrap())
+    }
+    #[test]
+    fn string_hir_metadata_corruptions_are_rejected() {
+        let mut invalid_utf8 = check("int main(){string s=\"ok\";return 0;}").unwrap();
+        let HirStmtKind::Local { initializer, .. } =
+            &mut invalid_utf8.functions[0].body.statements[0].kind
+        else {
+            panic!("expected string local");
+        };
+        let HirExprKind::String(op) = &mut initializer.kind else {
+            panic!("expected string literal");
+        };
+        **op = crate::StringOp::Literal { bytes: vec![0xff] };
+        assert!(verify_hir(&invalid_utf8).is_err());
+
+        let mut wrong_result = check("int main(){string s=\"ok\";return 0;}").unwrap();
+        let HirStmtKind::Local { initializer, .. } =
+            &mut wrong_result.functions[0].body.statements[0].kind
+        else {
+            panic!("expected string local");
+        };
+        initializer.ty = TypeId::BOOL;
+        assert!(verify_hir(&wrong_result).is_err());
     }
     #[test]
     fn verifier_rejects_duplicate_finally_identity() {

@@ -1008,6 +1008,10 @@ impl Parser {
                 kind: AstExprKind::Float(token.lexeme),
                 span: token.span,
             },
+            TokenKind::String => AstExpr {
+                kind: AstExprKind::String(decode_string_literal(&token.lexeme)),
+                span: token.span,
+            },
             TokenKind::KwTrue => AstExpr {
                 kind: AstExprKind::Bool(true),
                 span: token.span,
@@ -1390,6 +1394,30 @@ impl Parser {
             Some(self.current().span),
         )
     }
+}
+
+fn decode_string_literal(spelling: &str) -> String {
+    let inner = &spelling[1..spelling.len() - 1];
+    let mut decoded = String::with_capacity(inner.len());
+    let mut chars = inner.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            decoded.push(ch);
+            continue;
+        }
+        decoded.push(
+            match chars.next().expect("lexer validates string escapes") {
+                '0' => '\0',
+                'n' => '\n',
+                'r' => '\r',
+                't' => '\t',
+                '"' => '"',
+                '\\' => '\\',
+                _ => unreachable!("lexer validates string escapes"),
+            },
+        );
+    }
+    decoded
 }
 
 #[cfg(test)]

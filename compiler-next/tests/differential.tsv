@@ -22,7 +22,7 @@ malformed	PRESERVE_REJECTION	reject:E0100	reject	programs/malformed.ae
 invalid_main_parameter	V1_CONTRACT	reject:E0201	n/a	programs/unsupported_parameter.ae
 missing_main	V1_CONTRACT	reject:E0200	n/a	programs/unsupported_function.ae
 missing_return	FAIL_CLOSED	reject:E0207	n/a	programs/missing_return.ae
-unsupported_string	FAIL_CLOSED	reject:E0001	n/a	programs/unsupported_string.ae
+unsupported_string	GENERAL_V1	accept:0	n/a	programs/unsupported_string.ae
 direct_call	LEGACY_EQUIVALENT	accept:42	accept:42	programs/direct_call.ae
 bool_return	V1_CONTRACT	accept:1	n/a	programs/bool_return.ae
 nested_calls	LEGACY_EQUIVALENT	accept:25	accept:25	programs/nested_calls.ae

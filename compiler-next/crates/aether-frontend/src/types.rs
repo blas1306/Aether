@@ -256,6 +256,7 @@ impl TypeId {
     pub const USIZE: Self = Self(10);
     pub const FLOAT32: Self = Self(11);
     pub const FLOAT64: Self = Self(12);
+    pub const STRING: Self = Self(13);
 }
 
 impl fmt::Display for TypeId {
@@ -277,6 +278,7 @@ impl fmt::Display for TypeId {
             Self::USIZE => "usize",
             Self::FLOAT32 => "float32",
             Self::FLOAT64 => "float64",
+            Self::STRING => "string",
             Self(_) => return write!(f, "TypeId({})", self.0),
         };
         f.write_str(spelling)
@@ -347,6 +349,8 @@ pub enum TypeData {
     Bool,
     Integer(IntegerType),
     Float(FloatType),
+    /// Fundamental immutable, non-null UTF-8 owner handle.
+    String,
     /// Nominal, module-owned value aggregate.
     Struct(StructId),
     /// Nominal, module-owned tagged value aggregate.
@@ -510,6 +514,7 @@ impl fmt::Display for TypeData {
             Self::Bool => f.write_str("bool"),
             Self::Integer(v) => v.fmt(f),
             Self::Float(v) => v.fmt(f),
+            Self::String => f.write_str("string"),
             Self::Struct(id) => write!(f, "struct#{}", id.0),
             Self::Enum(id) => write!(f, "enum#{}", id.0),
             Self::GenericParam(id) => write!(f, "param({:?}:{})", id.owner, id.index),
@@ -835,6 +840,7 @@ impl TypeArena {
             TypeData::Integer(IntegerType::Usize),
             TypeData::Float(FloatType::Float32),
             TypeData::Float(FloatType::Float64),
+            TypeData::String,
         ];
         for (expected, data) in baseline.into_iter().enumerate() {
             let id = arena.intern(data);
@@ -1410,6 +1416,13 @@ impl TypeArena {
                 is_storable: matches!(data, TypeData::Class(_) | TypeData::Interface(_)),
                 needs_drop: true,
             },
+            TypeData::String => TypeProperties {
+                is_known: true,
+                is_copy: false,
+                is_relocatable: true,
+                is_storable: true,
+                needs_drop: true,
+            },
             TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_) => TypeProperties {
                 is_known: true,
                 is_copy: true,
@@ -1690,6 +1703,9 @@ impl TypeArena {
                     visiting,
                 ),
             Some(TypeData::Class(_) | TypeData::Interface(_)) => capability != Capability::Copy,
+            Some(TypeData::String) => {
+                matches!(capability, Capability::Relocatable | Capability::Storable)
+            }
             Some(TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_)) => true,
             Some(
                 TypeData::Reference { .. }
@@ -1803,7 +1819,10 @@ impl TypeArena {
         kind: CollectionKind,
         id: TypeId,
     ) -> CollectionElementAdmission {
-        if self.contains_class(id) {
+        // GENERAL-V1 deliberately qualifies `string` only as a direct value.
+        // Its intrinsic Storable/Relocatable facts are still truthful, but no
+        // collection has acquired string-element lifecycle lowering yet.
+        if id == TypeId::STRING || self.contains_class(id) {
             return CollectionElementAdmission::InvalidType;
         }
         let _timer = self.semantic_timer("frontend.detail.collection_admission");
@@ -1955,7 +1974,8 @@ impl TypeArena {
             Some(TypeData::ClassToken { .. } | TypeData::InterfaceKeepalive { .. }) => {
                 capability == 0
             }
-            Some(TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_)) | None => false,
+            Some(TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_) | TypeData::String)
+            | None => false,
         }
     }
 

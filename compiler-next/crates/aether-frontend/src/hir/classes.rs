@@ -1161,6 +1161,7 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
     use HirExprKind as E;
     match &e.kind {
         E::Class(op) => op.operands(),
+        E::String(op) => op.operands(),
         E::Int(_)
         | E::Float(_)
         | E::Bool(_)
@@ -1488,6 +1489,9 @@ pub(super) fn verify_body(
                         visit_expr(e, state, types, function, module, sigs)?;
                     }
                     visit_expr(requested_capacity, state, types, function, module, sigs)?;
+                }
+                HirStmtKind::StringOutput { value, .. } => {
+                    visit_expr(value, state, types, function, module, sigs)?;
                 }
                 HirStmtKind::Nop
                 | HirStmtKind::Break { .. }

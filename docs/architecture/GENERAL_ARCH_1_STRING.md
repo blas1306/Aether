@@ -1,9 +1,9 @@
 # GENERAL-ARCH-1 — modelo de `string` y frontera de texto
 
-Estado: **DECISIÓN DE ARQUITECTURA; SIN ADMISIÓN NI IMPLEMENTACIÓN**, 2026-09-12.
-Este milestone no modifica parser, HIR, MIR, SSA, LLVM ni runtime. La admisión
-de cualquier parte requiere un vertical native-first independiente y su
-promoción explícita al contrato semántico.
+Estado: **DECISIÓN DE ARQUITECTURA; PRIMER VERTICAL ADMITIDO POR GENERAL-V1**,
+2026-09-12. Esta decisión sigue siendo más amplia que el vertical implementado:
+la superficie exacta admitida y su qualification están registradas en
+[GENERAL-V1](GENERAL_V1_STRING_REPORT.md).
 
 ## 1. Decisión resumida
 

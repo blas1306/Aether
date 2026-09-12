@@ -2534,6 +2534,23 @@ borrowed descriptors and fresh owning results retain existing allocation costs.
 No consuming optimization, FMA contraction, reassociation, BLAS replacement or
 SIMD reduction reordering is enabled by this refactoring.
 
+### GENERAL-V1 compiler/runtime confirmation
+
+The native pipeline now carries canonical `string` and a shared typed
+`StringOp` vocabulary through HIR, MIR and SSA. Literal, Alias, Concat, Equal,
+ByteLength and Output retain their ownership/result contracts at every phase;
+MIR makes temporary cleanup and unwind cleanup explicit, and SSA independently
+rejects owners without a Transfer or Drop. Backend lowering consumes those
+verified decisions and does not infer lvalue/fresh ownership.
+
+The LLVM backend emits private immortal literal objects and the private
+single-thread string runtime only when a reachable compiled body or signature
+uses string. The runtime implements length-aware ARC, concat, content equality
+and output; shared runtime declarations are emitted once when string and
+exceptions coexist. The admitted surface, corruption tests, measurements and
+remaining debt are recorded in
+[GENERAL_V1_STRING_REPORT.md](GENERAL_V1_STRING_REPORT.md).
+
 OPEN DECISIONS for independent future work: fast-math modes, BLAS lowering,
 SIMD, loop tiling/blocking, parallel reductions, FMA and reproducibility modes.
 Each requires an explicit decision about observable order, traps, aliasing,

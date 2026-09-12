@@ -2580,3 +2580,30 @@ dispatch choice or closed-world assumption is used. The logical VirtualCall,
 receiver capability, arguments, result ownership and keepalive remain unchanged,
 and the complete transformed SSA is re-verified. Dynamic release and
 descriptor-selected destruction are unchanged.
+
+## GENERAL-V1 — immutable UTF-8 string spine
+
+Status: **ADMITTED** in `compiler-next` under the exact surface and exclusions
+in [GENERAL-V1](GENERAL_V1_STRING_REPORT.md), implementing the representation
+decision in [GENERAL-ARCH-1](GENERAL_ARCH_1_STRING.md).
+
+`string` is a canonical fundamental, immutable, non-null, valid-UTF-8 owning
+value. It is not a class. Its structural facts are `Copy=false`,
+`Relocatable=true`, `Storable=true`, `needs_drop=true`. Direct locals,
+assignment, by-value parameters and returns use explicit Alias, Transfer and
+Drop decisions. Dynamic backing uses non-atomic strong ARC; static literals,
+including the non-null empty singleton, preserve logical ownership while their
+physical retain/release is a no-op.
+
+The admitted content operations are only `string + string`, content `==`/`!=`,
+`byteLength(string) -> usize`, and length-aware `print(string)` /
+`println(string)`. U+0000 is ordinary content and byte length is authoritative;
+no operation uses C-string termination. Two non-empty concat operands create a
+fresh exact-size heap owner; empty fast paths Alias the other operand. Size
+overflow, allocation failure and invalid ARC state trap.
+
+String fields and payloads, string collection elements, generics involving
+string, references, indexing, slicing, views, iteration, Bytes, formatting,
+parsing, hashing, COW, SSO, normalization, graphemes, public FFI and threads are
+not admitted. These exclusions are semantic gates despite the truthful
+Storable/Relocatable properties and require independent future qualification.

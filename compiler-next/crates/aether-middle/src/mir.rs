@@ -257,6 +257,8 @@ pub enum BinaryOp {
 pub enum Rvalue {
     /// Ordered concrete object lifecycle/member operation.
     Class(Box<ClassOp<Operand, InstanceId>>),
+    /// Explicit immutable string lifecycle/content operation.
+    String(Box<aether_frontend::StringOp<Operand>>),
     /// Readable descriptor operands and an explicit structured initialization loop.
     /// Native oriented algebraic product with a closed concrete schedule.
     AlgebraicProduct {
@@ -773,7 +775,8 @@ fn conditional_drop_roots(block: &HirBlock) -> BTreeSet<LocalId> {
                 | HirStmtKind::Local { .. }
                 | HirStmtKind::Assign { .. }
                 | HirStmtKind::ListPush { .. }
-                | HirStmtKind::ListReserve { .. } => {}
+                | HirStmtKind::ListReserve { .. }
+                | HirStmtKind::StringOutput { .. } => {}
             }
         }
     }
@@ -1291,6 +1294,24 @@ impl Builder<'_> {
                         if let Some(local) = destination_owner {
                             self.set_drop_flag(local, true, statement.span);
                         }
+                    }
+                }
+                HirStmtKind::StringOutput { value, newline } => {
+                    let (source, owner) = self.lower_string_read(value);
+                    let token = self.temporary(TypeId::BOOL);
+                    self.assign(
+                        Place {
+                            base: PlaceBase::Local(token),
+                            projections: vec![],
+                        },
+                        Rvalue::String(Box::new(aether_frontend::StringOp::Output {
+                            source,
+                            newline: *newline,
+                        })),
+                        statement.span,
+                    );
+                    if let Some(owner) = owner {
+                        self.emit_drop(owner, statement.span);
                     }
                 }
                 HirStmtKind::ListPush {
@@ -1914,6 +1935,7 @@ impl Builder<'_> {
     fn lower_expr(&mut self, expression: &HirExpr) -> Operand {
         match &expression.kind {
             HirExprKind::Class(op) => self.lower_class(op, expression.ty, expression.span),
+            HirExprKind::String(op) => self.lower_string(op, expression.ty, expression.span),
             HirExprKind::Int(value) => Operand::Int {
                 value: *value,
                 ty: expression.ty,
@@ -3088,6 +3110,82 @@ impl Builder<'_> {
                 Operand::Local(destination)
             }
         }
+    }
+
+    fn lower_string(
+        &mut self,
+        op: &aether_frontend::StringOp<HirExpr>,
+        ty: TypeId,
+        span: Span,
+    ) -> Operand {
+        use aether_frontend::StringOp;
+        let (op, owners): (StringOp<Operand>, Vec<Place>) = match op {
+            StringOp::Literal { bytes } => (
+                StringOp::Literal {
+                    bytes: bytes.clone(),
+                },
+                Vec::new(),
+            ),
+            StringOp::Alias { source } => (
+                StringOp::Alias {
+                    source: self.lower_expr(source),
+                },
+                Vec::new(),
+            ),
+            StringOp::Concat { left, right } => {
+                let (left, left_owner) = self.lower_string_read(left);
+                let (right, right_owner) = self.lower_string_read(right);
+                (
+                    StringOp::Concat { left, right },
+                    [right_owner, left_owner].into_iter().flatten().collect(),
+                )
+            }
+            StringOp::Equal {
+                left,
+                right,
+                negate,
+            } => {
+                let (left, left_owner) = self.lower_string_read(left);
+                let (right, right_owner) = self.lower_string_read(right);
+                (
+                    StringOp::Equal {
+                        left,
+                        right,
+                        negate: *negate,
+                    },
+                    [right_owner, left_owner].into_iter().flatten().collect(),
+                )
+            }
+            StringOp::ByteLength { source } => {
+                let (source, owner) = self.lower_string_read(source);
+                (StringOp::ByteLength { source }, owner.into_iter().collect())
+            }
+            StringOp::Output { .. } => unreachable!("output is lowered from a statement"),
+        };
+        let destination = self.temporary(ty);
+        self.assign(
+            Place {
+                base: PlaceBase::Local(destination),
+                projections: vec![],
+            },
+            Rvalue::String(Box::new(op)),
+            span,
+        );
+        for owner in owners {
+            self.emit_drop(owner, span);
+        }
+        Operand::Local(destination)
+    }
+
+    fn lower_string_read(&mut self, expression: &HirExpr) -> (Operand, Option<Place>) {
+        let operand = self.lower_expr(expression);
+        if matches!(
+            expression.kind,
+            HirExprKind::Local(_) | HirExprKind::Load(_)
+        ) {
+            return (operand, None);
+        }
+        (operand.clone(), Some(operand_place(&operand)))
     }
 
     fn lower_math_read(&mut self, expression: &HirExpr) -> (Operand, Option<Place>) {
@@ -4361,6 +4459,19 @@ fn verify_ownership(
         for instruction in &block.instructions {
             let destination = place_root_local(&instruction.destination);
             match &instruction.value {
+                Rvalue::String(op) => {
+                    for operand in op.operands() {
+                        if let Operand::Local(local) = operand
+                            && !types.is_copy(function.locals[local.0 as usize].ty)
+                            && state[local.0 as usize] != MirOwnerState::Owned
+                        {
+                            return Err(fail("string operation uses a moved/dropped owner".into()));
+                        }
+                    }
+                    if op.creates_owner() {
+                        initialize_owner(function, types, &mut state, destination, fail)?;
+                    }
+                }
                 Rvalue::Class(op) => {
                     for operand in op.operands() {
                         if let Operand::Local(local) = operand
@@ -4827,6 +4938,14 @@ fn validate_rvalue(
                         .ok_or_else(|| "unknown class method target".into())
                 },
             )?;
+        }
+        Rvalue::String(op) => {
+            for operand in op.operands() {
+                validate_operand(function, operand, initialized)?;
+            }
+            aether_frontend::verify_string_op(op, destination, types, |operand| {
+                operand_type(function, operand)
+            })?;
         }
         Rvalue::Use(operand) => {
             validate_operand(function, operand, initialized)?;

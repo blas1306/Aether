@@ -4,6 +4,7 @@ mod algebraic;
 mod classes;
 mod elementwise;
 mod mathematical;
+mod strings;
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -93,6 +94,18 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         });
     let has_class_runtime =
         has_class_runtime || has_interface_runtime || program.exceptions_enabled;
+    let has_string_runtime = program.functions.iter().any(|function| {
+        let signature = &program.signatures[function.id.0 as usize];
+        signature.return_type == TypeId::STRING
+            || signature.parameters.iter().any(|p| p.ty == TypeId::STRING)
+            || function
+                .blocks
+                .iter()
+                .flat_map(|b| &b.instructions)
+                .any(|instruction| {
+                    instruction.ty == TypeId::STRING || matches!(instruction.op, SsaOp::String(_))
+                })
+    });
     let buffer_elements = types
         .entries()
         .filter_map(|(ty, data)| match data {
@@ -147,7 +160,10 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             _ => None,
         })
         .collect::<BTreeSet<_>>();
-    let has_owners = !fixed_elements.is_empty() || !list_elements.is_empty() || has_class_runtime;
+    let has_owners = !fixed_elements.is_empty()
+        || !list_elements.is_empty()
+        || has_class_runtime
+        || has_string_runtime;
     let mut output = String::new();
     writeln!(output, "; Aether NEXT-VERTICAL-18").unwrap();
     writeln!(
@@ -165,12 +181,19 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         }
     }
     writeln!(output, "declare void @llvm.trap() cold noreturn nounwind\n").unwrap();
+    if has_string_runtime || program.exceptions_enabled {
+        writeln!(output, "declare i64 @write(i32, ptr, i64)\n").unwrap();
+    }
     if has_owners {
         emit_runtime_boundary(&mut output);
         if has_class_runtime {
             classes::runtime(&mut output, program);
             classes::witnesses(&mut output, program);
         }
+    }
+    if has_string_runtime {
+        strings::emit_literals(&mut output, program);
+        strings::runtime(&mut output);
     }
     if program.exceptions_enabled {
         emit_exception_runtime(&mut output, types);
@@ -244,6 +267,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             && types.is_relocatable(*ty)
             && (has_class_runtime || types.object_class(*ty).is_none())
             && (has_interface_runtime || types.interface_identity(*ty).is_none())
+            && (has_string_runtime || *ty != TypeId::STRING)
     }) {
         emit_relocation_glue(&mut output, types, ty, &program.structs, &program.enums);
     }
@@ -252,6 +276,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             && types.needs_drop(*ty)
             && (has_class_runtime || types.object_class(*ty).is_none())
             && (has_interface_runtime || types.interface_identity(*ty).is_none())
+            && (has_string_runtime || *ty != TypeId::STRING)
     }) {
         emit_drop_glue(&mut output, types, ty, &program.structs, &program.enums);
     }
@@ -422,7 +447,6 @@ fn emit_exception_runtime(output: &mut String, types: &TypeArena) {
          declare ptr @__cxa_begin_catch(ptr) nounwind\n\
          declare void @__cxa_end_catch()\n\
          declare void @__cxa_rethrow() noreturn\n\
-         declare i64 @write(i32, ptr, i64)\n\
          @_ZTIPv = external constant ptr\n\
          @aether_unhandled_message = private constant [27 x i8] c\"unhandled Aether exception\\0A\"\n\
          define internal void @aether_exception_record_destroy(ptr %record) nounwind {\n\
@@ -565,7 +589,8 @@ fn emit_relocation_glue(
     .unwrap();
     writeln!(output, "entry:").unwrap();
     match types.get(ty).expect("concrete relocation type") {
-        TypeData::Interface(_)
+        TypeData::String
+        | TypeData::Interface(_)
         | TypeData::InterfaceKeepalive { .. }
         | TypeData::Class(_)
         | TypeData::ClassToken { .. }
@@ -644,6 +669,9 @@ fn emit_drop_glue(
     .unwrap();
     writeln!(output, "entry:").unwrap();
     match types.get(ty).expect("concrete drop type") {
+        TypeData::String => {
+            output.push_str("  call void @aether_string_release(ptr %value)\n  ret void\n}\n");
+        }
         TypeData::Interface(_) | TypeData::InterfaceKeepalive { .. } => {
             output.push_str("  %object = extractvalue { ptr, ptr } %value, 0\n  %witness = extractvalue { ptr, ptr } %value, 1\n  %release = load ptr, ptr %witness\n  call void %release(ptr %object)\n  ret void\n}\n");
         }
@@ -1293,6 +1321,9 @@ fn emit_function(
                     instruction.unwind,
                     block.id,
                 ),
+                SsaOp::String(op) => {
+                    strings::emit_op(output, op, instruction.result.0, llvm_operand);
+                }
                 SsaOp::Use(operand) => writeln!(
                     output,
                     "  %v{} = select i1 true, {} {}, {} {}",
@@ -3216,6 +3247,7 @@ fn mangle_symbol_type(
             let c = &types.classes()[id.0 as usize];
             nominal(c.module, &c.name, 'c')
         }
+        TypeData::String => "str".into(),
         TypeData::Bool => "b".into(),
         TypeData::Integer(integer) => format!("i{integer:?}"),
         TypeData::Float(float) => format!("f{float:?}"),
@@ -3355,9 +3387,10 @@ fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
             mangle_type_arguments(types, *args)
         ),
         TypeData::Interface(_) | TypeData::InterfaceKeepalive { .. } => "{ ptr, ptr }".into(),
-        TypeData::Class(_) | TypeData::ClassToken { .. } | TypeData::Reference { .. } => {
-            "ptr".into()
-        }
+        TypeData::String
+        | TypeData::Class(_)
+        | TypeData::ClassToken { .. }
+        | TypeData::Reference { .. } => "ptr".into(),
         TypeData::Buffer { .. }
         | TypeData::Vector { .. }
         | TypeData::Array { .. }
@@ -3391,6 +3424,7 @@ fn mangle_type(types: &TypeArena, ty: TypeId) -> String {
             format!("c{}_{}", class.0, classes::token_suffix(*kind))
         }
         TypeData::Bool => "b".into(),
+        TypeData::String => "str".into(),
         TypeData::Integer(integer) => format!("i{integer:?}"),
         TypeData::Float(float) => format!("f{float:?}"),
         TypeData::Struct(id) => format!("s{}", id.0),

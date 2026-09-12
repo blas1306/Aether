@@ -421,8 +421,8 @@ fn vertical6_qualified_alias_construction_and_matching_resolve() {
     assert!(compilation.dumps[&Emit::Ast].contains("VariantCall"));
     let hir = &compilation.dumps[&Emit::Hir];
     assert!(hir.contains("Numeric"));
-    assert!(hir.contains("TypeId(13) = Number"));
-    assert!(hir.contains("canonical: TypeId(\n            13"));
+    assert!(hir.contains("TypeId(14) = Number"));
+    assert!(hir.contains("canonical: TypeId(\n            14"));
     assert!(compilation.llvm.contains("switch i32"));
 
     let diagnostic = CompilationSession::discover(&module_program("errors/v6_unqualified"))
@@ -465,10 +465,10 @@ int main() {
         assert!(dump.contains("types (session-local)"), "{phase:?}");
         assert!(dump.contains("TypeId(4) = int64"), "{phase:?}");
         assert!(dump.contains("TypeId(9) = isize"), "{phase:?}");
-        assert!(dump.contains("TypeId(13) = A"), "{phase:?}");
-        assert!(dump.contains("TypeId(14) = B"), "{phase:?}");
-        assert!(dump.contains("TypeId(15) = E"), "{phase:?}");
-        assert!(dump.contains("TypeId(16) = F"), "{phase:?}");
+        assert!(dump.contains("TypeId(14) = A"), "{phase:?}");
+        assert!(dump.contains("TypeId(15) = B"), "{phase:?}");
+        assert!(dump.contains("TypeId(16) = E"), "{phase:?}");
+        assert!(dump.contains("TypeId(17) = F"), "{phase:?}");
     }
     let hir = &first.dumps[&Emit::Hir];
     assert!(hir.contains("WholeAgain"));
@@ -546,7 +546,7 @@ fn multi_file_diagnostics_are_structured_and_keep_source_provenance() {
         ("errors/invalid_qualified", "E0224", "main.ae"),
         ("errors/duplicate_import", "E0220", "main.ae"),
         ("errors/malformed_import", "E0100", "main.ae"),
-        ("errors/imported_unsupported", "E0001", "broken.ae"),
+        ("errors/imported_unsupported", "E0218", "main.ae"),
     ] {
         let error = CompilationSession::discover(&module_program(case))
             .and_then(|session| compile_session(session, &[]))
