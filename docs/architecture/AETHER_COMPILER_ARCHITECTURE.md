@@ -2551,6 +2551,32 @@ exceptions coexist. The admitted surface, corruption tests, measurements and
 remaining debt are recorded in
 [GENERAL_V1_STRING_REPORT.md](GENERAL_V1_STRING_REPORT.md).
 
+### GENERAL-V2 structural composition confirmation
+
+The frontend now applies the existing structural property fold to `string` in
+struct fields, enum payloads and Array/List element types. Containing values
+remain non-Copy owners while preserving Storable and Relocatable. Generic
+substitution accepts them under their actual constraints; `T: Copy` still
+fails. Whole-value reads use Move/Transfer and no field-wise Alias or aggregate
+clone operation exists.
+
+MIR stages root replacement as old-owner Move, new-owner publication and old
+Drop. Exact projected string replacement is represented by `ReplaceString`, so
+its publish-before-release order survives SSA and is independently type-checked
+there. SSA's string-owner audit is structural: parameters, phis, constructed
+aggregates, enum payloads, Array/List operations, calls, returns and Drops must
+consume each composed owner on every path.
+
+LLVM reuses the established recursive layout/drop glue. Struct and active enum
+payload destruction releases nested strings; Array/List destruction visits the
+initialized element prefix. Existing collection Relocate glue copies the
+one-word string handle and invalidates the source without retain/release.
+Runtime selection uses recursive string containment, including empty string
+collections with no literal or StringOp. Normal cleanup, early return and
+exception landing pads share this lifecycle contract. Qualification and exact
+counter evidence are in
+[GENERAL_V2_STRING_COMPOSITION_REPORT.md](GENERAL_V2_STRING_COMPOSITION_REPORT.md).
+
 OPEN DECISIONS for independent future work: fast-math modes, BLAS lowering,
 SIMD, loop tiling/blocking, parallel reductions, FMA and reproducibility modes.
 Each requires an explicit decision about observable order, traps, aliasing,

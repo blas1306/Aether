@@ -1819,10 +1819,10 @@ impl TypeArena {
         kind: CollectionKind,
         id: TypeId,
     ) -> CollectionElementAdmission {
-        // GENERAL-V1 deliberately qualifies `string` only as a direct value.
-        // Its intrinsic Storable/Relocatable facts are still truthful, but no
-        // collection has acquired string-element lifecycle lowering yet.
-        if id == TypeId::STRING || self.contains_class(id) {
+        if self.contains_class(id)
+            || (matches!(kind, CollectionKind::Vector | CollectionKind::Matrix)
+                && self.contains_string(id))
+        {
             return CollectionElementAdmission::InvalidType;
         }
         let _timer = self.semantic_timer("frontend.detail.collection_admission");
@@ -1895,6 +1895,13 @@ impl TypeArena {
     #[must_use]
     pub fn contains_reference(&self, id: TypeId) -> bool {
         self.contains_capability(id, 0, &HashMap::new(), &mut BTreeSet::new())
+    }
+
+    /// Whether a concrete type is, or structurally contains, the fundamental
+    /// string owner. This is a runtime-selection query, not a source capability.
+    #[must_use]
+    pub fn contains_string(&self, id: TypeId) -> bool {
+        self.contains_capability(id, 5, &HashMap::new(), &mut BTreeSet::new())
     }
 
     fn contains_capability(
@@ -1974,8 +1981,8 @@ impl TypeArena {
             Some(TypeData::ClassToken { .. } | TypeData::InterfaceKeepalive { .. }) => {
                 capability == 0
             }
-            Some(TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_) | TypeData::String)
-            | None => false,
+            Some(TypeData::String) => capability == 5,
+            Some(TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_)) | None => false,
         }
     }
 

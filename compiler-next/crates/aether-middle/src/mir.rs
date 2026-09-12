@@ -284,6 +284,12 @@ pub enum Rvalue {
     Move {
         source: Place,
     },
+    /// Replace one stored string owner, publishing the new handle before the
+    /// previous handle is released.
+    ReplaceString {
+        destination: Place,
+        value: Operand,
+    },
     /// Destroy one currently owned value. The boolean result is an internal
     /// sequencing token used by the assignment-shaped bootstrap MIR.
     Drop {
@@ -1244,10 +1250,23 @@ impl Builder<'_> {
                             PlaceBase::Local(local) if place.projections.is_empty() => Some(*local),
                             _ => None,
                         };
-                        if self
-                            .types
-                            .is_object_owner(value_type(&self.function, &value))
-                        {
+                        let value_ty = value_type(&self.function, &value);
+                        if value_ty == TypeId::STRING && destination_owner.is_none() {
+                            let token = self.temporary(TypeId::BOOL);
+                            self.assign(
+                                Place {
+                                    base: PlaceBase::Local(token),
+                                    projections: vec![],
+                                },
+                                Rvalue::ReplaceString {
+                                    destination: place,
+                                    value,
+                                },
+                                statement.span,
+                            );
+                            continue;
+                        }
+                        if self.types.needs_drop(value_ty) {
                             let old = self.temporary(value_type(&self.function, &value));
                             self.assign(
                                 Place {
@@ -1280,9 +1299,6 @@ impl Builder<'_> {
                                 statement.span,
                             );
                             continue;
-                        }
-                        if self.types.needs_drop(value_type(&self.function, &value)) {
-                            self.emit_drop(place.clone(), statement.span);
                         }
                         self.assign(
                             place,
@@ -4533,6 +4549,20 @@ fn verify_ownership(
                     consume_owner(function, types, &mut state, source, "Move", fail)?;
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
+                Rvalue::ReplaceString { destination, value } => {
+                    require_place_owner(function, types, &state, destination, fail)?;
+                    let local = operand_local_id(value).ok_or_else(|| {
+                        fail("MIR string replacement value is not materialized".into())
+                    })?;
+                    consume_owner(
+                        function,
+                        types,
+                        &mut state,
+                        local,
+                        "string replacement",
+                        fail,
+                    )?;
+                }
                 Rvalue::Drop { owner } => {
                     let owner = place_root_local(owner)
                         .ok_or_else(|| fail("MIR Drop owner has no local".into()))?;
@@ -5011,6 +5041,20 @@ fn validate_rvalue(
                 || !source.projections.is_empty()
             {
                 return Err("MIR Move requires one whole move-only owner".into());
+            }
+        }
+        Rvalue::ReplaceString {
+            destination: place,
+            value,
+        } => {
+            validate_place_read(function, place, structs, types, initialized)?;
+            validate_operand(function, value, initialized)?;
+            if destination != TypeId::BOOL
+                || place_type(function, place, structs, types)? != TypeId::STRING
+                || operand_type(function, value)? != TypeId::STRING
+                || !mir_place_writable(function, place, structs, types)?
+            {
+                return Err("MIR string replacement contract invalid".into());
             }
         }
         Rvalue::Drop { owner } => {

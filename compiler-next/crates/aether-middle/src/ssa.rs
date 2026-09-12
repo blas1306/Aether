@@ -145,6 +145,10 @@ pub enum SsaOp {
     Move {
         source: SsaPlace,
     },
+    ReplaceString {
+        destination: SsaPlace,
+        value: SsaOperand,
+    },
     Drop {
         owner: SsaPlace,
     },
@@ -931,6 +935,10 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
         Rvalue::Move { source } => SsaOp::Move {
             source: rename_place(source, stacks, mir),
         },
+        Rvalue::ReplaceString { destination, value } => SsaOp::ReplaceString {
+            destination: rename_place(destination, stacks, mir),
+            value: rename_operand(value, stacks),
+        },
         Rvalue::Drop { owner } => SsaOp::Drop {
             owner: rename_place(owner, stacks, mir),
         },
@@ -1634,6 +1642,10 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
         | Rvalue::ArrayLength { source: place }
         | Rvalue::ListLength { source: place }
         | Rvalue::ListCapacity { source: place } => place_locals(function, place),
+        Rvalue::ReplaceString { destination, value } => place_locals(function, destination)
+            .into_iter()
+            .chain(operand_local(value))
+            .collect(),
         Rvalue::BufferAlloc {
             length, initial, ..
         }
@@ -2348,24 +2360,50 @@ fn verify_ssa_function(
     }
     aether_frontend::verify_class_metadata(types, structs, enums).map_err(fail)?;
     classes::verify(function, signatures, types, &operand_ty).map_err(fail)?;
-    verify_string_ownership(function, fail)?;
+    verify_string_ownership(function, types, fail)?;
     verify_vector_transpose_ownership(function, fail)?;
     verify_matrix_literal_ownership(function, types, fail)?;
     verify_take_protocol(function, types, fail)?;
     Ok(())
 }
 
-/// Every SSA value carrying a GENERAL-V1 owner must have an explicit transfer
-/// or Drop site. Borrowing string operations (Alias source, concat operands,
-/// equality, byteLength and output) intentionally do not discharge ownership.
+/// Every SSA value carrying a string owner, directly or structurally, must
+/// have an explicit transfer or Drop site. Borrowing string operations do not
+/// discharge ownership.
+fn consume_string_operand(
+    block: BlockId,
+    operand: &SsaOperand,
+    owners: &BTreeSet<ValueId>,
+    consumed: &mut BTreeSet<(BlockId, ValueId)>,
+) -> bool {
+    let SsaOperand::Value(value) = operand else {
+        return false;
+    };
+    owners.contains(value) && !consumed.insert((block, *value))
+}
+
+fn consume_string_operands<'a>(
+    block: BlockId,
+    operands: impl IntoIterator<Item = &'a SsaOperand>,
+    owners: &BTreeSet<ValueId>,
+    consumed: &mut BTreeSet<(BlockId, ValueId)>,
+) -> bool {
+    operands
+        .into_iter()
+        .any(|operand| consume_string_operand(block, operand, owners, consumed))
+}
+
+#[allow(clippy::too_many_lines)]
 fn verify_string_ownership(
     function: &SsaFunction,
+    types: &TypeArena,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
+    let carries_string_owner = |ty| types.contains_string(ty) && types.needs_drop(ty);
     let mut owners = function
         .parameters
         .iter()
-        .filter(|parameter| parameter.ty == TypeId::STRING)
+        .filter(|parameter| carries_string_owner(parameter.ty))
         .map(|parameter| parameter.value)
         .collect::<BTreeSet<_>>();
     for block in &function.blocks {
@@ -2373,14 +2411,14 @@ fn verify_string_ownership(
             block
                 .phis
                 .iter()
-                .filter(|phi| phi.ty == TypeId::STRING)
+                .filter(|phi| carries_string_owner(phi.ty))
                 .map(|phi| phi.result),
         );
         owners.extend(
             block
                 .instructions
                 .iter()
-                .filter(|instruction| instruction.ty == TypeId::STRING)
+                .filter(|instruction| carries_string_owner(instruction.ty))
                 .map(|instruction| instruction.result),
         );
     }
@@ -2394,7 +2432,7 @@ fn verify_string_ownership(
 
     for block in &function.blocks {
         for phi in &block.phis {
-            if phi.ty == TypeId::STRING {
+            if carries_string_owner(phi.ty) {
                 for (predecessor, value) in &phi.incoming {
                     if !consumed_on_path.insert((*predecessor, *value)) {
                         return Err(fail(
@@ -2416,23 +2454,65 @@ fn verify_string_ownership(
                     }
                 }
                 SsaOp::Call { args, .. } => {
-                    for argument in args {
-                        if let SsaOperand::Value(value) = argument
-                            && owners.contains(value)
-                            && !consumed_on_path.insert((block.id, *value))
-                        {
-                            return Err(fail(
-                                "SSA string owner is consumed twice on one control-flow path"
-                                    .into(),
-                            ));
-                        }
+                    if consume_string_operands(block.id, args, &owners, &mut consumed_on_path) {
+                        return Err(fail(
+                            "SSA string owner is consumed twice on one control-flow path".into(),
+                        ));
+                    }
+                }
+                SsaOp::Aggregate { fields, .. } => {
+                    if consume_string_operands(
+                        block.id,
+                        fields.iter().map(|(_, value)| value),
+                        &owners,
+                        &mut consumed_on_path,
+                    ) {
+                        return Err(fail(
+                            "SSA string owner is consumed twice on one control-flow path".into(),
+                        ));
+                    }
+                }
+                SsaOp::EnumConstruct { payloads, .. }
+                | SsaOp::ArrayInit {
+                    elements: payloads, ..
+                }
+                | SsaOp::ListInit {
+                    elements: payloads, ..
+                } => {
+                    if consume_string_operands(block.id, payloads, &owners, &mut consumed_on_path) {
+                        return Err(fail(
+                            "SSA string owner is consumed twice on one control-flow path".into(),
+                        ));
+                    }
+                }
+                SsaOp::ListPush { value, .. }
+                | SsaOp::ReplaceString { value, .. }
+                | SsaOp::Store { value, .. }
+                | SsaOp::InsertField {
+                    aggregate: value, ..
+                } => {
+                    if consume_string_operand(block.id, value, &owners, &mut consumed_on_path) {
+                        return Err(fail(
+                            "SSA string-composed owner is consumed twice on one control-flow path"
+                                .into(),
+                        ));
+                    }
+                }
+                SsaOp::ConsumeEnum { owner } => {
+                    if let Some(value) = value_from_place(owner)
+                        && !consumed_on_path.insert((block.id, value))
+                    {
+                        return Err(fail(
+                            "SSA string-composed owner is consumed twice on one control-flow path"
+                                .into(),
+                        ));
                     }
                 }
                 _ => {}
             }
         }
         if let SsaTerminator::Return(SsaOperand::Value(value)) = &block.terminator
-            && function.return_type == TypeId::STRING
+            && carries_string_owner(function.return_type)
             && !consumed_on_path.insert((block.id, *value))
         {
             return Err(fail(
@@ -2446,7 +2526,7 @@ fn verify_string_ownership(
             .any(|(_, consumed)| consumed == owner)
     }) {
         return Err(fail(
-            "SSA string owner has no explicit Transfer or Drop".into(),
+            "SSA string-composed owner has no explicit Transfer or Drop".into(),
         ));
     }
     Ok(())
@@ -2796,6 +2876,16 @@ fn verify_op(
             let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
             if source_ty != result || types.is_copy(source_ty) || !source.projections.is_empty() {
                 return Err("SSA Move contract invalid".into());
+            }
+        }
+        SsaOp::ReplaceString { destination, value } => {
+            if result != TypeId::BOOL
+                || ssa_place_type(destination, memory_locals, structs, types, operand_ty)?
+                    != TypeId::STRING
+                || operand_ty(value)? != TypeId::STRING
+                || !writable(destination)?
+            {
+                return Err("SSA string replacement contract invalid".into());
             }
         }
         SsaOp::Drop { owner } => {
@@ -3598,6 +3688,10 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         | SsaOp::ArrayLength { source: place }
         | SsaOp::ListLength { source: place }
         | SsaOp::ListCapacity { source: place } => place_operands(place),
+        SsaOp::ReplaceString { destination, value } => place_operands(destination)
+            .into_iter()
+            .chain(std::iter::once(value))
+            .collect(),
         SsaOp::Store { place, value } => place_operands(place)
             .into_iter()
             .chain(std::iter::once(value))

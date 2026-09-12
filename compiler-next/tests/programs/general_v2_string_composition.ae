@@ -1,0 +1,59 @@
+struct Inner {
+    string value;
+}
+
+struct Pair {
+    string first;
+    string second;
+}
+
+struct Nested {
+    Inner inner;
+    Pair pair;
+}
+
+enum Message {
+    Text(string),
+    PairValue(Pair),
+    Empty
+}
+
+int consume(Nested value) {
+    return 0;
+}
+
+int main() {
+    string first = "a" + "b";
+    string second = "c" + "d";
+
+    Inner inner = Inner(first);
+    Pair pair = Pair(second, "immortal");
+    Nested nested = Nested(inner, pair);
+    Nested moved = nested;
+
+    Array<string> array = {first};
+    array[0] = second;
+
+    List<string> list = {first};
+    reserve(list, 4);
+    push(list, second);
+    list[0] = second;
+    string removed = remove(list, 0);
+    string last = pop(list);
+
+    Message message = Message.Text(removed);
+    match (message) {
+        Message.Text(value) => {
+            if (byteLength(value) != 2) {
+                return 11;
+            }
+        }
+        Message.PairValue(value) => { }
+        Message.Empty => { }
+    }
+
+    if (byteLength(last) != 2) {
+        return 12;
+    }
+    return consume(moved);
+}

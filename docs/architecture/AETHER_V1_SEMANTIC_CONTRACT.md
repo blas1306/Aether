@@ -2607,3 +2607,34 @@ string, references, indexing, slicing, views, iteration, Bytes, formatting,
 parsing, hashing, COW, SSO, normalization, graphemes, public FFI and threads are
 not admitted. These exclusions are semantic gates despite the truthful
 Storable/Relocatable properties and require independent future qualification.
+
+## GENERAL-V2 — string structural composition
+
+Status: **ADMITTED** in `compiler-next` for struct fields, enum payloads,
+`Array<string>` and `List<string>`, under the lifecycle and exclusions in
+[GENERAL-V2](GENERAL_V2_STRING_COMPOSITION_REPORT.md). This supersedes only the
+corresponding GENERAL-V1 storage gates; string representation and text semantics
+do not change.
+
+A type containing `string` composes the ordinary structural properties:
+`Copy=false`, `Relocatable=true`, `Storable=true` and `needs_drop=true`.
+Whole-value use transfers ownership and invalidates the source. It never
+synthesizes field-wise Alias, deep copy or a general Clone/Alias capability.
+Thus `T: Copy` rejects both string and any aggregate or collection containing
+it, and an owning read through a field or index remains invalid.
+
+Recursive Drop visits every initialized owning field, active enum payload or
+live collection element exactly once. Normal exits, early returns and exception
+unwind use the same cleanup plans. Array/List relocation transfers initialized
+storage without string retain/release; remove/pop transfer the extracted owner.
+
+Replacement of a complete drop-needing value first stages the old owner, then
+publishes the fully materialized new value, and finally drops the old owner.
+Replacement of an exact stored string slot has the same verified
+publish-before-release order. This does not admit arbitrary partial replacement
+of non-Copy values.
+
+Class/interface graph ownership, string references, `StringView`, textual
+indexing/slicing/iteration, Text APIs, interpolation/formatting, Bytes, hashing,
+COW/SSO and threads remain outside this admission. `Buffer<string>`,
+`Vector<string>` and `Matrix<string>` are likewise not admitted by GENERAL-V2.

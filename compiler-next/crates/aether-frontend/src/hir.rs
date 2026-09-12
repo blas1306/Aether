@@ -1385,18 +1385,6 @@ pub fn collect_program_signatures(
                 &enum_arities,
             )
             .map_err(|d| vec![src(d, module)])?;
-            if ty == TypeId::STRING {
-                return Err(vec![src(
-                    Diagnostic::new(
-                        "E0450",
-                        Phase::Semantic,
-                        DiagnosticCategory::Type,
-                        "GENERAL-V1 string values cannot be stored in struct fields",
-                        Some(field.span),
-                    ),
-                    module,
-                )]);
-            }
             if types.contains_view(ty) {
                 return Err(vec![src(
                     Diagnostic::new(
@@ -1510,18 +1498,6 @@ pub fn collect_program_signatures(
                 })
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|d| vec![src(d, module)])?;
-            if let Some(payload) = payloads.iter().find(|payload| payload.ty == TypeId::STRING) {
-                return Err(vec![src(
-                    Diagnostic::new(
-                        "E0450",
-                        Phase::Semantic,
-                        DiagnosticCategory::Type,
-                        "GENERAL-V1 string values cannot be stored in enum payloads",
-                        Some(payload.span),
-                    ),
-                    module,
-                )]);
-            }
             if let Some(payload) = payloads
                 .iter()
                 .find(|payload| types.contains_view(payload.ty))
@@ -1829,23 +1805,6 @@ pub fn collect_program_signatures(
                 &enum_arities,
             )
             .map_err(|d| vec![src(d, module)])?;
-            if !generic_parameters.is_empty()
-                && (return_type == TypeId::STRING
-                    || parameters
-                        .iter()
-                        .any(|parameter| parameter.ty == TypeId::STRING))
-            {
-                return Err(vec![src(
-                    Diagnostic::new(
-                        "E0450",
-                        Phase::Semantic,
-                        DiagnosticCategory::Type,
-                        "GENERAL-V1 does not admit string in generic function signatures",
-                        Some(f.span),
-                    ),
-                    module,
-                )]);
-            }
             for parameter in &parameters {
                 validate_type_constraints(&types, parameter.ty, &structs, &enums, parameter.span)
                     .map_err(|diagnostics| {
@@ -2376,15 +2335,6 @@ fn resolve_type_in_module(
             struct_arities,
             enum_arities,
         )?);
-    }
-    if arguments.contains(&TypeId::STRING) {
-        return Err(Diagnostic::new(
-            "E0450",
-            Phase::Semantic,
-            DiagnosticCategory::Type,
-            "GENERAL-V1 does not admit string as a generic argument",
-            Some(ty.span),
-        ));
     }
     if ty.module.is_none()
         && let Some(expected) = intrinsic_type_arity(&ty.name)
@@ -6191,7 +6141,14 @@ impl Analyzer<'_> {
                         continue;
                     }
                     let place = self.resolve_expr_place(place, true)?;
+                    if place.ty == TypeId::STRING
+                        && let HirPlaceBase::Local(local) = place.base
+                        && !place.projections.is_empty()
+                    {
+                        self.locals[local.0 as usize].address_taken = true;
+                    }
                     if !self.types.guarantees_copy(place.ty)
+                        && place.ty != TypeId::STRING
                         && (!place.projections.is_empty()
                             || matches!(place.base, HirPlaceBase::Dereference { .. }))
                     {
@@ -8872,12 +8829,6 @@ impl Analyzer<'_> {
                 span,
             )]);
         }
-        if type_arguments.contains(&TypeId::STRING) {
-            return Err(vec![type_error(
-                "GENERAL-V1 does not admit string as a generic function argument",
-                span,
-            )]);
-        }
         validate_generic_constraints(
             self.types,
             &s.generic_parameters,
@@ -10216,6 +10167,15 @@ fn verify_block(
                 }
                 if !hir_place_writable(place, f, types, structs, enums) {
                     return Err(fail("HIR writes through a shared reference".into()));
+                }
+                if !types.guarantees_copy(place.ty)
+                    && place.ty != TypeId::STRING
+                    && (!place.projections.is_empty()
+                        || matches!(place.base, HirPlaceBase::Dereference { .. }))
+                {
+                    return Err(fail(
+                        "HIR partial replacement of a non-Copy value is invalid".into(),
+                    ));
                 }
             }
             HirStmtKind::StringOutput { value, .. } => {
@@ -11863,6 +11823,18 @@ mod tests {
         };
         initializer.ty = TypeId::BOOL;
         assert!(verify_hir(&wrong_result).is_err());
+    }
+    #[test]
+    fn composed_string_hir_cleanup_corruption_is_rejected() {
+        let mut hir =
+            check("struct S{string value;}int main(){S value=S(\"a\"+\"b\");return 0;}").unwrap();
+        let HirStmtKind::Return { drops, .. } =
+            &mut hir.functions[0].body.statements.last_mut().unwrap().kind
+        else {
+            panic!("expected return");
+        };
+        drops.push(drops[0]);
+        assert!(verify_hir(&hir).is_err());
     }
     #[test]
     fn verifier_rejects_duplicate_finally_identity() {

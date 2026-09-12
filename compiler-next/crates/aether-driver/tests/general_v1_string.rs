@@ -296,19 +296,10 @@ fn canonical_properties_private_runtime_and_non_string_elision() {
 #[test]
 fn out_of_scope_text_surfaces_are_rejected() {
     let cases = [
-        "struct S{string value;}int main(){}",
-        "enum E{V(string)}int main(){}",
         "class C{string value;public init(string x){value=x;}}int main(){}",
-        "int main(){Array<string> x={\"a\"};}",
-        "int main(){List<string> x={\"a\"};}",
         "int main(){Buffer<string> x=Buffer<string>(1,\"a\");}",
         "int main(){Matrix<string> x={{\"a\"}};}",
         "int main(){Vector<string,Row> x={\"a\"};}",
-        "struct Box<T>{T value;}int main(){Box<string> x=Box<string>(\"a\");}",
-        "T id<T>(T value){return value;}int main(){string x=id<string>(\"a\");}",
-        "T id<T>(T value){return value;}int main(){string x=id(\"a\");}",
-        "string bad<T>(T value){return \"a\";}int main(){}",
-        "T bad<T>(string value){return T(1);}int main(){}",
         "int main(){string s=\"a\";ref string r=&s;}",
         "int main(){print(1);}",
         "int main(){println(true);}",

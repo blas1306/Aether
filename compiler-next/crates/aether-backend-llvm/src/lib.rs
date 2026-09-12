@@ -96,14 +96,18 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         has_class_runtime || has_interface_runtime || program.exceptions_enabled;
     let has_string_runtime = program.functions.iter().any(|function| {
         let signature = &program.signatures[function.id.0 as usize];
-        signature.return_type == TypeId::STRING
-            || signature.parameters.iter().any(|p| p.ty == TypeId::STRING)
+        types.contains_string(signature.return_type)
+            || signature
+                .parameters
+                .iter()
+                .any(|p| types.contains_string(p.ty))
             || function
                 .blocks
                 .iter()
                 .flat_map(|b| &b.instructions)
                 .any(|instruction| {
-                    instruction.ty == TypeId::STRING || matches!(instruction.op, SsaOp::String(_))
+                    types.contains_string(instruction.ty)
+                        || matches!(instruction.op, SsaOp::String(_))
                 })
     });
     let buffer_elements = types
@@ -1388,6 +1392,40 @@ fn emit_function(
                         )
                         .unwrap();
                     }
+                }
+                SsaOp::ReplaceString { destination, value } => {
+                    writeln!(
+                        output,
+                        "  ; string replacement: publish new owner before release"
+                    )
+                    .unwrap();
+                    let pointer = emit_place_pointer(
+                        output,
+                        function,
+                        destination,
+                        instruction.result.0,
+                        types,
+                        structs,
+                    );
+                    writeln!(
+                        output,
+                        "  %string_old{} = load ptr, ptr {pointer}",
+                        instruction.result.0
+                    )
+                    .unwrap();
+                    writeln!(output, "  store ptr {}, ptr {pointer}", llvm_operand(value)).unwrap();
+                    writeln!(
+                        output,
+                        "  call void @aether_string_release(ptr %string_old{})",
+                        instruction.result.0
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  %v{} = select i1 true, i1 true, i1 true",
+                        instruction.result.0
+                    )
+                    .unwrap();
                 }
                 SsaOp::Borrow { place, .. } => {
                     let pointer = emit_place_pointer(
