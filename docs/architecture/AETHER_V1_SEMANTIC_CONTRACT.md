@@ -2638,3 +2638,21 @@ Class/interface graph ownership, string references, `StringView`, textual
 indexing/slicing/iteration, Text APIs, interpolation/formatting, Bytes, hashing,
 COW/SSO and threads remain outside this admission. `Buffer<string>`,
 `Vector<string>` and `Matrix<string>` are likewise not admitted by GENERAL-V2.
+
+## TEXT-V1 — exact scalar-indexed Text
+
+Status: **ADMITTED** in `compiler-next` for the canonical explicit `Text` module
+and exact surface recorded in [TEXT-V1](TEXT_V1_REPORT.md). Public positions are
+nominal `Text.ScalarOffset` values counting Unicode scalars; byte positions stay
+private. `FindResult` distinguishes `Found(ScalarOffset)` from `NotFound`.
+
+Count, contains, prefix/suffix and find operations borrow inputs and allocate or
+Alias nothing. Substring and bootstrap ASCII trim return owned strings with the
+specified empty/full identity fast paths and fresh proper fragments. Split
+returns a fresh `List<string>`, preserves empty elements and rejects an empty
+separator before allocation. Bounds/range violations remain fail-fast traps.
+
+Only private byte-at and validated UTF-8 range-copy representation primitives
+are admitted. Regex, views, syntactic slicing/indexing, public iteration/Bytes,
+formatting, normalization/graphemes, case/locale operations, parsing, hashing
+and public builders remain outside the contract.

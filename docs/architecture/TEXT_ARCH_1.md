@@ -1,8 +1,7 @@
 # TEXT-ARCH-1 — initial text standard library
 
-Estado: **DECISIÓN DE ARQUITECTURA; DISEÑO SOLAMENTE**, 2026-09-12. No
-admite todavía ninguna API, primitive, módulo o cambio de compilador/runtime.
-La admisión requiere un vertical nativo separado y su qualification.
+Estado: **DECISIÓN DE ARQUITECTURA; TEXT-V1 IMPLEMENTADO**, 2026-09-12. La
+admisión nativa exacta se registra en [TEXT_V1_REPORT](TEXT_V1_REPORT.md).
 
 ## 1. Decisión resumida
 

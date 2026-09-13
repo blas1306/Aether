@@ -1,7 +1,8 @@
 # TEXT-ARCH-1 — report
 
-Estado: **DISEÑO CERRADO; NO IMPLEMENTADO**, 2026-09-12. Documento completo:
-[TEXT_ARCH_1](TEXT_ARCH_1.md).
+Estado: **DISEÑO CERRADO; TEXT-V1 IMPLEMENTADO**, 2026-09-12. Documento
+completo: [TEXT_ARCH_1](TEXT_ARCH_1.md). Qualification:
+[TEXT_V1_REPORT](TEXT_V1_REPORT.md).
 
 ## API propuesta
 

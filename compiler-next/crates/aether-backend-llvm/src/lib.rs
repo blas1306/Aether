@@ -5,6 +5,7 @@ mod classes;
 mod elementwise;
 mod mathematical;
 mod strings;
+mod text;
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -110,6 +111,13 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
                         || matches!(instruction.op, SsaOp::String(_))
                 })
     });
+    let has_text_runtime = program.functions.iter().any(|function| {
+        function
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .any(|instruction| matches!(instruction.op, SsaOp::Text(_)))
+    });
     let buffer_elements = types
         .entries()
         .filter_map(|(ty, data)| match data {
@@ -198,6 +206,9 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     if has_string_runtime {
         strings::emit_literals(&mut output, program);
         strings::runtime(&mut output);
+    }
+    if has_text_runtime {
+        text::runtime(&mut output);
     }
     if program.exceptions_enabled {
         emit_exception_runtime(&mut output, types);
@@ -1328,6 +1339,14 @@ fn emit_function(
                 SsaOp::String(op) => {
                     strings::emit_op(output, op, instruction.result.0, llvm_operand);
                 }
+                SsaOp::Text(op) => text::emit_op(
+                    output,
+                    op,
+                    instruction.result.0,
+                    &llvm_type(types, instruction.ty),
+                    &llvm_type(types, text_scalar_type(types, modules, structs)),
+                    llvm_operand,
+                ),
                 SsaOp::Use(operand) => writeln!(
                     output,
                     "  %v{} = select i1 true, {} {}, {} {}",
@@ -3439,6 +3458,25 @@ fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
         TypeData::MatrixView { .. } => "{ ptr, i64, i64, i64, i64 }".into(),
         TypeData::GenericParam(_) => panic!("unresolved generic parameter reached LLVM"),
     }
+}
+
+fn text_scalar_type(types: &TypeArena, modules: &[ModuleInfo], structs: &[StructInfo]) -> TypeId {
+    let id = structs
+        .iter()
+        .find(|info| {
+            info.name == "ScalarOffset"
+                && modules
+                    .get(info.module.0 as usize)
+                    .is_some_and(|module| module.name == "Text")
+        })
+        .expect("verified Text operation has canonical ScalarOffset")
+        .id;
+    types
+        .entries()
+        .find_map(|(ty, data)| {
+            matches!(data, TypeData::Struct(found) if *found == id).then_some(ty)
+        })
+        .expect("canonical ScalarOffset TypeId")
 }
 
 fn mangle_type_arguments(types: &TypeArena, args: aether_frontend::TypeArgsId) -> String {

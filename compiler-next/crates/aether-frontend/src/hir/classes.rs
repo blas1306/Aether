@@ -1162,6 +1162,7 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
     match &e.kind {
         E::Class(op) => op.operands(),
         E::String(op) => op.operands(),
+        E::Text(op) => op.operands(),
         E::Int(_)
         | E::Float(_)
         | E::Bool(_)

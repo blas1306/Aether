@@ -2585,6 +2585,22 @@ optimization level. Full evidence and remaining risks are recorded in
 [MATH_ARCH_1_REPORT.md](MATH_ARCH_1_REPORT.md).
 
 
+## TEXT-V1 compiler/runtime confirmation
+
+[TEXT-V1](TEXT_V1_REPORT.md) adds canonical toolchain resolution for the
+reserved explicit `Text` module and carries its closed call identity separately
+from fundamental `StringOp` through typed HIR, flow MIR and SSA. Each boundary
+reconstructs nominal offset/result types, borrowed string operands and owning
+results. The backend selects private text support only from reachable verified
+operations; programs without Text emit no text helpers.
+
+The representation boundary consists only of checked borrowed byte access and
+validated UTF-8 byte-range copy. Scalar decoding, scalar/byte conversion,
+linear exact search, ASCII trim and split remain internal library algorithms.
+LLVM consumes verified effects and the existing string/List lifecycle; O0/O2
+have identical observable semantics. No textual indexing, views, public byte
+surface or additional `StringOp` was introduced.
+
 ## LANGUAGE-PARITY-1 — entry normalization and centralized trivia
 
 `aether-frontend/src/lexer.rs::skip_trivia` is the single authority for existing

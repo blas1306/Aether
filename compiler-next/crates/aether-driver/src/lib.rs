@@ -107,6 +107,11 @@ impl CompilationSession {
             .unwrap_or_else(|| Path::new("."))
             .to_path_buf();
         let entry_name = logical_name(entry_path)?;
+        if entry_name == "Text" {
+            return Err(vec![io_diagnostic(
+                "`Text` is reserved for the canonical standard-library module",
+            )]);
+        }
         let mut file_load_ns = 0;
         let mut parse_ns = 0;
         let entry_module = load_module(
@@ -143,7 +148,20 @@ impl CompilationSession {
                         .with_source_name(&modules[index].info.source_name),
                     ]);
                 }
-                let target = if let Some(id) = by_name.get(&import.module).copied() {
+                let target = if import.module == "Text" {
+                    if let Some(id) = by_name.get("Text").copied() {
+                        id
+                    } else {
+                        let id =
+                            ModuleId(u32::try_from(modules.len()).expect("module count fits u32"));
+                        let source_id =
+                            SourceId(u32::try_from(modules.len()).expect("source count fits u32"));
+                        let loaded = load_std_text(id, source_id, &mut parse_ns)?;
+                        by_name.insert("Text".into(), id);
+                        modules.push(loaded);
+                        id
+                    }
+                } else if let Some(id) = by_name.get(&import.module).copied() {
                     id
                 } else {
                     let path = source_root.join(format!("{}.ae", import.module));
@@ -222,6 +240,30 @@ impl CompilationSession {
             .collect::<Vec<_>>()
             .join("\n")
     }
+}
+
+fn load_std_text(
+    id: ModuleId,
+    source_id: SourceId,
+    parse_ns: &mut u128,
+) -> Result<SessionModule, Vec<Diagnostic>> {
+    const SOURCE: &str =
+        "struct ScalarOffset { usize value; } enum FindResult { Found(ScalarOffset), NotFound, }";
+    let source = SourceFile::with_id(source_id, "<std>/Text.ae", SOURCE);
+    let started = Instant::now();
+    let ast = parse_source(&source)?;
+    *parse_ns += started.elapsed().as_nanos();
+    Ok(SessionModule {
+        info: ModuleInfo {
+            id,
+            name: "Text".into(),
+            source: source_id,
+            source_name: "<std>/Text.ae".into(),
+            imports: Vec::new(),
+        },
+        source,
+        ast,
+    })
 }
 
 /// Compiles one owned source through verified SSA and LLVM.

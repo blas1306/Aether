@@ -9,6 +9,7 @@ mod oop;
 pub use interfaces::*;
 mod parser;
 mod strings;
+mod text;
 mod types;
 pub use oop::*;
 
@@ -34,6 +35,7 @@ pub use hir::{
 pub use lexer::{Token, TokenKind, lex};
 pub use parser::parse;
 pub use strings::{StringOp, verify_string_op};
+pub use text::{TextOp, verify_text_op};
 pub use types::{
     AlgebraicCapability, BehavioralCapability, Capability, CollectionElementAdmission,
     CollectionKind, EnumId, FieldId, FloatType, GenericOwner, GenericParamId, IndexSemantics,

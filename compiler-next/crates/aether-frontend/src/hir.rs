@@ -891,6 +891,8 @@ pub enum HirExprKind {
     Class(Box<ClassOp<HirExpr>>),
     /// Fundamental immutable string lifecycle and content operations.
     String(Box<crate::StringOp<HirExpr>>),
+    /// Canonical standard-library text operations, separate from core `StringOp`.
+    Text(Box<crate::TextOp<HirExpr>>),
     AlgebraicValue {
         capability: AlgebraicCapability,
     },
@@ -3846,6 +3848,9 @@ impl Monomorphizer<'_> {
             HirExprKind::String(op) => HirExprKind::String(Box::new(
                 op.clone().map(|e| self.substitute_expr(&e, substitution))?,
             )),
+            HirExprKind::Text(op) => HirExprKind::Text(Box::new(
+                op.clone().map(|e| self.substitute_expr(&e, substitution))?,
+            )),
             HirExprKind::Int(value) => HirExprKind::Int(*value),
             HirExprKind::Float(value) => HirExprKind::Float(*value),
             HirExprKind::Bool(value) => HirExprKind::Bool(*value),
@@ -5193,6 +5198,12 @@ impl OwnershipAnalysis<'_> {
                 Ok(())
             }
             HirExprKind::String(op) => {
+                for operand in op.operands() {
+                    self.expr(operand)?;
+                }
+                Ok(())
+            }
+            HirExprKind::Text(op) => {
                 for operand in op.operands() {
                     self.expr(operand)?;
                 }
@@ -8594,6 +8605,9 @@ impl Analyzer<'_> {
                 Some(span),
             )]);
         }
+        if m == "Text" {
+            return self.text_apply(mid, f, type_arguments, args, span);
+        }
         if let Some(id) = self.names[mid.0 as usize].get(f).copied() {
             return self.call_id(id, &format!("{m}.{f}"), type_arguments, args, span);
         }
@@ -8617,6 +8631,141 @@ impl Analyzer<'_> {
             format!("unknown function or struct `{f}` in module `{m}`"),
             Some(span),
         )])
+    }
+
+    fn text_apply(
+        &mut self,
+        module: ModuleId,
+        function: &str,
+        type_arguments: &[AstType],
+        args: &[AstExpr],
+        span: Span,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        if !type_arguments.is_empty() {
+            return Err(vec![type_error(
+                "Text functions do not accept type arguments",
+                span,
+            )]);
+        }
+        let scalar_id = self.struct_names[module.0 as usize]
+            .get("ScalarOffset")
+            .copied()
+            .ok_or_else(|| {
+                vec![type_error(
+                    "canonical Text.ScalarOffset is unavailable",
+                    span,
+                )]
+            })?;
+        let scalar_ty = self.types.intern(TypeData::Struct(scalar_id));
+        let find_id = self.enum_names[module.0 as usize]
+            .get("FindResult")
+            .copied()
+            .ok_or_else(|| vec![type_error("canonical Text.FindResult is unavailable", span)])?;
+        let find_ty = self.types.intern(TypeData::Enum(find_id));
+        let arity = match function {
+            "scalarOffset" | "codePointCount" | "trim" => 1,
+            "contains" | "startsWith" | "endsWith" | "find" | "split" => 2,
+            "findFrom" | "substring" => 3,
+            _ => {
+                return Err(vec![Diagnostic::new(
+                    "E0222",
+                    Phase::Semantic,
+                    DiagnosticCategory::Name,
+                    format!("unknown function `{function}` in module `Text`"),
+                    Some(span),
+                )]);
+            }
+        };
+        if args.len() != arity {
+            return Err(vec![type_error(
+                format!(
+                    "Text.{function} expects {arity} arguments, found {}",
+                    args.len()
+                ),
+                span,
+            )]);
+        }
+        if function == "scalarOffset" {
+            return self.struct_init(scalar_ty, "Text.scalarOffset", args, span);
+        }
+        let (op, ty) = match function {
+            "codePointCount" => (
+                crate::TextOp::CodePointCount {
+                    value: self.string_borrow_operand(&args[0])?,
+                },
+                TypeId::USIZE,
+            ),
+            "contains" => (
+                crate::TextOp::Contains {
+                    value: self.string_borrow_operand(&args[0])?,
+                    needle: self.string_borrow_operand(&args[1])?,
+                },
+                TypeId::BOOL,
+            ),
+            "startsWith" => (
+                crate::TextOp::StartsWith {
+                    value: self.string_borrow_operand(&args[0])?,
+                    prefix: self.string_borrow_operand(&args[1])?,
+                },
+                TypeId::BOOL,
+            ),
+            "endsWith" => (
+                crate::TextOp::EndsWith {
+                    value: self.string_borrow_operand(&args[0])?,
+                    suffix: self.string_borrow_operand(&args[1])?,
+                },
+                TypeId::BOOL,
+            ),
+            "find" => (
+                crate::TextOp::Find {
+                    value: self.string_borrow_operand(&args[0])?,
+                    needle: self.string_borrow_operand(&args[1])?,
+                    start: None,
+                },
+                find_ty,
+            ),
+            "findFrom" => (
+                crate::TextOp::Find {
+                    value: self.string_borrow_operand(&args[0])?,
+                    needle: self.string_borrow_operand(&args[1])?,
+                    start: Some(self.expression(&args[2], Some(scalar_ty))?.expr),
+                },
+                find_ty,
+            ),
+            "substring" => (
+                crate::TextOp::Substring {
+                    value: self.string_borrow_operand(&args[0])?,
+                    start: self.expression(&args[1], Some(scalar_ty))?.expr,
+                    end: self.expression(&args[2], Some(scalar_ty))?.expr,
+                },
+                TypeId::STRING,
+            ),
+            "trim" => (
+                crate::TextOp::Trim {
+                    value: self.string_borrow_operand(&args[0])?,
+                },
+                TypeId::STRING,
+            ),
+            "split" => {
+                let list = self.types.intern_list(TypeId::STRING);
+                (
+                    crate::TextOp::Split {
+                        value: self.string_borrow_operand(&args[0])?,
+                        separator: self.string_borrow_operand(&args[1])?,
+                    },
+                    list,
+                )
+            }
+            _ => unreachable!(),
+        };
+        Ok(Checked {
+            expr: HirExpr {
+                kind: HirExprKind::Text(Box::new(op)),
+                ty,
+                span,
+            },
+            constant: None,
+        })
     }
 
     fn struct_init(
@@ -10569,6 +10718,13 @@ fn verify_expr(
             {
                 return Err(fail("HIR string Alias requires an lvalue".into()));
             }
+        }
+        HirExprKind::Text(op) => {
+            for operand in op.operands() {
+                verify_expr(operand, f, sigs, structs, enums, types, fail)?;
+            }
+            crate::verify_text_op(op, e.ty, types, structs, enums, |operand| Ok(operand.ty))
+                .map_err(fail)?;
         }
         HirExprKind::Int(_) if types.integer_info(e.ty).is_none() => {
             return Err(fail("HIR integer literal mismatch".into()));

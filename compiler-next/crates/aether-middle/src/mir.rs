@@ -259,6 +259,8 @@ pub enum Rvalue {
     Class(Box<ClassOp<Operand, InstanceId>>),
     /// Explicit immutable string lifecycle/content operation.
     String(Box<aether_frontend::StringOp<Operand>>),
+    /// Canonical standard-library Text operation.
+    Text(Box<aether_frontend::TextOp<Operand>>),
     /// Readable descriptor operands and an explicit structured initialization loop.
     /// Native oriented algebraic product with a closed concrete schedule.
     AlgebraicProduct {
@@ -1952,6 +1954,7 @@ impl Builder<'_> {
         match &expression.kind {
             HirExprKind::Class(op) => self.lower_class(op, expression.ty, expression.span),
             HirExprKind::String(op) => self.lower_string(op, expression.ty, expression.span),
+            HirExprKind::Text(op) => self.lower_text(op, expression.ty, expression.span),
             HirExprKind::Int(value) => Operand::Int {
                 value: *value,
                 ty: expression.ty,
@@ -3188,6 +3191,43 @@ impl Builder<'_> {
             span,
         );
         for owner in owners {
+            self.emit_drop(owner, span);
+        }
+        Operand::Local(destination)
+    }
+
+    fn lower_text(
+        &mut self,
+        op: &aether_frontend::TextOp<HirExpr>,
+        ty: TypeId,
+        span: Span,
+    ) -> Operand {
+        let mut owners = Vec::new();
+        let lowered = op
+            .clone()
+            .map(|expression| {
+                let temporary_string = expression.ty == TypeId::STRING
+                    && !matches!(
+                        expression.kind,
+                        HirExprKind::Local(_) | HirExprKind::Load(_)
+                    );
+                let operand = self.lower_expr(&expression);
+                if temporary_string {
+                    owners.push(operand_place(&operand));
+                }
+                Ok::<_, std::convert::Infallible>(operand)
+            })
+            .unwrap();
+        let destination = self.temporary(ty);
+        self.assign(
+            Place {
+                base: PlaceBase::Local(destination),
+                projections: vec![],
+            },
+            Rvalue::Text(Box::new(lowered)),
+            span,
+        );
+        for owner in owners.into_iter().rev() {
             self.emit_drop(owner, span);
         }
         Operand::Local(destination)
@@ -4488,6 +4528,19 @@ fn verify_ownership(
                         initialize_owner(function, types, &mut state, destination, fail)?;
                     }
                 }
+                Rvalue::Text(op) => {
+                    for operand in op.operands() {
+                        if let Operand::Local(local) = operand
+                            && !types.is_copy(function.locals[local.0 as usize].ty)
+                            && state[local.0 as usize] != MirOwnerState::Owned
+                        {
+                            return Err(fail("Text operation uses a moved/dropped owner".into()));
+                        }
+                    }
+                    if op.creates_owner() {
+                        initialize_owner(function, types, &mut state, destination, fail)?;
+                    }
+                }
                 Rvalue::Class(op) => {
                     for operand in op.operands() {
                         if let Operand::Local(local) = operand
@@ -4974,6 +5027,14 @@ fn validate_rvalue(
                 validate_operand(function, operand, initialized)?;
             }
             aether_frontend::verify_string_op(op, destination, types, |operand| {
+                operand_type(function, operand)
+            })?;
+        }
+        Rvalue::Text(op) => {
+            for operand in op.operands() {
+                validate_operand(function, operand, initialized)?;
+            }
+            aether_frontend::verify_text_op(op, destination, types, structs, enums, |operand| {
                 operand_type(function, operand)
             })?;
         }
