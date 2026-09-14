@@ -115,6 +115,8 @@ pub enum SsaOp {
     String(Box<aether_frontend::StringOp<SsaOperand>>),
     /// Canonical standard-library Text operation.
     Text(Box<aether_frontend::TextOp<SsaOperand>>),
+    /// Canonically resolved Core function call.
+    Core(Box<aether_frontend::CoreCall<SsaOperand>>),
     /// Structured mathematical loop; inputs are Copy readable descriptors.
     /// Native oriented algebraic product with a closed concrete schedule.
     AlgebraicProduct {
@@ -906,6 +908,11 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
                 .map(|operand| Ok::<_, std::convert::Infallible>(rename_operand(&operand, stacks)))
                 .unwrap(),
         )),
+        Rvalue::Core(op) => SsaOp::Core(Box::new(
+            op.clone()
+                .map(|operand| Ok::<_, std::convert::Infallible>(rename_operand(&operand, stacks)))
+                .unwrap(),
+        )),
         Rvalue::Use(operand) => SsaOp::Use(rename_operand(operand, stacks)),
         Rvalue::Load(place) => match &place.base {
             PlaceBase::Local(local)
@@ -1623,6 +1630,11 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
             .filter_map(operand_local)
             .collect(),
         Rvalue::Text(op) => op
+            .operands()
+            .into_iter()
+            .filter_map(operand_local)
+            .collect(),
+        Rvalue::Core(op) => op
             .operands()
             .into_iter()
             .filter_map(operand_local)
@@ -2817,6 +2829,9 @@ fn verify_op(
         SsaOp::Text(op) => {
             aether_frontend::verify_text_op(op, result, types, structs, enums, operand_ty)?;
         }
+        SsaOp::Core(op) => {
+            aether_frontend::verify_core_call(op, result, types, operand_ty)?;
+        }
 
         SsaOp::Use(operand) => {
             if operand_ty(operand)? != result || !types.is_copy(result) {
@@ -3676,6 +3691,7 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
     match op {
         SsaOp::String(op) => op.operands(),
         SsaOp::Text(op) => op.operands(),
+        SsaOp::Core(op) => op.operands(),
         SsaOp::Use(value)
         | SsaOp::VectorTransposeMove { operand: value, .. }
         | SsaOp::Coerce { operand: value, .. }

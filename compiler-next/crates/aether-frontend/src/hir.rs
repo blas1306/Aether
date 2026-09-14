@@ -677,6 +677,7 @@ pub enum HirStmtKind {
         mutation: StructuralMutation,
     },
     StringOutput {
+        function: crate::CoreFunction,
         value: HirExpr,
         newline: bool,
     },
@@ -950,6 +951,8 @@ pub enum HirExprKind {
     String(Box<crate::StringOp<HirExpr>>),
     /// Canonical standard-library text operations, separate from core `StringOp`.
     Text(Box<crate::TextOp<HirExpr>>),
+    /// A fully resolved, canonically identified Core function call.
+    Core(Box<crate::CoreCall<HirExpr>>),
     AlgebraicValue {
         capability: AlgebraicCapability,
     },
@@ -3852,7 +3855,12 @@ impl Monomorphizer<'_> {
                             place: self.substitute_place(place, substitution)?,
                             value: self.substitute_expr(value, substitution)?,
                         },
-                        HirStmtKind::StringOutput { value, newline } => HirStmtKind::StringOutput {
+                        HirStmtKind::StringOutput {
+                            function,
+                            value,
+                            newline,
+                        } => HirStmtKind::StringOutput {
+                            function: function.clone(),
                             value: self.substitute_expr(value, substitution)?,
                             newline: *newline,
                         },
@@ -4097,6 +4105,9 @@ impl Monomorphizer<'_> {
                 op.clone().map(|e| self.substitute_expr(&e, substitution))?,
             )),
             HirExprKind::Text(op) => HirExprKind::Text(Box::new(
+                op.clone().map(|e| self.substitute_expr(&e, substitution))?,
+            )),
+            HirExprKind::Core(op) => HirExprKind::Core(Box::new(
                 op.clone().map(|e| self.substitute_expr(&e, substitution))?,
             )),
             HirExprKind::Int(value) => HirExprKind::Int(*value),
@@ -5472,6 +5483,12 @@ impl OwnershipAnalysis<'_> {
                 }
                 Ok(())
             }
+            HirExprKind::Core(op) => {
+                for operand in op.operands() {
+                    self.expr(operand)?;
+                }
+                Ok(())
+            }
             HirExprKind::Move(local) => self.move_local(*local, expr.span),
             HirExprKind::Local(local) => {
                 if self.types.guarantees_copy(expr.ty) {
@@ -6793,7 +6810,12 @@ impl Analyzer<'_> {
             type_arguments,
             args,
         } = &expression.kind
-            && matches!(callee.as_str(), "print" | "println")
+            && !self.names[self.module.0 as usize].contains_key(callee)
+            && self.lookup(callee).is_none()
+            && matches!(
+                crate::prelude_symbol(callee),
+                Some(crate::CoreSymbol::Print | crate::CoreSymbol::Println)
+            )
         {
             if !type_arguments.is_empty() || args.len() != 1 {
                 return Err(vec![type_error(
@@ -6803,6 +6825,10 @@ impl Analyzer<'_> {
             }
             let value = self.string_borrow_operand(&args[0])?;
             return Ok(HirStmtKind::StringOutput {
+                function: crate::CoreFunction::resolve(
+                    crate::prelude_symbol(callee).expect("checked Core output symbol"),
+                    TypeId::STRING,
+                ),
                 value,
                 newline: callee == "println",
             });
@@ -7322,32 +7348,6 @@ impl Analyzer<'_> {
             type_arguments,
             args,
         } = &e.kind
-            && callee == "byteLength"
-        {
-            if !type_arguments.is_empty() || args.len() != 1 {
-                return Err(vec![type_error(
-                    "byteLength expects exactly one string and no type arguments",
-                    e.span,
-                )]);
-            }
-            let source = self.string_borrow_operand(&args[0])?;
-            return self.coerce(
-                Checked {
-                    expr: HirExpr {
-                        kind: HirExprKind::String(Box::new(crate::StringOp::ByteLength { source })),
-                        ty: TypeId::USIZE,
-                        span: e.span,
-                    },
-                    constant: None,
-                },
-                expected,
-            );
-        }
-        if let AstExprKind::Call {
-            callee,
-            type_arguments,
-            args,
-        } = &e.kind
             && (callee == "pop" || callee == "swap_remove" || callee == "remove")
         {
             let indexed = callee != "pop";
@@ -7471,16 +7471,18 @@ impl Analyzer<'_> {
                         e.span,
                     )]);
                 }
-                if self.names[self.module.0 as usize].contains_key(n) {
-                    return Err(vec![Diagnostic::new(
-                        "E0215",
-                        Phase::Semantic,
-                        DiagnosticCategory::Unsupported,
-                        "function values are not admitted",
-                        Some(e.span),
-                    )]);
-                }
                 let Some(l) = self.lookup(n) else {
+                    if self.names[self.module.0 as usize].contains_key(n)
+                        || crate::prelude_symbol(n).is_some()
+                    {
+                        return Err(vec![Diagnostic::new(
+                            "E0215",
+                            Phase::Semantic,
+                            DiagnosticCategory::Unsupported,
+                            "function values are not admitted",
+                            Some(e.span),
+                        )]);
+                    }
                     return Err(vec![unknown_name(n, e.span)]);
                 };
                 Checked {
@@ -7618,7 +7620,7 @@ impl Analyzer<'_> {
                     let target = self.nominal_struct_type(*id, resolved_arguments, e.span)?;
                     self.struct_init(target, callee, args, e.span)?
                 } else {
-                    self.call(callee, type_arguments, args, e.span)?
+                    self.call(callee, type_arguments, args, e.span, expected)?
                 }
             }
             AstExprKind::QualifiedCall {
@@ -8817,17 +8819,159 @@ impl Analyzer<'_> {
         type_arguments: &[AstType],
         args: &[AstExpr],
         span: Span,
+        expected: Option<TypeId>,
     ) -> Result<Checked, Vec<Diagnostic>> {
-        let Some(id) = self.names[self.module.0 as usize].get(n).copied() else {
+        if self.lookup(n).is_some() {
             return Err(vec![Diagnostic::new(
-                "E0212",
+                "E0215",
                 Phase::Semantic,
-                DiagnosticCategory::Name,
-                format!("unknown function `{n}`"),
+                DiagnosticCategory::Unsupported,
+                format!(
+                    "lexical value `{n}` shadows callable names; function values are not admitted"
+                ),
                 Some(span),
             )]);
+        }
+        if let Some(id) = self.names[self.module.0 as usize].get(n).copied() {
+            return self.call_id(id, n, type_arguments, args, span);
+        }
+        if let Some(symbol) = crate::prelude_symbol(n) {
+            return self.core_call(symbol, type_arguments, args, span, expected);
+        }
+        Err(vec![Diagnostic::new(
+            "E0212",
+            Phase::Semantic,
+            DiagnosticCategory::Name,
+            format!("unknown function `{n}`"),
+            Some(span),
+        )])
+    }
+
+    fn core_call(
+        &mut self,
+        symbol: crate::CoreSymbol,
+        type_arguments: &[AstType],
+        args: &[AstExpr],
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        if !type_arguments.is_empty() {
+            return Err(vec![type_error(
+                format!(
+                    "Core function `{}` does not accept type arguments",
+                    symbol.member()
+                ),
+                span,
+            )]);
+        }
+        let arity = crate::CoreFunction::resolve(symbol, TypeId::BOOL).arity();
+        if args.len() != arity {
+            return Err(vec![type_error(
+                format!(
+                    "Core function `{}` expects {arity} arguments, found {}",
+                    symbol.member(),
+                    args.len()
+                ),
+                span,
+            )]);
+        }
+        if matches!(
+            symbol,
+            crate::CoreSymbol::Print | crate::CoreSymbol::Println
+        ) {
+            return Err(vec![type_error(
+                "print/println are output effects and cannot be used as values",
+                span,
+            )]);
+        }
+        if symbol == crate::CoreSymbol::ByteLength {
+            let argument = self.string_borrow_operand(&args[0])?;
+            let function = crate::CoreFunction::resolve(symbol, TypeId::STRING);
+            return self.coerce(
+                Checked {
+                    expr: HirExpr {
+                        kind: HirExprKind::Core(Box::new(crate::CoreCall {
+                            function,
+                            arguments: vec![argument],
+                        })),
+                        ty: TypeId::USIZE,
+                        span,
+                    },
+                    constant: None,
+                },
+                expected,
+            );
+        }
+
+        let contextual = expected.filter(|ty| self.types.is_numeric(*ty));
+        let all_literals = args.iter().all(literal);
+        let mut checked = Vec::with_capacity(args.len());
+        for argument in args {
+            checked.push(self.expression(argument, all_literals.then_some(contextual).flatten())?);
+        }
+        let mut parameter_type = checked[0].expr.ty;
+        for argument in checked.iter().skip(1) {
+            parameter_type =
+                common(self.types, parameter_type, argument.expr.ty).ok_or_else(|| {
+                    vec![conversion_error(
+                        self.types,
+                        self.structs,
+                        self.enums,
+                        parameter_type,
+                        argument.expr.ty,
+                        span,
+                    )]
+                })?;
+        }
+        let signature_valid = match symbol {
+            crate::CoreSymbol::Abs => {
+                self.types
+                    .integer_info(parameter_type)
+                    .is_some_and(IntegerType::is_signed)
+                    || self.types.float_info(parameter_type).is_some()
+            }
+            crate::CoreSymbol::Min | crate::CoreSymbol::Max | crate::CoreSymbol::Clamp => {
+                self.types.is_numeric(parameter_type)
+            }
+            crate::CoreSymbol::Sqrt
+            | crate::CoreSymbol::Exp
+            | crate::CoreSymbol::Ln
+            | crate::CoreSymbol::Sin
+            | crate::CoreSymbol::Cos
+            | crate::CoreSymbol::Tan => self.types.float_info(parameter_type).is_some(),
+            crate::CoreSymbol::Print
+            | crate::CoreSymbol::Println
+            | crate::CoreSymbol::ByteLength => unreachable!(),
         };
-        self.call_id(id, n, type_arguments, args, span)
+        if !signature_valid {
+            return Err(vec![type_error(
+                format!(
+                    "Core function `{}` has no v1 signature for {}",
+                    symbol.member(),
+                    self.type_name(parameter_type)
+                ),
+                span,
+            )]);
+        }
+        let arguments = checked
+            .into_iter()
+            .map(|argument| self.coerce(argument, Some(parameter_type)).map(|c| c.expr))
+            .collect::<Result<Vec<_>, _>>()?;
+        let function = crate::CoreFunction::resolve(symbol, parameter_type);
+        self.coerce(
+            Checked {
+                expr: HirExpr {
+                    kind: HirExprKind::Core(Box::new(crate::CoreCall {
+                        function,
+                        arguments,
+                    })),
+                    ty: parameter_type,
+                    span,
+                },
+                constant: None,
+            },
+            expected,
+        )
     }
     fn local_enum_id(&self, name: &str) -> Option<EnumId> {
         self.aliases[self.module.0 as usize]
@@ -10612,9 +10756,23 @@ fn verify_block(
                     ));
                 }
             }
-            HirStmtKind::StringOutput { value, .. } => {
+            HirStmtKind::StringOutput {
+                function,
+                value,
+                newline,
+            } => {
                 verify_expr(value, f, sigs, structs, enums, types, fail)?;
-                if value.ty != TypeId::STRING {
+                let call = crate::CoreCall {
+                    function: function.clone(),
+                    arguments: vec![value.clone()],
+                };
+                if !matches!(
+                    function.symbol,
+                    crate::CoreSymbol::Print | crate::CoreSymbol::Println
+                ) || *newline != (function.symbol == crate::CoreSymbol::Println)
+                    || crate::verify_core_call(&call, TypeId::BOOL, types, |operand| Ok(operand.ty))
+                        .is_err()
+                {
                     return Err(fail("HIR string output operand is not string".into()));
                 }
             }
@@ -11010,6 +11168,12 @@ fn verify_expr(
             }
             crate::verify_text_op(op, e.ty, types, structs, enums, |operand| Ok(operand.ty))
                 .map_err(fail)?;
+        }
+        HirExprKind::Core(op) => {
+            for operand in op.operands() {
+                verify_expr(operand, f, sigs, structs, enums, types, fail)?;
+            }
+            crate::verify_core_call(op, e.ty, types, |operand| Ok(operand.ty)).map_err(fail)?;
         }
         HirExprKind::Int(_) if types.integer_info(e.ty).is_none() => {
             return Err(fail("HIR integer literal mismatch".into()));
@@ -12264,6 +12428,19 @@ mod tests {
         };
         initializer.ty = TypeId::BOOL;
         assert!(verify_hir(&wrong_result).is_err());
+    }
+    #[test]
+    fn core_hir_identity_corruption_is_rejected() {
+        let mut hir = check("int main(){double x=exp(1.0);return 0;}").unwrap();
+        let HirStmtKind::Local { initializer, .. } = &mut hir.functions[0].body.statements[0].kind
+        else {
+            panic!("expected Core local");
+        };
+        let HirExprKind::Core(call) = &mut initializer.kind else {
+            panic!("expected Core call");
+        };
+        call.function.identity.profile = 99;
+        assert!(verify_hir(&hir).is_err());
     }
     #[test]
     fn composed_string_hir_cleanup_corruption_is_rejected() {

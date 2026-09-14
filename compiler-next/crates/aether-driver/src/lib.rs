@@ -943,6 +943,9 @@ impl ClangToolchain {
         if llvm.contains("@__gxx_personality_v0") {
             command.arg("-lstdc++");
         }
+        if llvm.contains("; Core libm dependency") {
+            command.arg("-lm");
+        }
         let result = command.output();
         let _ = fs::remove_file(&llvm_path);
         let output_result = result.map_err(|error| {

@@ -1,0 +1,14 @@
+package CoreQualification;
+
+int main() {
+    int a = abs(-7);
+    int b = min(a, 9);
+    int c = max(b, 8);
+    int d = clamp(c, 0, 10);
+    float32 f = sqrt(float32(4.0));
+    double x = 1.0;
+    double y = exp(x) - 2.0 * x * x;
+    double z = ln(1.0) + sin(0.0) + cos(0.0) + tan(0.0);
+    println("done");
+    return d + int(f) + int(y) + int(z) + int(byteLength("x"));
+}

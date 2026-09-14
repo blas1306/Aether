@@ -2656,3 +2656,14 @@ Only private byte-at and validated UTF-8 range-copy representation primitives
 are admitted. Regex, views, syntactic slicing/indexing, public iteration/Bytes,
 formatting, normalization/graphemes, case/locale operations, parsing, hashing
 and public builders remain outside the contract.
+
+## CORE-V1 — closed prelude functions
+
+The admitted Core profile-v1 manifest contains only `print`, `println`,
+`byteLength`, `abs`, `min`, `max`, `clamp`, `sqrt`, `exp`, `ln`, `sin`, `cos`
+and `tan`. Unqualified lookup is lexical, current package, then this manifest;
+it opens no namespace and creates dependencies only for reached symbols.
+Canonical Core identity and the selected homogeneous scalar signature survive
+HIR, MIR and SSA. Exact signatures, IEEE/libm behavior, checked signed `abs`
+and exclusions are recorded in [CORE_V1_REPORT.md](CORE_V1_REPORT.md). This does
+not admit `List<T>` as Core or a general overload facility.

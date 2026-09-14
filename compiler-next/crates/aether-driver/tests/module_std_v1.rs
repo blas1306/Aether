@@ -266,3 +266,20 @@ fn namespace_alias_spelling_disappears_before_hir() {
         compile_with("str", "alias-b")
     );
 }
+
+#[test]
+fn std_import_aliases_do_not_open_or_modify_the_core_prelude() {
+    let directory = Directory::new("core-independent");
+    let entry = directory.write(
+        "main.ae",
+        "package Main; import std.Text as text; int main(){double x=exp(0.0);bool hit=text.contains(\"x\",\"x\");if(x!=1.0){return 1;}if(hit){return 0;}return 2;}",
+    );
+    let compilation = compile_session(
+        CompilationSession::discover(&entry).unwrap(),
+        &[Emit::Hir, Emit::Llvm],
+    )
+    .unwrap();
+    assert!(compilation.dumps[&Emit::Hir].contains("CoreSymbolKey"));
+    assert!(compilation.dumps[&Emit::Hir].contains("Contains"));
+    assert!(compilation.llvm.contains("Core libm dependency"));
+}

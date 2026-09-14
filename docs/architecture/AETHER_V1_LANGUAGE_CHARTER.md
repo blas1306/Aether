@@ -699,3 +699,16 @@ character columns MUST be preserved, including LF and CRLF within comments.
 Comments MUST NOT become semantic IR nodes. The generated main return is
 explicit in HIR before ownership cleanup and ordinary MIR/SSA/LLVM lowering.
 See [LANGUAGE_PARITY_1_REPORT.md](LANGUAGE_PARITY_1_REPORT.md).
+
+## CORE-V1 — initial prelude spine
+
+The native compiler admits the closed Core profile-v1 prelude `print`,
+`println`, `byteLength`, `abs`, `min`, `max`, `clamp`, `sqrt`, `exp`, `ln`,
+`sin`, `cos` and `tan` without imports. Prelude is symbol lookup, not `std.*`,
+and current-package members shadow it after lexical lookup. HIR/MIR/SSA retain
+canonical versioned Core function identity and exact scalar types. Integer
+operations preserve checked rules; float operations use typed libm/IEEE behavior
+without new conversions, exceptions or fast math. Only reached calls select
+runtime/libm dependencies. `List<T>`, general overloads and specialized
+mathematics remain outside this vertical. See
+[CORE_V1_REPORT.md](CORE_V1_REPORT.md).

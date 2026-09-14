@@ -2,6 +2,7 @@
 
 mod algebraic;
 mod classes;
+mod core;
 mod elementwise;
 mod mathematical;
 mod strings;
@@ -66,6 +67,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         || !types.classes().is_empty()
         || !types.interfaces().is_empty())
     .then(|| classes::reachable_functions(program));
+    let core_reachable = classes::reachable_functions(program);
     let has_class_runtime = reachable.as_ref().is_some_and(|reachable| {
         program
             .functions
@@ -97,22 +99,33 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         });
     let has_class_runtime =
         has_class_runtime || has_interface_runtime || program.exceptions_enabled;
-    let has_string_runtime = program.functions.iter().any(|function| {
-        let signature = &program.signatures[function.id.0 as usize];
-        types.contains_string(signature.return_type)
-            || signature
-                .parameters
-                .iter()
-                .any(|p| types.contains_string(p.ty))
-            || function
+    let has_string_runtime = program
+        .functions
+        .iter()
+        .filter(|function| {
+            let contains_core = function
                 .blocks
                 .iter()
-                .flat_map(|b| &b.instructions)
-                .any(|instruction| {
-                    types.contains_string(instruction.ty)
-                        || matches!(instruction.op, SsaOp::String(_))
-                })
-    });
+                .flat_map(|block| &block.instructions)
+                .any(|instruction| matches!(instruction.op, SsaOp::Core(_)));
+            !contains_core || core_reachable.contains(&function.id)
+        })
+        .any(|function| {
+            let signature = &program.signatures[function.id.0 as usize];
+            types.contains_string(signature.return_type)
+                || signature
+                    .parameters
+                    .iter()
+                    .any(|p| types.contains_string(p.ty))
+                || function
+                    .blocks
+                    .iter()
+                    .flat_map(|b| &b.instructions)
+                    .any(|instruction| {
+                        types.contains_string(instruction.ty)
+                            || matches!(instruction.op, SsaOp::String(_))
+                    })
+        });
     let has_text_runtime = program.functions.iter().any(|function| {
         function
             .blocks
@@ -120,6 +133,17 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             .flat_map(|block| &block.instructions)
             .any(|instruction| matches!(instruction.op, SsaOp::Text(_)))
     });
+    let core_calls = program
+        .functions
+        .iter()
+        .filter(|function| core_reachable.contains(&function.id))
+        .flat_map(|function| &function.blocks)
+        .flat_map(|block| &block.instructions)
+        .filter_map(|instruction| match &instruction.op {
+            SsaOp::Core(call) => Some((call.function.symbol, call.function.parameter_type)),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
     let buffer_elements = types
         .entries()
         .filter_map(|(ty, data)| match data {
@@ -212,6 +236,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     if has_text_runtime {
         text::runtime(&mut output);
     }
+    core::declarations(&mut output, &core_calls, types);
     if program.exceptions_enabled {
         emit_exception_runtime(&mut output, types);
     }
@@ -355,6 +380,12 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         if reachable
             .as_ref()
             .is_some_and(|r| !r.contains(&function.id))
+            || (!core_reachable.contains(&function.id)
+                && function
+                    .blocks
+                    .iter()
+                    .flat_map(|block| &block.instructions)
+                    .any(|instruction| matches!(instruction.op, SsaOp::Core(_))))
         {
             continue;
         }
@@ -1347,6 +1378,14 @@ fn emit_function(
                     instruction.result.0,
                     &llvm_type(types, instruction.ty),
                     &llvm_type(types, text_scalar_type(types, modules, structs)),
+                    llvm_operand,
+                ),
+                SsaOp::Core(op) => core::emit_op(
+                    output,
+                    op,
+                    instruction.result.0,
+                    types,
+                    &llvm_type(types, instruction.ty),
                     llvm_operand,
                 ),
                 SsaOp::Use(operand) => writeln!(

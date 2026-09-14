@@ -2640,3 +2640,18 @@ facility. Tests compare complete LLVM byte-for-byte for explicit/implicit zero
 returns, including conditional fallthrough and Buffer cleanup. Comment insertion
 compares HIR/MIR/SSA after excluding only physical Span fields, and compares
 complete LLVM unchanged. See [LANGUAGE_PARITY_1_REPORT.md](LANGUAGE_PARITY_1_REPORT.md).
+
+## CORE-V1 — resolved Core identity and selective lowering
+
+The frontend owns a closed `PRELUDE_V1` manifest and applies lexical → current
+package → prelude lookup. A selected entry becomes a canonical `CoreFunction`
+with a versioned `CoreSymbolKey` and concrete homogeneous signature before HIR.
+`CoreCall` crosses HIR, MIR and SSA and is reconstructed independently by each
+verifier; no later phase reads source spelling or imports to identify it.
+
+String output and byte length reuse GENERAL-V1 ownership/runtime paths. Scalar
+math uses the existing canonical types and widening only. LLVM emits direct
+integer comparisons/checked signed abs or ordinary float/double libm calls, and
+the driver links libm only when a reached call requires it. This is a typed
+library-call family rather than one language intrinsic per function. See
+[CORE_V1_REPORT.md](CORE_V1_REPORT.md).

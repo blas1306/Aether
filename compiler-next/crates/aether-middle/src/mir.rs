@@ -261,6 +261,8 @@ pub enum Rvalue {
     String(Box<aether_frontend::StringOp<Operand>>),
     /// Canonical standard-library Text operation.
     Text(Box<aether_frontend::TextOp<Operand>>),
+    /// Canonically resolved Core function call.
+    Core(Box<aether_frontend::CoreCall<Operand>>),
     /// Readable descriptor operands and an explicit structured initialization loop.
     /// Native oriented algebraic product with a closed concrete schedule.
     AlgebraicProduct {
@@ -1314,7 +1316,11 @@ impl Builder<'_> {
                         }
                     }
                 }
-                HirStmtKind::StringOutput { value, newline } => {
+                HirStmtKind::StringOutput {
+                    function,
+                    value,
+                    newline: _,
+                } => {
                     let (source, owner) = self.lower_string_read(value);
                     let token = self.temporary(TypeId::BOOL);
                     self.assign(
@@ -1322,9 +1328,9 @@ impl Builder<'_> {
                             base: PlaceBase::Local(token),
                             projections: vec![],
                         },
-                        Rvalue::String(Box::new(aether_frontend::StringOp::Output {
-                            source,
-                            newline: *newline,
+                        Rvalue::Core(Box::new(aether_frontend::CoreCall {
+                            function: function.clone(),
+                            arguments: vec![source],
                         })),
                         statement.span,
                     );
@@ -1955,6 +1961,7 @@ impl Builder<'_> {
             HirExprKind::Class(op) => self.lower_class(op, expression.ty, expression.span),
             HirExprKind::String(op) => self.lower_string(op, expression.ty, expression.span),
             HirExprKind::Text(op) => self.lower_text(op, expression.ty, expression.span),
+            HirExprKind::Core(op) => self.lower_core(op, expression.ty, expression.span),
             HirExprKind::Int(value) => Operand::Int {
                 value: *value,
                 ty: expression.ty,
@@ -3228,6 +3235,43 @@ impl Builder<'_> {
             span,
         );
         for owner in owners.into_iter().rev() {
+            self.emit_drop(owner, span);
+        }
+        Operand::Local(destination)
+    }
+
+    fn lower_core(
+        &mut self,
+        op: &aether_frontend::CoreCall<HirExpr>,
+        ty: TypeId,
+        span: Span,
+    ) -> Operand {
+        let mut owners = Vec::new();
+        let lowered = op
+            .clone()
+            .map(|expression| {
+                let temporary_string = expression.ty == TypeId::STRING
+                    && !matches!(
+                        expression.kind,
+                        HirExprKind::Local(_) | HirExprKind::Load(_)
+                    );
+                let operand = self.lower_expr(&expression);
+                if temporary_string {
+                    owners.push(operand_place(&operand));
+                }
+                Ok::<_, std::convert::Infallible>(operand)
+            })
+            .unwrap();
+        let destination = self.temporary(ty);
+        self.assign(
+            Place {
+                base: PlaceBase::Local(destination),
+                projections: vec![],
+            },
+            Rvalue::Core(Box::new(lowered)),
+            span,
+        );
+        for owner in owners {
             self.emit_drop(owner, span);
         }
         Operand::Local(destination)
@@ -5035,6 +5079,14 @@ fn validate_rvalue(
                 validate_operand(function, operand, initialized)?;
             }
             aether_frontend::verify_text_op(op, destination, types, structs, enums, |operand| {
+                operand_type(function, operand)
+            })?;
+        }
+        Rvalue::Core(op) => {
+            for operand in op.operands() {
+                validate_operand(function, operand, initialized)?;
+            }
+            aether_frontend::verify_core_call(op, destination, types, |operand| {
                 operand_type(function, operand)
             })?;
         }

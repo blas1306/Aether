@@ -1,6 +1,7 @@
 //! Source-facing phases for the isolated Aether compiler.
 
 mod ast;
+mod core;
 mod diagnostic;
 mod hir;
 mod interfaces;
@@ -18,6 +19,10 @@ pub use ast::{
     AstExprKind, AstField, AstFunction, AstGenericParam, AstImport, AstMatchArm, AstMatchMode,
     AstPackage, AstParameter, AstPlace, AstReferenceType, AstStmt, AstStmtKind, AstStruct, AstType,
     AstUnaryOp, AstVariant, AstVariantPattern, ParsedAst,
+};
+pub use core::{
+    CORE_V1_PROFILE, CoreCall, CoreFunction, CoreSymbol, CoreSymbolKey, PRELUDE_V1, prelude_symbol,
+    verify_core_call,
 };
 pub use diagnostic::{Diagnostic, DiagnosticCategory, FixIt, Phase, SourceFile, SourceId, Span};
 pub use hir::{
