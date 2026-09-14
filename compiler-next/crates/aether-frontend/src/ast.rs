@@ -272,8 +272,8 @@ pub enum AstStmtKind {
         scrutinee: AstExpr,
         arms: Vec<AstMatchArm>,
     },
-    /// Value return.
-    Return(AstExpr),
+    /// Value return, or `return;` from a void function.
+    Return(Option<AstExpr>),
     /// Exit the innermost loop.
     Break,
     /// Continue the innermost loop.

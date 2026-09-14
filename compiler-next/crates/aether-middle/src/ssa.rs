@@ -32,6 +32,8 @@ pub struct ValueId(pub u32);
 /// SSA operand for scalar or aggregate values.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SsaOperand {
+    /// The sole no-result value.
+    Unit,
     /// SSA value use.
     Value(ValueId),
     /// Signed 64-bit constant.
@@ -1370,6 +1372,7 @@ fn rvalue_result_type(
 
 fn mir_operand_type(function: &MirFunction, operand: &Operand) -> TypeId {
     match operand {
+        Operand::Unit => TypeId::VOID,
         Operand::Local(local) => function.locals[local.0 as usize].ty,
         Operand::Int { ty, .. } | Operand::Float { ty, .. } => *ty,
         Operand::Bool(_) => TypeId::BOOL,
@@ -1378,6 +1381,7 @@ fn mir_operand_type(function: &MirFunction, operand: &Operand) -> TypeId {
 
 fn rename_operand(operand: &Operand, stacks: &[Vec<ValueId>]) -> SsaOperand {
     match operand {
+        Operand::Unit => SsaOperand::Unit,
         Operand::Local(local) => SsaOperand::Value(
             *stacks[local.0 as usize]
                 .last()
@@ -2008,6 +2012,15 @@ fn verify_ssa_function(
             let may_throw = matches!(instruction.op, SsaOp::Call { .. })
                 || matches!(
                     instruction.op,
+                    SsaOp::Core(ref call)
+                        if matches!(
+                            call.function.symbol,
+                            aether_frontend::CoreSymbol::Print
+                                | aether_frontend::CoreSymbol::Println
+                        )
+                )
+                || matches!(
+                    instruction.op,
                     SsaOp::Class(ref op)
                         if matches!(
                             op.as_ref(),
@@ -2175,6 +2188,7 @@ fn verify_ssa_function(
 
     let operand_ty = |operand: &SsaOperand| -> Result<TypeId, String> {
         match operand {
+            SsaOperand::Unit => Ok(TypeId::VOID),
             SsaOperand::Value(value) => definitions
                 .get(value)
                 .map(|definition| definition.ty)

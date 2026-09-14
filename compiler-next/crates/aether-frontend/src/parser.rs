@@ -695,7 +695,11 @@ impl Parser {
             }
             TokenKind::KwReturn => {
                 self.advance();
-                AstStmtKind::Return(self.expression()?)
+                AstStmtKind::Return(if self.at(TokenKind::Semicolon) {
+                    None
+                } else {
+                    Some(self.expression()?)
+                })
             }
             TokenKind::KwBreak => {
                 self.advance();

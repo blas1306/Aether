@@ -257,6 +257,7 @@ impl TypeId {
     pub const FLOAT32: Self = Self(11);
     pub const FLOAT64: Self = Self(12);
     pub const STRING: Self = Self(13);
+    pub const VOID: Self = Self(14);
 }
 
 impl fmt::Display for TypeId {
@@ -279,6 +280,7 @@ impl fmt::Display for TypeId {
             Self::FLOAT32 => "float32",
             Self::FLOAT64 => "float64",
             Self::STRING => "string",
+            Self::VOID => "void",
             Self(_) => return write!(f, "TypeId({})", self.0),
         };
         f.write_str(spelling)
@@ -330,6 +332,8 @@ impl IndexSemantics {
 /// not have a variant here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum TypeData {
+    /// Source-level absence of a result. It is never storable or owning.
+    Void,
     /// Nominal owning class handle, never structural Copy.
     Class(crate::ClassId),
     /// Nominal owning adapted view of a class object.
@@ -515,6 +519,7 @@ impl fmt::Display for TypeData {
             Self::Integer(v) => v.fmt(f),
             Self::Float(v) => v.fmt(f),
             Self::String => f.write_str("string"),
+            Self::Void => f.write_str("void"),
             Self::Struct(id) => write!(f, "struct#{}", id.0),
             Self::Enum(id) => write!(f, "enum#{}", id.0),
             Self::GenericParam(id) => write!(f, "param({:?}:{})", id.owner, id.index),
@@ -841,6 +846,7 @@ impl TypeArena {
             TypeData::Float(FloatType::Float32),
             TypeData::Float(FloatType::Float64),
             TypeData::String,
+            TypeData::Void,
         ];
         for (expected, data) in baseline.into_iter().enumerate() {
             let id = arena.intern(data);
@@ -1385,6 +1391,7 @@ impl TypeArena {
         Some(properties)
     }
 
+    #[allow(clippy::too_many_lines)]
     fn properties_with_substitution(
         &self,
         id: TypeId,
@@ -1428,6 +1435,15 @@ impl TypeArena {
                 is_copy: true,
                 is_relocatable: true,
                 is_storable: true,
+                needs_drop: false,
+            },
+            TypeData::Void => TypeProperties {
+                is_known: true,
+                // The compiler's unit token is freely duplicable even though
+                // `void` is not a source-storable value type.
+                is_copy: true,
+                is_relocatable: false,
+                is_storable: false,
                 needs_drop: false,
             },
             TypeData::ClassToken { .. }
@@ -1739,7 +1755,7 @@ impl TypeArena {
                     visiting,
                 ),
             },
-            None => false,
+            Some(TypeData::Void) | None => false,
         };
         visiting.remove(&(capability, id));
         result
@@ -1982,7 +1998,8 @@ impl TypeArena {
                 capability == 0
             }
             Some(TypeData::String) => capability == 5,
-            Some(TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_)) | None => false,
+            Some(TypeData::Void | TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_))
+            | None => false,
         }
     }
 

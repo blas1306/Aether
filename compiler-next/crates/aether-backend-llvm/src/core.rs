@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::fmt::Write;
 
 use aether_frontend::{CoreCall, CoreSymbol, FloatType, TypeArena, TypeId};
-use aether_middle::SsaOperand;
+use aether_middle::{BlockId, SsaOperand};
 
 pub(super) fn declarations(
     output: &mut String,
@@ -90,7 +90,7 @@ fn libm_name(symbol: CoreSymbol, float: FloatType) -> &'static str {
     }
 }
 
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub(super) fn emit_op(
     output: &mut String,
     call: &CoreCall<SsaOperand>,
@@ -98,19 +98,34 @@ pub(super) fn emit_op(
     types: &TypeArena,
     llvm_ty: &str,
     operand: impl Fn(&SsaOperand) -> String,
+    unwind: Option<BlockId>,
+    block: BlockId,
+    io_exception_available: bool,
 ) {
     let args = call.arguments.iter().map(&operand).collect::<Vec<_>>();
     let ty = call.function.parameter_type;
     match call.function.symbol {
         CoreSymbol::Print | CoreSymbol::Println => {
             let newline = call.function.symbol == CoreSymbol::Println;
-            writeln!(
-                output,
-                "  call void @aether_string_write(ptr {}, i1 {newline})",
-                args[0]
-            )
-            .unwrap();
-            writeln!(output, "  %v{result} = select i1 true, i1 true, i1 true").unwrap();
+            if io_exception_available && let Some(unwind) = unwind {
+                writeln!(output, "  %v{result} = invoke i1 @aether_io_stdout(ptr {}, i1 {newline}) to label %core_cont_{}_{} unwind label %bb{}", args[0], block.0, result, unwind.0).unwrap();
+                writeln!(output, "core_cont_{}_{}:", block.0, result).unwrap();
+            } else if io_exception_available {
+                writeln!(
+                    output,
+                    "  %v{result} = call i1 @aether_io_stdout(ptr {}, i1 {newline})",
+                    args[0]
+                )
+                .unwrap();
+            } else {
+                writeln!(
+                    output,
+                    "  call void @aether_string_write(ptr {}, i1 {newline})",
+                    args[0]
+                )
+                .unwrap();
+                writeln!(output, "  %v{result} = select i1 true, i1 true, i1 true").unwrap();
+            }
         }
         CoreSymbol::ByteLength => {
             writeln!(

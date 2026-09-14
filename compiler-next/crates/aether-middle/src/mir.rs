@@ -181,6 +181,8 @@ pub enum PlaceBase {
 /// MIR operand for scalar or aggregate values.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operand {
+    /// The sole source-level no-result value.
+    Unit,
     /// Storage read.
     Local(LocalId),
     /// Signed 64-bit constant.
@@ -796,6 +798,7 @@ fn conditional_drop_roots(block: &HirBlock) -> BTreeSet<LocalId> {
     roots
 }
 
+#[allow(clippy::too_many_lines)]
 fn lower_function(
     function: &HirFunction,
     return_type: TypeId,
@@ -822,7 +825,8 @@ fn lower_function(
             ty: parameter.ty,
         })
         .collect();
-    let mut conditional_roots = conditional_drop_roots(&function.body);
+    let intrinsic_conditional_roots = conditional_drop_roots(&function.body);
+    let mut conditional_roots = intrinsic_conditional_roots.clone();
     if exceptions_enabled {
         conditional_roots.extend(
             function
@@ -893,6 +897,29 @@ fn lower_function(
         );
     }
     builder.lower_block(&function.body);
+    // Exception-enabled programs provision flags before lowering because any
+    // call may acquire an unwind edge. If this particular function acquired
+    // no such edge, remove those speculative flags again. Keeping them would
+    // describe a conditional cleanup that does not exist in its CFG.
+    if builder.function.exception_events.is_empty() {
+        let speculative_flags = builder
+            .function
+            .drop_flags
+            .iter()
+            .filter(|entry| !intrinsic_conditional_roots.contains(&entry.owner))
+            .map(|entry| entry.flag)
+            .collect::<BTreeSet<_>>();
+        builder
+            .function
+            .drop_flags
+            .retain(|entry| intrinsic_conditional_roots.contains(&entry.owner));
+        for block in &mut builder.function.blocks {
+            block.instructions.retain(|instruction| {
+                !place_root_local(&instruction.destination)
+                    .is_some_and(|local| speculative_flags.contains(&local))
+            });
+        }
+    }
     builder
         .function
         .finally_regions
@@ -1958,6 +1985,7 @@ impl Builder<'_> {
     #[allow(clippy::too_many_lines)]
     fn lower_expr(&mut self, expression: &HirExpr) -> Operand {
         match &expression.kind {
+            HirExprKind::Unit => Operand::Unit,
             HirExprKind::Class(op) => self.lower_class(op, expression.ty, expression.span),
             HirExprKind::String(op) => self.lower_string(op, expression.ty, expression.span),
             HirExprKind::Text(op) => self.lower_text(op, expression.ty, expression.span),
@@ -3376,6 +3404,10 @@ impl Builder<'_> {
         let may_throw = self.exceptions_enabled
             && match &value {
                 Rvalue::Call { .. } => true,
+                Rvalue::Core(call) => matches!(
+                    call.function.symbol,
+                    aether_frontend::CoreSymbol::Print | aether_frontend::CoreSymbol::Println
+                ),
                 Rvalue::Class(op) => matches!(
                     op.as_ref(),
                     ClassOp::DirectMethodCall { .. }
@@ -3805,6 +3837,15 @@ fn verify_mir_function(
                 unwind_predecessors[target.0 as usize] += 1;
             }
             let may_throw = matches!(instruction.value, Rvalue::Call { .. })
+                || matches!(
+                    instruction.value,
+                    Rvalue::Core(ref call)
+                        if matches!(
+                            call.function.symbol,
+                            aether_frontend::CoreSymbol::Print
+                                | aether_frontend::CoreSymbol::Println
+                        )
+                )
                 || matches!(
                     instruction.value,
                     Rvalue::Class(ref op)
@@ -6116,6 +6157,7 @@ fn validate_operand(
 
 fn operand_type(function: &MirFunction, operand: &Operand) -> Result<TypeId, String> {
     match operand {
+        Operand::Unit => Ok(TypeId::VOID),
         Operand::Local(local) => function
             .locals
             .get(local.0 as usize)

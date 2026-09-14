@@ -213,10 +213,10 @@ pub(super) fn expand_methods(program: &mut ParsedProgram) -> Result<(), Vec<Diag
                     }
                     if !ast_definitely_terminates(&f.body) {
                         f.body.statements.push(AstStmt {
-                            kind: AstStmtKind::Return(AstExpr {
+                            kind: AstStmtKind::Return(Some(AstExpr {
                                 kind: AstExprKind::Integer("0".into()),
                                 span: f.span,
-                            }),
+                            })),
                             span: f.span,
                         });
                     }
@@ -1164,7 +1164,8 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
         E::String(op) => op.operands(),
         E::Text(op) => op.operands(),
         E::Core(op) => op.operands(),
-        E::Int(_)
+        E::Unit
+        | E::Int(_)
         | E::Float(_)
         | E::Bool(_)
         | E::Local(_)

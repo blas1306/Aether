@@ -236,7 +236,7 @@ pub fn layout_of(
                 align: u64::from(target.pointer_width / 8),
             }
         }
-        TypeData::GenericParam(_) => return None,
+        TypeData::Void | TypeData::GenericParam(_) => return None,
     })
 }
 
@@ -945,6 +945,8 @@ pub enum AlgebraicProductKind {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HirExprKind {
+    /// Compiler materialization of the source-level no-result value.
+    Unit,
     /// Resolved class identities, ownership uses and direct member effects.
     Class(Box<ClassOp<HirExpr>>),
     /// Fundamental immutable string lifecycle and content operations.
@@ -1637,6 +1639,12 @@ pub fn collect_program_signatures(
                     module,
                 )]);
             }
+            if ty == TypeId::VOID {
+                return Err(vec![src(
+                    type_error("void is not storable in a struct field", field.span),
+                    module,
+                )]);
+            }
             if types.contains_reference(ty) {
                 return Err(vec![src(
                     Diagnostic::new(
@@ -1750,6 +1758,12 @@ pub fn collect_program_signatures(
                         "borrowed views cannot be stored in enum payloads",
                         Some(payload.span),
                     ),
+                    module,
+                )]);
+            }
+            if let Some(payload) = payloads.iter().find(|payload| payload.ty == TypeId::VOID) {
+                return Err(vec![src(
+                    type_error("void is not storable in an enum payload", payload.span),
                     module,
                 )]);
             }
@@ -2046,6 +2060,12 @@ pub fn collect_program_signatures(
             )
             .map_err(|d| vec![src(d, module)])?;
             for parameter in &parameters {
+                if parameter.ty == TypeId::VOID {
+                    return Err(vec![src(
+                        type_error("void is not a valid parameter type", parameter.span),
+                        module,
+                    )]);
+                }
                 validate_type_constraints(&types, parameter.ty, &structs, &enums, parameter.span)
                     .map_err(|diagnostics| {
                     diagnostics
@@ -2443,15 +2463,6 @@ fn resolve_type_in_module(
             struct_arities,
             enum_arities,
         )?;
-        if pointee == TypeId::STRING {
-            return Err(Diagnostic::new(
-                "E0450",
-                Phase::Semantic,
-                DiagnosticCategory::Type,
-                "GENERAL-V1 does not admit references to string",
-                Some(ty.span),
-            ));
-        }
         if types.contains_class(pointee) {
             return Err(classes::error(
                 "E0406",
@@ -3355,7 +3366,7 @@ fn compute_aggregate_layouts(
                     align: bytes,
                 }
             }
-            TypeData::GenericParam(_) => TypeLayout { size: 0, align: 1 },
+            TypeData::Void | TypeData::GenericParam(_) => TypeLayout { size: 0, align: 1 },
         }
     }
     fn struct_layout(
@@ -4082,6 +4093,7 @@ impl Monomorphizer<'_> {
     ) -> Result<HirExpr, Vec<Diagnostic>> {
         let ty = self.substitute_type(expression.ty, substitution, expression.span)?;
         let kind = match &expression.kind {
+            HirExprKind::Unit => HirExprKind::Unit,
             HirExprKind::Class(op) => {
                 let mapped = op.map(|e| self.substitute_expr(e, substitution), |f| Ok(*f))?;
                 let mapped = mapped.map(
@@ -4677,7 +4689,8 @@ fn compute_concrete_layouts(
                     align: bytes,
                 })
             }
-            TypeData::GenericParam(_)
+            TypeData::Void
+            | TypeData::GenericParam(_)
             | TypeData::StructInstance(_, _)
             | TypeData::EnumInstance(_, _) => None,
         };
@@ -4892,6 +4905,21 @@ fn analyze_function(
                 value: HirExpr {
                     kind: HirExprKind::Int(0),
                     ty: TypeId::INT64,
+                    span,
+                },
+                drops: Vec::new(),
+            },
+            span,
+            compiler_generated: true,
+        });
+    }
+    if sig.return_type == TypeId::VOID && !definitely_returns(&body) {
+        let span = Span::in_source(body.span.source, body.span.end - 1, body.span.end);
+        body.statements.push(HirStmt {
+            kind: HirStmtKind::Return {
+                value: HirExpr {
+                    kind: HirExprKind::Unit,
+                    ty: TypeId::VOID,
                     span,
                 },
                 drops: Vec::new(),
@@ -5497,7 +5525,8 @@ impl OwnershipAnalysis<'_> {
                     self.require_owned(*local, expr.span)
                 }
             }
-            HirExprKind::Int(_)
+            HirExprKind::Unit
+            | HirExprKind::Int(_)
             | HirExprKind::Float(_)
             | HirExprKind::Bool(_)
             | HirExprKind::AlgebraicValue { .. } => Ok(()),
@@ -6423,6 +6452,12 @@ impl Analyzer<'_> {
                         return Err(vec![duplicate("local", name, s.span)]);
                     }
                     let ty = self.resolve_source_type(ty)?;
+                    if ty == TypeId::VOID {
+                        return Err(vec![type_error(
+                            "void is not a source-storable local type",
+                            s.span,
+                        )]);
+                    }
                     let initializer = self.expression(initializer, Some(ty))?.expr;
                     let local = LocalId(self.locals.len() as u32);
                     self.locals.push(HirLocal {
@@ -6746,8 +6781,28 @@ impl Analyzer<'_> {
                             s.span,
                         )]);
                     }
+                    let value = match (v, self.return_type) {
+                        (None, TypeId::VOID) => HirExpr {
+                            kind: HirExprKind::Unit,
+                            ty: TypeId::VOID,
+                            span: s.span,
+                        },
+                        (None, _) => {
+                            return Err(vec![type_error(
+                                "a value is required when returning from a non-void function",
+                                s.span,
+                            )]);
+                        }
+                        (Some(_), TypeId::VOID) => {
+                            return Err(vec![type_error(
+                                "a void function cannot return a value",
+                                s.span,
+                            )]);
+                        }
+                        (Some(value), _) => self.expression(value, Some(self.return_type))?.expr,
+                    };
                     HirStmtKind::Return {
-                        value: self.expression(v, Some(self.return_type))?.expr,
+                        value,
                         drops: Vec::new(),
                     }
                 }
@@ -6840,7 +6895,7 @@ impl Analyzer<'_> {
             if !matches!(
                 initializer.kind,
                 HirExprKind::Call { .. } | HirExprKind::Class(_)
-            ) || !self.types.guarantees_copy(initializer.ty)
+            ) || (initializer.ty != TypeId::VOID && !self.types.guarantees_copy(initializer.ty))
             {
                 return Err(vec![Diagnostic::new(
                     "E0311",
@@ -7892,6 +7947,7 @@ impl Analyzer<'_> {
                 | TypeData::InterfaceKeepalive { .. }
                 | TypeData::Class(_)
                 | TypeData::ClassToken { .. }
+                | TypeData::Void
                 | TypeData::Bool
                 | TypeData::String
                 | TypeData::Struct(_)
@@ -10244,6 +10300,7 @@ fn builtin(n: &str) -> Option<TypeId> {
         "float32" | "float" => TypeId::FLOAT32,
         "float64" | "double" => TypeId::FLOAT64,
         "string" => TypeId::STRING,
+        "void" => TypeId::VOID,
         _ => return None,
     })
 }
@@ -12357,7 +12414,8 @@ fn ast_block_has_call(block: &AstBlock) -> bool {
             AstStmtKind::Assign { place, value } => {
                 ast_expr_has_call(place) || ast_expr_has_call(value)
             }
-            AstStmtKind::Expr(expr) | AstStmtKind::Return(expr) => ast_expr_has_call(expr),
+            AstStmtKind::Expr(expr) => ast_expr_has_call(expr),
+            AstStmtKind::Return(expr) => expr.as_ref().is_some_and(ast_expr_has_call),
             AstStmtKind::If {
                 condition,
                 then_block,

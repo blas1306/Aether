@@ -4,6 +4,7 @@ mod algebraic;
 mod classes;
 mod core;
 mod elementwise;
+mod io;
 mod mathematical;
 mod strings;
 mod text;
@@ -12,9 +13,9 @@ use std::collections::BTreeSet;
 use std::fmt::Write;
 
 use aether_frontend::{
-    CastKind, CoercionKind, EnumInfo, FieldId, FloatType, FloatValue, FunctionInstanceInfo,
-    IndexSemantics, IntegerType, MatchMode, ModuleInfo, StructInfo, Substitution, TargetProperties,
-    TypeArena, TypeData, TypeId, layout_of,
+    CastKind, CoercionKind, CoreSymbol, EnumInfo, FieldId, FloatType, FloatValue,
+    FunctionInstanceInfo, IndexSemantics, IntegerType, MatchMode, ModuleInfo, StructInfo,
+    Substitution, TargetProperties, TypeArena, TypeData, TypeId, layout_of,
 };
 use aether_middle::{
     BinaryOp, BlockId, SsaFunction, SsaOp, SsaOperand, SsaPlace, SsaPlaceBase, SsaPlaceProjection,
@@ -68,6 +69,22 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         || !types.interfaces().is_empty())
     .then(|| classes::reachable_functions(program));
     let core_reachable = classes::reachable_functions(program);
+    let has_exception_routes = program
+        .functions
+        .iter()
+        .filter(|function| core_reachable.contains(&function.id))
+        .any(|function| !function.exception_events.is_empty());
+    let reachable_io = program
+        .functions
+        .iter()
+        .filter(|function| core_reachable.contains(&function.id))
+        .filter_map(|function| {
+            io::function_kind(
+                &program.signatures[function.id.0 as usize],
+                &program.modules,
+            )
+        })
+        .collect::<Vec<_>>();
     let has_class_runtime = reachable.as_ref().is_some_and(|reachable| {
         program
             .functions
@@ -97,8 +114,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
                     .flat_map(|b| &b.instructions)
                     .any(|i| types.interface_identity(i.ty).is_some())
         });
-    let has_class_runtime =
-        has_class_runtime || has_interface_runtime || program.exceptions_enabled;
+    let has_class_runtime = has_class_runtime || has_interface_runtime || has_exception_routes;
     let has_string_runtime = program
         .functions
         .iter()
@@ -144,6 +160,12 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             _ => None,
         })
         .collect::<BTreeSet<_>>();
+    let has_core_output = core_calls
+        .iter()
+        .any(|(symbol, _)| matches!(symbol, CoreSymbol::Print | CoreSymbol::Println));
+    let stdout_exception = has_core_output
+        .then(|| io::find_class_id(types, &program.modules, "std.IO", "IOException"))
+        .flatten();
     let buffer_elements = types
         .entries()
         .filter_map(|(ty, data)| match data {
@@ -219,7 +241,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         }
     }
     writeln!(output, "declare void @llvm.trap() cold noreturn nounwind\n").unwrap();
-    if has_string_runtime || program.exceptions_enabled {
+    if has_string_runtime || has_exception_routes {
         writeln!(output, "declare i64 @write(i32, ptr, i64)\n").unwrap();
     }
     if has_owners {
@@ -236,8 +258,18 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     if has_text_runtime {
         text::runtime(&mut output);
     }
+    if !reachable_io.is_empty() || stdout_exception.is_some() {
+        io::runtime(
+            &mut output,
+            reachable_io.contains(&io::IoFunction::ReadLine),
+            reachable_io
+                .iter()
+                .any(|kind| matches!(kind, io::IoFunction::ReadText | io::IoFunction::WriteText)),
+            stdout_exception,
+        );
+    }
     core::declarations(&mut output, &core_calls, types);
-    if program.exceptions_enabled {
+    if has_exception_routes {
         emit_exception_runtime(&mut output, types);
     }
 
@@ -390,6 +422,19 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             continue;
         }
         let signature = &program.signatures[function.id.0 as usize];
+        if let Some(kind) = io::function_kind(signature, &program.modules) {
+            io::emit_function(
+                &mut output,
+                kind,
+                function,
+                signature,
+                &program.modules,
+                &program.structs,
+                &program.enums,
+                types,
+            );
+            continue;
+        }
         emit_function(
             &mut output,
             function,
@@ -406,7 +451,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     writeln!(
         output,
         "define i32 @main(){} {{",
-        if program.exceptions_enabled {
+        if has_exception_routes {
             " personality ptr @__gxx_personality_v0"
         } else {
             ""
@@ -421,7 +466,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         &program.enums,
         types,
     );
-    if program.exceptions_enabled {
+    if has_exception_routes {
         writeln!(output, "  %aether_result = invoke i64 @{entry_symbol}() to label %aether_success unwind label %aether_unhandled").unwrap();
         writeln!(output, "aether_success:").unwrap();
     } else {
@@ -456,7 +501,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     } else {
         writeln!(output, "  ret i32 %process_status").unwrap();
     }
-    if program.exceptions_enabled {
+    if has_exception_routes {
         writeln!(output, "aether_unhandled:").unwrap();
         writeln!(
             output,
@@ -694,7 +739,9 @@ fn emit_relocation_glue(
             }
             writeln!(output, "}}\n").unwrap();
         }
-        TypeData::GenericParam(_) => unreachable!("generic relocation reached LLVM"),
+        TypeData::Void | TypeData::GenericParam(_) => {
+            unreachable!("non-relocatable type reached LLVM relocation")
+        }
     }
 }
 
@@ -805,7 +852,8 @@ fn emit_drop_glue(
             }
             writeln!(output, "}}\n").unwrap();
         }
-        TypeData::Bool
+        TypeData::Void
+        | TypeData::Bool
         | TypeData::Integer(_)
         | TypeData::Float(_)
         | TypeData::Reference { .. }
@@ -1387,6 +1435,9 @@ fn emit_function(
                     types,
                     &llvm_type(types, instruction.ty),
                     llvm_operand,
+                    instruction.unwind,
+                    block.id,
+                    io::find_class_id(types, modules, "std.IO", "IOException").is_some(),
                 ),
                 SsaOp::Use(operand) => writeln!(
                     output,
@@ -3337,6 +3388,7 @@ fn mangle_symbol_type(
         format!("{prefix}{}_{module}{}_{name}", module.len(), name.len())
     };
     match types.get(ty).expect("verified symbol type") {
+        TypeData::Void => "v".into(),
         TypeData::Interface(id) | TypeData::InterfaceKeepalive { interface: id, .. } => {
             let i = &types.interfaces()[id.0 as usize];
             nominal(i.module, &i.name, 'j')
@@ -3463,7 +3515,7 @@ fn is_codegen_concrete_type(
 
 fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
     match types.get(ty).expect("verified backend TypeId") {
-        TypeData::Bool => "i1".into(),
+        TypeData::Void | TypeData::Bool => "i1".into(),
         TypeData::Integer(IntegerType::Int8 | IntegerType::Uint8) => "i8".into(),
         TypeData::Integer(IntegerType::Int16 | IntegerType::Uint16) => "i16".into(),
         TypeData::Integer(IntegerType::Int32 | IntegerType::Uint32) => "i32".into(),
@@ -3533,6 +3585,7 @@ fn mangle_type_arguments(types: &TypeArena, args: aether_frontend::TypeArgsId) -
 
 fn mangle_type(types: &TypeArena, ty: TypeId) -> String {
     match types.get(ty).expect("verified mangle type") {
+        TypeData::Void => "v".into(),
         TypeData::Interface(id) => format!("iface{}", id.0),
         TypeData::InterfaceKeepalive { interface, mutable } => {
             format!("iface{}_keepalive_{mutable}", interface.0)
@@ -4018,6 +4071,7 @@ fn concrete_enum_member(
 
 fn llvm_operand(operand: &SsaOperand) -> String {
     match operand {
+        SsaOperand::Unit => "false".into(),
         SsaOperand::Value(value) => format!("%v{}", value.0),
         SsaOperand::Int { value, .. } => value.to_string(),
         SsaOperand::Float { value, .. } => float_operand(*value),
@@ -4027,6 +4081,7 @@ fn llvm_operand(operand: &SsaOperand) -> String {
 
 fn operand_type(function: &SsaFunction, operand: &SsaOperand) -> TypeId {
     match operand {
+        SsaOperand::Unit => TypeId::VOID,
         SsaOperand::Int { ty, .. } | SsaOperand::Float { ty, .. } => *ty,
         SsaOperand::Bool(_) => TypeId::BOOL,
         SsaOperand::Value(value) => function

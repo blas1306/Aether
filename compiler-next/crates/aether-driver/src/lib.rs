@@ -312,12 +312,38 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
             });
         }
     }
-    let std_grants = units
+    let mut std_grants = units
         .iter()
         .flat_map(|unit| unit.ast.imports())
         .filter(|import| import.path.first().is_some_and(|segment| segment == "std"))
         .map(|import| PackagePath(import.path.clone()))
         .collect::<BTreeSet<_>>();
+    let file_granted = std_grants.contains(&PackagePath(vec!["std".into(), "File".into()]));
+    if file_granted {
+        std_grants.insert(PackagePath(vec!["std".into(), "IO".into()]));
+    }
+    let core_output_used = units.iter().filter(|unit| !unit.toolchain).any(|unit| {
+        let declared = unit
+            .ast
+            .functions()
+            .iter()
+            .map(|function| function.name.as_str())
+            .collect::<BTreeSet<_>>();
+        aether_frontend::lex(&unit.source).is_ok_and(|tokens| {
+            tokens.iter().enumerate().any(|(index, token)| {
+                token.kind == aether_frontend::TokenKind::Identifier
+                    && matches!(token.lexeme.as_str(), "print" | "println")
+                    && !declared.contains(token.lexeme.as_str())
+                    && tokens
+                        .get(index + 1)
+                        .is_some_and(|next| next.kind == aether_frontend::TokenKind::LeftParen)
+                    && index.checked_sub(1).is_none_or(|previous| {
+                        tokens[previous].kind != aether_frontend::TokenKind::Dot
+                    })
+            })
+        })
+    });
+    let io_public = std_grants.contains(&PackagePath(vec!["std".into(), "IO".into()]));
     let toolchain_packages = [
         (vec!["std", "Math"], "package std.Math;"),
         (
@@ -328,10 +354,24 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
             vec!["std", "Text"],
             "package std.Text; struct ScalarOffset { usize value; } enum FindResult { Found(ScalarOffset), NotFound, }",
         ),
+        (
+            vec!["std", "IO"],
+            if io_public {
+                "package std.IO; public open class IOException:Exception{public init(){}} public class InvalidTextEncodingException:IOException{public init():base(){}} enum ReadLineResult{Line(string),End,} ReadLineResult readLine(){ReadLineResult result=ReadLineResult.End;return result;} void eprint(ref string value){return;} void eprintln(ref string value){return;}"
+            } else {
+                "package std.IO; public open class IOException:Exception{public init(){}}"
+            },
+        ),
+        (
+            vec!["std", "File"],
+            "package std.File; import std.IO; public class FileNotFoundException:std.IO.IOException{public init():base(){}} public class PermissionDeniedException:std.IO.IOException{public init():base(){}} string readText(ref string path){return \"\";} void writeText(ref string path,ref string value){return;}",
+        ),
     ];
     for (segments, text) in toolchain_packages {
         let path = PackagePath(segments.into_iter().map(str::to_owned).collect());
-        if !std_grants.iter().any(|grant| path.starts_with(grant)) {
+        let granted = std_grants.iter().any(|grant| path.starts_with(grant));
+        let core_io = path == PackagePath(vec!["std".into(), "IO".into()]) && core_output_used;
+        if !(granted || core_io) {
             continue;
         }
         let std_source_id = SourceId(units.len() as u32);
@@ -405,7 +445,7 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
             ast: unit.ast.clone(),
         })
         .collect::<Vec<_>>();
-    for (index, unit) in units.iter().enumerate().filter(|(_, unit)| !unit.toolchain) {
+    for (index, unit) in units.iter().enumerate() {
         modules[index].info.imports = resolve_imports(unit, &package_ids, &representatives)?;
     }
     let entry = units
