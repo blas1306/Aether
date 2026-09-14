@@ -1,6 +1,6 @@
 //! Development driver for the isolated compiler.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
@@ -8,8 +8,9 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use aether_backend_llvm::{Backend, LlvmTextBackend, TargetDescriptor};
 use aether_frontend::{
-    Diagnostic, DiagnosticCategory, ModuleId, ModuleInfo, ParsedAst, ParsedModule, ParsedProgram,
-    Phase, ResolvedImport, SourceFile, SourceId, analyze_bodies_for_target,
+    Diagnostic, DiagnosticCategory, LogicalSourceKey, ModuleId, ModuleInfo, OriginKey, PackageId,
+    PackageKey, PackagePath, ParsedAst, ParsedModule, ParsedProgram, Phase, ResolvedImport,
+    SourceFile, SourceId, SourceUnitKey, Span, analyze_bodies_for_target,
     collect_program_signatures, collect_signatures, parse_source,
 };
 use aether_middle::{build_ssa, lower_hir, optimize_oop, verify_mir, verify_ssa};
@@ -101,104 +102,7 @@ pub struct CompilationSession {
 impl CompilationSession {
     /// Discovers, reads and parses the entry module and all imports transitively.
     pub fn discover(entry_path: &Path) -> Result<Self, Vec<Diagnostic>> {
-        let discovery_started = Instant::now();
-        let source_root = entry_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .to_path_buf();
-        let entry_name = logical_name(entry_path)?;
-        if entry_name == "Text" {
-            return Err(vec![io_diagnostic(
-                "`Text` is reserved for the canonical standard-library module",
-            )]);
-        }
-        let mut file_load_ns = 0;
-        let mut parse_ns = 0;
-        let entry_module = load_module(
-            ModuleId(0),
-            SourceId(0),
-            entry_name.clone(),
-            entry_path,
-            entry_path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("<entry>"),
-            &mut file_load_ns,
-            &mut parse_ns,
-            None,
-        )?;
-        let mut modules = vec![entry_module];
-        let mut by_name = BTreeMap::from([(entry_name, ModuleId(0))]);
-        let mut pending = VecDeque::from([ModuleId(0)]);
-        while let Some(module_id) = pending.pop_front() {
-            let index = module_id.0 as usize;
-            let imports = modules[index].ast.imports().to_vec();
-            let mut seen = BTreeSet::new();
-            let mut resolved = Vec::with_capacity(imports.len());
-            for import in imports {
-                if !seen.insert(import.module.clone()) {
-                    return Err(vec![
-                        Diagnostic::new(
-                            "E0220",
-                            Phase::Semantic,
-                            DiagnosticCategory::Name,
-                            format!("duplicate import `{}`", import.module),
-                            Some(import.span),
-                        )
-                        .with_source_name(&modules[index].info.source_name),
-                    ]);
-                }
-                let target = if import.module == "Text" {
-                    if let Some(id) = by_name.get("Text").copied() {
-                        id
-                    } else {
-                        let id =
-                            ModuleId(u32::try_from(modules.len()).expect("module count fits u32"));
-                        let source_id =
-                            SourceId(u32::try_from(modules.len()).expect("source count fits u32"));
-                        let loaded = load_std_text(id, source_id, &mut parse_ns)?;
-                        by_name.insert("Text".into(), id);
-                        modules.push(loaded);
-                        id
-                    }
-                } else if let Some(id) = by_name.get(&import.module).copied() {
-                    id
-                } else {
-                    let path = source_root.join(format!("{}.ae", import.module));
-                    let id = ModuleId(u32::try_from(modules.len()).expect("module count fits u32"));
-                    let source_id =
-                        SourceId(u32::try_from(modules.len()).expect("source count fits u32"));
-                    let loaded = load_module(
-                        id,
-                        source_id,
-                        import.module.clone(),
-                        &path,
-                        &format!("{}.ae", import.module),
-                        &mut file_load_ns,
-                        &mut parse_ns,
-                        Some((&modules[index].info.source_name, import.span)),
-                    )?;
-                    by_name.insert(import.module.clone(), id);
-                    modules.push(loaded);
-                    pending.push_back(id);
-                    id
-                };
-                resolved.push(ResolvedImport {
-                    name: import.module,
-                    module: target,
-                    span: import.span,
-                });
-            }
-            modules[index].info.imports = resolved;
-        }
-        Ok(Self {
-            source_root,
-            entry: ModuleId(0),
-            modules,
-            discovery_ns: discovery_started.elapsed().as_nanos(),
-            file_load_ns,
-            parse_ns,
-        })
+        discover_catalog(entry_path)
     }
 
     /// Explicit bootstrap source root: the entry file's containing directory.
@@ -242,28 +146,588 @@ impl CompilationSession {
     }
 }
 
-fn load_std_text(
-    id: ModuleId,
-    source_id: SourceId,
-    parse_ns: &mut u128,
-) -> Result<SessionModule, Vec<Diagnostic>> {
-    const SOURCE: &str =
-        "struct ScalarOffset { usize value; } enum FindResult { Found(ScalarOffset), NotFound, }";
-    let source = SourceFile::with_id(source_id, "<std>/Text.ae", SOURCE);
-    let started = Instant::now();
-    let ast = parse_source(&source)?;
-    *parse_ns += started.elapsed().as_nanos();
-    Ok(SessionModule {
-        info: ModuleInfo {
-            id,
-            name: "Text".into(),
-            source: source_id,
-            source_name: "<std>/Text.ae".into(),
-            imports: Vec::new(),
-        },
-        source,
-        ast,
+#[derive(Debug)]
+struct CatalogUnit {
+    path: PathBuf,
+    logical: String,
+    source: SourceFile,
+    ast: ParsedAst,
+    package: PackageKey,
+    toolchain: bool,
+}
+
+struct SourceCandidate {
+    path: PathBuf,
+    logical: String,
+    text: String,
+    package_path: Option<Vec<String>>,
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::too_many_lines)]
+fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnostic>> {
+    let discovery_started = Instant::now();
+    let source_root = entry_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf();
+    let entry_absolute = entry_path.canonicalize().map_err(|error| {
+        vec![io_diagnostic(format!(
+            "could not read entry source `{}`: {error}",
+            entry_path.display()
+        ))]
+    })?;
+    let mut paths = Vec::new();
+    collect_source_paths(&source_root, &source_root, &mut paths)?;
+    paths.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut file_load_ns = 0_u128;
+    let mut candidates = Vec::new();
+    for (logical, path) in paths {
+        let started = Instant::now();
+        let text = fs::read_to_string(&path).map_err(|error| {
+            vec![io_diagnostic(format!(
+                "could not read source unit `{logical}`: {error}"
+            ))]
+        })?;
+        file_load_ns += started.elapsed().as_nanos();
+        let package_path = catalog_package_header(&text);
+        if package_path
+            .as_ref()
+            .is_some_and(|path| path.first().is_some_and(|segment| segment == "std"))
+        {
+            return Err(vec![
+                Diagnostic::new(
+                    "E0231",
+                    Phase::Semantic,
+                    DiagnosticCategory::Name,
+                    "project source cannot declare reserved package root `std`",
+                    None,
+                )
+                .with_source_name(&logical),
+            ]);
+        }
+        candidates.push(SourceCandidate {
+            path,
+            logical,
+            text,
+            package_path,
+        });
+    }
+    let entry_candidate = candidates
+        .iter()
+        .position(|candidate| candidate.path.canonicalize().ok().as_ref() == Some(&entry_absolute))
+        .ok_or_else(|| {
+            vec![io_diagnostic(
+                "entry source is outside its source root catalog",
+            )]
+        })?;
+    let entry_path = candidates[entry_candidate]
+        .package_path
+        .clone()
+        .ok_or_else(|| {
+            vec![
+                Diagnostic::new(
+                    "E0230",
+                    Phase::Parse,
+                    DiagnosticCategory::Syntax,
+                    "source unit requires `package <path>;` as its first item",
+                    None,
+                )
+                .with_source_name(&candidates[entry_candidate].logical),
+            ]
+        })?;
+    if entry_path.first().is_some_and(|segment| segment == "std") {
+        return Err(vec![
+            Diagnostic::new(
+                "E0231",
+                Phase::Semantic,
+                DiagnosticCategory::Name,
+                "project source cannot declare reserved package root `std`",
+                None,
+            )
+            .with_source_name(&candidates[entry_candidate].logical),
+        ]);
+    }
+    let mut parse_ns = 0_u128;
+    let mut units = Vec::new();
+    let entry_package = PackageKey {
+        origin: OriginKey::Project,
+        path: PackagePath(entry_path),
+    };
+    let mut pending = BTreeSet::from([entry_package.clone()]);
+    let mut descendant_grants = BTreeSet::new();
+    let mut visited = BTreeSet::new();
+    let mut loaded_sources = BTreeSet::new();
+    while let Some(package) = pending.pop_first() {
+        if !visited.insert(package.clone()) || package.origin == OriginKey::Toolchain {
+            continue;
+        }
+        let include_descendants = descendant_grants.contains(&package);
+        let matching_candidates = candidates
+            .iter()
+            .filter(|candidate| {
+                candidate.package_path.as_ref().is_some_and(|path| {
+                    path == &package.path.0
+                        || (include_descendants && path.starts_with(&package.path.0))
+                }) && !loaded_sources.contains(&candidate.logical)
+            })
+            .collect::<Vec<_>>();
+        for candidate in matching_candidates {
+            loaded_sources.insert(candidate.logical.clone());
+            let source_id = SourceId(units.len() as u32);
+            let source =
+                SourceFile::with_id(source_id, candidate.logical.clone(), candidate.text.clone());
+            let started = Instant::now();
+            let ast = parse_source(&source).map_err(|diagnostics| {
+                diagnostics
+                    .into_iter()
+                    .map(|d| d.with_source_name(&candidate.logical))
+                    .collect::<Vec<_>>()
+            })?;
+            parse_ns += started.elapsed().as_nanos();
+            let verified = explicit_project_package(&ast, &candidate.logical)?;
+            for import in ast.imports() {
+                if import.path != ["Text"] && import.path != ["std"] {
+                    let origin = if import.path.first().is_some_and(|segment| segment == "std") {
+                        OriginKey::Toolchain
+                    } else {
+                        OriginKey::Project
+                    };
+                    let imported = PackageKey {
+                        origin,
+                        path: PackagePath(import.path.clone()),
+                    };
+                    if imported.origin == OriginKey::Project {
+                        descendant_grants.insert(imported.clone());
+                    }
+                    pending.insert(imported);
+                }
+            }
+            units.push(CatalogUnit {
+                path: candidate.path.clone(),
+                logical: candidate.logical.clone(),
+                source,
+                ast,
+                package: verified,
+                toolchain: false,
+            });
+        }
+    }
+    let std_grants = units
+        .iter()
+        .flat_map(|unit| unit.ast.imports())
+        .filter(|import| import.path.first().is_some_and(|segment| segment == "std"))
+        .map(|import| PackagePath(import.path.clone()))
+        .collect::<BTreeSet<_>>();
+    let toolchain_packages = [
+        (vec!["std", "Math"], "package std.Math;"),
+        (
+            vec!["std", "Math", "LinearAlgebra"],
+            "package std.Math.LinearAlgebra;",
+        ),
+        (
+            vec!["std", "Text"],
+            "package std.Text; struct ScalarOffset { usize value; } enum FindResult { Found(ScalarOffset), NotFound, }",
+        ),
+    ];
+    for (segments, text) in toolchain_packages {
+        let path = PackagePath(segments.into_iter().map(str::to_owned).collect());
+        if !std_grants.iter().any(|grant| path.starts_with(grant)) {
+            continue;
+        }
+        let std_source_id = SourceId(units.len() as u32);
+        let logical = format!("{}/package.ae", path.0.join("/"));
+        let std_source = SourceFile::with_id(std_source_id, format!("<toolchain>/{logical}"), text);
+        let started = Instant::now();
+        let std_ast = parse_source(&std_source)?;
+        parse_ns += started.elapsed().as_nanos();
+        units.push(CatalogUnit {
+            path: PathBuf::from(format!("<toolchain>/{logical}")),
+            logical,
+            source: std_source,
+            ast: std_ast,
+            package: PackageKey {
+                origin: OriginKey::Toolchain,
+                path,
+            },
+            toolchain: true,
+        });
+    }
+
+    let mut package_ids = BTreeMap::new();
+    let package_keys = units
+        .iter()
+        .flat_map(|unit| {
+            (1..=unit.package.path.0.len()).map(|length| PackageKey {
+                origin: unit.package.origin.clone(),
+                path: PackagePath(unit.package.path.0[..length].to_vec()),
+            })
+        })
+        .collect::<BTreeSet<_>>();
+    for key in package_keys {
+        let id = PackageId(package_ids.len() as u32);
+        package_ids.insert(key, id);
+    }
+    let mut representatives = BTreeMap::new();
+    for (index, unit) in units.iter().enumerate() {
+        for length in 1..=unit.package.path.0.len() {
+            let prefix = PackageKey {
+                origin: unit.package.origin.clone(),
+                path: PackagePath(unit.package.path.0[..length].to_vec()),
+            };
+            representatives
+                .entry(prefix)
+                .or_insert(ModuleId(index as u32));
+        }
+    }
+    validate_package_members(&units)?;
+    let mut modules = units
+        .iter()
+        .enumerate()
+        .map(|(index, unit)| SessionModule {
+            info: ModuleInfo {
+                id: ModuleId(index as u32),
+                key: SourceUnitKey {
+                    package: unit.package.clone(),
+                    logical_source: LogicalSourceKey(unit.logical.clone()),
+                },
+                package: package_ids[&unit.package],
+                name: unit.package.path.source(),
+                source: unit.source.id,
+                source_name: if unit.toolchain {
+                    format!("<toolchain>/{}", unit.logical)
+                } else {
+                    unit.logical.clone()
+                },
+                imports: Vec::new(),
+                semantic_dependencies: BTreeSet::new(),
+            },
+            source: unit.source.clone(),
+            ast: unit.ast.clone(),
+        })
+        .collect::<Vec<_>>();
+    for (index, unit) in units.iter().enumerate().filter(|(_, unit)| !unit.toolchain) {
+        modules[index].info.imports = resolve_imports(unit, &package_ids, &representatives)?;
+    }
+    let entry = units
+        .iter()
+        .position(|unit| {
+            !unit.toolchain && unit.path.canonicalize().ok().as_ref() == Some(&entry_absolute)
+        })
+        .map(|index| ModuleId(index as u32))
+        .ok_or_else(|| {
+            vec![io_diagnostic(
+                "entry source is outside its source root catalog",
+            )]
+        })?;
+    Ok(CompilationSession {
+        source_root,
+        entry,
+        modules,
+        discovery_ns: discovery_started.elapsed().as_nanos(),
+        file_load_ns,
+        parse_ns,
     })
+}
+
+fn catalog_package_header(text: &str) -> Option<Vec<String>> {
+    let source = SourceFile::new("<catalog>", text);
+    let tokens = aether_frontend::lex(&source).ok()?;
+    if tokens.first()?.kind != aether_frontend::TokenKind::KwPackage {
+        return None;
+    }
+    let mut path = Vec::new();
+    let mut index = 1;
+    loop {
+        let token = tokens.get(index)?;
+        if token.kind != aether_frontend::TokenKind::Identifier {
+            return None;
+        }
+        path.push(token.lexeme.clone());
+        index += 1;
+        match tokens.get(index)?.kind {
+            aether_frontend::TokenKind::Dot => index += 1,
+            aether_frontend::TokenKind::Semicolon => return Some(path),
+            _ => return None,
+        }
+    }
+}
+
+fn collect_source_paths(
+    root: &Path,
+    directory: &Path,
+    output: &mut Vec<(String, PathBuf)>,
+) -> Result<(), Vec<Diagnostic>> {
+    let entries = fs::read_dir(directory).map_err(|error| {
+        vec![io_diagnostic(format!(
+            "could not scan source root `{}`: {error}",
+            root.display()
+        ))]
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            vec![io_diagnostic(format!(
+                "could not inspect source root entry: {error}"
+            ))]
+        })?;
+        let kind = entry.file_type().map_err(|error| {
+            vec![io_diagnostic(format!(
+                "could not inspect `{}`: {error}",
+                entry.path().display()
+            ))]
+        })?;
+        if kind.is_symlink() {
+            return Err(vec![io_diagnostic(format!(
+                "symlink source-provider entry `{}` is ambiguous",
+                entry.path().display()
+            ))]);
+        }
+        if kind.is_dir() {
+            collect_source_paths(root, &entry.path(), output)?;
+        } else if kind.is_file()
+            && entry.path().extension().and_then(|ext| ext.to_str()) == Some("ae")
+        {
+            let entry_path = entry.path();
+            let relative = entry_path.strip_prefix(root).expect("walked below root");
+            let logical = relative
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+            output.push((logical, entry_path));
+        }
+    }
+    Ok(())
+}
+
+fn explicit_project_package(
+    ast: &ParsedAst,
+    source_name: &str,
+) -> Result<PackageKey, Vec<Diagnostic>> {
+    let Some(package) = ast.package() else {
+        return Err(vec![
+            Diagnostic::new(
+                "E0230",
+                Phase::Parse,
+                DiagnosticCategory::Syntax,
+                "source unit requires `package <path>;` as its first item",
+                None,
+            )
+            .with_source_name(source_name),
+        ]);
+    };
+    if package.path.first().is_some_and(|segment| segment == "std") {
+        return Err(vec![
+            Diagnostic::new(
+                "E0231",
+                Phase::Semantic,
+                DiagnosticCategory::Name,
+                "project source cannot declare reserved package root `std`",
+                Some(package.span),
+            )
+            .with_source_name(source_name),
+        ]);
+    }
+    Ok(PackageKey {
+        origin: OriginKey::Project,
+        path: PackagePath(package.path.clone()),
+    })
+}
+
+#[allow(clippy::too_many_lines)]
+fn resolve_imports(
+    unit: &CatalogUnit,
+    packages: &BTreeMap<PackageKey, PackageId>,
+    representatives: &BTreeMap<PackageKey, ModuleId>,
+) -> Result<Vec<ResolvedImport>, Vec<Diagnostic>> {
+    let mut seen_targets = BTreeSet::new();
+    let mut bindings = BTreeMap::<String, Span>::new();
+    let declarations = unit
+        .ast
+        .aliases()
+        .iter()
+        .map(|d| d.name.as_str())
+        .chain(unit.ast.structs().iter().map(|d| d.name.as_str()))
+        .chain(unit.ast.enums().iter().map(|d| d.name.as_str()))
+        .chain(unit.ast.classes().iter().map(|d| d.name.as_str()))
+        .chain(unit.ast.interfaces().iter().map(|d| d.name.as_str()))
+        .chain(unit.ast.functions().iter().map(|d| d.name.as_str()))
+        .collect::<BTreeSet<_>>();
+    let mut resolved = Vec::new();
+    for import in unit.ast.imports() {
+        if import.path == ["Text"] {
+            return Err(vec![
+                Diagnostic::new(
+                    "E0232",
+                    Phase::Semantic,
+                    DiagnosticCategory::Name,
+                    "legacy `import Text` is invalid; replace it with `import std.Text`",
+                    Some(import.span),
+                )
+                .with_fixit(import.span, "import std.Text;")
+                .with_source_name(&unit.logical),
+            ]);
+        }
+        if import.path == ["std"] {
+            return Err(vec![
+                Diagnostic::new(
+                    "E0233",
+                    Phase::Semantic,
+                    DiagnosticCategory::Name,
+                    "`import std;` is invalid; import a concrete `std.X` branch",
+                    Some(import.span),
+                )
+                .with_source_name(&unit.logical),
+            ]);
+        }
+        let origin = if import.path.first().is_some_and(|segment| segment == "std") {
+            OriginKey::Toolchain
+        } else {
+            OriginKey::Project
+        };
+        let target = PackageKey {
+            origin,
+            path: PackagePath(import.path.clone()),
+        };
+        let Some(package) = packages.get(&target).copied() else {
+            return Err(vec![
+                Diagnostic::new(
+                    "E0221",
+                    Phase::Semantic,
+                    DiagnosticCategory::Name,
+                    format!("package path `{}` does not exist", target.path.source()),
+                    Some(import.span),
+                )
+                .with_source_name(&unit.logical),
+            ]);
+        };
+        if !seen_targets.insert(target.clone()) {
+            return Err(vec![
+                Diagnostic::new(
+                    "E0220",
+                    Phase::Semantic,
+                    DiagnosticCategory::Name,
+                    format!(
+                        "duplicate import of canonical package `{}`",
+                        target.path.canonical()
+                    ),
+                    Some(import.span),
+                )
+                .with_source_name(&unit.logical),
+            ]);
+        }
+        let binding = import
+            .alias
+            .clone()
+            .unwrap_or_else(|| import.path[0].clone());
+        if binding == "std" && import.alias.is_some() {
+            return Err(vec![
+                Diagnostic::new(
+                    "E0234",
+                    Phase::Semantic,
+                    DiagnosticCategory::Name,
+                    "`std` is reserved and cannot be an import alias",
+                    Some(import.span),
+                )
+                .with_source_name(&unit.logical),
+            ]);
+        }
+        if let Some(previous) = bindings.insert(binding.clone(), import.span) {
+            if import.alias.is_some() {
+                return Err(vec![
+                    Diagnostic::new(
+                        "E0220",
+                        Phase::Semantic,
+                        DiagnosticCategory::Name,
+                        format!(
+                            "duplicate namespace binding `{binding}`; previous binding at {}..{}",
+                            previous.start, previous.end
+                        ),
+                        Some(import.span),
+                    )
+                    .with_source_name(&unit.logical),
+                ]);
+            }
+        }
+        if declarations.contains(binding.as_str()) {
+            return Err(vec![
+                Diagnostic::new(
+                    "E0235",
+                    Phase::Semantic,
+                    DiagnosticCategory::Name,
+                    format!("namespace binding `{binding}` conflicts with a package member"),
+                    Some(import.span),
+                )
+                .with_source_name(&unit.logical),
+            ]);
+        }
+        resolved.push(ResolvedImport {
+            name: import.alias.clone().unwrap_or_else(|| target.path.source()),
+            module: representatives[&target],
+            package,
+            target,
+            alias: import.alias.clone(),
+            span: import.span,
+        });
+    }
+    Ok(resolved)
+}
+
+fn validate_package_members(units: &[CatalogUnit]) -> Result<(), Vec<Diagnostic>> {
+    let mut members = BTreeMap::<PackageKey, BTreeMap<String, (&str, Span, &str)>>::new();
+    for unit in units {
+        let table = members.entry(unit.package.clone()).or_default();
+        for (kind, name, span) in unit
+            .ast
+            .aliases()
+            .iter()
+            .map(|d| ("alias", &d.name, d.span))
+            .chain(
+                unit.ast
+                    .structs()
+                    .iter()
+                    .map(|d| ("struct", &d.name, d.span)),
+            )
+            .chain(unit.ast.enums().iter().map(|d| ("enum", &d.name, d.span)))
+            .chain(
+                unit.ast
+                    .classes()
+                    .iter()
+                    .map(|d| ("class", &d.name, d.span)),
+            )
+            .chain(
+                unit.ast
+                    .interfaces()
+                    .iter()
+                    .map(|d| ("interface", &d.name, d.span)),
+            )
+            .chain(
+                unit.ast
+                    .functions()
+                    .iter()
+                    .map(|d| ("function", &d.name, d.span)),
+            )
+        {
+            if let Some((previous_kind, previous_span, previous_source)) =
+                table.insert(name.clone(), (kind, span, &unit.logical))
+            {
+                return Err(vec![Diagnostic::new("E0240", Phase::Semantic, DiagnosticCategory::Name, format!("duplicate package member `{}` across `{previous_source}` ({previous_kind} at {}..{}) and `{}` ({kind})", name, previous_span.start, previous_span.end, unit.logical), Some(span)).with_source_name(&unit.logical)]);
+            }
+        }
+    }
+    let keys = members.keys().cloned().collect::<Vec<_>>();
+    for package in &keys {
+        for child in keys.iter().filter(|candidate| {
+            candidate.origin == package.origin
+                && candidate.path.0.len() == package.path.0.len() + 1
+                && candidate.path.0.starts_with(&package.path.0)
+        }) {
+            let child_name = child.path.0.last().unwrap();
+            if let Some((kind, span, source)) = members[package].get(child_name) {
+                return Err(vec![Diagnostic::new("E0236", Phase::Semantic, DiagnosticCategory::Name, format!("package member `{child_name}` ({kind}) collides with child package `{}`", child.path.canonical()), Some(*span)).with_source_name(*source)]);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Compiles one owned source through verified SSA and LLVM.
@@ -564,86 +1028,4 @@ fn io_diagnostic(message: impl Into<String>) -> Diagnostic {
         message,
         None,
     )
-}
-
-fn logical_name(path: &Path) -> Result<String, Vec<Diagnostic>> {
-    let Some(name) = path.file_stem().and_then(|name| name.to_str()) else {
-        return Err(vec![io_diagnostic(format!(
-            "entry source `{}` has no UTF-8 module name",
-            path.display()
-        ))]);
-    };
-    let valid = name.bytes().enumerate().all(|(index, byte)| {
-        byte == b'_' || byte.is_ascii_alphanumeric() && (index > 0 || !byte.is_ascii_digit())
-    });
-    if !valid {
-        return Err(vec![io_diagnostic(format!(
-            "entry source stem `{name}` is not a valid bootstrap module identifier"
-        ))]);
-    }
-    Ok(name.to_owned())
-}
-
-#[allow(clippy::too_many_arguments)]
-fn load_module(
-    id: ModuleId,
-    source_id: SourceId,
-    logical_name: String,
-    path: &Path,
-    display_name: &str,
-    file_load_ns: &mut u128,
-    parse_ns: &mut u128,
-    imported_from: Option<(&str, aether_frontend::Span)>,
-) -> Result<SessionModule, Vec<Diagnostic>> {
-    let started = Instant::now();
-    let text = fs::read_to_string(path).map_err(|error| {
-        let (message, span, source_name) = imported_from.map_or_else(
-            || {
-                (
-                    format!("could not read entry module `{}`: {error}", path.display()),
-                    None,
-                    None,
-                )
-            },
-            |(source_name, span)| {
-                (
-                    format!(
-                        "imported module `{logical_name}` was not found at `{}`: {error}",
-                        path.display()
-                    ),
-                    Some(span),
-                    Some(source_name),
-                )
-            },
-        );
-        let diagnostic = Diagnostic::new(
-            "E0701",
-            Phase::Driver,
-            DiagnosticCategory::Io,
-            message,
-            span,
-        );
-        vec![source_name.map_or(diagnostic.clone(), |name| diagnostic.with_source_name(name))]
-    })?;
-    *file_load_ns += started.elapsed().as_nanos();
-    let source = SourceFile::with_id(source_id, display_name, text);
-    let started = Instant::now();
-    let ast = parse_source(&source).map_err(|diagnostics| {
-        diagnostics
-            .into_iter()
-            .map(|diagnostic| diagnostic.with_source_name(display_name))
-            .collect::<Vec<_>>()
-    })?;
-    *parse_ns += started.elapsed().as_nanos();
-    Ok(SessionModule {
-        info: ModuleInfo {
-            id,
-            name: logical_name,
-            source: source_id,
-            source_name: display_name.to_owned(),
-            imports: Vec::new(),
-        },
-        source,
-        ast,
-    })
 }

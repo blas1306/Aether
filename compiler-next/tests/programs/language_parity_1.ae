@@ -1,3 +1,5 @@
+package language_parity_1;
+
 // program entry
 int main() {
     /*

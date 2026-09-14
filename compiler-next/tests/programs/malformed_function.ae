@@ -1,2 +1,4 @@
+package malformed_function;
+
 int broken(int value, ) { return value; }
 int main() { return 0; }

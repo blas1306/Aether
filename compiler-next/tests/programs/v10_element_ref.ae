@@ -1,3 +1,5 @@
+package v10_element_ref;
+
 int main() {
     Buffer<int> values = Buffer<int>(4, 10);
     ref mut int element = &mut values[2];

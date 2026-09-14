@@ -1,1 +1,3 @@
+package unsupported_function;
+
 int helper() { return 1; }

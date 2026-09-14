@@ -1,3 +1,5 @@
+package oop_polish_1_base;
+
 open class A {
     public int n;
     public init(int n) { this.n = n; }

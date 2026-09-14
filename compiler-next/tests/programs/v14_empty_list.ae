@@ -1,3 +1,5 @@
+package v14_empty_list;
+
 int main() {
     List<int> values = {};
     return int(length(values));

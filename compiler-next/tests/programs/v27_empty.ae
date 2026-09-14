@@ -1,3 +1,5 @@
+package v27_empty;
+
 int main() {
     Vector<int,Row> a=[];
     Vector<int,Row> b=[];

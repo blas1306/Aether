@@ -1,3 +1,5 @@
+package a;
+
 import b;
 
 int even(int n) {

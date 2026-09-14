@@ -1,3 +1,5 @@
+package v4_float_to_int_trap;
+
 int main() {
     float64 infinity = 1.0 / 0.0;
     return int(infinity);

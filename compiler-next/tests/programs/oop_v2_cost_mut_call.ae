@@ -1,3 +1,5 @@
+package oop_v2_cost_mut_call;
+
 interface Access {
     int get();
     mut int increment();

@@ -1,3 +1,5 @@
+package v26_matrix_axis_generic;
+
 T read<T:Copy>(MatrixView<T> v) {
     VectorView<T,Row> r = row(v,1);
     VectorView<T,Column> c = column(v,1);

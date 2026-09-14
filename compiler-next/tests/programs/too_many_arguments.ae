@@ -1,2 +1,4 @@
+package too_many_arguments;
+
 int identity(int x) { return x; }
 int main() { return identity(1, 2); }

@@ -1,2 +1,4 @@
+package helper;
+
 T read<T:Copy>(VectorView<T,Row> v){return v[1];}
 int write<T:Copy>(VectorViewMut<T,Column> v,T x){v[1]=x;return 0;}

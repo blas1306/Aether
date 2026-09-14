@@ -1,3 +1,5 @@
+package forward_call;
+
 int first(int x) {
     return second(x);
 }

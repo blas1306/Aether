@@ -1,3 +1,5 @@
+package v4_casts;
+
 alias Tiny = int8;
 
 int main() {

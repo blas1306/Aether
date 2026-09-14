@@ -1,3 +1,5 @@
+package oop_opt_1_mixed;
+
 interface I { int get(); }
 class C : I { public int get() { return 7; } }
 class D : I { public int get() { return 9; } }

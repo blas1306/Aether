@@ -6,14 +6,14 @@ bootstrap Linux x86-64 de `compiler-next`, bajo el contrato de
 
 ## Módulo STD y tipos
 
-`import Text` resuelve una entrada canónica read-only distribuida por el driver.
+`import std.Text` resuelve una entrada canónica read-only distribuida por el driver.
 La resolución intercepta la identidad reservada antes de consultar el filesystem
 del proyecto, por lo que un `Text.ae` vecino no puede suplantarla. Importar sigue
 siendo explícito y no agrega prelude ni inicialización de módulo.
 
-El módulo declara los nominales ordinarios `Text.ScalarOffset`, representado por
-un `usize`, y `Text.FindResult`, con variantes `Found(ScalarOffset)` y
-`NotFound`. `Text.scalarOffset` construye únicamente el wrapper; bounds se
+El módulo declara los nominales ordinarios `std.Text.ScalarOffset`, representado por
+un `usize`, y `std.Text.FindResult`, con variantes `Found(ScalarOffset)` y
+`NotFound`. `std.Text.scalarOffset` construye únicamente el wrapper; bounds se
 validan al usarlo contra un string. Ambos tipos conservan identidad nominal en
 HIR, MIR, SSA y layout LLVM.
 

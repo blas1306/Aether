@@ -1,3 +1,5 @@
+package a;
+
 import common;
 
 int from_a(int x) {

@@ -1,1 +1,3 @@
+package oop_v3_transitive;
+
 open class A{} open class B:A{} class C:B{} int main(){A a=C();return 0;}

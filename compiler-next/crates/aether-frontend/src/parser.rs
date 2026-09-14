@@ -3,14 +3,19 @@
 use crate::{
     AstAlias, AstBinaryOp, AstBlock, AstCapabilityConstraint, AstCatch, AstEnum, AstExpr,
     AstExprKind, AstField, AstFunction, AstGenericParam, AstImport, AstMatchArm, AstMatchMode,
-    AstParameter, AstReferenceType, AstStmt, AstStmtKind, AstStruct, AstType, AstUnaryOp,
-    AstVariant, AstVariantPattern, Diagnostic, DiagnosticCategory, ParsedAst, Phase, SourceFile,
-    Token, TokenKind,
+    AstPackage, AstParameter, AstReferenceType, AstStmt, AstStmtKind, AstStruct, AstType,
+    AstUnaryOp, AstVariant, AstVariantPattern, Diagnostic, DiagnosticCategory, ParsedAst, Phase,
+    SourceFile, Token, TokenKind,
 };
 
 /// Parses an already tokenized source file.
 pub fn parse(_source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<Diagnostic>> {
     let mut parser = Parser { tokens, cursor: 0 };
+    let package = if parser.at(TokenKind::KwPackage) {
+        Some(parser.package().map_err(|error| vec![error])?)
+    } else {
+        None
+    };
     let mut imports = Vec::new();
     while parser.at(TokenKind::KwImport) {
         match parser.import() {
@@ -66,7 +71,8 @@ pub fn parse(_source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<
             }
         }
     }
-    if interfaces.is_empty()
+    if package.is_none()
+        && interfaces.is_empty()
         && classes.is_empty()
         && aliases.is_empty()
         && structs.is_empty()
@@ -79,6 +85,7 @@ pub fn parse(_source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<
         )])
     } else {
         Ok(ParsedAst {
+            package,
             imports,
             aliases,
             structs,
@@ -96,6 +103,37 @@ struct Parser {
 }
 
 impl Parser {
+    fn namespace_path(
+        &mut self,
+        message: &'static str,
+    ) -> Result<(Vec<String>, crate::Span), Diagnostic> {
+        let first = self.expect(TokenKind::Identifier, message)?;
+        let mut path = vec![first.lexeme];
+        let mut span = first.span;
+        while self.consume(TokenKind::Dot).is_some() {
+            let segment = self.expect(TokenKind::Identifier, "expected identifier after `.`")?;
+            span = span.through(segment.span);
+            path.push(segment.lexeme);
+        }
+        Ok((path, span))
+    }
+
+    fn package(&mut self) -> Result<AstPackage, Diagnostic> {
+        let start = self
+            .expect(TokenKind::KwPackage, "expected `package`")?
+            .span;
+        let (path, path_span) = self.namespace_path("expected package path")?;
+        let end = self
+            .expect(
+                TokenKind::Semicolon,
+                "expected `;` after package declaration",
+            )?
+            .span;
+        Ok(AstPackage {
+            path,
+            span: start.through(path_span).through(end),
+        })
+    }
     fn interface_decl(&mut self) -> Result<crate::AstInterface, Diagnostic> {
         let start = self.current().span;
         let public = self.current().lexeme == "public";
@@ -406,17 +444,21 @@ impl Parser {
 
     fn import(&mut self) -> Result<AstImport, Diagnostic> {
         let start = self.expect(TokenKind::KwImport, "expected `import`")?.span;
-        let module = self
-            .expect(TokenKind::Identifier, "expected module name after `import`")?
-            .lexeme;
+        let (path, _) = self.namespace_path("expected package path after `import`")?;
+        let alias = if self.consume(TokenKind::KwAs).is_some() {
+            Some(
+                self.expect(TokenKind::Identifier, "expected namespace alias after `as`")?
+                    .lexeme,
+            )
+        } else {
+            None
+        };
         let end = self
-            .expect(
-                TokenKind::Semicolon,
-                "expected `;` after module import; selective, aliased and nested imports are not admitted",
-            )?
+            .expect(TokenKind::Semicolon, "expected `;` after package import")?
             .span;
         Ok(AstImport {
-            module,
+            path,
+            alias,
             span: start.through(end),
         })
     }
@@ -513,17 +555,27 @@ impl Parser {
             TokenKind::KwInt | TokenKind::KwBool | TokenKind::Identifier => self.advance(),
             _ => return Err(self.error("E0100", "expected type name")),
         };
-        let (module, name, span) =
-            if token.kind == TokenKind::Identifier && self.consume(TokenKind::Dot).is_some() {
+        let is_identifier = token.kind == TokenKind::Identifier;
+        let mut segments = vec![(token.lexeme, token.span)];
+        if is_identifier {
+            while self.consume(TokenKind::Dot).is_some() {
                 let member = self.expect(TokenKind::Identifier, "expected type name after `.`")?;
-                (
-                    Some(token.lexeme),
-                    member.lexeme,
-                    token.span.through(member.span),
-                )
-            } else {
-                (None, token.lexeme, token.span)
-            };
+                segments.push((member.lexeme, member.span));
+            }
+        }
+        let span = segments
+            .first()
+            .unwrap()
+            .1
+            .through(segments.last().unwrap().1);
+        let (name, _) = segments.pop().unwrap();
+        let module = (!segments.is_empty()).then(|| {
+            segments
+                .into_iter()
+                .map(|(segment, _)| segment)
+                .collect::<Vec<_>>()
+                .join(".")
+        });
         let arguments = self.type_arguments()?;
         let span = arguments
             .last()
@@ -800,30 +852,34 @@ impl Parser {
 
     fn variant_pattern(&mut self) -> Result<AstVariantPattern, Diagnostic> {
         let first = self.expect(TokenKind::Identifier, "expected enum name in pattern")?;
-        let first_arguments = self.type_arguments()?;
-        self.expect(TokenKind::Dot, "variant patterns must be qualified")?;
-        let second = self.expect(TokenKind::Identifier, "expected variant name after `.`")?;
-        let second_arguments = self.type_arguments()?;
-        let (module, enum_name, type_arguments, variant, mut end) =
-            if self.consume(TokenKind::Dot).is_some() {
-                let third =
-                    self.expect(TokenKind::Identifier, "expected variant name after `.`")?;
-                (
-                    Some(first.lexeme),
-                    second.lexeme,
-                    second_arguments,
-                    third.lexeme,
-                    third.span,
-                )
-            } else {
-                (
-                    None,
-                    first.lexeme,
-                    first_arguments,
-                    second.lexeme,
-                    second.span,
-                )
-            };
+        let first_span = first.span;
+        let mut segments = vec![(first.lexeme, self.type_arguments()?, first_span)];
+        while self.consume(TokenKind::Dot).is_some() {
+            let segment = self.expect(TokenKind::Identifier, "expected name after `.`")?;
+            let span = segment.span;
+            segments.push((segment.lexeme, self.type_arguments()?, span));
+        }
+        if segments.len() < 2 {
+            return Err(self.error("E0106", "variant patterns must be qualified"));
+        }
+        let (variant, variant_arguments, mut end) = segments.pop().unwrap();
+        if !variant_arguments.is_empty() {
+            return Err(self.error("E0106", "variant names cannot have type arguments"));
+        }
+        let (enum_name, type_arguments, _) = segments.pop().unwrap();
+        if segments
+            .iter()
+            .any(|(_, arguments, _)| !arguments.is_empty())
+        {
+            return Err(self.error("E0106", "namespace segments cannot have type arguments"));
+        }
+        let module = (!segments.is_empty()).then(|| {
+            segments
+                .into_iter()
+                .map(|(name, _, _)| name)
+                .collect::<Vec<_>>()
+                .join(".")
+        });
         let mut bindings = Vec::new();
         if self.consume(TokenKind::LeftParen).is_some() {
             if !self.at(TokenKind::RightParen) {
@@ -848,7 +904,7 @@ impl Parser {
             type_arguments,
             variant,
             bindings,
-            span: first.span.through(end),
+            span: first_span.through(end),
         })
     }
 
@@ -1152,6 +1208,9 @@ impl Parser {
         } else {
             Vec::new()
         };
+        if first_arguments.is_empty() && self.has_nested_qualifier() {
+            return self.nested_qualified_primary(token);
+        }
         if self.consume(TokenKind::Dot).is_some() {
             let member = self.expect(TokenKind::Identifier, "expected member name after `.`")?;
             let member_arguments = self.type_arguments()?;
@@ -1257,6 +1316,90 @@ impl Parser {
         })
     }
 
+    fn has_nested_qualifier(&self) -> bool {
+        self.tokens
+            .get(self.cursor)
+            .is_some_and(|token| token.kind == TokenKind::Dot)
+            && self
+                .tokens
+                .get(self.cursor + 1)
+                .is_some_and(|token| token.kind == TokenKind::Identifier)
+            && self
+                .tokens
+                .get(self.cursor + 2)
+                .is_some_and(|token| token.kind == TokenKind::Dot)
+    }
+
+    fn nested_qualified_primary(&mut self, first: Token) -> Result<AstExpr, Diagnostic> {
+        let mut segments = vec![(first.lexeme, first.span)];
+        while self.consume(TokenKind::Dot).is_some() {
+            let segment = self.expect(TokenKind::Identifier, "expected member name after `.`")?;
+            segments.push((segment.lexeme, segment.span));
+        }
+        let (args, parenthesized, end) = if self.consume(TokenKind::LeftParen).is_some() {
+            let (args, end) = self.arguments()?;
+            (args, true, end)
+        } else {
+            (Vec::new(), false, segments.last().unwrap().1)
+        };
+        if segments.len() >= 4 {
+            let variant = segments.pop().unwrap().0;
+            let enum_name = segments.pop().unwrap().0;
+            let module = segments
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect::<Vec<_>>()
+                .join(".");
+            return Ok(AstExpr {
+                kind: AstExprKind::VariantCall {
+                    module,
+                    enum_name,
+                    type_arguments: Vec::new(),
+                    variant,
+                    args,
+                    parenthesized,
+                },
+                span: first.span.through(end),
+            });
+        }
+        if parenthesized {
+            let function = segments.pop().unwrap().0;
+            let module = segments
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect::<Vec<_>>()
+                .join(".");
+            return Ok(AstExpr {
+                kind: AstExprKind::QualifiedCall {
+                    module,
+                    function,
+                    type_arguments: Vec::new(),
+                    args,
+                    parenthesized: true,
+                },
+                span: first.span.through(end),
+            });
+        }
+        let mut iter = segments.into_iter();
+        let (root, root_span) = iter.next().unwrap();
+        let mut expression = AstExpr {
+            kind: AstExprKind::Name(root),
+            span: root_span,
+        };
+        for (name, name_span) in iter {
+            let span = expression.span.through(name_span);
+            expression = AstExpr {
+                kind: AstExprKind::Field {
+                    base: Box::new(expression),
+                    name,
+                    name_span,
+                },
+                span,
+            };
+        }
+        Ok(expression)
+    }
+
     fn generic_suffix_before_apply(&self) -> bool {
         if !self.at(TokenKind::Less) {
             return false;
@@ -1302,7 +1445,7 @@ impl Parser {
                 return None;
             }
             index += 1;
-            if tokens
+            while tokens
                 .get(index)
                 .is_some_and(|token| token.kind == TokenKind::Dot)
             {

@@ -6868,10 +6868,19 @@ mod tests {
             types: Arc::new(TypeArena::new()),
             modules: vec![ModuleInfo {
                 id: ModuleId(0),
+                key: aether_frontend::SourceUnitKey {
+                    package: aether_frontend::PackageKey {
+                        origin: aether_frontend::OriginKey::Project,
+                        path: aether_frontend::PackagePath(vec!["main".into()]),
+                    },
+                    logical_source: aether_frontend::LogicalSourceKey("<memory>".into()),
+                },
+                package: aether_frontend::PackageId(0),
                 name: "main".into(),
                 source: SourceId(0),
                 source_name: "<memory>".into(),
                 imports: vec![],
+                semantic_dependencies: BTreeSet::new(),
             }],
             structs: vec![],
             enums: vec![],

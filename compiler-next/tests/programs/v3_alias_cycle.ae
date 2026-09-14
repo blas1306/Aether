@@ -1,3 +1,5 @@
+package v3_alias_cycle;
+
 alias A = B;
 alias B = A;
 int main() { return 0; }

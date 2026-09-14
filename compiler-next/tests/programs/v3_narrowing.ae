@@ -1,1 +1,3 @@
+package v3_narrowing;
+
 int main() { int16 wide = 1; int8 narrow = wide; return narrow; }

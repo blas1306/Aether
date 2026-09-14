@@ -1,3 +1,5 @@
+package v15_symbolic_properties;
+
 struct Holder<T> {
     T value;
 }

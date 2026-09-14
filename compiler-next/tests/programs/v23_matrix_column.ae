@@ -1,3 +1,5 @@
+package v23_matrix_column;
+
 
 int main(){
 Matrix<int> a=[10;20;30];return a[3,1]+int(rows(a)+columns(a))-34;

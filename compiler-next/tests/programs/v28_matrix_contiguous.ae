@@ -1,3 +1,5 @@
+package v28_matrix_contiguous;
+
 int main(){
 Matrix<int> a=[1,2,3;4,5,6];Matrix<int> b=2*a;Matrix<int> c=a*3;
 if(rows(b)!=2){return 1;}if(columns(c)!=3){return 2;}

@@ -1,1 +1,3 @@
+package comparison_not_equal;
+
 int main() { if (4 != 5) { return 9; } else { return 2; } }

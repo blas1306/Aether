@@ -1,2 +1,4 @@
+package return_wrong_type;
+
 bool invalid() { return 1; }
 int main() { return 0; }

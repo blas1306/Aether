@@ -62,8 +62,10 @@ impl Backend for LlvmTextBackend {
 pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let program = ssa.as_ssa();
     let types = &program.types;
-    let reachable = (!types.classes().is_empty() || !types.interfaces().is_empty())
-        .then(|| classes::reachable_functions(program));
+    let reachable = (program.modules.len() > 1
+        || !types.classes().is_empty()
+        || !types.interfaces().is_empty())
+    .then(|| classes::reachable_functions(program));
     let has_class_runtime = reachable.as_ref().is_some_and(|reachable| {
         program
             .functions
@@ -3465,9 +3467,10 @@ fn text_scalar_type(types: &TypeArena, modules: &[ModuleInfo], structs: &[Struct
         .iter()
         .find(|info| {
             info.name == "ScalarOffset"
-                && modules
-                    .get(info.module.0 as usize)
-                    .is_some_and(|module| module.name == "Text")
+                && modules.get(info.module.0 as usize).is_some_and(|module| {
+                    module.key.package.origin == aether_frontend::OriginKey::Toolchain
+                        && module.key.package.path.0 == ["std", "Text"]
+                })
         })
         .expect("verified Text operation has canonical ScalarOffset")
         .id;

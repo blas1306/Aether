@@ -1,3 +1,5 @@
+package types;
+
 struct CopyBox<T: Copy> {
     T value;
 }

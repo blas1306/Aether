@@ -1,3 +1,5 @@
+package v33_zero_contraction;
+
 int main(){Vector<double,Column>c=[1,2];Vector<double,Row>r=[1,2,3];
  Vector<double,Column>ec=[];Vector<double,Row>er=[];
  Matrix<double>a=c*er;Matrix<double>b=ec*r;Matrix<double>z=a*b;

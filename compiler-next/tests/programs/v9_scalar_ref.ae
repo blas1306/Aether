@@ -1,3 +1,5 @@
+package v9_scalar_ref;
+
 int main() {
     int value = 1;
     ref mut int view = &mut value;

@@ -1,1 +1,3 @@
+package type_mismatch;
+
 int main() { int value = true; return value; }

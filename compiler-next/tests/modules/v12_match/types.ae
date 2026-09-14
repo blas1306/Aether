@@ -1,3 +1,5 @@
+package types;
+
 enum Storage {
     Empty,
     Owned(Buffer<int>),

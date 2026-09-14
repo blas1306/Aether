@@ -1,3 +1,5 @@
+package v6_enums;
+
 struct ErrorInfo {
     int code;
 }

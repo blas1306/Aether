@@ -418,7 +418,9 @@ fn vertical6_qualified_alias_construction_and_matching_resolve() {
         &[Emit::Ast, Emit::Hir, Emit::Llvm],
     )
     .unwrap();
-    assert!(compilation.dumps[&Emit::Ast].contains("VariantCall"));
+    // A three-segment application is deliberately neutral at parse time:
+    // HIR decides whether it denotes a package call or enum construction.
+    assert!(compilation.dumps[&Emit::Ast].contains("QualifiedCall"));
     let hir = &compilation.dumps[&Emit::Hir];
     assert!(hir.contains("Numeric"));
     assert!(hir.contains("TypeId(14) = Number"));
@@ -560,7 +562,7 @@ fn multi_file_diagnostics_are_structured_and_keep_source_provenance() {
     let error = CompilationSession::discover(&module_program("errors/missing_module"))
         .unwrap_err()
         .remove(0);
-    assert_eq!(error.code, "E0701");
+    assert_eq!(error.code, "E0221");
     assert_eq!(error.source_name.as_deref(), Some("main.ae"));
     assert!(error.span.is_some());
 }
@@ -701,12 +703,12 @@ fn vertical3_alias_signatures_work_across_modules() {
     fs::create_dir(&root).unwrap();
     fs::write(
         root.join("main.ae"),
-        "import math;int main(){return math.answer(21);}",
+        "package main; import math;int main(){return math.answer(21);}",
     )
     .unwrap();
     fs::write(
         root.join("math.ae"),
-        "alias Scalar=int16;int answer(Scalar x){return int(x+x);}",
+        "package math; alias Scalar=int16;int answer(Scalar x){return int(x+x);}",
     )
     .unwrap();
     let compilation = compile_session(
@@ -5455,7 +5457,7 @@ fn vertical21_cross_module_orientation_rejection_and_mangling() {
         "import storage;int main(){Vector<int,Row> r=[1,2];return storage.readColumn(&r,1);}",
         "import storage;int main(){storage.Holder<Vector<int,Row>> r=storage.Holder<Vector<int,Row>>([1]);storage.Holder<Vector<int,Column>> c=r;return 0;}",
     ] {
-        fs::write(directory.join("main.ae"), text).unwrap();
+        fs::write(directory.join("main.ae"), format!("package main; {text}")).unwrap();
         assert!(
             compile_session(
                 CompilationSession::discover(&directory.join("main.ae")).unwrap(),
@@ -5865,7 +5867,7 @@ fn vertical22_cross_module_orientation_and_layout() {
         "import storage;int main(){Vector<int,Column> c=[1];Vector<int,Column> bad=storage.toRow(c);return 0;}",
         "import storage;int main(){Vector<int,Column> c=[1];Vector<int,Column> bad=storage.toColumn(c);return 0;}",
     ] {
-        fs::write(directory.join("main.ae"), text).unwrap();
+        fs::write(directory.join("main.ae"), format!("package main; {text}")).unwrap();
         assert!(
             compile_session(
                 CompilationSession::discover(&directory.join("main.ae")).unwrap(),
@@ -6364,7 +6366,7 @@ fn vertical23_cross_module_signature_rejections() {
         "import storage;int main(){Matrix<double> a=storage.pair<int>(1,2);return 0;}",
         "import storage;int main(){Vector<int,Row> a=[1,2];return storage.read(&a,1,1);}",
     ] {
-        fs::write(directory.join("main.ae"), text).unwrap();
+        fs::write(directory.join("main.ae"), format!("package main; {text}")).unwrap();
         assert!(
             compile_session(
                 CompilationSession::discover(&directory.join("main.ae")).unwrap(),
@@ -6820,14 +6822,14 @@ fn vertical24_projected_provenance_and_cross_module_rejections() {
     }
     let directory = temporary("v24-modules");
     fs::create_dir_all(&directory).unwrap();
-    fs::write(directory.join("helper.ae"),"int read(MatrixView<int> v){return v[1,1];}int write(MatrixViewMut<int> v){v[1,1]=42;return 0;}").unwrap();
+    fs::write(directory.join("helper.ae"),"package helper; int read(MatrixView<int> v){return v[1,1];}int write(MatrixViewMut<int> v){v[1,1]=42;return 0;}").unwrap();
     for source in [
         "import helper;int main(){Matrix<int> a=[1];return helper.read(a);}",
         "import helper;int main(){Array<int> a={1};return helper.read(view(a));}",
         "import helper;int main(){Matrix<int> a=[1];return helper.write(matrix_view(a));}",
         "import helper;int main(){Matrix<double> a=[1];return helper.read(matrix_view(a));}",
     ] {
-        fs::write(directory.join("main.ae"), source).unwrap();
+        fs::write(directory.join("main.ae"), format!("package main; {source}")).unwrap();
         assert!(
             compile_session(
                 CompilationSession::discover(&directory.join("main.ae")).unwrap(),
@@ -7379,14 +7381,14 @@ fn vertical25_nonunit_stride_backend_contract() {
 fn vertical25_cross_module_type_capability_rejections() {
     let directory = temporary("v25-modules");
     fs::create_dir_all(&directory).unwrap();
-    fs::write(directory.join("helper.ae"), "int read(VectorView<int,Row> v){return v[1];}int write(VectorViewMut<int,Column> v){v[1]=42;return 0;}").unwrap();
+    fs::write(directory.join("helper.ae"), "package helper; int read(VectorView<int,Row> v){return v[1];}int write(VectorViewMut<int,Column> v){v[1]=42;return 0;}").unwrap();
     for source in [
         "import helper;int main(){Vector<int,Row> a=[1];return helper.write(transpose_view(a));}",
         "import helper;int main(){Vector<int,Row> a=[1];return helper.read(transpose_view(a));}",
         "import helper;int main(){Vector<double,Row> a=[1];return helper.read(vector_view(a));}",
         "import helper;int main(){Array<int> a={1};return helper.read(view(a));}",
     ] {
-        fs::write(directory.join("main.ae"), source).unwrap();
+        fs::write(directory.join("main.ae"), format!("package main; {source}")).unwrap();
         assert!(
             compile_session(
                 CompilationSession::discover(&directory.join("main.ae")).unwrap(),

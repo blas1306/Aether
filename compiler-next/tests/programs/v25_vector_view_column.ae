@@ -1,1 +1,3 @@
+package v25_vector_view_column;
+
 int main(){Vector<int,Column> a=[1,2,3];VectorView<int,Column> v=vector_view(a);return v[1]+v[3]-4;}

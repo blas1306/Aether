@@ -1,3 +1,5 @@
+package v20_remove_consume;
+
 int consume(Buffer<int> value) { return value[0]; }
 int main() {
     List<Buffer<int>> values = {Buffer<int>(1,10),Buffer<int>(1,20)};

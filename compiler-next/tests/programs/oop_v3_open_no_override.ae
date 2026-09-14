@@ -1,1 +1,3 @@
+package oop_v3_open_no_override;
+
 open class Animal{public init(){} public open int sound(){return 1;} public int age(){return 3;}}class Dog:Animal{} int main(){Animal a=Dog();return a.sound();}

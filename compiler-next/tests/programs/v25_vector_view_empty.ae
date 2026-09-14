@@ -1,1 +1,3 @@
+package v25_vector_view_empty;
+
 int main(){Vector<int,Column> a=[];VectorView<int,Column> v=vector_view(a);VectorViewMut<int,Column> w=vector_view_mut(a);VectorView<int,Row> t=transpose_view(v);VectorViewMut<int,Row> u=transpose_view_mut(w);return int(dimension(v)+dimension(w)+dimension(t)+dimension(u));}

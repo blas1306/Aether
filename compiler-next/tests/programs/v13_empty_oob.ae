@@ -1,3 +1,5 @@
+package v13_empty_oob;
+
 int main() {
     Array<int> empty = {};
     usize index = 0;

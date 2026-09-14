@@ -377,9 +377,9 @@ fn imported_base_identity_and_visibility() {
     let dir = Directory::new();
     let entry = dir.0.join("main.ae");
     let base = "public open class A{public init(){}public open int f(){return 1;}}";
-    fs::write(dir.0.join("first.ae"), base).unwrap();
-    fs::write(dir.0.join("second.ae"), base).unwrap();
-    fs::write(&entry, "import first;class B:first.A{public override int f(){return 7;}}int main(){first.A a=B();return a.f();}").unwrap();
+    fs::write(dir.0.join("first.ae"), format!("package first; {base}")).unwrap();
+    fs::write(dir.0.join("second.ae"), format!("package second; {base}")).unwrap();
+    fs::write(&entry, "package main; import first;class B:first.A{public override int f(){return 7;}}int main(){first.A a=B();return a.f();}").unwrap();
     let c = compile_session(CompilationSession::discover(&entry).unwrap(), &[]).unwrap();
     for opt in ["-O0", "-O2"] {
         execute(&instrument(&c.llvm, 7, [1, 1, 2, 1, 0, 1, 1]), opt);
@@ -388,15 +388,22 @@ fn imported_base_identity_and_visibility() {
         "import first;import second;class B:first.A{}int main(){second.A a=B();}",
         "import first;class B:first.A,first.A{}int main(){}",
     ] {
-        fs::write(&entry, source).unwrap();
+        fs::write(&entry, format!("package main; {source}")).unwrap();
         assert!(compile_session(CompilationSession::discover(&entry).unwrap(), &[]).is_err());
     }
     fs::write(
         dir.0.join("first.ae"),
-        base.replace("public open class", "open class"),
+        format!(
+            "package first; {}",
+            base.replace("public open class", "open class")
+        ),
     )
     .unwrap();
-    fs::write(&entry, "import first;class B:first.A{}int main(){}").unwrap();
+    fs::write(
+        &entry,
+        "package main; import first;class B:first.A{}int main(){}",
+    )
+    .unwrap();
     assert!(compile_session(CompilationSession::discover(&entry).unwrap(), &[]).is_err());
 }
 

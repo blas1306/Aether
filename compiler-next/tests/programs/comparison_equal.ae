@@ -1,1 +1,3 @@
+package comparison_equal;
+
 int main() { if (4 == 4) { return 8; } else { return 2; } }

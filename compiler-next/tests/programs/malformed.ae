@@ -1,1 +1,3 @@
+package malformed;
+
 int main( { return 0; }

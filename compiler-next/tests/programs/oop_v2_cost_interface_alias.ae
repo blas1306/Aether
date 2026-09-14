@@ -1,3 +1,5 @@
+package oop_v2_cost_interface_alias;
+
 interface Access {
     int get();
     mut int increment();

@@ -1,3 +1,5 @@
+package v32_row_matrix_strided;
+
 int main(){
     Matrix<double>a=[1,2,3;4,5,6];
     Matrix<double>b=[2,9;3,8;4,7];

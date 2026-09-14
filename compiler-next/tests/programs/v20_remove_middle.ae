@@ -1,3 +1,5 @@
+package v20_remove_middle;
+
 int main() {
     List<int> values = {10,20,30,40};
     usize cap = capacity(values);

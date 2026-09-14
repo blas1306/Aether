@@ -1,3 +1,5 @@
+package v21_vector_row;
+
 int main() {
     Vector<int,Row> v=[10,20,30];
     if (dimension(v)!=3) { return 1; }

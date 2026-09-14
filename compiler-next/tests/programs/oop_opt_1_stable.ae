@@ -1,3 +1,5 @@
+package oop_opt_1_stable;
+
 interface I { int get(); mut int inc(); }
 class C : I {
     int n;

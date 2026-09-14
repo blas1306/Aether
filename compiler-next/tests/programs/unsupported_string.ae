@@ -1,1 +1,3 @@
+package unsupported_string;
+
 int main() { string value = "no"; return 0; }

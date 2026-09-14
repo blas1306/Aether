@@ -3,8 +3,8 @@
 use super::*;
 use aether_frontend::{ClassId, ClassOp, ClassTokenKind};
 
-/// Closed direct-call reachability lets unused class declarations add no ARC
-/// runtime. This is emission policy; all functions were already verified.
+/// Closed direct-call reachability is the link graph. Namespace grants and
+/// semantic checking never make an otherwise unused body reachable.
 pub(super) fn reachable_functions(
     program: &aether_middle::SsaIr,
 ) -> BTreeSet<aether_frontend::InstanceId> {

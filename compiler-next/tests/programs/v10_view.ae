@@ -1,3 +1,5 @@
+package v10_view;
+
 int main() {
     Buffer<int> values = Buffer<int>(4, 10);
     ViewMut<int> writable = view_mut(values);

@@ -35,19 +35,65 @@ use std::time::Instant;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ModuleId(pub u32);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PackageId(pub u32);
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum OriginKey {
+    Project,
+    Toolchain,
+}
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PackagePath(pub Vec<String>);
+impl PackagePath {
+    #[must_use]
+    pub fn source(&self) -> String {
+        self.0.join(".")
+    }
+    #[must_use]
+    pub fn canonical(&self) -> String {
+        self.0.join("::")
+    }
+    #[must_use]
+    pub fn starts_with(&self, other: &Self) -> bool {
+        self.0.starts_with(&other.0)
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PackageKey {
+    pub origin: OriginKey,
+    pub path: PackagePath,
+}
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LogicalSourceKey(pub String);
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SourceUnitKey {
+    pub package: PackageKey,
+    pub logical_source: LogicalSourceKey,
+}
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct SymbolKey {
+    pub package: PackageKey,
+    pub member: String,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedImport {
     pub name: String,
     pub module: ModuleId,
+    pub package: PackageId,
+    pub target: PackageKey,
+    pub alias: Option<String>,
     pub span: Span,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ModuleInfo {
     pub id: ModuleId,
+    pub key: SourceUnitKey,
+    pub package: PackageId,
     pub name: String,
     pub source: SourceId,
     pub source_name: String,
     pub imports: Vec<ResolvedImport>,
+    pub semantic_dependencies: BTreeSet<ModuleId>,
 }
 #[derive(Clone, Debug)]
 pub struct ParsedModule {
@@ -82,6 +128,16 @@ pub struct FunctionSignature {
     pub parameters: Vec<ParameterSignature>,
     pub return_type: TypeId,
     pub span: Span,
+}
+impl FunctionSignature {
+    /// Stable logical identity, independent of the importing spelling and dense session IDs.
+    #[must_use]
+    pub fn symbol_key(&self, modules: &[ModuleInfo]) -> SymbolKey {
+        SymbolKey {
+            package: modules[self.module.0 as usize].key.package.clone(),
+            member: self.name.clone(),
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GenericParamInfo {
@@ -348,6 +404,7 @@ pub struct DeclaredProgram {
     signatures: Vec<FunctionSignature>,
     names: Vec<BTreeMap<String, FunctionId>>,
     imports: Vec<BTreeMap<String, ModuleId>>,
+    import_bindings: Vec<BTreeSet<String>>,
     module_names: BTreeMap<String, ModuleId>,
     aliases: Vec<BTreeMap<String, TypeId>>,
     alias_info: Vec<TypeAliasInfo>,
@@ -1149,16 +1206,47 @@ pub enum HirBinaryOp {
     NotEqual,
 }
 
+fn merge_package_tables<T: Copy>(program: &ParsedProgram, tables: &mut [BTreeMap<String, T>]) {
+    let mut package_tables = BTreeMap::<PackageId, BTreeMap<String, T>>::new();
+    for module in &program.modules {
+        package_tables
+            .entry(module.info.package)
+            .or_default()
+            .extend(
+                tables[module.info.id.0 as usize]
+                    .iter()
+                    .map(|(name, id)| (name.clone(), *id)),
+            );
+    }
+    for module in &program.modules {
+        tables[module.info.id.0 as usize] = package_tables[&module.info.package].clone();
+    }
+}
+
 pub fn collect_signatures(ast: ParsedAst) -> Result<DeclaredProgram, Vec<Diagnostic>> {
     let source = ast.functions.first().map_or(SourceId(0), |f| f.span.source);
+    let path = PackagePath(
+        ast.package()
+            .map_or_else(|| vec!["main".into()], |p| p.path.clone()),
+    );
+    let package_key = PackageKey {
+        origin: OriginKey::Project,
+        path,
+    };
     collect_program_signatures(ParsedProgram {
         modules: vec![ParsedModule {
             info: ModuleInfo {
                 id: ModuleId(0),
+                key: SourceUnitKey {
+                    package: package_key,
+                    logical_source: LogicalSourceKey("<memory>".into()),
+                },
+                package: PackageId(0),
                 name: "main".into(),
                 source,
                 source_name: "<memory>".into(),
                 imports: vec![],
+                semantic_dependencies: BTreeSet::new(),
             },
             ast,
         }],
@@ -1171,24 +1259,169 @@ pub fn collect_program_signatures(
     classes::inject_exception_core(&mut program)?;
     classes::expand_methods(&mut program)?;
     validate_program(&program)?;
-    let imports: Vec<BTreeMap<String, ModuleId>> = program
+    let representatives = program
         .modules
         .iter()
-        .map(|m| {
-            m.info
-                .imports
-                .iter()
-                .map(|i| (i.name.clone(), i.module))
-                .collect()
-        })
-        .collect();
+        .fold(BTreeMap::new(), |mut map, module| {
+            map.entry(module.info.package).or_insert(module.info.id);
+            map
+        });
     let module_names: BTreeMap<String, ModuleId> = program
         .modules
         .iter()
-        .map(|m| (m.info.name.clone(), m.info.id))
+        .map(|module| {
+            (
+                module.info.key.package.path.source(),
+                representatives[&module.info.package],
+            )
+        })
         .collect();
+    let imports: Vec<BTreeMap<String, ModuleId>> = program
+        .modules
+        .iter()
+        .map(|module| {
+            let mut visible = BTreeMap::new();
+            for grant in &module.info.imports {
+                for candidate in &program.modules {
+                    if candidate.info.key.package.origin == grant.target.origin
+                        && candidate
+                            .info
+                            .key
+                            .package
+                            .path
+                            .starts_with(&grant.target.path)
+                    {
+                        let suffix =
+                            &candidate.info.key.package.path.0[grant.target.path.0.len()..];
+                        let spelling = if let Some(alias) = &grant.alias {
+                            std::iter::once(alias.as_str())
+                                .chain(suffix.iter().map(String::as_str))
+                                .collect::<Vec<_>>()
+                                .join(".")
+                        } else {
+                            candidate.info.key.package.path.source()
+                        };
+                        visible.insert(spelling, representatives[&candidate.info.package]);
+                    }
+                }
+            }
+            visible
+        })
+        .collect();
+    let import_bindings = program
+        .modules
+        .iter()
+        .map(|module| {
+            module
+                .info
+                .imports
+                .iter()
+                .map(|grant| {
+                    grant
+                        .alias
+                        .clone()
+                        .unwrap_or_else(|| grant.target.path.0[0].clone())
+                })
+                .collect::<BTreeSet<_>>()
+        })
+        .collect::<Vec<_>>();
 
-    // One fail-closed top-level namespace per module. This guarantees that a
+    // One fail-closed top-level namespace per package, independent of which
+    // source unit contributed a declaration.
+    let mut package_declarations = BTreeMap::<(PackageId, String), (&str, ModuleId, Span)>::new();
+    for module in &program.modules {
+        for (kind, name, span) in module
+            .ast
+            .aliases()
+            .iter()
+            .map(|d| ("alias", &d.name, d.span))
+            .chain(
+                module
+                    .ast
+                    .structs()
+                    .iter()
+                    .map(|d| ("struct", &d.name, d.span)),
+            )
+            .chain(
+                module
+                    .ast
+                    .classes()
+                    .iter()
+                    .map(|d| ("class", &d.name, d.span)),
+            )
+            .chain(module.ast.enums().iter().map(|d| ("enum", &d.name, d.span)))
+            .chain(
+                module
+                    .ast
+                    .interfaces()
+                    .iter()
+                    .map(|d| ("interface", &d.name, d.span)),
+            )
+            .chain(
+                module
+                    .ast
+                    .functions()
+                    .iter()
+                    .map(|d| ("function", &d.name, d.span)),
+            )
+        {
+            if let Some((previous_kind, previous_module, previous_span)) = package_declarations
+                .insert(
+                    (module.info.package, name.clone()),
+                    (kind, module.info.id, span),
+                )
+            {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        if kind == "function" && previous_kind == "function" {
+                            "E0211"
+                        } else if kind == "alias" && previous_kind == "alias" {
+                            "E0225"
+                        } else {
+                            "E0240"
+                        },
+                        Phase::Semantic,
+                        DiagnosticCategory::Name,
+                        format!(
+                            "duplicate package member `{name}` ({previous_kind} in {} at {}..{}, {kind} in {})",
+                            program.modules[previous_module.0 as usize].info.source_name,
+                            previous_span.start,
+                            previous_span.end,
+                            module.info.source_name
+                        ),
+                        Some(span),
+                    ),
+                    module,
+                )]);
+            }
+        }
+    }
+    for module in &program.modules {
+        for import in &module.info.imports {
+            let binding = import
+                .alias
+                .clone()
+                .unwrap_or_else(|| import.target.path.0[0].clone());
+            if package_declarations.contains_key(&(module.info.package, binding.clone())) {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0235",
+                        Phase::Semantic,
+                        DiagnosticCategory::Name,
+                        format!(
+                            "namespace binding `{binding}` conflicts with a member of package `{}`",
+                            module.info.key.package.path.canonical()
+                        ),
+                        Some(import.span),
+                    ),
+                    module,
+                )]);
+            }
+        }
+    }
+
+    // A source unit still owns imports/provenance, while names are collected
+    // package-wide before bodies.
     // call-like spelling has exactly one semantic interpretation.
     for module in &program.modules {
         let mut declarations = BTreeMap::new();
@@ -1250,7 +1483,6 @@ pub fn collect_program_signatures(
             }
         }
     }
-
     // Nominal identities exist before any field/signature type is resolved.
     let mut struct_names = vec![BTreeMap::new(); program.modules.len()];
     let mut struct_decls = Vec::new();
@@ -1261,6 +1493,7 @@ pub fn collect_program_signatures(
             struct_decls.push((id, module.info.id, declaration));
         }
     }
+    merge_package_tables(&program, &mut struct_names);
 
     let mut enum_names = vec![BTreeMap::new(); program.modules.len()];
     let mut enum_decls = Vec::new();
@@ -1271,6 +1504,7 @@ pub fn collect_program_signatures(
             enum_decls.push((id, module.info.id, declaration));
         }
     }
+    merge_package_tables(&program, &mut enum_names);
     let struct_arities = struct_decls
         .iter()
         .map(|(_, _, declaration)| declaration.generic_parameters.len())
@@ -1339,6 +1573,7 @@ pub fn collect_program_signatures(
             )?;
         }
     }
+    merge_package_tables(&program, &mut aliases);
 
     let mut structs = Vec::with_capacity(struct_decls.len());
     let mut field_names = Vec::with_capacity(struct_decls.len());
@@ -1846,6 +2081,7 @@ pub fn collect_program_signatures(
             });
         }
     }
+    merge_package_tables(&program, &mut names);
     for c in &mut types.classes {
         for m in &mut c.methods {
             let s = &signatures[m.function.0 as usize];
@@ -2075,6 +2311,7 @@ pub fn collect_program_signatures(
         signatures,
         names,
         imports,
+        import_bindings,
         module_names,
         aliases,
         alias_info,
@@ -2222,24 +2459,20 @@ fn resolve_type_in_module(
         return Ok(types.intern_reference(pointee, reference.mutable));
     }
     let target = if let Some(module) = &ty.module {
-        let Some(target) = module_names.get(module).copied() else {
+        let Some(target) = imports[current.0 as usize].get(module).copied() else {
+            let known = module_names.contains_key(module);
             return Err(Diagnostic::new(
-                "E0221",
+                if known { "E0223" } else { "E0221" },
                 Phase::Semantic,
                 DiagnosticCategory::Name,
-                format!("unknown module `{module}`"),
+                if known {
+                    format!("package `{module}` is not imported")
+                } else {
+                    format!("unknown package path or namespace alias `{module}`")
+                },
                 Some(ty.span),
             ));
         };
-        if imports[current.0 as usize].get(module) != Some(&target) {
-            return Err(Diagnostic::new(
-                "E0223",
-                Phase::Semantic,
-                DiagnosticCategory::Name,
-                format!("module `{module}` is not directly imported"),
-                Some(ty.span),
-            ));
-        }
         target
     } else {
         current
@@ -3290,18 +3523,20 @@ pub fn analyze_bodies_for_target(
         },
     )?;
     let mut functions = vec![];
+    let mut semantic_dependencies = vec![BTreeSet::new(); d.program.modules.len()];
     let mut types = std::mem::take(&mut d.types);
     classes::compute_layouts(&mut types, &d.structs, &d.enums, target)?;
     for m in &d.program.modules {
         for f in m.ast.functions() {
             let id = FunctionId(functions.len() as u32);
-            functions.push(
+            let (function, dependencies) =
                 analyze_function(f, id, m.info.id, &d, &mut types, target).map_err(|ds| {
                     ds.into_iter()
                         .map(|x| x.with_source_name(&m.info.source_name))
                         .collect::<Vec<_>>()
-                })?,
-            );
+                })?;
+            semantic_dependencies[m.info.id.0 as usize].extend(dependencies);
+            functions.push(function);
         }
     }
     let generic_functions = functions;
@@ -3322,7 +3557,20 @@ pub fn analyze_bodies_for_target(
     )?;
     compute_concrete_layouts(&mut types, &d.structs, &d.enums, target)?;
     let hir = TypedHir {
-        modules: d.program.modules.iter().map(|m| m.info.clone()).collect(),
+        modules: d
+            .program
+            .modules
+            .iter()
+            .map(|m| {
+                let mut info = m.info.clone();
+                // Imports are source-unit lookup grants. Once bodies have been
+                // resolved, downstream IR retains only canonical dependencies.
+                info.imports.clear();
+                info.semantic_dependencies
+                    .clone_from(&semantic_dependencies[m.info.id.0 as usize]);
+                info
+            })
+            .collect(),
         types,
         aliases: d.alias_info,
         structs: d.structs,
@@ -4539,7 +4787,7 @@ fn analyze_function(
     d: &DeclaredProgram,
     types: &mut TypeArena,
     target: TargetProperties,
-) -> Result<GenericHirFunction, Vec<Diagnostic>> {
+) -> Result<(GenericHirFunction, BTreeSet<ModuleId>), Vec<Diagnostic>> {
     let sig = &d.signatures[id.0 as usize];
     crate::verify_class_signature(
         types,
@@ -4556,6 +4804,8 @@ fn analyze_function(
         signatures: &d.signatures,
         names: &d.names,
         imports: &d.imports,
+        import_bindings: &d.import_bindings,
+        used_modules: BTreeSet::new(),
         module_names: &d.module_names,
         aliases: &d.aliases,
         types,
@@ -4585,6 +4835,18 @@ fn analyze_function(
     };
     let mut parameters = vec![];
     for p in &sig.parameters {
+        if a.import_bindings[module.0 as usize].contains(&p.name) {
+            return Err(vec![Diagnostic::new(
+                "E0235",
+                Phase::Semantic,
+                DiagnosticCategory::Name,
+                format!(
+                    "parameter `{}` conflicts with a namespace import binding",
+                    p.name
+                ),
+                Some(p.span),
+            )]);
+        }
         if a.scopes[0].contains_key(&p.name) {
             return Err(vec![duplicate("parameter", &p.name, p.span)]);
         }
@@ -4656,7 +4918,7 @@ fn analyze_function(
                 })
                 .collect(),
         });
-    Ok(GenericHirFunction {
+    let function = GenericHirFunction {
         id,
         module,
         parameters,
@@ -4664,7 +4926,8 @@ fn analyze_function(
         body,
         constructor_unwind,
         span: f.span,
-    })
+    };
+    Ok((function, a.used_modules))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -5884,6 +6147,8 @@ struct Analyzer<'a> {
     signatures: &'a [FunctionSignature],
     names: &'a [BTreeMap<String, FunctionId>],
     imports: &'a [BTreeMap<String, ModuleId>],
+    import_bindings: &'a [BTreeSet<String>],
+    used_modules: BTreeSet<ModuleId>,
     module_names: &'a BTreeMap<String, ModuleId>,
     aliases: &'a [BTreeMap<String, TypeId>],
     types: &'a mut TypeArena,
@@ -5933,6 +6198,11 @@ impl Analyzer<'_> {
             self.enum_arities,
         )
         .map_err(|diagnostic| vec![diagnostic])?;
+        if let Some(namespace) = &ty.module
+            && let Some(module) = self.imports[self.module.0 as usize].get(namespace)
+        {
+            self.used_modules.insert(*module);
+        }
         validate_type_constraints(self.types, resolved, self.structs, self.enums, ty.span)?;
         Ok(resolved)
     }
@@ -6109,6 +6379,15 @@ impl Analyzer<'_> {
                     name,
                     initializer,
                 } => {
+                    if self.import_bindings[self.module.0 as usize].contains(name) {
+                        return Err(vec![Diagnostic::new(
+                            "E0235",
+                            Phase::Semantic,
+                            DiagnosticCategory::Name,
+                            format!("local `{name}` conflicts with a namespace import binding"),
+                            Some(s.span),
+                        )]);
+                    }
                     if name == "this" && self.class_method.is_some() {
                         return Err(vec![classes::error(
                             "E0404",
@@ -7353,6 +7632,12 @@ impl Analyzer<'_> {
                 if let Some(enum_id) = self.local_enum_id(module) {
                     let enum_ty = self.nominal_enum_type(enum_id, resolved_arguments, e.span)?;
                     self.enum_init(enum_ty, function, args, *parenthesized, e.span)?
+                } else if !self.imports[self.module.0 as usize].contains_key(module)
+                    && let Some((namespace, enum_name)) = module.rsplit_once('.')
+                {
+                    let enum_ty =
+                        self.qualified_enum_type(namespace, enum_name, type_arguments, e.span)?;
+                    self.enum_init(enum_ty, function, args, *parenthesized, e.span)?
                 } else {
                     self.qualified_apply(module, function, type_arguments, args, e.span)?
                 }
@@ -7377,7 +7662,8 @@ impl Analyzer<'_> {
                 } = &base.kind
                     && let AstExprKind::Name(module) = &qualifier.kind
                     && self.lookup(module).is_none()
-                    && self.module_names.contains_key(module)
+                    && (self.module_names.contains_key(module)
+                        || self.imports[self.module.0 as usize].contains_key(module))
                 {
                     let enum_ty = self.qualified_enum_type(module, enum_name, &[], e.span)?;
                     self.enum_init(enum_ty, name, &[], false, e.span)?
@@ -8587,25 +8873,22 @@ impl Analyzer<'_> {
         args: &[AstExpr],
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
-        let Some(mid) = self.module_names.get(m).copied() else {
+        let Some(mid) = self.imports[self.module.0 as usize].get(m).copied() else {
+            let known = self.module_names.contains_key(m);
             return Err(vec![Diagnostic::new(
-                "E0221",
+                if known { "E0223" } else { "E0221" },
                 Phase::Semantic,
                 DiagnosticCategory::Name,
-                format!("unknown module `{m}`"),
+                if known {
+                    format!("package `{m}` is not imported")
+                } else {
+                    format!("unknown package path or namespace alias `{m}`")
+                },
                 Some(span),
             )]);
         };
-        if self.imports[self.module.0 as usize].get(m) != Some(&mid) {
-            return Err(vec![Diagnostic::new(
-                "E0223",
-                Phase::Semantic,
-                DiagnosticCategory::Name,
-                format!("module `{m}` is not directly imported"),
-                Some(span),
-            )]);
-        }
-        if m == "Text" {
+        self.used_modules.insert(mid);
+        if self.module_names.get("std.Text") == Some(&mid) {
             return self.text_apply(mid, f, type_arguments, args, span);
         }
         if let Some(id) = self.names[mid.0 as usize].get(f).copied() {
@@ -9426,10 +9709,8 @@ impl Analyzer<'_> {
                 .is_some_and(|id| self.signatures[id.0 as usize].return_type == TypeId::STRING),
             AstExprKind::QualifiedCall {
                 module, function, ..
-            } => self
-                .module_names
+            } => self.imports[self.module.0 as usize]
                 .get(module)
-                .filter(|target| self.imports[self.module.0 as usize].get(module) == Some(target))
                 .and_then(|target| self.names[target.0 as usize].get(function))
                 .is_some_and(|id| self.signatures[id.0 as usize].return_type == TypeId::STRING),
             _ => false,
@@ -9961,20 +10242,24 @@ fn validate_program(p: &ParsedProgram) -> Result<(), Vec<Diagnostic>> {
     if p.modules.is_empty() || p.entry.0 as usize >= p.modules.len() {
         return Err(fail("module graph has no valid entry module"));
     }
-    let mut names = BTreeSet::new();
+    let mut keys = BTreeSet::new();
     let mut sources = BTreeSet::new();
     for (i, m) in p.modules.iter().enumerate() {
-        if m.info.id.0 as usize != i
-            || !names.insert(&m.info.name)
-            || !sources.insert(m.info.source)
+        if m.info.id.0 as usize != i || !keys.insert(&m.info.key) || !sources.insert(m.info.source)
         {
             return Err(fail("duplicate or non-canonical module/source identity"));
         }
         let mut imports = BTreeSet::new();
         for x in &m.info.imports {
             if x.module.0 as usize >= p.modules.len()
-                || p.modules[x.module.0 as usize].info.name != x.name
-                || !imports.insert(&x.name)
+                || p.modules[x.module.0 as usize].info.key.package.origin != x.target.origin
+                || !p.modules[x.module.0 as usize]
+                    .info
+                    .key
+                    .package
+                    .path
+                    .starts_with(&x.target.path)
+                || !imports.insert((&x.target, &x.alias))
             {
                 return Err(vec![
                     Diagnostic::new(

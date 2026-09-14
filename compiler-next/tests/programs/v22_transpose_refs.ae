@@ -1,3 +1,5 @@
+package v22_transpose_refs;
+
 int main() {
     Vector<int,Row> r=[10,20,30];
     if(true) { ref int before=&r[1]; if(*before!=10) { return 1; } }

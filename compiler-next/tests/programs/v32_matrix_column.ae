@@ -1,3 +1,5 @@
+package v32_matrix_column;
+
 int main(){
     Matrix<int>a=[1,2,3;4,5,6];
     Vector<int,Column>x=[2,3,4];

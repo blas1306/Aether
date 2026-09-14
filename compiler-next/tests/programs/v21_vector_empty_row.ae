@@ -1,1 +1,3 @@
+package v21_vector_empty_row;
+
 int main() { Vector<int,Row> v=[]; return int(dimension(v)); }

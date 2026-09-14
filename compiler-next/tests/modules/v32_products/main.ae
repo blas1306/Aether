@@ -1,3 +1,5 @@
+package main;
+
 import helper;
 Vector<T,Column> forward<T:Storable+Copy+Add+Mul+Zero>(MatrixView<T>a,VectorView<T,Column>x){return helper.mc(a,x);}
 Vector<T,Row> forward_row<T:Storable+Copy+Add+Mul+Zero>(VectorView<T,Row>x,MatrixView<T>a){return helper.rm(x,a);}

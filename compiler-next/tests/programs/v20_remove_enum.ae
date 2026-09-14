@@ -1,3 +1,5 @@
+package v20_remove_enum;
+
 enum Owned { Empty, Data(Buffer<int>) }
 int payload(Owned value) { match(value) { Owned.Empty => { return 0; } Owned.Data(b) => { return b[0]; } } }
 int main() {

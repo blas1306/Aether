@@ -1,3 +1,5 @@
+package v28_empty;
+
 Vector<int,Row> vector(ref mut int state){*state=*state*10+2;Vector<int,Row>a=[];return a;}
 Matrix<int> matrix(ref mut int state){*state=*state*10+2;Matrix<int>a=[];return a;}
 int scalar(ref mut int state){*state=*state*10+1;return 2;}

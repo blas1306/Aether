@@ -1,3 +1,5 @@
+package v28_control_flow;
+
 Vector<int,Row> scale(VectorView<int,Row>a){return 2*a;}
 Matrix<int> scale_matrix(MatrixView<int>a){return a*3;}
 int branch(bool flag){Vector<int,Row>a=[1,2];Vector<int,Row>b=scale(vector_view(a));

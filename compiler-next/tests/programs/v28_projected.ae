@@ -1,3 +1,5 @@
+package v28_projected;
+
 struct Holder { Matrix<int> m; Vector<int,Row> v; }
 int main(){Array<Matrix<int>>a={ [1,2;3,4] };Matrix<int>b=2*a[0];
 Array<Vector<int,Row>>v={ [2,3] };Vector<int,Row>w=v[0]*3;

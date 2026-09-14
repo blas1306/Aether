@@ -1,3 +1,5 @@
+package bool_return;
+
 bool positive(int x) {
     return x > 0;
 }

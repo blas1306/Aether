@@ -1,3 +1,5 @@
+package storage;
+
 Buffer<int> make(usize length) {
     return Buffer<int>(length, 9);
 }

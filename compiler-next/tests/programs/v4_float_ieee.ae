@@ -1,3 +1,5 @@
+package v4_float_ieee;
+
 int main() {
     float64 infinity = 1.0 / 0.0;
     float64 nan = 0.0 / 0.0;

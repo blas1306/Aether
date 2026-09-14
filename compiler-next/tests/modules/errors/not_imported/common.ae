@@ -1,3 +1,5 @@
+package common;
+
 int value() {
     return 42;
 }

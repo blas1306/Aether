@@ -1,3 +1,5 @@
+package main;
+
 import helper;
 Matrix<T> forward<T:Storable+Copy+Add+Mul+Zero>(MatrixView<T>a,MatrixView<T>b){return helper.multiply(a,b);}
 int main(){Matrix<int>a=[1,2;3,4];MatrixView<int>t=transpose_view(a);MatrixView<int>v=matrix_view(a);

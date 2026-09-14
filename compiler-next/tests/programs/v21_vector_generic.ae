@@ -1,3 +1,5 @@
+package v21_vector_generic;
+
 struct Holder<T: Storable> { T value; }
 Vector<T,Row> pair<T: Storable>(T a,T b) { Vector<T,Row> v=[a,b]; return v; }
 usize size<T: Storable>(ref Vector<T,Row> v) { return dimension(*v); }

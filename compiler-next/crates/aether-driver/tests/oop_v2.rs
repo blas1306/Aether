@@ -537,9 +537,9 @@ fn modules_keep_interfaces_nominal() {
     let public = COUNTER
         .replace("interface ", "public interface ")
         .replace("class C", "public class C");
-    fs::write(dir.0.join("first.ae"), &public).unwrap();
-    fs::write(dir.0.join("second.ae"), &public).unwrap();
-    fs::write(&entry,"import first;import second;int main(){first.I a=first.C(2);second.I b=second.C(3);return a.get()+b.get();}").unwrap();
+    fs::write(dir.0.join("first.ae"), format!("package first; {public}")).unwrap();
+    fs::write(dir.0.join("second.ae"), format!("package second; {public}")).unwrap();
+    fs::write(&entry,"package main; import first;import second;int main(){first.I a=first.C(2);second.I b=second.C(3);return a.get()+b.get();}").unwrap();
     let c = compile_session(CompilationSession::discover(&entry).unwrap(), &[]).unwrap();
     for opt in ["-O0", "-O2"] {
         execute(&instrument(&c.llvm, 5, [2, 2, 4, 2, 0, 2, 2]), opt);
@@ -550,13 +550,17 @@ fn modules_keep_interfaces_nominal() {
     ] {
         fs::write(
             &entry,
-            format!("import first;import second;int main(){{{body}}}"),
+            format!("package main; import first;import second;int main(){{{body}}}"),
         )
         .unwrap();
         assert!(compile_session(CompilationSession::discover(&entry).unwrap(), &[]).is_err());
     }
-    fs::write(dir.0.join("first.ae"), COUNTER).unwrap();
-    fs::write(&entry, "import first;int main(){first.I i=first.C(0);}").unwrap();
+    fs::write(dir.0.join("first.ae"), format!("package first; {COUNTER}")).unwrap();
+    fs::write(
+        &entry,
+        "package main; import first;int main(){first.I i=first.C(0);}",
+    )
+    .unwrap();
     assert!(compile_session(CompilationSession::discover(&entry).unwrap(), &[]).is_err());
 }
 

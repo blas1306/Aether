@@ -1,3 +1,5 @@
+package v11_reassignment;
+
 struct Owned {
     Buffer<int> values;
 }

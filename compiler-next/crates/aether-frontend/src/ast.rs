@@ -5,6 +5,7 @@ use crate::Span;
 /// Parsed compilation unit. Construction is restricted to the parser.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParsedAst {
+    pub(crate) package: Option<AstPackage>,
     pub(crate) imports: Vec<AstImport>,
     pub(crate) aliases: Vec<AstAlias>,
     pub(crate) structs: Vec<AstStruct>,
@@ -15,6 +16,11 @@ pub struct ParsedAst {
 }
 
 impl ParsedAst {
+    /// Declared logical package, if the source text contains one.
+    #[must_use]
+    pub const fn package(&self) -> Option<&AstPackage> {
+        self.package.as_ref()
+    }
     /// Flat interface declarations in source order.
     #[must_use]
     pub fn interfaces(&self) -> &[crate::AstInterface] {
@@ -59,7 +65,8 @@ impl ParsedAst {
     #[must_use]
     pub fn dump(&self) -> String {
         format!(
-            "imports: {:#?}\naliases: {:#?}\nstructs: {:#?}\nenums: {:#?}\nclasses: {:#?}\ninterfaces: {:#?}\nfunctions: {:#?}",
+            "package: {:#?}\nimports: {:#?}\naliases: {:#?}\nstructs: {:#?}\nenums: {:#?}\nclasses: {:#?}\ninterfaces: {:#?}\nfunctions: {:#?}",
+            self.package,
             self.imports,
             self.aliases,
             self.structs,
@@ -69,6 +76,15 @@ impl ParsedAst {
             self.functions
         )
     }
+}
+
+/// Logical package declaration for one source unit.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AstPackage {
+    /// Non-empty identifier segments.
+    pub path: Vec<String>,
+    /// Complete declaration provenance.
+    pub span: Span,
 }
 
 /// Nominal tagged value declaration.
@@ -128,8 +144,10 @@ pub struct AstAlias {
 /// Minimal source import, unresolved until module discovery.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AstImport {
-    /// Logical module spelling.
-    pub module: String,
+    /// Imported namespace path as canonical source segments.
+    pub path: Vec<String>,
+    /// Optional source-unit-local namespace alias.
+    pub alias: Option<String>,
     /// Full import declaration span.
     pub span: Span,
 }

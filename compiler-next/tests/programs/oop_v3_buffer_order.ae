@@ -1,1 +1,3 @@
+package oop_v3_buffer_order;
+
 open class A{Buffer<int> a;public init(Buffer<int> a){this.a=a;}} class B:A{Buffer<int> b;public init(Buffer<int> a,Buffer<int> b):base(a){this.b=b;}}int main(){A a=B(Buffer<int>(2,1),Buffer<int>(2,2));return 0;}

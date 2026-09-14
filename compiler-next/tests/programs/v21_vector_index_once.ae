@@ -1,3 +1,5 @@
+package v21_vector_index_once;
+
 alias RowInt = Vector<int,Row>;
 usize next(ref mut usize calls) { *calls=*calls+1; return 1; }
 int main() {

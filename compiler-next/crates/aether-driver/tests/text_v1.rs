@@ -32,7 +32,12 @@ fn compile_and_run(
     let directory = Directory::new();
     let input = directory.0.join("main.ae");
     let executable = directory.0.join("program");
-    fs::write(&input, source).unwrap();
+    let source = if source.trim_start().starts_with("package ") {
+        source.to_owned()
+    } else {
+        format!("package main;\n{source}")
+    };
+    fs::write(&input, &source).unwrap();
     let toolchain = ClangToolchain::default().with_optimization(optimization);
     let compilation = build_path(
         &input,
@@ -102,23 +107,23 @@ fn complete_surface_runs_at_o0_and_o2() {
 fn empty_edges_split_and_adversarial_search_are_exact() {
     let repeated = "a".repeat(20_000);
     let source = format!(
-        r#"import Text;
+        r#"import std.Text;
 int main(){{
- if(Text.contains("","")==false){{return 1;}}
- if(Text.startsWith("abc","")==false){{return 2;}}
- if(Text.endsWith("abc","")==false){{return 3;}}
- match(Text.find("abc","x")){{Text.FindResult.Found(at)=>{{return 4;}} Text.FindResult.NotFound=>{{}}}}
- match(Text.findFrom("abc","",Text.scalarOffset(3))){{Text.FindResult.Found(at)=>{{if(at.value!=3){{return 5;}}}} Text.FindResult.NotFound=>{{return 6;}}}}
- string empty=Text.substring("abc",Text.scalarOffset(1),Text.scalarOffset(1));
- string whole=Text.substring("abc",Text.scalarOffset(0),Text.scalarOffset(3));
+ if(std.Text.contains("","")==false){{return 1;}}
+ if(std.Text.startsWith("abc","")==false){{return 2;}}
+ if(std.Text.endsWith("abc","")==false){{return 3;}}
+ match(std.Text.find("abc","x")){{std.Text.FindResult.Found(at)=>{{return 4;}} std.Text.FindResult.NotFound=>{{}}}}
+ match(std.Text.findFrom("abc","",std.Text.scalarOffset(3))){{std.Text.FindResult.Found(at)=>{{if(at.value!=3){{return 5;}}}} std.Text.FindResult.NotFound=>{{return 6;}}}}
+ string empty=std.Text.substring("abc",std.Text.scalarOffset(1),std.Text.scalarOffset(1));
+ string whole=std.Text.substring("abc",std.Text.scalarOffset(0),std.Text.scalarOffset(3));
  if(empty!=""){{return 7;}} if(whole!="abc"){{return 7;}}
- List<string> a=Text.split(",a,,",",");
+ List<string> a=std.Text.split(",a,,",",");
  if(length(a)!=4){{return 8;}}
  string x0=remove(a,0);string x1=remove(a,0);string x2=remove(a,0);string x3=remove(a,0);
  if(x0!=""){{return 9;}} if(x1!="a"){{return 9;}} if(x2!=""){{return 9;}} if(x3!=""){{return 9;}}
- List<string> one=Text.split("abc","x");string only=remove(one,0);
+ List<string> one=std.Text.split("abc","x");string only=remove(one,0);
  if(length(one)!=0){{return 10;}} if(only!="abc"){{return 10;}}
- if(Text.contains("{repeated}b","{repeated}b")==false){{return 11;}}
+ if(std.Text.contains("{repeated}b","{repeated}b")==false){{return 11;}}
  return 0;
 }}"#
     );
@@ -131,10 +136,10 @@ int main(){{
 #[test]
 fn contract_failures_trap_before_results() {
     let cases = [
-        "import Text;int main(){Text.FindResult r=Text.findFrom(\"x\",\"\",Text.scalarOffset(2));match(r){Text.FindResult.Found(at)=>{} Text.FindResult.NotFound=>{}}return 0;}",
-        "import Text;int main(){string x=Text.substring(\"x\",Text.scalarOffset(1),Text.scalarOffset(0));return 0;}",
-        "import Text;int main(){string x=Text.substring(\"x\",Text.scalarOffset(0),Text.scalarOffset(2));return 0;}",
-        "import Text;int main(){List<string> x=Text.split(\"x\",\"\");return 0;}",
+        "import std.Text;int main(){std.Text.FindResult r=std.Text.findFrom(\"x\",\"\",std.Text.scalarOffset(2));match(r){std.Text.FindResult.Found(at)=>{} std.Text.FindResult.NotFound=>{}}return 0;}",
+        "import std.Text;int main(){string x=std.Text.substring(\"x\",std.Text.scalarOffset(1),std.Text.scalarOffset(0));return 0;}",
+        "import std.Text;int main(){string x=std.Text.substring(\"x\",std.Text.scalarOffset(0),std.Text.scalarOffset(2));return 0;}",
+        "import std.Text;int main(){List<string> x=std.Text.split(\"x\",\"\");return 0;}",
     ];
     for source in cases {
         let (_, output) = compile_and_run(source, OptimizationLevel::O0);
@@ -144,20 +149,20 @@ fn contract_failures_trap_before_results() {
 
 #[test]
 fn owned_results_cleanup_on_early_return_and_unwind() {
-    let early = r#"import Text;
+    let early = r#"import std.Text;
 string choose(){
- string part=Text.substring("abcd",Text.scalarOffset(1),Text.scalarOffset(3));
+ string part=std.Text.substring("abcd",std.Text.scalarOffset(1),std.Text.scalarOffset(3));
  return part;
 }
 int main(){
  string selected=choose();if(selected!="bc"){return 1;}
  return 0;
 }"#;
-    let unwind = r#"import Text;
+    let unwind = r#"import std.Text;
 open class Problem:Exception{public init(){}}
 int fail(){throw Problem();}
 int main(){
- try{List<string> pieces=Text.split("a,b",",");fail();}
+ try{List<string> pieces=std.Text.split("a,b",",");fail();}
  catch(Problem error){return 0;}
  return 2;
 }"#;
@@ -178,12 +183,12 @@ fn canonical_module_cannot_be_shadowed_and_helpers_are_reachable_only() {
     let executable = directory.0.join("program");
     fs::write(
         &input,
-        "import Text;int main(){return int(Text.codePointCount(\"é\"));}",
+        "package main; import std.Text;int main(){return int(std.Text.codePointCount(\"é\"));}",
     )
     .unwrap();
     fs::write(
         directory.0.join("Text.ae"),
-        "int codePointCount(string value){return 99;}",
+        "package Text; int codePointCount(string value){return 99;}",
     )
     .unwrap();
     let compilation = build_path(
@@ -198,7 +203,7 @@ fn canonical_module_cannot_be_shadowed_and_helpers_are_reachable_only() {
 
     let plain = directory.0.join("plain.ae");
     let plain_exe = directory.0.join("plain");
-    fs::write(&plain, "int main(){return 0;}").unwrap();
+    fs::write(&plain, "package plain; int main(){return 0;}").unwrap();
     let compilation = build_path(
         &plain,
         &plain_exe,
@@ -211,13 +216,13 @@ fn canonical_module_cannot_be_shadowed_and_helpers_are_reachable_only() {
 
 #[test]
 fn queries_allocate_and_retain_nothing() {
-    let source = r#"import Text;
+    let source = r#"import std.Text;
 int main(){
  string value="aaaaaaaaaaaaaaaaab";
- usize count=Text.codePointCount(value);bool contains=Text.contains(value,"aaac");
- bool starts=Text.startsWith(value,"a");bool ends=Text.endsWith(value,"b");
+ usize count=std.Text.codePointCount(value);bool contains=std.Text.contains(value,"aaac");
+ bool starts=std.Text.startsWith(value,"a");bool ends=std.Text.endsWith(value,"b");
  if(count!=18){return 2;}if(contains){return 2;}if(starts==false){return 2;}if(ends==false){return 2;}
- match(Text.find(value,"b")){Text.FindResult.Found(at)=>{} Text.FindResult.NotFound=>{return 1;}}
+ match(std.Text.find(value,"b")){std.Text.FindResult.Found(at)=>{} std.Text.FindResult.NotFound=>{return 1;}}
  return 0;
 }"#;
     for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {

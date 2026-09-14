@@ -1,3 +1,5 @@
+package v26_matrix_axis_refs;
+
 int main() {
     Matrix<int> a = [1,2;3,4];
     ref Matrix<int> shared = &a;

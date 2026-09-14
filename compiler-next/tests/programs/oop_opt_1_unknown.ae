@@ -1,3 +1,5 @@
+package oop_opt_1_unknown;
+
 interface I { int get(); }
 class C : I { public int get() { return 7; } }
 int read(I i) { return i.get(); }

@@ -1,3 +1,5 @@
+package v5_structs;
+
 struct Segment {
     Point start;
     Point end;

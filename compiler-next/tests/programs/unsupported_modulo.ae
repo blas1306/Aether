@@ -1,1 +1,3 @@
+package unsupported_modulo;
+
 int main() { return 4 % 2; }

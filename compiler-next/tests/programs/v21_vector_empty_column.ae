@@ -1,1 +1,3 @@
+package v21_vector_empty_column;
+
 int main() { Vector<double,Column> v=[]; return int(dimension(v)); }

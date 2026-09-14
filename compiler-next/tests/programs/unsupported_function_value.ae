@@ -1,3 +1,5 @@
+package unsupported_function_value;
+
 int helper() { return 1; }
 int main() {
     int value = helper;

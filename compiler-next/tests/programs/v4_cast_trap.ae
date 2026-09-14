@@ -1,2 +1,4 @@
+package v4_cast_trap;
+
 int8 narrow(int64 value) { return int8(value); }
 int main() { return narrow(128); }

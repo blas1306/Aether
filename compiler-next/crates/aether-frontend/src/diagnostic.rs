@@ -109,6 +109,17 @@ pub struct Diagnostic {
     pub span: Option<Span>,
     /// Source display name retained when a diagnostic leaves its compilation session.
     pub source_name: Option<String>,
+    /// Machine-applicable source replacements.
+    pub fixits: Box<[FixIt]>,
+}
+
+/// One deterministic source replacement suggestion.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FixIt {
+    /// Source bytes to replace.
+    pub span: Span,
+    /// Exact replacement text.
+    pub replacement: String,
 }
 
 impl Diagnostic {
@@ -128,7 +139,20 @@ impl Diagnostic {
             message: message.into(),
             span,
             source_name: None,
+            fixits: Box::new([]),
         }
+    }
+
+    /// Attaches a machine-applicable replacement.
+    #[must_use]
+    pub fn with_fixit(mut self, span: Span, replacement: impl Into<String>) -> Self {
+        let mut fixits = self.fixits.into_vec();
+        fixits.push(FixIt {
+            span,
+            replacement: replacement.into(),
+        });
+        self.fixits = fixits.into_boxed_slice();
+        self
     }
 
     /// Attaches source provenance without changing the structured location.

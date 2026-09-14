@@ -1,3 +1,5 @@
+package v22_transpose_non_numeric;
+
 struct Item { Buffer<int> data; }
 int main() {
     Vector<Item,Row> r=[Item(Buffer<int>(1,42))];

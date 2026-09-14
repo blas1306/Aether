@@ -1,3 +1,5 @@
+package v18_pop_int;
+
 int main() {
     List<int> values = {10, 20, 30};
     usize before = capacity(values);

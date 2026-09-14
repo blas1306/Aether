@@ -1,31 +1,33 @@
-import Text;
+package text_v1_smoke;
+
+import std.Text;
 
 int main() {
     string value = "Aé€😀é\0Z";
-    Text.ScalarOffset zero = Text.scalarOffset(0);
-    if (Text.codePointCount(value) != 8) { return 1; }
-    if (Text.contains(value, "€😀") == false) { return 2; }
-    if (Text.startsWith(value, "Aé") == false) { return 3; }
-    if (Text.endsWith(value, "\0Z") == false) { return 4; }
-    match (Text.findFrom(value, "😀", zero)) {
-        Text.FindResult.Found(at) => {
+    std.Text.ScalarOffset zero = std.Text.scalarOffset(0);
+    if (std.Text.codePointCount(value) != 8) { return 1; }
+    if (std.Text.contains(value, "€😀") == false) { return 2; }
+    if (std.Text.startsWith(value, "Aé") == false) { return 3; }
+    if (std.Text.endsWith(value, "\0Z") == false) { return 4; }
+    match (std.Text.findFrom(value, "😀", zero)) {
+        std.Text.FindResult.Found(at) => {
             if (at.value != 3) { return 5; }
         }
-        Text.FindResult.NotFound => { return 6; }
+        std.Text.FindResult.NotFound => { return 6; }
     }
-    match (Text.findFrom(value, "", Text.scalarOffset(8))) {
-        Text.FindResult.Found(at) => {
+    match (std.Text.findFrom(value, "", std.Text.scalarOffset(8))) {
+        std.Text.FindResult.Found(at) => {
             if (at.value != 8) { return 7; }
         }
-        Text.FindResult.NotFound => { return 8; }
+        std.Text.FindResult.NotFound => { return 8; }
     }
-    string middle = Text.substring(value, Text.scalarOffset(1), Text.scalarOffset(4));
+    string middle = std.Text.substring(value, std.Text.scalarOffset(1), std.Text.scalarOffset(4));
     if (middle != "é€😀") { return 9; }
-    string trimmed = Text.trim(" \t\n\rok \t");
+    string trimmed = std.Text.trim(" \t\n\rok \t");
     if (trimmed != "ok") { return 10; }
-    string unicode_space = Text.trim(" ok ");
+    string unicode_space = std.Text.trim(" ok ");
     if (unicode_space != " ok ") { return 11; }
-    List<string> pieces = Text.split("a,,b,", ",");
+    List<string> pieces = std.Text.split("a,,b,", ",");
     if (length(pieces) != 4) { return 12; }
     string p0 = remove(pieces, 0);
     string p1 = remove(pieces, 0);

@@ -1,1 +1,3 @@
+package oop_v3_empty;
+
 open class A{} class B:A{} int main(){B b=B();return 0;}

@@ -1,3 +1,5 @@
+package v10_allocation_overflow;
+
 int main() {
     usize length = 18446744073709551615;
     Buffer<int> values = Buffer<int>(length, 0);

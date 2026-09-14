@@ -1,3 +1,5 @@
+package v22_transpose_generic;
+
 Vector<T,Column> toColumn<T:Storable>(Vector<T,Row> v) { return transpose(v); }
 Vector<T,Row> toRow<T:Storable>(Vector<T,Column> v) { return transpose(v); }
 int consume(Vector<int,Column> v) { return v[1]+v[3]-40; }

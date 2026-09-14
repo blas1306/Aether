@@ -1,3 +1,5 @@
+package v21_vector_refs;
+
 int change(ref mut Vector<int,Row> v) { (*v)[2]=40; return 0; }
 int main() {
     Vector<int,Row> v=[10,20];

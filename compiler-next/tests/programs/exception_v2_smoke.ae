@@ -1,3 +1,5 @@
+package exception_v2_smoke;
+
 open class ConstructionFailure : Exception {
     public init() {}
 }

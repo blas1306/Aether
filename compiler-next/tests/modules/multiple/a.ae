@@ -1,3 +1,5 @@
+package a;
+
 int foo() {
     return 19;
 }

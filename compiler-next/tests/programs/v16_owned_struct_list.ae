@@ -1,3 +1,5 @@
+package v16_owned_struct_list;
+
 struct Dataset {
     Buffer<int> data;
     int count;

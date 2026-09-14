@@ -1,1 +1,3 @@
+package geometry;
+
 struct Point { int x; }

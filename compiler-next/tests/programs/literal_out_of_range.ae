@@ -1,1 +1,3 @@
+package literal_out_of_range;
+
 int main() { return 9223372036854775808; }

@@ -1,3 +1,5 @@
+package storage;
+
 struct Box<T: Storable> { Array<T> values; }
 Array<T> array<T: Storable>(T value) { Array<T> result = {value}; return result; }
 List<T> list<T: Storable + Relocatable>(T value) {

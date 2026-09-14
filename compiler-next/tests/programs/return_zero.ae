@@ -1,1 +1,3 @@
+package return_zero;
+
 int main() { return 0; }

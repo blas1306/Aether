@@ -1,3 +1,5 @@
+package v26_matrix_axis_projected;
+
 struct Holder { Matrix<int> m; }
 int main() {
     Holder h = Holder([1,2;3,4]);

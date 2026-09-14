@@ -1,1 +1,3 @@
+package storage;
+
 T popLast<T: Storable + Relocatable>(ref mut List<T> values) { return pop(*values); }

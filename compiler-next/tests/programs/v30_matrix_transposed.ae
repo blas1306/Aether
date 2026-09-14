@@ -1,3 +1,5 @@
+package v30_matrix_transposed;
+
 Matrix<T> add<T:Storable+Copy+Add>(MatrixView<T> a,MatrixView<T> b){return a+b;}
 Matrix<T> scale<T:Storable+Copy+Mul>(MatrixView<T> a,T s){return a*s;}
 int main(){Matrix<double>a=[1,2,3;4,5,6];MatrixView<double>t=transpose_view(a);

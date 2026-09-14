@@ -1,3 +1,5 @@
+package v18_pop_buffer;
+
 Buffer<int> takeLast(ref mut List<Buffer<int>> values) { return pop(*values); }
 int consume(Buffer<int> value) { return value[0]; }
 int main() {

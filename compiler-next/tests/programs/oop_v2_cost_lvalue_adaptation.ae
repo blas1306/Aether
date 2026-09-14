@@ -1,3 +1,5 @@
+package oop_v2_cost_lvalue_adaptation;
+
 interface Access {
     int get();
     mut int increment();

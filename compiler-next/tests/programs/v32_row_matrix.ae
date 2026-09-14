@@ -1,3 +1,5 @@
+package v32_row_matrix;
+
 int main(){
     Vector<double,Row>r=[2,3];
     Matrix<double>a=[1,2,3;4,5,6];

@@ -638,9 +638,9 @@ fn modules_keep_classes_nominal_and_members_visible() {
     let dir = Directory::new();
     let entry = dir.0.join("main.ae");
     let public = COUNTER.replacen("class Counter", "public class Counter", 1);
-    fs::write(dir.0.join("first.ae"), &public).unwrap();
-    fs::write(dir.0.join("second.ae"), &public).unwrap();
-    fs::write(&entry,"import first;import second;int main(){first.Counter a=first.Counter(5);second.Counter b=second.Counter(7);return a.get()+b.get();}").unwrap();
+    fs::write(dir.0.join("first.ae"), format!("package first; {public}")).unwrap();
+    fs::write(dir.0.join("second.ae"), format!("package second; {public}")).unwrap();
+    fs::write(&entry,"package main; import first;import second;int main(){first.Counter a=first.Counter(5);second.Counter b=second.Counter(7);return a.get()+b.get();}").unwrap();
     let c = compile_session(CompilationSession::discover(&entry).unwrap(), &[Emit::Hir]).unwrap();
     for opt in ["-O0", "-O2"] {
         execute(&instrument(&c.llvm, 12, [2, 2, 4, 2, 0, 2, 2]), opt);
@@ -652,7 +652,7 @@ fn modules_keep_classes_nominal_and_members_visible() {
     ] {
         fs::write(
             &entry,
-            format!("import first;import second;int main(){{{body}}}"),
+            format!("package main; import first;import second;int main(){{{body}}}"),
         )
         .unwrap();
         assert!(
@@ -660,10 +660,10 @@ fn modules_keep_classes_nominal_and_members_visible() {
             "{body}"
         );
     }
-    fs::write(dir.0.join("first.ae"), COUNTER).unwrap();
+    fs::write(dir.0.join("first.ae"), format!("package first; {COUNTER}")).unwrap();
     fs::write(
         &entry,
-        "import first;int main(){first.Counter a=first.Counter(0);}",
+        "package main; import first;int main(){first.Counter a=first.Counter(0);}",
     )
     .unwrap();
     assert!(compile_session(CompilationSession::discover(&entry).unwrap(), &[]).is_err());
@@ -910,8 +910,9 @@ fn class_locals_preserve_existing_container_and_mathematical_programs() {
         let main = source.find("int main()").unwrap();
         let brace = main + source[main..].find('{').unwrap() + 1;
         let mixed = format!(
-            "class OopMarker{{}}\n{}OopMarker oop_marker=OopMarker();{}",
-            &source[..brace],
+            "{}class OopMarker{{}}\n{}OopMarker oop_marker=OopMarker();{}",
+            &source[..main],
+            &source[main..brace],
             &source[brace..]
         );
         compile_source(&SourceFile::new(name, mixed), &[])

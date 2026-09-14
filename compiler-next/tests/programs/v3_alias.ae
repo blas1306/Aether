@@ -1,3 +1,5 @@
+package v3_alias;
+
 alias Tiny = int8;
 alias TinyChain = Tiny;
 int main() { TinyChain value = 42; return value; }

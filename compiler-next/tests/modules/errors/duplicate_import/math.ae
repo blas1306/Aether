@@ -1,3 +1,5 @@
+package math;
+
 int value() {
     return 42;
 }

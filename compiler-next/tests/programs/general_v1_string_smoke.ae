@@ -1,3 +1,5 @@
+package general_v1_string_smoke;
+
 string identity(string value) {
     return value;
 }

@@ -1,3 +1,5 @@
+package v20_remove_single;
+
 int main() {
     List<int> values = {10};
     usize cap = capacity(values);

@@ -1,3 +1,5 @@
+package v30_vector_add;
+
 Vector<T,Row> addRows<T:Storable+Copy+Add>(ref Vector<T,Row> a,ref Vector<T,Row> b){return *a+*b;}
 Vector<T,Row> forward<T:Storable+Copy+Add>(ref Vector<T,Row> a,ref Vector<T,Row> b){return addRows(a,b);}
 int main(){Vector<int,Row>a=[1,2,3];Vector<int,Row>b=forward(&a,&a);

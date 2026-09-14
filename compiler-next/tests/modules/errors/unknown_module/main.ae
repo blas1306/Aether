@@ -1,3 +1,5 @@
+package main;
+
 int main() {
     return nowhere.value();
 }

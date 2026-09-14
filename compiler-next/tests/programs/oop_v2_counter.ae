@@ -1,3 +1,5 @@
+package oop_v2_counter;
+
 interface CounterAccess {
     int get();
     mut int increment();

@@ -1,3 +1,5 @@
+package v22_transpose_row;
+
 int main() {
     Vector<int,Row> r=[10,20,30];
     usize before=dimension(r);

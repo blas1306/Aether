@@ -1,1 +1,3 @@
+package non_bool_condition;
+
 int main() { if (1) { return 1; } else { return 0; } }

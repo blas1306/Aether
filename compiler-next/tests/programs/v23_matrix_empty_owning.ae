@@ -1,1 +1,3 @@
+package v23_matrix_empty_owning;
+
 int main(){Matrix<Buffer<int>> a=[];return int(rows(a)+columns(a));}

@@ -1,2 +1,4 @@
+package storage;
+
 int read(MatrixView<int> v){return v[2,1];}
 int write(MatrixViewMut<int> v){v[2,1]=99;return 0;}

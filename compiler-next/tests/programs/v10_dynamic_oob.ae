@@ -1,3 +1,5 @@
+package v10_dynamic_oob;
+
 int main() {
     usize length = 2;
     usize index = length;

@@ -1,3 +1,5 @@
+package nested_calls;
+
 int square(int x) {
     return x * x;
 }

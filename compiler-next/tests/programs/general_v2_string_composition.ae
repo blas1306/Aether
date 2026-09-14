@@ -1,3 +1,5 @@
+package general_v2_string_composition;
+
 struct Inner {
     string value;
 }

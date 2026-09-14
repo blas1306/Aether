@@ -1,3 +1,5 @@
+package broken;
+
 int value() {
     return unknown;
 }

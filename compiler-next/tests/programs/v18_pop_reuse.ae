@@ -1,3 +1,5 @@
+package v18_pop_reuse;
+
 int main() {
     List<Buffer<int>> values = {Buffer<int>(1, 10), Buffer<int>(1, 20)};
     reserve(values, 8);

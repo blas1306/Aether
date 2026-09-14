@@ -1,3 +1,5 @@
+package oop_polish_1_multilevel;
+
 open class A {
     public init() {}
     public open int value() { return 1; }

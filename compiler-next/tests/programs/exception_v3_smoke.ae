@@ -1,3 +1,5 @@
+package exception_v3_smoke;
+
 interface Fallible {
     int run();
 }

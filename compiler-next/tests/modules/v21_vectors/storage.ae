@@ -1,3 +1,5 @@
+package storage;
+
 struct Holder<T: Storable> { T value; }
 Vector<T,Row> row<T: Storable>(T a,T b) { return [a,b]; }
 Vector<T,Column> column<T: Storable>(T a,T b) { return [a,b]; }

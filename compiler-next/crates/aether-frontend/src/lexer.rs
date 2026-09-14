@@ -43,6 +43,10 @@ pub enum TokenKind {
     KwContinue,
     /// `import`.
     KwImport,
+    /// `package`.
+    KwPackage,
+    /// `as`.
+    KwAs,
     /// `alias`.
     KwAlias,
     /// `struct`.
@@ -249,6 +253,8 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                     "break" => TokenKind::KwBreak,
                     "continue" => TokenKind::KwContinue,
                     "import" => TokenKind::KwImport,
+                    "package" => TokenKind::KwPackage,
+                    "as" => TokenKind::KwAs,
                     "alias" => TokenKind::KwAlias,
                     "struct" => TokenKind::KwStruct,
                     "enum" => TokenKind::KwEnum,

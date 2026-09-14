@@ -1,3 +1,5 @@
+package oop_v1_counter;
+
 // Shared identity: mutation through b is visible through a.
 class Counter {
     int value;

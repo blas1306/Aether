@@ -1,1 +1,3 @@
+package unsupported_parameter;
+
 int main(int value) { return value; }

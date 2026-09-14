@@ -1,3 +1,5 @@
+package exception_v1_smoke;
+
 open class Problem: Exception {
     public init() {}
 }

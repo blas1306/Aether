@@ -1,2 +1,4 @@
+package v4_div_zero;
+
 int64 divide(int64 a, int64 b) { return a / b; }
 int main() { return divide(1, 0); }

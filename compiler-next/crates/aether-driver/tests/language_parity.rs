@@ -156,17 +156,21 @@ fn imported_main_is_never_given_entry_semantics() {
     let dir = TestDirectory::new();
     let entry = dir.0.join("main.ae");
     let helper = dir.0.join("helper.ae");
-    fs::write(&entry, "import helper; int main(){}").unwrap();
+    fs::write(&entry, "package main; import helper; int main(){}").unwrap();
     for text in ["int main(){}", "int main(bool x){if(x){return 1;}}"] {
-        fs::write(&helper, text).unwrap();
+        fs::write(&helper, format!("package helper; {text}")).unwrap();
         let session = CompilationSession::discover(&entry).unwrap();
         let error = compile_session(session, &[]).unwrap_err();
         assert_eq!(error[0].code, "E0207");
         assert_eq!(error[0].source_name.as_deref(), Some("helper.ae"));
     }
-    fs::write(&helper, "// ordinary helper\nbool main(){return true;}").unwrap();
+    fs::write(
+        &helper,
+        "package helper; // ordinary helper\nbool main(){return true;}",
+    )
+    .unwrap();
     compile_session(CompilationSession::discover(&entry).unwrap(), &[]).unwrap();
-    fs::write(&entry, "import helper; int f(){return 0;}").unwrap();
+    fs::write(&entry, "package main; import helper; int f(){return 0;}").unwrap();
     assert_eq!(
         compile_session(CompilationSession::discover(&entry).unwrap(), &[]).unwrap_err()[0].code,
         "E0200"
@@ -259,12 +263,25 @@ fn native_main_exit_codes_and_comment_integration() {
             0,
         ),
     ] {
-        fs::write(&entry, text).unwrap();
+        let source = if text.trim_start().starts_with("package ") {
+            text.to_owned()
+        } else {
+            format!("package main; {text}")
+        };
+        fs::write(&entry, source).unwrap();
         let (_, status) = run_path(&entry, &[], &ClangToolchain::default()).unwrap();
         assert_eq!(status.code(), Some(expected), "{text}");
     }
-    fs::write(dir.0.join("helper.ae"), "int main(){return 7;}").unwrap();
-    fs::write(&entry, "import helper; int main(){return helper.main();}").unwrap();
+    fs::write(
+        dir.0.join("helper.ae"),
+        "package helper; int main(){return 7;}",
+    )
+    .unwrap();
+    fs::write(
+        &entry,
+        "package main; import helper; int main(){return helper.main();}",
+    )
+    .unwrap();
     assert_eq!(
         run_path(&entry, &[], &ClangToolchain::default())
             .unwrap()

@@ -1,3 +1,5 @@
+package refs;
+
 int read(ref int value) {
     return *value;
 }

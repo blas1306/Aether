@@ -1,3 +1,5 @@
+package direct_call;
+
 int add(int a, int b) {
     return a + b;
 }

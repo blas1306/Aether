@@ -1,3 +1,5 @@
+package v30_empty;
+
 Vector<T,Row> add<T:Storable+Copy+Add>(ref Vector<T,Row>a,ref Vector<T,Row>b){return *a+*b;}
 Matrix<T> sub<T:Storable+Copy+Sub>(ref Matrix<T>a,ref Matrix<T>b){return *a-*b;}
 Vector<T,Row> scaleV<T:Storable+Copy+Mul>(T s,ref Vector<T,Row>a){return s * *a;}

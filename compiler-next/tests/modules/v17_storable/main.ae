@@ -1,3 +1,5 @@
+package main;
+
 import storage;
 List<T> forwarded<T: Storable + Relocatable>(T value) { return storage.list<T>(value); }
 int main() {

@@ -1,3 +1,5 @@
+package v17_array_storage;
+
 Array<T> singleton<T: Storable>(T value) {
     Array<T> result = {value};
     return result;

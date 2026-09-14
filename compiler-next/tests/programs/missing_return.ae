@@ -1,2 +1,4 @@
+package missing_return;
+
 int helper() { int value = 1; }
 int main() { return 0; }
