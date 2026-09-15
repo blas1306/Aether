@@ -496,7 +496,7 @@ fn discovery_assigns_unique_ids_and_processes_shared_dependencies_once() {
     let common = session
         .modules()
         .iter()
-        .filter(|module| module.info().name == "common")
+        .filter(|module| module.info().display_name == "common")
         .count();
     assert_eq!(common, 1);
 }

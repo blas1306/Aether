@@ -790,7 +790,7 @@ impl FlowMir {
             write!(
                 dump,
                 "\nmodule {:?} `{}` functions: {functions:#?}",
-                module.id, module.name
+                module.id, module.display_name
             )
             .unwrap();
         }
@@ -8461,14 +8461,14 @@ mod tests {
             modules: vec![ModuleInfo {
                 id: ModuleId(0),
                 key: aether_frontend::SourceUnitKey {
-                    package: aether_frontend::PackageKey {
-                        origin: aether_frontend::OriginKey::Project,
-                        path: aether_frontend::PackagePath(vec!["main".into()]),
-                    },
+                    package: aether_frontend::PackageKey::named(
+                        aether_frontend::OriginKey::Project,
+                        aether_frontend::PackagePath(vec!["main".into()]),
+                    ),
                     logical_source: aether_frontend::LogicalSourceKey("<memory>".into()),
                 },
                 package: aether_frontend::PackageId(0),
-                name: "main".into(),
+                display_name: "main".into(),
                 source: SourceId(0),
                 source_name: "<memory>".into(),
                 imports: vec![],

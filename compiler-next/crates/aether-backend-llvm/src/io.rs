@@ -3,7 +3,8 @@
 use std::fmt::Write;
 
 use aether_frontend::{
-    ClassId, EnumInfo, FunctionInstanceInfo, ModuleInfo, OriginKey, StructInfo, TypeArena,
+    ClassId, EnumInfo, FunctionInstanceInfo, ModuleInfo, OriginKey, PackageKey, StructInfo,
+    TypeArena,
 };
 use aether_middle::SsaFunction;
 
@@ -22,10 +23,13 @@ pub(super) fn function_kind(
     modules: &[ModuleInfo],
 ) -> Option<IoFunction> {
     let package = &modules[signature.module.0 as usize].key.package;
-    if package.origin != OriginKey::Toolchain {
+    let PackageKey::Named { origin, path } = package else {
+        return None;
+    };
+    if *origin != OriginKey::Toolchain {
         return None;
     }
-    match (package.path.0.as_slice(), signature.name.as_str()) {
+    match (path.0.as_slice(), signature.name.as_str()) {
         ([a, b], "readLine") if a == "std" && b == "IO" => Some(IoFunction::ReadLine),
         ([a, b], "eprint") if a == "std" && b == "IO" => {
             Some(IoFunction::Eprint { newline: false })
@@ -50,14 +54,11 @@ pub(super) fn find_class_id(
         .iter()
         .find(|class| {
             class.name == name
-                && modules[class.module.0 as usize].key.package.origin == OriginKey::Toolchain
-                && modules[class.module.0 as usize]
-                    .key
-                    .package
-                    .path
-                    .0
-                    .join(".")
-                    == package
+                && matches!(
+                    &modules[class.module.0 as usize].key.package,
+                    PackageKey::Named { origin: OriginKey::Toolchain, path }
+                        if path.0.join(".") == package
+                )
         })
         .map(|class| class.id)
 }

@@ -568,7 +568,7 @@ impl SsaIr {
             write!(
                 dump,
                 "\nmodule {:?} `{}` functions: {functions:#?}",
-                module.id, module.name
+                module.id, module.display_name
             )
             .unwrap();
         }

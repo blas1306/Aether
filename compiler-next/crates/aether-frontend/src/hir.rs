@@ -46,6 +46,10 @@ pub enum OriginKey {
 pub struct PackagePath(pub Vec<String>);
 impl PackagePath {
     #[must_use]
+    pub fn is_valid(&self) -> bool {
+        !self.0.is_empty()
+    }
+    #[must_use]
     pub fn source(&self) -> String {
         self.0.join(".")
     }
@@ -59,9 +63,34 @@ impl PackagePath {
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct PackageKey {
-    pub origin: OriginKey,
-    pub path: PackagePath,
+pub enum PackageKey {
+    Named {
+        origin: OriginKey,
+        path: PackagePath,
+    },
+    Anonymous,
+}
+impl PackageKey {
+    #[must_use]
+    pub fn named(origin: OriginKey, path: PackagePath) -> Self {
+        Self::Named { origin, path }
+    }
+
+    #[must_use]
+    pub const fn named_parts(&self) -> Option<(&OriginKey, &PackagePath)> {
+        match self {
+            Self::Named { origin, path } => Some((origin, path)),
+            Self::Anonymous => None,
+        }
+    }
+
+    #[must_use]
+    pub fn display(&self) -> String {
+        match self {
+            Self::Named { path, .. } => path.source(),
+            Self::Anonymous => "<anonymous package>".into(),
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LogicalSourceKey(pub String);
@@ -89,7 +118,8 @@ pub struct ModuleInfo {
     pub id: ModuleId,
     pub key: SourceUnitKey,
     pub package: PackageId,
-    pub name: String,
+    /// Human-readable label only; nominal identity is always `key.package`.
+    pub display_name: String,
     pub source: SourceId,
     pub source_name: String,
     pub imports: Vec<ResolvedImport>,
@@ -585,7 +615,12 @@ impl TypedHir {
         }
         for m in &self.modules {
             let f: Vec<_> = self.functions.iter().filter(|f| f.module == m.id).collect();
-            write!(d, "\nmodule {:?} `{}` functions: {f:#?}", m.id, m.name).unwrap();
+            write!(
+                d,
+                "\nmodule {:?} `{}` functions: {f:#?}",
+                m.id, m.display_name
+            )
+            .unwrap();
         }
         d
     }
@@ -1298,13 +1333,13 @@ fn merge_package_tables<T: Copy>(program: &ParsedProgram, tables: &mut [BTreeMap
 
 pub fn collect_signatures(ast: ParsedAst) -> Result<DeclaredProgram, Vec<Diagnostic>> {
     let source = ast.functions.first().map_or(SourceId(0), |f| f.span.source);
-    let path = PackagePath(
-        ast.package()
-            .map_or_else(|| vec!["main".into()], |p| p.path.clone()),
-    );
-    let package_key = PackageKey {
-        origin: OriginKey::Project,
-        path,
+    let package_key = ast.package().map_or(PackageKey::Anonymous, |package| {
+        PackageKey::named(OriginKey::Project, PackagePath(package.path.clone()))
+    });
+    let display_name = if matches!(&package_key, PackageKey::Anonymous) {
+        package_key.display()
+    } else {
+        "main".into()
     };
     collect_program_signatures(ParsedProgram {
         modules: vec![ParsedModule {
@@ -1315,7 +1350,7 @@ pub fn collect_signatures(ast: ParsedAst) -> Result<DeclaredProgram, Vec<Diagnos
                     logical_source: LogicalSourceKey("<memory>".into()),
                 },
                 package: PackageId(0),
-                name: "main".into(),
+                display_name,
                 source,
                 source_name: "<memory>".into(),
                 imports: vec![],
@@ -1342,11 +1377,13 @@ pub fn collect_program_signatures(
     let module_names: BTreeMap<String, ModuleId> = program
         .modules
         .iter()
-        .map(|module| {
-            (
-                module.info.key.package.path.source(),
-                representatives[&module.info.package],
-            )
+        .filter_map(|module| {
+            module
+                .info
+                .key
+                .package
+                .named_parts()
+                .map(|(_, path)| (path.source(), representatives[&module.info.package]))
         })
         .collect();
     let imports: Vec<BTreeMap<String, ModuleId>> = program
@@ -1355,24 +1392,32 @@ pub fn collect_program_signatures(
         .map(|module| {
             let mut visible = BTreeMap::new();
             for grant in &module.info.imports {
+                let (grant_origin, grant_path) = grant
+                    .target
+                    .named_parts()
+                    .expect("validated import target is named");
                 for candidate in &program.modules {
-                    if candidate.info.key.package.origin == grant.target.origin
-                        && candidate
+                    if candidate.info.key.package.named_parts().is_some_and(
+                        |(candidate_origin, candidate_path)| {
+                            candidate_origin == grant_origin
+                                && candidate_path.starts_with(grant_path)
+                        },
+                    ) {
+                        let candidate_path = candidate
                             .info
                             .key
                             .package
-                            .path
-                            .starts_with(&grant.target.path)
-                    {
-                        let suffix =
-                            &candidate.info.key.package.path.0[grant.target.path.0.len()..];
+                            .named_parts()
+                            .expect("filtered named package")
+                            .1;
+                        let suffix = &candidate_path.0[grant_path.0.len()..];
                         let spelling = if let Some(alias) = &grant.alias {
                             std::iter::once(alias.as_str())
                                 .chain(suffix.iter().map(String::as_str))
                                 .collect::<Vec<_>>()
                                 .join(".")
                         } else {
-                            candidate.info.key.package.path.source()
+                            candidate_path.source()
                         };
                         visible.insert(spelling, representatives[&candidate.info.package]);
                     }
@@ -1390,10 +1435,15 @@ pub fn collect_program_signatures(
                 .imports
                 .iter()
                 .map(|grant| {
-                    grant
-                        .alias
-                        .clone()
-                        .unwrap_or_else(|| grant.target.path.0[0].clone())
+                    grant.alias.clone().unwrap_or_else(|| {
+                        grant
+                            .target
+                            .named_parts()
+                            .expect("validated import target is named")
+                            .1
+                            .0[0]
+                            .clone()
+                    })
                 })
                 .collect::<BTreeSet<_>>()
         })
@@ -1471,10 +1521,15 @@ pub fn collect_program_signatures(
     }
     for module in &program.modules {
         for import in &module.info.imports {
-            let binding = import
-                .alias
-                .clone()
-                .unwrap_or_else(|| import.target.path.0[0].clone());
+            let binding = import.alias.clone().unwrap_or_else(|| {
+                import
+                    .target
+                    .named_parts()
+                    .expect("validated import target is named")
+                    .1
+                    .0[0]
+                    .clone()
+            });
             if package_declarations.contains_key(&(module.info.package, binding.clone())) {
                 return Err(vec![src(
                     Diagnostic::new(
@@ -1483,7 +1538,7 @@ pub fn collect_program_signatures(
                         DiagnosticCategory::Name,
                         format!(
                             "namespace binding `{binding}` conflicts with a member of package `{}`",
-                            module.info.key.package.path.canonical()
+                            module.info.key.package.display()
                         ),
                         Some(import.span),
                     ),
@@ -11298,29 +11353,74 @@ fn validate_program(p: &ParsedProgram) -> Result<(), Vec<Diagnostic>> {
     }
     let mut keys = BTreeSet::new();
     let mut sources = BTreeSet::new();
+    let mut anonymous_source = None::<&str>;
     for (i, m) in p.modules.iter().enumerate() {
         if m.info.id.0 as usize != i || !keys.insert(&m.info.key) || !sources.insert(m.info.source)
         {
             return Err(fail("duplicate or non-canonical module/source identity"));
         }
+        match &m.info.key.package {
+            PackageKey::Named { path, .. } if !path.is_valid() => {
+                return Err(fail("named package identity contains an empty PackagePath"));
+            }
+            PackageKey::Named { path, .. }
+                if m.ast.package().is_none_or(|package| package.path != path.0) =>
+            {
+                return Err(fail(
+                    "named package identity does not match its source declaration",
+                ));
+            }
+            PackageKey::Anonymous if m.ast.package().is_some() => {
+                return Err(fail(
+                    "anonymous package identity has a named source declaration",
+                ));
+            }
+            PackageKey::Anonymous => {
+                if let Some(first) = anonymous_source.replace(&m.info.source_name) {
+                    return Err(vec![Diagnostic::new(
+                        "E0241",
+                        Phase::Semantic,
+                        DiagnosticCategory::Name,
+                        format!(
+                            "V1 permits only one source unit without a package declaration per source graph; first `{first}`, second `{}`",
+                            m.info.source_name
+                        ),
+                        None,
+                    )
+                    .with_source_name(&m.info.source_name)]);
+                }
+            }
+            PackageKey::Named { .. } => {}
+        }
         let mut imports = BTreeSet::new();
         for x in &m.info.imports {
-            if x.module.0 as usize >= p.modules.len()
-                || p.modules[x.module.0 as usize].info.key.package.origin != x.target.origin
-                || !p.modules[x.module.0 as usize]
-                    .info
-                    .key
-                    .package
-                    .path
-                    .starts_with(&x.target.path)
-                || !imports.insert((&x.target, &x.alias))
-            {
+            let valid_target =
+                x.target
+                    .named_parts()
+                    .is_some_and(|(target_origin, target_path)| {
+                        p.modules
+                            .get(x.module.0 as usize)
+                            .is_some_and(|target_module| {
+                                target_module.info.key.package.named_parts().is_some_and(
+                                    |(module_origin, module_path)| {
+                                        module_origin == target_origin
+                                            && module_path.starts_with(target_path)
+                                    },
+                                )
+                            })
+                    });
+            if !valid_target || !imports.insert((&x.target, &x.alias)) {
+                let detail = if matches!(x.target, PackageKey::Anonymous) {
+                    "anonymous package is not importable"
+                } else {
+                    "duplicate or invalid import"
+                };
                 return Err(vec![
                     Diagnostic::new(
                         "E0220",
                         Phase::Semantic,
                         DiagnosticCategory::Name,
-                        format!("duplicate or invalid import `{}`", x.name),
+                        format!("{detail} `{}`", x.name),
                         Some(x.span),
                     )
                     .with_source_name(&m.info.source_name),

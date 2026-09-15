@@ -166,13 +166,13 @@ struct SourceCandidate {
 #[allow(clippy::cast_possible_truncation, clippy::too_many_lines)]
 fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnostic>> {
     let discovery_started = Instant::now();
-    let source_root = source_root_for_entry(entry_path);
     let entry_absolute = entry_path.canonicalize().map_err(|error| {
         vec![io_diagnostic(format!(
             "could not read entry source `{}`: {error}",
             entry_path.display()
         ))]
     })?;
+    let source_root = source_root_for_entry(&entry_absolute);
     let mut paths = Vec::new();
     collect_source_paths(&source_root, &source_root, &mut paths)?;
     paths.sort_by(|left, right| left.0.cmp(&right.0));
@@ -217,55 +217,78 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
                 "entry source is outside its source root catalog",
             )]
         })?;
-    let entry_path = candidates[entry_candidate]
-        .package_path
-        .clone()
-        .ok_or_else(|| {
-            vec![
-                Diagnostic::new(
-                    "E0230",
-                    Phase::Parse,
-                    DiagnosticCategory::Syntax,
-                    "source unit requires `package <path>;` as its first item",
-                    None,
-                )
-                .with_source_name(&candidates[entry_candidate].logical),
-            ]
-        })?;
-    if entry_path.first().is_some_and(|segment| segment == "std") {
-        return Err(vec![
-            Diagnostic::new(
-                "E0231",
-                Phase::Semantic,
-                DiagnosticCategory::Name,
-                "project source cannot declare reserved package root `std`",
-                None,
-            )
-            .with_source_name(&candidates[entry_candidate].logical),
-        ]);
-    }
     let mut parse_ns = 0_u128;
     let mut units = Vec::new();
-    let entry_package = PackageKey {
-        origin: OriginKey::Project,
-        path: PackagePath(entry_path),
-    };
-    let mut pending = BTreeSet::from([entry_package.clone()]);
+    let entry_package = candidates[entry_candidate]
+        .package_path
+        .clone()
+        .map(|path| PackageKey::named(OriginKey::Project, PackagePath(path)));
+    let mut pending = BTreeSet::new();
     let mut descendant_grants = BTreeSet::new();
     let mut visited = BTreeSet::new();
     let mut loaded_sources = BTreeSet::new();
+    if let Some(package) = entry_package {
+        pending.insert(package);
+    } else {
+        let candidate = &candidates[entry_candidate];
+        let source = SourceFile::with_id(
+            SourceId(0),
+            candidate.logical.clone(),
+            candidate.text.clone(),
+        );
+        let started = Instant::now();
+        let ast = parse_source(&source).map_err(|diagnostics| {
+            diagnostics
+                .into_iter()
+                .map(|d| d.with_source_name(&candidate.logical))
+                .collect::<Vec<_>>()
+        })?;
+        parse_ns += started.elapsed().as_nanos();
+        for import in ast.imports() {
+            if import.path != ["Text"] && import.path != ["std"] {
+                let origin = if import.path.first().is_some_and(|segment| segment == "std") {
+                    OriginKey::Toolchain
+                } else {
+                    OriginKey::Project
+                };
+                let imported = PackageKey::named(origin.clone(), PackagePath(import.path.clone()));
+                if origin == OriginKey::Project {
+                    descendant_grants.insert(imported.clone());
+                }
+                pending.insert(imported);
+            }
+        }
+        loaded_sources.insert(candidate.logical.clone());
+        units.push(CatalogUnit {
+            path: candidate.path.clone(),
+            logical: candidate.logical.clone(),
+            source,
+            ast,
+            package: PackageKey::Anonymous,
+            toolchain: false,
+        });
+    }
     while let Some(package) = pending.pop_first() {
-        if !visited.insert(package.clone()) || package.origin == OriginKey::Toolchain {
+        let PackageKey::Named { origin, path } = &package else {
+            return Err(vec![io_diagnostic(
+                "anonymous package cannot be a discovery or import target",
+            )]);
+        };
+        if !visited.insert(package.clone()) || *origin == OriginKey::Toolchain {
             continue;
         }
         let include_descendants = descendant_grants.contains(&package);
         let matching_candidates = candidates
             .iter()
             .filter(|candidate| {
-                candidate.package_path.as_ref().is_some_and(|path| {
-                    path == &package.path.0
-                        || (include_descendants && path.starts_with(&package.path.0))
-                }) && !loaded_sources.contains(&candidate.logical)
+                candidate
+                    .package_path
+                    .as_ref()
+                    .is_some_and(|candidate_path| {
+                        candidate_path == &path.0
+                            || (include_descendants && candidate_path.starts_with(&path.0))
+                    })
+                    && !loaded_sources.contains(&candidate.logical)
             })
             .collect::<Vec<_>>();
         for candidate in matching_candidates {
@@ -289,11 +312,9 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
                     } else {
                         OriginKey::Project
                     };
-                    let imported = PackageKey {
-                        origin,
-                        path: PackagePath(import.path.clone()),
-                    };
-                    if imported.origin == OriginKey::Project {
+                    let imported =
+                        PackageKey::named(origin.clone(), PackagePath(import.path.clone()));
+                    if origin == OriginKey::Project {
                         descendant_grants.insert(imported.clone());
                     }
                     pending.insert(imported);
@@ -382,10 +403,7 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
             logical,
             source: std_source,
             ast: std_ast,
-            package: PackageKey {
-                origin: OriginKey::Toolchain,
-                path,
-            },
+            package: PackageKey::named(OriginKey::Toolchain, path),
             toolchain: true,
         });
     }
@@ -393,11 +411,13 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
     let mut package_ids = BTreeMap::new();
     let package_keys = units
         .iter()
-        .flat_map(|unit| {
-            (1..=unit.package.path.0.len()).map(|length| PackageKey {
-                origin: unit.package.origin.clone(),
-                path: PackagePath(unit.package.path.0[..length].to_vec()),
-            })
+        .flat_map(|unit| match unit.package.named_parts() {
+            Some((origin, path)) => (1..=path.0.len())
+                .map(|length| {
+                    PackageKey::named(origin.clone(), PackagePath(path.0[..length].to_vec()))
+                })
+                .collect::<Vec<_>>(),
+            None => vec![PackageKey::Anonymous],
         })
         .collect::<BTreeSet<_>>();
     for key in package_keys {
@@ -406,14 +426,14 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
     }
     let mut representatives = BTreeMap::new();
     for (index, unit) in units.iter().enumerate() {
-        for length in 1..=unit.package.path.0.len() {
-            let prefix = PackageKey {
-                origin: unit.package.origin.clone(),
-                path: PackagePath(unit.package.path.0[..length].to_vec()),
-            };
-            representatives
-                .entry(prefix)
-                .or_insert(ModuleId(index as u32));
+        if let Some((origin, path)) = unit.package.named_parts() {
+            for length in 1..=path.0.len() {
+                let prefix =
+                    PackageKey::named(origin.clone(), PackagePath(path.0[..length].to_vec()));
+                representatives
+                    .entry(prefix)
+                    .or_insert(ModuleId(index as u32));
+            }
         }
     }
     validate_package_members(&units)?;
@@ -428,7 +448,7 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
                     logical_source: LogicalSourceKey(unit.logical.clone()),
                 },
                 package: package_ids[&unit.package],
-                name: unit.package.path.source(),
+                display_name: unit.package.display(),
                 source: unit.source.id,
                 source_name: if unit.toolchain {
                     format!("<toolchain>/{}", unit.logical)
@@ -551,10 +571,10 @@ fn explicit_project_package(
     let Some(package) = ast.package() else {
         return Err(vec![
             Diagnostic::new(
-                "E0230",
-                Phase::Parse,
-                DiagnosticCategory::Syntax,
-                "source unit requires `package <path>;` as its first item",
+                "E0220",
+                Phase::Semantic,
+                DiagnosticCategory::Name,
+                "catalog classified an anonymous source unit as a named package contribution",
                 None,
             )
             .with_source_name(source_name),
@@ -572,10 +592,10 @@ fn explicit_project_package(
             .with_source_name(source_name),
         ]);
     }
-    Ok(PackageKey {
-        origin: OriginKey::Project,
-        path: PackagePath(package.path.clone()),
-    })
+    Ok(PackageKey::named(
+        OriginKey::Project,
+        PackagePath(package.path.clone()),
+    ))
 }
 
 #[allow(clippy::too_many_lines)]
@@ -629,17 +649,14 @@ fn resolve_imports(
         } else {
             OriginKey::Project
         };
-        let target = PackageKey {
-            origin,
-            path: PackagePath(import.path.clone()),
-        };
+        let target = PackageKey::named(origin, PackagePath(import.path.clone()));
         let Some(package) = packages.get(&target).copied() else {
             return Err(vec![
                 Diagnostic::new(
                     "E0221",
                     Phase::Semantic,
                     DiagnosticCategory::Name,
-                    format!("package path `{}` does not exist", target.path.source()),
+                    format!("package path `{}` does not exist", import.path.join(".")),
                     Some(import.span),
                 )
                 .with_source_name(&unit.logical),
@@ -653,7 +670,11 @@ fn resolve_imports(
                     DiagnosticCategory::Name,
                     format!(
                         "duplicate import of canonical package `{}`",
-                        target.path.canonical()
+                        target
+                            .named_parts()
+                            .expect("source import target is named")
+                            .1
+                            .canonical()
                     ),
                     Some(import.span),
                 )
@@ -706,7 +727,10 @@ fn resolve_imports(
             ]);
         }
         resolved.push(ResolvedImport {
-            name: import.alias.clone().unwrap_or_else(|| target.path.source()),
+            name: import
+                .alias
+                .clone()
+                .unwrap_or_else(|| import.path.join(".")),
             module: representatives[&target],
             package,
             target,
@@ -761,14 +785,22 @@ fn validate_package_members(units: &[CatalogUnit]) -> Result<(), Vec<Diagnostic>
     }
     let keys = members.keys().cloned().collect::<Vec<_>>();
     for package in &keys {
+        let Some((origin, path)) = package.named_parts() else {
+            continue;
+        };
         for child in keys.iter().filter(|candidate| {
-            candidate.origin == package.origin
-                && candidate.path.0.len() == package.path.0.len() + 1
-                && candidate.path.0.starts_with(&package.path.0)
+            candidate
+                .named_parts()
+                .is_some_and(|(candidate_origin, candidate_path)| {
+                    candidate_origin == origin
+                        && candidate_path.0.len() == path.0.len() + 1
+                        && candidate_path.0.starts_with(&path.0)
+                })
         }) {
-            let child_name = child.path.0.last().unwrap();
+            let child_path = child.named_parts().expect("filtered named child").1;
+            let child_name = child_path.0.last().unwrap();
             if let Some((kind, span, source)) = members[package].get(child_name) {
-                return Err(vec![Diagnostic::new("E0236", Phase::Semantic, DiagnosticCategory::Name, format!("package member `{child_name}` ({kind}) collides with child package `{}`", child.path.canonical()), Some(*span)).with_source_name(*source)]);
+                return Err(vec![Diagnostic::new("E0236", Phase::Semantic, DiagnosticCategory::Name, format!("package member `{child_name}` ({kind}) collides with child package `{}`", child_path.canonical()), Some(*span)).with_source_name(*source)]);
             }
         }
     }

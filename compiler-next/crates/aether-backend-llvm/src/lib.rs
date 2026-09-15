@@ -3441,7 +3441,7 @@ fn bootstrap_symbol(
     types: &TypeArena,
 ) -> String {
     let module = &modules[signature.module.0 as usize];
-    let base = bootstrap_symbol_for(&module.name, &signature.name);
+    let base = bootstrap_symbol_for_module(module, &signature.name);
     if signature.type_arguments.is_empty() {
         base
     } else {
@@ -3466,8 +3466,20 @@ fn mangle_symbol_type(
     enums: &[EnumInfo],
 ) -> String {
     let nominal = |module: aether_frontend::ModuleId, name: &str, prefix: char| {
-        let module = &modules[module.0 as usize].name;
-        format!("{prefix}{}_{module}{}_{name}", module.len(), name.len())
+        let module = &modules[module.0 as usize];
+        match &module.key.package {
+            aether_frontend::PackageKey::Named { .. } => {
+                format!(
+                    "{prefix}{}_{}{}_{name}",
+                    module.display_name.len(),
+                    module.display_name,
+                    name.len()
+                )
+            }
+            aether_frontend::PackageKey::Anonymous => {
+                format!("{prefix}a0_{}_{name}", name.len())
+            }
+        }
     };
     match types.get(ty).expect("verified symbol type") {
         TypeData::Void => "v".into(),
@@ -3644,8 +3656,13 @@ fn text_scalar_type(types: &TypeArena, modules: &[ModuleInfo], structs: &[Struct
         .find(|info| {
             info.name == "ScalarOffset"
                 && modules.get(info.module.0 as usize).is_some_and(|module| {
-                    module.key.package.origin == aether_frontend::OriginKey::Toolchain
-                        && module.key.package.path.0 == ["std", "Text"]
+                    matches!(
+                        &module.key.package,
+                        aether_frontend::PackageKey::Named {
+                            origin: aether_frontend::OriginKey::Toolchain,
+                            path,
+                        } if path.0 == ["std", "Text"]
+                    )
                 })
         })
         .expect("verified Text operation has canonical ScalarOffset")
@@ -4217,6 +4234,19 @@ pub fn bootstrap_symbol_for(module: &str, function: &str) -> String {
     )
 }
 
+fn bootstrap_symbol_for_module(module: &ModuleInfo, function: &str) -> String {
+    match &module.key.package {
+        aether_frontend::PackageKey::Named { .. } => {
+            bootstrap_symbol_for(&module.display_name, function)
+        }
+        aether_frontend::PackageKey::Anonymous => format!(
+            "__aether_v2_a0_f{}_{}",
+            function.len(),
+            escape_symbol_part(function)
+        ),
+    }
+}
+
 fn escape_symbol_part(name: &str) -> String {
     let mut escaped = String::new();
     for byte in name.bytes() {
@@ -4381,8 +4411,8 @@ mod tests {
         let output = llvm(
             "bool positive(int x){return x>0;}int main(){if(positive(5)){return 1;}return 0;}",
         );
-        assert!(output.contains("define i1 @__aether_v2_m4_main_f8_positive(i64 %v0)"));
-        assert!(output.contains("call i1 @__aether_v2_m4_main_f8_positive(i64 5)"));
+        assert!(output.contains("define i1 @__aether_v2_a0_f8_positive(i64 %v0)"));
+        assert!(output.contains("call i1 @__aether_v2_a0_f8_positive(i64 5)"));
         assert!(output.contains("define i32 @main()"));
     }
 

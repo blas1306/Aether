@@ -210,13 +210,13 @@ fn standard_math_namespace_nodes_exist_without_adding_an_api() {
         session
             .modules()
             .iter()
-            .any(|module| module.info().name == "std.Math")
+            .any(|module| module.info().display_name == "std.Math")
     );
     assert!(
         session
             .modules()
             .iter()
-            .any(|module| module.info().name == "std.Math.LinearAlgebra")
+            .any(|module| module.info().display_name == "std.Math.LinearAlgebra")
     );
     compile_session(session, &[]).unwrap();
 }

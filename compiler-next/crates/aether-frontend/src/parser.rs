@@ -35,7 +35,14 @@ pub fn parse(source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<D
     let mut classes = Vec::new();
     let mut interfaces = Vec::new();
     while !parser.at(TokenKind::Eof) {
-        if parser.current().lexeme == "interface"
+        if parser.at(TokenKind::KwPackage) {
+            let message = if package.is_some() {
+                "source unit contains more than one package declaration"
+            } else {
+                "package declaration must be the first non-trivia item"
+            };
+            return Err(vec![parser.error("E0107", message)]);
+        } else if parser.current().lexeme == "interface"
             || (parser.current().lexeme == "public"
                 && parser
                     .tokens
