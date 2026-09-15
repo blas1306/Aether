@@ -2,7 +2,8 @@
 #![allow(missing_docs)]
 
 use aether_frontend::{
-    CatchId, ClassId, ClassOp, ClassTokenKind, FinallyId, IndexSemantics, LoopId,
+    CatchId, ClassId, ClassOp, ClassTokenKind, CollectionKind, FinallyId, IndexSemantics,
+    IterationBindingCategory, LoopId,
 };
 mod classes;
 use std::collections::{BTreeSet, VecDeque};
@@ -10,12 +11,12 @@ use std::fmt::Write;
 use std::sync::Arc;
 
 use aether_frontend::{
-    CastKind, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId, FloatType,
-    FloatValue, FunctionInstanceInfo, HirBinaryOp, HirBlock, HirCallTarget, HirDrop, HirExpr,
-    HirExprKind, HirFinally, HirFunction, HirMatchArm, HirPlace, HirPlaceBase, HirPlaceProjection,
-    HirStmtKind, HirUnaryOp, InstanceId, LocalId, MatchMode, ModuleInfo, Phase, Span, StructId,
-    StructInfo, StructuralMutation, Substitution, TypeArena, TypeData, TypeId, TypedHir, VariantId,
-    format_type,
+    CastKind, CoercionKind, CollectionIterationSource, Diagnostic, DiagnosticCategory, EnumId,
+    EnumInfo, FieldId, FloatType, FloatValue, FunctionInstanceInfo, HirBinaryOp, HirBlock,
+    HirCallTarget, HirDrop, HirExpr, HirExprKind, HirFinally, HirFunction, HirMatchArm, HirPlace,
+    HirPlaceBase, HirPlaceProjection, HirStmtKind, HirUnaryOp, InstanceId, LocalId, MatchMode,
+    ModuleInfo, Phase, Span, StructId, StructInfo, StructuralMutation, Substitution, TypeArena,
+    TypeData, TypeId, TypedHir, VariantId, format_type,
 };
 
 /// Basic-block identity, equal to its stable vector index.
@@ -294,6 +295,20 @@ pub enum Rvalue {
     RangeBinding {
         loop_id: LoopId,
         current: Operand,
+    },
+    /// Fresh `CopyValue` binding loaded at the collection loop's item block.
+    CollectionBinding {
+        loop_id: LoopId,
+        source: Place,
+        index: Operand,
+        item_type: TypeId,
+        category: IterationBindingCategory,
+    },
+    /// Exactly-once transfer of a completed temporary collection to its loop root.
+    CollectionOwnerCapture {
+        loop_id: LoopId,
+        value: Operand,
+        iterable_type: TypeId,
     },
     /// Exactly-once, source-ordered capture in the range preheader.
     RangeOperand {
@@ -632,6 +647,8 @@ pub struct MirFunction {
     pub finally_regions: Vec<FinallyRegion>,
     /// Independently checked ITERATION-V1 range protocols.
     pub range_loops: Vec<RangeLoop>,
+    /// Independently checked ITERATION-V2 Array/List Copy protocols.
+    pub collection_loops: Vec<CollectionLoop>,
     pub constructor_unwind: Option<aether_frontend::ConstructorUnwindPlan>,
 }
 
@@ -656,6 +673,29 @@ pub struct RangeLoop {
     pub commit: BlockId,
     pub exit: BlockId,
     pub step_is_implicit: bool,
+}
+
+/// Structural authority for one lowered Array/List Copy loop.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CollectionLoop {
+    pub id: LoopId,
+    pub kind: CollectionKind,
+    pub iterable_type: TypeId,
+    pub item_type: TypeId,
+    pub binding_type: TypeId,
+    pub category: IterationBindingCategory,
+    pub binding: LocalId,
+    pub owner: LocalId,
+    pub captured_length: LocalId,
+    pub index: LocalId,
+    pub preheader: BlockId,
+    pub header: BlockId,
+    pub item: BlockId,
+    pub body: BlockId,
+    pub latch: BlockId,
+    pub exit: BlockId,
+    pub structural_borrow: bool,
+    pub temporary_owner: Option<LocalId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -800,7 +840,9 @@ fn conditional_drop_roots(block: &HirBlock) -> BTreeSet<LocalId> {
                         visit(else_block, roots);
                     }
                 }
-                HirStmtKind::While { body, .. } | HirStmtKind::ForRange { body, .. } => {
+                HirStmtKind::While { body, .. }
+                | HirStmtKind::ForRange { body, .. }
+                | HirStmtKind::ForCollection { body, .. } => {
                     visit(body, roots);
                 }
                 HirStmtKind::Match { arms, .. } => {
@@ -910,6 +952,7 @@ fn lower_function(
             exception_events: Vec::new(),
             finally_regions: Vec::new(),
             range_loops: Vec::new(),
+            collection_loops: Vec::new(),
             constructor_unwind: function.constructor_unwind.clone(),
         },
         current: Some(BlockId(0)),
@@ -1586,6 +1629,28 @@ impl Builder<'_> {
                     step,
                     end,
                     *step_is_implicit,
+                    body,
+                    statement.span,
+                ),
+                HirStmtKind::ForCollection {
+                    loop_id,
+                    binding,
+                    iterable_type,
+                    item_type,
+                    binding_type,
+                    category,
+                    source,
+                    structural_borrow,
+                    body,
+                } => self.lower_for_collection(
+                    *loop_id,
+                    *binding,
+                    *iterable_type,
+                    *item_type,
+                    *binding_type,
+                    *category,
+                    source,
+                    *structural_borrow,
                     body,
                     statement.span,
                 ),
@@ -2268,6 +2333,186 @@ impl Builder<'_> {
         );
         self.terminate(Terminator::Goto(header));
         self.current = Some(exit);
+    }
+
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+    fn lower_for_collection(
+        &mut self,
+        loop_id: LoopId,
+        binding: LocalId,
+        iterable_type: TypeId,
+        item_type: TypeId,
+        binding_type: TypeId,
+        category: IterationBindingCategory,
+        source: &CollectionIterationSource,
+        structural_borrow: bool,
+        body: &HirBlock,
+        span: Span,
+    ) {
+        let (source, temporary_owner) = match source {
+            CollectionIterationSource::Borrowed(place) => (self.lower_place(place), None),
+            CollectionIterationSource::Temporary { root, initializer } => {
+                let value = self.lower_expr(initializer);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(*root),
+                        projections: Vec::new(),
+                    },
+                    Rvalue::CollectionOwnerCapture {
+                        loop_id,
+                        value,
+                        iterable_type,
+                    },
+                    span,
+                );
+                self.set_drop_flag(*root, true, span);
+                self.active_owners.push(*root);
+                (
+                    Place {
+                        base: PlaceBase::Local(*root),
+                        projections: Vec::new(),
+                    },
+                    Some(*root),
+                )
+            }
+        };
+        let preheader = self
+            .current
+            .expect("collection operand capture has a live preheader");
+        let owner = match &source.base {
+            PlaceBase::Local(local) => *local,
+            PlaceBase::Dereference { reference, .. } => {
+                operand_local_id(reference).expect("verified collection provenance is materialized")
+            }
+        };
+        let kind = if self.types.array_element(iterable_type).is_some() {
+            CollectionKind::Array
+        } else {
+            CollectionKind::List
+        };
+        let captured_length = self.temporary(TypeId::USIZE);
+        self.assign(
+            operand_place(&Operand::Local(captured_length)),
+            if kind == CollectionKind::Array {
+                Rvalue::ArrayLength {
+                    source: source.clone(),
+                }
+            } else {
+                Rvalue::ListLength {
+                    source: source.clone(),
+                }
+            },
+            span,
+        );
+        let index = self.temporary(TypeId::USIZE);
+        self.assign(
+            operand_place(&Operand::Local(index)),
+            Rvalue::Use(Operand::Int {
+                value: 0,
+                ty: TypeId::USIZE,
+            }),
+            span,
+        );
+
+        let header = self.new_block();
+        let item = self.new_block();
+        let body_block = self.new_block();
+        let latch = self.new_block();
+        let exit = self.new_block();
+        self.function.collection_loops.push(CollectionLoop {
+            id: loop_id,
+            kind,
+            iterable_type,
+            item_type,
+            binding_type,
+            category,
+            binding,
+            owner,
+            captured_length,
+            index,
+            preheader,
+            header,
+            item,
+            body: body_block,
+            latch,
+            exit,
+            structural_borrow,
+            temporary_owner,
+        });
+        self.terminate(Terminator::Goto(header));
+
+        self.current = Some(header);
+        let in_bounds = self.temporary(TypeId::BOOL);
+        self.assign(
+            operand_place(&Operand::Local(in_bounds)),
+            Rvalue::Binary {
+                op: BinaryOp::Less,
+                left: Operand::Local(index),
+                right: Operand::Local(captured_length),
+                trap: None,
+                secondary_trap: None,
+            },
+            span,
+        );
+        self.terminate(Terminator::Branch {
+            condition: Operand::Local(in_bounds),
+            then_block: item,
+            else_block: exit,
+        });
+
+        self.current = Some(item);
+        self.assign(
+            operand_place(&Operand::Local(binding)),
+            Rvalue::CollectionBinding {
+                loop_id,
+                source: source.clone(),
+                index: Operand::Local(index),
+                item_type,
+                category,
+            },
+            span,
+        );
+        // The false edge is dominated by the same proven guard and exists so
+        // the latch remains a verifiable part of the total CFG even when all
+        // source body paths transfer abruptly.
+        self.terminate(Terminator::Branch {
+            condition: Operand::Local(in_bounds),
+            then_block: body_block,
+            else_block: latch,
+        });
+
+        self.current = Some(body_block);
+        self.loops.push((latch, exit, self.finalizers.len()));
+        self.lower_block(body);
+        self.loops.pop();
+        if let Some(end) = self.current {
+            self.current = Some(end);
+            self.terminate(Terminator::Goto(latch));
+        }
+
+        self.current = Some(latch);
+        self.assign(
+            operand_place(&Operand::Local(index)),
+            Rvalue::Binary {
+                op: BinaryOp::AddIntegerChecked,
+                left: Operand::Local(index),
+                right: Operand::Int {
+                    value: 1,
+                    ty: TypeId::USIZE,
+                },
+                trap: Some(TrapKind::IntegerOverflow),
+                secondary_trap: None,
+            },
+            span,
+        );
+        self.terminate(Terminator::Goto(header));
+
+        self.current = Some(exit);
+        if let Some(owner) = temporary_owner {
+            let active = self.active_owners.pop();
+            debug_assert_eq!(active, Some(owner));
+            self.emit_hir_drop(HirDrop::Unconditional(owner), span);
+        }
     }
 
     #[allow(clippy::too_many_lines)]
@@ -4267,6 +4512,7 @@ fn verify_mir_function(
         }
     }
     verify_range_loops(function, fail)?;
+    verify_collection_loops(function, types, fail)?;
     let mut predecessors = vec![Vec::new(); function.blocks.len()];
     let mut unwind_predecessors = vec![0_usize; function.blocks.len()];
     let mut ordinary_predecessors = vec![0_usize; function.blocks.len()];
@@ -4636,9 +4882,8 @@ fn verify_range_loops(
 ) -> Result<(), Vec<Diagnostic>> {
     let block = |id: BlockId| function.blocks.get(id.0 as usize);
     let mut structural_blocks = BTreeSet::new();
-    for (index, range) in function.range_loops.iter().enumerate() {
-        if range.id.0 as usize != index
-            || range.item_type != TypeId::INT64
+    for range in &function.range_loops {
+        if range.item_type != TypeId::INT64
             || function
                 .locals
                 .get(range.binding.0 as usize)
@@ -4780,6 +5025,170 @@ fn verify_range_loops(
 }
 
 #[allow(clippy::too_many_lines)]
+fn verify_collection_loops(
+    function: &MirFunction,
+    types: &TypeArena,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut loop_ids = function
+        .range_loops
+        .iter()
+        .map(|range| range.id)
+        .chain(
+            function
+                .collection_loops
+                .iter()
+                .map(|collection| collection.id),
+        )
+        .collect::<Vec<_>>();
+    loop_ids.sort();
+    if loop_ids
+        .iter()
+        .enumerate()
+        .any(|(index, id)| id.0 as usize != index)
+    {
+        return Err(fail("MIR loop identities are not canonical".into()));
+    }
+    let block = |id: BlockId| function.blocks.get(id.0 as usize);
+    for collection in &function.collection_loops {
+        let actual_item = match collection.kind {
+            CollectionKind::Array => types.array_element(collection.iterable_type),
+            CollectionKind::List => types.list_element(collection.iterable_type),
+            _ => None,
+        };
+        if actual_item != Some(collection.item_type)
+            || collection.binding_type != collection.item_type
+            || collection.category != IterationBindingCategory::CopyValue
+            || !types.guarantees_copy(collection.item_type)
+            || collection.structural_borrow != (collection.kind == CollectionKind::List)
+            || function
+                .locals
+                .get(collection.binding.0 as usize)
+                .map(|local| local.ty)
+                != Some(collection.binding_type)
+            || function
+                .locals
+                .get(collection.captured_length.0 as usize)
+                .map(|local| local.ty)
+                != Some(TypeId::USIZE)
+            || function
+                .locals
+                .get(collection.index.0 as usize)
+                .map(|local| local.ty)
+                != Some(TypeId::USIZE)
+        {
+            return Err(fail(
+                "MIR collection identity/type contract is invalid".into(),
+            ));
+        }
+        let Some(preheader) = block(collection.preheader) else {
+            return Err(fail("MIR collection preheader is missing".into()));
+        };
+        let length_sources = preheader
+            .instructions
+            .iter()
+            .filter_map(|instruction| {
+                if !matches!(instruction.destination.base, PlaceBase::Local(local) if local == collection.captured_length) {
+                    return None;
+                }
+                match (&collection.kind, &instruction.value) {
+                    (CollectionKind::Array, Rvalue::ArrayLength { source })
+                    | (CollectionKind::List, Rvalue::ListLength { source }) => Some(source),
+                    _ => None,
+                }
+            })
+            .collect::<Vec<_>>();
+        let index_initializations = preheader
+            .instructions
+            .iter()
+            .filter(|instruction| {
+                matches!(instruction.destination.base, PlaceBase::Local(local) if local == collection.index)
+                    && matches!(instruction.value, Rvalue::Use(Operand::Int { value: 0, ty: TypeId::USIZE }))
+            })
+            .count();
+        if length_sources.len() != 1
+            || index_initializations != 1
+            || !matches!(preheader.terminator, Some(Terminator::Goto(target)) if target == collection.header)
+        {
+            return Err(fail(
+                "MIR collection iterable/length/index capture protocol is invalid".into(),
+            ));
+        }
+        let Some(header) = block(collection.header) else {
+            return Err(fail("MIR collection header is missing".into()));
+        };
+        if !header.instructions.iter().any(|instruction| {
+            matches!(instruction.value, Rvalue::Binary {
+                op: BinaryOp::Less,
+                left: Operand::Local(index),
+                right: Operand::Local(length),
+                trap: None,
+                ..
+            } if index == collection.index && length == collection.captured_length)
+        }) || !matches!(header.terminator, Some(Terminator::Branch { then_block, else_block, .. }) if then_block == collection.item && else_block == collection.exit)
+        {
+            return Err(fail("MIR collection header guard is invalid".into()));
+        }
+        let Some(item) = block(collection.item) else {
+            return Err(fail("MIR collection item block is missing".into()));
+        };
+        if item.instructions.iter().filter(|instruction| {
+            matches!(instruction.destination.base, PlaceBase::Local(local) if local == collection.binding)
+                && matches!(instruction.value, Rvalue::CollectionBinding {
+                    loop_id,
+                    ref source,
+                    index: Operand::Local(index),
+                    item_type,
+                    category: IterationBindingCategory::CopyValue,
+                    ..
+                } if loop_id == collection.id && source == length_sources[0] && index == collection.index && item_type == collection.item_type)
+        }).count() != 1
+            || !matches!(item.terminator, Some(Terminator::Branch { then_block, else_block, .. }) if then_block == collection.body && else_block == collection.latch)
+        {
+            return Err(fail("MIR collection item load/binding is invalid".into()));
+        }
+        let Some(latch) = block(collection.latch) else {
+            return Err(fail("MIR collection latch is missing".into()));
+        };
+        if !latch.instructions.iter().any(|instruction| {
+            matches!(instruction.destination.base, PlaceBase::Local(local) if local == collection.index)
+                && matches!(instruction.value, Rvalue::Binary {
+                    op: BinaryOp::AddIntegerChecked,
+                    left: Operand::Local(index),
+                    right: Operand::Int { value: 1, ty: TypeId::USIZE },
+                    trap: Some(TrapKind::IntegerOverflow),
+                    ..
+                } if index == collection.index)
+        }) || !matches!(latch.terminator, Some(Terminator::Goto(target)) if target == collection.header)
+        {
+            return Err(fail("MIR collection latch advance is invalid".into()));
+        }
+        if collection
+            .temporary_owner
+            .is_some_and(|owner| owner != collection.owner)
+        {
+            return Err(fail(
+                "MIR collection hidden owner provenance is invalid".into(),
+            ));
+        }
+        let captures = preheader
+            .instructions
+            .iter()
+            .filter(|instruction| {
+                matches!(instruction.value, Rvalue::CollectionOwnerCapture { loop_id, iterable_type, .. }
+                    if loop_id == collection.id && iterable_type == collection.iterable_type)
+            })
+            .count();
+        if captures != usize::from(collection.temporary_owner.is_some()) {
+            return Err(fail(
+                "MIR collection temporary capture cardinality is invalid".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
 fn verify_drop_flag_contract(
     function: &MirFunction,
     signatures: &[FunctionInstanceInfo],
@@ -4862,6 +5271,14 @@ fn verify_drop_flag_contract(
                 }
                 Rvalue::VectorTransposeMove { operand, .. } => {
                     consume_operand(operand, &mut transitions);
+                    if let Some(owner) = destination
+                        && let Some(flag) = flag_for(owner)
+                    {
+                        transitions.push((flag, true));
+                    }
+                }
+                Rvalue::CollectionOwnerCapture { value, .. } => {
+                    consume_operand(value, &mut transitions);
                     if let Some(owner) = destination
                         && let Some(flag) = flag_for(owner)
                     {
@@ -5300,6 +5717,20 @@ fn verify_ownership(
                     }
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
+                Rvalue::CollectionOwnerCapture { value, .. } => {
+                    let source = operand_local_id(value).ok_or_else(|| {
+                        fail("collection temporary capture is not materialized".into())
+                    })?;
+                    consume_owner(
+                        function,
+                        types,
+                        &mut state,
+                        source,
+                        "collection temporary capture",
+                        fail,
+                    )?;
+                    initialize_owner(function, types, &mut state, destination, fail)?;
+                }
                 Rvalue::Move { source } => {
                     let source = place_root_local(source)
                         .ok_or_else(|| fail("MIR Move source has no owning local".into()))?;
@@ -5417,7 +5848,7 @@ fn verify_ownership(
                 Rvalue::Relocate { source, .. } => {
                     require_place_owner(function, types, &state, &source.root, fail)?;
                 }
-                Rvalue::ListSetLength { source, .. } => {
+                Rvalue::CollectionBinding { source, .. } | Rvalue::ListSetLength { source, .. } => {
                     require_place_owner(function, types, &state, source, fail)?;
                 }
                 Rvalue::ListPush {
@@ -5708,7 +6139,8 @@ fn validate_rvalue(
                 || operand_type(function, current)? != destination
                 || function
                     .range_loops
-                    .get(loop_id.0 as usize)
+                    .iter()
+                    .find(|range| range.id == *loop_id)
                     .map(|range| range.id)
                     != Some(*loop_id)
             {
@@ -5725,11 +6157,65 @@ fn validate_rvalue(
                 || operand_type(function, operand)? != destination
                 || function
                     .range_loops
-                    .get(loop_id.0 as usize)
+                    .iter()
+                    .find(|range| range.id == *loop_id)
                     .map(|range| range.id)
                     != Some(*loop_id)
             {
                 return Err("MIR range operand type/identity mismatch".into());
+            }
+        }
+        Rvalue::CollectionBinding {
+            loop_id,
+            source,
+            index,
+            item_type,
+            category,
+        } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            validate_operand(function, index, initialized)?;
+            let source_ty = place_type(function, source, structs, types)?;
+            if destination != *item_type
+                || operand_type(function, index)? != TypeId::USIZE
+                || types
+                    .array_element(source_ty)
+                    .or_else(|| types.list_element(source_ty))
+                    != Some(*item_type)
+                || !types.guarantees_copy(*item_type)
+                || *category != IterationBindingCategory::CopyValue
+                || function
+                    .collection_loops
+                    .iter()
+                    .find(|collection| collection.id == *loop_id)
+                    .is_none_or(|collection| {
+                        collection.item_type != *item_type || collection.category != *category
+                    })
+            {
+                return Err("MIR collection binding type/identity mismatch".into());
+            }
+        }
+        Rvalue::CollectionOwnerCapture {
+            loop_id,
+            value,
+            iterable_type,
+        } => {
+            validate_operand(function, value, initialized)?;
+            if destination != *iterable_type
+                || operand_type(function, value)? != *iterable_type
+                || types
+                    .array_element(*iterable_type)
+                    .or_else(|| types.list_element(*iterable_type))
+                    .is_none()
+                || function
+                    .collection_loops
+                    .iter()
+                    .find(|collection| collection.id == *loop_id)
+                    .is_none_or(|collection| {
+                        collection.iterable_type != *iterable_type
+                            || collection.temporary_owner.is_none()
+                    })
+            {
+                return Err("MIR collection temporary capture mismatch".into());
             }
         }
         Rvalue::Class(op) => {
@@ -7658,6 +8144,7 @@ mod tests {
                 exception_events: vec![],
                 finally_regions: vec![],
                 range_loops: vec![],
+                collection_loops: vec![],
                 constructor_unwind: None,
             }],
             entry: InstanceId(0),

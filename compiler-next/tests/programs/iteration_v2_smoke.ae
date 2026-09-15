@@ -1,0 +1,23 @@
+package iteration_v2_smoke;
+
+Array<int> array_values() {
+    return {1, 2, 3};
+}
+
+List<int> list_values() {
+    return {4, 5, 6};
+}
+
+int main() {
+    int total = 0;
+    for (x in array_values()) {
+        total = total + x;
+    }
+    for (int x in list_values()) {
+        if (x == 5) {
+            continue;
+        }
+        total = total + x;
+    }
+    return total;
+}

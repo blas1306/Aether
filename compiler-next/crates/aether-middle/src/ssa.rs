@@ -12,13 +12,13 @@ use std::fmt::Write;
 use std::sync::Arc;
 
 use aether_frontend::{
-    CastKind, CatchId, ClassId, CoercionKind, Diagnostic, DiagnosticCategory, EnumId, EnumInfo,
-    FieldId, FinallyId, FloatValue, FunctionInstanceInfo, InstanceId, LocalId, MatchMode,
-    ModuleInfo, Phase, Span, StructId, StructInfo, StructuralMutation, Substitution, TypeArena,
-    TypeData, TypeId, VariantId, format_type,
+    CastKind, CatchId, ClassId, CoercionKind, CollectionKind, Diagnostic, DiagnosticCategory,
+    EnumId, EnumInfo, FieldId, FinallyId, FloatValue, FunctionInstanceInfo, InstanceId,
+    IterationBindingCategory, LocalId, MatchMode, ModuleInfo, Phase, Span, StructId, StructInfo,
+    StructuralMutation, Substitution, TypeArena, TypeData, TypeId, VariantId, format_type,
 };
 
-use crate::mir::{ExceptionEventId, FinallyRegion, RangeLoop, place_type};
+use crate::mir::{CollectionLoop, ExceptionEventId, FinallyRegion, RangeLoop, place_type};
 use crate::{
     BinaryOp, BlockId, ElementInitialization, MirDropFlag, MirFunction, Operand, Place, PlaceBase,
     PlaceProjection, PushInit, Relocate, RelocationRange, Rvalue, SlotPlace, TakeState, Terminator,
@@ -136,6 +136,18 @@ pub enum SsaOp {
     RangeBinding {
         loop_id: aether_frontend::LoopId,
         current: SsaOperand,
+    },
+    CollectionBinding {
+        loop_id: aether_frontend::LoopId,
+        source: SsaPlace,
+        index: SsaOperand,
+        item_type: TypeId,
+        category: aether_frontend::IterationBindingCategory,
+    },
+    CollectionOwnerCapture {
+        loop_id: aether_frontend::LoopId,
+        value: SsaOperand,
+        iterable_type: TypeId,
     },
     RangeOperand {
         loop_id: aether_frontend::LoopId,
@@ -483,6 +495,7 @@ pub struct SsaFunction {
     pub exception_events: Vec<ExceptionEventId>,
     pub finally_regions: Vec<FinallyRegion>,
     pub range_loops: Vec<RangeLoop>,
+    pub collection_loops: Vec<CollectionLoop>,
     pub constructor_unwind: Option<aether_frontend::ConstructorUnwindPlan>,
 }
 
@@ -729,6 +742,7 @@ fn build_function_ssa(
         exception_events: function.exception_events.clone(),
         finally_regions: function.finally_regions.clone(),
         range_loops: function.range_loops.clone(),
+        collection_loops: function.collection_loops.clone(),
         constructor_unwind: function.constructor_unwind.clone(),
     }
 }
@@ -930,6 +944,28 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
         Rvalue::RangeBinding { loop_id, current } => SsaOp::RangeBinding {
             loop_id: *loop_id,
             current: rename_operand(current, stacks),
+        },
+        Rvalue::CollectionBinding {
+            loop_id,
+            source,
+            index,
+            item_type,
+            category,
+        } => SsaOp::CollectionBinding {
+            loop_id: *loop_id,
+            source: rename_place(source, stacks, mir),
+            index: rename_operand(index, stacks),
+            item_type: *item_type,
+            category: *category,
+        },
+        Rvalue::CollectionOwnerCapture {
+            loop_id,
+            value,
+            iterable_type,
+        } => SsaOp::CollectionOwnerCapture {
+            loop_id: *loop_id,
+            value: rename_operand(value, stacks),
+            iterable_type: *iterable_type,
         },
         Rvalue::RangeOperand {
             loop_id,
@@ -1672,10 +1708,15 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
             current: operand, ..
         }
         | Rvalue::RangeOperand { value: operand, .. }
+        | Rvalue::CollectionOwnerCapture { value: operand, .. }
         | Rvalue::VectorTransposeMove { operand, .. }
         | Rvalue::Coerce { operand, .. }
         | Rvalue::Cast { operand, .. }
         | Rvalue::Unary { operand, .. } => operand_local(operand).into_iter().collect(),
+        Rvalue::CollectionBinding { source, index, .. } => place_locals(function, source)
+            .into_iter()
+            .chain(operand_local(index))
+            .collect(),
         Rvalue::MatrixAxisVectorView {
             source,
             fixed_index,
@@ -1988,6 +2029,7 @@ fn verify_ssa_function(
         return Err(fail("SSA entry block does not exist".into()));
     }
     verify_ssa_range_loops(function, fail)?;
+    verify_ssa_collection_loops(function, types, fail)?;
     for (index, event) in function.exception_events.iter().enumerate() {
         if event.0 as usize != index {
             return Err(fail("SSA exception event identity is not canonical".into()));
@@ -2441,8 +2483,8 @@ fn verify_ssa_range_loops(
 ) -> Result<(), Vec<Diagnostic>> {
     let block = |id: BlockId| function.blocks.get(id.0 as usize);
     let mut structural_blocks = BTreeSet::new();
-    for (index, range) in function.range_loops.iter().enumerate() {
-        if range.id.0 as usize != index || range.item_type != TypeId::INT64 {
+    for range in &function.range_loops {
+        if range.item_type != TypeId::INT64 {
             return Err(fail("SSA range identity/type contract is invalid".into()));
         }
         let ids = [
@@ -2573,6 +2615,180 @@ fn verify_ssa_range_loops(
             {
                 return Err(fail("SSA range inclusive advance is invalid".into()));
             }
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+fn verify_ssa_collection_loops(
+    function: &SsaFunction,
+    types: &TypeArena,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut ids = function
+        .range_loops
+        .iter()
+        .map(|range| range.id)
+        .chain(
+            function
+                .collection_loops
+                .iter()
+                .map(|collection| collection.id),
+        )
+        .collect::<Vec<_>>();
+    ids.sort();
+    if ids
+        .iter()
+        .enumerate()
+        .any(|(index, id)| id.0 as usize != index)
+    {
+        return Err(fail("SSA loop identities are not canonical".into()));
+    }
+    let block = |id: BlockId| function.blocks.get(id.0 as usize);
+    for collection in &function.collection_loops {
+        let actual_item = match collection.kind {
+            CollectionKind::Array => types.array_element(collection.iterable_type),
+            CollectionKind::List => types.list_element(collection.iterable_type),
+            _ => None,
+        };
+        if actual_item != Some(collection.item_type)
+            || collection.binding_type != collection.item_type
+            || collection.category != IterationBindingCategory::CopyValue
+            || !types.guarantees_copy(collection.item_type)
+            || collection.structural_borrow != (collection.kind == CollectionKind::List)
+        {
+            return Err(fail(
+                "SSA collection identity/type contract is invalid".into(),
+            ));
+        }
+        let Some(preheader) = block(collection.preheader) else {
+            return Err(fail("SSA collection preheader is missing".into()));
+        };
+        let length_entries = preheader
+            .instructions
+            .iter()
+            .filter_map(|instruction| match (&collection.kind, &instruction.op) {
+                (CollectionKind::Array, SsaOp::ArrayLength { source })
+                | (CollectionKind::List, SsaOp::ListLength { source }) => {
+                    Some((instruction.result, source))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let zero_values = preheader
+            .instructions
+            .iter()
+            .filter(|instruction| {
+                instruction.ty == TypeId::USIZE
+                    && matches!(
+                        instruction.op,
+                        SsaOp::Use(SsaOperand::Int {
+                            value: 0,
+                            ty: TypeId::USIZE
+                        })
+                    )
+            })
+            .map(|instruction| instruction.result)
+            .collect::<Vec<_>>();
+        if length_entries.len() != 1
+            || zero_values.is_empty()
+            || !matches!(preheader.terminator, SsaTerminator::Goto(target) if target == collection.header)
+        {
+            return Err(fail("SSA collection capture protocol is invalid".into()));
+        }
+        let Some(header) = block(collection.header) else {
+            return Err(fail("SSA collection header is missing".into()));
+        };
+        let index_phi_entry = header
+            .phis
+            .iter()
+            .find(|phi| phi.local == collection.index && phi.ty == TypeId::USIZE)
+            .ok_or_else(|| fail("SSA collection index phi is missing".into()))?;
+        let index_phi = index_phi_entry.result;
+        if !index_phi_entry.incoming.iter().any(|(predecessor, value)| {
+            *predecessor == collection.preheader && zero_values.contains(value)
+        }) {
+            return Err(fail(
+                "SSA collection index does not start from captured zero".into(),
+            ));
+        }
+        if !header.instructions.iter().any(|instruction| {
+            matches!(instruction.op, SsaOp::Binary {
+                op: BinaryOp::Less,
+                left: SsaOperand::Value(index),
+                right: SsaOperand::Value(length),
+                trap: None,
+                ..
+            } if index == index_phi && length == length_entries[0].0)
+        }) || !matches!(header.terminator, SsaTerminator::Branch { then_block, else_block, .. } if then_block == collection.item && else_block == collection.exit)
+        {
+            return Err(fail("SSA collection header guard is invalid".into()));
+        }
+        let Some(item) = block(collection.item) else {
+            return Err(fail("SSA collection item block is missing".into()));
+        };
+        let same_source = |item_source: &SsaPlace| {
+            if item_source == length_entries[0].1 {
+                return true;
+            }
+            let (
+                SsaPlaceBase::Value(SsaOperand::Value(item_value)),
+                SsaPlaceBase::Value(SsaOperand::Value(initial_value)),
+            ) = (&item_source.base, &length_entries[0].1.base)
+            else {
+                return false;
+            };
+            header.phis.iter().any(|phi| {
+                phi.local == collection.owner
+                    && phi.result == *item_value
+                    && phi.incoming.iter().any(|(predecessor, value)| {
+                        *predecessor == collection.preheader && *value == *initial_value
+                    })
+            })
+        };
+        if item.instructions.iter().filter(|instruction| {
+            instruction.ty == collection.binding_type
+                && matches!(instruction.op, SsaOp::CollectionBinding {
+                    loop_id,
+                    ref source,
+                    index: SsaOperand::Value(index),
+                    item_type,
+                    category: IterationBindingCategory::CopyValue,
+                    ..
+                } if loop_id == collection.id && same_source(source) && index == index_phi && item_type == collection.item_type)
+        }).count() != 1
+            || !matches!(item.terminator, SsaTerminator::Branch { then_block, else_block, .. } if then_block == collection.body && else_block == collection.latch)
+        {
+            return Err(fail("SSA collection item load/binding is invalid".into()));
+        }
+        let Some(latch) = block(collection.latch) else {
+            return Err(fail("SSA collection latch is missing".into()));
+        };
+        if !latch.instructions.iter().any(|instruction| {
+            matches!(instruction.op, SsaOp::Binary {
+                op: BinaryOp::AddIntegerChecked,
+                left: SsaOperand::Value(index),
+                right: SsaOperand::Int { value: 1, ty: TypeId::USIZE },
+                trap: Some(TrapKind::IntegerOverflow),
+                ..
+            } if index == index_phi)
+        }) || !matches!(latch.terminator, SsaTerminator::Goto(target) if target == collection.header)
+        {
+            return Err(fail("SSA collection latch advance is invalid".into()));
+        }
+        let captures = preheader
+            .instructions
+            .iter()
+            .filter(|instruction| {
+                matches!(instruction.op, SsaOp::CollectionOwnerCapture { loop_id, iterable_type, .. }
+                    if loop_id == collection.id && iterable_type == collection.iterable_type)
+            })
+            .count();
+        if captures != usize::from(collection.temporary_owner.is_some()) {
+            return Err(fail(
+                "SSA collection temporary capture cardinality is invalid".into(),
+            ));
         }
     }
     Ok(())
@@ -3000,6 +3216,42 @@ fn verify_op(
         SsaOp::RangeOperand { loop_id, value, .. } => {
             if result != TypeId::INT64 || operand_ty(value)? != result {
                 return Err("SSA range operand type/identity mismatch".into());
+            }
+            let _ = loop_id;
+        }
+        SsaOp::CollectionBinding {
+            source,
+            index,
+            item_type,
+            category,
+            ..
+        } => {
+            let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
+            if result != *item_type
+                || operand_ty(index)? != TypeId::USIZE
+                || types
+                    .array_element(source_ty)
+                    .or_else(|| types.list_element(source_ty))
+                    != Some(*item_type)
+                || !types.guarantees_copy(*item_type)
+                || *category != aether_frontend::IterationBindingCategory::CopyValue
+            {
+                return Err("SSA collection binding type/category mismatch".into());
+            }
+        }
+        SsaOp::CollectionOwnerCapture {
+            loop_id,
+            value,
+            iterable_type,
+        } => {
+            if result != *iterable_type
+                || operand_ty(value)? != *iterable_type
+                || types
+                    .array_element(*iterable_type)
+                    .or_else(|| types.list_element(*iterable_type))
+                    .is_none()
+            {
+                return Err("SSA collection temporary capture mismatch".into());
             }
             let _ = loop_id;
         }
@@ -3895,11 +4147,16 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         SsaOp::Use(value)
         | SsaOp::RangeBinding { current: value, .. }
         | SsaOp::RangeOperand { value, .. }
+        | SsaOp::CollectionOwnerCapture { value, .. }
         | SsaOp::VectorTransposeMove { operand: value, .. }
         | SsaOp::Coerce { operand: value, .. }
         | SsaOp::Cast { operand: value, .. }
         | SsaOp::EnumDiscriminant { value, .. }
         | SsaOp::EnumPayload { value, .. } => vec![value],
+        SsaOp::CollectionBinding { source, index, .. } => place_operands(source)
+            .into_iter()
+            .chain(std::iter::once(index))
+            .collect(),
         SsaOp::MatrixAxisVectorView {
             source,
             fixed_index,

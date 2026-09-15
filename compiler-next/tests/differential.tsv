@@ -93,3 +93,4 @@ owned_array_elements	V1_CONTRACT	accept:0	n/a	programs/v16_array_buffer.ae
 owned_list_growth	V1_CONTRACT	accept:0	n/a	programs/v16_list_buffer_growth.ae
 nested_owned_lists	V1_CONTRACT	accept:0	n/a	programs/v16_nested_lists.ae
 owned_struct_list	V1_CONTRACT	accept:0	n/a	programs/v16_owned_struct_list.ae
+array_list_copy_for_in	V1_CONTRACT	accept:16	n/a	programs/iteration_v2_smoke.ae

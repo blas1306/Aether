@@ -10,8 +10,8 @@ pub use mathematical::{MathAxis, MathInput, MathStep, MathStride};
 mod ssa;
 
 pub use mir::{
-    BasicBlock, BinaryOp, BlockId, ElementInitialization, FinallyRegion, FlowMir, MirDropFlag,
-    MirFunction, MirInstruction, MirLocal, MirParameter, Operand, Place, PlaceBase,
+    BasicBlock, BinaryOp, BlockId, CollectionLoop, ElementInitialization, FinallyRegion, FlowMir,
+    MirDropFlag, MirFunction, MirInstruction, MirLocal, MirParameter, Operand, Place, PlaceBase,
     PlaceProjection, PushInit, RangeLoop, RangeOperandRole, Relocate, RelocationRange, Rvalue,
     SlotPlace, TakeState, Terminator, TrapKind, UnaryOp, VerifiedMir, lower_hir, verify_mir,
 };

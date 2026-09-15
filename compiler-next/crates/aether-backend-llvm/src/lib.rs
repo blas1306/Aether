@@ -1453,7 +1453,8 @@ fn emit_function(
                 | SsaOp::RangeBinding {
                     current: operand, ..
                 }
-                | SsaOp::RangeOperand { value: operand, .. } => writeln!(
+                | SsaOp::RangeOperand { value: operand, .. }
+                | SsaOp::CollectionOwnerCapture { value: operand, .. } => writeln!(
                     output,
                     "  %v{} = select i1 true, {} {}, {} {}",
                     instruction.result.0,
@@ -1463,6 +1464,45 @@ fn emit_function(
                     llvm_operand(operand)
                 )
                 .unwrap(),
+                SsaOp::CollectionBinding {
+                    source,
+                    index,
+                    item_type,
+                    ..
+                } => {
+                    let (descriptor, source_type) = emit_place_value(
+                        output,
+                        function,
+                        source,
+                        instruction.result.0,
+                        types,
+                        structs,
+                    );
+                    writeln!(
+                        output,
+                        "  %collection{}_data = extractvalue {} {descriptor}, 0",
+                        instruction.result.0,
+                        llvm_type(types, source_type)
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  %collection{}_slot = getelementptr inbounds {}, ptr %collection{}_data, i64 {}",
+                        instruction.result.0,
+                        llvm_type(types, *item_type),
+                        instruction.result.0,
+                        llvm_operand(index)
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  %v{} = load {}, ptr %collection{}_slot",
+                        instruction.result.0,
+                        llvm_type(types, *item_type),
+                        instruction.result.0
+                    )
+                    .unwrap();
+                }
                 SsaOp::Load { place } => {
                     let pointer = emit_place_pointer(
                         output,

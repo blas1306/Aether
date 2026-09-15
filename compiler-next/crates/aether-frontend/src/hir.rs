@@ -704,6 +704,18 @@ pub enum HirStmtKind {
         step_is_implicit: bool,
         body: HirBlock,
     },
+    /// ITERATION-V2 index loop over an exact Array<T> or List<T> with Copy T.
+    ForCollection {
+        loop_id: LoopId,
+        binding: LocalId,
+        iterable_type: TypeId,
+        item_type: TypeId,
+        binding_type: TypeId,
+        category: IterationBindingCategory,
+        source: CollectionIterationSource,
+        structural_borrow: bool,
+        body: HirBlock,
+    },
     Match {
         mode: MatchMode,
         scrutinee: HirExpr,
@@ -736,6 +748,21 @@ pub enum HirStmtKind {
         catches: Vec<HirCatch>,
         finally: Option<HirFinally>,
     },
+}
+
+/// Ownership/provenance form of an ITERATION-V2 collection operand.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CollectionIterationSource {
+    /// An existing collection place remains borrowed for the complete loop.
+    Borrowed(HirPlace),
+    /// A completed owning value is transferred into this hidden loop root.
+    Temporary { root: LocalId, initializer: HirExpr },
+}
+
+/// Source-visible category of the element binding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IterationBindingCategory {
+    CopyValue,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3949,6 +3976,52 @@ impl Monomorphizer<'_> {
                             step_is_implicit: *step_is_implicit,
                             body: self.substitute_block(body, substitution)?,
                         },
+                        HirStmtKind::ForCollection {
+                            loop_id,
+                            binding,
+                            iterable_type,
+                            item_type,
+                            binding_type,
+                            category,
+                            source,
+                            structural_borrow,
+                            body,
+                        } => HirStmtKind::ForCollection {
+                            loop_id: *loop_id,
+                            binding: *binding,
+                            iterable_type: self.substitute_type(
+                                *iterable_type,
+                                substitution,
+                                statement.span,
+                            )?,
+                            item_type: self.substitute_type(
+                                *item_type,
+                                substitution,
+                                statement.span,
+                            )?,
+                            binding_type: self.substitute_type(
+                                *binding_type,
+                                substitution,
+                                statement.span,
+                            )?,
+                            category: *category,
+                            source: match source {
+                                CollectionIterationSource::Borrowed(place) => {
+                                    CollectionIterationSource::Borrowed(
+                                        self.substitute_place(place, substitution)?,
+                                    )
+                                }
+                                CollectionIterationSource::Temporary { root, initializer } => {
+                                    CollectionIterationSource::Temporary {
+                                        root: *root,
+                                        initializer: self
+                                            .substitute_expr(initializer, substitution)?,
+                                    }
+                                }
+                            },
+                            structural_borrow: *structural_borrow,
+                            body: self.substitute_block(body, substitution)?,
+                        },
                         HirStmtKind::Match {
                             mode,
                             scrutinee,
@@ -5140,7 +5213,10 @@ impl OwnershipAnalysis<'_> {
         for statement in &mut block.statements {
             if matches!(
                 statement.kind,
-                HirStmtKind::If { .. } | HirStmtKind::While { .. } | HirStmtKind::Match { .. }
+                HirStmtKind::If { .. }
+                    | HirStmtKind::While { .. }
+                    | HirStmtKind::ForCollection { .. }
+                    | HirStmtKind::Match { .. }
             ) {
                 self.matrix_shapes.fill(None);
             }
@@ -5450,6 +5526,73 @@ impl OwnershipAnalysis<'_> {
                         }
                     }
                     self.state = before;
+                    self.matrix_shapes.fill(None);
+                }
+                HirStmtKind::ForCollection {
+                    source,
+                    structural_borrow,
+                    body,
+                    ..
+                } => {
+                    let (owner, temporary) = match source {
+                        CollectionIterationSource::Borrowed(place) => {
+                            self.place(place, statement.span)?;
+                            (
+                                self.owner_of_place(place).ok_or_else(|| {
+                                    self.error(
+                                        "E0445",
+                                        "collection iteration requires stable owner provenance",
+                                        statement.span,
+                                    )
+                                })?,
+                                false,
+                            )
+                        }
+                        CollectionIterationSource::Temporary { root, initializer } => {
+                            self.expr(initializer)?;
+                            self.state[root.0 as usize] = OwnerState::Owned;
+                            self.buffer_lengths[root.0 as usize] = self.known_length(initializer);
+                            self.active.push(*root);
+                            (*root, true)
+                        }
+                    };
+                    self.borrowed.last_mut().unwrap().insert(owner);
+                    if *structural_borrow {
+                        self.storage_borrowed.last_mut().unwrap().insert(owner);
+                        self.storage_ranges.last_mut().unwrap().push((owner, None));
+                    }
+                    let before = self.state.clone();
+                    let before_lengths = self.buffer_lengths.clone();
+                    self.loop_boundaries.push(self.active.len());
+                    self.block(body, true)?;
+                    self.loop_boundaries.pop();
+                    if !definitely_returns(body) {
+                        for local in &self.active {
+                            let index = local.0 as usize;
+                            if self.state[index] != before[index] {
+                                return Err(self.error(
+                                    "E0295",
+                                    "ownership state conflicts across a collection loop backedge",
+                                    statement.span,
+                                ));
+                            }
+                        }
+                    }
+                    self.state = before;
+                    self.buffer_lengths = before_lengths;
+                    self.borrowed.last_mut().unwrap().remove(&owner);
+                    if *structural_borrow {
+                        self.storage_borrowed.last_mut().unwrap().remove(&owner);
+                        self.storage_ranges
+                            .last_mut()
+                            .unwrap()
+                            .retain(|(root, _)| *root != owner);
+                    }
+                    if temporary {
+                        self.state[owner.0 as usize] = OwnerState::Dropped;
+                        let removed = self.active.pop();
+                        debug_assert_eq!(removed, Some(owner));
+                    }
                     self.matrix_shapes.fill(None);
                 }
                 HirStmtKind::Match {
@@ -6667,81 +6810,175 @@ impl Analyzer<'_> {
                     iterable,
                     body,
                 } => {
-                    let AstExprKind::Range { start, step, end } = &iterable.kind else {
-                        return Err(vec![Diagnostic::new(
-                            "E0441",
-                            Phase::Semantic,
-                            DiagnosticCategory::Unsupported,
-                            "ITERATION-V1 admits for-in only over Range<int>",
-                            Some(iterable.span),
-                        )]);
-                    };
-                    if let Some(binding_ty) = &binding.ty {
-                        let resolved = self.resolve_source_type(binding_ty)?;
-                        if resolved != TypeId::INT64 {
-                            return Err(vec![Diagnostic::new(
-                                "E0441",
-                                Phase::Semantic,
-                                DiagnosticCategory::Type,
-                                "ITERATION-V1 range bindings must be exactly int/int64",
-                                Some(binding_ty.span),
-                            )]);
-                        }
-                    }
-                    // Each call to expression is made once and in source order.
-                    let start = self.expression(start, Some(TypeId::INT64))?.expr;
-                    let (step, step_is_implicit) = if let Some(step) = step {
-                        let checked = self.expression(step, Some(TypeId::INT64))?;
-                        if matches!(checked.constant, Some(ConstantValue::Integer(0))) {
-                            return Err(vec![Diagnostic::new(
-                                "E0442",
-                                Phase::Semantic,
-                                DiagnosticCategory::Type,
-                                "range step must not be zero",
-                                Some(step.span),
-                            )]);
-                        }
-                        (checked.expr, false)
-                    } else {
-                        (
-                            HirExpr {
-                                kind: HirExprKind::Int(1),
-                                ty: TypeId::INT64,
-                                span: iterable.span,
-                            },
-                            true,
-                        )
-                    };
-                    let end = self.expression(end, Some(TypeId::INT64))?.expr;
-                    let local = LocalId(self.locals.len() as u32);
-                    self.locals.push(HirLocal {
-                        id: local,
-                        name: binding.name.clone(),
-                        ty: TypeId::INT64,
-                        span: binding.span,
-                        parameter: false,
-                        address_taken: false,
-                    });
                     let loop_id = LoopId(self.next_loop);
                     self.next_loop += 1;
-                    self.scopes.push(BTreeMap::new());
-                    self.scopes
-                        .last_mut()
-                        .unwrap()
-                        .insert(binding.name.clone(), local);
-                    self.loop_depth += 1;
-                    let body = self.block(body, false)?;
-                    self.loop_depth -= 1;
-                    self.scopes.pop();
-                    HirStmtKind::ForRange {
-                        loop_id,
-                        binding: local,
-                        item_type: TypeId::INT64,
-                        start,
-                        step,
-                        end,
-                        step_is_implicit,
-                        body,
+                    if let AstExprKind::Range { start, step, end } = &iterable.kind {
+                        if let Some(binding_ty) = &binding.ty {
+                            let resolved = self.resolve_source_type(binding_ty)?;
+                            if resolved != TypeId::INT64 {
+                                return Err(vec![Diagnostic::new(
+                                    "E0441",
+                                    Phase::Semantic,
+                                    DiagnosticCategory::Type,
+                                    "ITERATION-V1 range bindings must be exactly int/int64",
+                                    Some(binding_ty.span),
+                                )]);
+                            }
+                        }
+                        // Each call to expression is made once and in source order.
+                        let start = self.expression(start, Some(TypeId::INT64))?.expr;
+                        let (step, step_is_implicit) = if let Some(step) = step {
+                            let checked = self.expression(step, Some(TypeId::INT64))?;
+                            if matches!(checked.constant, Some(ConstantValue::Integer(0))) {
+                                return Err(vec![Diagnostic::new(
+                                    "E0442",
+                                    Phase::Semantic,
+                                    DiagnosticCategory::Type,
+                                    "range step must not be zero",
+                                    Some(step.span),
+                                )]);
+                            }
+                            (checked.expr, false)
+                        } else {
+                            (
+                                HirExpr {
+                                    kind: HirExprKind::Int(1),
+                                    ty: TypeId::INT64,
+                                    span: iterable.span,
+                                },
+                                true,
+                            )
+                        };
+                        let end = self.expression(end, Some(TypeId::INT64))?.expr;
+                        let local = LocalId(self.locals.len() as u32);
+                        self.locals.push(HirLocal {
+                            id: local,
+                            name: binding.name.clone(),
+                            ty: TypeId::INT64,
+                            span: binding.span,
+                            parameter: false,
+                            address_taken: false,
+                        });
+                        self.scopes.push(BTreeMap::new());
+                        self.scopes
+                            .last_mut()
+                            .unwrap()
+                            .insert(binding.name.clone(), local);
+                        self.loop_depth += 1;
+                        let body = self.block(body, false)?;
+                        self.loop_depth -= 1;
+                        self.scopes.pop();
+                        HirStmtKind::ForRange {
+                            loop_id,
+                            binding: local,
+                            item_type: TypeId::INT64,
+                            start,
+                            step,
+                            end,
+                            step_is_implicit,
+                            body,
+                        }
+                    } else {
+                        let is_place = matches!(
+                            iterable.kind,
+                            AstExprKind::Name(_)
+                                | AstExprKind::Field { .. }
+                                | AstExprKind::Index { .. }
+                                | AstExprKind::Unary {
+                                    op: AstUnaryOp::Dereference,
+                                    ..
+                                }
+                        );
+                        let (iterable_type, source) = if is_place {
+                            let place = self.resolve_expr_place(iterable, false)?;
+                            (place.ty, CollectionIterationSource::Borrowed(place))
+                        } else {
+                            let initializer = self.expression(iterable, None)?.expr;
+                            let iterable_type = initializer.ty;
+                            let root = LocalId(self.locals.len() as u32);
+                            self.locals.push(HirLocal {
+                                id: root,
+                                name: format!("$for_iterable_{}", loop_id.0),
+                                ty: iterable_type,
+                                span: iterable.span,
+                                parameter: false,
+                                address_taken: true,
+                            });
+                            (
+                                iterable_type,
+                                CollectionIterationSource::Temporary { root, initializer },
+                            )
+                        };
+                        let (item_type, structural_borrow) =
+                            if let Some(item) = self.types.array_element(iterable_type) {
+                                (item, false)
+                            } else if let Some(item) = self.types.list_element(iterable_type) {
+                                (item, true)
+                            } else {
+                                return Err(vec![Diagnostic::new(
+                                    "E0441",
+                                    Phase::Semantic,
+                                    DiagnosticCategory::Unsupported,
+                                    "for-in admits only Range<int>, Array<T>, or List<T>",
+                                    Some(iterable.span),
+                                )]);
+                            };
+                        if !self.types.guarantees_copy(item_type) {
+                            return Err(vec![Diagnostic::new(
+                                "E0443",
+                                Phase::Semantic,
+                                DiagnosticCategory::Unsupported,
+                                format!(
+                                    "ITERATION-V2 requires a Copy element type; {} needs a future explicit ref binding",
+                                    self.type_name(item_type)
+                                ),
+                                Some(iterable.span),
+                            )]);
+                        }
+                        if let Some(binding_ty) = &binding.ty {
+                            let resolved = self.resolve_source_type(binding_ty)?;
+                            if resolved != item_type {
+                                return Err(vec![Diagnostic::new(
+                                    "E0444",
+                                    Phase::Semantic,
+                                    DiagnosticCategory::Type,
+                                    format!(
+                                        "for-in binding must be exactly {}; per-element conversion is not permitted",
+                                        self.type_name(item_type)
+                                    ),
+                                    Some(binding_ty.span),
+                                )]);
+                            }
+                        }
+                        let local = LocalId(self.locals.len() as u32);
+                        self.locals.push(HirLocal {
+                            id: local,
+                            name: binding.name.clone(),
+                            ty: item_type,
+                            span: binding.span,
+                            parameter: false,
+                            address_taken: false,
+                        });
+                        self.scopes.push(BTreeMap::new());
+                        self.scopes
+                            .last_mut()
+                            .unwrap()
+                            .insert(binding.name.clone(), local);
+                        self.loop_depth += 1;
+                        let body = self.block(body, false)?;
+                        self.loop_depth -= 1;
+                        self.scopes.pop();
+                        HirStmtKind::ForCollection {
+                            loop_id,
+                            binding: local,
+                            iterable_type,
+                            item_type,
+                            binding_type: item_type,
+                            category: IterationBindingCategory::CopyValue,
+                            source,
+                            structural_borrow,
+                            body,
+                        }
                     }
                 }
                 AstStmtKind::Match {
@@ -11223,6 +11460,60 @@ fn verify_block(
                     fail,
                 )?;
             }
+            HirStmtKind::ForCollection {
+                binding,
+                iterable_type,
+                item_type,
+                binding_type,
+                category,
+                source,
+                structural_borrow,
+                body,
+                ..
+            } => {
+                let source_type = match source {
+                    CollectionIterationSource::Borrowed(place) => {
+                        verify_place(place, f, sigs, structs, enums, types, fail)?;
+                        place.ty
+                    }
+                    CollectionIterationSource::Temporary { root, initializer } => {
+                        verify_expr(initializer, f, sigs, structs, enums, types, fail)?;
+                        if f.locals.get(root.0 as usize).is_none_or(|local| {
+                            local.ty != initializer.ty || local.parameter || !local.address_taken
+                        }) {
+                            return Err(fail(
+                                "HIR collection temporary root contract is invalid".into(),
+                            ));
+                        }
+                        initializer.ty
+                    }
+                };
+                let actual_item = types
+                    .array_element(*iterable_type)
+                    .or_else(|| types.list_element(*iterable_type));
+                let is_list = types.list_element(*iterable_type).is_some();
+                if source_type != *iterable_type
+                    || actual_item != Some(*item_type)
+                    || *binding_type != *item_type
+                    || *category != IterationBindingCategory::CopyValue
+                    || !types.guarantees_copy(*item_type)
+                    || *structural_borrow != is_list
+                    || f.locals.get(binding.0 as usize).map(|local| local.ty) != Some(*binding_type)
+                {
+                    return Err(fail("HIR collection iteration protocol is invalid".into()));
+                }
+                verify_block(
+                    body,
+                    f,
+                    ret,
+                    sigs,
+                    structs,
+                    enums,
+                    types,
+                    active_catches,
+                    fail,
+                )?;
+            }
             HirStmtKind::Match {
                 mode,
                 scrutinee,
@@ -12614,7 +12905,8 @@ fn verify_finally_identities(
                     }
                 }
                 HirStmtKind::While { body, .. } => collect(body, ids, loops),
-                HirStmtKind::ForRange { loop_id, body, .. } => {
+                HirStmtKind::ForRange { loop_id, body, .. }
+                | HirStmtKind::ForCollection { loop_id, body, .. } => {
                     loops.push(*loop_id);
                     collect(body, ids, loops);
                 }
@@ -12685,9 +12977,9 @@ fn block_may_throw_or_transfer(block: &HirBlock) -> bool {
                 block_may_throw_or_transfer(then_block)
                     || else_block.as_ref().is_some_and(block_may_throw_or_transfer)
             }
-            HirStmtKind::While { body, .. } | HirStmtKind::ForRange { body, .. } => {
-                block_may_throw_or_transfer(body)
-            }
+            HirStmtKind::While { body, .. }
+            | HirStmtKind::ForRange { body, .. }
+            | HirStmtKind::ForCollection { body, .. } => block_may_throw_or_transfer(body),
             HirStmtKind::Match { arms, .. } => arms
                 .iter()
                 .any(|arm| block_may_throw_or_transfer(&arm.body)),
@@ -12828,6 +13120,46 @@ mod tests {
                 1 => *item_type = TypeId::INT32,
                 2 => step.kind = HirExprKind::Int(0),
                 _ => unreachable!(),
+            }
+            assert!(verify_hir(&bad).is_err());
+        }
+    }
+    #[test]
+    fn iteration_v2_hir_corruptions_fail_closed() {
+        let hir = check(
+            "int main(){Array<int> values={1,2};int sum=0;for(x in values){sum=sum+x;}return sum;}",
+        )
+        .unwrap();
+        verify_hir(&hir).unwrap();
+        for case in 0..4 {
+            let mut bad = hir.clone();
+            let HirStmtKind::ForCollection {
+                item_type,
+                binding_type,
+                category,
+                structural_borrow,
+                ..
+            } = &mut bad.functions[0].body.statements[2].kind
+            else {
+                panic!("expected collection loop")
+            };
+            match case {
+                0 => *item_type = TypeId::INT32,
+                1 => *binding_type = TypeId::INT32,
+                2 => *category = IterationBindingCategory::CopyValue,
+                3 => *structural_borrow = true,
+                _ => unreachable!(),
+            }
+            if case == 2 {
+                let HirStmtKind::ForCollection { source, .. } =
+                    &mut bad.functions[0].body.statements[2].kind
+                else {
+                    unreachable!()
+                };
+                let CollectionIterationSource::Borrowed(place) = source else {
+                    unreachable!()
+                };
+                place.ty = TypeId::INT64;
             }
             assert!(verify_hir(&bad).is_err());
         }

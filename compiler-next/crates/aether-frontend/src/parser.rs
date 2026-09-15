@@ -776,15 +776,20 @@ impl Parser<'_> {
         self.expect(TokenKind::KwFor, "expected `for`")?;
         self.expect(TokenKind::LeftParen, "expected `(` after `for`")?;
         let binding_start = self.current().span;
-        let (ty, name_token) = if self.at(TokenKind::KwInt) {
-            let ty = self.ty()?;
-            let name = self.expect(TokenKind::Identifier, "expected range binding name")?;
-            (Some(ty), name)
-        } else {
+        let inferred = self.at(TokenKind::Identifier)
+            && self
+                .tokens
+                .get(self.cursor + 1)
+                .is_some_and(|token| token.kind == TokenKind::KwIn);
+        let (ty, name_token) = if inferred {
             (
                 None,
                 self.expect(TokenKind::Identifier, "expected range binding name")?,
             )
+        } else {
+            let ty = self.ty()?;
+            let name = self.expect(TokenKind::Identifier, "expected for-in binding name")?;
+            (Some(ty), name)
         };
         let binding = AstForBinding {
             ty,

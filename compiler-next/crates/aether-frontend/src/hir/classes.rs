@@ -1453,6 +1453,25 @@ pub(super) fn verify_body(
                         );
                     }
                 }
+                HirStmtKind::ForCollection { source, body, .. } => {
+                    match source {
+                        crate::CollectionIterationSource::Borrowed(place) => {
+                            for expression in place_children(place) {
+                                visit_expr(expression, state, types, function, module, sigs)?;
+                            }
+                        }
+                        crate::CollectionIterationSource::Temporary { initializer, .. } => {
+                            visit_expr(initializer, state, types, function, module, sigs)?;
+                        }
+                    }
+                    let before = state.clone();
+                    block(body, state, init, types, function, module, sigs)?;
+                    if *state != before {
+                        return Err(
+                            "HIR collection loop changes constructor initialization state".into(),
+                        );
+                    }
+                }
                 HirStmtKind::Match {
                     arms, scrutinee, ..
                 } => {
