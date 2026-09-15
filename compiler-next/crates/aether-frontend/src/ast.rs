@@ -266,6 +266,13 @@ pub enum AstStmtKind {
     },
     /// Pre-test loop.
     While { condition: AstExpr, body: AstBlock },
+    /// Native iteration over an inclusive range. Other iterable forms remain
+    /// rejected by semantic analysis in ITERATION-V1.
+    ForIn {
+        binding: AstForBinding,
+        iterable: AstExpr,
+        body: AstBlock,
+    },
     /// Exhaustive enum match with block arms.
     Match {
         mode: AstMatchMode,
@@ -286,6 +293,18 @@ pub enum AstStmtKind {
         catches: Vec<AstCatch>,
         finally: Option<AstBlock>,
     },
+}
+
+/// Source binding of a `for-in` statement. The optional type is resolved
+/// before the name enters the body scope.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AstForBinding {
+    /// Optional exact source type annotation.
+    pub ty: Option<AstType>,
+    /// Binding spelling.
+    pub name: String,
+    /// Complete binding span.
+    pub span: Span,
 }
 
 /// One ordered typed exception handler.
@@ -429,6 +448,13 @@ pub enum AstExprKind {
         op: AstBinaryOp,
         left: Box<AstExpr>,
         right: Box<AstExpr>,
+    },
+    /// Non-associative inclusive range expression. The implicit step is not
+    /// fabricated by the parser.
+    Range {
+        start: Box<AstExpr>,
+        step: Option<Box<AstExpr>>,
+        end: Box<AstExpr>,
     },
 }
 

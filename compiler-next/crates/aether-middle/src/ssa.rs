@@ -18,7 +18,7 @@ use aether_frontend::{
     TypeData, TypeId, VariantId, format_type,
 };
 
-use crate::mir::{ExceptionEventId, FinallyRegion, place_type};
+use crate::mir::{ExceptionEventId, FinallyRegion, RangeLoop, place_type};
 use crate::{
     BinaryOp, BlockId, ElementInitialization, MirDropFlag, MirFunction, Operand, Place, PlaceBase,
     PlaceProjection, PushInit, Relocate, RelocationRange, Rvalue, SlotPlace, TakeState, Terminator,
@@ -133,6 +133,15 @@ pub enum SsaOp {
     },
     /// Scalar copy.
     Use(SsaOperand),
+    RangeBinding {
+        loop_id: aether_frontend::LoopId,
+        current: SsaOperand,
+    },
+    RangeOperand {
+        loop_id: aether_frontend::LoopId,
+        role: crate::RangeOperandRole,
+        value: SsaOperand,
+    },
     /// Alias-aware memory read from address-taken storage or a dereference.
     Load {
         place: SsaPlace,
@@ -473,6 +482,7 @@ pub struct SsaFunction {
     pub blocks: Vec<SsaBlock>,
     pub exception_events: Vec<ExceptionEventId>,
     pub finally_regions: Vec<FinallyRegion>,
+    pub range_loops: Vec<RangeLoop>,
     pub constructor_unwind: Option<aether_frontend::ConstructorUnwindPlan>,
 }
 
@@ -718,6 +728,7 @@ fn build_function_ssa(
         blocks,
         exception_events: function.exception_events.clone(),
         finally_regions: function.finally_regions.clone(),
+        range_loops: function.range_loops.clone(),
         constructor_unwind: function.constructor_unwind.clone(),
     }
 }
@@ -916,6 +927,19 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
                 .unwrap(),
         )),
         Rvalue::Use(operand) => SsaOp::Use(rename_operand(operand, stacks)),
+        Rvalue::RangeBinding { loop_id, current } => SsaOp::RangeBinding {
+            loop_id: *loop_id,
+            current: rename_operand(current, stacks),
+        },
+        Rvalue::RangeOperand {
+            loop_id,
+            role,
+            value,
+        } => SsaOp::RangeOperand {
+            loop_id: *loop_id,
+            role: *role,
+            value: rename_operand(value, stacks),
+        },
         Rvalue::Load(place) => match &place.base {
             PlaceBase::Local(local)
                 if !mir.locals[local.0 as usize].address_taken
@@ -1644,6 +1668,10 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
             .filter_map(operand_local)
             .collect(),
         Rvalue::Use(operand)
+        | Rvalue::RangeBinding {
+            current: operand, ..
+        }
+        | Rvalue::RangeOperand { value: operand, .. }
         | Rvalue::VectorTransposeMove { operand, .. }
         | Rvalue::Coerce { operand, .. }
         | Rvalue::Cast { operand, .. }
@@ -1959,6 +1987,7 @@ fn verify_ssa_function(
     if function.blocks.is_empty() || function.entry.0 as usize >= function.blocks.len() {
         return Err(fail("SSA entry block does not exist".into()));
     }
+    verify_ssa_range_loops(function, fail)?;
     for (index, event) in function.exception_events.iter().enumerate() {
         if event.0 as usize != index {
             return Err(fail("SSA exception event identity is not canonical".into()));
@@ -2405,6 +2434,150 @@ fn verify_ssa_function(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
+fn verify_ssa_range_loops(
+    function: &SsaFunction,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let block = |id: BlockId| function.blocks.get(id.0 as usize);
+    let mut structural_blocks = BTreeSet::new();
+    for (index, range) in function.range_loops.iter().enumerate() {
+        if range.id.0 as usize != index || range.item_type != TypeId::INT64 {
+            return Err(fail("SSA range identity/type contract is invalid".into()));
+        }
+        let ids = [
+            range.zero_trap,
+            range.direction,
+            range.ascending_entry,
+            range.descending_entry,
+            range.header,
+            range.body,
+            range.latch,
+            range.positive_check,
+            range.positive_add,
+            range.negative_check,
+            range.negative_add,
+            range.commit,
+            range.exit,
+        ];
+        if ids.iter().any(|id| block(*id).is_none())
+            || ids.iter().any(|id| !structural_blocks.insert(*id))
+        {
+            return Err(fail("SSA range blocks are missing or aliased".into()));
+        }
+        let branch_targets = |id| match block(id).map(|b| &b.terminator) {
+            Some(SsaTerminator::Branch {
+                then_block,
+                else_block,
+                ..
+            }) => Some((*then_block, *else_block)),
+            _ => None,
+        };
+        if !matches!(
+            block(range.zero_trap).map(|b| &b.terminator),
+            Some(SsaTerminator::Trap(TrapKind::ZeroRangeStep))
+        ) || branch_targets(range.preheader) != Some((range.zero_trap, range.direction))
+            || branch_targets(range.direction)
+                != Some((range.ascending_entry, range.descending_entry))
+            || branch_targets(range.ascending_entry) != Some((range.header, range.exit))
+            || branch_targets(range.descending_entry) != Some((range.header, range.exit))
+            || branch_targets(range.header) != Some((range.body, range.latch))
+            || branch_targets(range.latch) != Some((range.positive_check, range.negative_check))
+            || branch_targets(range.positive_check) != Some((range.positive_add, range.exit))
+            || branch_targets(range.negative_check) != Some((range.negative_add, range.exit))
+            || branch_targets(range.positive_add) != Some((range.commit, range.exit))
+            || branch_targets(range.negative_add) != Some((range.commit, range.exit))
+            || !matches!(block(range.commit).map(|b| &b.terminator), Some(SsaTerminator::Goto(target)) if *target == range.header)
+        {
+            return Err(fail("SSA range CFG protocol is invalid".into()));
+        }
+        if !block(range.header).expect("checked SSA range header").instructions.iter().any(|instruction| {
+            instruction.ty == TypeId::INT64
+                && matches!(instruction.op, SsaOp::RangeBinding { loop_id, .. } if loop_id == range.id)
+        }) {
+            return Err(fail("SSA range binding identity is invalid".into()));
+        }
+        let captures = block(range.preheader)
+            .expect("checked SSA range preheader")
+            .instructions
+            .iter()
+            .filter_map(|instruction| match instruction.op {
+                SsaOp::RangeOperand { loop_id, role, .. } if loop_id == range.id => Some(role),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if captures
+            != [
+                crate::RangeOperandRole::Start,
+                crate::RangeOperandRole::Step,
+                crate::RangeOperandRole::End,
+            ]
+        {
+            return Err(fail(
+                "SSA range operands are not captured once left-to-right".into(),
+            ));
+        }
+        if range.step_is_implicit
+            && !block(range.preheader)
+                .expect("checked SSA range preheader")
+                .instructions
+                .iter()
+                .any(|instruction| {
+                    matches!(instruction.op, SsaOp::RangeOperand {
+                    loop_id,
+                    role: crate::RangeOperandRole::Step,
+                    value: SsaOperand::Int { value: 1, ty: TypeId::INT64 }
+                } if loop_id == range.id)
+                })
+        {
+            return Err(fail("SSA implicit range step is not canonical +1".into()));
+        }
+        for (id, comparison) in [
+            (range.positive_check, BinaryOp::LessEqual),
+            (range.negative_check, BinaryOp::GreaterEqual),
+        ] {
+            let ops = &block(id).expect("checked SSA range block").instructions;
+            if !ops.iter().any(|i| {
+                matches!(
+                    i.op,
+                    SsaOp::Binary {
+                        op: BinaryOp::SubtractIntegerChecked,
+                        trap: Some(TrapKind::IntegerOverflow),
+                        ..
+                    }
+                )
+            }) || !ops
+                .iter()
+                .any(|i| matches!(i.op, SsaOp::Binary { op, trap: None, .. } if op == comparison))
+            {
+                return Err(fail("SSA range exhaustion guard is invalid".into()));
+            }
+        }
+        for (id, comparison) in [
+            (range.positive_add, BinaryOp::LessEqual),
+            (range.negative_add, BinaryOp::GreaterEqual),
+        ] {
+            let ops = &block(id).expect("checked SSA range advance").instructions;
+            if !ops.iter().any(|i| {
+                matches!(
+                    i.op,
+                    SsaOp::Binary {
+                        op: BinaryOp::AddIntegerChecked,
+                        trap: Some(TrapKind::IntegerOverflow),
+                        ..
+                    }
+                )
+            }) || !ops
+                .iter()
+                .any(|i| matches!(i.op, SsaOp::Binary { op, trap: None, .. } if op == comparison))
+            {
+                return Err(fail("SSA range inclusive advance is invalid".into()));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Every SSA value carrying a string owner, directly or structurally, must
 /// have an explicit transfer or Drop site. Borrowing string operations do not
 /// discharge ownership.
@@ -2818,6 +2991,18 @@ fn verify_op(
         Ok(true)
     };
     match op {
+        SsaOp::RangeBinding { loop_id, current } => {
+            if result != TypeId::INT64 || operand_ty(current)? != result {
+                return Err("SSA range binding type/identity mismatch".into());
+            }
+            let _ = loop_id;
+        }
+        SsaOp::RangeOperand { loop_id, value, .. } => {
+            if result != TypeId::INT64 || operand_ty(value)? != result {
+                return Err("SSA range operand type/identity mismatch".into());
+            }
+            let _ = loop_id;
+        }
         SsaOp::Class(op) => {
             if matches!(op.as_ref(), ClassOp::Construct { .. }) {
                 return Err("unlowered ClassInit reached SSA".into());
@@ -3701,12 +3886,15 @@ fn valid_coercion(types: &TypeArena, kind: CoercionKind, from: TypeId, to: TypeI
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
     match op {
         SsaOp::String(op) => op.operands(),
         SsaOp::Text(op) => op.operands(),
         SsaOp::Core(op) => op.operands(),
         SsaOp::Use(value)
+        | SsaOp::RangeBinding { current: value, .. }
+        | SsaOp::RangeOperand { value, .. }
         | SsaOp::VectorTransposeMove { operand: value, .. }
         | SsaOp::Coerce { operand: value, .. }
         | SsaOp::Cast { operand: value, .. }

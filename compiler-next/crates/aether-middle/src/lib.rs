@@ -12,8 +12,8 @@ mod ssa;
 pub use mir::{
     BasicBlock, BinaryOp, BlockId, ElementInitialization, FinallyRegion, FlowMir, MirDropFlag,
     MirFunction, MirInstruction, MirLocal, MirParameter, Operand, Place, PlaceBase,
-    PlaceProjection, PushInit, Relocate, RelocationRange, Rvalue, SlotPlace, TakeState, Terminator,
-    TrapKind, UnaryOp, VerifiedMir, lower_hir, verify_mir,
+    PlaceProjection, PushInit, RangeLoop, RangeOperandRole, Relocate, RelocationRange, Rvalue,
+    SlotPlace, TakeState, Terminator, TrapKind, UnaryOp, VerifiedMir, lower_hir, verify_mir,
 };
 pub use ssa::{
     ArcElision, ClassDevirtualization, Devirtualization, OopOptimizations, Phi, SsaBlock,

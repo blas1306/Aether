@@ -1449,7 +1449,11 @@ fn emit_function(
                     block.id,
                     io::find_class_id(types, modules, "std.IO", "IOException").is_some(),
                 ),
-                SsaOp::Use(operand) => writeln!(
+                SsaOp::Use(operand)
+                | SsaOp::RangeBinding {
+                    current: operand, ..
+                }
+                | SsaOp::RangeOperand { value: operand, .. } => writeln!(
                     output,
                     "  %v{} = select i1 true, {} {}, {} {}",
                     instruction.result.0,
@@ -2834,6 +2838,13 @@ fn emit_function(
                 writeln!(
                     output,
                     "  ; structured trap: ListEmpty\n  call void @llvm.trap()\n  unreachable"
+                )
+                .unwrap();
+            }
+            SsaTerminator::Trap(TrapKind::ZeroRangeStep) => {
+                writeln!(
+                    output,
+                    "  ; structured trap: ZeroRangeStep\n  call void @llvm.trap()\n  unreachable"
                 )
                 .unwrap();
             }

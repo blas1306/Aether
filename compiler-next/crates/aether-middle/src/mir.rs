@@ -1,7 +1,9 @@
 //! Explicit control-flow MIR and fail-closed verification.
 #![allow(missing_docs)]
 
-use aether_frontend::{CatchId, ClassId, ClassOp, ClassTokenKind, FinallyId, IndexSemantics};
+use aether_frontend::{
+    CatchId, ClassId, ClassOp, ClassTokenKind, FinallyId, IndexSemantics, LoopId,
+};
 mod classes;
 use std::collections::{BTreeSet, VecDeque};
 use std::fmt::Write;
@@ -210,6 +212,7 @@ pub enum TrapKind {
     AllocationFailure,
     IndexOutOfBounds,
     ListEmpty,
+    ZeroRangeStep,
 }
 
 /// Explicit scalar unary operations.
@@ -219,6 +222,14 @@ pub enum UnaryOp {
     NegateIntegerChecked,
     /// IEEE floating negation.
     NegateFloat,
+}
+
+/// Source-order role of a captured range operand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RangeOperandRole {
+    Start,
+    Step,
+    End,
 }
 
 /// Explicit scalar binary operations.
@@ -279,6 +290,17 @@ pub enum Rvalue {
     },
     /// Scalar copy.
     Use(Operand),
+    /// Fresh source binding initialization at an ITERATION-V1 header.
+    RangeBinding {
+        loop_id: LoopId,
+        current: Operand,
+    },
+    /// Exactly-once, source-ordered capture in the range preheader.
+    RangeOperand {
+        loop_id: LoopId,
+        role: RangeOperandRole,
+        value: Operand,
+    },
     /// Read a local or nested subobject place.
     Load(Place),
     /// Create an explicit typed non-owning view of stable storage.
@@ -608,7 +630,32 @@ pub struct MirFunction {
     pub entry: BlockId,
     pub exception_events: Vec<ExceptionEventId>,
     pub finally_regions: Vec<FinallyRegion>,
+    /// Independently checked ITERATION-V1 range protocols.
+    pub range_loops: Vec<RangeLoop>,
     pub constructor_unwind: Option<aether_frontend::ConstructorUnwindPlan>,
+}
+
+/// Structural authority for one lowered inclusive int range loop.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RangeLoop {
+    pub id: LoopId,
+    pub item_type: TypeId,
+    pub binding: LocalId,
+    pub preheader: BlockId,
+    pub zero_trap: BlockId,
+    pub direction: BlockId,
+    pub ascending_entry: BlockId,
+    pub descending_entry: BlockId,
+    pub header: BlockId,
+    pub body: BlockId,
+    pub latch: BlockId,
+    pub positive_check: BlockId,
+    pub positive_add: BlockId,
+    pub negative_check: BlockId,
+    pub negative_add: BlockId,
+    pub commit: BlockId,
+    pub exit: BlockId,
+    pub step_is_implicit: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -753,7 +800,9 @@ fn conditional_drop_roots(block: &HirBlock) -> BTreeSet<LocalId> {
                         visit(else_block, roots);
                     }
                 }
-                HirStmtKind::While { body, .. } => visit(body, roots),
+                HirStmtKind::While { body, .. } | HirStmtKind::ForRange { body, .. } => {
+                    visit(body, roots);
+                }
                 HirStmtKind::Match { arms, .. } => {
                     for arm in arms {
                         visit(&arm.body, roots);
@@ -860,6 +909,7 @@ fn lower_function(
             entry: BlockId(0),
             exception_events: Vec::new(),
             finally_regions: Vec::new(),
+            range_loops: Vec::new(),
             constructor_unwind: function.constructor_unwind.clone(),
         },
         current: Some(BlockId(0)),
@@ -1482,7 +1532,9 @@ impl Builder<'_> {
                             PendingAction::Goto {
                                 target,
                                 drops: later,
-                                remaining_finalizers: self.finalizers.len() - 1,
+                                remaining_finalizers: self.finalizers.len()
+                                    - loop_finalizer_depth
+                                    - 1,
                             },
                             statement.span,
                         );
@@ -1517,6 +1569,26 @@ impl Builder<'_> {
                     else_block,
                 } => self.lower_if(condition, then_block, else_block.as_ref()),
                 HirStmtKind::While { condition, body } => self.lower_while(condition, body),
+                HirStmtKind::ForRange {
+                    loop_id,
+                    binding,
+                    item_type,
+                    start,
+                    step,
+                    end,
+                    step_is_implicit,
+                    body,
+                } => self.lower_for_range(
+                    *loop_id,
+                    *binding,
+                    *item_type,
+                    start,
+                    step,
+                    end,
+                    *step_is_implicit,
+                    body,
+                    statement.span,
+                ),
                 HirStmtKind::Match {
                     mode,
                     scrutinee,
@@ -1861,6 +1933,340 @@ impl Builder<'_> {
             self.terminate(Terminator::Goto(header));
         }
         self.construction_state = construction_before;
+        self.current = Some(exit);
+    }
+
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+    fn lower_for_range(
+        &mut self,
+        loop_id: LoopId,
+        binding: LocalId,
+        item_type: TypeId,
+        start_expr: &HirExpr,
+        step_expr: &HirExpr,
+        end_expr: &HirExpr,
+        step_is_implicit: bool,
+        body: &HirBlock,
+        span: Span,
+    ) {
+        debug_assert_eq!(item_type, TypeId::INT64);
+        let preheader = self.current.expect("range has a live preheader");
+        let start_value = self.lower_expr(start_expr);
+        let start = self.temporary(item_type);
+        self.assign(
+            operand_place(&Operand::Local(start)),
+            Rvalue::RangeOperand {
+                loop_id,
+                role: RangeOperandRole::Start,
+                value: start_value,
+            },
+            span,
+        );
+        let step_value = self.lower_expr(step_expr);
+        let step = self.temporary(item_type);
+        self.assign(
+            operand_place(&Operand::Local(step)),
+            Rvalue::RangeOperand {
+                loop_id,
+                role: RangeOperandRole::Step,
+                value: step_value,
+            },
+            span,
+        );
+        let end_value = self.lower_expr(end_expr);
+        let end = self.temporary(item_type);
+        self.assign(
+            operand_place(&Operand::Local(end)),
+            Rvalue::RangeOperand {
+                loop_id,
+                role: RangeOperandRole::End,
+                value: end_value,
+            },
+            span,
+        );
+        let current = self.temporary(item_type);
+        self.assign(
+            operand_place(&Operand::Local(current)),
+            Rvalue::Use(Operand::Local(start)),
+            span,
+        );
+
+        let zero_trap = self.new_block();
+        let direction = self.new_block();
+        let ascending_entry = self.new_block();
+        let descending_entry = self.new_block();
+        let header = self.new_block();
+        let body_block = self.new_block();
+        let latch = self.new_block();
+        let positive_check = self.new_block();
+        let positive_add = self.new_block();
+        let negative_check = self.new_block();
+        let negative_add = self.new_block();
+        let commit = self.new_block();
+        let exit = self.new_block();
+        self.function.range_loops.push(RangeLoop {
+            id: loop_id,
+            item_type,
+            binding,
+            preheader,
+            zero_trap,
+            direction,
+            ascending_entry,
+            descending_entry,
+            header,
+            body: body_block,
+            latch,
+            positive_check,
+            positive_add,
+            negative_check,
+            negative_add,
+            commit,
+            exit,
+            step_is_implicit,
+        });
+
+        let is_zero = self.temporary(TypeId::BOOL);
+        self.assign(
+            operand_place(&Operand::Local(is_zero)),
+            Rvalue::Binary {
+                op: BinaryOp::Equal,
+                left: Operand::Local(step),
+                right: Operand::Int {
+                    value: 0,
+                    ty: item_type,
+                },
+                trap: None,
+                secondary_trap: None,
+            },
+            span,
+        );
+        self.terminate(Terminator::Branch {
+            condition: Operand::Local(is_zero),
+            then_block: zero_trap,
+            else_block: direction,
+        });
+        self.current = Some(zero_trap);
+        self.terminate(Terminator::Trap(TrapKind::ZeroRangeStep));
+
+        self.current = Some(direction);
+        let positive = self.temporary(TypeId::BOOL);
+        self.assign(
+            operand_place(&Operand::Local(positive)),
+            Rvalue::Binary {
+                op: BinaryOp::Greater,
+                left: Operand::Local(step),
+                right: Operand::Int {
+                    value: 0,
+                    ty: item_type,
+                },
+                trap: None,
+                secondary_trap: None,
+            },
+            span,
+        );
+        self.terminate(Terminator::Branch {
+            condition: Operand::Local(positive),
+            then_block: ascending_entry,
+            else_block: descending_entry,
+        });
+
+        self.current = Some(ascending_entry);
+        let ascending_compatible = self.temporary(TypeId::BOOL);
+        self.assign(
+            operand_place(&Operand::Local(ascending_compatible)),
+            Rvalue::Binary {
+                op: BinaryOp::LessEqual,
+                left: Operand::Local(current),
+                right: Operand::Local(end),
+                trap: None,
+                secondary_trap: None,
+            },
+            span,
+        );
+        self.terminate(Terminator::Branch {
+            condition: Operand::Local(ascending_compatible),
+            then_block: header,
+            else_block: exit,
+        });
+
+        self.current = Some(descending_entry);
+        let descending_compatible = self.temporary(TypeId::BOOL);
+        self.assign(
+            operand_place(&Operand::Local(descending_compatible)),
+            Rvalue::Binary {
+                op: BinaryOp::GreaterEqual,
+                left: Operand::Local(current),
+                right: Operand::Local(end),
+                trap: None,
+                secondary_trap: None,
+            },
+            span,
+        );
+        self.terminate(Terminator::Branch {
+            condition: Operand::Local(descending_compatible),
+            then_block: header,
+            else_block: exit,
+        });
+
+        self.current = Some(header);
+        self.assign(
+            operand_place(&Operand::Local(binding)),
+            Rvalue::RangeBinding {
+                loop_id,
+                current: Operand::Local(current),
+            },
+            span,
+        );
+        // Reify the already-proven nonzero invariant as the header guard. Its
+        // false edge makes the latch part of the total verified CFG even when
+        // every source body path exits abruptly.
+        let header_nonzero = self.temporary(TypeId::BOOL);
+        self.assign(
+            operand_place(&Operand::Local(header_nonzero)),
+            Rvalue::Binary {
+                op: BinaryOp::NotEqual,
+                left: Operand::Local(step),
+                right: Operand::Int {
+                    value: 0,
+                    ty: item_type,
+                },
+                trap: None,
+                secondary_trap: None,
+            },
+            span,
+        );
+        self.terminate(Terminator::Branch {
+            condition: Operand::Local(header_nonzero),
+            then_block: body_block,
+            else_block: latch,
+        });
+
+        self.current = Some(body_block);
+        self.loops.push((latch, exit, self.finalizers.len()));
+        self.lower_block(body);
+        self.loops.pop();
+        if let Some(end_block) = self.current {
+            self.current = Some(end_block);
+            self.terminate(Terminator::Goto(latch));
+        }
+
+        self.current = Some(latch);
+        self.terminate(Terminator::Branch {
+            condition: Operand::Local(positive),
+            then_block: positive_check,
+            else_block: negative_check,
+        });
+
+        self.current = Some(positive_check);
+        let positive_threshold = self.temporary(item_type);
+        self.assign(
+            operand_place(&Operand::Local(positive_threshold)),
+            Rvalue::Binary {
+                op: BinaryOp::SubtractIntegerChecked,
+                left: Operand::Int {
+                    value: i128::from(i64::MAX),
+                    ty: item_type,
+                },
+                right: Operand::Local(step),
+                trap: Some(TrapKind::IntegerOverflow),
+                secondary_trap: None,
+            },
+            span,
+        );
+        let positive_safe = self.temporary(TypeId::BOOL);
+        self.assign(
+            operand_place(&Operand::Local(positive_safe)),
+            Rvalue::Binary {
+                op: BinaryOp::LessEqual,
+                left: Operand::Local(current),
+                right: Operand::Local(positive_threshold),
+                trap: None,
+                secondary_trap: None,
+            },
+            span,
+        );
+        self.terminate(Terminator::Branch {
+            condition: Operand::Local(positive_safe),
+            then_block: positive_add,
+            else_block: exit,
+        });
+
+        self.current = Some(negative_check);
+        let negative_threshold = self.temporary(item_type);
+        self.assign(
+            operand_place(&Operand::Local(negative_threshold)),
+            Rvalue::Binary {
+                op: BinaryOp::SubtractIntegerChecked,
+                left: Operand::Int {
+                    value: i128::from(i64::MIN),
+                    ty: item_type,
+                },
+                right: Operand::Local(step),
+                trap: Some(TrapKind::IntegerOverflow),
+                secondary_trap: None,
+            },
+            span,
+        );
+        let negative_safe = self.temporary(TypeId::BOOL);
+        self.assign(
+            operand_place(&Operand::Local(negative_safe)),
+            Rvalue::Binary {
+                op: BinaryOp::GreaterEqual,
+                left: Operand::Local(current),
+                right: Operand::Local(negative_threshold),
+                trap: None,
+                secondary_trap: None,
+            },
+            span,
+        );
+        self.terminate(Terminator::Branch {
+            condition: Operand::Local(negative_safe),
+            then_block: negative_add,
+            else_block: exit,
+        });
+
+        let next = self.temporary(item_type);
+        let within = self.temporary(TypeId::BOOL);
+        for (block, comparison) in [
+            (positive_add, BinaryOp::LessEqual),
+            (negative_add, BinaryOp::GreaterEqual),
+        ] {
+            self.current = Some(block);
+            self.assign(
+                operand_place(&Operand::Local(next)),
+                Rvalue::Binary {
+                    op: BinaryOp::AddIntegerChecked,
+                    left: Operand::Local(current),
+                    right: Operand::Local(step),
+                    trap: Some(TrapKind::IntegerOverflow),
+                    secondary_trap: None,
+                },
+                span,
+            );
+            self.assign(
+                operand_place(&Operand::Local(within)),
+                Rvalue::Binary {
+                    op: comparison,
+                    left: Operand::Local(next),
+                    right: Operand::Local(end),
+                    trap: None,
+                    secondary_trap: None,
+                },
+                span,
+            );
+            self.terminate(Terminator::Branch {
+                condition: Operand::Local(within),
+                then_block: commit,
+                else_block: exit,
+            });
+        }
+        self.current = Some(commit);
+        self.assign(
+            operand_place(&Operand::Local(current)),
+            Rvalue::Use(Operand::Local(next)),
+            span,
+        );
+        self.terminate(Terminator::Goto(header));
         self.current = Some(exit);
     }
 
@@ -3860,6 +4266,7 @@ fn verify_mir_function(
             ));
         }
     }
+    verify_range_loops(function, fail)?;
     let mut predecessors = vec![Vec::new(); function.blocks.len()];
     let mut unwind_predecessors = vec![0_usize; function.blocks.len()];
     let mut ordinary_predecessors = vec![0_usize; function.blocks.len()];
@@ -4219,6 +4626,156 @@ fn verify_mir_function(
         }
     }
     verify_take_protocol(function, fail)?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+fn verify_range_loops(
+    function: &MirFunction,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let block = |id: BlockId| function.blocks.get(id.0 as usize);
+    let mut structural_blocks = BTreeSet::new();
+    for (index, range) in function.range_loops.iter().enumerate() {
+        if range.id.0 as usize != index
+            || range.item_type != TypeId::INT64
+            || function
+                .locals
+                .get(range.binding.0 as usize)
+                .map(|local| local.ty)
+                != Some(TypeId::INT64)
+        {
+            return Err(fail("MIR range identity/type contract is invalid".into()));
+        }
+        let ids = [
+            range.zero_trap,
+            range.direction,
+            range.ascending_entry,
+            range.descending_entry,
+            range.header,
+            range.body,
+            range.latch,
+            range.positive_check,
+            range.positive_add,
+            range.negative_check,
+            range.negative_add,
+            range.commit,
+            range.exit,
+        ];
+        if ids.iter().any(|id| block(*id).is_none())
+            || ids.iter().any(|id| !structural_blocks.insert(*id))
+        {
+            return Err(fail("MIR range blocks are missing or aliased".into()));
+        }
+        let branch_targets = |id| match block(id).and_then(|b| b.terminator.as_ref()) {
+            Some(Terminator::Branch {
+                then_block,
+                else_block,
+                ..
+            }) => Some((*then_block, *else_block)),
+            _ => None,
+        };
+        if !matches!(
+            block(range.zero_trap).and_then(|b| b.terminator.as_ref()),
+            Some(Terminator::Trap(TrapKind::ZeroRangeStep))
+        ) || branch_targets(range.preheader) != Some((range.zero_trap, range.direction))
+            || branch_targets(range.direction)
+                != Some((range.ascending_entry, range.descending_entry))
+            || branch_targets(range.ascending_entry) != Some((range.header, range.exit))
+            || branch_targets(range.descending_entry) != Some((range.header, range.exit))
+            || branch_targets(range.header) != Some((range.body, range.latch))
+            || branch_targets(range.latch) != Some((range.positive_check, range.negative_check))
+            || branch_targets(range.positive_check) != Some((range.positive_add, range.exit))
+            || branch_targets(range.negative_check) != Some((range.negative_add, range.exit))
+            || branch_targets(range.positive_add) != Some((range.commit, range.exit))
+            || branch_targets(range.negative_add) != Some((range.commit, range.exit))
+            || !matches!(block(range.commit).and_then(|b| b.terminator.as_ref()), Some(Terminator::Goto(target)) if *target == range.header)
+        {
+            return Err(fail("MIR range CFG protocol is invalid".into()));
+        }
+        let header = block(range.header).expect("checked range header");
+        if !header.instructions.iter().any(|instruction| {
+            matches!(instruction.destination.base, PlaceBase::Local(local) if local == range.binding)
+                && instruction.destination.projections.is_empty()
+                && matches!(instruction.value, Rvalue::RangeBinding { loop_id, current: Operand::Local(_) } if loop_id == range.id)
+        }) {
+            return Err(fail("MIR range binding is not initialized at the header".into()));
+        }
+        let captures = block(range.preheader)
+            .expect("checked range preheader")
+            .instructions
+            .iter()
+            .filter_map(|instruction| match instruction.value {
+                Rvalue::RangeOperand { loop_id, role, .. } if loop_id == range.id => Some(role),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if captures
+            != [
+                RangeOperandRole::Start,
+                RangeOperandRole::Step,
+                RangeOperandRole::End,
+            ]
+        {
+            return Err(fail(
+                "MIR range operands are not captured once left-to-right".into(),
+            ));
+        }
+        if range.step_is_implicit
+            && !block(range.preheader)
+                .expect("checked range preheader")
+                .instructions
+                .iter()
+                .any(|instruction| {
+                    matches!(instruction.value, Rvalue::RangeOperand {
+                    loop_id,
+                    role: RangeOperandRole::Step,
+                    value: Operand::Int { value: 1, ty: TypeId::INT64 }
+                } if loop_id == range.id)
+                })
+        {
+            return Err(fail("MIR implicit range step is not canonical +1".into()));
+        }
+        for (id, threshold_op, comparison) in [
+            (
+                range.positive_check,
+                BinaryOp::SubtractIntegerChecked,
+                BinaryOp::LessEqual,
+            ),
+            (
+                range.negative_check,
+                BinaryOp::SubtractIntegerChecked,
+                BinaryOp::GreaterEqual,
+            ),
+        ] {
+            let ops = &block(id).expect("checked range block").instructions;
+            if !ops.iter().any(|i| matches!(i.value, Rvalue::Binary { op, trap: Some(TrapKind::IntegerOverflow), .. } if op == threshold_op))
+                || !ops.iter().any(|i| matches!(i.value, Rvalue::Binary { op, trap: None, .. } if op == comparison))
+            {
+                return Err(fail("MIR range exhaustion guard is invalid".into()));
+            }
+        }
+        for (id, comparison) in [
+            (range.positive_add, BinaryOp::LessEqual),
+            (range.negative_add, BinaryOp::GreaterEqual),
+        ] {
+            let ops = &block(id).expect("checked range advance block").instructions;
+            if !ops.iter().any(|i| {
+                matches!(
+                    i.value,
+                    Rvalue::Binary {
+                        op: BinaryOp::AddIntegerChecked,
+                        trap: Some(TrapKind::IntegerOverflow),
+                        ..
+                    }
+                )
+            }) || !ops.iter().any(
+                |i| matches!(i.value, Rvalue::Binary { op, trap: None, .. } if op == comparison),
+            ) {
+                return Err(fail("MIR range inclusive advance is invalid".into()));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -5145,6 +5702,36 @@ fn validate_rvalue(
     initialized: &[bool],
 ) -> Result<(), String> {
     match value {
+        Rvalue::RangeBinding { loop_id, current } => {
+            validate_operand(function, current, initialized)?;
+            if destination != TypeId::INT64
+                || operand_type(function, current)? != destination
+                || function
+                    .range_loops
+                    .get(loop_id.0 as usize)
+                    .map(|range| range.id)
+                    != Some(*loop_id)
+            {
+                return Err("MIR range binding type/identity mismatch".into());
+            }
+        }
+        Rvalue::RangeOperand {
+            loop_id,
+            value: operand,
+            ..
+        } => {
+            validate_operand(function, operand, initialized)?;
+            if destination != TypeId::INT64
+                || operand_type(function, operand)? != destination
+                || function
+                    .range_loops
+                    .get(loop_id.0 as usize)
+                    .map(|range| range.id)
+                    != Some(*loop_id)
+            {
+                return Err("MIR range operand type/identity mismatch".into());
+            }
+        }
         Rvalue::Class(op) => {
             for operand in op.operands() {
                 validate_operand(function, operand, initialized)?;
@@ -7070,6 +7657,7 @@ mod tests {
                 entry: BlockId(0),
                 exception_events: vec![],
                 finally_regions: vec![],
+                range_loops: vec![],
                 constructor_unwind: None,
             }],
             entry: InstanceId(0),

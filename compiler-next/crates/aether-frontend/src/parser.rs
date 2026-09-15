@@ -2,10 +2,11 @@
 
 use crate::{
     AstAlias, AstBinaryOp, AstBlock, AstCapabilityConstraint, AstCatch, AstEnum, AstExpr,
-    AstExprKind, AstField, AstFunction, AstGenericParam, AstImport, AstInterpolationFragment,
-    AstMatchArm, AstMatchMode, AstPackage, AstParameter, AstReferenceType, AstStmt, AstStmtKind,
-    AstStruct, AstType, AstUnaryOp, AstVariant, AstVariantPattern, Diagnostic, DiagnosticCategory,
-    ParsedAst, Phase, SourceFile, Span, Token, TokenKind,
+    AstExprKind, AstField, AstForBinding, AstFunction, AstGenericParam, AstImport,
+    AstInterpolationFragment, AstMatchArm, AstMatchMode, AstPackage, AstParameter,
+    AstReferenceType, AstStmt, AstStmtKind, AstStruct, AstType, AstUnaryOp, AstVariant,
+    AstVariantPattern, Diagnostic, DiagnosticCategory, ParsedAst, Phase, SourceFile, Span, Token,
+    TokenKind,
 };
 
 /// Parses an already tokenized source file.
@@ -759,6 +760,7 @@ impl Parser<'_> {
                     span: start.through(body.span),
                 });
             }
+            TokenKind::KwFor => return self.for_statement(start),
             TokenKind::KwMatch => return self.match_statement(start),
             TokenKind::KwTry => return self.try_statement(start),
             _ => return Err(self.error("E0102", "expected a Vertical-16 statement")),
@@ -767,6 +769,39 @@ impl Parser<'_> {
         Ok(AstStmt {
             kind,
             span: start.through(semicolon.span),
+        })
+    }
+
+    fn for_statement(&mut self, start: crate::Span) -> Result<AstStmt, Diagnostic> {
+        self.expect(TokenKind::KwFor, "expected `for`")?;
+        self.expect(TokenKind::LeftParen, "expected `(` after `for`")?;
+        let binding_start = self.current().span;
+        let (ty, name_token) = if self.at(TokenKind::KwInt) {
+            let ty = self.ty()?;
+            let name = self.expect(TokenKind::Identifier, "expected range binding name")?;
+            (Some(ty), name)
+        } else {
+            (
+                None,
+                self.expect(TokenKind::Identifier, "expected range binding name")?,
+            )
+        };
+        let binding = AstForBinding {
+            ty,
+            name: name_token.lexeme,
+            span: binding_start.through(name_token.span),
+        };
+        self.expect(TokenKind::KwIn, "expected `in` after range binding")?;
+        let iterable = self.expression()?;
+        self.expect(TokenKind::RightParen, "expected `)` after for-in iterable")?;
+        let body = self.block()?;
+        Ok(AstStmt {
+            span: start.through(body.span),
+            kind: AstStmtKind::ForIn {
+                binding,
+                iterable,
+                body,
+            },
         })
     }
 
@@ -918,7 +953,32 @@ impl Parser<'_> {
     }
 
     fn expression(&mut self) -> Result<AstExpr, Diagnostic> {
-        self.equality()
+        self.range()
+    }
+
+    fn range(&mut self) -> Result<AstExpr, Diagnostic> {
+        let start = self.equality()?;
+        if self.consume(TokenKind::Colon).is_none() {
+            return Ok(start);
+        }
+        let middle = self.equality()?;
+        let (step, end) = if self.consume(TokenKind::Colon).is_some() {
+            (Some(Box::new(middle)), self.equality()?)
+        } else {
+            (None, middle)
+        };
+        if self.at(TokenKind::Colon) {
+            return Err(self.error("E0440", "range expressions are non-associative"));
+        }
+        let span = start.span.through(end.span);
+        Ok(AstExpr {
+            kind: AstExprKind::Range {
+                start: Box::new(start),
+                step,
+                end: Box::new(end),
+            },
+            span,
+        })
     }
 
     fn equality(&mut self) -> Result<AstExpr, Diagnostic> {

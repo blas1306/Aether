@@ -113,6 +113,9 @@ pub struct LocalId(pub u32);
 pub struct CatchId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FinallyId(pub u32);
+/// Function-local source loop identity, assigned in lexical discovery order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LoopId(pub u32);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParameterSignature {
     pub name: String,
@@ -688,6 +691,17 @@ pub enum HirStmtKind {
     },
     While {
         condition: HirExpr,
+        body: HirBlock,
+    },
+    /// ITERATION-V1 inclusive range loop over canonical int64.
+    ForRange {
+        loop_id: LoopId,
+        binding: LocalId,
+        item_type: TypeId,
+        start: HirExpr,
+        step: HirExpr,
+        end: HirExpr,
+        step_is_implicit: bool,
         body: HirBlock,
     },
     Match {
@@ -3912,6 +3926,29 @@ impl Monomorphizer<'_> {
                             condition: self.substitute_expr(condition, substitution)?,
                             body: self.substitute_block(body, substitution)?,
                         },
+                        HirStmtKind::ForRange {
+                            loop_id,
+                            binding,
+                            item_type,
+                            start,
+                            step,
+                            end,
+                            step_is_implicit,
+                            body,
+                        } => HirStmtKind::ForRange {
+                            loop_id: *loop_id,
+                            binding: *binding,
+                            item_type: self.substitute_type(
+                                *item_type,
+                                substitution,
+                                statement.span,
+                            )?,
+                            start: self.substitute_expr(start, substitution)?,
+                            step: self.substitute_expr(step, substitution)?,
+                            end: self.substitute_expr(end, substitution)?,
+                            step_is_implicit: *step_is_implicit,
+                            body: self.substitute_block(body, substitution)?,
+                        },
                         HirStmtKind::Match {
                             mode,
                             scrutinee,
@@ -4859,6 +4896,7 @@ fn analyze_function(
         loop_depth: 0,
         inside_finally: 0,
         next_finally: 0,
+        next_loop: 0,
         target,
     };
     let mut parameters = vec![];
@@ -5383,6 +5421,33 @@ impl OwnershipAnalysis<'_> {
                             } else {
                                 None
                             };
+                    }
+                    self.state = before;
+                    self.matrix_shapes.fill(None);
+                }
+                HirStmtKind::ForRange {
+                    start,
+                    step,
+                    end,
+                    body,
+                    ..
+                } => {
+                    self.expr(start)?;
+                    self.expr(step)?;
+                    self.expr(end)?;
+                    let before = self.state.clone();
+                    self.loop_boundaries.push(self.active.len());
+                    self.block(body, true)?;
+                    self.loop_boundaries.pop();
+                    for local in &self.active {
+                        let index = local.0 as usize;
+                        if self.state[index] != before[index] {
+                            return Err(self.error(
+                                "E0295",
+                                "ownership state conflicts across a range loop backedge",
+                                statement.span,
+                            ));
+                        }
                     }
                     self.state = before;
                     self.matrix_shapes.fill(None);
@@ -6221,6 +6286,7 @@ struct Analyzer<'a> {
     loop_depth: usize,
     inside_finally: usize,
     next_finally: u32,
+    next_loop: u32,
 }
 #[derive(Clone)]
 struct Checked {
@@ -6595,6 +6661,88 @@ impl Analyzer<'_> {
                         )]);
                     }
                     HirStmtKind::While { condition, body }
+                }
+                AstStmtKind::ForIn {
+                    binding,
+                    iterable,
+                    body,
+                } => {
+                    let AstExprKind::Range { start, step, end } = &iterable.kind else {
+                        return Err(vec![Diagnostic::new(
+                            "E0441",
+                            Phase::Semantic,
+                            DiagnosticCategory::Unsupported,
+                            "ITERATION-V1 admits for-in only over Range<int>",
+                            Some(iterable.span),
+                        )]);
+                    };
+                    if let Some(binding_ty) = &binding.ty {
+                        let resolved = self.resolve_source_type(binding_ty)?;
+                        if resolved != TypeId::INT64 {
+                            return Err(vec![Diagnostic::new(
+                                "E0441",
+                                Phase::Semantic,
+                                DiagnosticCategory::Type,
+                                "ITERATION-V1 range bindings must be exactly int/int64",
+                                Some(binding_ty.span),
+                            )]);
+                        }
+                    }
+                    // Each call to expression is made once and in source order.
+                    let start = self.expression(start, Some(TypeId::INT64))?.expr;
+                    let (step, step_is_implicit) = if let Some(step) = step {
+                        let checked = self.expression(step, Some(TypeId::INT64))?;
+                        if matches!(checked.constant, Some(ConstantValue::Integer(0))) {
+                            return Err(vec![Diagnostic::new(
+                                "E0442",
+                                Phase::Semantic,
+                                DiagnosticCategory::Type,
+                                "range step must not be zero",
+                                Some(step.span),
+                            )]);
+                        }
+                        (checked.expr, false)
+                    } else {
+                        (
+                            HirExpr {
+                                kind: HirExprKind::Int(1),
+                                ty: TypeId::INT64,
+                                span: iterable.span,
+                            },
+                            true,
+                        )
+                    };
+                    let end = self.expression(end, Some(TypeId::INT64))?.expr;
+                    let local = LocalId(self.locals.len() as u32);
+                    self.locals.push(HirLocal {
+                        id: local,
+                        name: binding.name.clone(),
+                        ty: TypeId::INT64,
+                        span: binding.span,
+                        parameter: false,
+                        address_taken: false,
+                    });
+                    let loop_id = LoopId(self.next_loop);
+                    self.next_loop += 1;
+                    self.scopes.push(BTreeMap::new());
+                    self.scopes
+                        .last_mut()
+                        .unwrap()
+                        .insert(binding.name.clone(), local);
+                    self.loop_depth += 1;
+                    let body = self.block(body, false)?;
+                    self.loop_depth -= 1;
+                    self.scopes.pop();
+                    HirStmtKind::ForRange {
+                        loop_id,
+                        binding: local,
+                        item_type: TypeId::INT64,
+                        start,
+                        step,
+                        end,
+                        step_is_implicit,
+                        body,
+                    }
                 }
                 AstStmtKind::Match {
                     mode,
@@ -7599,6 +7747,15 @@ impl Analyzer<'_> {
             }
         }
         let c = match &e.kind {
+            AstExprKind::Range { .. } => {
+                return Err(vec![Diagnostic::new(
+                    "E0441",
+                    Phase::Semantic,
+                    DiagnosticCategory::Unsupported,
+                    "Range values are admitted only as the iterable of for-in in ITERATION-V1",
+                    Some(e.span),
+                )]);
+            }
             AstExprKind::Bool(v) => Checked {
                 expr: HirExpr {
                     kind: HirExprKind::Bool(*v),
@@ -11031,6 +11188,41 @@ fn verify_block(
                     fail,
                 )?
             }
+            HirStmtKind::ForRange {
+                binding,
+                item_type,
+                start,
+                step,
+                end,
+                step_is_implicit,
+                body,
+                ..
+            } => {
+                verify_expr(start, f, sigs, structs, enums, types, fail)?;
+                verify_expr(step, f, sigs, structs, enums, types, fail)?;
+                verify_expr(end, f, sigs, structs, enums, types, fail)?;
+                if *item_type != TypeId::INT64
+                    || start.ty != *item_type
+                    || step.ty != *item_type
+                    || end.ty != *item_type
+                    || f.locals.get(binding.0 as usize).map(|local| local.ty) != Some(*item_type)
+                    || (*step_is_implicit && !matches!(step.kind, HirExprKind::Int(1)))
+                    || matches!(step.kind, HirExprKind::Int(0))
+                {
+                    return Err(fail("HIR int range protocol is invalid".into()));
+                }
+                verify_block(
+                    body,
+                    f,
+                    ret,
+                    sigs,
+                    structs,
+                    enums,
+                    types,
+                    active_catches,
+                    fail,
+                )?;
+            }
             HirStmtKind::Match {
                 mode,
                 scrutinee,
@@ -12408,7 +12600,7 @@ fn verify_finally_identities(
     block: &HirBlock,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
-    fn collect(block: &HirBlock, ids: &mut Vec<FinallyId>) {
+    fn collect(block: &HirBlock, ids: &mut Vec<FinallyId>, loops: &mut Vec<LoopId>) {
         for statement in &block.statements {
             match &statement.kind {
                 HirStmtKind::If {
@@ -12416,15 +12608,19 @@ fn verify_finally_identities(
                     else_block,
                     ..
                 } => {
-                    collect(then_block, ids);
+                    collect(then_block, ids, loops);
                     if let Some(else_block) = else_block {
-                        collect(else_block, ids);
+                        collect(else_block, ids, loops);
                     }
                 }
-                HirStmtKind::While { body, .. } => collect(body, ids),
+                HirStmtKind::While { body, .. } => collect(body, ids, loops),
+                HirStmtKind::ForRange { loop_id, body, .. } => {
+                    loops.push(*loop_id);
+                    collect(body, ids, loops);
+                }
                 HirStmtKind::Match { arms, .. } => {
                     for arm in arms {
-                        collect(&arm.body, ids);
+                        collect(&arm.body, ids, loops);
                     }
                 }
                 HirStmtKind::Try {
@@ -12432,13 +12628,13 @@ fn verify_finally_identities(
                     catches,
                     finally,
                 } => {
-                    collect(body, ids);
+                    collect(body, ids, loops);
                     for catch in catches {
-                        collect(&catch.body, ids);
+                        collect(&catch.body, ids, loops);
                     }
                     if let Some(finally) = finally {
                         ids.push(finally.id);
-                        collect(&finally.body, ids);
+                        collect(&finally.body, ids, loops);
                     }
                 }
                 _ => {}
@@ -12447,7 +12643,8 @@ fn verify_finally_identities(
     }
 
     let mut ids = Vec::new();
-    collect(block, &mut ids);
+    let mut loops = Vec::new();
+    collect(block, &mut ids, &mut loops);
     ids.sort();
     if ids
         .iter()
@@ -12455,6 +12652,14 @@ fn verify_finally_identities(
         .any(|(index, id)| id.0 as usize != index)
     {
         return Err(fail("HIR finally identities are not canonical".into()));
+    }
+    loops.sort();
+    if loops
+        .iter()
+        .enumerate()
+        .any(|(index, id)| id.0 as usize != index)
+    {
+        return Err(fail("HIR loop identities are not canonical".into()));
     }
     Ok(())
 }
@@ -12480,7 +12685,9 @@ fn block_may_throw_or_transfer(block: &HirBlock) -> bool {
                 block_may_throw_or_transfer(then_block)
                     || else_block.as_ref().is_some_and(block_may_throw_or_transfer)
             }
-            HirStmtKind::While { body, .. } => block_may_throw_or_transfer(body),
+            HirStmtKind::While { body, .. } | HirStmtKind::ForRange { body, .. } => {
+                block_may_throw_or_transfer(body)
+            }
             HirStmtKind::Match { arms, .. } => arms
                 .iter()
                 .any(|arm| block_may_throw_or_transfer(&arm.body)),
@@ -12524,6 +12731,11 @@ fn ast_expr_has_call(expr: &AstExpr) -> bool {
         AstExprKind::Binary { left, right, .. } => {
             ast_expr_has_call(left) || ast_expr_has_call(right)
         }
+        AstExprKind::Range { start, step, end } => {
+            ast_expr_has_call(start)
+                || step.as_deref().is_some_and(ast_expr_has_call)
+                || ast_expr_has_call(end)
+        }
         AstExprKind::Integer(_)
         | AstExprKind::Float(_)
         | AstExprKind::String(_)
@@ -12556,6 +12768,9 @@ fn ast_block_has_call(block: &AstBlock) -> bool {
             }
             AstStmtKind::While { condition, body } => {
                 ast_expr_has_call(condition) || ast_block_has_call(body)
+            }
+            AstStmtKind::ForIn { iterable, body, .. } => {
+                ast_expr_has_call(iterable) || ast_block_has_call(body)
             }
             AstStmtKind::Match {
                 scrutinee, arms, ..
@@ -12592,6 +12807,30 @@ mod tests {
     use crate::{SourceFile, parse_source};
     fn check(s: &str) -> Result<TypedHir, Vec<Diagnostic>> {
         analyze(parse_source(&SourceFile::new("test.ae", s)).unwrap())
+    }
+    #[test]
+    fn iteration_v1_hir_corruptions_fail_closed() {
+        let hir = check("int main(){int x=0;for(i in 0:2:6){x=x+i;}return x;}").unwrap();
+        verify_hir(&hir).unwrap();
+        for case in 0..3 {
+            let mut bad = hir.clone();
+            let HirStmtKind::ForRange {
+                loop_id,
+                item_type,
+                step,
+                ..
+            } = &mut bad.functions[0].body.statements[1].kind
+            else {
+                panic!("expected range loop")
+            };
+            match case {
+                0 => *loop_id = LoopId(9),
+                1 => *item_type = TypeId::INT32,
+                2 => step.kind = HirExprKind::Int(0),
+                _ => unreachable!(),
+            }
+            assert!(verify_hir(&bad).is_err());
+        }
     }
     #[test]
     fn string_hir_metadata_corruptions_are_rejected() {

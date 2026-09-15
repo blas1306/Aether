@@ -29,6 +29,10 @@ pub enum TokenKind {
     KwElse,
     /// `while`.
     KwWhile,
+    /// `for`.
+    KwFor,
+    /// `in`.
+    KwIn,
     /// `return`.
     KwReturn,
     /// `throw`.
@@ -300,6 +304,8 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                     "if" => TokenKind::KwIf,
                     "else" => TokenKind::KwElse,
                     "while" => TokenKind::KwWhile,
+                    "for" => TokenKind::KwFor,
+                    "in" => TokenKind::KwIn,
                     "return" => TokenKind::KwReturn,
                     "throw" => TokenKind::KwThrow,
                     "try" => TokenKind::KwTry,

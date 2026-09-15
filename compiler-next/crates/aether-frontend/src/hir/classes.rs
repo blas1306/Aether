@@ -1435,6 +1435,24 @@ pub(super) fn verify_body(
                         return Err("HIR loop changes constructor initialization state".into());
                     }
                 }
+                HirStmtKind::ForRange {
+                    start,
+                    step,
+                    end,
+                    body,
+                    ..
+                } => {
+                    visit_expr(start, state, types, function, module, sigs)?;
+                    visit_expr(step, state, types, function, module, sigs)?;
+                    visit_expr(end, state, types, function, module, sigs)?;
+                    let before = state.clone();
+                    block(body, state, init, types, function, module, sigs)?;
+                    if *state != before {
+                        return Err(
+                            "HIR range loop changes constructor initialization state".into()
+                        );
+                    }
+                }
                 HirStmtKind::Match {
                     arms, scrutinee, ..
                 } => {

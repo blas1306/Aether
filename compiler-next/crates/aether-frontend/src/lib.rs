@@ -16,9 +16,10 @@ pub use oop::*;
 
 pub use ast::{
     AstAlias, AstBinaryOp, AstBlock, AstCapabilityConstraint, AstCatch, AstEnum, AstExpr,
-    AstExprKind, AstField, AstFunction, AstGenericParam, AstImport, AstInterpolationFragment,
-    AstMatchArm, AstMatchMode, AstPackage, AstParameter, AstPlace, AstReferenceType, AstStmt,
-    AstStmtKind, AstStruct, AstType, AstUnaryOp, AstVariant, AstVariantPattern, ParsedAst,
+    AstExprKind, AstField, AstForBinding, AstFunction, AstGenericParam, AstImport,
+    AstInterpolationFragment, AstMatchArm, AstMatchMode, AstPackage, AstParameter, AstPlace,
+    AstReferenceType, AstStmt, AstStmtKind, AstStruct, AstType, AstUnaryOp, AstVariant,
+    AstVariantPattern, ParsedAst,
 };
 pub use core::{
     CORE_V1_PROFILE, CoreCall, CoreFunction, CoreSymbol, CoreSymbolKey, PRELUDE_V1, prelude_symbol,
@@ -31,7 +32,7 @@ pub use hir::{
     GenericParamInfo, HirBinaryOp, HirBlock, HirCallTarget, HirCatch, HirDrop, HirExpr,
     HirExprKind, HirFinally, HirFunction, HirLocal, HirMatchArm, HirMatchBinding, HirParameter,
     HirPlace, HirPlaceBase, HirPlaceProjection, HirStmt, HirStmtKind, HirUnaryOp,
-    InvalidationShape, LocalId, LogicalSourceKey, MatchMode, MathElementOp, MathShapeCheck,
+    InvalidationShape, LocalId, LogicalSourceKey, LoopId, MatchMode, MathElementOp, MathShapeCheck,
     MatrixProductExtent, ModuleId, ModuleInfo, MutationEffect, OriginKey, PackageId, PackageKey,
     PackagePath, ParameterSignature, ParsedModule, ParsedProgram, ResolvedImport, ScalarSide,
     SourceUnitKey, StructInfo, StructuralMutation, SymbolKey, TypeAliasInfo, TypeLayout, TypedHir,

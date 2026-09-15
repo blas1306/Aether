@@ -1,0 +1,18 @@
+package iteration_v1_smoke;
+
+int main() {
+    int total = 0;
+    for (i in 0:3) {
+        total = total + i;
+    }
+    for (int i in 6:-2:0) {
+        if (i == 4) {
+            continue;
+        }
+        total = total + i;
+        if (i == 2) {
+            break;
+        }
+    }
+    return total;
+}
