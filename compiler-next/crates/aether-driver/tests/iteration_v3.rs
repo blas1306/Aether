@@ -182,10 +182,12 @@ fn text_op_still_rejects_a_genuinely_dropped_string_owner() {
                 )
             })
             .unwrap();
-    function.blocks[block_index].instructions[instruction_index].value =
-        Rvalue::Text(Box::new(TextOp::CodePointCount {
+    function.blocks[block_index].instructions[instruction_index].value = Rvalue::Text {
+        call_site: aether_frontend::CallSiteId(999),
+        op: Box::new(TextOp::CodePointCount {
             value: Operand::Local(owner),
-        }));
+        }),
+    };
     let owner_drop = function
         .blocks
         .iter()

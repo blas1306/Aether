@@ -147,7 +147,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             .blocks
             .iter()
             .flat_map(|block| &block.instructions)
-            .any(|instruction| matches!(instruction.op, SsaOp::Text(_)))
+            .any(|instruction| matches!(instruction.op, SsaOp::Text { .. }))
     });
     let core_calls = program
         .functions
@@ -1430,7 +1430,7 @@ fn emit_function(
                 SsaOp::String(op) => {
                     strings::emit_op(output, op, instruction.result.0, types, llvm_operand);
                 }
-                SsaOp::Text(op) => text::emit_op(
+                SsaOp::Text { op, .. } => text::emit_op(
                     output,
                     op,
                     instruction.result.0,
@@ -1617,6 +1617,14 @@ fn emit_function(
                     writeln!(
                         output,
                         "  %v{} = getelementptr inbounds i8, ptr {pointer}, i64 0",
+                        instruction.result.0
+                    )
+                    .unwrap();
+                }
+                SsaOp::EndBorrow { .. } => {
+                    writeln!(
+                        output,
+                        "  %v{} = select i1 true, i1 true, i1 true ; EndBorrow",
                         instruction.result.0
                     )
                     .unwrap();
@@ -2693,7 +2701,7 @@ fn emit_function(
                         }
                     }
                 },
-                SsaOp::Call { callee, args } => {
+                SsaOp::Call { callee, args, .. } => {
                     let callee_signature = &signatures[callee.0 as usize];
                     let arguments = args
                         .iter()

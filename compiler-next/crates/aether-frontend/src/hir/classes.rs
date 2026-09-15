@@ -1162,7 +1162,7 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
     match &e.kind {
         E::Class(op) => op.operands(),
         E::String(op) => op.operands(),
-        E::Text(op) => op.operands(),
+        E::Text { op, .. } => op.operands(),
         E::Core(op) => op.operands(),
         E::Unit
         | E::Int(_)
@@ -1183,6 +1183,10 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
         | E::VectorView { source, .. }
         | E::MatrixView { source, .. }
         | E::View { source, .. } => place_children(source),
+        E::CallScopedSharedBorrow { source, .. } => match source {
+            crate::CallBorrowSource::Place(place) => place_children(place),
+            crate::CallBorrowSource::Temporary(initializer) => vec![initializer],
+        },
         E::ListSwapRemove { source, index, .. }
         | E::ListRemove { source, index, .. }
         | E::MatrixAxisVectorView {

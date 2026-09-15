@@ -18,7 +18,10 @@ use aether_frontend::{
     StructuralMutation, Substitution, TypeArena, TypeData, TypeId, VariantId, format_type,
 };
 
-use crate::mir::{CollectionLoop, ExceptionEventId, FinallyRegion, RangeLoop, place_type};
+use crate::mir::{
+    CallBorrowMetadata, CallBorrowSourceKind, CollectionLoop, ExceptionEventId, FinallyRegion,
+    RangeLoop, place_type,
+};
 use crate::{
     BinaryOp, BlockId, ElementInitialization, MirDropFlag, MirFunction, Operand, Place, PlaceBase,
     PlaceProjection, PushInit, Relocate, RelocationRange, Rvalue, SlotPlace, TakeState, Terminator,
@@ -116,7 +119,10 @@ pub enum SsaOp {
     /// Explicit immutable string lifecycle/content operation.
     String(Box<aether_frontend::StringOp<SsaOperand>>),
     /// Canonical standard-library Text operation.
-    Text(Box<aether_frontend::TextOp<SsaOperand>>),
+    Text {
+        call_site: aether_frontend::CallSiteId,
+        op: Box<aether_frontend::TextOp<SsaOperand>>,
+    },
     /// Canonically resolved Core function call.
     Core(Box<aether_frontend::CoreCall<SsaOperand>>),
     /// Structured mathematical loop; inputs are Copy readable descriptors.
@@ -168,6 +174,11 @@ pub enum SsaOp {
     Borrow {
         place: SsaPlace,
         mutable: bool,
+        call: Option<CallBorrowMetadata>,
+    },
+    EndBorrow {
+        call: CallBorrowMetadata,
+        reference: SsaOperand,
     },
     Move {
         source: SsaPlace,
@@ -374,6 +385,7 @@ pub enum SsaOp {
     },
     /// Resolved direct call.
     Call {
+        call_site: aether_frontend::CallSiteId,
         callee: InstanceId,
         args: Vec<SsaOperand>,
     },
@@ -930,11 +942,16 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
                 .map(|operand| Ok::<_, std::convert::Infallible>(rename_operand(&operand, stacks)))
                 .unwrap(),
         )),
-        Rvalue::Text(op) => SsaOp::Text(Box::new(
-            op.clone()
-                .map(|operand| Ok::<_, std::convert::Infallible>(rename_operand(&operand, stacks)))
-                .unwrap(),
-        )),
+        Rvalue::Text { call_site, op } => SsaOp::Text {
+            call_site: *call_site,
+            op: Box::new(
+                op.clone()
+                    .map(|operand| {
+                        Ok::<_, std::convert::Infallible>(rename_operand(&operand, stacks))
+                    })
+                    .unwrap(),
+            ),
+        },
         Rvalue::Core(op) => SsaOp::Core(Box::new(
             op.clone()
                 .map(|operand| Ok::<_, std::convert::Infallible>(rename_operand(&operand, stacks)))
@@ -1004,9 +1021,18 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
                 place: rename_place(place, stacks, mir),
             },
         },
-        Rvalue::Borrow { place, mutable } => SsaOp::Borrow {
+        Rvalue::Borrow {
+            place,
+            mutable,
+            call,
+        } => SsaOp::Borrow {
             place: rename_place(place, stacks, mir),
             mutable: *mutable,
+            call: *call,
+        },
+        Rvalue::EndBorrow { call, reference } => SsaOp::EndBorrow {
+            call: *call,
+            reference: rename_operand(reference, stacks),
         },
         Rvalue::Move { source } => SsaOp::Move {
             source: rename_place(source, stacks, mir),
@@ -1339,7 +1365,12 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             trap: *trap,
             secondary_trap: *secondary_trap,
         },
-        Rvalue::Call { callee, args } => SsaOp::Call {
+        Rvalue::Call {
+            call_site,
+            callee,
+            args,
+        } => SsaOp::Call {
+            call_site: *call_site,
             callee: *callee,
             args: args
                 .iter()
@@ -1686,14 +1717,14 @@ fn mir_liveness(function: &MirFunction, cfg: &Cfg) -> Vec<BTreeSet<LocalId>> {
 }
 
 #[allow(clippy::too_many_lines)]
-fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
+pub(crate) fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
     match value {
         Rvalue::String(op) => op
             .operands()
             .into_iter()
             .filter_map(operand_local)
             .collect(),
-        Rvalue::Text(op) => op
+        Rvalue::Text { op, .. } => op
             .operands()
             .into_iter()
             .filter_map(operand_local)
@@ -1713,6 +1744,7 @@ fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
         | Rvalue::Coerce { operand, .. }
         | Rvalue::Cast { operand, .. }
         | Rvalue::Unary { operand, .. } => operand_local(operand).into_iter().collect(),
+        Rvalue::EndBorrow { reference, .. } => operand_local(reference).into_iter().collect(),
         Rvalue::CollectionBinding { source, index, .. } => place_locals(function, source)
             .into_iter()
             .chain(operand_local(index))
@@ -2473,6 +2505,173 @@ fn verify_ssa_function(
     verify_vector_transpose_ownership(function, fail)?;
     verify_matrix_literal_ownership(function, types, fail)?;
     verify_take_protocol(function, types, fail)?;
+    verify_call_borrow_regions(function, fail)?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+fn verify_call_borrow_regions(
+    function: &SsaFunction,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut borrows = BTreeMap::new();
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            if let SsaOp::Borrow {
+                call: Some(metadata),
+                ..
+            } = &instruction.op
+                && borrows.insert(instruction.result, *metadata).is_some()
+            {
+                return Err(fail(
+                    "SSA call borrow value has duplicate definitions".into(),
+                ));
+            }
+        }
+    }
+    for (reference, metadata) in &borrows {
+        let mut call_uses = 0;
+        let mut end_uses = 0;
+        for block in &function.blocks {
+            if block
+                .phis
+                .iter()
+                .any(|phi| phi.incoming.iter().any(|(_, value)| value == reference))
+            {
+                return Err(fail("SSA call-scoped reference escapes through phi".into()));
+            }
+            for instruction in &block.instructions {
+                let allowed = match &instruction.op {
+                    SsaOp::Call {
+                        call_site, args, ..
+                    } if *call_site == metadata.call_site => args
+                        .get(metadata.argument_index as usize)
+                        .is_some_and(|operand| operand == &SsaOperand::Value(*reference)),
+                    SsaOp::Text { call_site, op } if *call_site == metadata.call_site => op
+                        .operands()
+                        .get(metadata.argument_index as usize)
+                        .is_some_and(|operand| **operand == SsaOperand::Value(*reference)),
+                    SsaOp::EndBorrow {
+                        call,
+                        reference: SsaOperand::Value(value),
+                    } if call == metadata && value == reference => true,
+                    _ => false,
+                };
+                let uses = op_operands(&instruction.op)
+                    .into_iter()
+                    .filter(|operand| **operand == SsaOperand::Value(*reference))
+                    .count();
+                if uses != 0 && !allowed {
+                    return Err(fail("SSA call-scoped reference escapes its call".into()));
+                }
+                match &instruction.op {
+                    SsaOp::Call { call_site, .. } | SsaOp::Text { call_site, .. }
+                        if *call_site == metadata.call_site && allowed =>
+                    {
+                        call_uses += 1;
+                    }
+                    SsaOp::EndBorrow { .. } if allowed => end_uses += 1,
+                    _ => {}
+                }
+            }
+            let terminator_uses = match &block.terminator {
+                SsaTerminator::Branch { condition, .. }
+                | SsaTerminator::Switch {
+                    discriminant: condition,
+                    ..
+                }
+                | SsaTerminator::Return(condition)
+                | SsaTerminator::Throw {
+                    payload: condition, ..
+                } => condition == &SsaOperand::Value(*reference),
+                _ => false,
+            };
+            if terminator_uses {
+                return Err(fail(
+                    "SSA call-scoped reference escapes through a terminator".into(),
+                ));
+            }
+        }
+        if call_uses != 1 || end_uses == 0 {
+            return Err(fail(
+                "SSA call borrow requires one matching call use and EndBorrow".into(),
+            ));
+        }
+    }
+    let mut incoming = vec![None; function.blocks.len()];
+    incoming[function.entry.0 as usize] = Some(BTreeSet::<ValueId>::new());
+    let mut queue = VecDeque::from([function.entry]);
+    let merge = |target: BlockId,
+                 state: &BTreeSet<ValueId>,
+                 incoming: &mut Vec<Option<BTreeSet<ValueId>>>,
+                 queue: &mut VecDeque<BlockId>|
+     -> Result<(), Vec<Diagnostic>> {
+        match &incoming[target.0 as usize] {
+            Some(existing) if existing != state => Err(fail(
+                "SSA call borrow regions disagree at a CFG join".into(),
+            )),
+            Some(_) => Ok(()),
+            None => {
+                incoming[target.0 as usize] = Some(state.clone());
+                queue.push_back(target);
+                Ok(())
+            }
+        }
+    };
+    while let Some(block_id) = queue.pop_front() {
+        let block = &function.blocks[block_id.0 as usize];
+        let mut active = incoming[block_id.0 as usize]
+            .clone()
+            .expect("queued borrow state");
+        for instruction in &block.instructions {
+            match &instruction.op {
+                SsaOp::Borrow {
+                    call: Some(_), ..
+                } => {
+                    if !active.insert(instruction.result) {
+                        return Err(fail("SSA call borrow begins twice".into()));
+                    }
+                }
+                SsaOp::EndBorrow {
+                    call,
+                    reference: SsaOperand::Value(reference),
+                } => {
+                    if borrows.get(reference) != Some(call) || !active.remove(reference) {
+                        return Err(fail("SSA EndBorrow does not close a live region".into()));
+                    }
+                }
+                SsaOp::Drop { owner }
+                    if borrows.iter().any(|(reference, metadata)| {
+                        active.contains(reference)
+                            && matches!(metadata.source, CallBorrowSourceKind::Temporary(local)
+                                if matches!(owner.base, SsaPlaceBase::MemoryLocal(root) if root == local))
+                    }) =>
+                {
+                    return Err(fail(
+                        "SSA call temporary is dropped before EndBorrow".into(),
+                    ));
+                }
+                _ => {}
+            }
+            if let Some(target) = instruction.unwind {
+                merge(target, &active, &mut incoming, &mut queue)?;
+            }
+        }
+        for target in ssa_targets(&block.terminator) {
+            merge(target, &active, &mut incoming, &mut queue)?;
+        }
+        if matches!(
+            block.terminator,
+            SsaTerminator::Return(_)
+                | SsaTerminator::ResumeUnwind { .. }
+                | SsaTerminator::ForwardUnwind { .. }
+        ) && !active.is_empty()
+        {
+            return Err(fail(
+                "SSA non-abortive exit retains a live call borrow".into(),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -3407,7 +3606,7 @@ fn verify_op(
         SsaOp::String(op) => {
             aether_frontend::verify_string_op(op, result, types, operand_ty)?;
         }
-        SsaOp::Text(op) => {
+        SsaOp::Text { op, .. } => {
             aether_frontend::verify_text_op(op, result, types, structs, enums, operand_ty)?;
         }
         SsaOp::Core(op) => {
@@ -3462,13 +3661,45 @@ fn verify_op(
                 return Err("SSA store through read-only View".into());
             }
         }
-        SsaOp::Borrow { place, mutable } => {
+        SsaOp::Borrow {
+            place,
+            mutable,
+            call,
+        } => {
             let pointee = ssa_place_type(place, memory_locals, structs, types, operand_ty)?;
             if types.reference_info(result) != Some((pointee, *mutable)) {
                 return Err("SSA borrow result type mismatch".into());
             }
             if *mutable && !writable(place)? {
                 return Err("SSA mutable borrow through shared reference".into());
+            }
+            if let Some(call) = call
+                && (*mutable
+                    || call.pointee_type != pointee
+                    || call.reference_type != result
+                    || types.reference_info(call.reference_type)
+                        != Some((call.pointee_type, false)))
+            {
+                return Err("SSA call borrow metadata/type contract invalid".into());
+            }
+            if let Some(call) = call
+                && let CallBorrowSourceKind::Temporary(local) = call.source
+                && (!matches!(place.base, SsaPlaceBase::MemoryLocal(root) if root == local)
+                    || !place.projections.is_empty()
+                    || memory_locals
+                        .iter()
+                        .find(|memory| memory.local == local)
+                        .is_none_or(|memory| memory.ty != call.pointee_type))
+            {
+                return Err("SSA call borrow temporary provenance invalid".into());
+            }
+        }
+        SsaOp::EndBorrow { call, reference } => {
+            if result != TypeId::BOOL
+                || operand_ty(reference)? != call.reference_type
+                || types.reference_info(call.reference_type) != Some((call.pointee_type, false))
+            {
+                return Err("SSA EndBorrow metadata/type contract invalid".into());
             }
         }
         SsaOp::AlgebraicProduct {
@@ -4067,7 +4298,7 @@ fn verify_op(
                 return Err(format!("invalid SSA contract for {op:?}"));
             }
         }
-        SsaOp::Call { callee, args } => {
+        SsaOp::Call { callee, args, .. } => {
             let signature = signatures
                 .get(callee.0 as usize)
                 .filter(|signature| signature.id == *callee)
@@ -4274,7 +4505,7 @@ fn valid_coercion(types: &TypeArena, kind: CoercionKind, from: TypeId, to: TypeI
 fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
     match op {
         SsaOp::String(op) => op.operands(),
-        SsaOp::Text(op) => op.operands(),
+        SsaOp::Text { op, .. } => op.operands(),
         SsaOp::Core(op) => op.operands(),
         SsaOp::Use(value)
         | SsaOp::RangeBinding { current: value, .. }
@@ -4372,6 +4603,7 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         }
         SsaOp::Class(op) => op.operands(),
         SsaOp::Call { args, .. } => args.iter().collect(),
+        SsaOp::EndBorrow { reference, .. } => vec![reference],
         SsaOp::ExceptionMatches { .. }
         | SsaOp::CatchBindAlias { .. }
         | SsaOp::EndCatch { .. }

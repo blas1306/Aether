@@ -368,6 +368,7 @@ size_trap:
 ");
 }
 
+#[allow(clippy::too_many_lines)]
 pub(super) fn emit_op(
     output: &mut String,
     op: &TextOp<SsaOperand>,
@@ -376,6 +377,11 @@ pub(super) fn emit_op(
     scalar_ty: &str,
     operand: impl Fn(&SsaOperand) -> String,
 ) {
+    let borrowed = |value: &SsaOperand, suffix: &str, output: &mut String| {
+        let name = format!("%text_ref_{result}_{suffix}");
+        writeln!(output, "  {name} = load ptr, ptr {}", operand(value)).unwrap();
+        name
+    };
     let scalar = |value: &SsaOperand, suffix: &str, output: &mut String| {
         let name = format!("%text_scalar_{result}_{suffix}");
         writeln!(
@@ -387,43 +393,53 @@ pub(super) fn emit_op(
         name
     };
     match op {
-        TextOp::CodePointCount { value } => writeln!(
-            output,
-            "  %v{result} = call i64 @aether_text_code_point_count(ptr {})",
-            operand(value)
-        )
-        .unwrap(),
+        TextOp::CodePointCount { value } => {
+            let value = borrowed(value, "value", output);
+            writeln!(
+                output,
+                "  %v{result} = call i64 @aether_text_code_point_count(ptr {value})"
+            )
+            .unwrap();
+        }
         TextOp::Contains { value, needle } => {
-            writeln!(output, "  %text_find_{result} = call {{ i1, i64 }} @aether_text_find(ptr {}, ptr {}, i64 0)", operand(value), operand(needle)).unwrap();
+            let value = borrowed(value, "value", output);
+            let needle = borrowed(needle, "needle", output);
+            writeln!(output, "  %text_find_{result} = call {{ i1, i64 }} @aether_text_find(ptr {value}, ptr {needle}, i64 0)").unwrap();
             writeln!(
                 output,
                 "  %v{result} = extractvalue {{ i1, i64 }} %text_find_{result}, 0"
             )
             .unwrap();
         }
-        TextOp::StartsWith { value, prefix } => writeln!(
-            output,
-            "  %v{result} = call i1 @aether_text_starts_with(ptr {}, ptr {})",
-            operand(value),
-            operand(prefix)
-        )
-        .unwrap(),
-        TextOp::EndsWith { value, suffix } => writeln!(
-            output,
-            "  %v{result} = call i1 @aether_text_ends_with(ptr {}, ptr {})",
-            operand(value),
-            operand(suffix)
-        )
-        .unwrap(),
+        TextOp::StartsWith { value, prefix } => {
+            let value = borrowed(value, "value", output);
+            let prefix = borrowed(prefix, "prefix", output);
+            writeln!(
+                output,
+                "  %v{result} = call i1 @aether_text_starts_with(ptr {value}, ptr {prefix})"
+            )
+            .unwrap();
+        }
+        TextOp::EndsWith { value, suffix } => {
+            let value = borrowed(value, "value", output);
+            let suffix = borrowed(suffix, "suffix", output);
+            writeln!(
+                output,
+                "  %v{result} = call i1 @aether_text_ends_with(ptr {value}, ptr {suffix})"
+            )
+            .unwrap();
+        }
         TextOp::Find {
             value,
             needle,
             start,
         } => {
+            let value = borrowed(value, "value", output);
+            let needle = borrowed(needle, "needle", output);
             let start = start
                 .as_ref()
                 .map_or_else(|| "0".into(), |v| scalar(v, "start", output));
-            writeln!(output, "  %text_find_{result} = call {{ i1, i64 }} @aether_text_find(ptr {}, ptr {}, i64 {start})", operand(value), operand(needle)).unwrap();
+            writeln!(output, "  %text_find_{result} = call {{ i1, i64 }} @aether_text_find(ptr {value}, ptr {needle}, i64 {start})").unwrap();
             writeln!(
                 output,
                 "  %text_found_{result} = extractvalue {{ i1, i64 }} %text_find_{result}, 0"
@@ -443,27 +459,27 @@ pub(super) fn emit_op(
             writeln!(output, "  %v{result} = insertvalue {result_ty} %text_enum_{result}, i64 %text_offset_{result}, 1, 0, 0").unwrap();
         }
         TextOp::Substring { value, start, end } => {
+            let value = borrowed(value, "value", output);
             let start = scalar(start, "start", output);
             let end = scalar(end, "end", output);
             writeln!(
                 output,
-                "  %v{result} = call ptr @aether_text_substring(ptr {}, i64 {start}, i64 {end})",
-                operand(value)
+                "  %v{result} = call ptr @aether_text_substring(ptr {value}, i64 {start}, i64 {end})"
             )
             .unwrap();
         }
-        TextOp::Trim { value } => writeln!(
-            output,
-            "  %v{result} = call ptr @aether_text_trim(ptr {})",
-            operand(value)
-        )
-        .unwrap(),
-        TextOp::Split { value, separator } => writeln!(
-            output,
-            "  %v{result} = call {{ ptr, i64, i64 }} @aether_text_split(ptr {}, ptr {})",
-            operand(value),
-            operand(separator)
-        )
-        .unwrap(),
+        TextOp::Trim { value } => {
+            let value = borrowed(value, "value", output);
+            writeln!(
+                output,
+                "  %v{result} = call ptr @aether_text_trim(ptr {value})"
+            )
+            .unwrap();
+        }
+        TextOp::Split { value, separator } => {
+            let value = borrowed(value, "value", output);
+            let separator = borrowed(separator, "separator", output);
+            writeln!(output, "  %v{result} = call {{ ptr, i64, i64 }} @aether_text_split(ptr {value}, ptr {separator})").unwrap();
+        }
     }
 }

@@ -2,11 +2,11 @@
 #![allow(missing_docs)]
 
 use aether_frontend::{
-    CatchId, ClassId, ClassOp, ClassTokenKind, CollectionKind, FinallyId, IndexSemantics,
-    IterationBindingCategory, LoopId,
+    CallBorrowOrigin, CallBorrowSource, CallSiteId, CatchId, ClassId, ClassOp, ClassTokenKind,
+    CollectionKind, FinallyId, IndexSemantics, IterationBindingCategory, LoopId,
 };
 mod classes;
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt::Write;
 use std::sync::Arc;
 
@@ -181,6 +181,22 @@ pub enum PlaceBase {
     Dereference { reference: Operand, mutable: bool },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CallBorrowSourceKind {
+    Place,
+    Temporary(LocalId),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CallBorrowMetadata {
+    pub call_site: CallSiteId,
+    pub argument_index: u32,
+    pub pointee_type: TypeId,
+    pub reference_type: TypeId,
+    pub source: CallBorrowSourceKind,
+    pub origin: CallBorrowOrigin,
+}
+
 /// MIR operand for scalar or aggregate values.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operand {
@@ -274,7 +290,10 @@ pub enum Rvalue {
     /// Explicit immutable string lifecycle/content operation.
     String(Box<aether_frontend::StringOp<Operand>>),
     /// Canonical standard-library Text operation.
-    Text(Box<aether_frontend::TextOp<Operand>>),
+    Text {
+        call_site: CallSiteId,
+        op: Box<aether_frontend::TextOp<Operand>>,
+    },
     /// Canonically resolved Core function call.
     Core(Box<aether_frontend::CoreCall<Operand>>),
     /// Readable descriptor operands and an explicit structured initialization loop.
@@ -322,6 +341,11 @@ pub enum Rvalue {
     Borrow {
         place: Place,
         mutable: bool,
+        call: Option<CallBorrowMetadata>,
+    },
+    EndBorrow {
+        call: CallBorrowMetadata,
+        reference: Operand,
     },
     /// Transfer one move-only owner out of an existing place.
     Move {
@@ -525,6 +549,7 @@ pub enum Rvalue {
     },
     /// Resolved direct call. The function table, not a source string, is authoritative.
     Call {
+        call_site: CallSiteId,
         callee: InstanceId,
         args: Vec<Operand>,
     },
@@ -965,6 +990,7 @@ fn lower_function(
         active_catches: Vec::new(),
         root_event: None,
         active_temporary_owners: Vec::new(),
+        active_call_borrows: Vec::new(),
         construction_state: function
             .constructor_unwind
             .as_ref()
@@ -1032,6 +1058,7 @@ struct Builder<'a> {
     active_catches: Vec<ExceptionEventId>,
     root_event: Option<ExceptionEventId>,
     active_temporary_owners: Vec<LocalId>,
+    active_call_borrows: Vec<(CallBorrowMetadata, Operand)>,
     construction_state: Option<aether_frontend::ClassInitializationState>,
     loops: Vec<(BlockId, BlockId, usize)>,
     finalizers: Vec<FinalizerContext>,
@@ -1264,6 +1291,10 @@ impl Builder<'_> {
             );
         }
         let temporaries = self.active_temporary_owners.clone();
+        let borrows = self.active_call_borrows.clone();
+        for (call, reference) in borrows.into_iter().rev() {
+            self.emit_end_borrow(call, reference, span);
+        }
         for owner in temporaries.into_iter().rev() {
             self.emit_hir_drop(HirDrop::Unconditional(owner), span);
         }
@@ -2645,7 +2676,9 @@ impl Builder<'_> {
             HirExprKind::Unit => Operand::Unit,
             HirExprKind::Class(op) => self.lower_class(op, expression.ty, expression.span),
             HirExprKind::String(op) => self.lower_string(op, expression.ty, expression.span),
-            HirExprKind::Text(op) => self.lower_text(op, expression.ty, expression.span),
+            HirExprKind::Text { call_site, op } => {
+                self.lower_text(*call_site, op, expression.ty, expression.span)
+            }
             HirExprKind::Core(op) => self.lower_core(op, expression.ty, expression.span),
             HirExprKind::Int(value) => Operand::Int {
                 value: *value,
@@ -2717,10 +2750,14 @@ impl Builder<'_> {
                     Rvalue::Borrow {
                         place,
                         mutable: *mutable,
+                        call: None,
                     },
                     expression.span,
                 );
                 Operand::Local(destination)
+            }
+            HirExprKind::CallScopedSharedBorrow { .. } => {
+                unreachable!("call-scoped borrow must be lowered by its enclosing call")
             }
             HirExprKind::BufferInit {
                 element_type,
@@ -3080,6 +3117,7 @@ impl Builder<'_> {
                         Rvalue::Borrow {
                             place: source,
                             mutable: true,
+                            call: None,
                         },
                         expression.span,
                     );
@@ -3325,6 +3363,7 @@ impl Builder<'_> {
                         Rvalue::Borrow {
                             place: source,
                             mutable: *mutable,
+                            call: None,
                         },
                         expression.span,
                     );
@@ -3414,11 +3453,13 @@ impl Builder<'_> {
                 );
                 Operand::Local(destination)
             }
-            HirExprKind::Call { callee, args, .. } => {
-                let args = args
-                    .iter()
-                    .map(|argument| self.lower_expr(argument))
-                    .collect();
+            HirExprKind::Call {
+                call_site,
+                callee,
+                args,
+                ..
+            } => {
+                let (args, borrow_start, owner_start) = self.lower_call_arguments(args);
                 let destination = self.temporary(expression.ty);
                 self.assign(
                     Place {
@@ -3426,6 +3467,7 @@ impl Builder<'_> {
                         projections: vec![],
                     },
                     Rvalue::Call {
+                        call_site: *call_site,
                         callee: match callee {
                             HirCallTarget::Instance(instance) => *instance,
                             HirCallTarget::Declaration(_) => {
@@ -3436,6 +3478,7 @@ impl Builder<'_> {
                     },
                     expression.span,
                 );
+                self.finish_call_borrows(borrow_start, owner_start, expression.span);
                 Operand::Local(destination)
             }
             HirExprKind::StructInit { struct_id, fields } => {
@@ -3946,25 +3989,17 @@ impl Builder<'_> {
 
     fn lower_text(
         &mut self,
+        call_site: CallSiteId,
         op: &aether_frontend::TextOp<HirExpr>,
         ty: TypeId,
         span: Span,
     ) -> Operand {
-        let mut owners = Vec::new();
+        let expressions = op.operands();
+        let (operands, borrow_start, owner_start) = self.lower_call_arguments(expressions);
+        let mut operands = operands.into_iter();
         let lowered = op
             .clone()
-            .map(|expression| {
-                let temporary_string = expression.ty == TypeId::STRING
-                    && !matches!(
-                        expression.kind,
-                        HirExprKind::Local(_) | HirExprKind::Load(_)
-                    );
-                let operand = self.lower_expr(&expression);
-                if temporary_string {
-                    owners.push(operand_place(&operand));
-                }
-                Ok::<_, std::convert::Infallible>(operand)
-            })
+            .map(|_| Ok::<_, std::convert::Infallible>(operands.next().unwrap()))
             .unwrap();
         let destination = self.temporary(ty);
         self.assign(
@@ -3972,12 +4007,13 @@ impl Builder<'_> {
                 base: PlaceBase::Local(destination),
                 projections: vec![],
             },
-            Rvalue::Text(Box::new(lowered)),
+            Rvalue::Text {
+                call_site,
+                op: Box::new(lowered),
+            },
             span,
         );
-        for owner in owners.into_iter().rev() {
-            self.emit_drop(owner, span);
-        }
+        self.finish_call_borrows(borrow_start, owner_start, span);
         Operand::Local(destination)
     }
 
@@ -4016,6 +4052,87 @@ impl Builder<'_> {
             self.emit_drop(owner, span);
         }
         Operand::Local(destination)
+    }
+
+    fn lower_call_arguments<'b>(
+        &mut self,
+        arguments: impl IntoIterator<Item = &'b HirExpr>,
+    ) -> (Vec<Operand>, usize, usize) {
+        let borrow_start = self.active_call_borrows.len();
+        let owner_start = self.active_temporary_owners.len();
+        let mut result = Vec::new();
+        for argument in arguments {
+            let HirExprKind::CallScopedSharedBorrow {
+                call_site,
+                argument_index,
+                pointee_type,
+                reference_type,
+                source,
+                origin,
+            } = &argument.kind
+            else {
+                result.push(self.lower_expr(argument));
+                continue;
+            };
+            let (place, source_kind) = match source {
+                CallBorrowSource::Place(place) => {
+                    (self.lower_place(place), CallBorrowSourceKind::Place)
+                }
+                CallBorrowSource::Temporary(initializer) => {
+                    let value = self.lower_expr(initializer);
+                    let local = operand_local_id(&value)
+                        .expect("verified call temporary is materialized in a local");
+                    self.function.locals[local.0 as usize].address_taken = true;
+                    if self.types.needs_drop(*pointee_type) {
+                        self.active_temporary_owners.push(local);
+                    }
+                    (
+                        operand_place(&value),
+                        CallBorrowSourceKind::Temporary(local),
+                    )
+                }
+            };
+            let metadata = CallBorrowMetadata {
+                call_site: *call_site,
+                argument_index: *argument_index,
+                pointee_type: *pointee_type,
+                reference_type: *reference_type,
+                source: source_kind,
+                origin: *origin,
+            };
+            let reference = Operand::Local(self.temporary(*reference_type));
+            self.assign(
+                operand_place(&reference),
+                Rvalue::Borrow {
+                    place,
+                    mutable: false,
+                    call: Some(metadata),
+                },
+                argument.span,
+            );
+            self.active_call_borrows.push((metadata, reference.clone()));
+            result.push(reference);
+        }
+        (result, borrow_start, owner_start)
+    }
+
+    fn finish_call_borrows(&mut self, borrow_start: usize, owner_start: usize, span: Span) {
+        let borrows = self.active_call_borrows[borrow_start..].to_vec();
+        self.active_call_borrows.truncate(borrow_start);
+        for (call, reference) in borrows.into_iter().rev() {
+            self.emit_end_borrow(call, reference, span);
+        }
+        let owners = self.active_temporary_owners[owner_start..].to_vec();
+        self.active_temporary_owners.truncate(owner_start);
+        for owner in owners.into_iter().rev() {
+            self.emit_drop(
+                Place {
+                    base: PlaceBase::Local(owner),
+                    projections: Vec::new(),
+                },
+                span,
+            );
+        }
     }
 
     fn lower_string_read(&mut self, expression: &HirExpr) -> (Operand, Option<Place>) {
@@ -4207,6 +4324,15 @@ impl Builder<'_> {
         if let Some(owner) = root {
             self.set_drop_flag(owner, false, span);
         }
+    }
+
+    fn emit_end_borrow(&mut self, call: CallBorrowMetadata, reference: Operand, span: Span) {
+        let token = self.temporary(TypeId::BOOL);
+        self.assign(
+            operand_place(&Operand::Local(token)),
+            Rvalue::EndBorrow { call, reference },
+            span,
+        );
     }
 
     fn emit_consume_enum(&mut self, owner: Place, span: Span) {
@@ -4872,6 +4998,172 @@ fn verify_mir_function(
         }
     }
     verify_take_protocol(function, fail)?;
+    verify_call_borrow_regions(function, fail)?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+fn verify_call_borrow_regions(
+    function: &MirFunction,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut borrows = BTreeMap::new();
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            if let Rvalue::Borrow {
+                call: Some(metadata),
+                ..
+            } = &instruction.value
+            {
+                let Some(reference) = place_root_local(&instruction.destination) else {
+                    return Err(fail("MIR call borrow result is not a local".into()));
+                };
+                if borrows.insert(reference, *metadata).is_some() {
+                    return Err(fail(
+                        "MIR call borrow local has duplicate definitions".into(),
+                    ));
+                }
+            }
+        }
+    }
+    for (reference, metadata) in &borrows {
+        let mut call_uses = 0;
+        let mut end_uses = 0;
+        for block in &function.blocks {
+            for instruction in &block.instructions {
+                let allowed = match &instruction.value {
+                    Rvalue::Call {
+                        call_site, args, ..
+                    } if *call_site == metadata.call_site => {
+                        args.get(metadata.argument_index as usize)
+                            == Some(&Operand::Local(*reference))
+                    }
+                    Rvalue::Text { call_site, op } if *call_site == metadata.call_site => op
+                        .operands()
+                        .get(metadata.argument_index as usize)
+                        .is_some_and(|operand| **operand == Operand::Local(*reference)),
+                    Rvalue::EndBorrow {
+                        call,
+                        reference: Operand::Local(value),
+                    } if call == metadata && value == reference => true,
+                    _ => false,
+                };
+                let uses = crate::ssa::rvalue_locals(function, &instruction.value)
+                    .into_iter()
+                    .filter(|local| local == reference)
+                    .count();
+                if uses != 0 && !allowed {
+                    return Err(fail("MIR call-scoped reference escapes its call".into()));
+                }
+                match &instruction.value {
+                    Rvalue::Call { call_site, .. } | Rvalue::Text { call_site, .. }
+                        if *call_site == metadata.call_site && allowed =>
+                    {
+                        call_uses += 1;
+                    }
+                    Rvalue::EndBorrow { .. } if allowed => end_uses += 1,
+                    _ => {}
+                }
+            }
+            let terminator_uses = match block.terminator.as_ref().expect("verified MIR") {
+                Terminator::Branch { condition, .. }
+                | Terminator::Switch {
+                    discriminant: condition,
+                    ..
+                }
+                | Terminator::Return(condition)
+                | Terminator::Throw {
+                    payload: condition, ..
+                } => condition == &Operand::Local(*reference),
+                _ => false,
+            };
+            if terminator_uses {
+                return Err(fail(
+                    "MIR call-scoped reference escapes through a terminator".into(),
+                ));
+            }
+        }
+        if call_uses != 1 || end_uses == 0 {
+            return Err(fail(
+                "MIR call borrow requires one matching call use and EndBorrow".into(),
+            ));
+        }
+    }
+    let mut incoming = vec![None; function.blocks.len()];
+    incoming[function.entry.0 as usize] = Some(BTreeSet::<LocalId>::new());
+    let mut queue = VecDeque::from([function.entry]);
+    let merge = |target: BlockId,
+                 state: &BTreeSet<LocalId>,
+                 incoming: &mut Vec<Option<BTreeSet<LocalId>>>,
+                 queue: &mut VecDeque<BlockId>|
+     -> Result<(), Vec<Diagnostic>> {
+        match &incoming[target.0 as usize] {
+            Some(existing) if existing != state => Err(fail(
+                "MIR call borrow regions disagree at a CFG join".into(),
+            )),
+            Some(_) => Ok(()),
+            None => {
+                incoming[target.0 as usize] = Some(state.clone());
+                queue.push_back(target);
+                Ok(())
+            }
+        }
+    };
+    while let Some(block_id) = queue.pop_front() {
+        let block = &function.blocks[block_id.0 as usize];
+        let mut active = incoming[block_id.0 as usize]
+            .clone()
+            .expect("queued borrow state");
+        for instruction in &block.instructions {
+            match &instruction.value {
+                Rvalue::Borrow { call: Some(_), .. } => {
+                    let reference = place_root_local(&instruction.destination)
+                        .expect("call borrow destination checked above");
+                    if !active.insert(reference) {
+                        return Err(fail("MIR call borrow begins twice".into()));
+                    }
+                }
+                Rvalue::EndBorrow {
+                    call,
+                    reference: Operand::Local(reference),
+                } => {
+                    if borrows.get(reference) != Some(call) || !active.remove(reference) {
+                        return Err(fail("MIR EndBorrow does not close a live region".into()));
+                    }
+                }
+                Rvalue::Drop { owner }
+                    if borrows.iter().any(|(reference, metadata)| {
+                        active.contains(reference)
+                            && matches!(metadata.source, CallBorrowSourceKind::Temporary(local)
+                                if place_root_local(owner) == Some(local))
+                    }) =>
+                {
+                    return Err(fail(
+                        "MIR call temporary is dropped before EndBorrow".into(),
+                    ));
+                }
+                _ => {}
+            }
+            if let Some(target) = instruction.unwind {
+                merge(target, &active, &mut incoming, &mut queue)?;
+            }
+        }
+        let terminator = block.terminator.as_ref().expect("verified MIR");
+        for target in targets(terminator) {
+            merge(target, &active, &mut incoming, &mut queue)?;
+        }
+        if matches!(
+            terminator,
+            Terminator::Return(_)
+                | Terminator::ResumeUnwind { .. }
+                | Terminator::ForwardUnwind { .. }
+        ) && !active.is_empty()
+        {
+            return Err(fail(
+                "MIR non-abortive exit retains a live call borrow".into(),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -5318,7 +5610,7 @@ fn verify_drop_flag_contract(
                         transitions.push((flag, true));
                     }
                 }
-                Rvalue::Call { callee, args } => {
+                Rvalue::Call { callee, args, .. } => {
                     let Some(signature) = signatures
                         .get(callee.0 as usize)
                         .filter(|signature| signature.id == *callee)
@@ -5670,7 +5962,7 @@ fn verify_ownership(
                         initialize_owner(function, types, &mut state, destination, fail)?;
                     }
                 }
-                Rvalue::Text(op) => {
+                Rvalue::Text { op, .. } => {
                     for operand in op.operands() {
                         if let Operand::Local(local) = operand
                             && !types.is_copy(function.locals[local.0 as usize].ty)
@@ -5826,7 +6118,7 @@ fn verify_ownership(
                 Rvalue::Core(call) if call.function.symbol == aether_frontend::CoreSymbol::Str => {
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
-                Rvalue::Call { callee, args } => {
+                Rvalue::Call { callee, args, .. } => {
                     let signature = signatures
                         .get(callee.0 as usize)
                         .filter(|signature| signature.id == *callee)
@@ -6282,7 +6574,7 @@ fn validate_rvalue(
                 operand_type(function, operand)
             })?;
         }
-        Rvalue::Text(op) => {
+        Rvalue::Text { op, .. } => {
             for operand in op.operands() {
                 validate_operand(function, operand, initialized)?;
             }
@@ -6312,7 +6604,11 @@ fn validate_rvalue(
                 return Err("MIR place load type mismatch".into());
             }
         }
-        Rvalue::Borrow { place, mutable } => {
+        Rvalue::Borrow {
+            place,
+            mutable,
+            call,
+        } => {
             validate_place_read(function, place, structs, types, initialized)?;
             let pointee = place_type(function, place, structs, types)?;
             if types.reference_info(destination) != Some((pointee, *mutable)) {
@@ -6326,6 +6622,39 @@ fn validate_rvalue(
                 && !function.locals[local.0 as usize].address_taken
             {
                 return Err("MIR borrowed local is not address-taken".into());
+            }
+            if let Some(call) = call {
+                if *mutable
+                    || call.pointee_type != pointee
+                    || call.reference_type != destination
+                    || types.reference_info(call.reference_type) != Some((call.pointee_type, false))
+                {
+                    return Err("MIR call borrow metadata/type contract invalid".into());
+                }
+                match call.source {
+                    CallBorrowSourceKind::Place => {}
+                    CallBorrowSourceKind::Temporary(local) => {
+                        if place.base != PlaceBase::Local(local)
+                            || !place.projections.is_empty()
+                            || function.locals.get(local.0 as usize).is_none_or(|slot| {
+                                slot.ty != call.pointee_type
+                                    || !slot.temporary
+                                    || !slot.address_taken
+                            })
+                        {
+                            return Err("MIR call borrow temporary provenance invalid".into());
+                        }
+                    }
+                }
+            }
+        }
+        Rvalue::EndBorrow { call, reference } => {
+            validate_operand(function, reference, initialized)?;
+            if destination != TypeId::BOOL
+                || operand_type(function, reference)? != call.reference_type
+                || types.reference_info(call.reference_type) != Some((call.pointee_type, false))
+            {
+                return Err("MIR EndBorrow metadata/type contract invalid".into());
             }
         }
         Rvalue::AlgebraicProduct {
@@ -6980,7 +7309,7 @@ fn validate_rvalue(
                 ));
             }
         }
-        Rvalue::Call { callee, args } => {
+        Rvalue::Call { callee, args, .. } => {
             let signature = signatures
                 .get(callee.0 as usize)
                 .filter(|signature| signature.id == *callee)

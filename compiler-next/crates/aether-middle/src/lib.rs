@@ -10,10 +10,11 @@ pub use mathematical::{MathAxis, MathInput, MathStep, MathStride};
 mod ssa;
 
 pub use mir::{
-    BasicBlock, BinaryOp, BlockId, CollectionLoop, ElementInitialization, FinallyRegion, FlowMir,
-    MirDropFlag, MirFunction, MirInstruction, MirLocal, MirParameter, Operand, Place, PlaceBase,
-    PlaceProjection, PushInit, RangeLoop, RangeOperandRole, Relocate, RelocationRange, Rvalue,
-    SlotPlace, TakeState, Terminator, TrapKind, UnaryOp, VerifiedMir, lower_hir, verify_mir,
+    BasicBlock, BinaryOp, BlockId, CallBorrowMetadata, CallBorrowSourceKind, CollectionLoop,
+    ElementInitialization, FinallyRegion, FlowMir, MirDropFlag, MirFunction, MirInstruction,
+    MirLocal, MirParameter, Operand, Place, PlaceBase, PlaceProjection, PushInit, RangeLoop,
+    RangeOperandRole, Relocate, RelocationRange, Rvalue, SlotPlace, TakeState, Terminator,
+    TrapKind, UnaryOp, VerifiedMir, lower_hir, verify_mir,
 };
 pub use ssa::{
     ArcElision, ClassDevirtualization, Devirtualization, OopOptimizations, Phi, SsaBlock,

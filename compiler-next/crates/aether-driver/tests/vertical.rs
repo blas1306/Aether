@@ -1094,10 +1094,6 @@ fn vertical9_reference_diagnostics_fail_closed() {
             "int identity(int x){return x;}int main(){ref int r=&identity(1);return 0;}",
             "E0270",
         ),
-        (
-            "int read(ref int x){return *x;}int main(){int x=1;return read(x);}",
-            "E0214",
-        ),
         ("int main(){ref int r=&missing;return 0;}", "E0202"),
     ] {
         let Err(mut diagnostics) = compile_source(&SourceFile::new("v9-error.ae", text), &[])

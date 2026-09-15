@@ -143,6 +143,12 @@ pub fn verify_text_op<O>(
         .into_iter()
         .map(&operand_ty)
         .collect::<Result<Vec<_>, _>>()?;
+    let string_ref = types
+        .id_of(TypeData::Reference {
+            pointee: TypeId::STRING,
+            mutable: false,
+        })
+        .ok_or("canonical ref string type is missing")?;
     let (string_count, expected) = match op {
         TextOp::CodePointCount { .. } => (1, TypeId::USIZE),
         TextOp::Contains { .. } | TextOp::StartsWith { .. } | TextOp::EndsWith { .. } => {
@@ -161,10 +167,7 @@ pub fn verify_text_op<O>(
                 .ok_or("canonical List<string> type is missing")?,
         ),
     };
-    if tys
-        .iter()
-        .take(string_count)
-        .any(|ty| *ty != TypeId::STRING)
+    if tys.iter().take(string_count).any(|ty| *ty != string_ref)
         || tys.iter().skip(string_count).any(|ty| *ty != scalar_ty)
     {
         return Err("Text operation operand type is invalid".into());

@@ -346,7 +346,7 @@ pub(super) fn verify(
                         consume(o, &mut state)?;
                     }
                 }
-                SsaOp::Call { callee, args } => {
+                SsaOp::Call { callee, args, .. } => {
                     if types
                         .class_method(signatures[callee.0 as usize].function_id)
                         .is_some()

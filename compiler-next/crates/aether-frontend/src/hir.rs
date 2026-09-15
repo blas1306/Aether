@@ -116,6 +116,9 @@ pub struct FinallyId(pub u32);
 /// Function-local source loop identity, assigned in lexical discovery order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LoopId(pub u32);
+/// Function-local call identity, assigned in source evaluation order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CallSiteId(pub u32);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParameterSignature {
     pub name: String,
@@ -915,6 +918,16 @@ pub struct HirExpr {
     pub span: Span,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CallBorrowOrigin {
+    Implicit,
+    Explicit,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CallBorrowSource {
+    Place(HirPlace),
+    Temporary(Box<HirExpr>),
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FloatValue {
     Float32(u32),
     Float64(u64),
@@ -994,7 +1007,10 @@ pub enum HirExprKind {
     /// Fundamental immutable string lifecycle and content operations.
     String(Box<crate::StringOp<HirExpr>>),
     /// Canonical standard-library text operations, separate from core `StringOp`.
-    Text(Box<crate::TextOp<HirExpr>>),
+    Text {
+        call_site: CallSiteId,
+        op: Box<crate::TextOp<HirExpr>>,
+    },
     /// A fully resolved, canonically identified Core function call.
     Core(Box<crate::CoreCall<HirExpr>>),
     AlgebraicValue {
@@ -1059,6 +1075,15 @@ pub enum HirExprKind {
     Borrow {
         place: HirPlace,
         mutable: bool,
+    },
+    /// Exact `T -> ref T` adaptation confined to one resolved call argument.
+    CallScopedSharedBorrow {
+        call_site: CallSiteId,
+        argument_index: u32,
+        pointee_type: TypeId,
+        reference_type: TypeId,
+        source: CallBorrowSource,
+        origin: CallBorrowOrigin,
     },
     BufferInit {
         element_type: TypeId,
@@ -1167,6 +1192,7 @@ pub enum HirExprKind {
         mutable: bool,
     },
     Call {
+        call_site: CallSiteId,
         callee: HirCallTarget,
         type_arguments: Vec<TypeId>,
         args: Vec<HirExpr>,
@@ -3136,6 +3162,11 @@ fn infer_generic_arguments(
     actual: TypeId,
     inferred: &mut BTreeMap<GenericParamId, TypeId>,
 ) -> Result<(), Vec<Diagnostic>> {
+    // BORROW-ERGONOMICS-V1 never infers through the later `T -> ref T`
+    // adaptation. Another argument (or explicit application) must determine T.
+    if types.reference_info(pattern).is_some() && types.reference_info(actual).is_none() {
+        return Ok(());
+    }
     if let Some(parameter) = types.generic_param(pattern) {
         if let Some(previous) = inferred.insert(parameter, actual)
             && previous != actual
@@ -4229,9 +4260,10 @@ impl Monomorphizer<'_> {
             HirExprKind::String(op) => HirExprKind::String(Box::new(
                 op.clone().map(|e| self.substitute_expr(&e, substitution))?,
             )),
-            HirExprKind::Text(op) => HirExprKind::Text(Box::new(
-                op.clone().map(|e| self.substitute_expr(&e, substitution))?,
-            )),
+            HirExprKind::Text { call_site, op } => HirExprKind::Text {
+                call_site: *call_site,
+                op: Box::new(op.clone().map(|e| self.substitute_expr(&e, substitution))?),
+            },
             HirExprKind::Core(op) => HirExprKind::Core(Box::new(
                 op.clone().map(|e| self.substitute_expr(&e, substitution))?,
             )),
@@ -4262,6 +4294,32 @@ impl Monomorphizer<'_> {
             HirExprKind::Borrow { place, mutable } => HirExprKind::Borrow {
                 place: self.substitute_place(place, substitution)?,
                 mutable: *mutable,
+            },
+            HirExprKind::CallScopedSharedBorrow {
+                call_site,
+                argument_index,
+                pointee_type,
+                reference_type,
+                source,
+                origin,
+            } => HirExprKind::CallScopedSharedBorrow {
+                call_site: *call_site,
+                argument_index: *argument_index,
+                pointee_type: self.substitute_type(*pointee_type, substitution, expression.span)?,
+                reference_type: self.substitute_type(
+                    *reference_type,
+                    substitution,
+                    expression.span,
+                )?,
+                source: match source {
+                    CallBorrowSource::Place(place) => {
+                        CallBorrowSource::Place(self.substitute_place(place, substitution)?)
+                    }
+                    CallBorrowSource::Temporary(initializer) => CallBorrowSource::Temporary(
+                        Box::new(self.substitute_expr(initializer, substitution)?),
+                    ),
+                },
+                origin: *origin,
             },
             HirExprKind::BufferInit {
                 element_type,
@@ -4427,6 +4485,7 @@ impl Monomorphizer<'_> {
                 mutable: *mutable,
             },
             HirExprKind::Call {
+                call_site,
                 callee,
                 type_arguments,
                 args,
@@ -4452,6 +4511,7 @@ impl Monomorphizer<'_> {
                     expression.span,
                 )?;
                 HirExprKind::Call {
+                    call_site: *call_site,
                     callee: HirCallTarget::Instance(instance),
                     type_arguments: concrete_arguments,
                     args: args
@@ -4971,6 +5031,7 @@ fn analyze_function(
         inside_finally: 0,
         next_finally: 0,
         next_loop: 0,
+        next_call_site: 0,
         target,
     };
     let mut parameters = vec![];
@@ -5758,7 +5819,7 @@ impl OwnershipAnalysis<'_> {
                 }
                 Ok(())
             }
-            HirExprKind::Text(op) => {
+            HirExprKind::Text { op, .. } => {
                 for operand in op.operands() {
                     self.expr(operand)?;
                 }
@@ -5770,6 +5831,10 @@ impl OwnershipAnalysis<'_> {
                 }
                 Ok(())
             }
+            HirExprKind::CallScopedSharedBorrow { source, .. } => match source {
+                CallBorrowSource::Place(place) => self.place(place, expr.span),
+                CallBorrowSource::Temporary(initializer) => self.expr(initializer),
+            },
             HirExprKind::Move(local) => self.move_local(*local, expr.span),
             HirExprKind::Local(local) => {
                 if self.types.guarantees_copy(expr.ty) {
@@ -6244,7 +6309,11 @@ impl OwnershipAnalysis<'_> {
             | HirExprKind::View { source: place, .. }
             | HirExprKind::MatrixAxisVectorView { source: place, .. }
             | HirExprKind::VectorView { source: place, .. }
-            | HirExprKind::MatrixView { source: place, .. } => self.owner_of_place(place),
+            | HirExprKind::MatrixView { source: place, .. }
+            | HirExprKind::CallScopedSharedBorrow {
+                source: CallBorrowSource::Place(place),
+                ..
+            } => self.owner_of_place(place),
             HirExprKind::Load(place) if self.types.mathematical_view_info(expr.ty).is_some() => {
                 self.owner_of_place(place)
             }
@@ -6274,7 +6343,11 @@ impl OwnershipAnalysis<'_> {
     fn storage_index(&self, expr: &HirExpr) -> Option<u64> {
         match &expr.kind {
             HirExprKind::Local(local) => self.borrow_indices[local.0 as usize],
-            HirExprKind::Borrow { place, .. } => {
+            HirExprKind::Borrow { place, .. }
+            | HirExprKind::CallScopedSharedBorrow {
+                source: CallBorrowSource::Place(place),
+                ..
+            } => {
                 if let HirPlaceBase::Local(local) = place.base
                     && self
                         .types
@@ -6300,7 +6373,11 @@ impl OwnershipAnalysis<'_> {
 
     fn is_list_storage_borrow(&self, expr: &HirExpr) -> bool {
         match &expr.kind {
-            HirExprKind::Borrow { place, .. } => place
+            HirExprKind::Borrow { place, .. }
+            | HirExprKind::CallScopedSharedBorrow {
+                source: CallBorrowSource::Place(place),
+                ..
+            } => place
                 .projections
                 .iter()
                 .any(|projection| matches!(projection, HirPlaceProjection::Index { .. })),
@@ -6487,6 +6564,7 @@ struct Analyzer<'a> {
     inside_finally: usize,
     next_finally: u32,
     next_loop: u32,
+    next_call_site: u32,
 }
 #[derive(Clone)]
 struct Checked {
@@ -6499,6 +6577,14 @@ enum ConstantValue {
     Float(FloatValue),
 }
 impl Analyzer<'_> {
+    fn call_site(&mut self) -> CallSiteId {
+        let id = CallSiteId(self.next_call_site);
+        self.next_call_site = self
+            .next_call_site
+            .checked_add(1)
+            .expect("call site count fits u32");
+        id
+    }
     fn resolve_source_type(&mut self, ty: &AstType) -> Result<TypeId, Vec<Diagnostic>> {
         let resolved = resolve_type_in_module(
             ty,
@@ -9754,61 +9840,83 @@ impl Analyzer<'_> {
         if function == "scalarOffset" {
             return self.struct_init(scalar_ty, "Text.scalarOffset", args, span);
         }
+        let call_site = self.call_site();
+        let string_ref = self.types.intern_reference(TypeId::STRING, false);
+        let mut adapted = Vec::with_capacity(args.len());
+        let string_count = match function {
+            "codePointCount" | "trim" | "substring" => 1,
+            "contains" | "startsWith" | "endsWith" | "find" | "findFrom" | "split" => 2,
+            _ => unreachable!(),
+        };
+        for (index, argument) in args.iter().enumerate() {
+            let parameter = if index < string_count {
+                string_ref
+            } else {
+                scalar_ty
+            };
+            adapted.push(self.adapt_call_argument(
+                argument,
+                parameter,
+                call_site,
+                u32::try_from(index).expect("argument index fits u32"),
+                None,
+            )?);
+        }
         let (op, ty) = match function {
             "codePointCount" => (
                 crate::TextOp::CodePointCount {
-                    value: self.string_borrow_operand(&args[0])?,
+                    value: adapted[0].clone(),
                 },
                 TypeId::USIZE,
             ),
             "contains" => (
                 crate::TextOp::Contains {
-                    value: self.string_borrow_operand(&args[0])?,
-                    needle: self.string_borrow_operand(&args[1])?,
+                    value: adapted[0].clone(),
+                    needle: adapted[1].clone(),
                 },
                 TypeId::BOOL,
             ),
             "startsWith" => (
                 crate::TextOp::StartsWith {
-                    value: self.string_borrow_operand(&args[0])?,
-                    prefix: self.string_borrow_operand(&args[1])?,
+                    value: adapted[0].clone(),
+                    prefix: adapted[1].clone(),
                 },
                 TypeId::BOOL,
             ),
             "endsWith" => (
                 crate::TextOp::EndsWith {
-                    value: self.string_borrow_operand(&args[0])?,
-                    suffix: self.string_borrow_operand(&args[1])?,
+                    value: adapted[0].clone(),
+                    suffix: adapted[1].clone(),
                 },
                 TypeId::BOOL,
             ),
             "find" => (
                 crate::TextOp::Find {
-                    value: self.string_borrow_operand(&args[0])?,
-                    needle: self.string_borrow_operand(&args[1])?,
+                    value: adapted[0].clone(),
+                    needle: adapted[1].clone(),
                     start: None,
                 },
                 find_ty,
             ),
             "findFrom" => (
                 crate::TextOp::Find {
-                    value: self.string_borrow_operand(&args[0])?,
-                    needle: self.string_borrow_operand(&args[1])?,
-                    start: Some(self.expression(&args[2], Some(scalar_ty))?.expr),
+                    value: adapted[0].clone(),
+                    needle: adapted[1].clone(),
+                    start: Some(adapted[2].clone()),
                 },
                 find_ty,
             ),
             "substring" => (
                 crate::TextOp::Substring {
-                    value: self.string_borrow_operand(&args[0])?,
-                    start: self.expression(&args[1], Some(scalar_ty))?.expr,
-                    end: self.expression(&args[2], Some(scalar_ty))?.expr,
+                    value: adapted[0].clone(),
+                    start: adapted[1].clone(),
+                    end: adapted[2].clone(),
                 },
                 TypeId::STRING,
             ),
             "trim" => (
                 crate::TextOp::Trim {
-                    value: self.string_borrow_operand(&args[0])?,
+                    value: adapted[0].clone(),
                 },
                 TypeId::STRING,
             ),
@@ -9816,8 +9924,8 @@ impl Analyzer<'_> {
                 let list = self.types.intern_list(TypeId::STRING);
                 (
                     crate::TextOp::Split {
-                        value: self.string_borrow_operand(&args[0])?,
-                        separator: self.string_borrow_operand(&args[1])?,
+                        value: adapted[0].clone(),
+                        separator: adapted[1].clone(),
                     },
                     list,
                 )
@@ -9826,7 +9934,10 @@ impl Analyzer<'_> {
         };
         Ok(Checked {
             expr: HirExpr {
-                kind: HirExprKind::Text(Box::new(op)),
+                kind: HirExprKind::Text {
+                    call_site,
+                    op: Box::new(op),
+                },
                 ty,
                 span,
             },
@@ -10068,15 +10179,18 @@ impl Analyzer<'_> {
             .types
             .substitute(s.return_type, &substitution)
             .map_err(|parameter| vec![incomplete_substitution(parameter, span)])?;
+        let call_site = self.call_site();
         let mut out = vec![];
         for (index, (a, concrete_ty)) in args.iter().zip(concrete_parameters).enumerate() {
-            let checked = if let Some(values) = &prechecked {
-                self.coerce(values[index].clone(), Some(concrete_ty))
-            } else {
-                self.expression(a, Some(concrete_ty))
-            };
-            match checked {
-                Ok(x) => out.push(x.expr),
+            let checked = prechecked.as_ref().map(|values| values[index].clone());
+            match self.adapt_call_argument(
+                a,
+                concrete_ty,
+                call_site,
+                u32::try_from(index).expect("argument index fits u32"),
+                checked,
+            ) {
+                Ok(x) => out.push(x),
                 Err(mut ds) => {
                     if let Some(d) = ds.first_mut() {
                         d.code = "E0214";
@@ -10094,6 +10208,7 @@ impl Analyzer<'_> {
         Ok(Checked {
             expr: HirExpr {
                 kind: HirExprKind::Call {
+                    call_site,
                     callee: HirCallTarget::Declaration(id),
                     type_arguments,
                     args: out,
@@ -10103,6 +10218,136 @@ impl Analyzer<'_> {
             },
             constant: None,
         })
+    }
+
+    fn adapt_call_argument(
+        &mut self,
+        source: &AstExpr,
+        parameter_type: TypeId,
+        call_site: CallSiteId,
+        argument_index: u32,
+        prechecked: Option<Checked>,
+    ) -> Result<HirExpr, Vec<Diagnostic>> {
+        let reference = self.types.reference_info(parameter_type);
+        if let Some((pointee, false)) = reference
+            && let Ok(place) = self.resolve_expr_place(source, false)
+            && place.ty == pointee
+        {
+            self.mark_place_address_taken(&place);
+            return Ok(HirExpr {
+                kind: HirExprKind::CallScopedSharedBorrow {
+                    call_site,
+                    argument_index,
+                    pointee_type: pointee,
+                    reference_type: parameter_type,
+                    source: CallBorrowSource::Place(place),
+                    origin: CallBorrowOrigin::Implicit,
+                },
+                ty: parameter_type,
+                span: source.span,
+            });
+        }
+        let checked = if let Some(checked) = prechecked {
+            checked
+        } else if let Some((pointee, false)) = reference {
+            if matches!(
+                source.kind,
+                AstExprKind::Unary {
+                    op: AstUnaryOp::BorrowShared,
+                    ..
+                }
+            ) || self
+                .resolve_expr_place(source, false)
+                .is_ok_and(|place| place.ty == parameter_type)
+            {
+                self.expression(source, Some(parameter_type))?
+            } else {
+                self.expression(source, Some(pointee))?
+            }
+        } else if reference.is_some_and(|(_, mutable)| mutable)
+            && !matches!(
+                source.kind,
+                AstExprKind::Unary {
+                    op: AstUnaryOp::BorrowMutable,
+                    ..
+                }
+            )
+        {
+            self.expression(source, None)?
+        } else {
+            self.expression(source, Some(parameter_type))?
+        };
+
+        if checked.expr.ty == parameter_type {
+            if let (
+                Some((pointee, false)),
+                HirExprKind::Borrow {
+                    place,
+                    mutable: false,
+                },
+            ) = (reference, &checked.expr.kind)
+            {
+                return Ok(HirExpr {
+                    kind: HirExprKind::CallScopedSharedBorrow {
+                        call_site,
+                        argument_index,
+                        pointee_type: pointee,
+                        reference_type: parameter_type,
+                        source: CallBorrowSource::Place(place.clone()),
+                        origin: CallBorrowOrigin::Explicit,
+                    },
+                    ty: parameter_type,
+                    span: checked.expr.span,
+                });
+            }
+            return Ok(checked.expr);
+        }
+
+        if let Some((pointee, false)) = reference {
+            if checked.expr.ty == pointee
+                && !matches!(checked.expr.kind, HirExprKind::Coerce { .. })
+            {
+                return Ok(HirExpr {
+                    kind: HirExprKind::CallScopedSharedBorrow {
+                        call_site,
+                        argument_index,
+                        pointee_type: pointee,
+                        reference_type: parameter_type,
+                        source: CallBorrowSource::Temporary(Box::new(checked.expr)),
+                        origin: CallBorrowOrigin::Implicit,
+                    },
+                    ty: parameter_type,
+                    span: source.span,
+                });
+            }
+            return Err(vec![type_error(
+                format!(
+                    "implicit shared argument borrow requires exact {}; found {}",
+                    self.type_name(pointee),
+                    self.type_name(checked.expr.ty)
+                ),
+                source.span,
+            )]);
+        }
+        if reference.is_some_and(|(_, mutable)| mutable) {
+            return Err(vec![type_error(
+                "implicit mutable argument borrows are not supported; use `&mut place`",
+                source.span,
+            )]);
+        }
+        self.coerce(checked, Some(parameter_type))
+            .map(|value| value.expr)
+    }
+
+    fn mark_place_address_taken(&mut self, place: &HirPlace) {
+        if let HirPlaceBase::Local(local) = place.base
+            && !place
+                .projections
+                .iter()
+                .any(|projection| matches!(projection, HirPlaceProjection::Index { .. }))
+        {
+            self.locals[local.0 as usize].address_taken = true;
+        }
     }
     // Operand places are borrowed before ordinary value resolution can insert Move.
     // This preserves projected owners and explicit dereferences as well as locals.
@@ -11914,9 +12159,15 @@ fn verify_expr(
                 return Err(fail("HIR string Alias requires an lvalue".into()));
             }
         }
-        HirExprKind::Text(op) => {
-            for operand in op.operands() {
-                verify_expr(operand, f, sigs, structs, enums, types, fail)?;
+        HirExprKind::Text { call_site, op } => {
+            for (index, operand) in op.operands().into_iter().enumerate() {
+                if matches!(operand.kind, HirExprKind::CallScopedSharedBorrow { .. }) {
+                    verify_call_borrow(
+                        operand, *call_site, index, f, sigs, structs, enums, types, fail,
+                    )?;
+                } else {
+                    verify_expr(operand, f, sigs, structs, enums, types, fail)?;
+                }
             }
             crate::verify_text_op(op, e.ty, types, structs, enums, |operand| Ok(operand.ty))
                 .map_err(fail)?;
@@ -11972,6 +12223,11 @@ fn verify_expr(
                     "HIR borrowed local is not marked address-taken".into(),
                 ));
             }
+        }
+        HirExprKind::CallScopedSharedBorrow { .. } => {
+            return Err(fail(
+                "HIR call-scoped borrow appears outside its exact argument slot".into(),
+            ));
         }
         HirExprKind::BufferInit {
             element_type,
@@ -12276,6 +12532,7 @@ fn verify_expr(
             }
         }
         HirExprKind::Call {
+            call_site,
             callee,
             type_arguments,
             args,
@@ -12342,8 +12599,12 @@ fn verify_expr(
             if return_type != e.ty || args.len() != parameters.len() {
                 return Err(fail("HIR call mismatch".into()));
             }
-            for (a, ty) in args.iter().zip(parameters) {
-                verify_expr(a, f, sigs, structs, enums, types, fail)?;
+            for (index, (a, ty)) in args.iter().zip(parameters).enumerate() {
+                if matches!(a.kind, HirExprKind::CallScopedSharedBorrow { .. }) {
+                    verify_call_borrow(a, *call_site, index, f, sigs, structs, enums, types, fail)?;
+                } else {
+                    verify_expr(a, f, sigs, structs, enums, types, fail)?;
+                }
                 if a.ty != ty {
                     return Err(fail("HIR argument mismatch".into()));
                 }
@@ -12769,6 +13030,79 @@ fn verify_expr(
             }
         }
         _ => {}
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_call_borrow(
+    expression: &HirExpr,
+    expected_site: CallSiteId,
+    expected_index: usize,
+    function: &VerificationFunction<'_>,
+    signatures: VerificationSignatures<'_>,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+    types: &TypeArena,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let HirExprKind::CallScopedSharedBorrow {
+        call_site,
+        argument_index,
+        pointee_type,
+        reference_type,
+        source,
+        origin,
+    } = &expression.kind
+    else {
+        return Err(fail("HIR argument is not a call borrow".into()));
+    };
+    if *call_site != expected_site
+        || *argument_index as usize != expected_index
+        || expression.ty != *reference_type
+        || types.reference_info(*reference_type) != Some((*pointee_type, false))
+    {
+        return Err(fail(
+            "HIR call borrow identity/index/pointee/reference contract invalid".into(),
+        ));
+    }
+    match source {
+        CallBorrowSource::Place(place) => {
+            verify_place(place, function, signatures, structs, enums, types, fail)?;
+            if place.ty != *pointee_type {
+                return Err(fail("HIR call borrow Place type mismatch".into()));
+            }
+            if let HirPlaceBase::Local(local) = place.base
+                && !place
+                    .projections
+                    .iter()
+                    .any(|projection| matches!(projection, HirPlaceProjection::Index { .. }))
+                && !function.locals[local.0 as usize].address_taken
+            {
+                return Err(fail(
+                    "HIR call-borrowed local is not marked address-taken".into(),
+                ));
+            }
+        }
+        CallBorrowSource::Temporary(initializer) => {
+            verify_expr(
+                initializer,
+                function,
+                signatures,
+                structs,
+                enums,
+                types,
+                fail,
+            )?;
+            if initializer.ty != *pointee_type
+                || matches!(initializer.kind, HirExprKind::Coerce { .. })
+                || *origin != CallBorrowOrigin::Implicit
+            {
+                return Err(fail(
+                    "HIR call temporary requires one exact unconverted T initializer".into(),
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -13209,6 +13543,57 @@ mod tests {
                 0 => *loop_id = LoopId(9),
                 1 => *item_type = TypeId::INT32,
                 2 => step.kind = HirExprKind::Int(0),
+                _ => unreachable!(),
+            }
+            assert!(verify_hir(&bad).is_err());
+        }
+    }
+    #[test]
+    fn call_scoped_shared_borrow_hir_corruptions_fail_closed() {
+        let hir =
+            check("int read(ref int x){return *x;}int main(){int x=7;int y=read(x);return y;}")
+                .unwrap();
+        verify_hir(&hir).unwrap();
+        for case in 0..4 {
+            let mut bad = hir.clone();
+            let HirStmtKind::Local { initializer, .. } =
+                &mut bad.functions[1].body.statements[1].kind
+            else {
+                panic!("expected call result local")
+            };
+            let HirExprKind::Call {
+                call_site, args, ..
+            } = &mut initializer.kind
+            else {
+                panic!("expected direct call")
+            };
+            let argument_span = args[0].span;
+            let HirExprKind::CallScopedSharedBorrow {
+                call_site: borrow_site,
+                argument_index,
+                pointee_type: _,
+                reference_type,
+                source,
+                origin,
+            } = &mut args[0].kind
+            else {
+                panic!("expected implicit borrow")
+            };
+            match case {
+                0 => *borrow_site = CallSiteId(call_site.0 + 1),
+                1 => *argument_index = 1,
+                2 => *reference_type = TypeId::BOOL,
+                3 => {
+                    let CallBorrowSource::Place(place) = source else {
+                        unreachable!()
+                    };
+                    *source = CallBorrowSource::Temporary(Box::new(HirExpr {
+                        kind: HirExprKind::Int(7),
+                        ty: place.ty,
+                        span: argument_span,
+                    }));
+                    *origin = CallBorrowOrigin::Explicit;
+                }
                 _ => unreachable!(),
             }
             assert!(verify_hir(&bad).is_err());
