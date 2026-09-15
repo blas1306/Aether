@@ -6,6 +6,9 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from pprint import pformat
 from io import StringIO
+import os
+import shutil
+import subprocess
 import sys
 from typing import TYPE_CHECKING, TextIO
 
@@ -50,6 +53,8 @@ EXIT_TOOLCHAIN_ERROR = 3
 EXIT_INTERNAL_COMPILER_ERROR = 70
 EXIT_INTERRUPTED = 130
 
+_COMPILERS = ("legacy", "next")
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -64,6 +69,12 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("file", nargs="?", help="Aether source file to execute.")
+    parser.add_argument(
+        "--compiler",
+        choices=_COMPILERS,
+        default="legacy",
+        help="Compiler implementation to use (default: legacy).",
+    )
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--repl", action="store_true", help="Start a persistent Aether REPL.")
     modes.add_argument(
@@ -228,6 +239,112 @@ def build_native_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _extract_compiler_selection(
+    argv: Sequence[str], *, stderr: TextIO
+) -> tuple[str, list[str]] | None:
+    """Remove the temporary launcher selector without interpreting compiler args."""
+    compiler = "legacy"
+    remaining: list[str] = []
+    seen = False
+    cursor = 0
+    while cursor < len(argv):
+        argument = argv[cursor]
+        if argument == "--":
+            remaining.extend(argv[cursor:])
+            break
+        if argument == "--compiler":
+            if seen:
+                print("aether: error: --compiler may only be specified once.", file=stderr)
+                return None
+            seen = True
+            cursor += 1
+            if cursor == len(argv):
+                print(
+                    "aether: error: argument --compiler: expected one argument",
+                    file=stderr,
+                )
+                return None
+            compiler = argv[cursor]
+        elif argument.startswith("--compiler="):
+            if seen:
+                print("aether: error: --compiler may only be specified once.", file=stderr)
+                return None
+            seen = True
+            compiler = argument.partition("=")[2]
+        else:
+            remaining.append(argument)
+        cursor += 1
+
+    if compiler not in _COMPILERS:
+        choices = ", ".join(repr(choice) for choice in _COMPILERS)
+        print(
+            f"aether: error: argument --compiler: invalid choice: {compiler!r} "
+            f"(choose from {choices})",
+            file=stderr,
+        )
+        return None
+    return compiler, remaining
+
+
+def _resolve_next_compiler() -> Path | None:
+    """Find the installed binary or this checkout's existing Cargo artifact."""
+    executable_name = "aether-next.exe" if os.name == "nt" else "aether-next"
+    candidates = [Path(sys.executable).resolve().parent / executable_name]
+    installed = shutil.which(executable_name)
+    if installed is not None:
+        candidates.append(Path(installed))
+    repository = Path(__file__).resolve().parents[2]
+    candidates.extend(
+        repository / "compiler-next" / "target" / profile / executable_name
+        for profile in ("release", "debug")
+    )
+    for candidate in candidates:
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate.resolve()
+    return None
+
+
+def _main_next(
+    argv: Sequence[str],
+    *,
+    stdin: TextIO,
+    stdout: TextIO,
+    stderr: TextIO,
+) -> int:
+    executable = _resolve_next_compiler()
+    if executable is None:
+        print(
+            "aether: error: compiler-next executable `aether-next` was not found "
+            "in the Aether installation or repository.",
+            file=stderr,
+        )
+        return EXIT_TOOLCHAIN_ERROR
+
+    command = [str(executable), "run", *argv]
+    kwargs: dict[str, object] = {"check": False}
+    captured_stdout = stdout is not sys.stdout
+    captured_stderr = stderr is not sys.stderr
+    if stdin is not sys.stdin:
+        kwargs["input"] = stdin.read()
+        kwargs["text"] = True
+    if captured_stdout:
+        kwargs["stdout"] = subprocess.PIPE
+        kwargs["text"] = True
+    if captured_stderr:
+        kwargs["stderr"] = subprocess.PIPE
+        kwargs["text"] = True
+    try:
+        completed = subprocess.run(command, **kwargs)
+    except OSError as exc:
+        print(f"aether: error: could not execute compiler-next: {exc}", file=stderr)
+        return EXIT_TOOLCHAIN_ERROR
+    if captured_stdout and completed.stdout is not None:
+        stdout.write(completed.stdout)
+    if captured_stderr and completed.stderr is not None:
+        stderr.write(completed.stderr)
+    return completed.returncode
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -239,6 +356,17 @@ def main(
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
     argv_list = list(sys.argv[1:] if argv is None else argv)
+    selection = _extract_compiler_selection(argv_list, stderr=stderr)
+    if selection is None:
+        return EXIT_USAGE_ERROR
+    compiler, argv_list = selection
+    if compiler == "next":
+        return _main_next(
+            argv_list,
+            stdin=stdin,
+            stdout=stdout,
+            stderr=stderr,
+        )
     if argv_list and argv_list[0] == "bench":
         return _main_bench(argv_list[1:], stdout=stdout, stderr=stderr)
     if argv_list and argv_list[0] == "build":

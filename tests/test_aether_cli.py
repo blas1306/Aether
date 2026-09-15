@@ -133,6 +133,90 @@ def _changed_constant_folding_iteration_titles() -> list[str]:
     ]
 
 
+def test_compiler_selector_defaults_to_legacy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    program = tmp_path / "legacy_default.ae"
+    program.write_text('println("legacy");\n', encoding="utf-8")
+    monkeypatch.setattr(
+        "aether.cli._main_next",
+        lambda *_args, **_kwargs: pytest.fail("compiler-next was selected"),
+    )
+
+    assert run_cli(["--backend=ast", str(program)]) == (
+        EXIT_SUCCESS,
+        "legacy\n",
+        "",
+    )
+
+
+def test_compiler_selector_accepts_explicit_legacy(tmp_path: Path) -> None:
+    program = tmp_path / "legacy_explicit.ae"
+    program.write_text('println("legacy");\n', encoding="utf-8")
+
+    assert run_cli([str(program), "--compiler", "legacy", "--backend=ast"]) == (
+        EXIT_SUCCESS,
+        "legacy\n",
+        "",
+    )
+
+
+def test_compiler_selector_delegates_to_next_and_preserves_process_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = Path("/opt/aether/bin/aether-next")
+    calls: list[tuple[list[str], dict[str, object]]] = []
+    monkeypatch.setattr("aether.cli._resolve_next_compiler", lambda: executable)
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 23, "next stdout\n", "next stderr\n")
+
+    monkeypatch.setattr("aether.cli.subprocess.run", fake_run)
+
+    result = run_cli(["main.ae", "--compiler=next", "--timings"])
+
+    assert result == (23, "next stdout\n", "next stderr\n")
+    assert calls[0][0] == [str(executable), "run", "main.ae", "--timings"]
+
+
+def test_compiler_selector_rejects_unknown_value() -> None:
+    exit_code, stdout, stderr = run_cli(["main.ae", "--compiler", "experimental"])
+
+    assert exit_code == EXIT_USAGE_ERROR
+    assert stdout == ""
+    assert "argument --compiler: invalid choice: 'experimental'" in stderr
+    assert "'legacy', 'next'" in stderr
+
+
+def test_next_compiler_preserves_relative_explicit_and_absolute_entry_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executable = Path("/opt/aether/bin/aether-next")
+    commands: list[list[str]] = []
+    monkeypatch.setattr("aether.cli._resolve_next_compiler", lambda: executable)
+    monkeypatch.chdir(tmp_path)
+    entry = tmp_path / "main.ae"
+    entry.write_text("package main; int main() { return 0; }\n", encoding="utf-8")
+
+    def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("aether.cli.subprocess.run", fake_run)
+
+    for path in ("main.ae", "./main.ae", str(entry.resolve())):
+        assert run_cli([path, "--compiler", "next"]) == (EXIT_SUCCESS, "", "")
+
+    assert commands == [
+        [str(executable), "run", "main.ae"],
+        [str(executable), "run", "./main.ae"],
+        [str(executable), "run", str(entry.resolve())],
+    ]
+
+
 def test_executes_valid_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     program = tmp_path / "return_0.ae"
     program.write_text("int main() { return 0; }\n", encoding="utf-8")
@@ -406,6 +490,7 @@ def test_help_describes_direct_execution_and_tools() -> None:
     assert "usage: aether" in stdout
     assert "aether program.ae" in stdout
     assert "--repl" in stdout
+    assert "--compiler {legacy,next}" in stdout
     assert "--tokens" in stdout
     assert "--ast" in stdout
     assert "--backend" in stdout

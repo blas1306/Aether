@@ -166,10 +166,7 @@ struct SourceCandidate {
 #[allow(clippy::cast_possible_truncation, clippy::too_many_lines)]
 fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnostic>> {
     let discovery_started = Instant::now();
-    let source_root = entry_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .to_path_buf();
+    let source_root = source_root_for_entry(entry_path);
     let entry_absolute = entry_path.canonicalize().map_err(|error| {
         vec![io_diagnostic(format!(
             "could not read entry source `{}`: {error}",
@@ -467,6 +464,14 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
         file_load_ns,
         parse_ns,
     })
+}
+
+fn source_root_for_entry(entry_path: &Path) -> PathBuf {
+    entry_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf()
 }
 
 fn catalog_package_header(text: &str) -> Option<Vec<String>> {
@@ -1073,4 +1078,27 @@ fn io_diagnostic(message: impl Into<String>) -> Diagnostic {
         message,
         None,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::source_root_for_entry;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn entry_without_explicit_parent_uses_current_directory_as_source_root() {
+        assert_eq!(
+            source_root_for_entry(Path::new("main.ae")),
+            PathBuf::from(".")
+        );
+        assert_eq!(
+            source_root_for_entry(Path::new("./main.ae")),
+            PathBuf::from(".")
+        );
+
+        let absolute = std::env::temp_dir()
+            .join("aether-source-root")
+            .join("main.ae");
+        assert_eq!(source_root_for_entry(&absolute), absolute.parent().unwrap());
+    }
 }
