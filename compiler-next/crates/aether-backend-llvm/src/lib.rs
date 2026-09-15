@@ -1468,6 +1468,7 @@ fn emit_function(
                     source,
                     index,
                     item_type,
+                    category,
                     ..
                 } => {
                     let (descriptor, source_type) = emit_place_value(
@@ -1494,14 +1495,26 @@ fn emit_function(
                         llvm_operand(index)
                     )
                     .unwrap();
-                    writeln!(
-                        output,
-                        "  %v{} = load {}, ptr %collection{}_slot",
-                        instruction.result.0,
-                        llvm_type(types, *item_type),
-                        instruction.result.0
-                    )
-                    .unwrap();
+                    match category {
+                        aether_frontend::IterationBindingCategory::CopyValue => {
+                            writeln!(
+                                output,
+                                "  %v{} = load {}, ptr %collection{}_slot",
+                                instruction.result.0,
+                                llvm_type(types, *item_type),
+                                instruction.result.0
+                            )
+                            .unwrap();
+                        }
+                        aether_frontend::IterationBindingCategory::SharedElementBorrow => {
+                            writeln!(
+                                output,
+                                "  %v{} = getelementptr inbounds i8, ptr %collection{}_slot, i64 0",
+                                instruction.result.0, instruction.result.0
+                            )
+                            .unwrap();
+                        }
+                    }
                 }
                 SsaOp::Load { place } => {
                     let pointer = emit_place_pointer(

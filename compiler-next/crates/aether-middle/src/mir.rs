@@ -296,7 +296,7 @@ pub enum Rvalue {
         loop_id: LoopId,
         current: Operand,
     },
-    /// Fresh `CopyValue` binding loaded at the collection loop's item block.
+    /// Fresh value load or shared slot borrow at the collection item block.
     CollectionBinding {
         loop_id: LoopId,
         source: Place,
@@ -647,7 +647,7 @@ pub struct MirFunction {
     pub finally_regions: Vec<FinallyRegion>,
     /// Independently checked ITERATION-V1 range protocols.
     pub range_loops: Vec<RangeLoop>,
-    /// Independently checked ITERATION-V2 Array/List Copy protocols.
+    /// Independently checked Array/List iteration protocols.
     pub collection_loops: Vec<CollectionLoop>,
     pub constructor_unwind: Option<aether_frontend::ConstructorUnwindPlan>,
 }
@@ -675,7 +675,7 @@ pub struct RangeLoop {
     pub step_is_implicit: bool,
 }
 
-/// Structural authority for one lowered Array/List Copy loop.
+/// Structural authority for one lowered Array/List loop.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CollectionLoop {
     pub id: LoopId,
@@ -5056,10 +5056,19 @@ fn verify_collection_loops(
             CollectionKind::List => types.list_element(collection.iterable_type),
             _ => None,
         };
+        let valid_binding = match collection.category {
+            IterationBindingCategory::CopyValue => {
+                collection.binding_type == collection.item_type
+                    && types.guarantees_copy(collection.item_type)
+            }
+            IterationBindingCategory::SharedElementBorrow => {
+                !types.guarantees_copy(collection.item_type)
+                    && types.reference_info(collection.binding_type)
+                        == Some((collection.item_type, false))
+            }
+        };
         if actual_item != Some(collection.item_type)
-            || collection.binding_type != collection.item_type
-            || collection.category != IterationBindingCategory::CopyValue
-            || !types.guarantees_copy(collection.item_type)
+            || !valid_binding
             || collection.structural_borrow != (collection.kind == CollectionKind::List)
             || function
                 .locals
@@ -5139,9 +5148,9 @@ fn verify_collection_loops(
                     ref source,
                     index: Operand::Local(index),
                     item_type,
-                    category: IterationBindingCategory::CopyValue,
+                    category,
                     ..
-                } if loop_id == collection.id && source == length_sources[0] && index == collection.index && item_type == collection.item_type)
+                } if loop_id == collection.id && source == length_sources[0] && index == collection.index && item_type == collection.item_type && category == collection.category)
         }).count() != 1
             || !matches!(item.terminator, Some(Terminator::Branch { then_block, else_block, .. }) if then_block == collection.body && else_block == collection.latch)
         {
@@ -5626,6 +5635,17 @@ fn verify_ownership(
         }
     }
     let mut incoming: Vec<Option<Vec<MirOwnerState>>> = vec![None; function.blocks.len()];
+    let borrowed_string_loads = function
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .filter_map(|instruction| {
+            let local = place_root_local(&instruction.destination)?;
+            (matches!(instruction.value, Rvalue::Load(_))
+                && function.locals[local.0 as usize].ty == TypeId::STRING)
+                .then_some(local)
+        })
+        .collect::<BTreeSet<_>>();
     incoming[function.entry.0 as usize] = Some(entry);
     let mut queue = VecDeque::from([function.entry]);
     while let Some(block_id) = queue.pop_front() {
@@ -5641,6 +5661,7 @@ fn verify_ownership(
                         if let Operand::Local(local) = operand
                             && !types.is_copy(function.locals[local.0 as usize].ty)
                             && state[local.0 as usize] != MirOwnerState::Owned
+                            && !borrowed_string_loads.contains(local)
                         {
                             return Err(fail("string operation uses a moved/dropped owner".into()));
                         }
@@ -6175,14 +6196,21 @@ fn validate_rvalue(
             validate_place_read(function, source, structs, types, initialized)?;
             validate_operand(function, index, initialized)?;
             let source_ty = place_type(function, source, structs, types)?;
-            if destination != *item_type
+            let valid_binding = match category {
+                IterationBindingCategory::CopyValue => {
+                    destination == *item_type && types.guarantees_copy(*item_type)
+                }
+                IterationBindingCategory::SharedElementBorrow => {
+                    !types.guarantees_copy(*item_type)
+                        && types.reference_info(destination) == Some((*item_type, false))
+                }
+            };
+            if !valid_binding
                 || operand_type(function, index)? != TypeId::USIZE
                 || types
                     .array_element(source_ty)
                     .or_else(|| types.list_element(source_ty))
                     != Some(*item_type)
-                || !types.guarantees_copy(*item_type)
-                || *category != IterationBindingCategory::CopyValue
                 || function
                     .collection_loops
                     .iter()
@@ -6277,7 +6305,9 @@ fn validate_rvalue(
         }
         Rvalue::Load(place) => {
             validate_place_read(function, place, structs, types, initialized)?;
-            if place_type(function, place, structs, types)? != destination {
+            if place_type(function, place, structs, types)? != destination
+                || (!types.guarantees_copy(destination) && destination != TypeId::STRING)
+            {
                 return Err("MIR place load type mismatch".into());
             }
         }

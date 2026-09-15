@@ -1,0 +1,21 @@
+package iteration_v3_smoke;
+
+Array<string> words() {
+    return {"A\0B", "hé"};
+}
+
+int main() {
+    usize total = 0;
+    for (word in words()) {
+        println("${*word}");
+        total = total + byteLength(*word);
+    }
+    List<string> more = {"x", "yz"};
+    for (ref string word in more) {
+        total = total + byteLength(*word);
+    }
+    if (total == 9) {
+        return 0;
+    }
+    return 1;
+}

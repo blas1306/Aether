@@ -704,7 +704,7 @@ pub enum HirStmtKind {
         step_is_implicit: bool,
         body: HirBlock,
     },
-    /// ITERATION-V2 index loop over an exact Array<T> or List<T> with Copy T.
+    /// Index loop over an exact Array<T> or List<T>.
     ForCollection {
         loop_id: LoopId,
         binding: LocalId,
@@ -750,7 +750,7 @@ pub enum HirStmtKind {
     },
 }
 
-/// Ownership/provenance form of an ITERATION-V2 collection operand.
+/// Ownership/provenance form of a collection iteration operand.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CollectionIterationSource {
     /// An existing collection place remains borrowed for the complete loop.
@@ -763,6 +763,7 @@ pub enum CollectionIterationSource {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IterationBindingCategory {
     CopyValue,
+    SharedElementBorrow,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -4247,7 +4248,7 @@ impl Monomorphizer<'_> {
             }
             HirExprKind::Load(place) => {
                 let place = self.substitute_place(place, substitution)?;
-                if !self.types.guarantees_copy(place.ty) {
+                if !self.types.guarantees_copy(place.ty) && place.ty != TypeId::STRING {
                     return Err(vec![Diagnostic::new(
                         "E0293",
                         Phase::Semantic,
@@ -5104,6 +5105,7 @@ struct OwnershipAnalysis<'a> {
     buffer_lengths: Vec<Option<u64>>,
     matrix_shapes: Vec<Option<(u64, u64)>>,
     storage_ranges: Vec<Vec<(LocalId, Option<u64>)>>,
+    iteration_element_borrowed: Vec<BTreeSet<LocalId>>,
     borrow_indices: Vec<Option<u64>>,
     storage_references: Vec<bool>,
     loop_boundaries: Vec<usize>,
@@ -5126,6 +5128,7 @@ fn synthesize_ownership(
         buffer_lengths: vec![None; locals.len()],
         matrix_shapes: vec![None; locals.len()],
         storage_ranges: Vec::new(),
+        iteration_element_borrowed: Vec::new(),
         borrow_indices: vec![None; locals.len()],
         storage_references: vec![false; locals.len()],
         loop_boundaries: Vec::new(),
@@ -5210,6 +5213,7 @@ impl OwnershipAnalysis<'_> {
         self.borrowed.push(BTreeSet::new());
         self.storage_borrowed.push(BTreeSet::new());
         self.storage_ranges.push(Vec::new());
+        self.iteration_element_borrowed.push(BTreeSet::new());
         for statement in &mut block.statements {
             if matches!(
                 statement.kind,
@@ -5252,6 +5256,22 @@ impl OwnershipAnalysis<'_> {
                 HirStmtKind::Assign { place, value } => {
                     self.expr(value)?;
                     self.place(place, statement.span)?;
+                    if !self.types.guarantees_copy(place.ty)
+                        && place.projections.iter().any(|projection| {
+                            matches!(projection, HirPlaceProjection::Index { .. })
+                        })
+                        && self.owner_of_place(place).is_some_and(|owner| {
+                            self.iteration_element_borrowed
+                                .iter()
+                                .any(|scope| scope.contains(&owner))
+                        })
+                    {
+                        return Err(self.error(
+                            "E0446",
+                            "cannot replace a non-Copy collection slot while the current iteration element borrow is live",
+                            statement.span,
+                        ));
+                    }
                     if let HirPlaceBase::Local(local) = place.base
                         && place.projections.is_empty()
                         && !self.types.guarantees_copy(self.locals[local.0 as usize].ty)
@@ -5529,6 +5549,8 @@ impl OwnershipAnalysis<'_> {
                     self.matrix_shapes.fill(None);
                 }
                 HirStmtKind::ForCollection {
+                    binding,
+                    category,
                     source,
                     structural_borrow,
                     body,
@@ -5561,6 +5583,17 @@ impl OwnershipAnalysis<'_> {
                         self.storage_borrowed.last_mut().unwrap().insert(owner);
                         self.storage_ranges.last_mut().unwrap().push((owner, None));
                     }
+                    if *category == IterationBindingCategory::SharedElementBorrow {
+                        self.provenance[binding.0 as usize] = Some(owner);
+                        self.storage_references[binding.0 as usize] = true;
+                        self.borrowed.last_mut().unwrap().insert(owner);
+                        self.storage_borrowed.last_mut().unwrap().insert(owner);
+                        self.storage_ranges.last_mut().unwrap().push((owner, None));
+                        self.iteration_element_borrowed
+                            .last_mut()
+                            .unwrap()
+                            .insert(owner);
+                    }
                     let before = self.state.clone();
                     let before_lengths = self.buffer_lengths.clone();
                     self.loop_boundaries.push(self.active.len());
@@ -5581,13 +5614,19 @@ impl OwnershipAnalysis<'_> {
                     self.state = before;
                     self.buffer_lengths = before_lengths;
                     self.borrowed.last_mut().unwrap().remove(&owner);
-                    if *structural_borrow {
+                    if *structural_borrow
+                        || *category == IterationBindingCategory::SharedElementBorrow
+                    {
                         self.storage_borrowed.last_mut().unwrap().remove(&owner);
                         self.storage_ranges
                             .last_mut()
                             .unwrap()
                             .retain(|(root, _)| *root != owner);
                     }
+                    self.iteration_element_borrowed
+                        .last_mut()
+                        .unwrap()
+                        .remove(&owner);
                     if temporary {
                         self.state[owner.0 as usize] = OwnerState::Dropped;
                         let removed = self.active.pop();
@@ -5696,9 +5735,11 @@ impl OwnershipAnalysis<'_> {
         self.borrowed.pop();
         self.storage_borrowed.pop();
         self.storage_ranges.pop();
+        self.iteration_element_borrowed.pop();
         if !nested {
             debug_assert!(self.borrowed.is_empty());
             debug_assert!(self.storage_borrowed.is_empty());
+            debug_assert!(self.iteration_element_borrowed.is_empty());
         }
         Ok(())
     }
@@ -5907,6 +5948,22 @@ impl OwnershipAnalysis<'_> {
                 self.storage_ranges.push(Vec::new());
                 for argument in args {
                     self.expr(argument)?;
+                    if self
+                        .types
+                        .reference_info(argument.ty)
+                        .is_some_and(|(_, mutable)| mutable)
+                        && let Some(owner) = self.derived_owner(argument)
+                        && self
+                            .iteration_element_borrowed
+                            .iter()
+                            .any(|scope| scope.contains(&owner))
+                    {
+                        return Err(self.error(
+                            "E0446",
+                            "writable call argument may replace or invalidate the current borrowed iteration element",
+                            argument.span,
+                        ));
+                    }
                     if self
                         .types
                         .reference_info(argument.ty)
@@ -6923,28 +6980,24 @@ impl Analyzer<'_> {
                                     Some(iterable.span),
                                 )]);
                             };
-                        if !self.types.guarantees_copy(item_type) {
-                            return Err(vec![Diagnostic::new(
-                                "E0443",
-                                Phase::Semantic,
-                                DiagnosticCategory::Unsupported,
-                                format!(
-                                    "ITERATION-V2 requires a Copy element type; {} needs a future explicit ref binding",
-                                    self.type_name(item_type)
-                                ),
-                                Some(iterable.span),
-                            )]);
-                        }
+                        let (binding_type, category) = if self.types.guarantees_copy(item_type) {
+                            (item_type, IterationBindingCategory::CopyValue)
+                        } else {
+                            (
+                                self.types.intern_reference(item_type, false),
+                                IterationBindingCategory::SharedElementBorrow,
+                            )
+                        };
                         if let Some(binding_ty) = &binding.ty {
                             let resolved = self.resolve_source_type(binding_ty)?;
-                            if resolved != item_type {
+                            if resolved != binding_type {
                                 return Err(vec![Diagnostic::new(
                                     "E0444",
                                     Phase::Semantic,
                                     DiagnosticCategory::Type,
                                     format!(
                                         "for-in binding must be exactly {}; per-element conversion is not permitted",
-                                        self.type_name(item_type)
+                                        self.type_name(binding_type)
                                     ),
                                     Some(binding_ty.span),
                                 )]);
@@ -6954,7 +7007,7 @@ impl Analyzer<'_> {
                         self.locals.push(HirLocal {
                             id: local,
                             name: binding.name.clone(),
-                            ty: item_type,
+                            ty: binding_type,
                             span: binding.span,
                             parameter: false,
                             address_taken: false,
@@ -6973,8 +7026,8 @@ impl Analyzer<'_> {
                             binding: local,
                             iterable_type,
                             item_type,
-                            binding_type: item_type,
-                            category: IterationBindingCategory::CopyValue,
+                            binding_type,
+                            category,
                             source,
                             structural_borrow,
                             body,
@@ -7811,7 +7864,22 @@ impl Analyzer<'_> {
                         });
                     }
                     crate::AstInterpolationFragment::Hole { expression, span } => {
-                        let mut value = self.expression(expression, None)?.expr;
+                        let mut value = match self.resolve_expr_place(expression, false) {
+                            Ok(place) if place.ty == TypeId::STRING => {
+                                let kind = match place.base {
+                                    HirPlaceBase::Local(local) if place.projections.is_empty() => {
+                                        HirExprKind::Local(local)
+                                    }
+                                    _ => HirExprKind::Load(place),
+                                };
+                                HirExpr {
+                                    kind,
+                                    ty: TypeId::STRING,
+                                    span: expression.span,
+                                }
+                            }
+                            _ => self.expression(expression, None)?.expr,
+                        };
                         let ty = value.ty;
                         let conversion = if ty == TypeId::STRING {
                             if let HirExprKind::String(op) = value.kind {
@@ -10433,6 +10501,21 @@ impl Analyzer<'_> {
     }
 
     fn string_borrow_operand(&mut self, expression: &AstExpr) -> Result<HirExpr, Vec<Diagnostic>> {
+        if let Ok(place) = self.resolve_expr_place(expression, false)
+            && place.ty == TypeId::STRING
+        {
+            let kind = match place.base {
+                HirPlaceBase::Local(local) if place.projections.is_empty() => {
+                    HirExprKind::Local(local)
+                }
+                _ => HirExprKind::Load(place),
+            };
+            return Ok(HirExpr {
+                kind,
+                ty: TypeId::STRING,
+                span: expression.span,
+            });
+        }
         let checked = self.expression(expression, Some(TypeId::STRING))?;
         let span = checked.expr.span;
         match checked.expr.kind {
@@ -11492,11 +11575,18 @@ fn verify_block(
                     .array_element(*iterable_type)
                     .or_else(|| types.list_element(*iterable_type));
                 let is_list = types.list_element(*iterable_type).is_some();
+                let valid_binding = match category {
+                    IterationBindingCategory::CopyValue => {
+                        *binding_type == *item_type && types.guarantees_copy(*item_type)
+                    }
+                    IterationBindingCategory::SharedElementBorrow => {
+                        !types.guarantees_copy(*item_type)
+                            && types.reference_info(*binding_type) == Some((*item_type, false))
+                    }
+                };
                 if source_type != *iterable_type
                     || actual_item != Some(*item_type)
-                    || *binding_type != *item_type
-                    || *category != IterationBindingCategory::CopyValue
-                    || !types.guarantees_copy(*item_type)
+                    || !valid_binding
                     || *structural_borrow != is_list
                     || f.locals.get(binding.0 as usize).map(|local| local.ty) != Some(*binding_type)
                 {
@@ -11859,7 +11949,7 @@ fn verify_expr(
         }
         HirExprKind::Load(place) => {
             verify_place(place, f, sigs, structs, enums, types, fail)?;
-            if place.ty != e.ty {
+            if place.ty != e.ty || (!types.guarantees_copy(e.ty) && e.ty != TypeId::STRING) {
                 return Err(fail("HIR load/place type mismatch".into()));
             }
         }
@@ -13160,6 +13250,33 @@ mod tests {
                     unreachable!()
                 };
                 place.ty = TypeId::INT64;
+            }
+            assert!(verify_hir(&bad).is_err());
+        }
+    }
+    #[test]
+    fn iteration_v3_shared_borrow_hir_corruptions_fail_closed() {
+        let hir = check(
+            "int main(){Array<string> values={\"x\"};for(word in values){println(*word);}return 0;}",
+        )
+        .unwrap();
+        verify_hir(&hir).unwrap();
+        for case in 0..3 {
+            let mut bad = hir.clone();
+            let HirStmtKind::ForCollection {
+                item_type,
+                binding_type,
+                category,
+                ..
+            } = &mut bad.functions[0].body.statements[1].kind
+            else {
+                panic!("expected shared collection loop")
+            };
+            match case {
+                0 => *item_type = TypeId::INT64,
+                1 => *binding_type = TypeId::STRING,
+                2 => *category = IterationBindingCategory::CopyValue,
+                _ => unreachable!(),
             }
             assert!(verify_hir(&bad).is_err());
         }

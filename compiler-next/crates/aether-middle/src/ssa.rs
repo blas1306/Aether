@@ -2652,10 +2652,19 @@ fn verify_ssa_collection_loops(
             CollectionKind::List => types.list_element(collection.iterable_type),
             _ => None,
         };
+        let valid_binding = match collection.category {
+            IterationBindingCategory::CopyValue => {
+                collection.binding_type == collection.item_type
+                    && types.guarantees_copy(collection.item_type)
+            }
+            IterationBindingCategory::SharedElementBorrow => {
+                !types.guarantees_copy(collection.item_type)
+                    && types.reference_info(collection.binding_type)
+                        == Some((collection.item_type, false))
+            }
+        };
         if actual_item != Some(collection.item_type)
-            || collection.binding_type != collection.item_type
-            || collection.category != IterationBindingCategory::CopyValue
-            || !types.guarantees_copy(collection.item_type)
+            || !valid_binding
             || collection.structural_borrow != (collection.kind == CollectionKind::List)
         {
             return Err(fail(
@@ -2747,6 +2756,25 @@ fn verify_ssa_collection_loops(
                     })
             })
         };
+        let same_root = |place: &SsaPlace| {
+            if place.base == length_entries[0].1.base {
+                return true;
+            }
+            let (
+                SsaPlaceBase::Value(SsaOperand::Value(place_value)),
+                SsaPlaceBase::Value(SsaOperand::Value(initial_value)),
+            ) = (&place.base, &length_entries[0].1.base)
+            else {
+                return false;
+            };
+            header.phis.iter().any(|phi| {
+                phi.local == collection.owner
+                    && phi.result == *place_value
+                    && phi.incoming.iter().any(|(predecessor, value)| {
+                        *predecessor == collection.preheader && *value == *initial_value
+                    })
+            })
+        };
         if item.instructions.iter().filter(|instruction| {
             instruction.ty == collection.binding_type
                 && matches!(instruction.op, SsaOp::CollectionBinding {
@@ -2754,13 +2782,104 @@ fn verify_ssa_collection_loops(
                     ref source,
                     index: SsaOperand::Value(index),
                     item_type,
-                    category: IterationBindingCategory::CopyValue,
+                    category,
                     ..
-                } if loop_id == collection.id && same_source(source) && index == index_phi && item_type == collection.item_type)
+                } if loop_id == collection.id && same_source(source) && index == index_phi && item_type == collection.item_type && category == collection.category)
         }).count() != 1
             || !matches!(item.terminator, SsaTerminator::Branch { then_block, else_block, .. } if then_block == collection.body && else_block == collection.latch)
         {
             return Err(fail("SSA collection item load/binding is invalid".into()));
+        }
+        if collection.category == IterationBindingCategory::SharedElementBorrow {
+            let binding_value = item
+                .instructions
+                .iter()
+                .find(|instruction| {
+                    matches!(instruction.op, SsaOp::CollectionBinding {
+                        loop_id,
+                        category: IterationBindingCategory::SharedElementBorrow,
+                        ..
+                    } if loop_id == collection.id)
+                })
+                .map(|instruction| instruction.result)
+                .ok_or_else(|| fail("SSA shared element borrow origin is missing".into()))?;
+            let mut body_region = BTreeSet::new();
+            let mut pending = vec![collection.body];
+            while let Some(block_id) = pending.pop() {
+                if matches!(
+                    block_id,
+                    id if id == collection.header
+                        || id == collection.item
+                        || id == collection.latch
+                        || id == collection.exit
+                ) || !body_region.insert(block_id)
+                {
+                    continue;
+                }
+                let Some(region_block) = block(block_id) else {
+                    return Err(fail(
+                        "SSA shared element borrow body block is missing".into(),
+                    ));
+                };
+                pending.extend(ssa_targets(&region_block.terminator));
+            }
+            let is_binding = |operand: &SsaOperand| matches!(operand, SsaOperand::Value(value) if *value == binding_value);
+            for region_block in body_region.iter().filter_map(|id| block(*id)) {
+                for instruction in &region_block.instructions {
+                    let invalidates = match &instruction.op {
+                        SsaOp::Store { place, .. }
+                        | SsaOp::ReplaceString {
+                            destination: place, ..
+                        }
+                        | SsaOp::Move { source: place }
+                        | SsaOp::ListSetLength { source: place, .. }
+                        | SsaOp::ListPush { source: place, .. }
+                        | SsaOp::ListReserve { source: place, .. } => same_root(place),
+                        SsaOp::Take { slot, .. } => same_root(&slot.root),
+                        SsaOp::Relocate {
+                            source,
+                            destination,
+                            ..
+                        } => same_root(&source.root) || same_root(&destination.root),
+                        _ => false,
+                    };
+                    if invalidates {
+                        return Err(fail(
+                            "SSA operation invalidates storage protected by a live shared iteration element borrow".into(),
+                        ));
+                    }
+                }
+            }
+            for outside in function.blocks.iter().filter(|outside| {
+                !body_region.contains(&outside.id) && outside.id != collection.item
+            }) {
+                let phi_use = outside.phis.iter().any(|phi| {
+                    phi.incoming
+                        .iter()
+                        .any(|(_, value)| *value == binding_value)
+                });
+                let instruction_use = outside
+                    .instructions
+                    .iter()
+                    .any(|instruction| op_operands(&instruction.op).into_iter().any(is_binding));
+                let terminator_use = match &outside.terminator {
+                    SsaTerminator::Branch { condition, .. }
+                    | SsaTerminator::Switch {
+                        discriminant: condition,
+                        ..
+                    }
+                    | SsaTerminator::Return(condition)
+                    | SsaTerminator::Throw {
+                        payload: condition, ..
+                    } => is_binding(condition),
+                    _ => false,
+                };
+                if phi_use || instruction_use || terminator_use {
+                    return Err(fail(
+                        "SSA shared element borrow escapes its per-iteration body lifetime".into(),
+                    ));
+                }
+            }
         }
         let Some(latch) = block(collection.latch) else {
             return Err(fail("SSA collection latch is missing".into()));
@@ -2845,7 +2964,10 @@ fn verify_string_ownership(
             block
                 .instructions
                 .iter()
-                .filter(|instruction| carries_string_owner(instruction.ty))
+                .filter(|instruction| {
+                    carries_string_owner(instruction.ty)
+                        && !matches!(instruction.op, SsaOp::Load { .. })
+                })
                 .map(|instruction| instruction.result),
         );
     }
@@ -2913,6 +3035,7 @@ fn verify_string_ownership(
                     }
                 }
                 SsaOp::ListPush { value, .. }
+                | SsaOp::CollectionOwnerCapture { value, .. }
                 | SsaOp::ReplaceString { value, .. }
                 | SsaOp::Store { value, .. }
                 | SsaOp::InsertField {
@@ -3227,14 +3350,21 @@ fn verify_op(
             ..
         } => {
             let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
-            if result != *item_type
+            let valid_binding = match category {
+                IterationBindingCategory::CopyValue => {
+                    result == *item_type && types.guarantees_copy(*item_type)
+                }
+                IterationBindingCategory::SharedElementBorrow => {
+                    !types.guarantees_copy(*item_type)
+                        && types.reference_info(result) == Some((*item_type, false))
+                }
+            };
+            if !valid_binding
                 || operand_ty(index)? != TypeId::USIZE
                 || types
                     .array_element(source_ty)
                     .or_else(|| types.list_element(source_ty))
                     != Some(*item_type)
-                || !types.guarantees_copy(*item_type)
-                || *category != aether_frontend::IterationBindingCategory::CopyValue
             {
                 return Err("SSA collection binding type/category mismatch".into());
             }
@@ -3290,7 +3420,9 @@ fn verify_op(
             }
         }
         SsaOp::Load { place } => {
-            if ssa_place_type(place, memory_locals, structs, types, operand_ty)? != result {
+            if ssa_place_type(place, memory_locals, structs, types, operand_ty)? != result
+                || (!types.guarantees_copy(result) && result != TypeId::STRING)
+            {
                 return Err("SSA memory load type mismatch".into());
             }
         }

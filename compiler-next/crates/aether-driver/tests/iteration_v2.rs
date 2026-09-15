@@ -85,8 +85,6 @@ fn empty_singleton_multiple_exact_bindings_and_copy_sizes() {
     for bad in [
         "int main(){Array<int32> a={1};for(int x in a){}return 0;}",
         "int main(){List<int> a={1};for(int32 x in a){}return 0;}",
-        "int main(){Array<string> a={\"x\"};for(x in a){}return 0;}",
-        "int main(){List<string> a={\"x\"};for(ref string x in a){}return 0;}",
     ] {
         assert!(
             compile_source_with_optimization(

@@ -266,8 +266,7 @@ pub enum AstStmtKind {
     },
     /// Pre-test loop.
     While { condition: AstExpr, body: AstBlock },
-    /// Native iteration over an inclusive int range or an ITERATION-V2
-    /// Array/List whose exact element type is Copy.
+    /// Native iteration over an inclusive int range or an Array/List.
     ForIn {
         binding: AstForBinding,
         iterable: AstExpr,
