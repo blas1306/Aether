@@ -52,6 +52,26 @@ es Alias del source; fragmentos propios no vacíos se copian una sola vez y los
 vacíos usan el singleton. Separador vacío toma `EmptyTextSeparator` antes de
 allocation.
 
+## Lines
+
+`std.Text.lines(ref string text) -> List<string>` recorre el contenido UTF-8 por
+bytes ASCII de control y materializa un `List<string>` owning fresh. LF termina
+una línea; si el byte inmediatamente anterior es CR, ambos bytes forman CRLF y
+se excluyen. Un CR que no precede a LF es contenido ordinario. No se reconocen
+otros separadores Unicode.
+
+El input vacío produce una lista vacía. Cada terminador preserva la línea real
+que lo precede, incluso si es vacía, pero un LF/CRLF final no crea un fragmento
+vacío adicional. En consecuencia, `lines("\n") == {""}` y
+`lines("\n\n") == {"", ""}`. La operación usa dos pasadas lineales: cuenta
+slots y luego copia rangos mediante `copyUtf8ByteRange`; los rangos vacíos usan
+el singleton existente. `split` conserva sin cambios su semántica, incluido su
+fragmento final vacío.
+
+El único parámetro sigue siendo `ref string`. BORROW-ERGONOMICS-V1 adapta una
+llamada ordinaria como `std.Text.lines(text)` a un shared borrow limitado a la
+call, sin `&`, Alias ni eventos ARC adicionales.
+
 El Drop estructural existente de `List<string>` destruye el prefijo publicado
 en orden inverso y cada obligación string exactamente una vez. Returns normales,
 early returns y landing pads reutilizan el cleanup general de GENERAL-V2.
@@ -61,7 +81,7 @@ early returns y landing pads reutilizan el cleanup general de GENERAL-V2.
 Los inputs string de todas las operaciones se bajan como lecturas borrowed: no
 se crea Alias para lvalues. Un string temporal permanece owned durante la
 operación y se destruye después. `FindResult` y `ScalarOffset` son Copy. Los
-resultados de substring/trim y cada elemento de split usan las decisiones
+resultados de substring/trim y cada elemento de split/lines usan las decisiones
 Alias/fresh descritas arriba; `List<string>` siempre es un owner fresh.
 
 La instrumentación privada de GENERAL-V1 sigue observando allocation, retain,
@@ -91,7 +111,7 @@ Transfer y Drop y reconstruye el ledger de owners. SSA vuelve a validar tipos,
 dominancia, consumos y resultados; O2 reusa la reverificación existente.
 
 El backend sólo acepta SSA verificada. Los cuerpos internos implementan decode,
-scalar↔byte, comparación, búsqueda, trim y split y consumen las dos primitives
+scalar↔byte, comparación, búsqueda, trim, split y lines y consumen las dos primitives
 de representación. Un programa sin una operación `Text` no emite ningún símbolo
 `aether_text_*`; importar el módulo sin usarlo tampoco selecciona helpers.
 
@@ -104,6 +124,8 @@ de representación. Un programa sin una operación `Text` no emite ningún símb
 - substring vacío, completo y propio; rangos invertidos y offsets fuera de bounds;
 - los seis bytes trim y NBSP no recortado;
 - split inicial/final/adyacente, sin match y separador vacío;
+- lines vacío, LF/CRLF, terminador final, vacíos internos, CR aislado, mezcla de
+  estilos, UTF-8 multibyte, U+0000 y separador Unicode no reconocido;
 - patrón repetitivo adversarial de 20.001 bytes;
 - construcción y match nominal de `ScalarOffset`/`FindResult`;
 - shadowing por archivo de usuario y ausencia de helpers sin uso;

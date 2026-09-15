@@ -37,13 +37,18 @@ pub enum TextOp<O> {
         value: O,
         separator: O,
     },
+    Lines {
+        value: O,
+    },
 }
 
 impl<O> TextOp<O> {
     #[must_use]
     pub fn operands(&self) -> Vec<&O> {
         match self {
-            Self::CodePointCount { value } | Self::Trim { value } => vec![value],
+            Self::CodePointCount { value } | Self::Trim { value } | Self::Lines { value } => {
+                vec![value]
+            }
             Self::Contains { value, needle }
             | Self::Find {
                 value,
@@ -69,7 +74,7 @@ impl<O> TextOp<O> {
     pub const fn creates_owner(&self) -> bool {
         matches!(
             self,
-            Self::Substring { .. } | Self::Trim { .. } | Self::Split { .. }
+            Self::Substring { .. } | Self::Trim { .. } | Self::Split { .. } | Self::Lines { .. }
         )
     }
 
@@ -107,6 +112,7 @@ impl<O> TextOp<O> {
                 value: f(value)?,
                 separator: f(separator)?,
             },
+            Self::Lines { value } => TextOp::Lines { value: f(value)? },
         })
     }
 }
@@ -158,6 +164,16 @@ pub fn verify_text_op<O>(
         TextOp::Substring { .. } | TextOp::Trim { .. } => (1, TypeId::STRING),
         TextOp::Split { .. } => (
             2,
+            types
+                .entries()
+                .find_map(|(ty, data)| {
+                    matches!(data, TypeData::List { element } if *element == TypeId::STRING)
+                        .then_some(ty)
+                })
+                .ok_or("canonical List<string> type is missing")?,
+        ),
+        TextOp::Lines { .. } => (
+            1,
             types
                 .entries()
                 .find_map(|(ty, data)| {

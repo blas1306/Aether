@@ -1,0 +1,32 @@
+package Examples.WordStats;
+
+import std.File;
+import std.Text;
+
+int main() {
+    string text = std.File.readText("input.txt");
+
+    List<string> lines = std.Text.lines(text);
+
+    int lineCount = 0;
+    int wordCount = 0;
+
+    for (line in lines) {
+        lineCount = lineCount + 1;
+
+        List<string> words = std.Text.split(*line, " ");
+
+        for (word in words) {
+            string trimmed = std.Text.trim(*word);
+
+            if (trimmed != "") {
+                wordCount = wordCount + 1;
+            }
+        }
+    }
+
+    println("Lines: ${lineCount}");
+    println("Words: ${wordCount}");
+
+    return 0;
+}

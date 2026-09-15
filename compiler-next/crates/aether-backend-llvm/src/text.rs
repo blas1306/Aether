@@ -365,6 +365,94 @@ size_trap:
   call void @llvm.trap()
   unreachable
 }
+
+define internal { ptr, i64, i64 } @aether_text_lines(ptr %value) {
+entry:
+  %length = call i64 @aether_string_length(ptr %value)
+  %empty = icmp eq i64 %length, 0
+  br i1 %empty, label %empty_result, label %count_header
+empty_result:
+  ret { ptr, i64, i64 } zeroinitializer
+count_header:
+  %count_offset = phi i64 [ 0, %entry ], [ %count_next_offset, %count_body ]
+  %lf_count = phi i64 [ 0, %entry ], [ %count_next, %count_body ]
+  %count_done = icmp eq i64 %count_offset, %length
+  br i1 %count_done, label %count_finish, label %count_body
+count_body:
+  %count_byte = call i8 @aether_text_byte_at(ptr %value, i64 %count_offset)
+  %is_lf = icmp eq i8 %count_byte, 10
+  %count_increment = zext i1 %is_lf to i64
+  %count_next = add i64 %lf_count, %count_increment
+  %count_next_offset = add i64 %count_offset, 1
+  br label %count_header
+count_finish:
+  %last_offset = sub i64 %length, 1
+  %last_byte = call i8 @aether_text_byte_at(ptr %value, i64 %last_offset)
+  %terminal_lf = icmp eq i8 %last_byte, 10
+  %tail_count = select i1 %terminal_lf, i64 0, i64 1
+  %items_pair = call { i64, i1 } @llvm.uadd.with.overflow.i64(i64 %lf_count, i64 %tail_count)
+  %items = extractvalue { i64, i1 } %items_pair, 0
+  %items_overflow = extractvalue { i64, i1 } %items_pair, 1
+  br i1 %items_overflow, label %size_trap, label %allocate_size
+allocate_size:
+  %bytes_pair = call { i64, i1 } @llvm.umul.with.overflow.i64(i64 %items, i64 8)
+  %bytes = extractvalue { i64, i1 } %bytes_pair, 0
+  %bytes_overflow = extractvalue { i64, i1 } %bytes_pair, 1
+  br i1 %bytes_overflow, label %size_trap, label %allocate
+allocate:
+  %storage = call ptr @aether_alloc(i64 %bytes, i64 8)
+  br label %fill_header
+fill_header:
+  %offset = phi i64 [ 0, %allocate ], [ %next_offset, %fill_next ]
+  %start = phi i64 [ 0, %allocate ], [ %next_start_value, %fill_next ]
+  %index = phi i64 [ 0, %allocate ], [ %next_index_value, %fill_next ]
+  %done = icmp eq i64 %offset, %length
+  br i1 %done, label %tail_check, label %fill_body
+fill_body:
+  %byte = call i8 @aether_text_byte_at(ptr %value, i64 %offset)
+  %separator = icmp eq i8 %byte, 10
+  br i1 %separator, label %line_end_check, label %advance
+line_end_check:
+  %has_previous = icmp ult i64 %start, %offset
+  br i1 %has_previous, label %previous, label %publish
+previous:
+  %previous_offset = sub i64 %offset, 1
+  %previous_byte = call i8 @aether_text_byte_at(ptr %value, i64 %previous_offset)
+  %is_cr = icmp eq i8 %previous_byte, 13
+  %stripped_end = select i1 %is_cr, i64 %previous_offset, i64 %offset
+  br label %publish
+publish:
+  %line_end = phi i64 [ %offset, %line_end_check ], [ %stripped_end, %previous ]
+  %line = call ptr @aether_text_copy_range(ptr %value, i64 %start, i64 %line_end)
+  %slot = getelementptr ptr, ptr %storage, i64 %index
+  store ptr %line, ptr %slot
+  %next_start = add i64 %offset, 1
+  %next_index = add i64 %index, 1
+  br label %fill_next
+advance:
+  br label %fill_next
+fill_next:
+  %next_start_value = phi i64 [ %next_start, %publish ], [ %start, %advance ]
+  %next_index_value = phi i64 [ %next_index, %publish ], [ %index, %advance ]
+  %next_offset = add i64 %offset, 1
+  br label %fill_header
+tail_check:
+  %has_tail = icmp ult i64 %start, %length
+  br i1 %has_tail, label %tail, label %return
+tail:
+  %last = call ptr @aether_text_copy_range(ptr %value, i64 %start, i64 %length)
+  %last_slot = getelementptr ptr, ptr %storage, i64 %index
+  store ptr %last, ptr %last_slot
+  br label %return
+return:
+  %r0 = insertvalue { ptr, i64, i64 } poison, ptr %storage, 0
+  %r1 = insertvalue { ptr, i64, i64 } %r0, i64 %items, 1
+  %r2 = insertvalue { ptr, i64, i64 } %r1, i64 %items, 2
+  ret { ptr, i64, i64 } %r2
+size_trap:
+  call void @llvm.trap()
+  unreachable
+}
 ");
 }
 
@@ -480,6 +568,14 @@ pub(super) fn emit_op(
             let value = borrowed(value, "value", output);
             let separator = borrowed(separator, "separator", output);
             writeln!(output, "  %v{result} = call {{ ptr, i64, i64 }} @aether_text_split(ptr {value}, ptr {separator})").unwrap();
+        }
+        TextOp::Lines { value } => {
+            let value = borrowed(value, "value", output);
+            writeln!(
+                output,
+                "  %v{result} = call {{ ptr, i64, i64 }} @aether_text_lines(ptr {value})"
+            )
+            .unwrap();
         }
     }
 }

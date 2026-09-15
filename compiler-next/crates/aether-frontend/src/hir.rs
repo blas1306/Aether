@@ -9815,7 +9815,7 @@ impl Analyzer<'_> {
             .ok_or_else(|| vec![type_error("canonical Text.FindResult is unavailable", span)])?;
         let find_ty = self.types.intern(TypeData::Enum(find_id));
         let arity = match function {
-            "scalarOffset" | "codePointCount" | "trim" => 1,
+            "scalarOffset" | "codePointCount" | "trim" | "lines" => 1,
             "contains" | "startsWith" | "endsWith" | "find" | "split" => 2,
             "findFrom" | "substring" => 3,
             _ => {
@@ -9844,7 +9844,7 @@ impl Analyzer<'_> {
         let string_ref = self.types.intern_reference(TypeId::STRING, false);
         let mut adapted = Vec::with_capacity(args.len());
         let string_count = match function {
-            "codePointCount" | "trim" | "substring" => 1,
+            "codePointCount" | "trim" | "substring" | "lines" => 1,
             "contains" | "startsWith" | "endsWith" | "find" | "findFrom" | "split" => 2,
             _ => unreachable!(),
         };
@@ -9926,6 +9926,15 @@ impl Analyzer<'_> {
                     crate::TextOp::Split {
                         value: adapted[0].clone(),
                         separator: adapted[1].clone(),
+                    },
+                    list,
+                )
+            }
+            "lines" => {
+                let list = self.types.intern_list(TypeId::STRING);
+                (
+                    crate::TextOp::Lines {
+                        value: adapted[0].clone(),
                     },
                     list,
                 )

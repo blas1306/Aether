@@ -2651,6 +2651,11 @@ Alias nothing. Substring and bootstrap ASCII trim return owned strings with the
 specified empty/full identity fast paths and fresh proper fragments. Split
 returns a fresh `List<string>`, preserves empty elements and rejects an empty
 separator before allocation. Bounds/range violations remain fail-fast traps.
+`std.Text.lines(ref string) -> List<string>` recognizes LF and CRLF, excludes
+their bytes, preserves real empty lines, suppresses only the extra fragment
+after a final terminator, and returns an empty list for empty input. Isolated CR
+and non-LF Unicode separators remain content. Its shared argument participates
+in the ordinary call-scoped implicit borrow adaptation.
 
 Only private byte-at and validated UTF-8 range-copy representation primitives
 are admitted. Regex, views, syntactic slicing/indexing, public iteration/Bytes,

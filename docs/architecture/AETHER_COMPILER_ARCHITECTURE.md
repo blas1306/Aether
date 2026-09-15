@@ -2596,7 +2596,8 @@ operations; programs without Text emit no text helpers.
 
 The representation boundary consists only of checked borrowed byte access and
 validated UTF-8 byte-range copy. Scalar decoding, scalar/byte conversion,
-linear exact search, ASCII trim and split remain internal library algorithms.
+linear exact search, ASCII trim, split and LF/CRLF line decomposition remain
+internal library algorithms.
 LLVM consumes verified effects and the existing string/List lifecycle; O0/O2
 have identical observable semantics. No textual indexing, views, public byte
 surface or additional `StringOp` was introduced.

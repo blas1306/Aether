@@ -1,6 +1,6 @@
 //! TEXT-V1 exact scalar-indexed Text qualification.
 
-use std::{fs, path::PathBuf, process::Command};
+use std::{fmt::Write as _, fs, path::PathBuf, process::Command};
 
 use aether_driver::{ClangToolchain, Emit, OptimizationLevel, build_path};
 
@@ -93,6 +93,7 @@ fn complete_surface_runs_at_o0_and_o2() {
                 "Substring",
                 "Trim",
                 "Split",
+                "Lines",
             ] {
                 assert!(dump.contains(operation), "{phase:?} lacks {operation}");
             }
@@ -100,6 +101,84 @@ fn complete_surface_runs_at_o0_and_o2() {
         assert!(compilation.llvm.contains("aether_text_byte_at"));
         assert!(compilation.llvm.contains("aether_text_copy_range"));
         assert!(!compilation.llvm.contains("TextOp"));
+    }
+}
+
+fn instrument_balanced_lifecycle(llvm: &str) -> String {
+    let mut guard = String::new();
+    writeln!(
+        guard,
+        "  %lines_heap_allocs = load i64, ptr @aether_heap_alloc_count\n  %lines_heap_frees = load i64, ptr @aether_heap_free_count\n  %lines_heap_ok = icmp eq i64 %lines_heap_allocs, %lines_heap_frees\n  %lines_string_allocs = load i64, ptr @aether_string_alloc_count\n  %lines_string_frees = load i64, ptr @aether_string_free_count\n  %lines_string_ok = icmp eq i64 %lines_string_allocs, %lines_string_frees\n  %lines_balanced = and i1 %lines_heap_ok, %lines_string_ok\n  %lines_result_ok = icmp eq i32 %process_status, 0\n  %lines_ok = and i1 %lines_balanced, %lines_result_ok\n  %lines_status = select i1 %lines_ok, i32 0, i32 99\n  ret i32 %lines_status"
+    )
+    .unwrap();
+    llvm.replace("  ret i32 %process_status", &guard)
+}
+
+#[test]
+fn lines_v1_exact_semantics_borrow_and_lifecycle_at_o0_o2() {
+    let source = r#"import std.Text;
+int zero(ref string input){List<string> lines=std.Text.lines(input);if(length(lines)!=0){return 1;}return 0;}
+int one(ref string input,ref string expected){List<string> lines=std.Text.lines(input);if(length(lines)!=1){return 1;}string a=remove(lines,0);if(a!=*expected){return 2;}return 0;}
+int two(ref string input,ref string first,ref string second){List<string> lines=std.Text.lines(input);if(length(lines)!=2){return 1;}string a=remove(lines,0);string b=remove(lines,0);if(a!=*first){return 2;}if(b!=*second){return 3;}return 0;}
+int three(ref string input,ref string first,ref string second,ref string third){List<string> lines=std.Text.lines(input);if(length(lines)!=3){return 1;}string a=remove(lines,0);string b=remove(lines,0);string c=remove(lines,0);if(a!=*first){return 2;}if(b!=*second){return 3;}if(c!=*third){return 4;}return 0;}
+int main(){
+ string text="a\nb";
+ if(zero("")!=0){return 1;}
+ if(one("a","a")!=0){return 2;}
+ if(two(text,"a","b")!=0){return 3;}
+ if(two("a\nb\n","a","b")!=0){return 4;}
+ if(one("\n","")!=0){return 5;}
+ if(two("\n\n","","")!=0){return 6;}
+ if(three("a\n\nb","a","","b")!=0){return 7;}
+ if(two("a\r\nb\r\n","a","b")!=0){return 8;}
+ if(one("a\rb","a\rb")!=0){return 9;}
+ if(three("é\0😀\r\n\n中\rtext\n","é\0😀","","中\rtext")!=0){return 10;}
+ if(one("a b","a b")!=0){return 11;}
+ List<string> split=std.Text.split("a\n","\n");if(length(split)!=2){return 12;}
+ string split0=remove(split,0);string split1=remove(split,0);if(split0!="a"){return 13;}if(split1!=""){return 14;}
+ return 0;
+}"#;
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        let (compilation, output) = compile_and_run(source, optimization);
+        assert_eq!(output.status.code(), Some(0), "{optimization:?}");
+        assert!(compilation.dumps[&Emit::Hir].contains("Lines"));
+        assert!(compilation.dumps[&Emit::Hir].contains("CallScopedSharedBorrow"));
+        assert!(compilation.dumps[&Emit::Mir].contains("EndBorrow"));
+        assert!(compilation.dumps[&Emit::Ssa].contains("Drop"));
+        assert!(compilation.llvm.contains("@aether_text_lines"));
+        assert_eq!(
+            execute_llvm(
+                &instrument_balanced_lifecycle(&compilation.llvm),
+                optimization
+            )
+            .status
+            .code(),
+            Some(0),
+            "unbalanced lifecycle at {optimization:?}"
+        );
+    }
+}
+
+#[test]
+fn lines_v1_list_is_cleaned_during_unwind() {
+    let source = r#"import std.Text;
+open class Problem:Exception{public init(){}}
+int fail(){throw Problem();}
+int main(){try{List<string> lines=std.Text.lines("a\r\n\nb\n");fail();}catch(Problem error){return 0;}return 1;}"#;
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        let (compilation, output) = compile_and_run(source, optimization);
+        assert_eq!(output.status.code(), Some(0), "{optimization:?}");
+        assert!(compilation.dumps[&Emit::Mir].contains("unwind"));
+        assert_eq!(
+            execute_llvm(
+                &instrument_balanced_lifecycle(&compilation.llvm),
+                optimization
+            )
+            .status
+            .code(),
+            Some(0),
+            "unbalanced unwind lifecycle at {optimization:?}"
+        );
     }
 }
 

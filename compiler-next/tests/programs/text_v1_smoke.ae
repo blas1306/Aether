@@ -37,5 +37,11 @@ int main() {
     if (p1 != "") { return 14; }
     if (p2 != "b") { return 15; }
     if (p3 != "") { return 16; }
+    List<string> lines = std.Text.lines("first\r\nsecond\n");
+    if (length(lines) != 2) { return 17; }
+    string l0 = remove(lines, 0);
+    string l1 = remove(lines, 0);
+    if (l0 != "first") { return 18; }
+    if (l1 != "second") { return 19; }
     return 0;
 }
