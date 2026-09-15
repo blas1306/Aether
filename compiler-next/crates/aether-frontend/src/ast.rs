@@ -363,6 +363,10 @@ pub enum AstExprKind {
     Float(String),
     /// Decoded, valid UTF-8 content. U+0000 is retained as an ordinary byte.
     String(String),
+    /// One decoded Unicode scalar value.
+    Char(char),
+    /// String literal with source-ordered text and expression fields.
+    Interpolation(Vec<AstInterpolationFragment>),
     /// Boolean literal.
     Bool(bool),
     /// Collection literal. Its concrete collection kind is selected only from
@@ -426,6 +430,16 @@ pub enum AstExprKind {
         left: Box<AstExpr>,
         right: Box<AstExpr>,
     },
+}
+
+/// One parsed component of an interpolated string literal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub enum AstInterpolationFragment {
+    /// Decoded UTF-8 bytes from the literal text.
+    Text { value: String, span: Span },
+    /// A non-empty ordinary Aether expression between `${` and `}`.
+    Hole { expression: AstExpr, span: Span },
 }
 
 /// Prefix operators.

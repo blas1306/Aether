@@ -3,7 +3,7 @@
 use std::collections::BTreeSet;
 use std::fmt::Write;
 
-use aether_frontend::{CoreCall, CoreSymbol, FloatType, TypeArena, TypeId};
+use aether_frontend::{CoreCall, CoreSymbol, FloatType, TypeArena, TypeData, TypeId};
 use aether_middle::{BlockId, SsaOperand};
 
 pub(super) fn declarations(
@@ -14,6 +14,9 @@ pub(super) fn declarations(
     let mut libm = false;
     let mut emitted = BTreeSet::new();
     for &(symbol, ty) in calls {
+        if symbol == CoreSymbol::Str {
+            continue;
+        }
         let Some(float) = types.float_info(ty) else {
             continue;
         };
@@ -105,6 +108,51 @@ pub(super) fn emit_op(
     let args = call.arguments.iter().map(&operand).collect::<Vec<_>>();
     let ty = call.function.parameter_type;
     match call.function.symbol {
+        CoreSymbol::Str => {
+            writeln!(
+                output,
+                "  %format_buffer{result} = alloca [128 x i8], align 8"
+            )
+            .unwrap();
+            let (formatter, argument_ty, argument) = match types.get(ty).expect("verified str type")
+            {
+                TypeData::Bool => ("aether_format_bool", "i1".to_owned(), args[0].clone()),
+                TypeData::Char => ("aether_format_char", "i32".to_owned(), args[0].clone()),
+                TypeData::Integer(integer) => {
+                    let bits = integer.bits(aether_frontend::TargetProperties::LINUX_X86_64);
+                    let value = if bits == 64 {
+                        args[0].clone()
+                    } else {
+                        let extension = if integer.is_signed() { "sext" } else { "zext" };
+                        writeln!(
+                            output,
+                            "  %format_wide{result} = {extension} i{bits} {} to i64",
+                            args[0]
+                        )
+                        .unwrap();
+                        format!("%format_wide{result}")
+                    };
+                    (
+                        if integer.is_signed() {
+                            "aether_format_i64"
+                        } else {
+                            "aether_format_u64"
+                        },
+                        "i64".to_owned(),
+                        value,
+                    )
+                }
+                TypeData::Float(FloatType::Float32) => {
+                    ("aether_format_f32", "float".to_owned(), args[0].clone())
+                }
+                TypeData::Float(FloatType::Float64) => {
+                    ("aether_format_f64", "double".to_owned(), args[0].clone())
+                }
+                _ => unreachable!("verified str scalar"),
+            };
+            writeln!(output, "  %format_length{result} = call i64 @{formatter}(ptr %format_buffer{result}, {argument_ty} {argument})").unwrap();
+            writeln!(output, "  %v{result} = call ptr @aether_string_from_buffer(ptr %format_buffer{result}, i64 %format_length{result})").unwrap();
+        }
         CoreSymbol::Print | CoreSymbol::Println => {
             let newline = call.function.symbol == CoreSymbol::Println;
             if io_exception_available && let Some(unwind) = unwind {

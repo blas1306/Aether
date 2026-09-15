@@ -2,15 +2,19 @@
 
 use crate::{
     AstAlias, AstBinaryOp, AstBlock, AstCapabilityConstraint, AstCatch, AstEnum, AstExpr,
-    AstExprKind, AstField, AstFunction, AstGenericParam, AstImport, AstMatchArm, AstMatchMode,
-    AstPackage, AstParameter, AstReferenceType, AstStmt, AstStmtKind, AstStruct, AstType,
-    AstUnaryOp, AstVariant, AstVariantPattern, Diagnostic, DiagnosticCategory, ParsedAst, Phase,
-    SourceFile, Token, TokenKind,
+    AstExprKind, AstField, AstFunction, AstGenericParam, AstImport, AstInterpolationFragment,
+    AstMatchArm, AstMatchMode, AstPackage, AstParameter, AstReferenceType, AstStmt, AstStmtKind,
+    AstStruct, AstType, AstUnaryOp, AstVariant, AstVariantPattern, Diagnostic, DiagnosticCategory,
+    ParsedAst, Phase, SourceFile, Span, Token, TokenKind,
 };
 
 /// Parses an already tokenized source file.
-pub fn parse(_source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<Diagnostic>> {
-    let mut parser = Parser { tokens, cursor: 0 };
+pub fn parse(source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<Diagnostic>> {
+    let mut parser = Parser {
+        source,
+        tokens,
+        cursor: 0,
+    };
     let package = if parser.at(TokenKind::KwPackage) {
         Some(parser.package().map_err(|error| vec![error])?)
     } else {
@@ -97,12 +101,13 @@ pub fn parse(_source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<
     }
 }
 
-struct Parser {
+struct Parser<'a> {
+    source: &'a SourceFile,
     tokens: Vec<Token>,
     cursor: usize,
 }
 
-impl Parser {
+impl Parser<'_> {
     fn namespace_path(
         &mut self,
         message: &'static str,
@@ -1069,7 +1074,11 @@ impl Parser {
                 span: token.span,
             },
             TokenKind::String => AstExpr {
-                kind: AstExprKind::String(decode_string_literal(&token.lexeme)),
+                kind: self.parse_string_literal(&token)?,
+                span: token.span,
+            },
+            TokenKind::Character => AstExpr {
+                kind: AstExprKind::Char(decode_character_literal(&token.lexeme)),
                 span: token.span,
             },
             TokenKind::KwTrue => AstExpr {
@@ -1541,30 +1550,180 @@ impl Parser {
             Some(self.current().span),
         )
     }
+
+    #[allow(clippy::too_many_lines)]
+    fn parse_string_literal(&self, token: &Token) -> Result<AstExprKind, Diagnostic> {
+        let spelling = token.lexeme.as_bytes();
+        let mut fragments = Vec::new();
+        let mut text = String::new();
+        let mut chunk_start = token.span.start + 1;
+        let mut cursor = 1;
+        while cursor + 1 < spelling.len() {
+            if spelling[cursor] == b'\\' {
+                if spelling.get(cursor + 1) == Some(&b'$')
+                    && spelling.get(cursor + 2) == Some(&b'{')
+                {
+                    text.push_str("${");
+                    cursor += 3;
+                    continue;
+                }
+                let escape = spelling[cursor + 1];
+                text.push(match escape {
+                    b'0' => '\0',
+                    b'n' => '\n',
+                    b'r' => '\r',
+                    b't' => '\t',
+                    b'"' => '"',
+                    b'\\' => '\\',
+                    _ => unreachable!("lexer validates string escapes"),
+                });
+                cursor += 2;
+                continue;
+            }
+            if spelling[cursor] == b'$' && spelling.get(cursor + 1) == Some(&b'{') {
+                let field_source_start = token.span.start + cursor;
+                if !text.is_empty() {
+                    fragments.push(AstInterpolationFragment::Text {
+                        value: std::mem::take(&mut text),
+                        span: Span::in_source(token.span.source, chunk_start, field_source_start),
+                    });
+                }
+                let close = interpolation_close_in_spelling(spelling, cursor + 2)
+                    .expect("lexer validated interpolation closure");
+                let expression_start = token.span.start + cursor + 2;
+                let expression_end = token.span.start + close;
+                if spelling[cursor + 2..close]
+                    .iter()
+                    .all(u8::is_ascii_whitespace)
+                {
+                    return Err(Diagnostic::new(
+                        "E0108",
+                        Phase::Parse,
+                        DiagnosticCategory::Syntax,
+                        "interpolation field expression cannot be empty",
+                        Some(Span::in_source(
+                            token.span.source,
+                            field_source_start,
+                            expression_end + 1,
+                        )),
+                    ));
+                }
+                let padded = format!(
+                    "{}{}",
+                    " ".repeat(expression_start),
+                    &self.source.text[expression_start..expression_end]
+                );
+                let field_source =
+                    SourceFile::with_id(self.source.id, self.source.name.clone(), padded);
+                let field_tokens =
+                    crate::lex(&field_source).map_err(|mut errors| errors.remove(0))?;
+                let mut field_parser = Parser {
+                    source: &field_source,
+                    tokens: field_tokens,
+                    cursor: 0,
+                };
+                let expression = field_parser.expression()?;
+                if !field_parser.at(TokenKind::Eof) {
+                    return Err(field_parser
+                        .error("E0109", "expected one expression in interpolation field"));
+                }
+                fragments.push(AstInterpolationFragment::Hole {
+                    expression,
+                    span: Span::in_source(
+                        token.span.source,
+                        field_source_start,
+                        expression_end + 1,
+                    ),
+                });
+                cursor = close + 1;
+                chunk_start = token.span.start + cursor;
+                continue;
+            }
+            let ch = token.lexeme[cursor..]
+                .chars()
+                .next()
+                .expect("valid UTF-8 token");
+            text.push(ch);
+            cursor += ch.len_utf8();
+        }
+        if fragments.is_empty() {
+            Ok(AstExprKind::String(text))
+        } else {
+            if !text.is_empty() {
+                fragments.push(AstInterpolationFragment::Text {
+                    value: text,
+                    span: Span::in_source(token.span.source, chunk_start, token.span.end - 1),
+                });
+            }
+            Ok(AstExprKind::Interpolation(fragments))
+        }
+    }
 }
 
-fn decode_string_literal(spelling: &str) -> String {
-    let inner = &spelling[1..spelling.len() - 1];
-    let mut decoded = String::with_capacity(inner.len());
-    let mut chars = inner.chars();
-    while let Some(ch) = chars.next() {
-        if ch != '\\' {
-            decoded.push(ch);
-            continue;
+fn interpolation_close_in_spelling(bytes: &[u8], mut cursor: usize) -> Option<usize> {
+    let mut braces = 0_u32;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'"' => {
+                cursor += 1;
+                while cursor < bytes.len() {
+                    match bytes[cursor] {
+                        b'\\' => cursor = (cursor + 2).min(bytes.len()),
+                        b'"' => {
+                            cursor += 1;
+                            break;
+                        }
+                        _ => cursor += 1,
+                    }
+                }
+            }
+            b'/' if bytes.get(cursor + 1) == Some(&b'/') => {
+                cursor += 2;
+                while cursor < bytes.len() && !matches!(bytes[cursor], b'\n' | b'\r') {
+                    cursor += 1;
+                }
+            }
+            b'/' if bytes.get(cursor + 1) == Some(&b'*') => {
+                cursor += 2;
+                while cursor + 1 < bytes.len()
+                    && !(bytes[cursor] == b'*' && bytes[cursor + 1] == b'/')
+                {
+                    cursor += 1;
+                }
+                cursor = (cursor + 2).min(bytes.len());
+            }
+            b'{' => {
+                braces = braces.checked_add(1)?;
+                cursor += 1;
+            }
+            b'}' if braces == 0 => return Some(cursor),
+            b'}' => {
+                braces -= 1;
+                cursor += 1;
+            }
+            _ => cursor += 1,
         }
-        decoded.push(
-            match chars.next().expect("lexer validates string escapes") {
-                '0' => '\0',
-                'n' => '\n',
-                'r' => '\r',
-                't' => '\t',
-                '"' => '"',
-                '\\' => '\\',
-                _ => unreachable!("lexer validates string escapes"),
-            },
-        );
     }
-    decoded
+    None
+}
+
+fn decode_character_literal(spelling: &str) -> char {
+    let inner = &spelling[1..spelling.len() - 1];
+    if let Some(escape) = inner.strip_prefix('\\') {
+        return match escape {
+            "0" => '\0',
+            "n" => '\n',
+            "r" => '\r',
+            "t" => '\t',
+            "'" => '\'',
+            "\\" => '\\',
+            _ => unreachable!("lexer validates character escapes"),
+        };
+    }
+    inner
+        .chars()
+        .next()
+        .expect("lexer validates nonempty character")
 }
 
 #[cfg(test)]

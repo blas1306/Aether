@@ -423,8 +423,8 @@ fn vertical6_qualified_alias_construction_and_matching_resolve() {
     assert!(compilation.dumps[&Emit::Ast].contains("QualifiedCall"));
     let hir = &compilation.dumps[&Emit::Hir];
     assert!(hir.contains("Numeric"));
-    assert!(hir.contains("TypeId(15) = Number"));
-    assert!(hir.contains("canonical: TypeId(\n            15"));
+    assert!(hir.contains("TypeId(16) = Number"));
+    assert!(hir.contains("canonical: TypeId(\n            16"));
     assert!(compilation.llvm.contains("switch i32"));
 
     let diagnostic = CompilationSession::discover(&module_program("errors/v6_unqualified"))
@@ -467,10 +467,10 @@ int main() {
         assert!(dump.contains("types (session-local)"), "{phase:?}");
         assert!(dump.contains("TypeId(4) = int64"), "{phase:?}");
         assert!(dump.contains("TypeId(9) = isize"), "{phase:?}");
-        assert!(dump.contains("TypeId(15) = A"), "{phase:?}");
-        assert!(dump.contains("TypeId(16) = B"), "{phase:?}");
-        assert!(dump.contains("TypeId(17) = E"), "{phase:?}");
-        assert!(dump.contains("TypeId(18) = F"), "{phase:?}");
+        assert!(dump.contains("TypeId(16) = A"), "{phase:?}");
+        assert!(dump.contains("TypeId(17) = B"), "{phase:?}");
+        assert!(dump.contains("TypeId(18) = E"), "{phase:?}");
+        assert!(dump.contains("TypeId(19) = F"), "{phase:?}");
     }
     let hir = &first.dumps[&Emit::Hir];
     assert!(hir.contains("WholeAgain"));

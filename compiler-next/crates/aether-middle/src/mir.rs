@@ -1349,6 +1349,11 @@ impl Builder<'_> {
                     newline: _,
                 } => {
                     let (source, owner) = self.lower_string_read(value);
+                    if let Some(owner) = &owner
+                        && let Some(local) = place_root_local(owner)
+                    {
+                        self.active_temporary_owners.push(local);
+                    }
                     let token = self.temporary(TypeId::BOOL);
                     self.assign(
                         Place {
@@ -1362,6 +1367,7 @@ impl Builder<'_> {
                         statement.span,
                     );
                     if let Some(owner) = owner {
+                        self.active_temporary_owners.pop();
                         self.emit_drop(owner, statement.span);
                     }
                 }
@@ -3166,6 +3172,7 @@ impl Builder<'_> {
         }
     }
 
+    #[allow(clippy::too_many_lines)]
     fn lower_string(
         &mut self,
         op: &aether_frontend::StringOp<HirExpr>,
@@ -3173,6 +3180,7 @@ impl Builder<'_> {
         span: Span,
     ) -> Operand {
         use aether_frontend::StringOp;
+        let temporary_active_start = self.active_temporary_owners.len();
         let (op, owners): (StringOp<Operand>, Vec<Place>) = match op {
             StringOp::Literal { bytes } => (
                 StringOp::Literal {
@@ -3214,6 +3222,58 @@ impl Builder<'_> {
                 let (source, owner) = self.lower_string_read(source);
                 (StringOp::ByteLength { source }, owner.into_iter().collect())
             }
+            StringOp::Interpolate {
+                fragments,
+                ownership,
+                size_plan,
+            } => {
+                let mut owners = Vec::new();
+                let mut lowered = Vec::with_capacity(fragments.len());
+                for fragment in fragments {
+                    lowered.push(match fragment {
+                        aether_frontend::InterpolationFragment::Text { bytes, span } => {
+                            aether_frontend::InterpolationFragment::Text {
+                                bytes: bytes.clone(),
+                                span: *span,
+                            }
+                        }
+                        aether_frontend::InterpolationFragment::Hole {
+                            value,
+                            ty,
+                            conversion,
+                            span,
+                        } => {
+                            let temporary_string = *ty == TypeId::STRING
+                                && !matches!(
+                                    value.kind,
+                                    HirExprKind::Local(_) | HirExprKind::Load(_)
+                                );
+                            let operand = self.lower_expr(value);
+                            if temporary_string {
+                                let owner = operand_place(&operand);
+                                if let Some(local) = place_root_local(&owner) {
+                                    self.active_temporary_owners.push(local);
+                                }
+                                owners.push(owner);
+                            }
+                            aether_frontend::InterpolationFragment::Hole {
+                                value: operand,
+                                ty: *ty,
+                                conversion: *conversion,
+                                span: *span,
+                            }
+                        }
+                    });
+                }
+                (
+                    StringOp::Interpolate {
+                        fragments: lowered,
+                        ownership: *ownership,
+                        size_plan: *size_plan,
+                    },
+                    owners.into_iter().rev().collect(),
+                )
+            }
             StringOp::Output { .. } => unreachable!("output is lowered from a statement"),
         };
         let destination = self.temporary(ty);
@@ -3225,6 +3285,8 @@ impl Builder<'_> {
             Rvalue::String(Box::new(op)),
             span,
         );
+        self.active_temporary_owners
+            .truncate(temporary_active_start);
         for owner in owners {
             self.emit_drop(owner, span);
         }
@@ -4749,6 +4811,9 @@ fn verify_ownership(
                         "collection literal initialization",
                         fail,
                     )?;
+                    initialize_owner(function, types, &mut state, destination, fail)?;
+                }
+                Rvalue::Core(call) if call.function.symbol == aether_frontend::CoreSymbol::Str => {
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
                 Rvalue::Call { callee, args } => {

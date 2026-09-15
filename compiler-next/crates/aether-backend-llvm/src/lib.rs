@@ -163,6 +163,14 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let has_core_output = core_calls
         .iter()
         .any(|(symbol, _)| matches!(symbol, CoreSymbol::Print | CoreSymbol::Println));
+    let has_format_runtime = core_calls
+        .iter()
+        .any(|(symbol, _)| *symbol == CoreSymbol::Str)
+        || program.functions.iter().any(|function| {
+            function.blocks.iter().flat_map(|block| &block.instructions).any(|instruction| {
+                matches!(&instruction.op, SsaOp::String(op) if matches!(op.as_ref(), aether_frontend::StringOp::Interpolate { .. }))
+            })
+        });
     let stdout_exception = has_core_output
         .then(|| io::find_class_id(types, &program.modules, "std.IO", "IOException"))
         .flatten();
@@ -253,7 +261,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     }
     if has_string_runtime {
         strings::emit_literals(&mut output, program);
-        strings::runtime(&mut output);
+        strings::runtime(&mut output, has_format_runtime);
     }
     if has_text_runtime {
         text::runtime(&mut output);
@@ -688,6 +696,7 @@ fn emit_relocation_glue(
         | TypeData::Class(_)
         | TypeData::ClassToken { .. }
         | TypeData::Bool
+        | TypeData::Char
         | TypeData::Integer(_)
         | TypeData::Float(_)
         | TypeData::Reference { .. }
@@ -854,6 +863,7 @@ fn emit_drop_glue(
         }
         TypeData::Void
         | TypeData::Bool
+        | TypeData::Char
         | TypeData::Integer(_)
         | TypeData::Float(_)
         | TypeData::Reference { .. }
@@ -1418,7 +1428,7 @@ fn emit_function(
                     block.id,
                 ),
                 SsaOp::String(op) => {
-                    strings::emit_op(output, op, instruction.result.0, llvm_operand);
+                    strings::emit_op(output, op, instruction.result.0, types, llvm_operand);
                 }
                 SsaOp::Text(op) => text::emit_op(
                     output,
@@ -3399,6 +3409,7 @@ fn mangle_symbol_type(
         }
         TypeData::String => "str".into(),
         TypeData::Bool => "b".into(),
+        TypeData::Char => "ch".into(),
         TypeData::Integer(integer) => format!("i{integer:?}"),
         TypeData::Float(float) => format!("f{float:?}"),
         TypeData::Struct(id) => {
@@ -3518,7 +3529,9 @@ fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
         TypeData::Void | TypeData::Bool => "i1".into(),
         TypeData::Integer(IntegerType::Int8 | IntegerType::Uint8) => "i8".into(),
         TypeData::Integer(IntegerType::Int16 | IntegerType::Uint16) => "i16".into(),
-        TypeData::Integer(IntegerType::Int32 | IntegerType::Uint32) => "i32".into(),
+        TypeData::Char | TypeData::Integer(IntegerType::Int32 | IntegerType::Uint32) => {
+            "i32".into()
+        }
         TypeData::Integer(
             IntegerType::Int64 | IntegerType::Uint64 | IntegerType::Isize | IntegerType::Usize,
         ) => "i64".into(),
@@ -3595,6 +3608,7 @@ fn mangle_type(types: &TypeArena, ty: TypeId) -> String {
             format!("c{}_{}", class.0, classes::token_suffix(*kind))
         }
         TypeData::Bool => "b".into(),
+        TypeData::Char => "ch".into(),
         TypeData::String => "str".into(),
         TypeData::Integer(integer) => format!("i{integer:?}"),
         TypeData::Float(float) => format!("f{float:?}"),

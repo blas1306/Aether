@@ -178,6 +178,7 @@ pub fn layout_of(
 ) -> Option<TypeLayout> {
     Some(match types.get(ty)? {
         TypeData::Bool => TypeLayout { size: 1, align: 1 },
+        TypeData::Char | TypeData::Float(FloatType::Float32) => TypeLayout { size: 4, align: 4 },
         TypeData::Integer(integer) => {
             let bytes = u64::from(integer.bits(target) / 8);
             TypeLayout {
@@ -185,7 +186,6 @@ pub fn layout_of(
                 align: bytes,
             }
         }
-        TypeData::Float(FloatType::Float32) => TypeLayout { size: 4, align: 4 },
         TypeData::Float(FloatType::Float64) => TypeLayout { size: 8, align: 8 },
         TypeData::Struct(id) => {
             let info = structs.get(id.0 as usize)?;
@@ -3310,6 +3310,9 @@ fn compute_aggregate_layouts(
     ) -> TypeLayout {
         match types.get(ty).expect("layout requires valid TypeId") {
             TypeData::Bool => TypeLayout { size: 1, align: 1 },
+            TypeData::Char | TypeData::Float(FloatType::Float32) => {
+                TypeLayout { size: 4, align: 4 }
+            }
             TypeData::Integer(integer) => {
                 let bytes = u64::from(integer.bits(target) / 8);
                 TypeLayout {
@@ -3317,7 +3320,6 @@ fn compute_aggregate_layouts(
                     align: bytes,
                 }
             }
-            TypeData::Float(FloatType::Float32) => TypeLayout { size: 4, align: 4 },
             TypeData::Float(FloatType::Float64) => TypeLayout { size: 8, align: 8 },
             TypeData::Struct(id) => {
                 struct_layout(*id, structs, enums, types, struct_state, enum_state, target)
@@ -4642,6 +4644,9 @@ fn compute_concrete_layouts(
         })?;
         let scalar = match data {
             TypeData::Bool => Some(TypeLayout { size: 1, align: 1 }),
+            TypeData::Char | TypeData::Float(FloatType::Float32) => {
+                Some(TypeLayout { size: 4, align: 4 })
+            }
             TypeData::Integer(integer) => {
                 let bytes = u64::from(integer.bits(target) / 8);
                 Some(TypeLayout {
@@ -4649,7 +4654,6 @@ fn compute_concrete_layouts(
                     align: bytes,
                 })
             }
-            TypeData::Float(FloatType::Float32) => Some(TypeLayout { size: 4, align: 4 }),
             TypeData::Float(FloatType::Float64) => Some(TypeLayout { size: 8, align: 8 }),
             TypeData::Struct(id) => Some(structs[id.0 as usize].layout),
             TypeData::Enum(id) => Some(enums[id.0 as usize].layout),
@@ -7398,6 +7402,91 @@ impl Analyzer<'_> {
                 expected,
             );
         }
+        if let AstExprKind::Char(value) = &e.kind {
+            return self.coerce(
+                Checked {
+                    expr: HirExpr {
+                        kind: HirExprKind::Int(i128::from(u32::from(*value))),
+                        ty: TypeId::CHAR,
+                        span: e.span,
+                    },
+                    constant: Some(ConstantValue::Integer(i128::from(u32::from(*value)))),
+                },
+                expected,
+            );
+        }
+        if let AstExprKind::Interpolation(fragments) = &e.kind {
+            let mut plan = Vec::with_capacity(fragments.len());
+            for fragment in fragments {
+                match fragment {
+                    crate::AstInterpolationFragment::Text { value, span } => {
+                        plan.push(crate::InterpolationFragment::Text {
+                            bytes: value.as_bytes().to_vec(),
+                            span: *span,
+                        });
+                    }
+                    crate::AstInterpolationFragment::Hole { expression, span } => {
+                        let mut value = self.expression(expression, None)?.expr;
+                        let ty = value.ty;
+                        let conversion = if ty == TypeId::STRING {
+                            if let HirExprKind::String(op) = value.kind {
+                                value = match *op {
+                                    crate::StringOp::Alias { source } => source,
+                                    other => HirExpr {
+                                        kind: HirExprKind::String(Box::new(other)),
+                                        ty,
+                                        span: value.span,
+                                    },
+                                };
+                            }
+                            crate::InterpolationConversion::StringBorrow
+                        } else if matches!(
+                            self.types.get(ty),
+                            Some(
+                                TypeData::Bool
+                                    | TypeData::Char
+                                    | TypeData::Integer(_)
+                                    | TypeData::Float(_)
+                            )
+                        ) {
+                            crate::InterpolationConversion::CanonicalScalarFormat
+                        } else {
+                            return Err(vec![Diagnostic::new(
+                                "E0340",
+                                Phase::Semantic,
+                                DiagnosticCategory::Type,
+                                format!(
+                                    "type {} is not interpolable in FORMAT-V1",
+                                    self.type_name(ty)
+                                ),
+                                Some(*span),
+                            )]);
+                        };
+                        plan.push(crate::InterpolationFragment::Hole {
+                            value,
+                            ty,
+                            conversion,
+                            span: *span,
+                        });
+                    }
+                }
+            }
+            return self.coerce(
+                Checked {
+                    expr: HirExpr {
+                        kind: HirExprKind::String(Box::new(crate::StringOp::Interpolate {
+                            fragments: plan,
+                            ownership: crate::StringOwnership::Fresh,
+                            size_plan: crate::InterpolationSizePlan::CheckedExact,
+                        })),
+                        ty: TypeId::STRING,
+                        span: e.span,
+                    },
+                    constant: None,
+                },
+                expected,
+            );
+        }
         if let AstExprKind::Call {
             callee,
             type_arguments,
@@ -7949,6 +8038,7 @@ impl Analyzer<'_> {
                 | TypeData::ClassToken { .. }
                 | TypeData::Void
                 | TypeData::Bool
+                | TypeData::Char
                 | TypeData::String
                 | TypeData::Struct(_)
                 | TypeData::Enum(_)
@@ -8958,6 +9048,36 @@ impl Analyzer<'_> {
                 expected,
             );
         }
+        if symbol == crate::CoreSymbol::Str {
+            let argument = self.expression(&args[0], None)?.expr;
+            if !matches!(
+                self.types.get(argument.ty),
+                Some(TypeData::Bool | TypeData::Char | TypeData::Integer(_) | TypeData::Float(_))
+            ) {
+                return Err(vec![type_error(
+                    format!(
+                        "Core function `str` has no v1 signature for {}",
+                        self.type_name(argument.ty)
+                    ),
+                    span,
+                )]);
+            }
+            let parameter_type = argument.ty;
+            return self.coerce(
+                Checked {
+                    expr: HirExpr {
+                        kind: HirExprKind::Core(Box::new(crate::CoreCall {
+                            function: crate::CoreFunction::resolve(symbol, parameter_type),
+                            arguments: vec![argument],
+                        })),
+                        ty: TypeId::STRING,
+                        span,
+                    },
+                    constant: None,
+                },
+                expected,
+            );
+        }
 
         let contextual = expected.filter(|ty| self.types.is_numeric(*ty));
         let all_literals = args.iter().all(literal);
@@ -8997,7 +9117,8 @@ impl Analyzer<'_> {
             | crate::CoreSymbol::Tan => self.types.float_info(parameter_type).is_some(),
             crate::CoreSymbol::Print
             | crate::CoreSymbol::Println
-            | crate::CoreSymbol::ByteLength => unreachable!(),
+            | crate::CoreSymbol::ByteLength
+            | crate::CoreSymbol::Str => unreachable!(),
         };
         if !signature_valid {
             return Err(vec![type_error(
@@ -10301,6 +10422,7 @@ fn builtin(n: &str) -> Option<TypeId> {
         "float64" | "double" => TypeId::FLOAT64,
         "string" => TypeId::STRING,
         "void" => TypeId::VOID,
+        "char" => TypeId::CHAR,
         _ => return None,
     })
 }
@@ -11232,7 +11354,7 @@ fn verify_expr(
             }
             crate::verify_core_call(op, e.ty, types, |operand| Ok(operand.ty)).map_err(fail)?;
         }
-        HirExprKind::Int(_) if types.integer_info(e.ty).is_none() => {
+        HirExprKind::Int(_) if types.integer_info(e.ty).is_none() && e.ty != TypeId::CHAR => {
             return Err(fail("HIR integer literal mismatch".into()));
         }
         HirExprKind::Float(FloatValue::Float32(_)) if e.ty != TypeId::FLOAT32 => {
@@ -12388,6 +12510,12 @@ fn ast_expr_has_call(expr: &AstExpr) -> bool {
         | AstExprKind::MethodCall { .. } => true,
         AstExprKind::CollectionLiteral(values) => values.iter().any(ast_expr_has_call),
         AstExprKind::MathematicalLiteral { rows } => rows.iter().flatten().any(ast_expr_has_call),
+        AstExprKind::Interpolation(fragments) => fragments.iter().any(|fragment| match fragment {
+            crate::AstInterpolationFragment::Hole { expression, .. } => {
+                ast_expr_has_call(expression)
+            }
+            crate::AstInterpolationFragment::Text { .. } => false,
+        }),
         AstExprKind::Field { base, .. } => ast_expr_has_call(base),
         AstExprKind::Index { base, indices } => {
             ast_expr_has_call(base) || indices.iter().any(ast_expr_has_call)
@@ -12399,6 +12527,7 @@ fn ast_expr_has_call(expr: &AstExpr) -> bool {
         AstExprKind::Integer(_)
         | AstExprKind::Float(_)
         | AstExprKind::String(_)
+        | AstExprKind::Char(_)
         | AstExprKind::Bool(_)
         | AstExprKind::Name(_)
         | AstExprKind::QualifiedName { .. } => false,

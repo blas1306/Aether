@@ -21,6 +21,7 @@ pub enum CoreSymbol {
     Sin = 10,
     Cos = 11,
     Tan = 12,
+    Str = 13,
 }
 
 impl CoreSymbol {
@@ -40,6 +41,7 @@ impl CoreSymbol {
             Self::Sin => "sin",
             Self::Cos => "cos",
             Self::Tan => "tan",
+            Self::Str => "str",
         }
     }
 
@@ -63,6 +65,7 @@ pub const PRELUDE_V1: &[(&str, CoreSymbol)] = &[
     ("sin", CoreSymbol::Sin),
     ("cos", CoreSymbol::Cos),
     ("tan", CoreSymbol::Tan),
+    ("str", CoreSymbol::Str),
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -107,6 +110,7 @@ impl CoreFunction {
         match self.symbol {
             CoreSymbol::Print | CoreSymbol::Println => TypeId::BOOL,
             CoreSymbol::ByteLength => TypeId::USIZE,
+            CoreSymbol::Str => TypeId::STRING,
             _ => self.parameter_type,
         }
     }
@@ -181,6 +185,15 @@ pub fn verify_core_call<O>(
         | CoreSymbol::Sin
         | CoreSymbol::Cos
         | CoreSymbol::Tan => types.float_info(function.parameter_type).is_some(),
+        CoreSymbol::Str => matches!(
+            types.get(function.parameter_type),
+            Some(
+                crate::TypeData::Bool
+                    | crate::TypeData::Char
+                    | crate::TypeData::Integer(_)
+                    | crate::TypeData::Float(_)
+            )
+        ),
     };
     valid
         .then_some(())
@@ -194,7 +207,7 @@ mod tests {
 
     #[test]
     fn v1_manifest_is_closed_unique_and_canonical() {
-        assert_eq!(PRELUDE_V1.len(), 13);
+        assert_eq!(PRELUDE_V1.len(), 14);
         assert_eq!(
             PRELUDE_V1
                 .iter()

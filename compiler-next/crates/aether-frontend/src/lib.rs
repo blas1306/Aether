@@ -16,9 +16,9 @@ pub use oop::*;
 
 pub use ast::{
     AstAlias, AstBinaryOp, AstBlock, AstCapabilityConstraint, AstCatch, AstEnum, AstExpr,
-    AstExprKind, AstField, AstFunction, AstGenericParam, AstImport, AstMatchArm, AstMatchMode,
-    AstPackage, AstParameter, AstPlace, AstReferenceType, AstStmt, AstStmtKind, AstStruct, AstType,
-    AstUnaryOp, AstVariant, AstVariantPattern, ParsedAst,
+    AstExprKind, AstField, AstFunction, AstGenericParam, AstImport, AstInterpolationFragment,
+    AstMatchArm, AstMatchMode, AstPackage, AstParameter, AstPlace, AstReferenceType, AstStmt,
+    AstStmtKind, AstStruct, AstType, AstUnaryOp, AstVariant, AstVariantPattern, ParsedAst,
 };
 pub use core::{
     CORE_V1_PROFILE, CoreCall, CoreFunction, CoreSymbol, CoreSymbolKey, PRELUDE_V1, prelude_symbol,
@@ -40,7 +40,10 @@ pub use hir::{
 };
 pub use lexer::{Token, TokenKind, lex};
 pub use parser::parse;
-pub use strings::{StringOp, verify_string_op};
+pub use strings::{
+    InterpolationConversion, InterpolationFragment, InterpolationSizePlan, StringOp,
+    StringOwnership, verify_string_op,
+};
 pub use text::{TextOp, verify_text_op};
 pub use types::{
     AlgebraicCapability, BehavioralCapability, Capability, CollectionElementAdmission,

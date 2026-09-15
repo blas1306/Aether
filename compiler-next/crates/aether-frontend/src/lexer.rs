@@ -13,6 +13,8 @@ pub enum TokenKind {
     Float,
     /// Immutable UTF-8 string literal. The lexeme retains the exact spelling.
     String,
+    /// Immutable Unicode scalar literal.
+    Character,
     /// `int`.
     KwInt,
     /// `bool`.
@@ -190,6 +192,9 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                             cursor += 1;
                             match bytes.get(cursor) {
                                 Some(b'0' | b'n' | b'r' | b't' | b'"' | b'\\') => cursor += 1,
+                                Some(b'$') if bytes.get(cursor + 1) == Some(&b'{') => {
+                                    cursor += 2;
+                                }
                                 Some(_) => {
                                     let end = (cursor + 1).min(bytes.len());
                                     diagnostics.push(Diagnostic::new(
@@ -205,6 +210,22 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                             }
                         }
                         b'\n' | b'\r' => break,
+                        b'$' if bytes.get(cursor + 1) == Some(&b'{') => {
+                            let field_start = cursor;
+                            if let Some(close) = interpolation_close(source, cursor + 2) {
+                                cursor = close + 1;
+                            } else {
+                                diagnostics.push(Diagnostic::new(
+                                    "E0004",
+                                    Phase::Lex,
+                                    DiagnosticCategory::Syntax,
+                                    "interpolation field is missing its closing `}`",
+                                    Some(Span::in_source(source.id, field_start, bytes.len())),
+                                ));
+                                cursor = bytes.len();
+                                break;
+                            }
+                        }
                         byte => {
                             cursor += if byte.is_ascii() {
                                 1
@@ -227,6 +248,40 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                         "unterminated string literal",
                         Some(Span::in_source(source.id, start, cursor)),
                     ));
+                }
+            }
+            b'\'' => {
+                cursor += 1;
+                let value_start = cursor;
+                if bytes.get(cursor) == Some(&b'\\') {
+                    cursor += 1;
+                    match bytes.get(cursor) {
+                        Some(b'0' | b'n' | b'r' | b't' | b'\'' | b'\\') => cursor += 1,
+                        _ => diagnostics.push(Diagnostic::new(
+                            "E0005",
+                            Phase::Lex,
+                            DiagnosticCategory::Syntax,
+                            "unsupported character escape",
+                            Some(Span::in_source(source.id, start, cursor.min(bytes.len()))),
+                        )),
+                    }
+                } else if cursor < bytes.len() {
+                    cursor += source.text[cursor..]
+                        .chars()
+                        .next()
+                        .map_or(1, char::len_utf8);
+                }
+                if cursor == value_start || bytes.get(cursor) != Some(&b'\'') {
+                    diagnostics.push(Diagnostic::new(
+                        "E0005",
+                        Phase::Lex,
+                        DiagnosticCategory::Syntax,
+                        "character literal must contain exactly one Unicode scalar",
+                        Some(Span::in_source(source.id, start, cursor.min(bytes.len()))),
+                    ));
+                } else {
+                    cursor += 1;
+                    push(&mut tokens, TokenKind::Character, source, start, cursor);
                 }
             }
             b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
@@ -340,6 +395,56 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
     } else {
         Err(diagnostics)
     }
+}
+
+/// Finds the depth-zero `}` while treating strings and comments as complete
+/// lexical units. Braces inside those units cannot affect interpolation.
+fn interpolation_close(source: &SourceFile, mut cursor: usize) -> Option<usize> {
+    let bytes = source.text.as_bytes();
+    let mut braces = 0_u32;
+    while cursor < bytes.len() {
+        match bytes[cursor] {
+            b'"' => {
+                cursor += 1;
+                while cursor < bytes.len() {
+                    match bytes[cursor] {
+                        b'\\' => cursor = (cursor + 2).min(bytes.len()),
+                        b'"' => {
+                            cursor += 1;
+                            break;
+                        }
+                        _ => cursor += 1,
+                    }
+                }
+            }
+            b'/' if bytes.get(cursor + 1) == Some(&b'/') => {
+                cursor += 2;
+                while cursor < bytes.len() && !matches!(bytes[cursor], b'\n' | b'\r') {
+                    cursor += 1;
+                }
+            }
+            b'/' if bytes.get(cursor + 1) == Some(&b'*') => {
+                cursor += 2;
+                while cursor + 1 < bytes.len()
+                    && !(bytes[cursor] == b'*' && bytes[cursor + 1] == b'/')
+                {
+                    cursor += 1;
+                }
+                cursor = (cursor + 2).min(bytes.len());
+            }
+            b'{' => {
+                braces = braces.checked_add(1)?;
+                cursor += 1;
+            }
+            b'}' if braces == 0 => return Some(cursor),
+            b'}' => {
+                braces -= 1;
+                cursor += 1;
+            }
+            _ => cursor += 1,
+        }
+    }
+    None
 }
 
 /// Skip trivia directly in the original byte buffer. Coordinates continue to

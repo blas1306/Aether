@@ -258,6 +258,7 @@ impl TypeId {
     pub const FLOAT64: Self = Self(12);
     pub const STRING: Self = Self(13);
     pub const VOID: Self = Self(14);
+    pub const CHAR: Self = Self(15);
 }
 
 impl fmt::Display for TypeId {
@@ -281,6 +282,7 @@ impl fmt::Display for TypeId {
             Self::FLOAT64 => "float64",
             Self::STRING => "string",
             Self::VOID => "void",
+            Self::CHAR => "char",
             Self(_) => return write!(f, "TypeId({})", self.0),
         };
         f.write_str(spelling)
@@ -351,6 +353,8 @@ pub enum TypeData {
         kind: crate::ClassTokenKind,
     },
     Bool,
+    /// One valid Unicode scalar value, stored as its 21-bit code point in `u32`.
+    Char,
     Integer(IntegerType),
     Float(FloatType),
     /// Fundamental immutable, non-null UTF-8 owner handle.
@@ -520,6 +524,7 @@ impl fmt::Display for TypeData {
             Self::Float(v) => v.fmt(f),
             Self::String => f.write_str("string"),
             Self::Void => f.write_str("void"),
+            Self::Char => f.write_str("char"),
             Self::Struct(id) => write!(f, "struct#{}", id.0),
             Self::Enum(id) => write!(f, "enum#{}", id.0),
             Self::GenericParam(id) => write!(f, "param({:?}:{})", id.owner, id.index),
@@ -847,6 +852,7 @@ impl TypeArena {
             TypeData::Float(FloatType::Float64),
             TypeData::String,
             TypeData::Void,
+            TypeData::Char,
         ];
         for (expected, data) in baseline.into_iter().enumerate() {
             let id = arena.intern(data);
@@ -1430,13 +1436,15 @@ impl TypeArena {
                 is_storable: true,
                 needs_drop: true,
             },
-            TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_) => TypeProperties {
-                is_known: true,
-                is_copy: true,
-                is_relocatable: true,
-                is_storable: true,
-                needs_drop: false,
-            },
+            TypeData::Bool | TypeData::Char | TypeData::Integer(_) | TypeData::Float(_) => {
+                TypeProperties {
+                    is_known: true,
+                    is_copy: true,
+                    is_relocatable: true,
+                    is_storable: true,
+                    needs_drop: false,
+                }
+            }
             TypeData::Void => TypeProperties {
                 is_known: true,
                 // The compiler's unit token is freely duplicable even though
@@ -1722,7 +1730,9 @@ impl TypeArena {
             Some(TypeData::String) => {
                 matches!(capability, Capability::Relocatable | Capability::Storable)
             }
-            Some(TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_)) => true,
+            Some(TypeData::Bool | TypeData::Char | TypeData::Integer(_) | TypeData::Float(_)) => {
+                true
+            }
             Some(
                 TypeData::Reference { .. }
                 | TypeData::View { .. }
@@ -1998,7 +2008,13 @@ impl TypeArena {
                 capability == 0
             }
             Some(TypeData::String) => capability == 5,
-            Some(TypeData::Void | TypeData::Bool | TypeData::Integer(_) | TypeData::Float(_))
+            Some(
+                TypeData::Void
+                | TypeData::Bool
+                | TypeData::Char
+                | TypeData::Integer(_)
+                | TypeData::Float(_),
+            )
             | None => false,
         }
     }

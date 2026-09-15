@@ -980,7 +980,9 @@ impl ClangToolchain {
             .arg(&llvm_path)
             .arg("-o")
             .arg(output);
-        if llvm.contains("@__gxx_personality_v0") {
+        if llvm.contains("@__gxx_personality_v0")
+            || llvm.contains("; FORMAT C++ to_chars dependency")
+        {
             command.arg("-lstdc++");
         }
         if llvm.contains("; Core libm dependency") {
