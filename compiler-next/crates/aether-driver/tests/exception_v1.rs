@@ -142,7 +142,7 @@ fn root_is_deterministic_and_traps_are_not_aether_exceptions() {
         assert_eq!(output.status.code(), Some(70));
         assert_eq!(
             String::from_utf8_lossy(&output.stderr),
-            "unhandled Aether exception\n"
+            "Unhandled Problem\n"
         );
     }
     let trap = format!(

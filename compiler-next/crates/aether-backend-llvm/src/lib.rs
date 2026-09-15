@@ -174,6 +174,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let stdout_exception = has_core_output
         .then(|| io::find_class_id(types, &program.modules, "std.IO", "IOException"))
         .flatten();
+    let has_io_runtime = !reachable_io.is_empty() || stdout_exception.is_some();
     let buffer_elements = types
         .entries()
         .filter_map(|(ty, data)| match data {
@@ -252,6 +253,9 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     if has_string_runtime || has_exception_routes {
         writeln!(output, "declare i64 @write(i32, ptr, i64)\n").unwrap();
     }
+    if has_exception_routes || has_io_runtime {
+        writeln!(output, "declare ptr @__errno_location() nounwind\n").unwrap();
+    }
     if has_owners {
         emit_runtime_boundary(&mut output);
         if has_class_runtime {
@@ -266,7 +270,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     if has_text_runtime {
         text::runtime(&mut output);
     }
-    if !reachable_io.is_empty() || stdout_exception.is_some() {
+    if has_io_runtime {
         io::runtime(
             &mut output,
             reachable_io.contains(&io::IoFunction::ReadLine),
@@ -539,7 +543,13 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     output
 }
 
+#[allow(clippy::too_many_lines)]
 fn emit_exception_runtime(output: &mut String, types: &TypeArena) {
+    writeln!(
+        output,
+        "@aether_unhandled_prefix = private constant [10 x i8] c\"Unhandled \"\n@aether_unhandled_newline = private constant [1 x i8] c\"\\0A\""
+    )
+    .unwrap();
     output.push_str(
         "declare i32 @__gxx_personality_v0(...)\n\
          declare ptr @__cxa_allocate_exception(i64)\n\
@@ -549,7 +559,6 @@ fn emit_exception_runtime(output: &mut String, types: &TypeArena) {
          declare void @__cxa_end_catch()\n\
          declare void @__cxa_rethrow() noreturn\n\
          @_ZTIPv = external constant ptr\n\
-         @aether_unhandled_message = private constant [27 x i8] c\"unhandled Aether exception\\0A\"\n\
          define internal void @aether_exception_record_destroy(ptr %record) nounwind {\n\
          entry:\n\
            %payload = load ptr, ptr %record\n\
@@ -563,13 +572,40 @@ fn emit_exception_runtime(output: &mut String, types: &TypeArena) {
            call void @__cxa_throw(ptr %record, ptr @_ZTIPv, ptr @aether_exception_record_destroy)\n\
            unreachable\n\
          }\n\
-         define internal void @aether_report_unhandled(ptr %payload) nounwind {\n\
+         define internal i1 @aether_diagnostic_write_all(ptr %data, i64 %length) nounwind {\n\
          entry:\n\
-           %ignored = call i64 @write(i32 2, ptr @aether_unhandled_message, i64 27)\n\
-           ret void\n\
-         }\n\n",
+           br label %loop\n\
+         loop:\n\
+           %offset = phi i64 [ 0, %entry ], [ %next, %progress ], [ %offset, %retry ]\n\
+           %done = icmp eq i64 %offset, %length\n\
+           br i1 %done, label %ok, label %attempt\n\
+         attempt:\n\
+           %remaining = sub i64 %length, %offset\n\
+           %cursor = getelementptr i8, ptr %data, i64 %offset\n\
+           %written = call i64 @write(i32 2, ptr %cursor, i64 %remaining)\n\
+           %positive = icmp sgt i64 %written, 0\n\
+           br i1 %positive, label %progress, label %failed\n\
+         progress:\n\
+           %next = add i64 %offset, %written\n\
+           br label %loop\n\
+         failed:\n\
+           %zero = icmp eq i64 %written, 0\n\
+           br i1 %zero, label %error, label %errno\n\
+         errno:\n\
+           %errno_pointer = call ptr @__errno_location()\n\
+           %errno_value = load i32, ptr %errno_pointer\n\
+           %interrupted = icmp eq i32 %errno_value, 4\n\
+           br i1 %interrupted, label %retry, label %error\n\
+         retry:\n\
+           br label %loop\n\
+         ok:\n\
+           ret i1 true\n\
+         error:\n\
+           ret i1 false\n\
+         }\n",
     );
-    output.push_str("define internal i1 @aether_exception_matches(ptr %payload, ptr %catch_descriptor) nounwind {\nentry:\n  %descriptor_address = getelementptr i8, ptr %payload, i64 8\n  %dynamic_descriptor = load ptr, ptr %descriptor_address\n");
+    writeln!(output, "define internal void @aether_report_unhandled(ptr %payload) nounwind {{\nentry:\n  %descriptor_address = getelementptr i8, ptr %payload, i64 {}\n  %dynamic_descriptor = load ptr, ptr %descriptor_address\n  %diagnostic_slot = getelementptr ptr, ptr %dynamic_descriptor, i64 {}\n  %diagnostic = load ptr, ptr %diagnostic_slot\n  %name_address = getelementptr {{ ptr, i64 }}, ptr %diagnostic, i32 0, i32 0\n  %name = load ptr, ptr %name_address\n  %length_address = getelementptr {{ ptr, i64 }}, ptr %diagnostic, i32 0, i32 1\n  %length = load i64, ptr %length_address\n  %prefix_ok = call i1 @aether_diagnostic_write_all(ptr @aether_unhandled_prefix, i64 10)\n  br i1 %prefix_ok, label %write_name, label %return\nwrite_name:\n  %name_ok = call i1 @aether_diagnostic_write_all(ptr %name, i64 %length)\n  br i1 %name_ok, label %write_newline, label %return\nwrite_newline:\n  %newline_ok = call i1 @aether_diagnostic_write_all(ptr @aether_unhandled_newline, i64 1)\n  br label %return\nreturn:\n  ret void\n}}\n", classes::OBJECT_DESCRIPTOR_BYTE_OFFSET, classes::CLASS_DESCRIPTOR_DIAGNOSTIC_SLOT).unwrap();
+    writeln!(output, "define internal i1 @aether_exception_matches(ptr %payload, ptr %catch_descriptor) nounwind {{\nentry:\n  %descriptor_address = getelementptr i8, ptr %payload, i64 {}\n  %dynamic_descriptor = load ptr, ptr %descriptor_address", classes::OBJECT_DESCRIPTOR_BYTE_OFFSET).unwrap();
     for class in types.classes() {
         writeln!(
             output,

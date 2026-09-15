@@ -3,6 +3,71 @@
 use super::*;
 use aether_frontend::{ClassId, ClassOp, ClassTokenKind};
 
+pub(super) const OBJECT_DESCRIPTOR_BYTE_OFFSET: usize = 8;
+pub(super) const CLASS_DESCRIPTOR_DESTROY_SLOT: usize = 0;
+pub(super) const CLASS_DESCRIPTOR_DIAGNOSTIC_SLOT: usize = 1;
+const CLASS_DESCRIPTOR_VIRTUAL_BASE_SLOT: usize = 2;
+const WITNESS_DROP_SLOT: usize = 0;
+const WITNESS_METHOD_BASE_SLOT: usize = 1;
+
+fn class_virtual_slot(
+    signatures: &[FunctionInstanceInfo],
+    slot: aether_frontend::VirtualSlotId,
+) -> usize {
+    CLASS_DESCRIPTOR_VIRTUAL_BASE_SLOT
+        + signatures
+            .iter()
+            .position(|signature| signature.function_id == slot.0)
+            .expect("verified virtual slot has a physical signature")
+}
+
+fn class_witness_slot(
+    signatures: &[FunctionInstanceInfo],
+    interface: aether_frontend::InterfaceId,
+) -> usize {
+    CLASS_DESCRIPTOR_VIRTUAL_BASE_SLOT + signatures.len() + interface.0 as usize
+}
+
+const fn witness_method_slot(slot: u32) -> usize {
+    WITNESS_METHOD_BASE_SLOT + slot as usize
+}
+
+fn diagnostic_display(
+    program: &aether_middle::SsaIr,
+    class: &aether_frontend::ClassInfo,
+) -> String {
+    if program.types.exception_class() == Some(class.id) {
+        return "Exception".into();
+    }
+    match &program.modules[class.module.0 as usize].key.package {
+        aether_frontend::PackageKey::Named { path, .. } => {
+            format!("{}.{}", path.source(), class.name)
+        }
+        aether_frontend::PackageKey::Anonymous => class.name.clone(),
+    }
+}
+
+fn llvm_bytes(bytes: &[u8]) -> String {
+    let mut encoded = String::new();
+    for byte in bytes {
+        write!(encoded, "\\{byte:02X}").unwrap();
+    }
+    encoded
+}
+
+fn class_descriptor_prefix(destroy: String, diagnostic: String) -> Vec<String> {
+    let mut slots = vec!["ptr null".into(); CLASS_DESCRIPTOR_VIRTUAL_BASE_SLOT];
+    slots[CLASS_DESCRIPTOR_DESTROY_SLOT] = destroy;
+    slots[CLASS_DESCRIPTOR_DIAGNOSTIC_SLOT] = diagnostic;
+    slots
+}
+
+fn witness_prefix(drop: String) -> Vec<String> {
+    let mut slots = vec!["ptr null".into(); WITNESS_METHOD_BASE_SLOT];
+    slots[WITNESS_DROP_SLOT] = drop;
+    slots
+}
+
 /// Closed direct-call reachability is the link graph. Namespace grants and
 /// semantic checking never make an otherwise unused body reachable.
 pub(super) fn reachable_functions(
@@ -93,10 +158,29 @@ pub(super) fn runtime(output: &mut String, program: &aether_middle::SsaIr) {
         .unwrap();
     }
     output.push_str("define internal void @aether_object_retain(ptr %object) {\nentry:\n  %count = load i64, ptr %object\n  %zero = icmp eq i64 %count, 0\n  %full = icmp eq i64 %count, -1\n  %bad = or i1 %zero, %full\n  br i1 %bad, label %invalid, label %live\nlive:\n  %next = add i64 %count, 1\n  store i64 %next, ptr %object\n  %events = load i64, ptr @aether_object_retain_count\n  %events_next = add i64 %events, 1\n  store i64 %events_next, ptr @aether_object_retain_count\n  ret void\ninvalid:\n  call void @llvm.trap()\n  unreachable\n}\n");
-    output.push_str("define internal void @aether_object_release(ptr %value) {\nentry:\n");
-    output.push_str("  %count = load i64, ptr %value\n  %zero = icmp eq i64 %count, 0\n  br i1 %zero, label %invalid, label %live\ninvalid:\n  call void @llvm.trap()\n  unreachable\nlive:\n  %next = sub i64 %count, 1\n  store i64 %next, ptr %value\n  %events = load i64, ptr @aether_object_release_count\n  %events_next = add i64 %events, 1\n  store i64 %events_next, ptr @aether_object_release_count\n  %last = icmp eq i64 %next, 0\n  br i1 %last, label %destroy, label %done\ndestroy:\n  %descriptor_addr = getelementptr i8, ptr %value, i64 8\n  %descriptor = load ptr, ptr %descriptor_addr\n  %destroy_target = load ptr, ptr %descriptor\n  call void %destroy_target(ptr %value)\n  br label %done\ndone:\n  ret void\n}\n");
+    writeln!(output, "define internal void @aether_object_release(ptr %value) {{\nentry:\n  %count = load i64, ptr %value\n  %zero = icmp eq i64 %count, 0\n  br i1 %zero, label %invalid, label %live\ninvalid:\n  call void @llvm.trap()\n  unreachable\nlive:\n  %next = sub i64 %count, 1\n  store i64 %next, ptr %value\n  %events = load i64, ptr @aether_object_release_count\n  %events_next = add i64 %events, 1\n  store i64 %events_next, ptr @aether_object_release_count\n  %last = icmp eq i64 %next, 0\n  br i1 %last, label %destroy, label %done\ndestroy:\n  %descriptor_addr = getelementptr i8, ptr %value, i64 {OBJECT_DESCRIPTOR_BYTE_OFFSET}\n  %descriptor = load ptr, ptr %descriptor_addr\n  %destroy_slot = getelementptr ptr, ptr %descriptor, i64 {CLASS_DESCRIPTOR_DESTROY_SLOT}\n  %destroy_target = load ptr, ptr %destroy_slot\n  call void %destroy_target(ptr %value)\n  br label %done\ndone:\n  ret void\n}}").unwrap();
     for class in types.classes() {
-        let mut slots = vec![format!("ptr @aether_object_destroy_{}", class.id.0)];
+        let display = diagnostic_display(program, class);
+        writeln!(
+            output,
+            "@aether_diagnostic_name_{} = private constant [{} x i8] c\"{}\"",
+            class.id.0,
+            display.len(),
+            llvm_bytes(display.as_bytes())
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "@aether_diagnostic_type_{} = private constant {{ ptr, i64 }} {{ ptr @aether_diagnostic_name_{}, i64 {} }}",
+            class.id.0,
+            class.id.0,
+            display.len()
+        )
+        .unwrap();
+        let mut slots = class_descriptor_prefix(
+            format!("ptr @aether_object_destroy_{}", class.id.0),
+            format!("ptr @aether_diagnostic_type_{}", class.id.0),
+        );
         for function in &program.signatures {
             let target = types
                 .class_method(function.function_id)
@@ -151,7 +235,7 @@ pub(super) fn runtime(output: &mut String, program: &aether_middle::SsaIr) {
         )
         .unwrap();
         destroy_body(output, types, class.id);
-        writeln!(output,"define internal ptr @aether_object_alloc_{}() {{\nentry:\n  %object = call ptr @aether_alloc(i64 {}, i64 {})\n  store i64 1, ptr %object\n  %descriptor_addr = getelementptr i8, ptr %object, i64 8\n  store ptr @aether_descriptor_{}, ptr %descriptor_addr\n  %events = load i64, ptr @aether_object_alloc_count\n  %next = add i64 %events, 1\n  store i64 %next, ptr @aether_object_alloc_count\n  ret ptr %object\n}}",class.id.0,class.layout.size,class.layout.align,class.id.0).unwrap();
+        writeln!(output,"define internal ptr @aether_object_alloc_{}() {{\nentry:\n  %object = call ptr @aether_alloc(i64 {}, i64 {})\n  store i64 1, ptr %object\n  %descriptor_addr = getelementptr i8, ptr %object, i64 {OBJECT_DESCRIPTOR_BYTE_OFFSET}\n  store ptr @aether_descriptor_{}, ptr %descriptor_addr\n  %events = load i64, ptr @aether_object_alloc_count\n  %next = add i64 %events, 1\n  store i64 %next, ptr @aether_object_alloc_count\n  ret ptr %object\n}}",class.id.0,class.layout.size,class.layout.align,class.id.0).unwrap();
     }
 }
 
@@ -360,7 +444,8 @@ pub(super) fn emit_op(
                 )
                 .unwrap();
             }
-            writeln!(output,"  %descriptor_addr{result} = getelementptr i8, ptr {}, i64 8\n  %descriptor{result} = load ptr, ptr %descriptor_addr{result}\n  %witness_slot{result} = getelementptr ptr, ptr %descriptor{result}, i64 {}\n  %dynamic_witness{result} = load ptr, ptr %witness_slot{result}\n  %carrier{result} = insertvalue {{ ptr, ptr }} poison, ptr {}, 0\n  %v{result} = insertvalue {{ ptr, ptr }} %carrier{result}, ptr %dynamic_witness{result}, 1",llvm_operand(source),1 + signatures.len() + interface.0 as usize,llvm_operand(source)).unwrap();
+            let physical_slot = class_witness_slot(signatures, *interface);
+            writeln!(output,"  %descriptor_addr{result} = getelementptr i8, ptr {}, i64 {OBJECT_DESCRIPTOR_BYTE_OFFSET}\n  %descriptor{result} = load ptr, ptr %descriptor_addr{result}\n  %witness_slot{result} = getelementptr ptr, ptr %descriptor{result}, i64 {physical_slot}\n  %dynamic_witness{result} = load ptr, ptr %witness_slot{result}\n  %carrier{result} = insertvalue {{ ptr, ptr }} poison, ptr {}, 0\n  %v{result} = insertvalue {{ ptr, ptr }} %carrier{result}, ptr %dynamic_witness{result}, 1",llvm_operand(source),llvm_operand(source)).unwrap();
         }
         ClassOp::InterfaceCall {
             requirement,
@@ -369,7 +454,8 @@ pub(super) fn emit_op(
             args,
         } => {
             let r = types.requirement(*requirement).unwrap();
-            writeln!(output,"  %obj{result} = extractvalue {{ ptr, ptr }} {}, 0\n  %wit{result} = extractvalue {{ ptr, ptr }} {}, 1\n  %slot{result} = getelementptr ptr, ptr %wit{result}, i64 {}\n  %target{result} = load ptr, ptr %slot{result}",llvm_operand(receiver),llvm_operand(receiver),slot+1).unwrap();
+            let physical_slot = witness_method_slot(*slot);
+            writeln!(output,"  %obj{result} = extractvalue {{ ptr, ptr }} {}, 0\n  %wit{result} = extractvalue {{ ptr, ptr }} {}, 1\n  %slot{result} = getelementptr ptr, ptr %wit{result}, i64 {physical_slot}\n  %target{result} = load ptr, ptr %slot{result}",llvm_operand(receiver),llvm_operand(receiver)).unwrap();
             let arguments = std::iter::once(format!("ptr %obj{result}"))
                 .chain(
                     args.iter()
@@ -398,12 +484,8 @@ pub(super) fn emit_op(
             ..
         } => {
             let sig = &signatures[method.0 as usize];
-            let physical_slot = signatures
-                .iter()
-                .position(|s| s.function_id == slot.0)
-                .unwrap()
-                + 1;
-            writeln!(output, "  %descriptor_addr{result} = getelementptr i8, ptr {}, i64 8\n  %descriptor{result} = load ptr, ptr %descriptor_addr{result}\n  %slot{result} = getelementptr ptr, ptr %descriptor{result}, i64 {physical_slot}\n  %target{result} = load ptr, ptr %slot{result}", llvm_operand(receiver)).unwrap();
+            let physical_slot = class_virtual_slot(signatures, *slot);
+            writeln!(output, "  %descriptor_addr{result} = getelementptr i8, ptr {}, i64 {OBJECT_DESCRIPTOR_BYTE_OFFSET}\n  %descriptor{result} = load ptr, ptr %descriptor_addr{result}\n  %slot{result} = getelementptr ptr, ptr %descriptor{result}, i64 {physical_slot}\n  %target{result} = load ptr, ptr %slot{result}", llvm_operand(receiver)).unwrap();
             let arguments = std::iter::once(receiver)
                 .chain(args)
                 .zip(&sig.parameters)
@@ -602,10 +684,10 @@ pub(super) fn witnesses(output: &mut String, program: &aether_middle::SsaIr) {
         let id = w.id;
         let w = &program.types.witnesses()[id.0 as usize];
         let ty = program.types.id_of(TypeData::Class(w.class)).unwrap();
-        let mut slots = vec![format!(
+        let mut slots = witness_prefix(format!(
             "ptr @aether_drop_{}",
             mangle_type(&program.types, ty)
-        )];
+        ));
         for s in &w.slots {
             let sig = program
                 .signatures

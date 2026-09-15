@@ -1068,6 +1068,7 @@ struct Builder<'a> {
 struct HandlerContext {
     event: ExceptionEventId,
     dispatch: Option<BlockId>,
+    catches: bool,
     cleanup_boundary: usize,
     catch_boundary: usize,
     finalizer_depth: usize,
@@ -1275,7 +1276,8 @@ impl Builder<'_> {
         };
         let pad = self.new_block();
         self.function.blocks[pad.0 as usize].landing_pad = Some(event);
-        self.function.blocks[pad.0 as usize].landing_pad_catches = handler.is_some();
+        self.function.blocks[pad.0 as usize].landing_pad_catches =
+            handler.is_some_and(|context| context.catches);
         self.current = Some(pad);
         if let Some((class, object)) = free_unpublished {
             let token = self.temporary(TypeId::BOOL);
@@ -1754,6 +1756,7 @@ impl Builder<'_> {
         let context = HandlerContext {
             event,
             dispatch: None,
+            catches: !catches.is_empty(),
             cleanup_boundary: self.active_owners.len(),
             catch_boundary: self.active_catches.len(),
             finalizer_depth: self.finalizers.len(),
