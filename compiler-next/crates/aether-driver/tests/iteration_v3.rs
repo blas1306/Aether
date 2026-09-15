@@ -2,9 +2,11 @@
 
 use std::{fs, path::PathBuf, process::Command};
 
-use aether_driver::{Emit, OptimizationLevel, compile_source_with_optimization};
-use aether_frontend::{IterationBindingCategory, SourceFile, analyze, parse_source};
-use aether_middle::{Rvalue, SsaOp, build_ssa, lower_hir, verify_mir, verify_ssa};
+use aether_driver::{
+    ClangToolchain, Emit, OptimizationLevel, build_path, compile_source_with_optimization,
+};
+use aether_frontend::{IterationBindingCategory, SourceFile, TextOp, analyze, parse_source};
+use aether_middle::{Operand, Rvalue, SsaOp, build_ssa, lower_hir, verify_mir, verify_ssa};
 
 struct Directory(PathBuf);
 
@@ -62,6 +64,25 @@ fn execute(text: &str, optimization: OptimizationLevel) -> std::process::Output 
     Command::new(executable).output().unwrap()
 }
 
+fn compile_and_run_text(
+    text: &str,
+    optimization: OptimizationLevel,
+) -> (aether_driver::Compilation, std::process::Output) {
+    let directory = Directory::new();
+    let input = directory.0.join("main.ae");
+    let executable = directory.0.join("program");
+    fs::write(&input, text).unwrap();
+    let compilation = build_path(
+        &input,
+        &executable,
+        &[Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+        &ClangToolchain::default().with_optimization(optimization),
+    )
+    .unwrap_or_else(|errors| panic!("{text}\n{errors:#?}"));
+    let output = Command::new(executable).output().unwrap();
+    (compilation, output)
+}
+
 fn qualify(text: &str, expected: i32) {
     for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
         assert_eq!(
@@ -100,6 +121,94 @@ fn inferred_and_explicit_shared_string_borrows_read_exact_bytes() {
 
     reject("int main(){Array<string> a={\"x\"};for(string x in a){}return 0;}");
     reject("int main(){List<string> a={\"x\"};for(ref mut string x in a){}return 0;}");
+}
+
+#[test]
+fn borrowed_string_loads_feed_text_ops_in_array_list_and_nested_loops() {
+    let source = r#"package iteration_v3_text;
+import std.Text;
+int main(){
+ Array<string> lines={" alpha beta "," gamma "};List<string> more={" delta "," epsilon zeta "};
+ string separator=" ";usize bytes=0;
+ for(line in lines){
+  List<string> words=std.Text.split(*line,separator);
+  for(word in words){string trimmed=std.Text.trim(*word);bytes=bytes+byteLength(trimmed);}
+ }
+ for(line in more){
+  List<string> words=std.Text.split(*line,separator);
+  for(word in words){string trimmed=std.Text.trim(*word);bytes=bytes+byteLength(trimmed);}
+ }
+ if(bytes==30){return 0;}return 1;
+}"#;
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        let (compilation, output) = compile_and_run_text(source, optimization);
+        assert_eq!(output.status.code(), Some(0), "{optimization:?}");
+        assert!(compilation.dumps[&Emit::Mir].contains("Trim"));
+        assert!(compilation.dumps[&Emit::Mir].contains("Split"));
+        assert!(compilation.dumps[&Emit::Mir].contains("SharedElementBorrow"));
+        assert!(!compilation.dumps[&Emit::Mir].contains("Alias"));
+    }
+}
+
+#[test]
+fn text_op_still_rejects_a_genuinely_dropped_string_owner() {
+    let source =
+        "int main(){string value=\"abc\";usize count=byteLength(value);return int(count)-3;}";
+    let hir =
+        analyze(parse_source(&SourceFile::new("corrupt_text_owner.ae", source)).unwrap()).unwrap();
+    let mut mir = lower_hir(hir);
+    let function = &mut mir.functions[0];
+
+    let (block_index, instruction_index, owner) =
+        function
+            .blocks
+            .iter()
+            .enumerate()
+            .find_map(|(block_index, block)| {
+                block.instructions.iter().enumerate().find_map(
+                    |(instruction_index, instruction)| match &instruction.value {
+                        Rvalue::Core(call)
+                            if call.function.symbol == aether_frontend::CoreSymbol::ByteLength =>
+                        {
+                            match call.arguments.as_slice() {
+                                [Operand::Local(owner)] => {
+                                    Some((block_index, instruction_index, *owner))
+                                }
+                                _ => None,
+                            }
+                        }
+                        _ => None,
+                    },
+                )
+            })
+            .unwrap();
+    function.blocks[block_index].instructions[instruction_index].value =
+        Rvalue::Text(Box::new(TextOp::CodePointCount {
+            value: Operand::Local(owner),
+        }));
+    let owner_drop = function
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .find(|instruction| {
+            matches!(
+                &instruction.value,
+                Rvalue::Drop { owner: place }
+                    if place.base == aether_middle::PlaceBase::Local(owner)
+                        && place.projections.is_empty()
+            )
+        })
+        .unwrap()
+        .clone();
+    function.blocks[block_index]
+        .instructions
+        .insert(instruction_index, owner_drop);
+
+    let errors = verify_mir(mir).unwrap_err();
+    assert_eq!(
+        errors[0].message,
+        "Text operation uses a moved/dropped owner"
+    );
 }
 
 #[test]

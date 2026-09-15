@@ -5675,6 +5675,7 @@ fn verify_ownership(
                         if let Operand::Local(local) = operand
                             && !types.is_copy(function.locals[local.0 as usize].ty)
                             && state[local.0 as usize] != MirOwnerState::Owned
+                            && !borrowed_string_loads.contains(local)
                         {
                             return Err(fail("Text operation uses a moved/dropped owner".into()));
                         }

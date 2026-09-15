@@ -72,6 +72,14 @@ retain/release, deep copy, iterator object, vtable, `next` ni allocation por
 item. Los únicos costos owning son la construcción y destrucción normal de la
 colección/elementos.
 
+Una carga `string` obtenida al desreferenciar ese préstamo sigue siendo un
+operando prestado al llegar a MIR. El verificador de ownership reconoce esos
+temporales `Rvalue::Load` tanto en `Rvalue::String` como en `Rvalue::Text`: no
+exige estado `Owned` al temporal prestado, pero la carga todavía valida el owner
+de la colección y las reglas de provenance/lifetime de ITERATION-V3. Los owners
+reales moved/dropped continúan siendo rechazados por ambas familias de
+operaciones.
+
 ## Temporales y control flow
 
 Las colecciones temporales owning conservan el hidden root de V2. El préstamo
