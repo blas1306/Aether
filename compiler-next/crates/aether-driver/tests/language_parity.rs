@@ -38,7 +38,7 @@ fn without_spans(dump: &str) -> String {
     let mut in_span = false;
     dump.lines()
         .filter(|line| {
-            if line.trim() == "span: Span {" {
+            if line.trim().ends_with(": Span {") {
                 in_span = true;
                 false
             } else if in_span {

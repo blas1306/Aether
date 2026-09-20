@@ -1,0 +1,7 @@
+package main;
+
+import helper as h;
+
+int main() {
+    return h.answer(40);
+}

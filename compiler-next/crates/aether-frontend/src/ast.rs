@@ -176,6 +176,10 @@ pub struct AstParameter {
     pub ty: AstType,
     /// Source name.
     pub name: String,
+    /// Optional caller-evaluated initializer for a trailing default parameter.
+    pub default: Option<AstExpr>,
+    /// Span of the `=` token when a default is present.
+    pub default_equals_span: Option<Span>,
     /// Declaration span.
     pub span: Span,
 }

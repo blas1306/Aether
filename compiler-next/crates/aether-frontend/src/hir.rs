@@ -153,7 +153,14 @@ pub struct CallSiteId(pub u32);
 pub struct ParameterSignature {
     pub name: String,
     pub ty: TypeId,
+    pub default: Option<DefaultArgumentTemplate>,
     pub span: Span,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DefaultArgumentTemplate {
+    pub parameter_index: u32,
+    pub expression: AstExpr,
+    pub equals_span: Span,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FunctionSignature {
@@ -164,6 +171,16 @@ pub struct FunctionSignature {
     pub parameters: Vec<ParameterSignature>,
     pub return_type: TypeId,
     pub span: Span,
+}
+
+impl FunctionSignature {
+    #[must_use]
+    pub fn minimum_arity(&self) -> usize {
+        self.parameters
+            .iter()
+            .position(|parameter| parameter.default.is_some())
+            .unwrap_or(self.parameters.len())
+    }
 }
 impl FunctionSignature {
     /// Stable logical identity, independent of the importing spelling and dense session IDs.
@@ -1249,7 +1266,7 @@ pub enum HirExprKind {
         call_site: CallSiteId,
         callee: HirCallTarget,
         type_arguments: Vec<TypeId>,
-        args: Vec<HirExpr>,
+        args: Vec<HirCallArgument>,
     },
     /// Call through a first-class non-capturing function pointer.
     IndirectCall {
@@ -1285,6 +1302,27 @@ pub enum HirExprKind {
         op: HirBinaryOp,
         left: Box<HirExpr>,
         right: Box<HirExpr>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HirCallArgument {
+    pub binding: LocalId,
+    pub initializer: HirExpr,
+    pub ty: TypeId,
+    pub origin: HirCallArgumentOrigin,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HirCallArgumentOrigin {
+    Explicit {
+        source_span: Span,
+    },
+    Defaulted {
+        declaration: FunctionId,
+        parameter_index: u32,
+        default_span: Span,
+        call_span: Span,
     },
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2182,6 +2220,39 @@ pub fn collect_program_signatures(
         for f in module.ast.functions() {
             let id = FunctionId(signatures.len() as u32);
             names[module.info.id.0 as usize].insert(f.name.clone(), id);
+            if types.class_method(id).is_some()
+                && let Some(parameter) = f.parameters.iter().find(|p| p.default.is_some())
+            {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0367",
+                        Phase::Semantic,
+                        DiagnosticCategory::Unsupported,
+                        "default parameters are not yet supported on methods or initializers",
+                        parameter.default_equals_span.or(Some(parameter.span)),
+                    ),
+                    module,
+                )]);
+            }
+            if let Some(first_default) = f.parameters.iter().position(|p| p.default.is_some())
+                && let Some(required) = f.parameters[first_default + 1..]
+                    .iter()
+                    .find(|p| p.default.is_none())
+            {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0360",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        format!(
+                            "parameter `{}` is required after a parameter with a default",
+                            required.name
+                        ),
+                        Some(required.span),
+                    ),
+                    module,
+                )]);
+            }
             let generic_parameters = collect_generic_parameters(
                 GenericOwner::Function(id.0),
                 &f.generic_parameters,
@@ -2195,7 +2266,8 @@ pub fn collect_program_signatures(
             let mut parameters = f
                 .parameters
                 .iter()
-                .map(|p| {
+                .enumerate()
+                .map(|(index, p)| {
                     resolve_type_in_module(
                         &p.ty,
                         module.info.id,
@@ -2212,6 +2284,12 @@ pub fn collect_program_signatures(
                     .map(|ty| ParameterSignature {
                         name: p.name.clone(),
                         ty,
+                        default: p.default.clone().map(|expression| DefaultArgumentTemplate {
+                            parameter_index: u32::try_from(index)
+                                .expect("parameter index fits u32"),
+                            expression,
+                            equals_span: p.default_equals_span.expect("default has equals span"),
+                        }),
                         span: p.span,
                     })
                 })
@@ -2314,6 +2392,18 @@ pub fn collect_program_signatures(
                 .id;
             let mut requirements = Vec::new();
             for (index, r) in source.requirements.iter().enumerate() {
+                if let Some(parameter) = r.parameters.iter().find(|p| p.default.is_some()) {
+                    return Err(vec![src(
+                        Diagnostic::new(
+                            "E0367",
+                            Phase::Semantic,
+                            DiagnosticCategory::Unsupported,
+                            "default parameters are not yet supported on interface requirements",
+                            parameter.default_equals_span.or(Some(parameter.span)),
+                        ),
+                        module,
+                    )]);
+                }
                 let mut resolve = |ty: &AstType| {
                     resolve_type_in_module(
                         ty,
@@ -4039,6 +4129,7 @@ impl Monomorphizer<'_> {
                 Ok(ParameterSignature {
                     name: parameter.name.clone(),
                     ty: self.substitute_type(parameter.ty, &substitution, parameter.span)?,
+                    default: parameter.default.clone(),
                     span: parameter.span,
                 })
             })
@@ -4731,7 +4822,19 @@ impl Monomorphizer<'_> {
                     type_arguments: concrete_arguments,
                     args: args
                         .iter()
-                        .map(|argument| self.substitute_expr(argument, substitution))
+                        .map(|argument| {
+                            Ok::<_, Vec<Diagnostic>>(HirCallArgument {
+                                binding: argument.binding,
+                                initializer: self
+                                    .substitute_expr(&argument.initializer, substitution)?,
+                                ty: self.substitute_type(
+                                    argument.ty,
+                                    substitution,
+                                    argument.initializer.span,
+                                )?,
+                                origin: argument.origin,
+                            })
+                        })
                         .collect::<Result<Vec<_>, _>>()?,
                 }
             }
@@ -5262,6 +5365,7 @@ fn analyze_function(
         next_finally: 0,
         next_loop: 0,
         next_call_site: 0,
+        default_forbidden: None,
         target,
     };
     let mut parameters = vec![];
@@ -5297,6 +5401,7 @@ fn analyze_function(
             span: p.span,
         });
     }
+    a.validate_declared_defaults(sig, &parameters)?;
     let mut ast_body = f.body.clone();
     if a.class_method.as_ref().is_some_and(|(c, m)| m.initializing && a.types.classes[c.0 as usize].base.is_some())
         && !ast_body.statements.first().is_some_and(|s| matches!(&s.kind, AstStmtKind::Expr(AstExpr { kind: AstExprKind::Call { callee, .. }, .. }) if callee == "$base")) {
@@ -6220,108 +6325,20 @@ impl OwnershipAnalysis<'_> {
             | HirExprKind::ArrayLength { source }
             | HirExprKind::ListLength { source }
             | HirExprKind::ListCapacity { source } => self.place(source, expr.span),
-            HirExprKind::Call { args, .. } | HirExprKind::IndirectCall { args, .. } => {
-                if let HirExprKind::IndirectCall { callee, .. } = &expr.kind {
-                    self.expr(callee)?;
-                }
-                // Writable nested List effects cannot yet be related across
-                // aliased descriptor parameters. Keep this boundary closed.
-                if let Some(argument) = args
+            HirExprKind::Call { args, .. } => self.call_arguments(
+                &args
                     .iter()
-                    .find(|argument| self.types.has_untracked_mutable_view_effect(argument.ty))
-                {
-                    return Err(self.error("E0313", "passing a mutable mathematical view containing List storage requires nested alias-effect provenance", argument.span));
-                }
-
-                if args.iter().any(|a| {
-                    self.types
-                        .reference_info(a.ty)
-                        .is_some_and(|(_, mutable)| mutable)
-                }) {
-                    self.matrix_shapes.fill(None);
-                }
-                // Earlier borrowed arguments remain live while later arguments
-                // are evaluated (which can now extract an owning storage slot).
-                self.borrowed.push(BTreeSet::new());
-                self.storage_borrowed.push(BTreeSet::new());
-                self.storage_ranges.push(Vec::new());
-                for argument in args {
-                    self.expr(argument)?;
-                    if self
-                        .types
-                        .reference_info(argument.ty)
-                        .is_some_and(|(_, mutable)| mutable)
-                        && let Some(owner) = self.derived_owner(argument)
-                        && self
-                            .iteration_element_borrowed
-                            .iter()
-                            .any(|scope| scope.contains(&owner))
-                    {
-                        return Err(self.error(
-                            "E0446",
-                            "writable call argument may replace or invalidate the current borrowed iteration element",
-                            argument.span,
-                        ));
-                    }
-                    if self
-                        .types
-                        .reference_info(argument.ty)
-                        .is_some_and(|(pointee, mutable)| {
-                            mutable && self.types.may_contain_list(pointee)
-                        })
-                        && let Some(owner) = self.derived_owner(argument).or_else(|| {
-                            if let HirExprKind::Borrow { place, .. } = &argument.kind {
-                                self.owner_of_place(place)
-                            } else {
-                                None
-                            }
-                        })
-                        && self.has_live_storage_borrow(owner)
-                    {
-                        return Err(self.error(
-                            "E0313",
-                            "cannot pass a writable reference to a call while a derived element reference/view remains live",
-                            argument.span,
-                        ));
-                    }
-                    if self
-                        .types
-                        .reference_info(argument.ty)
-                        .is_some_and(|(pointee, mutable)| {
-                            mutable && self.types.may_contain_list(pointee)
-                        })
-                        && let Some(owner) = self.derived_owner(argument)
-                    {
-                        self.buffer_lengths[owner.0 as usize] = None;
-                    }
-                    if let Some(owner) = self.derived_owner(argument) {
-                        self.borrowed.last_mut().unwrap().insert(owner);
-                        if self.is_list_storage_borrow(argument) {
-                            let index = self.storage_index(argument);
-                            self.storage_borrowed.last_mut().unwrap().insert(owner);
-                            self.storage_ranges.last_mut().unwrap().push((owner, index));
-                        }
-                    }
-                }
-                // A later argument can introduce a storage borrow that aliases
-                // an earlier writable argument. Check the full call boundary.
-                for argument in args {
-                    if self
-                        .types
-                        .reference_info(argument.ty)
-                        .is_some_and(|(pointee, mutable)| {
-                            mutable && self.types.may_contain_list(pointee)
-                        })
-                        && let Some(owner) = self.derived_owner(argument)
-                        && self.has_live_storage_borrow(owner)
-                    {
-                        return Err(self.error("E0313", "writable call argument may invalidate another live element reference/view argument", argument.span));
-                    }
-                }
-                self.borrowed.pop();
-                self.storage_borrowed.pop();
-                self.storage_ranges.pop();
-                Ok(())
+                    .map(|argument| (&argument.initializer, Some(argument.binding)))
+                    .collect::<Vec<_>>(),
+            ),
+            HirExprKind::IndirectCall { callee, args, .. } => {
+                self.expr(callee)?;
+                self.call_arguments(
+                    &args
+                        .iter()
+                        .map(|argument| (argument, None))
+                        .collect::<Vec<_>>(),
+                )
             }
             HirExprKind::StructInit { fields, .. } => {
                 for (_, value) in fields {
@@ -6514,6 +6531,118 @@ impl OwnershipAnalysis<'_> {
             && !self.types.guarantees_copy(self.locals[owner.0 as usize].ty)
         {
             self.require_owned(owner, span)?;
+        }
+        Ok(())
+    }
+
+    fn call_arguments(
+        &mut self,
+        args: &[(&HirExpr, Option<LocalId>)],
+    ) -> Result<(), Vec<Diagnostic>> {
+        if let Some(argument) = args
+            .iter()
+            .map(|(argument, _)| *argument)
+            .find(|argument| self.types.has_untracked_mutable_view_effect(argument.ty))
+        {
+            return Err(self.error("E0313", "passing a mutable mathematical view containing List storage requires nested alias-effect provenance", argument.span));
+        }
+        if args.iter().any(|(argument, _)| {
+            self.types
+                .reference_info(argument.ty)
+                .is_some_and(|(_, mutable)| mutable)
+        }) {
+            self.matrix_shapes.fill(None);
+        }
+        self.borrowed.push(BTreeSet::new());
+        self.storage_borrowed.push(BTreeSet::new());
+        self.storage_ranges.push(Vec::new());
+        for (argument, binding) in args {
+            self.expr(argument)?;
+            if let Some(binding) = binding {
+                if let Some(owner) = self.derived_owner(argument) {
+                    self.provenance[binding.0 as usize] = Some(owner);
+                }
+                if !self.types.guarantees_copy(argument.ty) {
+                    self.buffer_lengths[binding.0 as usize] = self.known_length(argument);
+                    self.matrix_shapes[binding.0 as usize] = self.known_matrix_shape(argument);
+                    self.state[binding.0 as usize] = OwnerState::Owned;
+                    self.active.push(*binding);
+                }
+            }
+            if self
+                .types
+                .reference_info(argument.ty)
+                .is_some_and(|(_, mutable)| mutable)
+                && let Some(owner) = self.derived_owner(argument)
+                && self
+                    .iteration_element_borrowed
+                    .iter()
+                    .any(|scope| scope.contains(&owner))
+            {
+                return Err(self.error(
+                    "E0446",
+                    "writable call argument may replace or invalidate the current borrowed iteration element",
+                    argument.span,
+                ));
+            }
+            if self
+                .types
+                .reference_info(argument.ty)
+                .is_some_and(|(pointee, mutable)| mutable && self.types.may_contain_list(pointee))
+                && let Some(owner) = self.derived_owner(argument).or_else(|| {
+                    if let HirExprKind::Borrow { place, .. } = &argument.kind {
+                        self.owner_of_place(place)
+                    } else {
+                        None
+                    }
+                })
+                && self.has_live_storage_borrow(owner)
+            {
+                return Err(self.error(
+                    "E0313",
+                    "cannot pass a writable reference to a call while a derived element reference/view remains live",
+                    argument.span,
+                ));
+            }
+            if self
+                .types
+                .reference_info(argument.ty)
+                .is_some_and(|(pointee, mutable)| mutable && self.types.may_contain_list(pointee))
+                && let Some(owner) = self.derived_owner(argument)
+            {
+                self.buffer_lengths[owner.0 as usize] = None;
+            }
+            if let Some(owner) = self.derived_owner(argument) {
+                self.borrowed.last_mut().unwrap().insert(owner);
+                if self.is_list_storage_borrow(argument) {
+                    let index = self.storage_index(argument);
+                    self.storage_borrowed.last_mut().unwrap().insert(owner);
+                    self.storage_ranges.last_mut().unwrap().push((owner, index));
+                }
+            }
+        }
+        for (argument, _) in args {
+            if self
+                .types
+                .reference_info(argument.ty)
+                .is_some_and(|(pointee, mutable)| mutable && self.types.may_contain_list(pointee))
+                && let Some(owner) = self.derived_owner(argument)
+                && self.has_live_storage_borrow(owner)
+            {
+                return Err(self.error("E0313", "writable call argument may invalidate another live element reference/view argument", argument.span));
+            }
+        }
+        self.borrowed.pop();
+        self.storage_borrowed.pop();
+        self.storage_ranges.pop();
+        for (_, binding) in args {
+            if let Some(binding) = binding
+                && !self
+                    .types
+                    .guarantees_copy(self.locals[binding.0 as usize].ty)
+            {
+                self.move_local(*binding, self.locals[binding.0 as usize].span)?;
+            }
         }
         Ok(())
     }
@@ -6799,6 +6928,7 @@ struct Analyzer<'a> {
     next_finally: u32,
     next_loop: u32,
     next_call_site: u32,
+    default_forbidden: Option<(String, BTreeMap<String, bool>)>,
 }
 #[derive(Clone)]
 struct Checked {
@@ -6811,6 +6941,88 @@ enum ConstantValue {
     Float(FloatValue),
 }
 impl Analyzer<'_> {
+    fn invalid_default_reference(&self, name: &str, span: Span) -> Option<Vec<Diagnostic>> {
+        let (parameter, forbidden) = self.default_forbidden.as_ref()?;
+        let self_reference = *forbidden.get(name)?;
+        Some(vec![Diagnostic::new(
+            "E0364",
+            Phase::Semantic,
+            DiagnosticCategory::Name,
+            format!(
+                "default for `{parameter}` cannot reference {} parameter `{name}`",
+                if self_reference { "itself" } else { "later" }
+            ),
+            Some(span),
+        )])
+    }
+
+    fn validate_declared_defaults(
+        &mut self,
+        signature: &FunctionSignature,
+        parameters: &[HirParameter],
+    ) -> Result<(), Vec<Diagnostic>> {
+        let saved_locals = self.locals.clone();
+        let saved_scopes = self.scopes.clone();
+        let saved_call_site = self.next_call_site;
+        for (index, parameter) in signature.parameters.iter().enumerate() {
+            let Some(template) = &parameter.default else {
+                continue;
+            };
+            self.scopes = vec![
+                signature.parameters[..index]
+                    .iter()
+                    .zip(parameters)
+                    .map(|(previous, hir)| (previous.name.clone(), hir.local))
+                    .collect(),
+            ];
+            self.default_forbidden = Some((
+                parameter.name.clone(),
+                signature.parameters[index..]
+                    .iter()
+                    .enumerate()
+                    .map(|(offset, later)| (later.name.clone(), offset == 0))
+                    .collect(),
+            ));
+            let call_site = self.call_site();
+            let result = self.adapt_call_argument(
+                &template.expression,
+                parameter.ty,
+                call_site,
+                template.parameter_index,
+                None,
+            );
+            if let Err(mut diagnostics) = result {
+                self.locals = saved_locals;
+                self.scopes = saved_scopes;
+                self.next_call_site = saved_call_site;
+                self.default_forbidden = None;
+                if let Some(diagnostic) = diagnostics.first_mut()
+                    && diagnostic.code != "E0364"
+                {
+                    let cause = diagnostic.message.clone();
+                    diagnostic.code = if matches!(
+                        diagnostic.category,
+                        DiagnosticCategory::Type | DiagnosticCategory::Conversion
+                    ) {
+                        "E0361"
+                    } else {
+                        "E0365"
+                    };
+                    diagnostic.message = format!(
+                        "default for parameter `{}` requires {}: {cause}",
+                        parameter.name,
+                        self.type_name(parameter.ty)
+                    );
+                }
+                return Err(diagnostics);
+            }
+        }
+        self.locals = saved_locals;
+        self.scopes = saved_scopes;
+        self.next_call_site = saved_call_site;
+        self.default_forbidden = None;
+        Ok(())
+    }
     fn call_site(&mut self) -> CallSiteId {
         let id = CallSiteId(self.next_call_site);
         self.next_call_site = self
@@ -7950,6 +8162,9 @@ impl Analyzer<'_> {
     ) -> Result<HirPlace, Vec<Diagnostic>> {
         match &expression.kind {
             AstExprKind::Name(name) => {
+                if let Some(diagnostic) = self.invalid_default_reference(name, expression.span) {
+                    return Err(diagnostic);
+                }
                 let Some(local) = self.lookup(name) else {
                     return Err(vec![unknown_name(name, expression.span)]);
                 };
@@ -8391,6 +8606,9 @@ impl Analyzer<'_> {
                 constant: None,
             },
             AstExprKind::Name(n) => {
+                if let Some(diagnostic) = self.invalid_default_reference(n, e.span) {
+                    return Err(diagnostic);
+                }
                 if n == "this" && self.class_method.is_some() {
                     return Err(vec![classes::error(
                         "E0404",
@@ -9876,6 +10094,9 @@ impl Analyzer<'_> {
         span: Span,
         expected: Option<TypeId>,
     ) -> Result<Checked, Vec<Diagnostic>> {
+        if let Some(diagnostic) = self.invalid_default_reference(n, span) {
+            return Err(diagnostic);
+        }
         if let Some(local) = self.lookup(n) {
             if !type_arguments.is_empty() {
                 return Err(vec![Diagnostic::new(
@@ -9902,14 +10123,25 @@ impl Analyzer<'_> {
             let parameters = parameters.to_vec();
             if args.len() != parameters.len() {
                 return Err(vec![Diagnostic::new(
-                    "E0352",
+                    if args.len() < parameters.len() {
+                        "E0366"
+                    } else {
+                        "E0352"
+                    },
                     Phase::Semantic,
                     DiagnosticCategory::Type,
-                    format!(
-                        "function value expects {} arguments, found {}",
-                        parameters.len(),
-                        args.len()
-                    ),
+                    if args.len() < parameters.len() {
+                        format!(
+                            "function value requires {} arguments; defaults are available only on direct declarations",
+                            parameters.len()
+                        )
+                    } else {
+                        format!(
+                            "function value expects {} arguments, found {}",
+                            parameters.len(),
+                            args.len()
+                        )
+                    },
                     Some(span),
                 )]);
             }
@@ -10538,17 +10770,32 @@ impl Analyzer<'_> {
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
         let s = self.signatures[id.0 as usize].clone();
-        if args.len() != s.parameters.len() {
+        let minimum_arity = s.minimum_arity();
+        if args.len() < minimum_arity {
             return Err(vec![Diagnostic::new(
-                "E0213",
+                "E0362",
                 Phase::Semantic,
                 DiagnosticCategory::Type,
                 format!(
-                    "function `{name}` expects {} arguments, found {}",
+                    "function `{name}` accepts {minimum_arity}..{} arguments, found {}; missing required arguments",
                     s.parameters.len(),
                     args.len()
                 ),
                 Some(span),
+            )]);
+        }
+        if args.len() > s.parameters.len() {
+            return Err(vec![Diagnostic::new(
+                "E0363",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!(
+                    "function `{name}` accepts at most {} arguments, found {}",
+                    s.parameters.len(),
+                    args.len()
+                ),
+                args.get(s.parameters.len())
+                    .map_or(Some(span), |arg| Some(arg.span)),
             )]);
         }
         let mut type_arguments = self.resolve_type_arguments(source_type_arguments)?;
@@ -10619,30 +10866,70 @@ impl Analyzer<'_> {
             .substitute(s.return_type, &substitution)
             .map_err(|parameter| vec![incomplete_substitution(parameter, span)])?;
         let call_site = self.call_site();
-        let mut out = vec![];
-        for (index, (a, concrete_ty)) in args.iter().zip(concrete_parameters).enumerate() {
-            let checked = prechecked.as_ref().map(|values| values[index].clone());
-            match self.adapt_call_argument(
-                a,
-                concrete_ty,
-                call_site,
-                u32::try_from(index).expect("argument index fits u32"),
-                checked,
-            ) {
-                Ok(x) => out.push(x),
-                Err(mut ds) => {
-                    if let Some(d) = ds.first_mut() {
-                        d.code = "E0214";
-                        d.message = format!(
-                            "argument {} to `{name}` requires {}: {}",
-                            index + 1,
-                            self.type_name(concrete_ty),
-                            d.message
-                        )
-                    }
-                    return Err(ds);
-                }
-            }
+        let mut out = Vec::with_capacity(s.parameters.len());
+        for (index, concrete_ty) in concrete_parameters.iter().copied().enumerate() {
+            let argument_index = u32::try_from(index).expect("argument index fits u32");
+            let (initializer, origin) = if let Some(argument) = args.get(index) {
+                let checked = prechecked.as_ref().map(|values| values[index].clone());
+                let initializer = self
+                    .adapt_call_argument(argument, concrete_ty, call_site, argument_index, checked)
+                    .map_err(|mut diagnostics| {
+                        if let Some(diagnostic) = diagnostics.first_mut() {
+                            diagnostic.code = "E0214";
+                            diagnostic.message = format!(
+                                "argument {} to `{name}` requires {}: {}",
+                                index + 1,
+                                self.type_name(concrete_ty),
+                                diagnostic.message
+                            );
+                        }
+                        diagnostics
+                    })?;
+                (
+                    initializer,
+                    HirCallArgumentOrigin::Explicit {
+                        source_span: argument.span,
+                    },
+                )
+            } else {
+                let template = s.parameters[index]
+                    .default
+                    .as_ref()
+                    .expect("arity range guarantees a trailing default");
+                let initializer = self.materialize_default_argument(
+                    &s,
+                    template,
+                    concrete_ty,
+                    &type_arguments,
+                    &out,
+                    call_site,
+                    span,
+                )?;
+                (
+                    initializer,
+                    HirCallArgumentOrigin::Defaulted {
+                        declaration: id,
+                        parameter_index: argument_index,
+                        default_span: template.expression.span,
+                        call_span: span,
+                    },
+                )
+            };
+            let binding = LocalId(self.locals.len() as u32);
+            self.locals.push(HirLocal {
+                id: binding,
+                name: format!("$call{}_arg{index}", call_site.0),
+                ty: concrete_ty,
+                span: initializer.span,
+                parameter: false,
+                address_taken: false,
+            });
+            out.push(HirCallArgument {
+                binding,
+                initializer,
+                ty: concrete_ty,
+                origin,
+            });
         }
         Ok(Checked {
             expr: HirExpr {
@@ -10656,6 +10943,82 @@ impl Analyzer<'_> {
                 span,
             },
             constant: None,
+        })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn materialize_default_argument(
+        &mut self,
+        signature: &FunctionSignature,
+        template: &DefaultArgumentTemplate,
+        parameter_type: TypeId,
+        type_arguments: &[TypeId],
+        previous: &[HirCallArgument],
+        call_site: CallSiteId,
+        call_span: Span,
+    ) -> Result<HirExpr, Vec<Diagnostic>> {
+        let index = template.parameter_index as usize;
+        let scope = signature.parameters[..index]
+            .iter()
+            .zip(previous)
+            .map(|(parameter, argument)| (parameter.name.clone(), argument.binding))
+            .collect::<BTreeMap<_, _>>();
+        let forbidden = signature.parameters[index..]
+            .iter()
+            .enumerate()
+            .map(|(offset, parameter)| (parameter.name.clone(), offset == 0))
+            .collect::<BTreeMap<_, _>>();
+        let concrete_generics = signature
+            .generic_parameters
+            .iter()
+            .zip(type_arguments)
+            .map(|(parameter, argument)| (parameter.name.clone(), *argument))
+            .collect::<BTreeMap<_, _>>();
+
+        let saved_module = self.module;
+        let saved_scopes = std::mem::replace(&mut self.scopes, vec![scope]);
+        let saved_generics = std::mem::replace(&mut self.generic_scope, concrete_generics);
+        let saved_class = self.class_method.take();
+        let saved_context = self
+            .default_forbidden
+            .replace((signature.parameters[index].name.clone(), forbidden));
+        self.module = signature.module;
+        let result = self.adapt_call_argument(
+            &template.expression,
+            parameter_type,
+            call_site,
+            template.parameter_index,
+            None,
+        );
+        self.module = saved_module;
+        self.scopes = saved_scopes;
+        self.generic_scope = saved_generics;
+        self.class_method = saved_class;
+        self.default_forbidden = saved_context;
+
+        result.map_err(|mut diagnostics| {
+            if let Some(diagnostic) = diagnostics.first_mut()
+                && diagnostic.code != "E0364"
+            {
+                let cause = diagnostic.message.clone();
+                diagnostic.code = if signature.generic_parameters.is_empty()
+                    && matches!(
+                        diagnostic.category,
+                        DiagnosticCategory::Type | DiagnosticCategory::Conversion
+                    ) {
+                    "E0361"
+                } else {
+                    "E0365"
+                };
+                diagnostic.message = format!(
+                    "default for parameter `{}` requires {}: {cause} (at call {}..{})",
+                    signature.parameters[index].name,
+                    self.type_name(parameter_type),
+                    call_span.start,
+                    call_span.end
+                );
+            }
+            diagnostics
         })
     }
 
@@ -13093,7 +13456,7 @@ fn verify_expr(
             type_arguments,
             args,
         } => {
-            let (return_type, parameters) = match (sigs, callee) {
+            let (return_type, parameters, declaration) = match (sigs, callee) {
                 (VerificationSignatures::Concrete(signatures), HirCallTarget::Instance(callee)) => {
                     let s = signatures
                         .get(callee.0 as usize)
@@ -13104,6 +13467,7 @@ fn verify_expr(
                     (
                         s.return_type,
                         s.parameters.iter().map(|p| p.ty).collect::<Vec<_>>(),
+                        s.function_id,
                     )
                 }
                 (
@@ -13144,6 +13508,7 @@ fn verify_expr(
                             .iter()
                             .map(|p| substitute(p.ty))
                             .collect::<Result<Vec<_>, _>>()?,
+                        s.id,
                     )
                 }
                 _ => {
@@ -13155,13 +13520,52 @@ fn verify_expr(
             if return_type != e.ty || args.len() != parameters.len() {
                 return Err(fail("HIR call mismatch".into()));
             }
+            let mut bindings = BTreeSet::new();
+            let mut saw_default = false;
             for (index, (a, ty)) in args.iter().zip(parameters).enumerate() {
-                if matches!(a.kind, HirExprKind::CallScopedSharedBorrow { .. }) {
-                    verify_call_borrow(a, *call_site, index, f, sigs, structs, enums, types, fail)?;
-                } else {
-                    verify_expr(a, f, sigs, structs, enums, types, fail)?;
+                if f.locals.get(a.binding.0 as usize).map(|local| local.ty) != Some(a.ty)
+                    || a.ty != ty
+                    || !bindings.insert(a.binding)
+                {
+                    return Err(fail("HIR call argument binding/type mismatch".into()));
                 }
-                if a.ty != ty {
+                match a.origin {
+                    HirCallArgumentOrigin::Explicit { .. } if saw_default => {
+                        return Err(fail(
+                            "HIR explicit argument follows a defaulted argument".into(),
+                        ));
+                    }
+                    HirCallArgumentOrigin::Explicit { .. } => {}
+                    HirCallArgumentOrigin::Defaulted {
+                        declaration: owner,
+                        parameter_index,
+                        ..
+                    } if owner == declaration && parameter_index as usize == index => {
+                        saw_default = true;
+                    }
+                    HirCallArgumentOrigin::Defaulted { .. } => {
+                        return Err(fail("HIR default argument provenance mismatch".into()));
+                    }
+                }
+                if matches!(
+                    a.initializer.kind,
+                    HirExprKind::CallScopedSharedBorrow { .. }
+                ) {
+                    verify_call_borrow(
+                        &a.initializer,
+                        *call_site,
+                        index,
+                        f,
+                        sigs,
+                        structs,
+                        enums,
+                        types,
+                        fail,
+                    )?;
+                } else {
+                    verify_expr(&a.initializer, f, sigs, structs, enums, types, fail)?;
+                }
+                if a.initializer.ty != ty {
                     return Err(fail("HIR argument mismatch".into()));
                 }
             }
@@ -14123,7 +14527,7 @@ mod tests {
             else {
                 panic!("expected direct call")
             };
-            let argument_span = args[0].span;
+            let argument_span = args[0].initializer.span;
             let HirExprKind::CallScopedSharedBorrow {
                 call_site: borrow_site,
                 argument_index,
@@ -14131,7 +14535,7 @@ mod tests {
                 reference_type,
                 source,
                 origin,
-            } = &mut args[0].kind
+            } = &mut args[0].initializer.kind
             else {
                 panic!("expected implicit borrow")
             };

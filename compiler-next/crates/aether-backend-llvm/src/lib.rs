@@ -4526,7 +4526,7 @@ mod tests {
             "bool positive(int x){return x>0;}int main(){if(positive(5)){return 1;}return 0;}",
         );
         assert!(output.contains("define i1 @__aether_v2_a0_f8_positive(i64 %v0)"));
-        assert!(output.contains("call i1 @__aether_v2_a0_f8_positive(i64 5)"));
+        assert!(output.contains("call i1 @__aether_v2_a0_f8_positive(i64 %v"));
         assert!(output.contains("define i32 @main()"));
     }
 

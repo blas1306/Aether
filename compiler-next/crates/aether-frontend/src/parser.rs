@@ -197,10 +197,19 @@ impl Parser<'_> {
                 loop {
                     let ty = self.ty()?;
                     let token = self.expect(TokenKind::Identifier, "expected parameter name")?;
+                    let equals = self.consume(TokenKind::Equal);
+                    let default = if equals.is_some() {
+                        Some(self.expression()?)
+                    } else {
+                        None
+                    };
+                    let end = default.as_ref().map_or(token.span, |expr| expr.span);
                     parameters.push(AstParameter {
                         ty,
                         name: token.lexeme,
-                        span: token.span,
+                        default,
+                        default_equals_span: equals.map(|token| token.span),
+                        span: token.span.through(end),
                     });
                     if self.consume(TokenKind::Comma).is_none() {
                         break;
@@ -500,10 +509,19 @@ impl Parser<'_> {
                 let parameter_start = self.current().span;
                 let ty = self.ty()?;
                 let token = self.expect(TokenKind::Identifier, "expected parameter name")?;
+                let equals = self.consume(TokenKind::Equal);
+                let default = if equals.is_some() {
+                    Some(self.expression()?)
+                } else {
+                    None
+                };
+                let parameter_end = default.as_ref().map_or(token.span, |expr| expr.span);
                 parameters.push(AstParameter {
                     ty,
                     name: token.lexeme,
-                    span: parameter_start.through(token.span),
+                    default,
+                    default_equals_span: equals.map(|token| token.span),
+                    span: parameter_start.through(parameter_end),
                 });
                 if self.consume(TokenKind::Comma).is_none() {
                     break;

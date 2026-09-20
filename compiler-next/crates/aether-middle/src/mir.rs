@@ -3495,7 +3495,7 @@ impl Builder<'_> {
                 args,
                 ..
             } => {
-                let (args, borrow_start, owner_start) = self.lower_call_arguments(args);
+                let (args, borrow_start, owner_start) = self.lower_direct_call_arguments(args);
                 let destination = self.temporary(expression.ty);
                 self.assign(
                     Place {
@@ -4123,58 +4123,156 @@ impl Builder<'_> {
         let owner_start = self.active_temporary_owners.len();
         let mut result = Vec::new();
         for argument in arguments {
-            let HirExprKind::CallScopedSharedBorrow {
-                call_site,
-                argument_index,
-                pointee_type,
-                reference_type,
-                source,
-                origin,
-            } = &argument.kind
-            else {
-                result.push(self.lower_expr(argument));
-                continue;
-            };
-            let (place, source_kind) = match source {
-                CallBorrowSource::Place(place) => {
-                    (self.lower_place(place), CallBorrowSourceKind::Place)
-                }
-                CallBorrowSource::Temporary(initializer) => {
-                    let value = self.lower_expr(initializer);
-                    let local = operand_local_id(&value)
-                        .expect("verified call temporary is materialized in a local");
-                    self.function.locals[local.0 as usize].address_taken = true;
-                    if self.types.needs_drop(*pointee_type) {
-                        self.active_temporary_owners.push(local);
-                    }
-                    (
-                        operand_place(&value),
-                        CallBorrowSourceKind::Temporary(local),
-                    )
-                }
-            };
-            let metadata = CallBorrowMetadata {
-                call_site: *call_site,
-                argument_index: *argument_index,
-                pointee_type: *pointee_type,
-                reference_type: *reference_type,
-                source: source_kind,
-                origin: *origin,
-            };
-            let reference = Operand::Local(self.temporary(*reference_type));
-            self.assign(
-                operand_place(&reference),
-                Rvalue::Borrow {
-                    place,
-                    mutable: false,
-                    call: Some(metadata),
-                },
-                argument.span,
-            );
-            self.active_call_borrows.push((metadata, reference.clone()));
-            result.push(reference);
+            result.push(self.lower_call_argument(argument));
         }
         (result, borrow_start, owner_start)
+    }
+
+    fn lower_direct_call_arguments(
+        &mut self,
+        arguments: &[aether_frontend::HirCallArgument],
+    ) -> (Vec<Operand>, usize, usize) {
+        let borrow_start = self.active_call_borrows.len();
+        let owner_start = self.active_temporary_owners.len();
+        let mut transferred = BTreeSet::new();
+        for argument in arguments {
+            let is_call_borrow = matches!(
+                argument.initializer.kind,
+                HirExprKind::CallScopedSharedBorrow { .. }
+            );
+            let value = self.lower_call_argument_into(
+                &argument.initializer,
+                is_call_borrow.then_some(argument.binding),
+            );
+            if is_call_borrow {
+                continue;
+            }
+            let rvalue = if self.types.is_copy(argument.ty) {
+                Rvalue::Use(value)
+            } else {
+                Rvalue::Move {
+                    source: operand_place(&value),
+                }
+            };
+            self.assign(
+                Place {
+                    base: PlaceBase::Local(argument.binding),
+                    projections: Vec::new(),
+                },
+                rvalue,
+                argument.initializer.span,
+            );
+            if !self.types.is_copy(argument.ty) && self.types.needs_drop(argument.ty) {
+                self.set_drop_flag(argument.binding, true, argument.initializer.span);
+                self.active_temporary_owners.push(argument.binding);
+                transferred.insert(argument.binding);
+            }
+        }
+        self.active_temporary_owners
+            .retain(|local| !transferred.contains(local));
+        let mut result = Vec::with_capacity(arguments.len());
+        for argument in arguments {
+            if transferred.contains(&argument.binding) {
+                let destination = self.temporary(argument.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: Vec::new(),
+                    },
+                    Rvalue::Move {
+                        source: Place {
+                            base: PlaceBase::Local(argument.binding),
+                            projections: Vec::new(),
+                        },
+                    },
+                    argument.initializer.span,
+                );
+                self.set_drop_flag(argument.binding, false, argument.initializer.span);
+                result.push(Operand::Local(destination));
+                continue;
+            }
+            if self.types.is_copy(argument.ty)
+                && self.function.locals[argument.binding.0 as usize].address_taken
+            {
+                let destination = self.temporary(argument.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: Vec::new(),
+                    },
+                    Rvalue::Load(Place {
+                        base: PlaceBase::Local(argument.binding),
+                        projections: Vec::new(),
+                    }),
+                    argument.initializer.span,
+                );
+                result.push(Operand::Local(destination));
+            } else {
+                result.push(Operand::Local(argument.binding));
+            }
+        }
+        (result, borrow_start, owner_start)
+    }
+
+    fn lower_call_argument(&mut self, argument: &HirExpr) -> Operand {
+        self.lower_call_argument_into(argument, None)
+    }
+
+    fn lower_call_argument_into(
+        &mut self,
+        argument: &HirExpr,
+        destination: Option<LocalId>,
+    ) -> Operand {
+        let HirExprKind::CallScopedSharedBorrow {
+            call_site,
+            argument_index,
+            pointee_type,
+            reference_type,
+            source,
+            origin,
+        } = &argument.kind
+        else {
+            return self.lower_expr(argument);
+        };
+        let (place, source_kind) = match source {
+            CallBorrowSource::Place(place) => {
+                (self.lower_place(place), CallBorrowSourceKind::Place)
+            }
+            CallBorrowSource::Temporary(initializer) => {
+                let value = self.lower_expr(initializer);
+                let local = operand_local_id(&value)
+                    .expect("verified call temporary is materialized in a local");
+                self.function.locals[local.0 as usize].address_taken = true;
+                if self.types.needs_drop(*pointee_type) {
+                    self.active_temporary_owners.push(local);
+                }
+                (
+                    operand_place(&value),
+                    CallBorrowSourceKind::Temporary(local),
+                )
+            }
+        };
+        let metadata = CallBorrowMetadata {
+            call_site: *call_site,
+            argument_index: *argument_index,
+            pointee_type: *pointee_type,
+            reference_type: *reference_type,
+            source: source_kind,
+            origin: *origin,
+        };
+        let reference =
+            Operand::Local(destination.unwrap_or_else(|| self.temporary(*reference_type)));
+        self.assign(
+            operand_place(&reference),
+            Rvalue::Borrow {
+                place,
+                mutable: false,
+                call: Some(metadata),
+            },
+            argument.span,
+        );
+        self.active_call_borrows.push((metadata, reference.clone()));
+        reference
     }
 
     fn finish_call_borrows(&mut self, borrow_start: usize, owner_start: usize, span: Span) {

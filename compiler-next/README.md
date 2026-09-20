@@ -1,5 +1,22 @@
 # Aether native compiler — OOP-POLISH-1
 
+## Default parameters (DEFAULT-PARAMETERS-V1)
+
+Free user functions may declare trailing defaults with `T name = expression`.
+After the first default every following source parameter must also have one.
+Direct calls may omit only a suffix; explicit arguments and then omitted
+defaults are evaluated exactly once from left to right. Defaults use declaration
+scope, may read earlier parameter bindings, and never participate in generic
+inference.
+
+HIR normalizes every direct call to its full physical arity with call-scoped
+bindings and `Explicit`/`Defaulted` provenance. MIR, SSA and LLVM contain only
+ordinary full-arity calls. Function values retain the complete `Function` type
+and indirect calls cannot omit arguments. Methods, initializers and interface
+requirements remain gated with `E0367`; there are no named arguments, holes,
+wrappers, thunks, runtime metadata or ABI changes. See the
+[implementation report](../docs/architecture/DEFAULT_PARAMETERS_V1_REPORT.md).
+
 ## Base calls and exact class devirtualization (OOP-POLISH-1)
 
 Inside a derived method, `base.method(args)` directly invokes the implementation
@@ -867,7 +884,7 @@ generic-params := "<" generic-param ("," generic-param)* ">"
 generic-param  := IDENT (":" capability ("+" capability)*)?
 capability     := "Copy" | "Relocatable" | "Storable" | "Add" | "Sub" | "Mul"
 parameters := parameter ("," parameter)*
-parameter  := type IDENT
+parameter  := type IDENT ("=" expression)?
 type       := "ref" "mut"? type
             | (IDENT ".")? ("bool" | integer-type | float-type | IDENT)
               ("<" type ("," type)* ">")?

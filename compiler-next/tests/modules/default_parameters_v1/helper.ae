@@ -1,0 +1,9 @@
+package helper;
+
+int increment(int value) {
+    return value + 1;
+}
+
+int answer(int value, int delta = increment(1)) {
+    return value + delta;
+}

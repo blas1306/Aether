@@ -32,8 +32,8 @@ mutual_recursion	V1_CONTRACT	accept:7	n/a	programs/mutual_recursion.ae
 parameter_value	LEGACY_EQUIVALENT	accept:9	accept:9	programs/parameter_value.ae
 duplicate_function	V1_CONTRACT	reject:E0211	n/a	programs/duplicate_function.ae
 unknown_callee	V1_CONTRACT	reject:E0212	n/a	programs/unknown_callee.ae
-too_many_arguments	V1_CONTRACT	reject:E0213	n/a	programs/too_many_arguments.ae
-too_few_arguments	V1_CONTRACT	reject:E0213	n/a	programs/too_few_arguments.ae
+too_many_arguments	V1_CONTRACT	reject:E0363	n/a	programs/too_many_arguments.ae
+too_few_arguments	V1_CONTRACT	reject:E0362	n/a	programs/too_few_arguments.ae
 wrong_argument_type	V1_CONTRACT	reject:E0214	n/a	programs/wrong_argument_type.ae
 return_wrong_type	V1_CONTRACT	reject:E0205	n/a	programs/return_wrong_type.ae
 unsupported_function_value	FAIL_CLOSED	reject:E0351	n/a	programs/unsupported_function_value.ae

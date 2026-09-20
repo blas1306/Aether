@@ -227,6 +227,8 @@ pub(super) fn expand_methods(program: &mut ParsedProgram) -> Result<(), Vec<Diag
                     AstParameter {
                         ty: ast_type(&class.name, f.span),
                         name: "this".into(),
+                        default: None,
+                        default_equals_span: None,
                         span: f.span,
                     },
                 );
@@ -1214,10 +1216,10 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
         | E::VectorInit { elements, .. }
         | E::ArrayInit { elements, .. }
         | E::ListInit { elements, .. }
-        | E::Call { args: elements, .. }
         | E::EnumInit {
             payloads: elements, ..
         } => elements.iter().collect(),
+        E::Call { args, .. } => args.iter().map(|argument| &argument.initializer).collect(),
         E::IndirectCall { callee, args, .. } => std::iter::once(callee.as_ref())
             .chain(args.iter())
             .collect(),

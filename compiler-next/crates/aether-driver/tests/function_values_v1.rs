@@ -157,7 +157,7 @@ fn syntax_signature_arity_void_and_open_generic_fail_closed() {
         ),
         (
             "int f(int x){return x;}int main(){Function<(int),int> g=f;return g();}",
-            "E0352 function value expects 1 arguments, found 0",
+            "E0366 function value requires 1 arguments",
         ),
         (
             "int use(Function<(void),int> f){return 0;}int main(){return 0;}",

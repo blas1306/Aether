@@ -185,8 +185,8 @@ fn scalar_function_diagnostics_are_stable_and_structured() {
     for (source, code) in [
         ("duplicate_function.ae", "E0211"),
         ("unknown_callee.ae", "E0212"),
-        ("too_many_arguments.ae", "E0213"),
-        ("too_few_arguments.ae", "E0213"),
+        ("too_many_arguments.ae", "E0363"),
+        ("too_few_arguments.ae", "E0362"),
         ("wrong_argument_type.ae", "E0214"),
         ("return_wrong_type.ae", "E0205"),
         ("unsupported_function_value.ae", "E0351"),
