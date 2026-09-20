@@ -82,7 +82,9 @@ pub(super) fn reachable_functions(
         let function = program.functions.iter().find(|f| f.id == id).unwrap();
         for instruction in function.blocks.iter().flat_map(|b| &b.instructions) {
             match &instruction.op {
-                SsaOp::Call { callee, .. } => pending.push(*callee),
+                SsaOp::Call { callee, .. } | SsaOp::FunctionRef { target: callee, .. } => {
+                    pending.push(*callee);
+                }
                 SsaOp::Class(op) => match op.as_ref() {
                     ClassOp::ObjectAlloc { .. } => {
                         pending.extend(

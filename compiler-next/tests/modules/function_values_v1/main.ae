@@ -1,0 +1,12 @@
+package main;
+
+import helper;
+
+int invoke(Function<(), int> function) {
+    return function();
+}
+
+int main() {
+    Function<(), int> imported = helper.answer;
+    return invoke(imported);
+}

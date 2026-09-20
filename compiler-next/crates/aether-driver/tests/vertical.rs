@@ -189,7 +189,7 @@ fn scalar_function_diagnostics_are_stable_and_structured() {
         ("too_few_arguments.ae", "E0213"),
         ("wrong_argument_type.ae", "E0214"),
         ("return_wrong_type.ae", "E0205"),
-        ("unsupported_function_value.ae", "E0215"),
+        ("unsupported_function_value.ae", "E0351"),
         ("malformed_function.ae", "E0104"),
     ] {
         let text = fs::read_to_string(program(source)).unwrap();
@@ -545,7 +545,7 @@ fn multi_file_diagnostics_are_structured_and_keep_source_provenance() {
         ("errors/not_imported", "E0223", "a.ae"),
         ("errors/imported_semantic", "E0202", "broken.ae"),
         ("errors/unknown_module", "E0221", "main.ae"),
-        ("errors/invalid_qualified", "E0224", "main.ae"),
+        ("errors/invalid_qualified", "E0351", "main.ae"),
         ("errors/duplicate_import", "E0220", "main.ae"),
         ("errors/malformed_import", "E0100", "main.ae"),
         ("errors/imported_unsupported", "E0218", "main.ae"),

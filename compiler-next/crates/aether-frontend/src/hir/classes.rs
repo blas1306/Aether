@@ -14,10 +14,11 @@ pub(super) fn error(code: &'static str, message: impl Into<String>, span: Span) 
 }
 fn ast_type(name: &str, span: Span) -> AstType {
     AstType {
-        module: None,
-        name: name.into(),
-        arguments: Vec::new(),
-        reference: None,
+        kind: crate::AstTypeKind::Named {
+            module: None,
+            name: name.into(),
+            arguments: Vec::new(),
+        },
         span,
     }
 }
@@ -101,7 +102,7 @@ pub(super) fn inject_exception_core(program: &mut ParsedProgram) -> Result<(), V
                 class
                     .relations
                     .iter()
-                    .any(|relation| relation.module.is_none() && relation.name == "Exception")
+                    .any(|relation| matches!(relation.named(), Some((None, "Exception", _))))
             })
     });
     if !needed {
@@ -1168,6 +1169,7 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
         | E::Int(_)
         | E::Float(_)
         | E::Bool(_)
+        | E::FunctionRef { .. }
         | E::Local(_)
         | E::Move(_)
         | E::AlgebraicValue { .. } => Vec::new(),
@@ -1216,6 +1218,9 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
         | E::EnumInit {
             payloads: elements, ..
         } => elements.iter().collect(),
+        E::IndirectCall { callee, args, .. } => std::iter::once(callee.as_ref())
+            .chain(args.iter())
+            .collect(),
         E::StructInit { fields, .. } => fields.iter().map(|(_, e)| e).collect(),
         E::CapabilityBinary { left, right, .. }
         | E::VectorScalarMultiply { left, right, .. }

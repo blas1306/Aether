@@ -381,6 +381,11 @@ fn bounded_strong_counts(program: &SsaIr) -> bool {
                     SsaOp::Call { callee, .. } => {
                         edges[function.id.0 as usize].insert(*callee);
                     }
+                    SsaOp::IndirectCall { .. } => {
+                        // An opaque callable can target a recursive path. Keep
+                        // strong-count overflow behavior conservative.
+                        edges[function.id.0 as usize].insert(function.id);
+                    }
                     SsaOp::Class(op) => match op.as_ref() {
                         ClassOp::BaseInit {
                             initializer: method,

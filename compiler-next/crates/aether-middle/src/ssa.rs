@@ -389,6 +389,16 @@ pub enum SsaOp {
         callee: InstanceId,
         args: Vec<SsaOperand>,
     },
+    FunctionRef {
+        target: InstanceId,
+        signature: TypeId,
+    },
+    IndirectCall {
+        call_site: aether_frontend::CallSiteId,
+        callee: SsaOperand,
+        args: Vec<SsaOperand>,
+        signature: TypeId,
+    },
     ExceptionMatches {
         event: ExceptionEventId,
         catch_class: ClassId,
@@ -1377,6 +1387,24 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
                 .map(|argument| rename_operand(argument, stacks))
                 .collect(),
         },
+        Rvalue::FunctionRef { target, signature } => SsaOp::FunctionRef {
+            target: *target,
+            signature: *signature,
+        },
+        Rvalue::IndirectCall {
+            call_site,
+            callee,
+            args,
+            signature,
+        } => SsaOp::IndirectCall {
+            call_site: *call_site,
+            callee: rename_operand(callee, stacks),
+            args: args
+                .iter()
+                .map(|argument| rename_operand(argument, stacks))
+                .collect(),
+            signature: *signature,
+        },
         Rvalue::ExceptionMatches { event, catch_class } => SsaOp::ExceptionMatches {
             event: *event,
             catch_class: *catch_class,
@@ -1845,7 +1873,12 @@ pub(crate) fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<Local
             .filter_map(operand_local)
             .collect(),
         Rvalue::Call { args, .. } => args.iter().filter_map(operand_local).collect(),
-        Rvalue::ExceptionMatches { .. }
+        Rvalue::IndirectCall { callee, args, .. } => operand_local(callee)
+            .into_iter()
+            .chain(args.iter().filter_map(operand_local))
+            .collect(),
+        Rvalue::FunctionRef { .. }
+        | Rvalue::ExceptionMatches { .. }
         | Rvalue::CatchBindAlias { .. }
         | Rvalue::EndCatch { .. }
         | Rvalue::SetPendingFinally { .. }
@@ -2112,29 +2145,30 @@ fn verify_ssa_function(
             if let Some(target) = instruction.unwind {
                 unwind_predecessors[target.0 as usize] += 1;
             }
-            let may_throw = matches!(instruction.op, SsaOp::Call { .. })
-                || matches!(
-                    instruction.op,
-                    SsaOp::Core(ref call)
-                        if matches!(
-                            call.function.symbol,
-                            aether_frontend::CoreSymbol::Print
-                                | aether_frontend::CoreSymbol::Println
-                        )
-                )
-                || matches!(
-                    instruction.op,
-                    SsaOp::Class(ref op)
-                        if matches!(
-                            op.as_ref(),
-                            ClassOp::DirectMethodCall { .. }
-                                | ClassOp::BaseMethodCall { .. }
-                                | ClassOp::VirtualCall { .. }
-                                | ClassOp::InterfaceCall { .. }
-                                | ClassOp::BaseInit { .. }
-                                | ClassOp::InitCall { .. }
-                        )
-                );
+            let may_throw = matches!(
+                instruction.op,
+                SsaOp::Call { .. } | SsaOp::IndirectCall { .. }
+            ) || matches!(
+                instruction.op,
+                SsaOp::Core(ref call)
+                    if matches!(
+                        call.function.symbol,
+                        aether_frontend::CoreSymbol::Print
+                            | aether_frontend::CoreSymbol::Println
+                    )
+            ) || matches!(
+                instruction.op,
+                SsaOp::Class(ref op)
+                    if matches!(
+                        op.as_ref(),
+                        ClassOp::DirectMethodCall { .. }
+                            | ClassOp::BaseMethodCall { .. }
+                            | ClassOp::VirtualCall { .. }
+                            | ClassOp::InterfaceCall { .. }
+                            | ClassOp::BaseInit { .. }
+                            | ClassOp::InitCall { .. }
+                    )
+            );
             if !function.exception_events.is_empty() && instruction.unwind.is_some() != may_throw {
                 return Err(fail("SSA invoke/unwind edge contract is invalid".into()));
             }
@@ -2544,6 +2578,9 @@ fn verify_call_borrow_regions(
                 let allowed = match &instruction.op {
                     SsaOp::Call {
                         call_site, args, ..
+                    }
+                    | SsaOp::IndirectCall {
+                        call_site, args, ..
                     } if *call_site == metadata.call_site => args
                         .get(metadata.argument_index as usize)
                         .is_some_and(|operand| operand == &SsaOperand::Value(*reference)),
@@ -2565,7 +2602,9 @@ fn verify_call_borrow_regions(
                     return Err(fail("SSA call-scoped reference escapes its call".into()));
                 }
                 match &instruction.op {
-                    SsaOp::Call { call_site, .. } | SsaOp::Text { call_site, .. }
+                    SsaOp::Call { call_site, .. }
+                    | SsaOp::IndirectCall { call_site, .. }
+                    | SsaOp::Text { call_site, .. }
                         if *call_site == metadata.call_site && allowed =>
                     {
                         call_uses += 1;
@@ -3201,7 +3240,7 @@ fn verify_string_ownership(
                         ));
                     }
                 }
-                SsaOp::Call { args, .. } => {
+                SsaOp::Call { args, .. } | SsaOp::IndirectCall { args, .. } => {
                     if consume_string_operands(block.id, args, &owners, &mut consumed_on_path) {
                         return Err(fail(
                             "SSA string owner is consumed twice on one control-flow path".into(),
@@ -3473,7 +3512,7 @@ fn verify_ssa_finally_regions(
             let block = &function.blocks[block.0 as usize];
             if block.instructions.iter().any(|instruction| {
                 instruction.unwind.is_some()
-                    || matches!(instruction.op, SsaOp::Call { .. })
+                    || matches!(instruction.op, SsaOp::Call { .. } | SsaOp::IndirectCall { .. })
                     || matches!(instruction.op, SsaOp::Class(ref op) if matches!(op.as_ref(), ClassOp::DirectMethodCall { .. } | ClassOp::BaseMethodCall { .. } | ClassOp::VirtualCall { .. } | ClassOp::InterfaceCall { .. } | ClassOp::InitCall { .. } | ClassOp::BaseInit { .. }))
             }) || matches!(
                 block.terminator,
@@ -4312,6 +4351,49 @@ fn verify_op(
                 }
             }
         }
+        SsaOp::FunctionRef { target, signature } => {
+            let target = signatures
+                .get(target.0 as usize)
+                .filter(|target_info| target_info.id == *target)
+                .ok_or_else(|| "SSA FunctionRef target does not exist".to_string())?;
+            let Some((parameters, return_type)) = types.function_signature(*signature) else {
+                return Err("SSA FunctionRef signature is not Function".into());
+            };
+            if result != *signature
+                || types.contains_generic(*signature)
+                || parameters
+                    != target
+                        .parameters
+                        .iter()
+                        .map(|parameter| parameter.ty)
+                        .collect::<Vec<_>>()
+                || return_type != target.return_type
+            {
+                return Err("SSA FunctionRef violates exact target signature".into());
+            }
+        }
+        SsaOp::IndirectCall {
+            callee,
+            args,
+            signature,
+            ..
+        } => {
+            let Some((parameters, return_type)) = types.function_signature(*signature) else {
+                return Err("SSA IndirectCall signature is not Function".into());
+            };
+            if types.contains_generic(*signature)
+                || operand_ty(callee)? != *signature
+                || result != return_type
+                || args.len() != parameters.len()
+            {
+                return Err("SSA IndirectCall callee/result/arity mismatch".into());
+            }
+            for (argument, parameter) in args.iter().zip(parameters) {
+                if operand_ty(argument)? != *parameter {
+                    return Err("SSA IndirectCall argument type mismatch".into());
+                }
+            }
+        }
         SsaOp::ExceptionMatches { event, catch_class } => {
             if result != TypeId::BOOL || !types.is_exception_class(*catch_class) {
                 return Err(format!("invalid SSA exception match for event {event:?}"));
@@ -4603,8 +4685,12 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         }
         SsaOp::Class(op) => op.operands(),
         SsaOp::Call { args, .. } => args.iter().collect(),
+        SsaOp::IndirectCall { callee, args, .. } => {
+            std::iter::once(callee).chain(args.iter()).collect()
+        }
         SsaOp::EndBorrow { reference, .. } => vec![reference],
-        SsaOp::ExceptionMatches { .. }
+        SsaOp::FunctionRef { .. }
+        | SsaOp::ExceptionMatches { .. }
         | SsaOp::CatchBindAlias { .. }
         | SsaOp::EndCatch { .. }
         | SsaOp::SetPendingFinally { .. }

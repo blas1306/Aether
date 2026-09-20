@@ -553,6 +553,16 @@ pub enum Rvalue {
         callee: InstanceId,
         args: Vec<Operand>,
     },
+    FunctionRef {
+        target: InstanceId,
+        signature: TypeId,
+    },
+    IndirectCall {
+        call_site: CallSiteId,
+        callee: Operand,
+        args: Vec<Operand>,
+        signature: TypeId,
+    },
     ExceptionMatches {
         event: ExceptionEventId,
         catch_class: ClassId,
@@ -2692,6 +2702,29 @@ impl Builder<'_> {
                 ty: expression.ty,
             },
             HirExprKind::Bool(value) => Operand::Bool(*value),
+            HirExprKind::FunctionRef {
+                target,
+                function_type,
+            } => {
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::FunctionRef {
+                        target: match target {
+                            HirCallTarget::Instance(instance) => *instance,
+                            HirCallTarget::Declaration(_) => {
+                                unreachable!("verified concrete HIR function reference")
+                            }
+                        },
+                        signature: *function_type,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
             HirExprKind::Local(local) => {
                 if self.function.locals[local.0 as usize].address_taken {
                     let destination = self.temporary(expression.ty);
@@ -3484,6 +3517,31 @@ impl Builder<'_> {
                 self.finish_call_borrows(borrow_start, owner_start, expression.span);
                 Operand::Local(destination)
             }
+            HirExprKind::IndirectCall {
+                call_site,
+                callee,
+                args,
+                signature,
+            } => {
+                let callee = self.lower_expr(callee);
+                let (args, borrow_start, owner_start) = self.lower_call_arguments(args);
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::IndirectCall {
+                        call_site: *call_site,
+                        callee,
+                        args,
+                        signature: *signature,
+                    },
+                    expression.span,
+                );
+                self.finish_call_borrows(borrow_start, owner_start, expression.span);
+                Operand::Local(destination)
+            }
             HirExprKind::StructInit { struct_id, fields } => {
                 let fields = fields
                     .iter()
@@ -4236,7 +4294,7 @@ impl Builder<'_> {
             .expect("typed HIR has no unreachable statements");
         let may_throw = self.exceptions_enabled
             && match &value {
-                Rvalue::Call { .. } => true,
+                Rvalue::Call { .. } | Rvalue::IndirectCall { .. } => true,
                 Rvalue::Core(call) => matches!(
                     call.function.symbol,
                     aether_frontend::CoreSymbol::Print | aether_frontend::CoreSymbol::Println
@@ -4680,29 +4738,30 @@ fn verify_mir_function(
                 predecessors[target.0 as usize].push(block.id);
                 unwind_predecessors[target.0 as usize] += 1;
             }
-            let may_throw = matches!(instruction.value, Rvalue::Call { .. })
-                || matches!(
-                    instruction.value,
-                    Rvalue::Core(ref call)
-                        if matches!(
-                            call.function.symbol,
-                            aether_frontend::CoreSymbol::Print
-                                | aether_frontend::CoreSymbol::Println
-                        )
-                )
-                || matches!(
-                    instruction.value,
-                    Rvalue::Class(ref op)
-                        if matches!(
-                            op.as_ref(),
-                            ClassOp::DirectMethodCall { .. }
-                                | ClassOp::BaseMethodCall { .. }
-                                | ClassOp::VirtualCall { .. }
-                                | ClassOp::InterfaceCall { .. }
-                                | ClassOp::BaseInit { .. }
-                                | ClassOp::InitCall { .. }
-                        )
-                );
+            let may_throw = matches!(
+                instruction.value,
+                Rvalue::Call { .. } | Rvalue::IndirectCall { .. }
+            ) || matches!(
+                instruction.value,
+                Rvalue::Core(ref call)
+                    if matches!(
+                        call.function.symbol,
+                        aether_frontend::CoreSymbol::Print
+                            | aether_frontend::CoreSymbol::Println
+                    )
+            ) || matches!(
+                instruction.value,
+                Rvalue::Class(ref op)
+                    if matches!(
+                        op.as_ref(),
+                        ClassOp::DirectMethodCall { .. }
+                            | ClassOp::BaseMethodCall { .. }
+                            | ClassOp::VirtualCall { .. }
+                            | ClassOp::InterfaceCall { .. }
+                            | ClassOp::BaseInit { .. }
+                            | ClassOp::InitCall { .. }
+                    )
+            );
             if instruction.unwind.is_some() != may_throw && !function.exception_events.is_empty() {
                 return Err(fail(
                     "MIR potentially-throwing instruction/unwind edge mismatch".into(),
@@ -5037,6 +5096,9 @@ fn verify_call_borrow_regions(
                 let allowed = match &instruction.value {
                     Rvalue::Call {
                         call_site, args, ..
+                    }
+                    | Rvalue::IndirectCall {
+                        call_site, args, ..
                     } if *call_site == metadata.call_site => {
                         args.get(metadata.argument_index as usize)
                             == Some(&Operand::Local(*reference))
@@ -5059,7 +5121,9 @@ fn verify_call_borrow_regions(
                     return Err(fail("MIR call-scoped reference escapes its call".into()));
                 }
                 match &instruction.value {
-                    Rvalue::Call { call_site, .. } | Rvalue::Text { call_site, .. }
+                    Rvalue::Call { call_site, .. }
+                    | Rvalue::IndirectCall { call_site, .. }
+                    | Rvalue::Text { call_site, .. }
                         if *call_site == metadata.call_site && allowed =>
                     {
                         call_uses += 1;
@@ -5633,6 +5697,24 @@ fn verify_drop_flag_contract(
                         transitions.push((flag, true));
                     }
                 }
+                Rvalue::IndirectCall {
+                    args, signature, ..
+                } => {
+                    let (parameters, _) =
+                        types.function_signature(*signature).ok_or_else(|| {
+                            fail("MIR drop-flag analysis found invalid indirect signature".into())
+                        })?;
+                    for (argument, parameter) in args.iter().zip(parameters) {
+                        if !types.is_copy(*parameter) {
+                            consume_operand(argument, &mut transitions);
+                        }
+                    }
+                    if let Some(owner) = destination
+                        && let Some(flag) = flag_for(owner)
+                    {
+                        transitions.push((flag, true));
+                    }
+                }
                 Rvalue::Aggregate { fields, .. } => {
                     for (_, operand) in fields {
                         if !types.is_copy(operand_type(function, operand).map_err(fail)?) {
@@ -5871,7 +5953,7 @@ fn verify_finally_regions(
             let block = &function.blocks[block.0 as usize];
             if block.instructions.iter().any(|instruction| {
                 instruction.unwind.is_some()
-                    || matches!(instruction.value, Rvalue::Call { .. })
+                    || matches!(instruction.value, Rvalue::Call { .. } | Rvalue::IndirectCall { .. })
                     || matches!(instruction.value, Rvalue::Class(ref op) if matches!(op.as_ref(), ClassOp::DirectMethodCall { .. } | ClassOp::BaseMethodCall { .. } | ClassOp::VirtualCall { .. } | ClassOp::InterfaceCall { .. } | ClassOp::InitCall { .. } | ClassOp::BaseInit { .. }))
             }) || matches!(
                 block.terminator,
@@ -6134,6 +6216,30 @@ fn verify_ownership(
                                 fail("owned call argument is not materialized".into())
                             })?;
                             consume_owner(function, types, &mut state, local, "call", fail)?;
+                        }
+                    }
+                    initialize_owner(function, types, &mut state, destination, fail)?;
+                }
+                Rvalue::IndirectCall {
+                    args, signature, ..
+                } => {
+                    let (parameters, _) =
+                        types.function_signature(*signature).ok_or_else(|| {
+                            fail("MIR ownership analysis found invalid indirect signature".into())
+                        })?;
+                    for (argument, parameter) in args.iter().zip(parameters) {
+                        if !types.is_copy(*parameter) {
+                            let local = operand_local_id(argument).ok_or_else(|| {
+                                fail("owned indirect call argument is not materialized".into())
+                            })?;
+                            consume_owner(
+                                function,
+                                types,
+                                &mut state,
+                                local,
+                                "indirect call",
+                                fail,
+                            )?;
                         }
                     }
                     initialize_owner(function, types, &mut state, destination, fail)?;
@@ -7324,6 +7430,51 @@ fn validate_rvalue(
                 validate_operand(function, argument, initialized)?;
                 if operand_type(function, argument)? != parameter.ty {
                     return Err("MIR call argument type mismatch".into());
+                }
+            }
+        }
+        Rvalue::FunctionRef { target, signature } => {
+            let target = signatures
+                .get(target.0 as usize)
+                .filter(|target_info| target_info.id == *target)
+                .ok_or_else(|| "MIR FunctionRef target does not exist".to_string())?;
+            let Some((parameters, result)) = types.function_signature(*signature) else {
+                return Err("MIR FunctionRef signature is not Function".into());
+            };
+            if destination != *signature
+                || parameters
+                    != target
+                        .parameters
+                        .iter()
+                        .map(|parameter| parameter.ty)
+                        .collect::<Vec<_>>()
+                || result != target.return_type
+                || types.contains_generic(*signature)
+            {
+                return Err("MIR FunctionRef violates its exact signature".into());
+            }
+        }
+        Rvalue::IndirectCall {
+            callee,
+            args,
+            signature,
+            ..
+        } => {
+            validate_operand(function, callee, initialized)?;
+            let Some((parameters, result)) = types.function_signature(*signature) else {
+                return Err("MIR IndirectCall signature is not Function".into());
+            };
+            if types.contains_generic(*signature)
+                || operand_type(function, callee)? != *signature
+                || destination != result
+                || args.len() != parameters.len()
+            {
+                return Err("MIR IndirectCall callee/result/arity mismatch".into());
+            }
+            for (argument, parameter) in args.iter().zip(parameters) {
+                validate_operand(function, argument, initialized)?;
+                if operand_type(function, argument)? != *parameter {
+                    return Err("MIR IndirectCall argument type mismatch".into());
                 }
             }
         }

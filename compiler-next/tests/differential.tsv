@@ -36,7 +36,7 @@ too_many_arguments	V1_CONTRACT	reject:E0213	n/a	programs/too_many_arguments.ae
 too_few_arguments	V1_CONTRACT	reject:E0213	n/a	programs/too_few_arguments.ae
 wrong_argument_type	V1_CONTRACT	reject:E0214	n/a	programs/wrong_argument_type.ae
 return_wrong_type	V1_CONTRACT	reject:E0205	n/a	programs/return_wrong_type.ae
-unsupported_function_value	FAIL_CLOSED	reject:E0215	n/a	programs/unsupported_function_value.ae
+unsupported_function_value	FAIL_CLOSED	reject:E0351	n/a	programs/unsupported_function_value.ae
 malformed_function	PRESERVE_REJECTION	reject:E0104	n/a	programs/malformed_function.ae
 scalar_aliases	V1_CONTRACT	accept:42	n/a	programs/v3_alias.ae
 unsigned_width	V1_CONTRACT	accept:42	n/a	programs/v3_uint.ae

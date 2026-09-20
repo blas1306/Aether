@@ -294,10 +294,11 @@ impl Parser<'_> {
                 // Reuse parameter/block parsing, keeping init's source role explicit.
                 let function = self.function_tail(
                     AstType {
-                        module: None,
-                        name: "int".into(),
-                        arguments: Vec::new(),
-                        reference: None,
+                        kind: crate::AstTypeKind::Named {
+                            module: None,
+                            name: "int".into(),
+                            arguments: Vec::new(),
+                        },
                         span: token.span,
                     },
                     "init".into(),
@@ -554,10 +555,7 @@ impl Parser<'_> {
             let pointee = self.ty()?;
             let span = reference.span.through(pointee.span);
             return Ok(AstType {
-                module: None,
-                name: if mutable { "ref mut" } else { "ref" }.into(),
-                arguments: Vec::new(),
-                reference: Some(AstReferenceType {
+                kind: crate::AstTypeKind::Reference(AstReferenceType {
                     pointee: Box::new(pointee),
                     mutable,
                 }),
@@ -576,7 +574,7 @@ impl Parser<'_> {
                 segments.push((member.lexeme, member.span));
             }
         }
-        let span = segments
+        let mut span = segments
             .first()
             .unwrap()
             .1
@@ -589,17 +587,72 @@ impl Parser<'_> {
                 .collect::<Vec<_>>()
                 .join(".")
         });
+        if module.is_none() && name == "Function" && self.at(TokenKind::Less) {
+            self.advance();
+            self.expect_function(TokenKind::LeftParen, "expected `(` after `Function<`")?;
+            let mut parameters = Vec::new();
+            if !self.at(TokenKind::RightParen) {
+                loop {
+                    parameters.push(self.ty().map_err(|_| {
+                        self.function_type_error("expected Function parameter type")
+                    })?);
+                    if self.consume(TokenKind::Comma).is_none() {
+                        break;
+                    }
+                    if self.at(TokenKind::RightParen) {
+                        return Err(self.function_type_error(
+                            "trailing comma is not allowed in a Function parameter list",
+                        ));
+                    }
+                }
+            }
+            self.expect_function(
+                TokenKind::RightParen,
+                "expected `)` after Function parameters",
+            )?;
+            self.expect_function(TokenKind::Comma, "expected `,` before Function return type")?;
+            let result = self
+                .ty()
+                .map_err(|_| self.function_type_error("expected Function return type"))?;
+            let end =
+                self.expect_function(TokenKind::Greater, "expected `>` after Function type")?;
+            span = span.through(end.span);
+            return Ok(AstType {
+                kind: crate::AstTypeKind::Function {
+                    parameters,
+                    result: Box::new(result),
+                },
+                span,
+            });
+        }
         let arguments = self.type_arguments()?;
         let span = arguments
             .last()
             .map_or(span, |argument| span.through(argument.span));
         Ok(AstType {
-            module,
-            name,
-            arguments,
-            reference: None,
+            kind: crate::AstTypeKind::Named {
+                module,
+                name,
+                arguments,
+            },
             span,
         })
+    }
+
+    fn expect_function(
+        &mut self,
+        kind: TokenKind,
+        message: &'static str,
+    ) -> Result<Token, Diagnostic> {
+        self.consume(kind)
+            .ok_or_else(|| self.function_type_error(message))
+    }
+
+    fn function_type_error(&self, detail: &'static str) -> Diagnostic {
+        self.error(
+            "E0110",
+            format!("invalid Function type syntax; expected Function<(P1, ...), R>: {detail}"),
+        )
     }
 
     fn generic_parameters(&mut self) -> Result<Vec<AstGenericParam>, Diagnostic> {
@@ -1528,6 +1581,36 @@ impl Parser<'_> {
                 TokenKind::Identifier | TokenKind::KwInt | TokenKind::KwBool
             ) {
                 return None;
+            }
+            if tokens.get(index)?.lexeme == "Function"
+                && tokens
+                    .get(index + 1)
+                    .is_some_and(|token| token.kind == TokenKind::Less)
+            {
+                index += 2;
+                if tokens.get(index)?.kind != TokenKind::LeftParen {
+                    return None;
+                }
+                index += 1;
+                if tokens.get(index)?.kind != TokenKind::RightParen {
+                    loop {
+                        index = skip_type(tokens, index)?;
+                        if tokens.get(index)?.kind != TokenKind::Comma {
+                            break;
+                        }
+                        index += 1;
+                    }
+                }
+                if tokens.get(index)?.kind != TokenKind::RightParen
+                    || tokens.get(index + 1)?.kind != TokenKind::Comma
+                {
+                    return None;
+                }
+                index = skip_type(tokens, index + 2)?;
+                if tokens.get(index)?.kind != TokenKind::Greater {
+                    return None;
+                }
+                return Some(index + 1);
             }
             index += 1;
             while tokens

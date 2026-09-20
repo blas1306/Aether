@@ -375,6 +375,11 @@ pub enum TypeData {
         pointee: TypeId,
         mutable: bool,
     },
+    /// Structural non-capturing Aether callable signature.
+    Function {
+        parameters: TypeArgsId,
+        result: TypeId,
+    },
     /// Fixed-length contiguous owning allocation. This is a compiler-known
     /// generic form rather than a nominal source declaration.
     Buffer {
@@ -532,6 +537,9 @@ impl fmt::Display for TypeData {
             Self::EnumInstance(id, args) => write!(f, "enum#{}<args#{}>", id.0, args.0),
             Self::Reference { pointee, mutable } => {
                 write!(f, "ref {}{pointee}", if *mutable { "mut " } else { "" })
+            }
+            Self::Function { parameters, result } => {
+                write!(f, "Function<args#{}, {result}>", parameters.0)
             }
             Self::Buffer { element } => write!(f, "Buffer<{element}>"),
             Self::Vector {
@@ -933,6 +941,35 @@ impl TypeArena {
         self.intern(TypeData::Reference { pointee, mutable })
     }
 
+    /// Interns an exact structural callable signature. `void` is a result-only
+    /// type and can therefore never occur in `parameters`.
+    pub fn intern_function(
+        &mut self,
+        parameters: Vec<TypeId>,
+        result: TypeId,
+    ) -> Result<TypeId, &'static str> {
+        if !self.is_valid(result)
+            || parameters
+                .iter()
+                .any(|parameter| !self.is_valid(*parameter))
+        {
+            return Err("Function signature contains an invalid type");
+        }
+        if parameters.contains(&TypeId::VOID) {
+            return Err("Function parameter type cannot be void");
+        }
+        let parameters = self.intern_arguments(parameters);
+        Ok(self.intern(TypeData::Function { parameters, result }))
+    }
+
+    #[must_use]
+    pub fn function_signature(&self, ty: TypeId) -> Option<(&[TypeId], TypeId)> {
+        let TypeData::Function { parameters, result } = *self.get(ty)? else {
+            return None;
+        };
+        Some((self.arguments(parameters)?, result))
+    }
+
     pub fn intern_buffer(&mut self, element: TypeId) -> TypeId {
         self.intern(TypeData::Buffer { element })
     }
@@ -1088,6 +1125,14 @@ impl TypeArena {
                 })
             }
             Some(TypeData::Reference { pointee, .. }) => self.contains_generic(*pointee),
+            Some(TypeData::Function { parameters, result }) => {
+                self.contains_generic(*result)
+                    || self.arguments(*parameters).is_some_and(|parameters| {
+                        parameters
+                            .iter()
+                            .any(|parameter| self.contains_generic(*parameter))
+                    })
+            }
             Some(
                 TypeData::Buffer { element }
                 | TypeData::Matrix { element }
@@ -1445,6 +1490,13 @@ impl TypeArena {
                     needs_drop: false,
                 }
             }
+            TypeData::Function { .. } => TypeProperties {
+                is_known: true,
+                is_copy: true,
+                is_relocatable: true,
+                is_storable: true,
+                needs_drop: false,
+            },
             TypeData::Void => TypeProperties {
                 is_known: true,
                 // The compiler's unit token is freely duplicable even though
@@ -1733,6 +1785,10 @@ impl TypeArena {
             Some(TypeData::Bool | TypeData::Char | TypeData::Integer(_) | TypeData::Float(_)) => {
                 true
             }
+            Some(TypeData::Function { .. }) => matches!(
+                capability,
+                Capability::Copy | Capability::Relocatable | Capability::Storable
+            ),
             Some(
                 TypeData::Reference { .. }
                 | TypeData::View { .. }
@@ -1930,6 +1986,13 @@ impl TypeArena {
         self.contains_capability(id, 5, &HashMap::new(), &mut BTreeSet::new())
     }
 
+    /// Whether this type is, or structurally stores, a function value. This is
+    /// used only by the closed storage gates of FUNCTION-VALUES-V1.
+    #[must_use]
+    pub fn contains_function(&self, id: TypeId) -> bool {
+        self.contains_capability(id, 6, &HashMap::new(), &mut BTreeSet::new())
+    }
+
     fn contains_capability(
         &self,
         id: TypeId,
@@ -2008,6 +2071,7 @@ impl TypeArena {
                 capability == 0
             }
             Some(TypeData::String) => capability == 5,
+            Some(TypeData::Function { .. }) => capability == 6,
             Some(
                 TypeData::Void
                 | TypeData::Bool
@@ -2113,6 +2177,20 @@ impl TypeArena {
                 let pointee = self.substitute(pointee, substitution)?;
                 Ok(self.intern_reference(pointee, mutable))
             }
+            Some(TypeData::Function { parameters, result }) => {
+                let source = self
+                    .arguments(parameters)
+                    .expect("valid argument identity")
+                    .to_vec();
+                let parameters = source
+                    .into_iter()
+                    .map(|parameter| self.substitute(parameter, substitution))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result = self.substitute(result, substitution)?;
+                Ok(self
+                    .intern_function(parameters, result)
+                    .expect("substitution preserves Function legality"))
+            }
             Some(TypeData::Buffer { element }) => {
                 let element = self.substitute(element, substitution)?;
                 Ok(self.intern_buffer(element))
@@ -2206,6 +2284,27 @@ impl TypeArena {
                     .ids
                     .get(&TypeData::Reference { pointee, mutable })
                     .expect("monomorphizer interned substituted reference"))
+            }
+            Some(TypeData::Function { parameters, result }) => {
+                let parameters = self
+                    .arguments(parameters)
+                    .expect("valid argument identity")
+                    .iter()
+                    .map(|parameter| self.substituted_existing(*parameter, substitution))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result = self.substituted_existing(result, substitution)?;
+                let args = self
+                    .argument_ids
+                    .get(&parameters)
+                    .copied()
+                    .expect("monomorphizer interned substituted Function arguments");
+                Ok(*self
+                    .ids
+                    .get(&TypeData::Function {
+                        parameters: args,
+                        result,
+                    })
+                    .expect("monomorphizer interned substituted Function"))
             }
             Some(TypeData::Buffer { element }) => {
                 let element = self.substituted_existing(element, substitution)?;

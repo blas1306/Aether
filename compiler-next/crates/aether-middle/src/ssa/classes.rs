@@ -357,6 +357,11 @@ pub(super) fn verify(
                         consume(arg, &mut state)?;
                     }
                 }
+                SsaOp::IndirectCall { args, .. } => {
+                    for arg in args {
+                        consume(arg, &mut state)?;
+                    }
+                }
                 SsaOp::Use(o) | SsaOp::ExtractField { aggregate: o, .. }
                     if tracked(operand_ty(o)?) =>
                 {

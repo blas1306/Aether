@@ -251,7 +251,8 @@ pub fn layout_of(
         TypeData::String
         | TypeData::Class(_)
         | TypeData::ClassToken { .. }
-        | TypeData::Reference { .. } => TypeLayout {
+        | TypeData::Reference { .. }
+        | TypeData::Function { .. } => TypeLayout {
             size: u64::from(target.pointer_width / 8),
             align: u64::from(target.pointer_width / 8),
         },
@@ -323,6 +324,19 @@ pub fn format_type(
             if *mutable { "mut " } else { "" },
             format_type(types, *pointee, structs, enums)
         ),
+        Some(TypeData::Function { parameters, result }) => {
+            let parameters = types
+                .arguments(*parameters)
+                .unwrap_or(&[])
+                .iter()
+                .map(|parameter| format_type(types, *parameter, structs, enums))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "Function<({parameters}), {}>",
+                format_type(types, *result, structs, enums)
+            )
+        }
         Some(TypeData::Buffer { element }) => {
             format!("Buffer<{}>", format_type(types, *element, structs, enums))
         }
@@ -1103,6 +1117,11 @@ pub enum HirExprKind {
     Int(i128),
     Float(FloatValue),
     Bool(bool),
+    /// Exact address of one visible top-level Aether function.
+    FunctionRef {
+        target: HirCallTarget,
+        function_type: TypeId,
+    },
     Local(LocalId),
     /// Explicit consuming use of a move-only local.
     Move(LocalId),
@@ -1231,6 +1250,13 @@ pub enum HirExprKind {
         callee: HirCallTarget,
         type_arguments: Vec<TypeId>,
         args: Vec<HirExpr>,
+    },
+    /// Call through a first-class non-capturing function pointer.
+    IndirectCall {
+        call_site: CallSiteId,
+        callee: Box<HirExpr>,
+        args: Vec<HirExpr>,
+        signature: TypeId,
     },
     StructInit {
         struct_id: StructId,
@@ -1589,7 +1615,10 @@ pub fn collect_program_signatures(
             )
         {
             let previous = declarations.insert(name.clone(), kind);
-            if builtin(name).is_some() || intrinsic_type_arity(name).is_some() || previous.is_some()
+            if name == "Function"
+                || builtin(name).is_some()
+                || intrinsic_type_arity(name).is_some()
+                || previous.is_some()
             {
                 let code = match previous {
                     Some("function") if kind == "function" => "E0211",
@@ -1762,6 +1791,18 @@ pub fn collect_program_signatures(
                     module,
                 )]);
             }
+            if types.contains_function(ty) {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0357",
+                        Phase::Semantic,
+                        DiagnosticCategory::Unsupported,
+                        "Function fields are not supported in FUNCTION-VALUES-V1",
+                        Some(field.span),
+                    ),
+                    module,
+                )]);
+            }
             if ty == TypeId::VOID {
                 return Err(vec![src(
                     type_error("void is not storable in a struct field", field.span),
@@ -1879,6 +1920,21 @@ pub fn collect_program_signatures(
                         Phase::Semantic,
                         DiagnosticCategory::Type,
                         "borrowed views cannot be stored in enum payloads",
+                        Some(payload.span),
+                    ),
+                    module,
+                )]);
+            }
+            if let Some(payload) = payloads
+                .iter()
+                .find(|payload| types.contains_function(payload.ty))
+            {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0357",
+                        Phase::Semantic,
+                        DiagnosticCategory::Unsupported,
+                        "Function enum payloads are not supported in FUNCTION-VALUES-V1",
                         Some(payload.span),
                     ),
                     module,
@@ -2182,6 +2238,18 @@ pub fn collect_program_signatures(
                 &enum_arities,
             )
             .map_err(|d| vec![src(d, module)])?;
+            if types.contains_function(return_type) {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0357",
+                        Phase::Semantic,
+                        DiagnosticCategory::Unsupported,
+                        "returning Function values is not supported in FUNCTION-VALUES-V1",
+                        Some(f.return_type.span),
+                    ),
+                    module,
+                )]);
+            }
             for parameter in &parameters {
                 if parameter.ty == TypeId::VOID {
                     return Err(vec![src(
@@ -2387,6 +2455,13 @@ pub fn collect_program_signatures(
                     &enum_arities,
                 )
                 .map_err(|d| vec![src(d, module)])?;
+                if types.contains_function(ty) {
+                    return Err(vec![classes::error(
+                        "E0357",
+                        "Function fields are not supported in FUNCTION-VALUES-V1",
+                        field.span,
+                    )]);
+                }
                 let narrow_buffer = types.buffer_element(ty) == Some(TypeId::INT64) && !public;
                 let narrow_class_owner =
                     types.class_id(ty).is_some_and(|owner| owner != cid) && !public;
@@ -2511,12 +2586,12 @@ fn resolve_alias(
     }
     state.insert(name.into(), AliasState::Visiting);
     let a = decl[name];
-    let ty = if a.target.module.is_none()
-        && a.target.arguments.is_empty()
-        && decl.contains_key(&a.target.name)
+    let alias_target = a.target.named();
+    let ty = if let Some((None, target_name, [])) = alias_target
+        && decl.contains_key(target_name)
     {
         resolve_alias(
-            &a.target.name,
+            target_name,
             module,
             decl,
             struct_names,
@@ -2552,7 +2627,8 @@ fn resolve_alias(
     info.push(TypeAliasInfo {
         module: module.info.id,
         name: name.into(),
-        target_spelling: a.target.name.clone(),
+        target_spelling: alias_target
+            .map_or_else(|| "<structural>".into(), |(_, name, _)| name.into()),
         canonical: ty,
         span: a.span,
     });
@@ -2572,7 +2648,7 @@ fn resolve_type_in_module(
     struct_arities: &[usize],
     enum_arities: &[usize],
 ) -> Result<TypeId, Diagnostic> {
-    if let Some(reference) = &ty.reference {
+    if let crate::AstTypeKind::Reference(reference) = &ty.kind {
         let pointee = resolve_type_in_module(
             &reference.pointee,
             current,
@@ -2595,7 +2671,65 @@ fn resolve_type_in_module(
         }
         return Ok(types.intern_reference(pointee, reference.mutable));
     }
-    let target = if let Some(module) = &ty.module {
+    if let crate::AstTypeKind::Function { parameters, result } = &ty.kind {
+        let mut resolved = Vec::with_capacity(parameters.len());
+        for parameter in parameters {
+            let parameter = resolve_type_in_module(
+                parameter,
+                current,
+                aliases,
+                struct_names,
+                enum_names,
+                imports,
+                module_names,
+                types,
+                generic_scope,
+                struct_arities,
+                enum_arities,
+            )?;
+            if parameter == TypeId::VOID {
+                return Err(Diagnostic::new(
+                    "E0350",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    "Function parameter type cannot be void",
+                    Some(ty.span),
+                ));
+            }
+            resolved.push(parameter);
+        }
+        let result = resolve_type_in_module(
+            result,
+            current,
+            aliases,
+            struct_names,
+            enum_names,
+            imports,
+            module_names,
+            types,
+            generic_scope,
+            struct_arities,
+            enum_arities,
+        )?;
+        return types.intern_function(resolved, result).map_err(|message| {
+            Diagnostic::new(
+                "E0350",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                message,
+                Some(ty.span),
+            )
+        });
+    }
+    let crate::AstTypeKind::Named {
+        module,
+        name,
+        arguments: type_arguments,
+    } = &ty.kind
+    else {
+        unreachable!("reference and Function handled above")
+    };
+    let target = if let Some(module) = module {
         let Some(target) = imports[current.0 as usize].get(module).copied() else {
             let known = module_names.contains_key(module);
             return Err(Diagnostic::new(
@@ -2614,41 +2748,28 @@ fn resolve_type_in_module(
     } else {
         current
     };
-    if ty.module.is_none()
-        && let Some(parameter) = generic_scope.get(&ty.name).copied()
+    if module.is_none()
+        && let Some(parameter) = generic_scope.get(name).copied()
     {
-        if !ty.arguments.is_empty() {
+        if !type_arguments.is_empty() {
             return Err(generic_arity(ty, 0));
         }
         return Ok(parameter);
     }
-    if ty.module.is_none()
-        && matches!(ty.name.as_str(), "Matrix" | "MatrixView" | "MatrixViewMut")
-        && ty.arguments.len() != 1
+    if module.is_none()
+        && matches!(name.as_str(), "Matrix" | "MatrixView" | "MatrixViewMut")
+        && type_arguments.len() != 1
     {
         return Err(generic_arity(ty, 1));
     }
-    if ty.module.is_none() && matches!(ty.name.as_str(), "Vector" | "VectorView" | "VectorViewMut")
-    {
-        if ty.arguments.len() != 2 {
+    if module.is_none() && matches!(name.as_str(), "Vector" | "VectorView" | "VectorViewMut") {
+        if type_arguments.len() != 2 {
             return Err(generic_arity(ty, 2));
         }
-        let marker = &ty.arguments[1];
-        let orientation = match marker.name.as_str() {
-            "Row"
-                if marker.module.is_none()
-                    && marker.reference.is_none()
-                    && marker.arguments.is_empty() =>
-            {
-                Orientation::Row
-            }
-            "Column"
-                if marker.module.is_none()
-                    && marker.reference.is_none()
-                    && marker.arguments.is_empty() =>
-            {
-                Orientation::Column
-            }
+        let marker = &type_arguments[1];
+        let orientation = match marker.named() {
+            Some((None, "Row", [])) => Orientation::Row,
+            Some((None, "Column", [])) => Orientation::Column,
             _ => {
                 return Err(Diagnostic::new(
                     "E0324",
@@ -2660,7 +2781,7 @@ fn resolve_type_in_module(
             }
         };
         let element = resolve_type_in_module(
-            &ty.arguments[0],
+            &type_arguments[0],
             current,
             aliases,
             struct_names,
@@ -2672,8 +2793,8 @@ fn resolve_type_in_module(
             struct_arities,
             enum_arities,
         )?;
-        if ty.name != "Vector" {
-            return Ok(types.intern_vector_view(element, orientation, ty.name == "VectorViewMut"));
+        if name != "Vector" {
+            return Ok(types.intern_vector_view(element, orientation, name == "VectorViewMut"));
         }
         let deferred_aggregate = types.properties(element).is_some_and(|p| !p.is_known)
             && (types.struct_id(element).is_some() || types.enum_id(element).is_some());
@@ -2692,8 +2813,8 @@ fn resolve_type_in_module(
         }
         return Ok(types.intern_vector(element, orientation));
     }
-    let mut arguments = Vec::with_capacity(ty.arguments.len());
-    for argument in &ty.arguments {
+    let mut arguments = Vec::with_capacity(type_arguments.len());
+    for argument in type_arguments {
         arguments.push(resolve_type_in_module(
             argument,
             current,
@@ -2708,16 +2829,25 @@ fn resolve_type_in_module(
             enum_arities,
         )?);
     }
-    if ty.module.is_none()
-        && let Some(expected) = intrinsic_type_arity(&ty.name)
+    if module.is_none()
+        && let Some(expected) = intrinsic_type_arity(name)
     {
         if arguments.len() != expected {
             return Err(generic_arity(ty, expected));
         }
         let element = arguments[0];
+        if matches!(name.as_str(), "Array" | "List") && types.contains_function(element) {
+            return Err(Diagnostic::new(
+                "E0357",
+                Phase::Semantic,
+                DiagnosticCategory::Unsupported,
+                format!("{name}<Function<...>> is not supported in FUNCTION-VALUES-V1"),
+                Some(ty.span),
+            ));
+        }
         if types.contains_generic(element)
             && !matches!(
-                ty.name.as_str(),
+                name.as_str(),
                 "Matrix" | "MatrixView" | "MatrixViewMut" | "Array" | "List"
             )
         {
@@ -2726,13 +2856,12 @@ fn resolve_type_in_module(
                 Phase::Semantic,
                 DiagnosticCategory::Type,
                 format!(
-                    "{} element types must be concrete; generic Buffer/View construction is deferred",
-                    ty.name
+                    "{name} element types must be concrete; generic Buffer/View construction is deferred"
                 ),
                 Some(ty.span),
             ));
         }
-        return match ty.name.as_str() {
+        return match name.as_str() {
             "Buffer" => {
                 let deferred_aggregate = types
                     .properties(element)
@@ -2839,7 +2968,7 @@ fn resolve_type_in_module(
     if let Some(i) = types
         .interfaces
         .iter()
-        .find(|i| i.module == target && i.name == ty.name)
+        .find(|i| i.module == target && i.name == *name)
     {
         if !arguments.is_empty() {
             return Err(generic_arity(ty, 0));
@@ -2856,7 +2985,7 @@ fn resolve_type_in_module(
     if let Some(class) = types
         .classes
         .iter()
-        .find(|c| c.module == target && c.name == ty.name)
+        .find(|c| c.module == target && c.name == *name)
     {
         if !arguments.is_empty() {
             return Err(generic_arity(ty, 0));
@@ -2870,8 +2999,8 @@ fn resolve_type_in_module(
         }
         return Ok(types.id_of(TypeData::Class(class.id)).unwrap());
     }
-    if ty.module.is_none()
-        && ty.name == "Exception"
+    if module.is_none()
+        && name == "Exception"
         && let Some(class) = types.exception_class()
     {
         if !arguments.is_empty() {
@@ -2879,7 +3008,7 @@ fn resolve_type_in_module(
         }
         return Ok(types.id_of(TypeData::Class(class)).unwrap());
     }
-    if let Some(id) = struct_names[target.0 as usize].get(&ty.name).copied() {
+    if let Some(id) = struct_names[target.0 as usize].get(name).copied() {
         let expected = struct_arities[id.0 as usize];
         if arguments.len() != expected {
             return Err(generic_arity(ty, expected));
@@ -2892,7 +3021,7 @@ fn resolve_type_in_module(
             Ok(types.intern_struct_instance(id, arguments))
         };
     }
-    if let Some(id) = enum_names[target.0 as usize].get(&ty.name).copied() {
+    if let Some(id) = enum_names[target.0 as usize].get(name).copied() {
         let expected = enum_arities[id.0 as usize];
         if arguments.len() != expected {
             return Err(generic_arity(ty, expected));
@@ -2907,7 +3036,7 @@ fn resolve_type_in_module(
     }
     if let Some(alias) = aliases
         .get(target.0 as usize)
-        .and_then(|map| map.get(&ty.name))
+        .and_then(|map| map.get(name))
         .copied()
     {
         if !arguments.is_empty() {
@@ -2915,8 +3044,8 @@ fn resolve_type_in_module(
         }
         return Ok(alias);
     }
-    if ty.module.is_none()
-        && let Some(builtin) = builtin(&ty.name)
+    if module.is_none()
+        && let Some(builtin) = builtin(name)
     {
         if !arguments.is_empty() {
             return Err(generic_arity(ty, 0));
@@ -2927,14 +3056,15 @@ fn resolve_type_in_module(
 }
 
 fn generic_arity(ty: &AstType, expected: usize) -> Diagnostic {
+    let (_, name, arguments) = ty.named().expect("generic arity applies to named type");
     Diagnostic::new(
         "E0261",
         Phase::Semantic,
         DiagnosticCategory::Type,
         format!(
             "type `{}` expects {expected} generic arguments, found {}",
-            ty.name,
-            ty.arguments.len()
+            name,
+            arguments.len()
         ),
         Some(ty.span),
     )
@@ -3465,7 +3595,8 @@ fn compute_aggregate_layouts(
             | TypeData::ClassToken { .. }
             | TypeData::Interface(_)
             | TypeData::InterfaceKeepalive { .. }
-            | TypeData::Reference { .. } => {
+            | TypeData::Reference { .. }
+            | TypeData::Function { .. } => {
                 let bytes = u64::from(target.pointer_width / 8);
                 TypeLayout {
                     size: bytes,
@@ -4325,6 +4456,35 @@ impl Monomorphizer<'_> {
             HirExprKind::Int(value) => HirExprKind::Int(*value),
             HirExprKind::Float(value) => HirExprKind::Float(*value),
             HirExprKind::Bool(value) => HirExprKind::Bool(*value),
+            HirExprKind::FunctionRef {
+                target,
+                function_type,
+            } => {
+                let function_type =
+                    self.substitute_type(*function_type, substitution, expression.span)?;
+                let target = match target {
+                    HirCallTarget::Declaration(function) => HirCallTarget::Instance(self.request(
+                        InstanceKey {
+                            function: *function,
+                            arguments: Vec::new(),
+                        },
+                        expression.span,
+                    )?),
+                    HirCallTarget::Instance(_) => {
+                        return Err(vec![Diagnostic::new(
+                            "E0266",
+                            Phase::Semantic,
+                            DiagnosticCategory::Verification,
+                            "generic HIR already contains an instance function reference",
+                            Some(expression.span),
+                        )]);
+                    }
+                };
+                HirExprKind::FunctionRef {
+                    target,
+                    function_type,
+                }
+            }
             HirExprKind::Local(local) => HirExprKind::Local(*local),
             HirExprKind::Move(local) => {
                 if self.types.guarantees_copy(ty) {
@@ -4575,6 +4735,20 @@ impl Monomorphizer<'_> {
                         .collect::<Result<Vec<_>, _>>()?,
                 }
             }
+            HirExprKind::IndirectCall {
+                call_site,
+                callee,
+                args,
+                signature,
+            } => HirExprKind::IndirectCall {
+                call_site: *call_site,
+                callee: Box::new(self.substitute_expr(callee, substitution)?),
+                args: args
+                    .iter()
+                    .map(|argument| self.substitute_expr(argument, substitution))
+                    .collect::<Result<Vec<_>, _>>()?,
+                signature: self.substitute_type(*signature, substitution, expression.span)?,
+            },
             HirExprKind::StructInit { struct_id, fields } => HirExprKind::StructInit {
                 struct_id: *struct_id,
                 fields: fields
@@ -4888,7 +5062,8 @@ fn compute_concrete_layouts(
             | TypeData::ClassToken { .. }
             | TypeData::Interface(_)
             | TypeData::InterfaceKeepalive { .. }
-            | TypeData::Reference { .. } => {
+            | TypeData::Reference { .. }
+            | TypeData::Function { .. } => {
                 let bytes = u64::from(target.pointer_width / 8);
                 Some(TypeLayout {
                     size: bytes,
@@ -5902,6 +6077,7 @@ impl OwnershipAnalysis<'_> {
             | HirExprKind::Int(_)
             | HirExprKind::Float(_)
             | HirExprKind::Bool(_)
+            | HirExprKind::FunctionRef { .. }
             | HirExprKind::AlgebraicValue { .. } => Ok(()),
             HirExprKind::MatrixAxisVectorView {
                 source,
@@ -6044,7 +6220,10 @@ impl OwnershipAnalysis<'_> {
             | HirExprKind::ArrayLength { source }
             | HirExprKind::ListLength { source }
             | HirExprKind::ListCapacity { source } => self.place(source, expr.span),
-            HirExprKind::Call { args, .. } => {
+            HirExprKind::Call { args, .. } | HirExprKind::IndirectCall { args, .. } => {
+                if let HirExprKind::IndirectCall { callee, .. } = &expr.kind {
+                    self.expr(callee)?;
+                }
                 // Writable nested List effects cannot yet be related across
                 // aliased descriptor parameters. Keep this boundary closed.
                 if let Some(argument) = args
@@ -6655,7 +6834,7 @@ impl Analyzer<'_> {
             self.enum_arities,
         )
         .map_err(|diagnostic| vec![diagnostic])?;
-        if let Some(namespace) = &ty.module
+        if let Some((Some(namespace), _, _)) = ty.named()
             && let Some(module) = self.imports[self.module.0 as usize].get(namespace)
         {
             self.used_modules.insert(*module);
@@ -7477,7 +7656,7 @@ impl Analyzer<'_> {
             let initializer = self.expression(expression, None)?.expr;
             if !matches!(
                 initializer.kind,
-                HirExprKind::Call { .. } | HirExprKind::Class(_)
+                HirExprKind::Call { .. } | HirExprKind::IndirectCall { .. } | HirExprKind::Class(_)
             ) || (initializer.ty != TypeId::VOID && !self.types.guarantees_copy(initializer.ty))
             {
                 return Err(vec![Diagnostic::new(
@@ -7620,10 +7799,11 @@ impl Analyzer<'_> {
         let mut resolved_arms = Vec::new();
         for arm in arms {
             let pattern_ty = AstType {
-                module: arm.pattern.module.clone(),
-                name: arm.pattern.enum_name.clone(),
-                arguments: arm.pattern.type_arguments.clone(),
-                reference: None,
+                kind: crate::AstTypeKind::Named {
+                    module: arm.pattern.module.clone(),
+                    name: arm.pattern.enum_name.clone(),
+                    arguments: arm.pattern.type_arguments.clone(),
+                },
                 span: arm.pattern.span,
             };
             let resolved_ty = self.resolve_source_type(&pattern_ty)?;
@@ -8219,14 +8399,60 @@ impl Analyzer<'_> {
                     )]);
                 }
                 let Some(l) = self.lookup(n) else {
-                    if self.names[self.module.0 as usize].contains_key(n)
-                        || crate::prelude_symbol(n).is_some()
-                    {
+                    if let Some(id) = self.names[self.module.0 as usize].get(n).copied() {
+                        let signature = self.signatures[id.0 as usize].clone();
+                        if !signature.generic_parameters.is_empty() {
+                            return Err(vec![Diagnostic::new(
+                                "E0355",
+                                Phase::Semantic,
+                                DiagnosticCategory::Unsupported,
+                                "generic function must be explicitly instantiated before use as a value",
+                                Some(e.span),
+                            )]);
+                        }
+                        let function_type = self
+                            .types
+                            .intern_function(
+                                signature.parameters.iter().map(|p| p.ty).collect(),
+                                signature.return_type,
+                            )
+                            .expect("collected function signature is valid");
+                        if let Some(expected) = expected
+                            && expected != function_type
+                        {
+                            return Err(vec![Diagnostic::new(
+                                "E0351",
+                                Phase::Semantic,
+                                DiagnosticCategory::Type,
+                                format!(
+                                    "function reference has type {}, expected {}",
+                                    self.type_name(function_type),
+                                    self.type_name(expected)
+                                ),
+                                Some(e.span),
+                            )]);
+                        }
+                        return self.coerce(
+                            Checked {
+                                expr: HirExpr {
+                                    kind: HirExprKind::FunctionRef {
+                                        target: HirCallTarget::Declaration(id),
+                                        function_type,
+                                    },
+                                    ty: function_type,
+                                    span: e.span,
+                                },
+                                constant: None,
+                            },
+                            expected,
+                        );
+                    }
+                    if crate::prelude_symbol(n).is_some() {
                         return Err(vec![Diagnostic::new(
-                            "E0215",
+                            "E0356",
                             Phase::Semantic,
                             DiagnosticCategory::Unsupported,
-                            "function values are not admitted",
+                            "builtin functions are not values; use a top-level wrapper",
                             Some(e.span),
                         )]);
                     }
@@ -8404,7 +8630,61 @@ impl Analyzer<'_> {
                 self.enum_init(enum_ty, variant, args, *parenthesized, e.span)?
             }
             AstExprKind::Field { base, name, .. } => {
-                if let AstExprKind::Field {
+                if let AstExprKind::Name(module) = &base.kind
+                    && self.lookup(module).is_none()
+                    && let Some(target_module) =
+                        self.imports[self.module.0 as usize].get(module).copied()
+                    && let Some(id) = self.names[target_module.0 as usize].get(name).copied()
+                {
+                    self.used_modules.insert(target_module);
+                    let signature = self.signatures[id.0 as usize].clone();
+                    if !signature.generic_parameters.is_empty() {
+                        return Err(vec![Diagnostic::new(
+                            "E0355",
+                            Phase::Semantic,
+                            DiagnosticCategory::Unsupported,
+                            "generic function must be explicitly instantiated before use as a value",
+                            Some(e.span),
+                        )]);
+                    }
+                    let function_type = self
+                        .types
+                        .intern_function(
+                            signature
+                                .parameters
+                                .iter()
+                                .map(|parameter| parameter.ty)
+                                .collect(),
+                            signature.return_type,
+                        )
+                        .expect("collected function signature is valid");
+                    if let Some(expected) = expected
+                        && expected != function_type
+                    {
+                        return Err(vec![Diagnostic::new(
+                            "E0351",
+                            Phase::Semantic,
+                            DiagnosticCategory::Type,
+                            format!(
+                                "function reference has type {}, expected {}",
+                                self.type_name(function_type),
+                                self.type_name(expected)
+                            ),
+                            Some(e.span),
+                        )]);
+                    }
+                    Checked {
+                        expr: HirExpr {
+                            kind: HirExprKind::FunctionRef {
+                                target: HirCallTarget::Declaration(id),
+                                function_type,
+                            },
+                            ty: function_type,
+                            span: e.span,
+                        },
+                        constant: None,
+                    }
+                } else if let AstExprKind::Field {
                     base: qualifier,
                     name: enum_name,
                     ..
@@ -8421,6 +8701,31 @@ impl Analyzer<'_> {
                         let enum_ty = self.nominal_enum_type(enum_id, Vec::new(), e.span)?;
                         self.enum_init(enum_ty, name, &[], false, e.span)?
                     } else {
+                        if let Some(local) = self.lookup(type_name) {
+                            let receiver_type = self.locals[local.0 as usize].ty;
+                            let is_class_method =
+                                self.types.object_class(receiver_type).is_some_and(|class| {
+                                    self.types.effective_method(class, name).is_some()
+                                });
+                            let is_interface_method = self
+                                .types
+                                .interface_identity(receiver_type)
+                                .is_some_and(|interface| {
+                                    self.types.interfaces()[interface.0 as usize]
+                                        .requirements
+                                        .iter()
+                                        .any(|requirement| requirement.name == *name)
+                                });
+                            if is_class_method || is_interface_method {
+                                return Err(vec![Diagnostic::new(
+                                    "E0354",
+                                    Phase::Semantic,
+                                    DiagnosticCategory::Type,
+                                    "bound and method function values are not supported",
+                                    Some(e.span),
+                                )]);
+                            }
+                        }
                         let place = self.resolve_expr_place(e, false)?;
                         self.load_place(place, e.span)?
                     }
@@ -8649,6 +8954,7 @@ impl Analyzer<'_> {
                 | TypeData::StructInstance(_, _)
                 | TypeData::EnumInstance(_, _)
                 | TypeData::Reference { .. }
+                | TypeData::Function { .. }
                 | TypeData::Buffer { .. }
                 | TypeData::Vector { .. }
                 | TypeData::Array { .. }
@@ -9570,16 +9876,84 @@ impl Analyzer<'_> {
         span: Span,
         expected: Option<TypeId>,
     ) -> Result<Checked, Vec<Diagnostic>> {
-        if self.lookup(n).is_some() {
-            return Err(vec![Diagnostic::new(
-                "E0215",
-                Phase::Semantic,
-                DiagnosticCategory::Unsupported,
-                format!(
-                    "lexical value `{n}` shadows callable names; function values are not admitted"
-                ),
-                Some(span),
-            )]);
+        if let Some(local) = self.lookup(n) {
+            if !type_arguments.is_empty() {
+                return Err(vec![Diagnostic::new(
+                    "E0353",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    "function values do not accept generic call arguments",
+                    Some(span),
+                )]);
+            }
+            let signature = self.locals[local.0 as usize].ty;
+            let Some((parameters, result)) = self.types.function_signature(signature) else {
+                return Err(vec![Diagnostic::new(
+                    "E0215",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    format!(
+                        "value `{n}` of type {} is not callable",
+                        self.type_name(signature)
+                    ),
+                    Some(span),
+                )]);
+            };
+            let parameters = parameters.to_vec();
+            if args.len() != parameters.len() {
+                return Err(vec![Diagnostic::new(
+                    "E0352",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    format!(
+                        "function value expects {} arguments, found {}",
+                        parameters.len(),
+                        args.len()
+                    ),
+                    Some(span),
+                )]);
+            }
+            let call_site = self.call_site();
+            let mut checked = Vec::with_capacity(args.len());
+            for (index, (argument, parameter)) in args.iter().zip(parameters).enumerate() {
+                checked.push(
+                    self.adapt_call_argument(
+                        argument,
+                        parameter,
+                        call_site,
+                        u32::try_from(index).expect("argument index fits u32"),
+                        None,
+                    )
+                    .map_err(|mut diagnostics| {
+                        if let Some(diagnostic) = diagnostics.first_mut() {
+                            diagnostic.code = "E0353";
+                            diagnostic.message = format!(
+                                "indirect call argument {} is incompatible with signature: {}",
+                                index + 1,
+                                diagnostic.message
+                            );
+                        }
+                        diagnostics
+                    })?,
+                );
+            }
+            return Ok(Checked {
+                expr: HirExpr {
+                    kind: HirExprKind::IndirectCall {
+                        call_site,
+                        callee: Box::new(HirExpr {
+                            kind: HirExprKind::Local(local),
+                            ty: signature,
+                            span,
+                        }),
+                        args: checked,
+                        signature,
+                    },
+                    ty: result,
+                    span,
+                },
+                constant: None,
+            });
         }
         if let Some(id) = self.names[self.module.0 as usize].get(n).copied() {
             return self.call_id(id, n, type_arguments, args, span);
@@ -9769,10 +10143,11 @@ impl Analyzer<'_> {
         span: Span,
     ) -> Result<TypeId, Vec<Diagnostic>> {
         let ty = AstType {
-            module: Some(module.into()),
-            name: name.into(),
-            arguments: arguments.to_vec(),
-            reference: None,
+            kind: crate::AstTypeKind::Named {
+                module: Some(module.into()),
+                name: name.into(),
+                arguments: arguments.to_vec(),
+            },
             span,
         };
         let resolved = self.resolve_source_type(&ty)?;
@@ -11213,11 +11588,12 @@ fn builtin(n: &str) -> Option<TypeId> {
     })
 }
 fn unknown_type(t: &AstType) -> Diagnostic {
+    let name = t.named().map_or("<structural>", |(_, name, _)| name);
     Diagnostic::new(
         "E0204",
         Phase::Semantic,
         DiagnosticCategory::Type,
-        format!("unknown type `{}`", t.name),
+        format!("unknown type `{name}`"),
         Some(t.span),
     )
 }
@@ -12638,6 +13014,77 @@ fn verify_expr(
             };
             if types.view_info(e.ty) != Some((element, *mutable)) {
                 return Err(fail("HIR View type/capability mismatch".into()));
+            }
+        }
+        HirExprKind::FunctionRef {
+            target,
+            function_type,
+        } => {
+            let Some((parameters, result)) = types.function_signature(*function_type) else {
+                return Err(fail("HIR FunctionRef has a non-Function type".into()));
+            };
+            let (target_parameters, target_result) = match (sigs, target) {
+                (VerificationSignatures::Concrete(signatures), HirCallTarget::Instance(target)) => {
+                    let signature = signatures
+                        .get(target.0 as usize)
+                        .filter(|signature| signature.id == *target)
+                        .ok_or_else(|| fail("HIR FunctionRef target is missing".into()))?;
+                    (
+                        signature
+                            .parameters
+                            .iter()
+                            .map(|parameter| parameter.ty)
+                            .collect::<Vec<_>>(),
+                        signature.return_type,
+                    )
+                }
+                (
+                    VerificationSignatures::Parametric(signatures),
+                    HirCallTarget::Declaration(target),
+                ) => {
+                    let signature = signatures
+                        .get(target.0 as usize)
+                        .filter(|signature| signature.id == *target)
+                        .ok_or_else(|| fail("HIR FunctionRef declaration is missing".into()))?;
+                    if !signature.generic_parameters.is_empty() {
+                        return Err(fail(
+                            "HIR FunctionRef targets an open generic function".into(),
+                        ));
+                    }
+                    (
+                        signature
+                            .parameters
+                            .iter()
+                            .map(|parameter| parameter.ty)
+                            .collect::<Vec<_>>(),
+                        signature.return_type,
+                    )
+                }
+                _ => return Err(fail("HIR FunctionRef target phase is invalid".into())),
+            };
+            if e.ty != *function_type || parameters != target_parameters || result != target_result
+            {
+                return Err(fail("HIR FunctionRef signature mismatch".into()));
+            }
+        }
+        HirExprKind::IndirectCall {
+            callee,
+            args,
+            signature,
+            ..
+        } => {
+            verify_expr(callee, f, sigs, structs, enums, types, fail)?;
+            let Some((parameters, result)) = types.function_signature(*signature) else {
+                return Err(fail("HIR IndirectCall has a non-Function signature".into()));
+            };
+            if callee.ty != *signature || e.ty != result || args.len() != parameters.len() {
+                return Err(fail("HIR IndirectCall callee/result/arity mismatch".into()));
+            }
+            for (argument, parameter) in args.iter().zip(parameters) {
+                verify_expr(argument, f, sigs, structs, enums, types, fail)?;
+                if argument.ty != *parameter {
+                    return Err(fail("HIR IndirectCall argument type mismatch".into()));
+                }
             }
         }
         HirExprKind::Call {

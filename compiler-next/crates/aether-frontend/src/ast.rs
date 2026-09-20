@@ -183,16 +183,42 @@ pub struct AstParameter {
 /// Admitted source type spelling.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AstType {
-    /// Optional module qualifier; imported types never enter unqualified scope.
-    pub module: Option<String>,
-    /// Exact final source spelling, resolved and canonicalized during semantics.
-    pub name: String,
-    /// Recursive generic application arguments.
-    pub arguments: Vec<AstType>,
-    /// Reference wrapper when this spelling is `ref T` or `ref mut T`.
-    pub reference: Option<AstReferenceType>,
+    /// Mutually exclusive source type form.
+    pub kind: AstTypeKind,
     /// Type-token provenance.
     pub span: Span,
+}
+
+/// Closed source type grammar. Function parameter parentheses are represented
+/// directly and never fabricated as a tuple or nominal generic argument.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub enum AstTypeKind {
+    Named {
+        module: Option<String>,
+        name: String,
+        arguments: Vec<AstType>,
+    },
+    Reference(AstReferenceType),
+    Function {
+        parameters: Vec<AstType>,
+        result: Box<AstType>,
+    },
+}
+
+impl AstType {
+    /// Returns the nominal components when this is a named type.
+    #[must_use]
+    pub fn named(&self) -> Option<(Option<&str>, &str, &[AstType])> {
+        match &self.kind {
+            AstTypeKind::Named {
+                module,
+                name,
+                arguments,
+            } => Some((module.as_deref(), name, arguments)),
+            AstTypeKind::Reference(_) | AstTypeKind::Function { .. } => None,
+        }
+    }
 }
 
 /// Explicit non-owning source reference type.

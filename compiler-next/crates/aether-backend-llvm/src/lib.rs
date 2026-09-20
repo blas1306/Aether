@@ -736,6 +736,7 @@ fn emit_relocation_glue(
         | TypeData::Integer(_)
         | TypeData::Float(_)
         | TypeData::Reference { .. }
+        | TypeData::Function { .. }
         | TypeData::VectorView { .. }
         | TypeData::MatrixView { .. }
         | TypeData::View { .. }
@@ -903,6 +904,7 @@ fn emit_drop_glue(
         | TypeData::Integer(_)
         | TypeData::Float(_)
         | TypeData::Reference { .. }
+        | TypeData::Function { .. }
         | TypeData::VectorView { .. }
         | TypeData::MatrixView { .. }
         | TypeData::View { .. }
@@ -2780,6 +2782,65 @@ fn emit_function(
                         .unwrap();
                     }
                 }
+                SsaOp::FunctionRef { target, .. } => {
+                    let target = &signatures[target.0 as usize];
+                    let symbol = bootstrap_symbol(target, modules, structs, enums, types);
+                    writeln!(
+                        output,
+                        "  %v{} = select i1 true, ptr @{}, ptr @{}",
+                        instruction.result.0, symbol, symbol
+                    )
+                    .unwrap();
+                }
+                SsaOp::IndirectCall {
+                    callee,
+                    args,
+                    signature,
+                    ..
+                } => {
+                    let (parameters, result) = types
+                        .function_signature(*signature)
+                        .expect("verified indirect call signature");
+                    let arguments = args
+                        .iter()
+                        .zip(parameters)
+                        .map(|(argument, parameter)| {
+                            format!(
+                                "{} {}",
+                                llvm_type(types, *parameter),
+                                llvm_operand(argument)
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    if let Some(unwind) = instruction.unwind {
+                        writeln!(
+                            output,
+                            "  %v{} = invoke {} {}({arguments}) to label %{} unwind label %{}",
+                            instruction.result.0,
+                            llvm_type(types, result),
+                            llvm_operand(callee),
+                            continuation_label(block.id, instruction.result.0),
+                            block_label(unwind)
+                        )
+                        .unwrap();
+                        writeln!(
+                            output,
+                            "{}:",
+                            continuation_label(block.id, instruction.result.0)
+                        )
+                        .unwrap();
+                    } else {
+                        writeln!(
+                            output,
+                            "  %v{} = call {} {}({arguments})",
+                            instruction.result.0,
+                            llvm_type(types, result),
+                            llvm_operand(callee)
+                        )
+                        .unwrap();
+                    }
+                }
                 SsaOp::ExceptionMatches { event, catch_class } => {
                     writeln!(
                         output,
@@ -3573,6 +3634,17 @@ fn mangle_symbol_type(
             if *mutable { "m" } else { "s" },
             mangle_symbol_type(types, *pointee, modules, structs, enums)
         ),
+        TypeData::Function { parameters, result } => format!(
+            "Fx{}zR{}",
+            types
+                .arguments(*parameters)
+                .unwrap()
+                .iter()
+                .map(|parameter| mangle_symbol_type(types, *parameter, modules, structs, enums))
+                .collect::<Vec<_>>()
+                .join("_"),
+            mangle_symbol_type(types, *result, modules, structs, enums)
+        ),
         TypeData::Buffer { element } => format!(
             "B{}",
             mangle_symbol_type(types, *element, modules, structs, enums)
@@ -3673,7 +3745,8 @@ fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
         TypeData::String
         | TypeData::Class(_)
         | TypeData::ClassToken { .. }
-        | TypeData::Reference { .. } => "ptr".into(),
+        | TypeData::Reference { .. }
+        | TypeData::Function { .. } => "ptr".into(),
         TypeData::Buffer { .. }
         | TypeData::Vector { .. }
         | TypeData::Array { .. }
@@ -3749,6 +3822,11 @@ fn mangle_type(types: &TypeArena, ty: TypeId) -> String {
             "r{}{}",
             if *mutable { "m" } else { "s" },
             mangle_type(types, *pointee)
+        ),
+        TypeData::Function { parameters, result } => format!(
+            "Fx{}zR{}",
+            mangle_type_arguments(types, *parameters),
+            mangle_type(types, *result)
         ),
         TypeData::Buffer { element } => format!("B{}", mangle_type(types, *element)),
         TypeData::Vector {
