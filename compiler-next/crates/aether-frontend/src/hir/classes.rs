@@ -225,6 +225,8 @@ pub(super) fn expand_methods(program: &mut ParsedProgram) -> Result<(), Vec<Diag
                 f.parameters.insert(
                     0,
                     AstParameter {
+                        mutability: crate::BindingMutability::Mutable,
+                        const_span: None,
                         ty: ast_type(&class.name, f.span),
                         name: "this".into(),
                         default: None,
@@ -579,6 +581,8 @@ impl Analyzer<'_> {
             ty: initializer.ty,
             span,
             parameter: false,
+            source_binding: false,
+            mutability: crate::BindingMutability::Mutable,
             address_taken: false,
         });
         HirStmtKind::Local { local, initializer }

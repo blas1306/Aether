@@ -2,6 +2,16 @@
 
 use crate::Span;
 
+/// Whether source storage may be replaced after its declaration initializer.
+/// This is binding metadata and never forms part of an [`AstType`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BindingMutability {
+    /// Ordinary replaceable binding.
+    Mutable,
+    /// Immutable binding whose complete owning root may still be moved.
+    Const,
+}
+
 /// Parsed compilation unit. Construction is restricted to the parser.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParsedAst {
@@ -172,6 +182,10 @@ pub struct AstFunction {
 /// Source-level scalar parameter.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AstParameter {
+    /// Source binding mutability; excluded from the function type and ABI.
+    pub mutability: BindingMutability,
+    /// Span of the `const` modifier, when present.
+    pub const_span: Option<Span>,
     /// Written type.
     pub ty: AstType,
     /// Source name.
@@ -279,6 +293,8 @@ pub struct AstStmt {
 pub enum AstStmtKind {
     /// Explicitly typed and initialized local.
     Local {
+        mutability: BindingMutability,
+        const_span: Option<Span>,
         ty: AstType,
         name: String,
         initializer: AstExpr,

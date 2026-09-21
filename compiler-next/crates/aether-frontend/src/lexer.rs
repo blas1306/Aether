@@ -65,6 +65,8 @@ pub enum TokenKind {
     KwRef,
     /// `mut`.
     KwMut,
+    /// `const`.
+    KwConst,
     /// `(`.
     LeftParen,
     /// `)`.
@@ -322,6 +324,7 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                     "match" => TokenKind::KwMatch,
                     "ref" => TokenKind::KwRef,
                     "mut" => TokenKind::KwMut,
+                    "const" => TokenKind::KwConst,
                     _ => TokenKind::Identifier,
                 };
                 push(&mut tokens, kind, source, start, cursor);

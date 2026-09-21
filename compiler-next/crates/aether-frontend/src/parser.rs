@@ -5,8 +5,8 @@ use crate::{
     AstExprKind, AstField, AstForBinding, AstFunction, AstGenericParam, AstImport,
     AstInterpolationFragment, AstMatchArm, AstMatchMode, AstPackage, AstParameter,
     AstReferenceType, AstStmt, AstStmtKind, AstStruct, AstType, AstUnaryOp, AstVariant,
-    AstVariantPattern, Diagnostic, DiagnosticCategory, ParsedAst, Phase, SourceFile, Span, Token,
-    TokenKind,
+    AstVariantPattern, BindingMutability, Diagnostic, DiagnosticCategory, ParsedAst, Phase,
+    SourceFile, Span, Token, TokenKind,
 };
 
 /// Parses an already tokenized source file.
@@ -35,6 +35,9 @@ pub fn parse(source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<D
     let mut classes = Vec::new();
     let mut interfaces = Vec::new();
     while !parser.at(TokenKind::Eof) {
+        if parser.at(TokenKind::KwConst) {
+            return Err(vec![parser.unsupported_const("globals")]);
+        }
         if parser.at(TokenKind::KwPackage) {
             let message = if package.is_some() {
                 "source unit contains more than one package declaration"
@@ -116,6 +119,13 @@ struct Parser<'a> {
 }
 
 impl Parser<'_> {
+    fn unsupported_const(&self, context: &str) -> Diagnostic {
+        self.error(
+            "E0370",
+            format!("const {context} are not supported in CONST-V1"),
+        )
+    }
+
     fn namespace_path(
         &mut self,
         message: &'static str,
@@ -195,6 +205,7 @@ impl Parser<'_> {
             let mut parameters = Vec::new();
             if !self.at(TokenKind::RightParen) {
                 loop {
+                    let const_token = self.consume(TokenKind::KwConst);
                     let ty = self.ty()?;
                     let token = self.expect(TokenKind::Identifier, "expected parameter name")?;
                     let equals = self.consume(TokenKind::Equal);
@@ -205,6 +216,12 @@ impl Parser<'_> {
                     };
                     let end = default.as_ref().map_or(token.span, |expr| expr.span);
                     parameters.push(AstParameter {
+                        mutability: if const_token.is_some() {
+                            BindingMutability::Const
+                        } else {
+                            BindingMutability::Mutable
+                        },
+                        const_span: const_token.map(|token| token.span),
                         ty,
                         name: token.lexeme,
                         default,
@@ -286,6 +303,9 @@ impl Parser<'_> {
                 }
                 _ => false,
             };
+            if self.at(TokenKind::KwConst) {
+                return Err(self.error("E0370", "const fields are not supported in CONST-V1"));
+            }
             let method_open = self.current().lexeme == "open";
             let overriding = self.current().lexeme == "override";
             if method_open || overriding {
@@ -429,6 +449,9 @@ impl Parser<'_> {
         self.expect(TokenKind::LeftBrace, "expected `{` after struct name")?;
         let mut fields = Vec::new();
         while !self.at(TokenKind::RightBrace) && !self.at(TokenKind::Eof) {
+            if self.at(TokenKind::KwConst) {
+                return Err(self.error("E0370", "const fields are not supported in CONST-V1"));
+            }
             let field_start = self.current().span;
             let ty = self.ty()?;
             let field = self.expect(TokenKind::Identifier, "expected field name")?;
@@ -506,7 +529,10 @@ impl Parser<'_> {
         let mut parameters = Vec::new();
         if !self.at(TokenKind::RightParen) {
             loop {
-                let parameter_start = self.current().span;
+                let const_token = self.consume(TokenKind::KwConst);
+                let parameter_start = const_token
+                    .as_ref()
+                    .map_or(self.current().span, |token| token.span);
                 let ty = self.ty()?;
                 let token = self.expect(TokenKind::Identifier, "expected parameter name")?;
                 let equals = self.consume(TokenKind::Equal);
@@ -517,6 +543,12 @@ impl Parser<'_> {
                 };
                 let parameter_end = default.as_ref().map_or(token.span, |expr| expr.span);
                 parameters.push(AstParameter {
+                    mutability: if const_token.is_some() {
+                        BindingMutability::Const
+                    } else {
+                        BindingMutability::Mutable
+                    },
+                    const_span: const_token.map(|token| token.span),
                     ty,
                     name: token.lexeme,
                     default,
@@ -568,6 +600,9 @@ impl Parser<'_> {
     }
 
     fn ty(&mut self) -> Result<AstType, Diagnostic> {
+        if matches!(self.current().kind, TokenKind::KwConst | TokenKind::KwMut) {
+            return Err(self.error("E0374", "`const` must precede the complete binding type"));
+        }
         if let Some(reference) = self.consume(TokenKind::KwRef) {
             let mutable = self.consume(TokenKind::KwMut).is_some();
             let pointee = self.ty()?;
@@ -739,6 +774,27 @@ impl Parser<'_> {
     fn statement(&mut self) -> Result<AstStmt, Diagnostic> {
         let start = self.current().span;
         let kind = match self.current().kind {
+            TokenKind::KwConst => {
+                let const_token = self.advance();
+                let ty = self.ty()?;
+                let name = self
+                    .expect(TokenKind::Identifier, "expected local name")?
+                    .lexeme;
+                if self.consume(TokenKind::Equal).is_none() {
+                    return Err(self.error(
+                        "E0371",
+                        format!("const local '{name}' requires an initializer"),
+                    ));
+                }
+                let initializer = self.expression()?;
+                AstStmtKind::Local {
+                    mutability: BindingMutability::Const,
+                    const_span: Some(const_token.span),
+                    ty,
+                    name,
+                    initializer,
+                }
+            }
             TokenKind::KwInt | TokenKind::KwBool | TokenKind::KwRef => {
                 let ty = self.ty()?;
                 let name = self
@@ -747,6 +803,8 @@ impl Parser<'_> {
                 self.expect(TokenKind::Equal, "locals require an initializer")?;
                 let initializer = self.expression()?;
                 AstStmtKind::Local {
+                    mutability: BindingMutability::Mutable,
+                    const_span: None,
                     ty,
                     name,
                     initializer,
@@ -760,6 +818,8 @@ impl Parser<'_> {
                 self.expect(TokenKind::Equal, "locals require an initializer")?;
                 let initializer = self.expression()?;
                 AstStmtKind::Local {
+                    mutability: BindingMutability::Mutable,
+                    const_span: None,
                     ty,
                     name,
                     initializer,

@@ -134,6 +134,10 @@ pub struct MirLocal {
     pub name: Option<String>,
     /// Whether lowering introduced the slot.
     pub temporary: bool,
+    /// True only for source locals and parameters.
+    pub source_binding: bool,
+    /// Source binding mutability, never a type qualifier.
+    pub mutability: aether_frontend::BindingMutability,
     /// Stable memory is required because this local is borrowed.
     pub address_taken: bool,
 }
@@ -145,6 +149,7 @@ pub struct MirParameter {
     pub local: LocalId,
     /// Canonical semantic type.
     pub ty: TypeId,
+    pub mutability: aether_frontend::BindingMutability,
 }
 
 /// One compiler-generated root-level conditional ownership flag.
@@ -940,6 +945,8 @@ fn lower_function(
             ty: local.ty,
             name: Some(local.name.clone()),
             temporary: false,
+            source_binding: local.source_binding,
+            mutability: local.mutability,
             address_taken: local.address_taken,
         })
         .collect();
@@ -949,6 +956,7 @@ fn lower_function(
         .map(|parameter| MirParameter {
             local: parameter.local,
             ty: parameter.ty,
+            mutability: parameter.mutability,
         })
         .collect();
     let intrinsic_conditional_roots = conditional_drop_roots(&function.body);
@@ -4369,6 +4377,8 @@ impl Builder<'_> {
             ty,
             name: None,
             temporary: true,
+            source_binding: false,
+            mutability: aether_frontend::BindingMutability::Mutable,
             address_taken: false,
         });
         id
@@ -4784,18 +4794,20 @@ fn verify_mir_function(
         }
     }
     for (parameter, declared) in function.parameters.iter().zip(&signature.parameters) {
-        if function
-            .locals
-            .get(parameter.local.0 as usize)
-            .map(|local| local.ty)
-            != Some(declared.ty)
+        let local = function.locals.get(parameter.local.0 as usize);
+        if local.map(|local| local.ty) != Some(declared.ty)
             || parameter.ty != declared.ty
+            || parameter.mutability != declared.mutability
+            || local.is_none_or(|local| {
+                !local.source_binding || local.temporary || local.mutability != parameter.mutability
+            })
         {
             return Err(fail(
-                "MIR parameter identity/type contract is invalid".into(),
+                "MIR parameter identity/type/mutability contract is invalid".into(),
             ));
         }
     }
+    verify_const_bindings(function, fail)?;
     verify_range_loops(function, fail)?;
     verify_collection_loops(function, types, fail)?;
     let mut predecessors = vec![Vec::new(); function.blocks.len()];
@@ -5159,6 +5171,84 @@ fn verify_mir_function(
     }
     verify_take_protocol(function, fail)?;
     verify_call_borrow_regions(function, fail)?;
+    Ok(())
+}
+
+fn mir_const_inline_root(function: &MirFunction, place: &Place) -> Option<LocalId> {
+    let PlaceBase::Local(local) = place.base else {
+        return None;
+    };
+    let info = function.locals.get(local.0 as usize)?;
+    (info.source_binding
+        && info.mutability == aether_frontend::BindingMutability::Const
+        && !place
+            .projections
+            .iter()
+            .any(|projection| matches!(projection, PlaceProjection::Index { .. })))
+    .then_some(local)
+}
+
+fn verify_const_bindings(
+    function: &MirFunction,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let parameters = function
+        .parameters
+        .iter()
+        .map(|parameter| parameter.local)
+        .collect::<BTreeSet<_>>();
+    let mut root_initializers = vec![0_u32; function.locals.len()];
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            if let Some(local) = mir_const_inline_root(function, &instruction.destination) {
+                if !instruction.destination.projections.is_empty() || parameters.contains(&local) {
+                    return Err(fail("MIR writes const inline storage".into()));
+                }
+                if !matches!(
+                    instruction.value,
+                    Rvalue::ListPush { .. }
+                        | Rvalue::ListReserve { .. }
+                        | Rvalue::ListSetLength { .. }
+                        | Rvalue::Relocate { .. }
+                        | Rvalue::Take { .. }
+                ) {
+                    root_initializers[local.0 as usize] += 1;
+                }
+            }
+            match &instruction.value {
+                Rvalue::Borrow {
+                    place,
+                    mutable: true,
+                    ..
+                } if mir_const_inline_root(function, place).is_some() => {
+                    return Err(fail("MIR mutably borrows const inline storage".into()));
+                }
+                Rvalue::Move { source }
+                    if mir_const_inline_root(function, source).is_some()
+                        && !source.projections.is_empty() =>
+                {
+                    return Err(fail("MIR partially moves const inline storage".into()));
+                }
+                Rvalue::ReplaceString { destination, .. }
+                    if mir_const_inline_root(function, destination).is_some() =>
+                {
+                    return Err(fail("MIR replaces const inline string storage".into()));
+                }
+                _ => {}
+            }
+        }
+    }
+    for local in &function.locals {
+        if local.source_binding
+            && local.mutability == aether_frontend::BindingMutability::Const
+            && !parameters.contains(&local.id)
+            && root_initializers[local.id.0 as usize] != 1
+        {
+            return Err(fail(
+                "MIR const local does not have exactly one initializer".into(),
+            ));
+        }
+    }
     Ok(())
 }
 

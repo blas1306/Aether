@@ -79,6 +79,15 @@ pub struct SsaMemoryLocal {
     pub parameter: Option<ValueId>,
 }
 
+/// Source binding metadata retained even when its storage is promoted away.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SsaBinding {
+    pub local: LocalId,
+    pub ty: TypeId,
+    pub parameter: bool,
+    pub mutability: aether_frontend::BindingMutability,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SsaPlace {
     pub base: SsaPlaceBase,
@@ -435,6 +444,8 @@ pub struct SsaInstruction {
     /// Source provenance.
     pub span: Span,
     pub unwind: Option<BlockId>,
+    /// MIR destination local, retained for source-binding verification.
+    pub binding: Option<LocalId>,
 }
 
 /// SSA control-flow terminator.
@@ -504,6 +515,8 @@ pub struct SsaFunction {
     pub function_id: aether_frontend::FunctionId,
     /// Entry parameter definitions in call order.
     pub parameters: Vec<SsaParameter>,
+    /// Minimal source-binding table retained across promotion.
+    pub bindings: Vec<SsaBinding>,
     /// Only address-taken locals cross the SSA/memory boundary.
     pub memory_locals: Vec<SsaMemoryLocal>,
     /// Root-level conditional ownership metadata retained from verified MIR.
@@ -700,6 +713,20 @@ fn build_function_ssa(
                 .map(|parameter| parameter.value),
         })
         .collect();
+    let bindings = function
+        .locals
+        .iter()
+        .filter(|local| local.source_binding)
+        .map(|local| SsaBinding {
+            local: local.id,
+            ty: local.ty,
+            parameter: function
+                .parameters
+                .iter()
+                .any(|parameter| parameter.local == local.id),
+            mutability: local.mutability,
+        })
+        .collect();
     let mut next_value = u32::try_from(parameters.len()).expect("parameter count fits u32");
     let mut phi_results: Vec<BTreeMap<LocalId, ValueId>> =
         vec![BTreeMap::new(); function.blocks.len()];
@@ -756,6 +783,7 @@ fn build_function_ssa(
         id: function.id,
         function_id: function.function_id,
         parameters,
+        bindings,
         memory_locals,
         drop_flags: function.drop_flags.clone(),
         return_type: function.return_type,
@@ -816,6 +844,7 @@ fn rename_block(
                 op: rename_rvalue(&instruction.value, stacks, mir),
                 span: instruction.span,
                 unwind: instruction.unwind,
+                binding: None,
             });
             let store_result = ValueId(*next_value);
             *next_value += 1;
@@ -833,6 +862,10 @@ fn rename_block(
                 },
                 span: instruction.span,
                 unwind: None,
+                binding: match instruction.destination.base {
+                    PlaceBase::Local(local) => Some(local),
+                    PlaceBase::Dereference { .. } => None,
+                },
             });
             continue;
         }
@@ -861,6 +894,7 @@ fn rename_block(
                     op: rename_rvalue(&instruction.value, stacks, mir),
                     span: instruction.span,
                     unwind: instruction.unwind,
+                    binding: None,
                 });
                 SsaOperand::Value(value_result)
             };
@@ -897,6 +931,7 @@ fn rename_block(
             } else {
                 None
             },
+            binding: Some(destination_local),
         });
         stacks[destination_local.0 as usize].push(result);
         pushes[destination_local.0 as usize] += 1;
@@ -2093,6 +2128,7 @@ fn verify_ssa_function(
     if function.blocks.is_empty() || function.entry.0 as usize >= function.blocks.len() {
         return Err(fail("SSA entry block does not exist".into()));
     }
+    verify_ssa_const_bindings(function, signature, fail)?;
     verify_ssa_range_loops(function, fail)?;
     verify_ssa_collection_loops(function, types, fail)?;
     for (index, event) in function.exception_events.iter().enumerate() {
@@ -2540,6 +2576,131 @@ fn verify_ssa_function(
     verify_matrix_literal_ownership(function, types, fail)?;
     verify_take_protocol(function, types, fail)?;
     verify_call_borrow_regions(function, fail)?;
+    Ok(())
+}
+
+fn ssa_const_memory_root(function: &SsaFunction, place: &SsaPlace) -> Option<LocalId> {
+    let SsaPlaceBase::MemoryLocal(local) = place.base else {
+        return None;
+    };
+    let binding = function
+        .bindings
+        .iter()
+        .find(|binding| binding.local == local)?;
+    (binding.mutability == aether_frontend::BindingMutability::Const
+        && !place
+            .projections
+            .iter()
+            .any(|projection| matches!(projection, SsaPlaceProjection::Index { .. })))
+    .then_some(local)
+}
+
+#[allow(clippy::too_many_lines)]
+fn verify_ssa_const_bindings(
+    function: &SsaFunction,
+    signature: &FunctionInstanceInfo,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut seen = BTreeSet::new();
+    for binding in &function.bindings {
+        if !seen.insert(binding.local) || !function.bindings.is_sorted_by_key(|b| b.local) {
+            return Err(fail("SSA source binding table is not canonical".into()));
+        }
+        if !binding.parameter
+            && !function
+                .memory_locals
+                .iter()
+                .any(|local| local.local == binding.local)
+            && !function
+                .blocks
+                .iter()
+                .flat_map(|block| &block.instructions)
+                .any(|instruction| instruction.binding == Some(binding.local))
+        {
+            return Err(fail("SSA source binding has no retained definition".into()));
+        }
+    }
+    for (parameter, declared) in function.parameters.iter().zip(&signature.parameters) {
+        let Some(binding) = function
+            .bindings
+            .iter()
+            .find(|binding| binding.local == parameter.local)
+        else {
+            return Err(fail("SSA parameter source binding is missing".into()));
+        };
+        if !binding.parameter
+            || binding.ty != parameter.ty
+            || binding.mutability != declared.mutability
+        {
+            return Err(fail("SSA parameter binding mutability is invalid".into()));
+        }
+    }
+    let mut definitions = BTreeMap::<LocalId, u32>::new();
+    for block in &function.blocks {
+        for phi in &block.phis {
+            if function.bindings.iter().any(|binding| {
+                binding.local == phi.local
+                    && binding.mutability == aether_frontend::BindingMutability::Const
+            }) {
+                return Err(fail(
+                    "SSA creates a phi redefinition for a const binding".into(),
+                ));
+            }
+        }
+        for instruction in &block.instructions {
+            if let Some(local) = instruction.binding
+                && let Some(binding) = function.bindings.iter().find(|b| b.local == local)
+                && binding.mutability == aether_frontend::BindingMutability::Const
+            {
+                match &instruction.op {
+                    SsaOp::Store { place, .. }
+                        if place.projections.iter().any(|projection| {
+                            matches!(projection, SsaPlaceProjection::Index { .. })
+                        }) => {}
+                    SsaOp::ListPush { .. }
+                    | SsaOp::ListReserve { .. }
+                    | SsaOp::ListSetLength { .. }
+                    | SsaOp::Relocate { .. }
+                    | SsaOp::Take { .. } => {}
+                    SsaOp::InsertField { .. } => {
+                        return Err(fail("SSA mutates const inline storage".into()));
+                    }
+                    _ => *definitions.entry(local).or_default() += 1,
+                }
+            }
+            match &instruction.op {
+                SsaOp::Store { place, .. }
+                    if ssa_const_memory_root(function, place).is_some()
+                        && !place.projections.is_empty() =>
+                {
+                    return Err(fail("SSA stores to const inline storage".into()));
+                }
+                SsaOp::Borrow {
+                    place,
+                    mutable: true,
+                    ..
+                } if ssa_const_memory_root(function, place).is_some() => {
+                    return Err(fail("SSA mutably borrows const inline storage".into()));
+                }
+                SsaOp::ReplaceString { destination, .. }
+                    if ssa_const_memory_root(function, destination).is_some() =>
+                {
+                    return Err(fail("SSA replaces const inline string storage".into()));
+                }
+                _ => {}
+            }
+        }
+    }
+    for binding in &function.bindings {
+        if binding.mutability == aether_frontend::BindingMutability::Const {
+            let expected = u32::from(!binding.parameter);
+            if definitions.get(&binding.local).copied().unwrap_or(0) != expected {
+                return Err(fail(
+                    "SSA const binding does not have one source definition".into(),
+                ));
+            }
+        }
+    }
     Ok(())
 }
 

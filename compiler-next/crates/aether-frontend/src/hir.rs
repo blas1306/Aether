@@ -153,6 +153,7 @@ pub struct CallSiteId(pub u32);
 pub struct ParameterSignature {
     pub name: String,
     pub ty: TypeId,
+    pub mutability: crate::BindingMutability,
     pub default: Option<DefaultArgumentTemplate>,
     pub span: Span,
 }
@@ -503,6 +504,9 @@ pub struct HirLocal {
     pub ty: TypeId,
     pub span: Span,
     pub parameter: bool,
+    /// True only for a source local or source parameter.
+    pub source_binding: bool,
+    pub mutability: crate::BindingMutability,
     /// Requires stable memory because this local, or one of its fields, is borrowed.
     pub address_taken: bool,
 }
@@ -511,6 +515,7 @@ pub struct HirParameter {
     pub local: LocalId,
     pub ty: TypeId,
     pub span: Span,
+    pub mutability: crate::BindingMutability,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypedHir {
@@ -2284,6 +2289,7 @@ pub fn collect_program_signatures(
                     .map(|ty| ParameterSignature {
                         name: p.name.clone(),
                         ty,
+                        mutability: p.mutability,
                         default: p.default.clone().map(|expression| DefaultArgumentTemplate {
                             parameter_index: u32::try_from(index)
                                 .expect("parameter index fits u32"),
@@ -4129,6 +4135,7 @@ impl Monomorphizer<'_> {
                 Ok(ParameterSignature {
                     name: parameter.name.clone(),
                     ty: self.substitute_type(parameter.ty, &substitution, parameter.span)?,
+                    mutability: parameter.mutability,
                     default: parameter.default.clone(),
                     span: parameter.span,
                 })
@@ -4146,6 +4153,8 @@ impl Monomorphizer<'_> {
                     ty: self.substitute_type(local.ty, &substitution, local.span)?,
                     span: local.span,
                     parameter: local.parameter,
+                    source_binding: local.source_binding,
+                    mutability: local.mutability,
                     address_taken: local.address_taken,
                 })
             })
@@ -4158,6 +4167,7 @@ impl Monomorphizer<'_> {
                     local: parameter.local,
                     ty: self.substitute_type(parameter.ty, &substitution, parameter.span)?,
                     span: parameter.span,
+                    mutability: parameter.mutability,
                 })
             })
             .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?;
@@ -5392,6 +5402,8 @@ fn analyze_function(
             ty: p.ty,
             span: p.span,
             parameter: true,
+            source_binding: true,
+            mutability: p.mutability,
             address_taken: false,
         });
         a.scopes[0].insert(p.name.clone(), local);
@@ -5399,6 +5411,7 @@ fn analyze_function(
             local,
             ty: p.ty,
             span: p.span,
+            mutability: p.mutability,
         });
     }
     a.validate_declared_defaults(sig, &parameters)?;
@@ -7223,6 +7236,8 @@ impl Analyzer<'_> {
             }
             let kind = match &s.kind {
                 AstStmtKind::Local {
+                    mutability,
+                    const_span: _,
                     ty,
                     name,
                     initializer,
@@ -7268,6 +7283,8 @@ impl Analyzer<'_> {
                         ty,
                         span: s.span,
                         parameter: false,
+                        source_binding: true,
+                        mutability: *mutability,
                         address_taken: false,
                     });
                     self.scopes.last_mut().unwrap().insert(name.clone(), local);
@@ -7285,6 +7302,21 @@ impl Analyzer<'_> {
                         continue;
                     }
                     let place = self.resolve_expr_place(place, true)?;
+                    if let Some(local) = self.const_inline_root(&place) {
+                        let name = &self.locals[local.0 as usize].name;
+                        let message = if place.projections.is_empty() {
+                            format!("cannot assign to const binding '{name}'")
+                        } else {
+                            format!("cannot mutate storage of const binding '{name}'")
+                        };
+                        return Err(vec![Diagnostic::new(
+                            "E0372",
+                            Phase::Semantic,
+                            DiagnosticCategory::Type,
+                            message,
+                            Some(s.span),
+                        )]);
+                    }
                     if place.ty == TypeId::STRING
                         && let HirPlaceBase::Local(local) = place.base
                         && !place.projections.is_empty()
@@ -7446,6 +7478,8 @@ impl Analyzer<'_> {
                             ty: TypeId::INT64,
                             span: binding.span,
                             parameter: false,
+                            source_binding: false,
+                            mutability: crate::BindingMutability::Mutable,
                             address_taken: false,
                         });
                         self.scopes.push(BTreeMap::new());
@@ -7491,6 +7525,8 @@ impl Analyzer<'_> {
                                 ty: iterable_type,
                                 span: iterable.span,
                                 parameter: false,
+                                source_binding: false,
+                                mutability: crate::BindingMutability::Mutable,
                                 address_taken: true,
                             });
                             (
@@ -7542,6 +7578,8 @@ impl Analyzer<'_> {
                             ty: binding_type,
                             span: binding.span,
                             parameter: false,
+                            source_binding: false,
+                            mutability: crate::BindingMutability::Mutable,
                             address_taken: false,
                         });
                         self.scopes.push(BTreeMap::new());
@@ -7679,6 +7717,8 @@ impl Analyzer<'_> {
                             ty,
                             span: catch.span,
                             parameter: false,
+                            source_binding: false,
+                            mutability: crate::BindingMutability::Mutable,
                             address_taken: false,
                         });
                         self.scopes
@@ -7888,6 +7928,8 @@ impl Analyzer<'_> {
                 ty: initializer.ty,
                 span: expression.span,
                 parameter: false,
+                source_binding: false,
+                mutability: crate::BindingMutability::Mutable,
                 address_taken: false,
             });
             return Ok(HirStmtKind::Local { local, initializer });
@@ -8108,6 +8150,8 @@ impl Analyzer<'_> {
                     ty: binding_ty,
                     span: *span,
                     parameter: false,
+                    source_binding: false,
+                    mutability: crate::BindingMutability::Mutable,
                     address_taken: false,
                 });
                 self.scopes.last_mut().unwrap().insert(name.clone(), local);
@@ -8981,6 +9025,18 @@ impl Analyzer<'_> {
                     }
                 );
                 let place = self.resolve_expr_place(operand, mutable)?;
+                if mutable && let Some(local) = self.const_inline_root(&place) {
+                    return Err(vec![Diagnostic::new(
+                        "E0373",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        format!(
+                            "cannot mutably borrow const storage '{}'",
+                            self.locals[local.0 as usize].name
+                        ),
+                        Some(e.span),
+                    )]);
+                }
                 if let HirPlaceBase::Local(local) = &place.base
                     && !place
                         .projections
@@ -9020,6 +9076,18 @@ impl Analyzer<'_> {
 
     fn load_place(&self, place: HirPlace, span: Span) -> Result<Checked, Vec<Diagnostic>> {
         if !self.types.guarantees_copy(place.ty) {
+            if let Some(local) = self.const_inline_root(&place) {
+                return Err(vec![Diagnostic::new(
+                    "E0375",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    format!(
+                        "cannot partially move from const storage '{}'",
+                        self.locals[local.0 as usize].name
+                    ),
+                    Some(span),
+                )]);
+            }
             return Err(vec![Diagnostic::new(
                 "E0293",
                 Phase::Semantic,
@@ -10922,6 +10990,8 @@ impl Analyzer<'_> {
                 ty: concrete_ty,
                 span: initializer.span,
                 parameter: false,
+                source_binding: false,
+                mutability: crate::BindingMutability::Mutable,
                 address_taken: false,
             });
             out.push(HirCallArgument {
@@ -11695,6 +11765,22 @@ impl Analyzer<'_> {
         self.scopes.iter().rev().find_map(|s| s.get(n).copied())
     }
 
+    fn const_inline_root(&self, place: &HirPlace) -> Option<LocalId> {
+        let HirPlaceBase::Local(local) = place.base else {
+            return None;
+        };
+        let info = &self.locals[local.0 as usize];
+        if info.mutability != crate::BindingMutability::Const
+            || place
+                .projections
+                .iter()
+                .any(|projection| matches!(projection, HirPlaceProjection::Index { .. }))
+        {
+            return None;
+        }
+        Some(local)
+    }
+
     fn type_name(&self, ty: TypeId) -> String {
         format_type(self.types, ty, self.structs, self.enums)
     }
@@ -12312,6 +12398,18 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
                 return Err(fail("HIR local identity invalid".into()));
             }
         }
+        for (parameter, signature) in f.parameters.iter().zip(&s.parameters) {
+            let Some(local) = f.locals.get(parameter.local.0 as usize) else {
+                return Err(fail("HIR parameter binding is missing".into()));
+            };
+            if !local.parameter
+                || !local.source_binding
+                || local.mutability != parameter.mutability
+                || parameter.mutability != signature.mutability
+            {
+                return Err(fail("HIR parameter binding mutability is invalid".into()));
+            }
+        }
         crate::verify_class_signature(
             &h.types,
             s.function_id,
@@ -12320,6 +12418,7 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
             s.return_type,
         )
         .map_err(&fail)?;
+        verify_hir_const_initializers(&f.body, &f.locals, &f.parameters, &fail)?;
         classes::verify_body(
             &f.body,
             &f.locals,
@@ -12420,6 +12519,28 @@ fn verify_parametric_hir(
         let function = VerificationFunction {
             locals: &declaration.locals,
         };
+        for (parameter, signature_parameter) in
+            declaration.parameters.iter().zip(&signature.parameters)
+        {
+            let Some(local) = declaration.locals.get(parameter.local.0 as usize) else {
+                return Err(fail("generic HIR parameter binding is missing".into()));
+            };
+            if !local.parameter
+                || !local.source_binding
+                || local.mutability != parameter.mutability
+                || parameter.mutability != signature_parameter.mutability
+            {
+                return Err(fail(
+                    "generic HIR parameter binding mutability is invalid".into(),
+                ));
+            }
+        }
+        verify_hir_const_initializers(
+            &declaration.body,
+            &declaration.locals,
+            &declaration.parameters,
+            &fail,
+        )?;
         classes::verify_body(
             &declaration.body,
             &declaration.locals,
@@ -12450,6 +12571,98 @@ fn verify_parametric_hir(
             &[],
             &fail,
         )?;
+    }
+    Ok(())
+}
+
+fn verify_hir_const_initializers(
+    body: &HirBlock,
+    locals: &[HirLocal],
+    parameters: &[HirParameter],
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    fn visit(block: &HirBlock, counts: &mut [u32]) -> bool {
+        for statement in &block.statements {
+            match &statement.kind {
+                HirStmtKind::Local { local, .. } => {
+                    let Some(count) = counts.get_mut(local.0 as usize) else {
+                        return false;
+                    };
+                    *count += 1;
+                }
+                HirStmtKind::If {
+                    then_block,
+                    else_block,
+                    ..
+                } => {
+                    if !visit(then_block, counts) {
+                        return false;
+                    }
+                    if let Some(block) = else_block {
+                        if !visit(block, counts) {
+                            return false;
+                        }
+                    }
+                }
+                HirStmtKind::While { body, .. }
+                | HirStmtKind::ForRange { body, .. }
+                | HirStmtKind::ForCollection { body, .. } => {
+                    if !visit(body, counts) {
+                        return false;
+                    }
+                }
+                HirStmtKind::Match { arms, .. } => {
+                    for arm in arms {
+                        if !visit(&arm.body, counts) {
+                            return false;
+                        }
+                    }
+                }
+                HirStmtKind::Try {
+                    body,
+                    catches,
+                    finally,
+                } => {
+                    if !visit(body, counts) {
+                        return false;
+                    }
+                    for catch in catches {
+                        if !visit(&catch.body, counts) {
+                            return false;
+                        }
+                    }
+                    if let Some(finally) = finally {
+                        if !visit(&finally.body, counts) {
+                            return false;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        true
+    }
+
+    let parameter_ids = parameters
+        .iter()
+        .map(|parameter| parameter.local)
+        .collect::<BTreeSet<_>>();
+    let mut counts = vec![0_u32; locals.len()];
+    if !visit(body, &mut counts) {
+        return Err(fail("HIR const initializer names an invalid local".into()));
+    }
+    for local in locals {
+        if !local.source_binding && local.mutability == crate::BindingMutability::Const {
+            return Err(fail("compiler-owned HIR local is marked const".into()));
+        }
+        if local.source_binding && local.mutability == crate::BindingMutability::Const {
+            let expected = u32::from(!parameter_ids.contains(&local.id));
+            if counts[local.id.0 as usize] != expected {
+                return Err(fail(
+                    "HIR const binding does not have exactly one initializer".into(),
+                ));
+            }
+        }
     }
     Ok(())
 }
@@ -12494,6 +12707,9 @@ fn verify_block(
                 }
                 if !hir_place_writable(place, f, types, structs, enums) {
                     return Err(fail("HIR writes through a shared reference".into()));
+                }
+                if hir_const_inline_root(place, f).is_some() {
+                    return Err(fail("HIR writes const inline storage".into()));
                 }
                 if !types.guarantees_copy(place.ty)
                     && place.ty != TypeId::STRING
@@ -13056,6 +13272,9 @@ fn verify_expr(
             verify_place(place, f, sigs, structs, enums, types, fail)?;
             if types.reference_info(e.ty) != Some((place.ty, *mutable)) {
                 return Err(fail("HIR borrow type/capability mismatch".into()));
+            }
+            if *mutable && hir_const_inline_root(place, f).is_some() {
+                return Err(fail("HIR mutably borrows const inline storage".into()));
             }
             if *mutable && !hir_place_writable(place, f, types, structs, enums) {
                 return Err(fail("HIR mutable borrow through shared reference".into()));
@@ -14067,6 +14286,19 @@ fn verify_call_borrow(
     Ok(())
 }
 
+fn hir_const_inline_root(place: &HirPlace, f: &VerificationFunction<'_>) -> Option<LocalId> {
+    let HirPlaceBase::Local(local) = place.base else {
+        return None;
+    };
+    let info = f.locals.get(local.0 as usize)?;
+    (info.mutability == crate::BindingMutability::Const
+        && !place
+            .projections
+            .iter()
+            .any(|projection| matches!(projection, HirPlaceProjection::Index { .. })))
+    .then_some(local)
+}
+
 fn hir_place_writable(
     place: &HirPlace,
     f: &VerificationFunction<'_>,
@@ -14754,9 +14986,19 @@ mod tests {
             ty: TypeId(u32::MAX),
             span: Span::new(0, 0),
             parameter: false,
+            source_binding: false,
+            mutability: crate::BindingMutability::Mutable,
             address_taken: false,
         });
         assert!(verify_hir(&h).is_err());
+    }
+
+    #[test]
+    fn verifier_rejects_duplicate_const_initialization() {
+        let mut hir = check("int main(){const int x=1;return x-1;}").unwrap();
+        let duplicate = hir.functions[0].body.statements[0].clone();
+        hir.functions[0].body.statements.insert(1, duplicate);
+        assert!(verify_hir(&hir).is_err());
     }
     #[test]
     fn layout_boundary_uses_target_properties_and_cached_aggregates() {
