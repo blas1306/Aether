@@ -1,30 +1,29 @@
 package Roots;
 
-from Functions import ScalarCallable;
-from Results import RootResult;
-from Results import RootStatus;
+import Functions;
+import Results;
 
-public RootResult bisection(
-    ScalarCallable target,
+Results.RootResult bisection(
+    Functions.ScalarCallable target,
     double left,
     double right,
     double tolerance,
     int maxIterations
 ) {
     if (tolerance <= 0.0 || maxIterations <= 0 || left >= right) {
-        return RootResult((left + right) / 2.0, 0, RootStatus.InvalidInterval);
+        return Results.RootResult((left + right) / 2.0, 0, Results.RootStatus.InvalidInterval);
     }
 
     double fLeft = target(left);
     double fRight = target(right);
     if (abs(fLeft) <= tolerance) {
-        return RootResult(left, 0, RootStatus.Converged);
+        return Results.RootResult(left, 0, Results.RootStatus.Converged);
     }
     if (abs(fRight) <= tolerance) {
-        return RootResult(right, 0, RootStatus.Converged);
+        return Results.RootResult(right, 0, Results.RootStatus.Converged);
     }
     if (fLeft * fRight > 0.0) {
-        return RootResult((left + right) / 2.0, 0, RootStatus.InvalidInterval);
+        return Results.RootResult((left + right) / 2.0, 0, Results.RootStatus.InvalidInterval);
     }
 
     int iterations = 0;
@@ -35,7 +34,7 @@ public RootResult bisection(
         iterations = iterations + 1;
 
         if (abs(fMiddle) <= tolerance || abs(right - left) / 2.0 <= tolerance) {
-            return RootResult(middle, iterations, RootStatus.Converged);
+            return Results.RootResult(middle, iterations, Results.RootStatus.Converged);
         }
         if (fLeft * fMiddle < 0.0) {
             right = middle;
@@ -44,18 +43,18 @@ public RootResult bisection(
             fLeft = fMiddle;
         }
     }
-    return RootResult(middle, iterations, RootStatus.MaxIterations);
+    return Results.RootResult(middle, iterations, Results.RootStatus.MaxIterations);
 }
 
-public RootResult newton(
-    ScalarCallable target,
-    ScalarCallable derivative,
+Results.RootResult newton(
+    Functions.ScalarCallable target,
+    Functions.ScalarCallable derivative,
     double initial,
     double tolerance,
     int maxIterations
 ) {
     if (tolerance <= 0.0 || maxIterations <= 0) {
-        return RootResult(initial, 0, RootStatus.InvalidInterval);
+        return Results.RootResult(initial, 0, Results.RootStatus.InvalidInterval);
     }
 
     double x = initial;
@@ -63,32 +62,32 @@ public RootResult newton(
     while (iterations < maxIterations) {
         double fx = target(x);
         if (abs(fx) <= tolerance) {
-            return RootResult(x, iterations, RootStatus.Converged);
+            return Results.RootResult(x, iterations, Results.RootStatus.Converged);
         }
 
         double slope = derivative(x);
         if (abs(slope) <= tolerance) {
-            return RootResult(x, iterations, RootStatus.ZeroDerivative);
+            return Results.RootResult(x, iterations, Results.RootStatus.ZeroDerivative);
         }
 
         x = x - fx / slope;
         iterations = iterations + 1;
     }
     if (abs(target(x)) <= tolerance) {
-        return RootResult(x, iterations, RootStatus.Converged);
+        return Results.RootResult(x, iterations, Results.RootStatus.Converged);
     }
-    return RootResult(x, iterations, RootStatus.MaxIterations);
+    return Results.RootResult(x, iterations, Results.RootStatus.MaxIterations);
 }
 
-public RootResult secant(
-    ScalarCallable target,
+Results.RootResult secant(
+    Functions.ScalarCallable target,
     double previous,
     double current,
     double tolerance,
     int maxIterations
 ) {
     if (tolerance <= 0.0 || maxIterations <= 0) {
-        return RootResult(current, 0, RootStatus.InvalidInterval);
+        return Results.RootResult(current, 0, Results.RootStatus.InvalidInterval);
     }
 
     double fPrevious = target(previous);
@@ -96,12 +95,12 @@ public RootResult secant(
     int iterations = 0;
     while (iterations < maxIterations) {
         if (abs(fCurrent) <= tolerance) {
-            return RootResult(current, iterations, RootStatus.Converged);
+            return Results.RootResult(current, iterations, Results.RootStatus.Converged);
         }
 
         double denominator = fCurrent - fPrevious;
         if (abs(denominator) <= tolerance) {
-            return RootResult(current, iterations, RootStatus.ZeroDerivative);
+            return Results.RootResult(current, iterations, Results.RootStatus.ZeroDerivative);
         }
 
         double next = current - fCurrent * (current - previous) / denominator;
@@ -112,7 +111,7 @@ public RootResult secant(
         iterations = iterations + 1;
     }
     if (abs(fCurrent) <= tolerance) {
-        return RootResult(current, iterations, RootStatus.Converged);
+        return Results.RootResult(current, iterations, Results.RootStatus.Converged);
     }
-    return RootResult(current, iterations, RootStatus.MaxIterations);
+    return Results.RootResult(current, iterations, Results.RootStatus.MaxIterations);
 }

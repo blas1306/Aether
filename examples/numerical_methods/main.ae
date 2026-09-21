@@ -1,49 +1,42 @@
-from Integration import simpson;
-from Integration import trapezoid;
-from Problems import noRealRoot;
-from Problems import quadraticMinusTwo;
-from Problems import quadraticMinusTwoDerivative;
-from Problems import square;
-from Results import RootResult;
-from Results import RootStatus;
-from Results import IntegrationResult;
-from Results import IntegrationStatus;
-from Roots import bisection;
-from Roots import newton;
-from Roots import secant;
+import Problems;
+import Roots;
+import Integration;
+import Results;
 
-RootResult bisected = bisection(quadraticMinusTwo, 0.0, 2.0, 1e-10, 100);
-RootResult newtonResult = newton(quadraticMinusTwo, quadraticMinusTwoDerivative, 1.0, 1e-10, 100);
-RootResult secantResult = secant(quadraticMinusTwo, 0.0, 2.0, 1e-10, 100);
+int main() {
+    Results.RootResult bisected = Roots.bisection(Problems.quadraticMinusTwo, 0.0, 2.0, 1e-10, 100);
+    Results.RootResult newtonResult = Roots.newton(Problems.quadraticMinusTwo, Problems.quadraticMinusTwoDerivative, 1.0, 1e-10, 100);
+    Results.RootResult secantResult = Roots.secant(Problems.quadraticMinusTwo, 0.0, 2.0, 1e-10, 100);
 
-println("bisection converged: ", bisected.status == RootStatus.Converged);
-println("bisection accurate: ", abs(bisected.value * bisected.value - 2.0) < 1e-8);
-println("newton converged: ", newtonResult.status == RootStatus.Converged);
-println("newton accurate: ", abs(newtonResult.value * newtonResult.value - 2.0) < 1e-8);
-println("secant converged: ", secantResult.status == RootStatus.Converged);
-println("secant accurate: ", abs(secantResult.value * secantResult.value - 2.0) < 1e-8);
+    println("bisection converged: ${Results.isConverged(bisected.status)}");
+    println("bisection accurate: ${abs(bisected.value * bisected.value - 2.0) < 1e-8}");
+    println("newton converged: ${Results.isConverged(newtonResult.status)}");
+    println("newton accurate: ${abs(newtonResult.value * newtonResult.value - 2.0) < 1e-8}");
+    println("secant converged: ${Results.isConverged(secantResult.status)}");
+    println("secant accurate: ${abs(secantResult.value * secantResult.value - 2.0) < 1e-8}");
 
-RootResult invalidBracket = bisection(noRealRoot, -1.0, 1.0, 1e-10, 100);
-RootResult zeroDerivative = newton(quadraticMinusTwo, quadraticMinusTwoDerivative, 0.0, 1e-10, 100);
-RootResult zeroSecantDenominator = secant(quadraticMinusTwo, -1.0, 1.0, 1e-10, 100);
-println("invalid bracket rejected: ", invalidBracket.status == RootStatus.InvalidInterval);
-println("zero derivative rejected: ", zeroDerivative.status == RootStatus.ZeroDerivative);
-println("zero secant denominator rejected: ", zeroSecantDenominator.status == RootStatus.ZeroDerivative);
+    Results.RootResult invalidBracket = Roots.bisection(Problems.noRealRoot, -1.0, 1.0, 1e-10, 100);
+    Results.RootResult zeroDerivative = Roots.newton(Problems.quadraticMinusTwo, Problems.quadraticMinusTwoDerivative, 0.0, 1e-10, 100);
+    Results.RootResult zeroSecantDenominator = Roots.secant(Problems.quadraticMinusTwo, -1.0, 1.0, 1e-10, 100);
+    println("invalid bracket rejected: ${Results.isInvalidInterval(invalidBracket.status)}");
+    println("zero derivative rejected: ${Results.isZeroDerivative(zeroDerivative.status)}");
+    println("zero secant denominator rejected: ${Results.isZeroDerivative(zeroSecantDenominator.status)}");
 
-IntegrationResult trapezoidResult = trapezoid(square, 0.0, 1.0, 100);
-IntegrationResult simpsonResult = simpson(square, 0.0, 1.0, 100);
-println("trapezoid succeeded: ", trapezoidResult.status == IntegrationStatus.Success);
-println("trapezoid accurate: ", abs(trapezoidResult.value - 1.0 / 3.0) < 1e-4);
-println("simpson succeeded: ", simpsonResult.status == IntegrationStatus.Success);
-println("simpson accurate: ", abs(simpsonResult.value - 1.0 / 3.0) < 1e-10);
+    Results.IntegrationResult trapezoidResult = Integration.trapezoid(Problems.square, 0.0, 1.0, 100);
+    Results.IntegrationResult simpsonResult = Integration.simpson(Problems.square, 0.0, 1.0, 100);
+    println("trapezoid succeeded: ${Results.isIntegrationSuccess(trapezoidResult.status)}");
+    println("trapezoid accurate: ${abs(trapezoidResult.value - 1.0 / 3.0) < 1e-4}");
+    println("simpson succeeded: ${Results.isIntegrationSuccess(simpsonResult.status)}");
+    println("simpson accurate: ${abs(simpsonResult.value - 1.0 / 3.0) < 1e-10}");
 
-IntegrationResult invalidTrapezoid = trapezoid(square, 0.0, 1.0, 0);
-IntegrationResult invalidSimpsonCount = simpson(square, 0.0, 1.0, -2);
-IntegrationResult oddSimpson = simpson(square, 0.0, 1.0, 3);
-IntegrationResult reversedTrapezoid = trapezoid(square, 1.0, 0.0, 100);
-IntegrationResult reversedSimpson = simpson(square, 1.0, 0.0, 100);
-println("invalid trapezoid count rejected: ", invalidTrapezoid.status == IntegrationStatus.NonPositiveSubintervalCount);
-println("invalid Simpson count rejected: ", invalidSimpsonCount.status == IntegrationStatus.NonPositiveSubintervalCount);
-println("odd Simpson count rejected: ", oddSimpson.status == IntegrationStatus.SimpsonRequiresEvenSubintervals);
-println("reversed trapezoid preserves sign: ", abs(reversedTrapezoid.value + 1.0 / 3.0) < 1e-4);
-println("reversed Simpson preserves sign: ", abs(reversedSimpson.value + 1.0 / 3.0) < 1e-10);
+    Results.IntegrationResult invalidTrapezoid = Integration.trapezoid(Problems.square, 0.0, 1.0, 0);
+    Results.IntegrationResult invalidSimpsonCount = Integration.simpson(Problems.square, 0.0, 1.0, -2);
+    Results.IntegrationResult oddSimpson = Integration.simpson(Problems.square, 0.0, 1.0, 3);
+    Results.IntegrationResult reversedTrapezoid = Integration.trapezoid(Problems.square, 1.0, 0.0, 100);
+    Results.IntegrationResult reversedSimpson = Integration.simpson(Problems.square, 1.0, 0.0, 100);
+    println("invalid trapezoid count rejected: ${Results.isNonPositiveSubintervalCount(invalidTrapezoid.status)}");
+    println("invalid Simpson count rejected: ${Results.isNonPositiveSubintervalCount(invalidSimpsonCount.status)}");
+    println("odd Simpson count rejected: ${Results.isSimpsonRequiresEvenSubintervals(oddSimpson.status)}");
+    println("reversed trapezoid preserves sign: ${abs(reversedTrapezoid.value + 1.0 / 3.0) < 1e-4}");
+    println("reversed Simpson preserves sign: ${abs(reversedSimpson.value + 1.0 / 3.0) < 1e-10}");
+}

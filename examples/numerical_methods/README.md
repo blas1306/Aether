@@ -15,15 +15,15 @@ algorithms written entirely in Aether:
 - typed top-level callables, structs by value, imports, loops, and real scalar
   mathematics.
 
-Run either backend from the repository root:
+Run it with `compiler-next` from the repository root:
 
 ```bash
-aether --backend=ast examples/numerical_methods/main.ae
-aether --backend=llvm examples/numerical_methods/main.ae
+aether examples/numerical_methods/main.ae --compiler next
+aether examples/numerical_methods/main.ae --compiler next -O2
 ```
 
-Every printed validation must end in `true`, and both backends must produce the
-same eighteen lines.
+The first command uses O0. Every printed validation must end in `true`, and O0
+and O2 must produce the same eighteen lines.
 
 La caracterización de Fase 0 de Array/List se ejecuta también como guardia de
 regresión indirecta para este programa. No cambia sus contratos numéricos, sus
@@ -34,14 +34,14 @@ callables ni sus resultados; el RC futuro de colecciones permanece pendiente.
 `Functions.ae` declares the structural alias:
 
 ```aether
-public alias ScalarCallable = Function<(double), double>;
+alias ScalarCallable = Function<(double), double>;
 ```
 
 The root solvers and integrators receive a `ScalarCallable` and invoke it
-directly. `main.ae` passes selectively imported functions from `Problems.ae`,
-so this example covers both callable aliases and cross-module symbol mangling.
-The old `ScalarFunction.evaluate(double)` interface workaround is no longer
-needed.
+directly. `main.ae` imports packages and passes qualified functions from
+`Problems.ae`, so this example covers both callable aliases and cross-package
+symbol mangling. The old `ScalarFunction.evaluate(double)` interface workaround
+is no longer needed.
 
 Typed callables deliberately cover only capture-free user-defined top-level
 functions. A value such as `Function<(double), double>` is represented natively by an LLVM
@@ -53,11 +53,11 @@ scope. A top-level wrapper can expose a builtin when needed.
 
 `Results.ae` declares the payload-free enum `RootStatus` with `Converged`,
 `MaxIterations`, `InvalidInterval`, and `ZeroDerivative`. `RootResult.status`
-uses that type directly, so callers compare qualified members instead of
-interpreting a boolean or integer error code. Bisection reports invalid input
-and invalid brackets as `InvalidInterval`; Newton and secant report a near-zero
-derivative/denominator as `ZeroDerivative`; exhausted loops report
-`MaxIterations`.
+uses that type directly. Exhaustive predicates in `Results.ae` inspect the enum
+without converting it to a boolean or integer error code. Bisection reports
+invalid input and invalid brackets as `InvalidInterval`; Newton and secant
+report a near-zero derivative/denominator as `ZeroDerivative`; exhausted loops
+report `MaxIterations`.
 
 ## Integration status API
 
@@ -69,11 +69,10 @@ ambiguous `0.0` sentinel: zero is a valid integral and is no longer also the
 error contract.
 
 The functions deliberately accept reversed limits. Their signed step preserves
-the standard identity `integral(a, b) = -integral(b, a)` in both backends.
+the standard identity `integral(a, b) = -integral(b, a)` at both optimization
+levels.
 
-## Remaining error-model boundary
+## Error-model boundary
 
-Native `throw`/`try-catch` is still unsupported. To keep one honest program
-executable by both backends, expected numerical failures use nominal status
-enums in `RootResult` and `IntegrationResult`; no exception or sentinel is
-required.
+Expected numerical outcomes use nominal status enums in `RootResult` and
+`IntegrationResult`; no exception or sentinel is required.

@@ -1,17 +1,16 @@
 package Integration;
 
-from Functions import ScalarCallable;
-from Results import IntegrationResult;
-from Results import IntegrationStatus;
+import Functions;
+import Results;
 
-public IntegrationResult trapezoid(
-    ScalarCallable target,
+Results.IntegrationResult trapezoid(
+    Functions.ScalarCallable target,
     double left,
     double right,
     int intervals
 ) {
     if (intervals <= 0) {
-        return IntegrationResult(0.0, IntegrationStatus.NonPositiveSubintervalCount);
+        return Results.IntegrationResult(0.0, Results.IntegrationStatus.NonPositiveSubintervalCount);
     }
 
     double step = (right - left) / double(intervals);
@@ -21,20 +20,20 @@ public IntegrationResult trapezoid(
         total = total + target(left + double(index) * step);
         index = index + 1;
     }
-    return IntegrationResult(total * step, IntegrationStatus.Success);
+    return Results.IntegrationResult(total * step, Results.IntegrationStatus.Success);
 }
 
-public IntegrationResult simpson(
-    ScalarCallable target,
+Results.IntegrationResult simpson(
+    Functions.ScalarCallable target,
     double left,
     double right,
     int intervals
 ) {
     if (intervals <= 0) {
-        return IntegrationResult(0.0, IntegrationStatus.NonPositiveSubintervalCount);
+        return Results.IntegrationResult(0.0, Results.IntegrationStatus.NonPositiveSubintervalCount);
     }
     if (intervals % 2 != 0) {
-        return IntegrationResult(0.0, IntegrationStatus.SimpsonRequiresEvenSubintervals);
+        return Results.IntegrationResult(0.0, Results.IntegrationStatus.SimpsonRequiresEvenSubintervals);
     }
 
     double step = (right - left) / double(intervals);
@@ -48,5 +47,5 @@ public IntegrationResult simpson(
         total = total + weight * target(left + double(index) * step);
         index = index + 1;
     }
-    return IntegrationResult(total * step / 3.0, IntegrationStatus.Success);
+    return Results.IntegrationResult(total * step / 3.0, Results.IntegrationStatus.Success);
 }

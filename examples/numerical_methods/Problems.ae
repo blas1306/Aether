@@ -1,17 +1,17 @@
 package Problems;
 
-public double quadraticMinusTwo(double x) {
+double quadraticMinusTwo(double x) {
     return x * x - 2.0;
 }
 
-public double quadraticMinusTwoDerivative(double x) {
+double quadraticMinusTwoDerivative(double x) {
     return 2.0 * x;
 }
 
-public double noRealRoot(double x) {
+double noRealRoot(double x) {
     return x * x + 1.0;
 }
 
-public double square(double x) {
+double square(double x) {
     return x * x;
 }
