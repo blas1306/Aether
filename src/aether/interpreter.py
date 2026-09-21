@@ -1171,6 +1171,9 @@ class Interpreter:
             print(prompt, end="", flush=True)
             return
         self._write_output(prompt)
+        # Ensure prompt is flushed before reading input
+        import sys
+        sys.stdout.flush()
 
     def _evaluate_range(self, expression: ast.RangeExpression, env: Environment) -> AetherValue:
         start = self._evaluate(expression.start, env)

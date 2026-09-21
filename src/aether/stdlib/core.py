@@ -109,6 +109,8 @@ def builtin_definitions() -> list[BuiltinDefinition]:
         BuiltinDefinition("log", _constant_runtime(log_builtin), _math_unary_type("log"), _exactly_one("log")),
         BuiltinDefinition("sqrt", _constant_runtime(sqrt_builtin), _sqrt_type, _exactly_one("sqrt")),
         BuiltinDefinition("abs", _constant_runtime(abs_builtin), _abs_type, _exactly_one("abs")),
+        BuiltinDefinition("min", _constant_runtime(min_builtin), _min_max_type("min"), _exactly_two("min")),
+        BuiltinDefinition("max", _constant_runtime(max_builtin), _min_max_type("max"), _exactly_two("max")),
         BuiltinDefinition("complex", _constant_runtime(complex_builtin), _complex_type, _one_or_two("complex")),
         BuiltinDefinition("real", _constant_runtime(real_builtin), _real_part_type("real"), _exactly_one("real")),
         BuiltinDefinition("imag", _constant_runtime(imag_builtin), _real_part_type("imag"), _exactly_one("imag")),
@@ -624,6 +626,20 @@ def abs_builtin(args: list[AetherValue]) -> AetherValue:
     return AetherValue(value.type_name, abs(value.value))
 
 
+def min_builtin(args: list[AetherValue]) -> AetherValue:
+    left, right = _require_real_numeric_binary_args(args, "min")
+    result_type = common_primitive_type([left.type_name, right.type_name], label="min")
+    result = min(left.value, right.value)
+    return AetherValue(result_type, int(result) if result_type == "int" else float(result))
+
+
+def max_builtin(args: list[AetherValue]) -> AetherValue:
+    left, right = _require_real_numeric_binary_args(args, "max")
+    result_type = common_primitive_type([left.type_name, right.type_name], label="max")
+    result = max(left.value, right.value)
+    return AetherValue(result_type, int(result) if result_type == "int" else float(result))
+
+
 def complex_builtin(args: list[AetherValue]) -> AetherValue:
     if len(args) not in {1, 2}:
         raise AetherTypeError("complex(...) expects one or two arguments.")
@@ -1078,6 +1094,23 @@ def _abs_type(arg_types: list[AetherType | None]) -> AetherType | None:
     if argument_type not in NUMERIC_TYPES:
         raise AetherTypeError(f"abs(...) expects a numeric argument, got '{type_to_string(argument_type)}'.")
     return "double" if argument_type == "complex" else argument_type
+
+
+def _min_max_type(label: str):
+    def infer(arg_types: list[AetherType | None]) -> AetherType | None:
+        if len(arg_types) != 2:
+            raise AetherTypeError(f"{label}(...) expects exactly two arguments.")
+        left_type, right_type = arg_types
+        if left_type is None or right_type is None:
+            return None
+        if left_type not in REAL_NUMERIC_TYPES or right_type not in REAL_NUMERIC_TYPES:
+            raise AetherTypeError(
+                f"{label}(...) expects real numeric arguments, got "
+                f"'{type_to_string(left_type)}' and '{type_to_string(right_type)}'."
+            )
+        return common_primitive_type([left_type, right_type], label=label)
+
+    return infer
 
 
 def _complex_type(arg_types: list[AetherType | None]) -> AetherType | None:

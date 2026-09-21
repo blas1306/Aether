@@ -1,5 +1,3 @@
-package Examples.WordStats;
-
 import std.File;
 import std.Text;
 

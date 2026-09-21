@@ -44,7 +44,7 @@ class CompletionItem:
 
 AETHER_ERRORS = (AetherSyntaxError, AetherTypeError, AetherRuntimeError)
 _LOCATION_RE = re.compile(r"line (?P<line>\d+), column (?P<column>\d+)")
-_ASSIGNMENT_RE = re.compile(r"\b(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:=|\+=)")
+_ASSIGNMENT_RE = re.compile(r"\b(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*(?:=|\+=|-=|\*=|/=)")
 _DECLARATION_RE = re.compile(
     r"\b(?:(?:public|private)\s+)?(?:const\s+)?"
     r"(?:int|float|double|string|boolean|Array\s*<[^>]+>|List\s*<[^>]+>|Matrix\s*<[^>]+>|Vector\s*<[^>]+>|[A-Z][A-Za-z0-9_]*)\s+"

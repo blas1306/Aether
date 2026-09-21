@@ -78,6 +78,19 @@ println(Math.ceil(-1.2));
     assert result.output == "3\n4\n-2\n-1\n"
 
 
+def test_legacy_min_and_max_builtins() -> None:
+    result = run_aether(
+        """
+println(min(7, 3));
+println(max(7, 3));
+println(max(1.5, 2.0));
+println(min(-2.5, -1.0));
+"""
+    )
+
+    assert result.output == "3\n7\n2.0\n-2.5\n"
+
+
 def test_factorial_rejects_non_int_and_negative_values() -> None:
     with pytest.raises(AetherTypeError, match="expects an int argument"):
         run_aether("from Math import factorial\nprintln(factorial(5.0));")

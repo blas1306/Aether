@@ -724,6 +724,122 @@ class Parser:
                     plus_equals.line,
                     plus_equals.column,
                 )
+            if isinstance(expression, (ast.IndexExpression, ast.MatrixIndexExpression, ast.SliceExpression)):
+                return ast.Assignment(
+                    expression,
+                    ast.BinaryExpression(expression, "+", value, plus_equals.line, plus_equals.column),
+                    plus_equals.line,
+                    plus_equals.column,
+                )
+            if isinstance(expression, ast.FieldAccess):
+                if not self._is_field_assignment_lvalue(expression):
+                    raise self._error(
+                        plus_equals,
+                        "Field assignment target must start from a variable; assigning to fields on temporaries is not supported.",
+                    )
+                return ast.FieldAssignment(
+                    expression.target,
+                    expression.field_name,
+                    ast.BinaryExpression(expression, "+", value, plus_equals.line, plus_equals.column),
+                    plus_equals.line,
+                    plus_equals.column,
+                )
+            raise self._error(self._previous(), "Invalid assignment target.")
+        if self._match(TokenType.MINUS_EQUAL):
+            minus_equals = self._previous()
+            value = self._expression()
+            self._consume(TokenType.SEMICOLON, "Expected ';' after assignment.")
+            if isinstance(expression, ast.Identifier):
+                return ast.Assignment(
+                    expression.name,
+                    ast.BinaryExpression(expression, "-", value, minus_equals.line, minus_equals.column),
+                    minus_equals.line,
+                    minus_equals.column,
+                )
+            if isinstance(expression, (ast.IndexExpression, ast.MatrixIndexExpression, ast.SliceExpression)):
+                return ast.Assignment(
+                    expression,
+                    ast.BinaryExpression(expression, "-", value, minus_equals.line, minus_equals.column),
+                    minus_equals.line,
+                    minus_equals.column,
+                )
+            if isinstance(expression, ast.FieldAccess):
+                if not self._is_field_assignment_lvalue(expression):
+                    raise self._error(
+                        minus_equals,
+                        "Field assignment target must start from a variable; assigning to fields on temporaries is not supported.",
+                    )
+                return ast.FieldAssignment(
+                    expression.target,
+                    expression.field_name,
+                    ast.BinaryExpression(expression, "-", value, minus_equals.line, minus_equals.column),
+                    minus_equals.line,
+                    minus_equals.column,
+                )
+            raise self._error(self._previous(), "Invalid assignment target.")
+        if self._match(TokenType.STAR_EQUAL):
+            star_equals = self._previous()
+            value = self._expression()
+            self._consume(TokenType.SEMICOLON, "Expected ';' after assignment.")
+            if isinstance(expression, ast.Identifier):
+                return ast.Assignment(
+                    expression.name,
+                    ast.BinaryExpression(expression, "*", value, star_equals.line, star_equals.column),
+                    star_equals.line,
+                    star_equals.column,
+                )
+            if isinstance(expression, (ast.IndexExpression, ast.MatrixIndexExpression, ast.SliceExpression)):
+                return ast.Assignment(
+                    expression,
+                    ast.BinaryExpression(expression, "*", value, star_equals.line, star_equals.column),
+                    star_equals.line,
+                    star_equals.column,
+                )
+            if isinstance(expression, ast.FieldAccess):
+                if not self._is_field_assignment_lvalue(expression):
+                    raise self._error(
+                        star_equals,
+                        "Field assignment target must start from a variable; assigning to fields on temporaries is not supported.",
+                    )
+                return ast.FieldAssignment(
+                    expression.target,
+                    expression.field_name,
+                    ast.BinaryExpression(expression, "*", value, star_equals.line, star_equals.column),
+                    star_equals.line,
+                    star_equals.column,
+                )
+            raise self._error(self._previous(), "Invalid assignment target.")
+        if self._match(TokenType.SLASH_EQUAL):
+            slash_equals = self._previous()
+            value = self._expression()
+            self._consume(TokenType.SEMICOLON, "Expected ';' after assignment.")
+            if isinstance(expression, ast.Identifier):
+                return ast.Assignment(
+                    expression.name,
+                    ast.BinaryExpression(expression, "/", value, slash_equals.line, slash_equals.column),
+                    slash_equals.line,
+                    slash_equals.column,
+                )
+            if isinstance(expression, (ast.IndexExpression, ast.MatrixIndexExpression, ast.SliceExpression)):
+                return ast.Assignment(
+                    expression,
+                    ast.BinaryExpression(expression, "/", value, slash_equals.line, slash_equals.column),
+                    slash_equals.line,
+                    slash_equals.column,
+                )
+            if isinstance(expression, ast.FieldAccess):
+                if not self._is_field_assignment_lvalue(expression):
+                    raise self._error(
+                        slash_equals,
+                        "Field assignment target must start from a variable; assigning to fields on temporaries is not supported.",
+                    )
+                return ast.FieldAssignment(
+                    expression.target,
+                    expression.field_name,
+                    ast.BinaryExpression(expression, "/", value, slash_equals.line, slash_equals.column),
+                    slash_equals.line,
+                    slash_equals.column,
+                )
             raise self._error(self._previous(), "Invalid assignment target.")
         self._consume(TokenType.SEMICOLON, "Expected ';' after expression.")
         return ast.ExpressionStatement(expression)

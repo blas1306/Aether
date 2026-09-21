@@ -35,9 +35,7 @@ class Lexer:
         if char == "#":
             self._skip_line_comment()
             return
-        if char == "/" and self._match("/"):
-            self._skip_line_comment()
-            return
+        # comment handling and compound assignment operators handled below
 
         single_char_tokens = {
             "(": TokenType.LEFT_PAREN,
@@ -60,6 +58,21 @@ class Lexer:
         }
         if char == "+":
             self._add_token(TokenType.PLUS_EQUAL if self._match("=") else TokenType.PLUS)
+            return
+        if char == "-":
+            self._add_token(TokenType.MINUS_EQUAL if self._match("=") else TokenType.MINUS)
+            return
+        if char == "*":
+            self._add_token(TokenType.STAR_EQUAL if self._match("=") else TokenType.STAR)
+            return
+        if char == "/":
+            if self._match("="):
+                self._add_token(TokenType.SLASH_EQUAL)
+                return
+            if self._match("/"):
+                self._skip_line_comment()
+                return
+            self._add_token(TokenType.SLASH)
             return
         if char == ".":
             if self._match("+"):
