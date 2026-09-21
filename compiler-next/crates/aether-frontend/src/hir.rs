@@ -7330,6 +7330,43 @@ struct Analyzer<'a> {
     null_states: BTreeMap<LocalId, NullState>,
     next_non_null_proof: u32,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IntrinsicGenericConstructor {
+    Buffer,
+    Array,
+    Matrix,
+    Vector,
+    List,
+    View,
+    ViewMut,
+    VectorView,
+    VectorViewMut,
+    MatrixView,
+    MatrixViewMut,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GenericFamilyKey {
+    Struct(StructId),
+    Enum(EnumId),
+    Intrinsic(IntrinsicGenericConstructor),
+}
+
+#[derive(Clone, Debug)]
+struct LocalTypePattern {
+    family: GenericFamilyKey,
+    nullable: bool,
+    source_name: String,
+    source_span: Span,
+    expected_arity: usize,
+}
+
+enum LocalTypeExpectation {
+    Exact(TypeId),
+    InferRoot(LocalTypePattern),
+}
+
 #[derive(Clone)]
 struct Checked {
     expr: HirExpr,
@@ -7341,6 +7378,277 @@ enum ConstantValue {
     Float(FloatValue),
 }
 impl Analyzer<'_> {
+    fn intrinsic_generic_constructor(name: &str) -> Option<IntrinsicGenericConstructor> {
+        match name {
+            "Buffer" => Some(IntrinsicGenericConstructor::Buffer),
+            "Array" => Some(IntrinsicGenericConstructor::Array),
+            "Matrix" => Some(IntrinsicGenericConstructor::Matrix),
+            "Vector" => Some(IntrinsicGenericConstructor::Vector),
+            "List" => Some(IntrinsicGenericConstructor::List),
+            "View" => Some(IntrinsicGenericConstructor::View),
+            "ViewMut" => Some(IntrinsicGenericConstructor::ViewMut),
+            "VectorView" => Some(IntrinsicGenericConstructor::VectorView),
+            "VectorViewMut" => Some(IntrinsicGenericConstructor::VectorViewMut),
+            "MatrixView" => Some(IntrinsicGenericConstructor::MatrixView),
+            "MatrixViewMut" => Some(IntrinsicGenericConstructor::MatrixViewMut),
+            _ => None,
+        }
+    }
+
+    fn omitted_generic_family(&self, ty: &AstType) -> Option<(GenericFamilyKey, usize, String)> {
+        let (namespace, name, arguments) = ty.named()?;
+        if !arguments.is_empty() {
+            return None;
+        }
+        if namespace.is_none() && self.generic_scope.contains_key(name) {
+            return None;
+        }
+        if namespace.is_none()
+            && let Some(constructor) = Self::intrinsic_generic_constructor(name)
+        {
+            return Some((
+                GenericFamilyKey::Intrinsic(constructor),
+                intrinsic_type_arity(name).expect("intrinsic constructor has arity"),
+                name.into(),
+            ));
+        }
+        let target = namespace.map_or(Some(self.module), |namespace| {
+            self.imports[self.module.0 as usize].get(namespace).copied()
+        })?;
+        if let Some(id) = self.struct_names[target.0 as usize].get(name).copied() {
+            let arity = self.struct_arities[id.0 as usize];
+            return (arity > 0).then(|| (GenericFamilyKey::Struct(id), arity, name.into()));
+        }
+        if let Some(id) = self.enum_names[target.0 as usize].get(name).copied() {
+            let arity = self.enum_arities[id.0 as usize];
+            return (arity > 0).then(|| (GenericFamilyKey::Enum(id), arity, name.into()));
+        }
+        None
+    }
+
+    fn contains_nested_generic_omission(&self, ty: &AstType) -> bool {
+        match &ty.kind {
+            crate::AstTypeKind::Named { arguments, .. } => {
+                self.omitted_generic_family(ty).is_some()
+                    || arguments
+                        .iter()
+                        .any(|argument| self.contains_nested_generic_omission(argument))
+            }
+            crate::AstTypeKind::Reference(reference) => {
+                self.contains_nested_generic_omission(&reference.pointee)
+            }
+            crate::AstTypeKind::Function { parameters, result } => {
+                parameters
+                    .iter()
+                    .any(|parameter| self.contains_nested_generic_omission(parameter))
+                    || self.contains_nested_generic_omission(result)
+            }
+            crate::AstTypeKind::Nullable { payload, .. } => {
+                self.contains_nested_generic_omission(payload)
+            }
+        }
+    }
+
+    fn resolve_local_type_expectation(
+        &mut self,
+        ty: &AstType,
+    ) -> Result<LocalTypeExpectation, Vec<Diagnostic>> {
+        let arity_diagnostics = match self.resolve_source_type(ty) {
+            Ok(exact) => return Ok(LocalTypeExpectation::Exact(exact)),
+            Err(diagnostics)
+                if diagnostics
+                    .first()
+                    .is_none_or(|diagnostic| diagnostic.code != "E0261") =>
+            {
+                return Err(diagnostics);
+            }
+            Err(diagnostics) => diagnostics,
+        };
+
+        let candidate = match &ty.kind {
+            crate::AstTypeKind::Named { .. } => {
+                self.omitted_generic_family(ty)
+                    .map(|(family, expected_arity, source_name)| {
+                        (family, expected_arity, source_name, false, ty.span)
+                    })
+            }
+            crate::AstTypeKind::Nullable { payload, .. } => self
+                .omitted_generic_family(payload)
+                .map(|(family, expected_arity, source_name)| {
+                    (family, expected_arity, source_name, true, payload.span)
+                }),
+            _ => None,
+        };
+        if let Some((family, expected_arity, source_name, nullable, source_span)) = candidate {
+            let family_type = match &ty.kind {
+                crate::AstTypeKind::Nullable { payload, .. } => payload.as_ref(),
+                _ => ty,
+            };
+            if let Some((Some(namespace), _, _)) = family_type.named()
+                && let Some(module) = self.imports[self.module.0 as usize].get(namespace)
+            {
+                self.used_modules.insert(*module);
+            }
+            return Ok(LocalTypeExpectation::InferRoot(LocalTypePattern {
+                family,
+                nullable,
+                source_name,
+                source_span,
+                expected_arity,
+            }));
+        }
+        if self.contains_nested_generic_omission(ty) {
+            return Err(vec![Diagnostic::new(
+                "E0463",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "generic arguments may be omitted only for the root local constructor (optionally nullable)",
+                Some(ty.span),
+            )]);
+        }
+        Err(arity_diagnostics)
+    }
+
+    fn rhs_generic_family(&self, ty: TypeId) -> Option<(GenericFamilyKey, usize)> {
+        match self.types.get(ty).copied()? {
+            TypeData::StructInstance(id, arguments) => Some((
+                GenericFamilyKey::Struct(id),
+                self.types.arguments(arguments)?.len(),
+            )),
+            TypeData::EnumInstance(id, arguments) => Some((
+                GenericFamilyKey::Enum(id),
+                self.types.arguments(arguments)?.len(),
+            )),
+            TypeData::Buffer { .. } => Some((
+                GenericFamilyKey::Intrinsic(IntrinsicGenericConstructor::Buffer),
+                1,
+            )),
+            TypeData::Array { .. } => Some((
+                GenericFamilyKey::Intrinsic(IntrinsicGenericConstructor::Array),
+                1,
+            )),
+            TypeData::Matrix { .. } => Some((
+                GenericFamilyKey::Intrinsic(IntrinsicGenericConstructor::Matrix),
+                1,
+            )),
+            TypeData::Vector { .. } => Some((
+                GenericFamilyKey::Intrinsic(IntrinsicGenericConstructor::Vector),
+                2,
+            )),
+            TypeData::List { .. } => Some((
+                GenericFamilyKey::Intrinsic(IntrinsicGenericConstructor::List),
+                1,
+            )),
+            TypeData::View { mutable: false, .. } => Some((
+                GenericFamilyKey::Intrinsic(IntrinsicGenericConstructor::View),
+                1,
+            )),
+            TypeData::View { mutable: true, .. } => Some((
+                GenericFamilyKey::Intrinsic(IntrinsicGenericConstructor::ViewMut),
+                1,
+            )),
+            TypeData::VectorView { mutable: false, .. } => Some((
+                GenericFamilyKey::Intrinsic(IntrinsicGenericConstructor::VectorView),
+                2,
+            )),
+            TypeData::VectorView { mutable: true, .. } => Some((
+                GenericFamilyKey::Intrinsic(IntrinsicGenericConstructor::VectorViewMut),
+                2,
+            )),
+            TypeData::MatrixView { mutable: false, .. } => Some((
+                GenericFamilyKey::Intrinsic(IntrinsicGenericConstructor::MatrixView),
+                1,
+            )),
+            TypeData::MatrixView { mutable: true, .. } => Some((
+                GenericFamilyKey::Intrinsic(IntrinsicGenericConstructor::MatrixViewMut),
+                1,
+            )),
+            _ => None,
+        }
+    }
+
+    fn adopt_local_pattern(
+        &self,
+        pattern: &LocalTypePattern,
+        rhs: TypeId,
+        initializer_span: Span,
+    ) -> Result<TypeId, Vec<Diagnostic>> {
+        let rhs_payload = self.types.nullable_payload(rhs);
+        if rhs_payload.is_some() != pattern.nullable {
+            return Err(vec![Diagnostic::new(
+                "E0464",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!(
+                    "initializer type does not have the required local type shape `{}{}`",
+                    pattern.source_name,
+                    if pattern.nullable { "?<...>" } else { "<...>" }
+                ),
+                Some(initializer_span),
+            )]);
+        }
+        let application = rhs_payload.unwrap_or(rhs);
+        let Some((family, arity)) = self.rhs_generic_family(application) else {
+            let malformed_same_family = matches!(
+                (pattern.family, self.types.get(application)),
+                (GenericFamilyKey::Struct(expected), Some(TypeData::Struct(actual))) if expected == *actual
+            ) || matches!(
+                (pattern.family, self.types.get(application)),
+                (GenericFamilyKey::Enum(expected), Some(TypeData::Enum(actual))) if expected == *actual
+            );
+            return Err(vec![Diagnostic::new(
+                if malformed_same_family {
+                    "E0464"
+                } else {
+                    "E0461"
+                },
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                if malformed_same_family {
+                    format!(
+                        "initializer type does not have the required local type shape `{}<...>`",
+                        pattern.source_name
+                    )
+                } else {
+                    format!(
+                        "local type pattern `{}` cannot be inferred from initializer type `{}`",
+                        pattern.source_name,
+                        self.type_name(rhs)
+                    )
+                },
+                Some(initializer_span),
+            )]);
+        };
+        if family != pattern.family {
+            return Err(vec![Diagnostic::new(
+                "E0460",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!(
+                    "local type pattern `{}` requires `{}<...>`, but initializer has `{}`",
+                    pattern.source_name,
+                    pattern.source_name,
+                    self.type_name(rhs)
+                ),
+                Some(pattern.source_span),
+            )]);
+        }
+        if arity != pattern.expected_arity {
+            return Err(vec![Diagnostic::new(
+                "E0464",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!(
+                    "initializer type does not have the required local type shape `{}<...>`",
+                    pattern.source_name
+                ),
+                Some(initializer_span),
+            )]);
+        }
+        validate_type_constraints(self.types, rhs, self.structs, self.enums, initializer_span)?;
+        Ok(rhs)
+    }
+
     fn refine_for_condition(&mut self, condition: &AstExpr, truth: bool) {
         match &condition.kind {
             AstExprKind::Unary {
@@ -7739,14 +8047,41 @@ impl Analyzer<'_> {
                     if self.scopes.last().is_some_and(|x| x.contains_key(name)) {
                         return Err(vec![duplicate("local", name, s.span)]);
                     }
-                    let ty = self.resolve_source_type(ty)?;
+                    let expectation = self.resolve_local_type_expectation(ty)?;
+                    let (ty, initializer) = match expectation {
+                        LocalTypeExpectation::Exact(ty) => {
+                            let initializer = self.expression(initializer, Some(ty))?.expr;
+                            (ty, initializer)
+                        }
+                        LocalTypeExpectation::InferRoot(pattern) => {
+                            let initializer = self.expression(initializer, None).map_err(
+                                |mut diagnostics| {
+                                    if let Some(diagnostic) = diagnostics.first_mut()
+                                        && matches!(diagnostic.code, "E0263" | "E0451")
+                                    {
+                                        diagnostic.code = "E0462";
+                                        diagnostic.message = format!(
+                                            "initializer does not determine all arguments of `{}`: {}",
+                                            pattern.source_name, diagnostic.message
+                                        );
+                                    }
+                                    diagnostics
+                                },
+                            )?.expr;
+                            let ty = self.adopt_local_pattern(
+                                &pattern,
+                                initializer.ty,
+                                initializer.span,
+                            )?;
+                            (ty, initializer)
+                        }
+                    };
                     if ty == TypeId::VOID {
                         return Err(vec![type_error(
                             "void is not a source-storable local type",
                             s.span,
                         )]);
                     }
-                    let initializer = self.expression(initializer, Some(ty))?.expr;
                     let local = LocalId(self.locals.len() as u32);
                     self.locals.push(HirLocal {
                         id: local,
@@ -13222,6 +13557,12 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
         if !h.types.is_valid(ty) {
             return Err(fail(format!("HIR references invalid TypeId({})", ty.0)));
         }
+        if !hir_value_type_is_complete(&h.types, ty, &h.structs, &h.enums) {
+            return Err(fail(format!(
+                "HIR value type {} is an incomplete generic application",
+                format_type(&h.types, ty, &h.structs, &h.enums)
+            )));
+        }
     }
     let e = &h.instances[h.entry.0 as usize];
     if e.name != "main" || e.return_type != TypeId::INT64 || !e.parameters.is_empty() {
@@ -13349,6 +13690,67 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
         )?
     }
     Ok(())
+}
+
+fn hir_value_type_is_complete(
+    types: &TypeArena,
+    ty: TypeId,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+) -> bool {
+    match types.get(ty) {
+        Some(TypeData::Struct(id)) => structs
+            .get(id.0 as usize)
+            .is_some_and(|info| info.generic_parameters.is_empty()),
+        Some(TypeData::Enum(id)) => enums
+            .get(id.0 as usize)
+            .is_some_and(|info| info.generic_parameters.is_empty()),
+        Some(TypeData::StructInstance(id, arguments)) => structs
+            .get(id.0 as usize)
+            .zip(types.arguments(*arguments))
+            .is_some_and(|(info, arguments)| {
+                !info.generic_parameters.is_empty()
+                    && info.generic_parameters.len() == arguments.len()
+                    && arguments.iter().all(|argument| {
+                        hir_value_type_is_complete(types, *argument, structs, enums)
+                    })
+            }),
+        Some(TypeData::EnumInstance(id, arguments)) => enums
+            .get(id.0 as usize)
+            .zip(types.arguments(*arguments))
+            .is_some_and(|(info, arguments)| {
+                !info.generic_parameters.is_empty()
+                    && info.generic_parameters.len() == arguments.len()
+                    && arguments.iter().all(|argument| {
+                        hir_value_type_is_complete(types, *argument, structs, enums)
+                    })
+            }),
+        Some(
+            TypeData::Nullable(payload)
+            | TypeData::Reference {
+                pointee: payload, ..
+            },
+        ) => hir_value_type_is_complete(types, *payload, structs, enums),
+        Some(TypeData::Function { parameters, result }) => {
+            types.arguments(*parameters).is_some_and(|parameters| {
+                parameters
+                    .iter()
+                    .all(|parameter| hir_value_type_is_complete(types, *parameter, structs, enums))
+            }) && hir_value_type_is_complete(types, *result, structs, enums)
+        }
+        Some(
+            TypeData::Buffer { element }
+            | TypeData::Array { element }
+            | TypeData::Matrix { element }
+            | TypeData::Vector { element, .. }
+            | TypeData::List { element }
+            | TypeData::View { element, .. }
+            | TypeData::VectorView { element, .. }
+            | TypeData::MatrixView { element, .. },
+        ) => hir_value_type_is_complete(types, *element, structs, enums),
+        Some(_) => true,
+        None => false,
+    }
 }
 /// Shared borrowed body context; generic verification creates no `InstanceId`.
 struct VerificationFunction<'a> {
@@ -15890,6 +16292,23 @@ mod tests {
             address_taken: false,
         });
         assert!(verify_hir(&h).is_err());
+    }
+
+    #[test]
+    fn verifier_rejects_generic_declaration_type_as_a_value_type() {
+        let mut h = check(
+            "struct Box<T>{T value;}int main(){Box<int> value=Box<int>(1);return value.value;}",
+        )
+        .unwrap();
+        let raw = h.types.id_of(TypeData::Struct(StructId(0))).unwrap();
+        let main = h
+            .functions
+            .iter_mut()
+            .find(|function| h.instances[function.id.0 as usize].name == "main")
+            .unwrap();
+        main.locals[0].ty = raw;
+        let errors = verify_hir(&h).unwrap_err();
+        assert!(errors[0].message.contains("incomplete generic application"));
     }
 
     #[test]

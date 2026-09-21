@@ -6010,7 +6010,9 @@ fn vertical23_structured_diagnostics() {
     for (body, code) in [
         ("Matrix<int,int> a=[];", "E0261"),
         ("Matrix<int,Missing> a=[];", "E0261"),
-        ("Matrix a=[];", "E0261"),
+        // GENERIC-LOCAL-INFERENCE-V1 deliberately types the RHS without an
+        // expected type; an empty mathematical literal cannot determine T.
+        ("Matrix a=[];", "E0326"),
         ("Matrix<ref int> a=[];", "E0331"),
         ("Matrix<int> a=[1,2;3,4,5];", "E0333"),
         ("Vector<int,Row> a=[1;2];", "E0332"),

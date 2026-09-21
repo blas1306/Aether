@@ -2087,6 +2087,12 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
         if !ssa.types.is_valid(ty) {
             return Err(fail(format!("SSA references invalid TypeId({})", ty.0)));
         }
+        if !ssa_value_type_is_complete(&ssa, ty) {
+            return Err(fail(format!(
+                "SSA value type TypeId({}) is an incomplete generic application",
+                ty.0
+            )));
+        }
     }
     for (index, (signature, function)) in ssa.signatures.iter().zip(&ssa.functions).enumerate() {
         let nullable_proofs = function
@@ -2171,6 +2177,68 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
     }
     oop_opt::verify(&ssa).map_err(fail)?;
     Ok(VerifiedSsa(ssa))
+}
+
+fn ssa_value_type_is_complete(ssa: &SsaIr, ty: TypeId) -> bool {
+    match ssa.types.get(ty) {
+        Some(TypeData::Struct(id)) => ssa
+            .structs
+            .get(id.0 as usize)
+            .is_some_and(|info| info.generic_parameters.is_empty()),
+        Some(TypeData::Enum(id)) => ssa
+            .enums
+            .get(id.0 as usize)
+            .is_some_and(|info| info.generic_parameters.is_empty()),
+        Some(TypeData::StructInstance(id, arguments)) => ssa
+            .structs
+            .get(id.0 as usize)
+            .zip(ssa.types.arguments(*arguments))
+            .is_some_and(|(info, arguments)| {
+                !info.generic_parameters.is_empty()
+                    && info.generic_parameters.len() == arguments.len()
+                    && arguments
+                        .iter()
+                        .all(|argument| ssa_value_type_is_complete(ssa, *argument))
+            }),
+        Some(TypeData::EnumInstance(id, arguments)) => ssa
+            .enums
+            .get(id.0 as usize)
+            .zip(ssa.types.arguments(*arguments))
+            .is_some_and(|(info, arguments)| {
+                !info.generic_parameters.is_empty()
+                    && info.generic_parameters.len() == arguments.len()
+                    && arguments
+                        .iter()
+                        .all(|argument| ssa_value_type_is_complete(ssa, *argument))
+            }),
+        Some(
+            TypeData::Nullable(payload)
+            | TypeData::Reference {
+                pointee: payload, ..
+            },
+        ) => ssa_value_type_is_complete(ssa, *payload),
+        Some(TypeData::Function { parameters, result }) => {
+            ssa.types.arguments(*parameters).is_some_and(|parameters| {
+                parameters
+                    .iter()
+                    .all(|parameter| ssa_value_type_is_complete(ssa, *parameter))
+            }) && ssa_value_type_is_complete(ssa, *result)
+        }
+        Some(
+            TypeData::Buffer { element }
+            | TypeData::Array { element }
+            | TypeData::Matrix { element }
+            | TypeData::Vector { element, .. }
+            | TypeData::List { element }
+            | TypeData::View { element, .. }
+            | TypeData::VectorView { element, .. }
+            | TypeData::MatrixView { element, .. },
+        ) => ssa_value_type_is_complete(ssa, *element),
+        None => false,
+        // Declaration metadata may contain symbolic parameters. The concrete
+        // signature/value audit below rejects them from runtime value slots.
+        Some(_) => true,
+    }
 }
 
 #[allow(clippy::too_many_lines, clippy::items_after_statements)]
@@ -5850,6 +5918,20 @@ mod tests {
             ty: TypeId(u32::MAX),
         });
         assert!(verify_ssa(ssa).is_err());
+    }
+
+    #[test]
+    fn verifier_rejects_incomplete_generic_value_type() {
+        let mut corrupt = raw_ssa(
+            "struct Box<T>{T value;}int main(){Box<int> value=Box<int>(1);return value.value;}",
+        );
+        let raw = corrupt
+            .types
+            .id_of(TypeData::Struct(aether_frontend::StructId(0)))
+            .unwrap();
+        corrupt.functions[0].blocks[0].instructions[0].ty = raw;
+        let errors = verify_ssa(corrupt).unwrap_err();
+        assert!(errors[0].message.contains("incomplete generic application"));
     }
 
     #[test]

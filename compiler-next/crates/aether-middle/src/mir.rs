@@ -4839,6 +4839,12 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
         if !mir.types.is_valid(ty) {
             return Err(fail(format!("MIR references invalid TypeId({})", ty.0)));
         }
+        if !mir_value_type_is_complete(&mir, ty) {
+            return Err(fail(format!(
+                "MIR value type TypeId({}) is an incomplete generic application",
+                ty.0
+            )));
+        }
     }
     for (index, (signature, function)) in mir.signatures.iter().zip(&mir.functions).enumerate() {
         if signature.id.0 as usize != index || function.id != signature.id {
@@ -4892,6 +4898,68 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
         )?;
     }
     Ok(VerifiedMir(mir))
+}
+
+fn mir_value_type_is_complete(mir: &FlowMir, ty: TypeId) -> bool {
+    match mir.types.get(ty) {
+        Some(TypeData::Struct(id)) => mir
+            .structs
+            .get(id.0 as usize)
+            .is_some_and(|info| info.generic_parameters.is_empty()),
+        Some(TypeData::Enum(id)) => mir
+            .enums
+            .get(id.0 as usize)
+            .is_some_and(|info| info.generic_parameters.is_empty()),
+        Some(TypeData::StructInstance(id, arguments)) => mir
+            .structs
+            .get(id.0 as usize)
+            .zip(mir.types.arguments(*arguments))
+            .is_some_and(|(info, arguments)| {
+                !info.generic_parameters.is_empty()
+                    && info.generic_parameters.len() == arguments.len()
+                    && arguments
+                        .iter()
+                        .all(|argument| mir_value_type_is_complete(mir, *argument))
+            }),
+        Some(TypeData::EnumInstance(id, arguments)) => mir
+            .enums
+            .get(id.0 as usize)
+            .zip(mir.types.arguments(*arguments))
+            .is_some_and(|(info, arguments)| {
+                !info.generic_parameters.is_empty()
+                    && info.generic_parameters.len() == arguments.len()
+                    && arguments
+                        .iter()
+                        .all(|argument| mir_value_type_is_complete(mir, *argument))
+            }),
+        Some(
+            TypeData::Nullable(payload)
+            | TypeData::Reference {
+                pointee: payload, ..
+            },
+        ) => mir_value_type_is_complete(mir, *payload),
+        Some(TypeData::Function { parameters, result }) => {
+            mir.types.arguments(*parameters).is_some_and(|parameters| {
+                parameters
+                    .iter()
+                    .all(|parameter| mir_value_type_is_complete(mir, *parameter))
+            }) && mir_value_type_is_complete(mir, *result)
+        }
+        Some(
+            TypeData::Buffer { element }
+            | TypeData::Array { element }
+            | TypeData::Matrix { element }
+            | TypeData::Vector { element, .. }
+            | TypeData::List { element }
+            | TypeData::View { element, .. }
+            | TypeData::VectorView { element, .. }
+            | TypeData::MatrixView { element, .. },
+        ) => mir_value_type_is_complete(mir, *element),
+        None => false,
+        // Declaration metadata may contain symbolic parameters. The concrete
+        // signature/local audit below rejects them from runtime value slots.
+        Some(_) => true,
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -8982,6 +9050,20 @@ mod tests {
         let mut invalid = mir("int main(){int x=0;return x;}");
         invalid.functions[0].locals[0].ty = TypeId(u32::MAX);
         assert!(verify_mir(invalid).is_err());
+    }
+
+    #[test]
+    fn verifier_rejects_incomplete_generic_value_type() {
+        let mut corrupt = mir(
+            "struct Box<T>{T value;}int main(){Box<int> value=Box<int>(1);return value.value;}",
+        );
+        let raw = corrupt
+            .types
+            .id_of(TypeData::Struct(aether_frontend::StructId(0)))
+            .unwrap();
+        corrupt.functions[0].locals[0].ty = raw;
+        let errors = verify_mir(corrupt).unwrap_err();
+        assert!(errors[0].message.contains("incomplete generic application"));
     }
 
     #[test]
