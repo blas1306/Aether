@@ -1175,11 +1175,13 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
         | E::Int(_)
         | E::Float(_)
         | E::Bool(_)
+        | E::NullableNull { .. }
         | E::FunctionRef { .. }
         | E::Local(_)
         | E::Move(_)
         | E::AlgebraicValue { .. } => Vec::new(),
         E::Load(source)
+        | E::NullablePayload { source, .. }
         | E::Borrow { place: source, .. }
         | E::MatrixRows { source }
         | E::MatrixColumns { source }
@@ -1213,6 +1215,11 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
             length, initial, ..
         } => vec![length, initial],
         E::VectorTranspose { operand, .. }
+        | E::NullableInject {
+            payload: operand, ..
+        }
+        | E::NullableIsNull { operand }
+        | E::LogicalNot { operand }
         | E::Coerce { operand, .. }
         | E::ExplicitCast { operand, .. }
         | E::Unary { operand, .. } => vec![operand],
@@ -1233,6 +1240,8 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
         | E::MatrixScalarMultiply { left, right, .. }
         | E::VectorElementwiseBinary { left, right, .. }
         | E::MatrixElementwiseBinary { left, right, .. }
+        | E::ShortCircuitAnd { left, right }
+        | E::ShortCircuitOr { left, right }
         | E::Binary { left, right, .. } => vec![left, right],
         E::AlgebraicProduct {
             left,

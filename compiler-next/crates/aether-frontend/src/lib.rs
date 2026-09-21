@@ -35,12 +35,13 @@ pub use hir::{
     HirFunction, HirLocal, HirMatchArm, HirMatchBinding, HirParameter, HirPlace, HirPlaceBase,
     HirPlaceProjection, HirStmt, HirStmtKind, HirUnaryOp, InvalidationShape,
     IterationBindingCategory, LocalId, LogicalSourceKey, LoopId, MatchMode, MathElementOp,
-    MathShapeCheck, MatrixProductExtent, ModuleId, ModuleInfo, MutationEffect, OriginKey,
-    PackageId, PackageKey, PackagePath, ParameterSignature, ParsedModule, ParsedProgram,
-    ResolvedImport, ScalarSide, SourceUnitKey, StructInfo, StructuralMutation, SymbolKey,
-    TypeAliasInfo, TypeLayout, TypedHir, VariantInfo, VariantPayloadInfo, analyze, analyze_bodies,
-    analyze_bodies_for_target, collect_program_signatures, collect_signatures, format_type,
-    layout_of, verify_hir,
+    MathShapeCheck, MatrixProductExtent, ModuleId, ModuleInfo, MutationEffect, NonNullProofId,
+    NullableLayout, NullablePayloadAccess, OriginKey, PackageId, PackageKey, PackagePath,
+    ParameterSignature, ParsedModule, ParsedProgram, ResolvedImport, ScalarSide, SourceUnitKey,
+    StructInfo, StructuralMutation, SymbolKey, TypeAliasInfo, TypeLayout, TypedHir, VariantInfo,
+    VariantPayloadInfo, analyze, analyze_bodies, analyze_bodies_for_target,
+    collect_program_signatures, collect_signatures, format_type, layout_of, nullable_layout_of,
+    verify_hir,
 };
 pub use lexer::{Token, TokenKind, lex};
 pub use parser::parse;

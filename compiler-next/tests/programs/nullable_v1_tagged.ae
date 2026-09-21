@@ -1,0 +1,11 @@
+int? choose(int? value = null) {
+    return value;
+}
+
+int main() {
+    int? value = choose(7);
+    if (!(value == null)) {
+        return value - 7;
+    }
+    return 1;
+}

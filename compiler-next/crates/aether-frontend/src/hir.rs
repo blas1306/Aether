@@ -216,6 +216,54 @@ pub struct TypeLayout {
     pub align: u64,
 }
 
+/// Central physical choice for a nullable semantic type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NullableLayout {
+    Niche {
+        layout: TypeLayout,
+    },
+    Tagged {
+        layout: TypeLayout,
+        tag_offset: u64,
+        payload_offset: u64,
+        payload: TypeLayout,
+    },
+}
+
+#[must_use]
+pub fn nullable_layout_of(
+    types: &TypeArena,
+    nullable: TypeId,
+    target: TargetProperties,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+) -> Option<NullableLayout> {
+    let payload_ty = types.nullable_payload(nullable)?;
+    let payload = layout_of(types, payload_ty, target, structs, enums)?;
+    if matches!(
+        types.get(payload_ty),
+        Some(
+            TypeData::String
+                | TypeData::Class(_)
+                | TypeData::Reference { .. }
+                | TypeData::Function { .. }
+        )
+    ) {
+        return Some(NullableLayout::Niche { layout: payload });
+    }
+    let payload_offset = 1_u64.div_ceil(payload.align) * payload.align;
+    let size = (payload_offset + payload.size).div_ceil(payload.align) * payload.align;
+    Some(NullableLayout::Tagged {
+        layout: TypeLayout {
+            size,
+            align: payload.align,
+        },
+        tag_offset: 0,
+        payload_offset,
+        payload,
+    })
+}
+
 /// Returns the session's target-specific layout for a canonical type.
 ///
 /// Aggregate entries are the caches populated once during semantic analysis;
@@ -273,6 +321,9 @@ pub fn layout_of(
         | TypeData::Function { .. } => TypeLayout {
             size: u64::from(target.pointer_width / 8),
             align: u64::from(target.pointer_width / 8),
+        },
+        TypeData::Nullable(_) => match nullable_layout_of(types, ty, target, structs, enums)? {
+            NullableLayout::Niche { layout } | NullableLayout::Tagged { layout, .. } => layout,
         },
         TypeData::Buffer { .. }
         | TypeData::Vector { .. }
@@ -342,6 +393,14 @@ pub fn format_type(
             if *mutable { "mut " } else { "" },
             format_type(types, *pointee, structs, enums)
         ),
+        Some(TypeData::Nullable(payload)) => {
+            let inner = format_type(types, *payload, structs, enums);
+            if matches!(types.get(*payload), Some(TypeData::Reference { .. })) {
+                format!("({inner})?")
+            } else {
+                format!("{inner}?")
+            }
+        }
         Some(TypeData::Function { parameters, result }) => {
             let parameters = types
                 .arguments(*parameters)
@@ -988,6 +1047,166 @@ pub struct HirExpr {
     pub ty: TypeId,
     pub span: Span,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NonNullProofId(pub u32);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NullablePayloadAccess {
+    Copy,
+    Borrow,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NullState {
+    Unknown,
+    Null,
+    NonNull,
+}
+
+fn nullable_loop_expression_effects(
+    expression: &AstExpr,
+    written_roots: &mut BTreeSet<String>,
+    has_call: &mut bool,
+) {
+    match &expression.kind {
+        AstExprKind::Call { args, .. }
+        | AstExprKind::QualifiedCall { args, .. }
+        | AstExprKind::VariantCall { args, .. } => {
+            *has_call = true;
+            for argument in args {
+                nullable_loop_expression_effects(argument, written_roots, has_call);
+            }
+        }
+        AstExprKind::MethodCall { receiver, args, .. } => {
+            *has_call = true;
+            nullable_loop_expression_effects(receiver, written_roots, has_call);
+            for argument in args {
+                nullable_loop_expression_effects(argument, written_roots, has_call);
+            }
+        }
+        AstExprKind::Unary { op, operand } => {
+            if *op == AstUnaryOp::BorrowMutable
+                && let AstExprKind::Name(name) = &operand.kind
+            {
+                written_roots.insert(name.clone());
+            }
+            nullable_loop_expression_effects(operand, written_roots, has_call);
+        }
+        AstExprKind::Binary { left, right, .. } => {
+            nullable_loop_expression_effects(left, written_roots, has_call);
+            nullable_loop_expression_effects(right, written_roots, has_call);
+        }
+        AstExprKind::Range { start, step, end } => {
+            nullable_loop_expression_effects(start, written_roots, has_call);
+            if let Some(step) = step {
+                nullable_loop_expression_effects(step, written_roots, has_call);
+            }
+            nullable_loop_expression_effects(end, written_roots, has_call);
+        }
+        AstExprKind::CollectionLiteral(elements) => {
+            for element in elements {
+                nullable_loop_expression_effects(element, written_roots, has_call);
+            }
+        }
+        AstExprKind::MathematicalLiteral { rows } => {
+            for element in rows.iter().flatten() {
+                nullable_loop_expression_effects(element, written_roots, has_call);
+            }
+        }
+        AstExprKind::Interpolation(fragments) => {
+            for fragment in fragments {
+                if let crate::AstInterpolationFragment::Hole { expression, .. } = fragment {
+                    nullable_loop_expression_effects(expression, written_roots, has_call);
+                }
+            }
+        }
+        AstExprKind::Field { base, .. } => {
+            nullable_loop_expression_effects(base, written_roots, has_call);
+        }
+        AstExprKind::Index { base, indices } => {
+            nullable_loop_expression_effects(base, written_roots, has_call);
+            for index in indices {
+                nullable_loop_expression_effects(index, written_roots, has_call);
+            }
+        }
+        AstExprKind::Integer(_)
+        | AstExprKind::Float(_)
+        | AstExprKind::String(_)
+        | AstExprKind::Char(_)
+        | AstExprKind::Bool(_)
+        | AstExprKind::Null
+        | AstExprKind::Name(_)
+        | AstExprKind::QualifiedName { .. } => {}
+    }
+}
+
+fn nullable_loop_block_effects(
+    block: &AstBlock,
+    written_roots: &mut BTreeSet<String>,
+    has_call: &mut bool,
+) {
+    for statement in &block.statements {
+        match &statement.kind {
+            AstStmtKind::Local { initializer, .. } => {
+                nullable_loop_expression_effects(initializer, written_roots, has_call);
+            }
+            AstStmtKind::Assign { place, value } => {
+                if let AstExprKind::Name(name) = &place.kind {
+                    written_roots.insert(name.clone());
+                }
+                nullable_loop_expression_effects(place, written_roots, has_call);
+                nullable_loop_expression_effects(value, written_roots, has_call);
+            }
+            AstStmtKind::Expr(expression) => {
+                nullable_loop_expression_effects(expression, written_roots, has_call);
+            }
+            AstStmtKind::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                nullable_loop_expression_effects(condition, written_roots, has_call);
+                nullable_loop_block_effects(then_block, written_roots, has_call);
+                if let Some(else_block) = else_block {
+                    nullable_loop_block_effects(else_block, written_roots, has_call);
+                }
+            }
+            AstStmtKind::While { condition, body } => {
+                nullable_loop_expression_effects(condition, written_roots, has_call);
+                nullable_loop_block_effects(body, written_roots, has_call);
+            }
+            AstStmtKind::ForIn { iterable, body, .. } => {
+                nullable_loop_expression_effects(iterable, written_roots, has_call);
+                nullable_loop_block_effects(body, written_roots, has_call);
+            }
+            AstStmtKind::Match {
+                scrutinee, arms, ..
+            } => {
+                nullable_loop_expression_effects(scrutinee, written_roots, has_call);
+                for arm in arms {
+                    nullable_loop_block_effects(&arm.body, written_roots, has_call);
+                }
+            }
+            AstStmtKind::Return(value) | AstStmtKind::Throw(value) => {
+                if let Some(value) = value {
+                    nullable_loop_expression_effects(value, written_roots, has_call);
+                }
+            }
+            AstStmtKind::Try {
+                body,
+                catches,
+                finally,
+            } => {
+                nullable_loop_block_effects(body, written_roots, has_call);
+                for catch in catches {
+                    nullable_loop_block_effects(&catch.body, written_roots, has_call);
+                }
+                if let Some(finally) = finally {
+                    nullable_loop_block_effects(finally, written_roots, has_call);
+                }
+            }
+            AstStmtKind::Break | AstStmtKind::Continue => {}
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CallBorrowOrigin {
     Implicit,
@@ -1139,6 +1358,32 @@ pub enum HirExprKind {
     Int(i128),
     Float(FloatValue),
     Bool(bool),
+    NullableNull {
+        nullable_type: TypeId,
+    },
+    NullableInject {
+        payload: Box<HirExpr>,
+        nullable_type: TypeId,
+    },
+    NullableIsNull {
+        operand: Box<HirExpr>,
+    },
+    NullablePayload {
+        source: HirPlace,
+        proof: NonNullProofId,
+        access: NullablePayloadAccess,
+    },
+    ShortCircuitAnd {
+        left: Box<HirExpr>,
+        right: Box<HirExpr>,
+    },
+    ShortCircuitOr {
+        left: Box<HirExpr>,
+        right: Box<HirExpr>,
+    },
+    LogicalNot {
+        operand: Box<HirExpr>,
+    },
     /// Exact address of one visible top-level Aether function.
     FunctionRef {
         target: HirCallTarget,
@@ -2744,6 +2989,30 @@ fn resolve_type_in_module(
     struct_arities: &[usize],
     enum_arities: &[usize],
 ) -> Result<TypeId, Diagnostic> {
+    if let crate::AstTypeKind::Nullable { payload, .. } = &ty.kind {
+        let payload = resolve_type_in_module(
+            payload,
+            current,
+            aliases,
+            struct_names,
+            enum_names,
+            imports,
+            module_names,
+            types,
+            generic_scope,
+            struct_arities,
+            enum_arities,
+        )?;
+        return types.intern_nullable(payload).map_err(|message| {
+            Diagnostic::new(
+                "E0450",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                message,
+                Some(ty.span),
+            )
+        });
+    }
     if let crate::AstTypeKind::Reference(reference) = &ty.kind {
         let pointee = resolve_type_in_module(
             &reference.pointee,
@@ -2823,7 +3092,7 @@ fn resolve_type_in_module(
         arguments: type_arguments,
     } = &ty.kind
     else {
-        unreachable!("reference and Function handled above")
+        unreachable!("structural type handled above")
     };
     let target = if let Some(module) = module {
         let Some(target) = imports[current.0 as usize].get(module).copied() else {
@@ -3411,6 +3680,7 @@ fn validate_type_constraints(
         }
         Some(
             TypeData::Reference { pointee: ty, .. }
+            | TypeData::Nullable(ty)
             | TypeData::Buffer { element: ty }
             | TypeData::View { element: ty, .. }
             | TypeData::VectorView { element: ty, .. }
@@ -3459,6 +3729,11 @@ fn infer_generic_arguments(
         }
         return Ok(());
     }
+    if let Some(payload) = types.nullable_payload(pattern)
+        && types.nullable_payload(actual).is_none()
+    {
+        return infer_generic_arguments(types, payload, actual, inferred);
+    }
     match (types.get(pattern), types.get(actual)) {
         (
             Some(TypeData::Vector {
@@ -3492,7 +3767,8 @@ fn infer_generic_arguments(
                 mutable: rm,
             }),
         ) if lm == rm => infer_generic_arguments(types, *left, *right, inferred),
-        (Some(TypeData::Matrix { element: left }), Some(TypeData::Matrix { element: right }))
+        (Some(TypeData::Nullable(left)), Some(TypeData::Nullable(right)))
+        | (Some(TypeData::Matrix { element: left }), Some(TypeData::Matrix { element: right }))
         | (Some(TypeData::Array { element: left }), Some(TypeData::Array { element: right }))
         | (Some(TypeData::List { element: left }), Some(TypeData::List { element: right })) => {
             infer_generic_arguments(types, *left, *right, inferred)
@@ -3620,7 +3896,11 @@ fn compute_aggregate_layouts(
                 .collect(),
         };
         for ty in child_types {
-            match types.get(ty) {
+            let mut inline = ty;
+            while let Some(TypeData::Nullable(payload)) = types.get(inline) {
+                inline = *payload;
+            }
+            match types.get(inline) {
                 Some(TypeData::Struct(id) | TypeData::StructInstance(id, _)) => {
                     visit(Node::Struct(*id), structs, enums, types, state)?
                 }
@@ -3721,6 +4001,34 @@ fn compute_aggregate_layouts(
                 TypeLayout {
                     size: bytes * 3,
                     align: bytes,
+                }
+            }
+            TypeData::Nullable(payload) => {
+                let payload_layout = type_layout(
+                    *payload,
+                    structs,
+                    enums,
+                    types,
+                    struct_state,
+                    enum_state,
+                    target,
+                );
+                if matches!(
+                    types.get(*payload),
+                    Some(
+                        TypeData::String
+                            | TypeData::Class(_)
+                            | TypeData::Reference { .. }
+                            | TypeData::Function { .. }
+                    )
+                ) {
+                    payload_layout
+                } else {
+                    let offset = align_up(1, payload_layout.align);
+                    TypeLayout {
+                        size: align_up(offset + payload_layout.size, payload_layout.align),
+                        align: payload_layout.align,
+                    }
                 }
             }
             TypeData::Void | TypeData::GenericParam(_) => TypeLayout { size: 0, align: 1 },
@@ -4557,6 +4865,47 @@ impl Monomorphizer<'_> {
             HirExprKind::Int(value) => HirExprKind::Int(*value),
             HirExprKind::Float(value) => HirExprKind::Float(*value),
             HirExprKind::Bool(value) => HirExprKind::Bool(*value),
+            HirExprKind::NullableNull { nullable_type } => HirExprKind::NullableNull {
+                nullable_type: self.substitute_type(
+                    *nullable_type,
+                    substitution,
+                    expression.span,
+                )?,
+            },
+            HirExprKind::NullableInject {
+                payload,
+                nullable_type,
+            } => HirExprKind::NullableInject {
+                payload: Box::new(self.substitute_expr(payload, substitution)?),
+                nullable_type: self.substitute_type(
+                    *nullable_type,
+                    substitution,
+                    expression.span,
+                )?,
+            },
+            HirExprKind::NullableIsNull { operand } => HirExprKind::NullableIsNull {
+                operand: Box::new(self.substitute_expr(operand, substitution)?),
+            },
+            HirExprKind::NullablePayload {
+                source,
+                proof,
+                access,
+            } => HirExprKind::NullablePayload {
+                source: self.substitute_place(source, substitution)?,
+                proof: *proof,
+                access: *access,
+            },
+            HirExprKind::ShortCircuitAnd { left, right } => HirExprKind::ShortCircuitAnd {
+                left: Box::new(self.substitute_expr(left, substitution)?),
+                right: Box::new(self.substitute_expr(right, substitution)?),
+            },
+            HirExprKind::ShortCircuitOr { left, right } => HirExprKind::ShortCircuitOr {
+                left: Box::new(self.substitute_expr(left, substitution)?),
+                right: Box::new(self.substitute_expr(right, substitution)?),
+            },
+            HirExprKind::LogicalNot { operand } => HirExprKind::LogicalNot {
+                operand: Box::new(self.substitute_expr(operand, substitution)?),
+            },
             HirExprKind::FunctionRef {
                 target,
                 function_type,
@@ -5081,6 +5430,7 @@ impl Monomorphizer<'_> {
 fn type_depth(types: &TypeArena, ty: TypeId) -> usize {
     match types.get(ty) {
         Some(TypeData::Reference { pointee, .. }) => 1 + type_depth(types, *pointee),
+        Some(TypeData::Nullable(payload)) => 1 + type_depth(types, *payload),
         Some(
             TypeData::Buffer { element }
             | TypeData::Matrix { element }
@@ -5115,6 +5465,7 @@ fn type_contains(types: &TypeArena, outer: TypeId, needle: TypeId) -> bool {
                 })
             }
             Some(TypeData::Reference { pointee, .. }) => type_contains(types, *pointee, needle),
+            Some(TypeData::Nullable(payload)) => type_contains(types, *payload, needle),
             Some(
                 TypeData::Buffer { element }
                 | TypeData::Matrix { element }
@@ -5210,7 +5561,8 @@ fn compute_concrete_layouts(
             TypeData::Void
             | TypeData::GenericParam(_)
             | TypeData::StructInstance(_, _)
-            | TypeData::EnumInstance(_, _) => None,
+            | TypeData::EnumInstance(_, _)
+            | TypeData::Nullable(_) => None,
         };
         if let Some(layout) = scalar {
             return Ok(layout);
@@ -5235,6 +5587,27 @@ fn compute_concrete_layouts(
         }
         let layout =
             match data {
+                TypeData::Nullable(payload) => {
+                    let payload_layout =
+                        concrete_layout(types, structs, enums, target, payload, visiting)?;
+                    if matches!(
+                        types.get(payload),
+                        Some(
+                            TypeData::String
+                                | TypeData::Class(_)
+                                | TypeData::Reference { .. }
+                                | TypeData::Function { .. }
+                        )
+                    ) {
+                        payload_layout
+                    } else {
+                        let offset = align_up(1, payload_layout.align);
+                        TypeLayout {
+                            size: align_up(offset + payload_layout.size, payload_layout.align),
+                            align: payload_layout.align,
+                        }
+                    }
+                }
                 TypeData::StructInstance(id, args) => {
                     let info = &structs[id.0 as usize];
                     let arguments = types
@@ -5376,6 +5749,8 @@ fn analyze_function(
         next_loop: 0,
         next_call_site: 0,
         default_forbidden: None,
+        null_states: BTreeMap::new(),
+        next_non_null_proof: 0,
         target,
     };
     let mut parameters = vec![];
@@ -5407,6 +5782,9 @@ fn analyze_function(
             address_taken: false,
         });
         a.scopes[0].insert(p.name.clone(), local);
+        if a.types.nullable_payload(p.ty).is_some() {
+            a.null_states.insert(local, NullState::Unknown);
+        }
         parameters.push(HirParameter {
             local,
             ty: p.ty,
@@ -6195,8 +6573,12 @@ impl OwnershipAnalysis<'_> {
             | HirExprKind::Int(_)
             | HirExprKind::Float(_)
             | HirExprKind::Bool(_)
+            | HirExprKind::NullableNull { .. }
             | HirExprKind::FunctionRef { .. }
             | HirExprKind::AlgebraicValue { .. } => Ok(()),
+            HirExprKind::NullableInject { payload, .. }
+            | HirExprKind::NullableIsNull { operand: payload }
+            | HirExprKind::LogicalNot { operand: payload } => self.expr(payload),
             HirExprKind::MatrixAxisVectorView {
                 source,
                 fixed_index,
@@ -6332,7 +6714,8 @@ impl OwnershipAnalysis<'_> {
                 }
                 Ok(())
             }
-            HirExprKind::MatrixRows { source }
+            HirExprKind::NullablePayload { source, .. }
+            | HirExprKind::MatrixRows { source }
             | HirExprKind::MatrixColumns { source }
             | HirExprKind::VectorDimension { source }
             | HirExprKind::ArrayLength { source }
@@ -6481,7 +6864,9 @@ impl OwnershipAnalysis<'_> {
                 }
                 Ok(())
             }
-            HirExprKind::CapabilityBinary { left, right, .. }
+            HirExprKind::ShortCircuitAnd { left, right }
+            | HirExprKind::ShortCircuitOr { left, right }
+            | HirExprKind::CapabilityBinary { left, right, .. }
             | HirExprKind::Binary { left, right, .. } => {
                 self.expr(left)?;
                 self.expr(right)
@@ -6942,6 +7327,8 @@ struct Analyzer<'a> {
     next_loop: u32,
     next_call_site: u32,
     default_forbidden: Option<(String, BTreeMap<String, bool>)>,
+    null_states: BTreeMap<LocalId, NullState>,
+    next_non_null_proof: u32,
 }
 #[derive(Clone)]
 struct Checked {
@@ -6954,6 +7341,90 @@ enum ConstantValue {
     Float(FloatValue),
 }
 impl Analyzer<'_> {
+    fn refine_for_condition(&mut self, condition: &AstExpr, truth: bool) {
+        match &condition.kind {
+            AstExprKind::Unary {
+                op: AstUnaryOp::LogicalNot,
+                operand,
+            } => {
+                self.refine_for_condition(operand, !truth);
+            }
+            AstExprKind::Binary {
+                op: AstBinaryOp::LogicalAnd,
+                left,
+                right,
+            } if truth => {
+                self.refine_for_condition(left, true);
+                self.refine_for_condition(right, true);
+            }
+            AstExprKind::Binary {
+                op: AstBinaryOp::LogicalOr,
+                left,
+                right,
+            } if !truth => {
+                self.refine_for_condition(left, false);
+                self.refine_for_condition(right, false);
+            }
+            AstExprKind::Binary { op, left, right }
+                if matches!(op, AstBinaryOp::Equal | AstBinaryOp::NotEqual) =>
+            {
+                let name = match (&left.kind, &right.kind) {
+                    (AstExprKind::Name(name), AstExprKind::Null)
+                    | (AstExprKind::Null, AstExprKind::Name(name)) => Some(name),
+                    _ => None,
+                };
+                if let Some(local) = name.and_then(|name| self.lookup(name))
+                    && self
+                        .types
+                        .nullable_payload(self.locals[local.0 as usize].ty)
+                        .is_some()
+                {
+                    let non_null = (*op == AstBinaryOp::NotEqual) == truth;
+                    self.null_states.insert(
+                        local,
+                        if non_null {
+                            NullState::NonNull
+                        } else {
+                            NullState::Null
+                        },
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn joined_null_states(
+        left: &BTreeMap<LocalId, NullState>,
+        right: &BTreeMap<LocalId, NullState>,
+    ) -> BTreeMap<LocalId, NullState> {
+        left.keys()
+            .chain(right.keys())
+            .copied()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .map(|local| {
+                let l = left.get(&local).copied().unwrap_or(NullState::Unknown);
+                let r = right.get(&local).copied().unwrap_or(NullState::Unknown);
+                (local, if l == r { l } else { NullState::Unknown })
+            })
+            .collect()
+    }
+
+    fn fresh_non_null_proof(&mut self) -> NonNullProofId {
+        let id = NonNullProofId(self.next_non_null_proof);
+        self.next_non_null_proof += 1;
+        id
+    }
+
+    fn invalidate_nullable_aliases_after_mutating_call(&mut self) {
+        for local in &self.locals {
+            if local.address_taken && self.types.nullable_payload(local.ty).is_some() {
+                self.null_states.insert(local.id, NullState::Unknown);
+            }
+        }
+    }
+
     fn invalid_default_reference(&self, name: &str, span: Span) -> Option<Vec<Diagnostic>> {
         let (parameter, forbidden) = self.default_forbidden.as_ref()?;
         let self_reference = *forbidden.get(name)?;
@@ -7288,6 +7759,14 @@ impl Analyzer<'_> {
                         address_taken: false,
                     });
                     self.scopes.last_mut().unwrap().insert(name.clone(), local);
+                    if self.types.nullable_payload(ty).is_some() {
+                        let state = match initializer.kind {
+                            HirExprKind::NullableNull { .. } => NullState::Null,
+                            HirExprKind::NullableInject { .. } => NullState::NonNull,
+                            _ => NullState::Unknown,
+                        };
+                        self.null_states.insert(local, state);
+                    }
                     HirStmtKind::Local { local, initializer }
                 }
                 AstStmtKind::Assign { place, value } => {
@@ -7371,6 +7850,17 @@ impl Analyzer<'_> {
                             ds
                         })?
                         .expr;
+                    if let HirPlaceBase::Local(local) = &place.base
+                        && place.projections.is_empty()
+                        && self.types.nullable_payload(place.ty).is_some()
+                    {
+                        let state = match value.kind {
+                            HirExprKind::NullableNull { .. } => NullState::Null,
+                            HirExprKind::NullableInject { .. } => NullState::NonNull,
+                            _ => NullState::Unknown,
+                        };
+                        self.null_states.insert(*local, state);
+                    }
                     HirStmtKind::Assign { place, value }
                 }
                 AstStmtKind::Expr(expression) => self.effect_statement(expression)?,
@@ -7379,16 +7869,25 @@ impl Analyzer<'_> {
                     then_block,
                     else_block,
                 } => {
-                    let condition = self.expression(condition, Some(TypeId::BOOL))?.expr;
+                    let condition_ast = condition;
+                    let before_null = self.null_states.clone();
+                    let condition = self.expression(condition_ast, Some(TypeId::BOOL))?.expr;
+                    self.null_states.clone_from(&before_null);
+                    self.refine_for_condition(condition_ast, true);
                     let before = self.initialized_fields.clone();
                     let then_block = self.block(then_block, true)?;
                     let then_fields = self.initialized_fields.clone();
+                    let then_null = self.null_states.clone();
                     self.initialized_fields.clone_from(&before);
+                    self.null_states.clone_from(&before_null);
+                    self.refine_for_condition(condition_ast, false);
                     let else_block = else_block
                         .as_ref()
                         .map(|b| self.block(b, true))
                         .transpose()?;
                     let else_fields = self.initialized_fields.clone();
+                    let else_null = self.null_states.clone();
+                    self.null_states = Self::joined_null_states(&then_null, &else_null);
                     self.initialized_fields =
                         then_fields.intersection(&else_fields).copied().collect();
                     // An owning field cannot have a path-dependent replacement state.
@@ -7412,11 +7911,33 @@ impl Analyzer<'_> {
                     }
                 }
                 AstStmtKind::While { condition, body } => {
-                    let condition = self.expression(condition, Some(TypeId::BOOL))?.expr;
+                    let condition_ast = condition;
+                    let mut written_roots = BTreeSet::new();
+                    let mut has_call = false;
+                    nullable_loop_block_effects(body, &mut written_roots, &mut has_call);
+                    for name in written_roots {
+                        if let Some(local) = self.lookup(&name)
+                            && self
+                                .types
+                                .nullable_payload(self.locals[local.0 as usize].ty)
+                                .is_some()
+                        {
+                            self.null_states.insert(local, NullState::Unknown);
+                        }
+                    }
+                    if has_call {
+                        self.invalidate_nullable_aliases_after_mutating_call();
+                    }
+                    let before_null = self.null_states.clone();
+                    let condition = self.expression(condition_ast, Some(TypeId::BOOL))?.expr;
+                    self.null_states.clone_from(&before_null);
+                    self.refine_for_condition(condition_ast, true);
                     let before = self.initialized_fields.clone();
                     self.loop_depth += 1;
                     let body = self.block(body, true)?;
                     self.loop_depth -= 1;
+                    self.null_states.clone_from(&before_null);
+                    self.refine_for_condition(condition_ast, false);
                     if before != self.initialized_fields {
                         return Err(vec![classes::error(
                             "E0403",
@@ -8420,6 +8941,36 @@ impl Analyzer<'_> {
                 expected,
             );
         }
+        if matches!(e.kind, AstExprKind::Null) {
+            let Some(nullable_type) =
+                expected.filter(|ty| self.types.nullable_payload(*ty).is_some())
+            else {
+                let message = expected.map_or_else(
+                    || "null requires a concrete nullable expected type".to_string(),
+                    |ty| {
+                        format!(
+                            "cannot use null where non-null {} is required",
+                            self.type_name(ty)
+                        )
+                    },
+                );
+                return Err(vec![Diagnostic::new(
+                    "E0451",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    message,
+                    Some(e.span),
+                )]);
+            };
+            return Ok(Checked {
+                expr: HirExpr {
+                    kind: HirExprKind::NullableNull { nullable_type },
+                    ty: nullable_type,
+                    span: e.span,
+                },
+                constant: None,
+            });
+        }
         if let AstExprKind::Char(value) = &e.kind {
             return self.coerce(
                 Checked {
@@ -8614,10 +9165,16 @@ impl Analyzer<'_> {
             return self.collection_literal(elements, e.span, expected);
         }
         if let AstExprKind::Integer(t) = &e.kind {
-            return self.integer(t, false, expected, e.span);
+            let literal_expected = expected.map(|ty| self.types.nullable_payload(ty).unwrap_or(ty));
+            return self
+                .integer(t, false, literal_expected, e.span)
+                .and_then(|checked| self.coerce(checked, expected));
         }
         if let AstExprKind::Float(t) = &e.kind {
-            return self.float(t, false, expected, e.span);
+            let literal_expected = expected.map(|ty| self.types.nullable_payload(ty).unwrap_or(ty));
+            return self
+                .float(t, false, literal_expected, e.span)
+                .and_then(|checked| self.coerce(checked, expected));
         }
         if let AstExprKind::Unary {
             op: AstUnaryOp::Negate,
@@ -8625,10 +9182,18 @@ impl Analyzer<'_> {
         } = &e.kind
         {
             if let AstExprKind::Integer(t) = &operand.kind {
-                return self.integer(t, true, expected, e.span);
+                let literal_expected =
+                    expected.map(|ty| self.types.nullable_payload(ty).unwrap_or(ty));
+                return self
+                    .integer(t, true, literal_expected, e.span)
+                    .and_then(|checked| self.coerce(checked, expected));
             }
             if let AstExprKind::Float(t) = &operand.kind {
-                return self.float(t, true, expected, e.span);
+                let literal_expected =
+                    expected.map(|ty| self.types.nullable_payload(ty).unwrap_or(ty));
+                return self
+                    .float(t, true, literal_expected, e.span)
+                    .and_then(|checked| self.coerce(checked, expected));
             }
         }
         let c = match &e.kind {
@@ -8681,6 +9246,7 @@ impl Analyzer<'_> {
                             .expect("collected function signature is valid");
                         if let Some(expected) = expected
                             && expected != function_type
+                            && self.types.nullable_payload(expected) != Some(function_type)
                         {
                             return Err(vec![Diagnostic::new(
                                 "E0351",
@@ -8720,6 +9286,38 @@ impl Analyzer<'_> {
                     }
                     return Err(vec![unknown_name(n, e.span)]);
                 };
+                let declared = self.locals[l.0 as usize].ty;
+                if let Some(payload) = self.types.nullable_payload(declared)
+                    && (expected == Some(payload) || expected.is_none())
+                    && self.null_states.get(&l) == Some(&NullState::NonNull)
+                {
+                    if !self.types.guarantees_copy(payload) {
+                        return Err(vec![Diagnostic::new(
+                            "E0457",
+                            Phase::Semantic,
+                            DiagnosticCategory::Type,
+                            "cannot move owning payload from refined nullable; move the nullable value or use a future explicit take operation",
+                            Some(e.span),
+                        )]);
+                    }
+                    let proof = self.fresh_non_null_proof();
+                    return Ok(Checked {
+                        expr: HirExpr {
+                            kind: HirExprKind::NullablePayload {
+                                source: HirPlace {
+                                    base: HirPlaceBase::Local(l),
+                                    projections: Vec::new(),
+                                    ty: declared,
+                                },
+                                proof,
+                                access: NullablePayloadAccess::Copy,
+                            },
+                            ty: payload,
+                            span: e.span,
+                        },
+                        constant: None,
+                    });
+                }
                 Checked {
                     expr: HirExpr {
                         kind: if self.locals[l.0 as usize].ty == TypeId::STRING {
@@ -8922,6 +9520,7 @@ impl Analyzer<'_> {
                         .expect("collected function signature is valid");
                     if let Some(expected) = expected
                         && expected != function_type
+                        && self.types.nullable_payload(expected) != Some(function_type)
                     {
                         return Err(vec![Diagnostic::new(
                             "E0351",
@@ -9044,6 +9643,14 @@ impl Analyzer<'_> {
                         .any(|projection| matches!(projection, HirPlaceProjection::Index { .. }))
                 {
                     self.locals[local.0 as usize].address_taken = true;
+                    if mutable
+                        && self
+                            .types
+                            .nullable_payload(self.locals[local.0 as usize].ty)
+                            .is_some()
+                    {
+                        self.null_states.insert(*local, NullState::Unknown);
+                    }
                 }
                 if self.types.object_class(place.ty).is_some() {
                     return Err(vec![classes::error(
@@ -9066,6 +9673,22 @@ impl Analyzer<'_> {
                 op: AstUnaryOp::Negate,
                 operand,
             } => self.negate(operand, e.span)?,
+            AstExprKind::Unary {
+                op: AstUnaryOp::LogicalNot,
+                operand,
+            } => {
+                let operand = self.expression(operand, Some(TypeId::BOOL))?.expr;
+                Checked {
+                    expr: HirExpr {
+                        kind: HirExprKind::LogicalNot {
+                            operand: Box::new(operand),
+                        },
+                        ty: TypeId::BOOL,
+                        span: e.span,
+                    },
+                    constant: None,
+                }
+            }
             AstExprKind::Binary { op, left, right } => {
                 self.binary(*op, left, right, expected, e.span)?
             }
@@ -9234,6 +9857,7 @@ impl Analyzer<'_> {
                 | TypeData::Bool
                 | TypeData::Char
                 | TypeData::String
+                | TypeData::Nullable(_)
                 | TypeData::Struct(_)
                 | TypeData::Enum(_)
                 | TypeData::GenericParam(_)
@@ -9585,7 +10209,7 @@ impl Analyzer<'_> {
         span: Span,
         expected: Option<TypeId>,
     ) -> Result<Checked, Vec<Diagnostic>> {
-        let Some(collection_type) = expected else {
+        let Some(expected_type) = expected else {
             return Err(vec![Diagnostic::new(
                 "E0305",
                 Phase::Semantic,
@@ -9594,6 +10218,10 @@ impl Analyzer<'_> {
                 Some(span),
             )]);
         };
+        let collection_type = self
+            .types
+            .nullable_payload(expected_type)
+            .unwrap_or(expected_type);
         let (element_type, is_list) =
             if let Some(element) = self.types.array_element(collection_type) {
                 (element, false)
@@ -9615,24 +10243,27 @@ impl Analyzer<'_> {
         for element in elements {
             resolved.push(self.expression(element, Some(element_type))?.expr);
         }
-        Ok(Checked {
-            expr: HirExpr {
-                kind: if is_list {
-                    HirExprKind::ListInit {
-                        element_type,
-                        elements: resolved,
-                    }
-                } else {
-                    HirExprKind::ArrayInit {
-                        element_type,
-                        elements: resolved,
-                    }
+        self.coerce(
+            Checked {
+                expr: HirExpr {
+                    kind: if is_list {
+                        HirExprKind::ListInit {
+                            element_type,
+                            elements: resolved,
+                        }
+                    } else {
+                        HirExprKind::ArrayInit {
+                            element_type,
+                            elements: resolved,
+                        }
+                    },
+                    ty: collection_type,
+                    span,
                 },
-                ty: collection_type,
-                span,
+                constant: None,
             },
-            constant: None,
-        })
+            expected,
+        )
     }
 
     fn array_fill(
@@ -10175,7 +10806,21 @@ impl Analyzer<'_> {
                     Some(span),
                 )]);
             }
-            let signature = self.locals[local.0 as usize].ty;
+            let declared = self.locals[local.0 as usize].ty;
+            let signature = if let Some(payload) = self.types.nullable_payload(declared) {
+                if self.null_states.get(&local) != Some(&NullState::NonNull) {
+                    return Err(vec![Diagnostic::new(
+                        "E0455",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "call requires a non-null function value",
+                        Some(span),
+                    )]);
+                }
+                payload
+            } else {
+                declared
+            };
             let Some((parameters, result)) = self.types.function_signature(signature) else {
                 return Err(vec![Diagnostic::new(
                     "E0215",
@@ -10215,11 +10860,11 @@ impl Analyzer<'_> {
             }
             let call_site = self.call_site();
             let mut checked = Vec::with_capacity(args.len());
-            for (index, (argument, parameter)) in args.iter().zip(parameters).enumerate() {
+            for (index, (argument, parameter)) in args.iter().zip(&parameters).enumerate() {
                 checked.push(
                     self.adapt_call_argument(
                         argument,
-                        parameter,
+                        *parameter,
                         call_site,
                         u32::try_from(index).expect("argument index fits u32"),
                         None,
@@ -10237,14 +10882,37 @@ impl Analyzer<'_> {
                     })?,
                 );
             }
+            if parameters.iter().any(|parameter| {
+                self.types
+                    .reference_info(*parameter)
+                    .is_some_and(|(_, mutable)| mutable)
+            }) {
+                self.invalidate_nullable_aliases_after_mutating_call();
+            }
             return Ok(Checked {
                 expr: HirExpr {
                     kind: HirExprKind::IndirectCall {
                         call_site,
-                        callee: Box::new(HirExpr {
-                            kind: HirExprKind::Local(local),
-                            ty: signature,
-                            span,
+                        callee: Box::new(if declared == signature {
+                            HirExpr {
+                                kind: HirExprKind::Local(local),
+                                ty: signature,
+                                span,
+                            }
+                        } else {
+                            HirExpr {
+                                kind: HirExprKind::NullablePayload {
+                                    source: HirPlace {
+                                        base: HirPlaceBase::Local(local),
+                                        projections: Vec::new(),
+                                        ty: declared,
+                                    },
+                                    proof: self.fresh_non_null_proof(),
+                                    access: NullablePayloadAccess::Copy,
+                                },
+                                ty: signature,
+                                span,
+                            }
                         }),
                         args: checked,
                         signature,
@@ -10875,14 +11543,24 @@ impl Analyzer<'_> {
                 .iter()
                 .zip(&s.parameters)
                 .map(|(argument, parameter)| {
+                    if matches!(argument.kind, AstExprKind::Null) {
+                        return Ok(None);
+                    }
                     let expected =
                         (!self.types.contains_generic(parameter.ty)).then_some(parameter.ty);
-                    self.expression(argument, expected)
+                    self.expression(argument, expected).map(Some)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             let mut inferred = BTreeMap::new();
             for (parameter, argument) in s.parameters.iter().zip(&checked) {
-                infer_generic_arguments(self.types, parameter.ty, argument.expr.ty, &mut inferred)?;
+                if let Some(argument) = argument {
+                    infer_generic_arguments(
+                        self.types,
+                        parameter.ty,
+                        argument.expr.ty,
+                        &mut inferred,
+                    )?;
+                }
             }
             for parameter in &s.generic_parameters {
                 let Some(argument) = inferred.get(&parameter.id).copied() else {
@@ -10938,7 +11616,7 @@ impl Analyzer<'_> {
         for (index, concrete_ty) in concrete_parameters.iter().copied().enumerate() {
             let argument_index = u32::try_from(index).expect("argument index fits u32");
             let (initializer, origin) = if let Some(argument) = args.get(index) {
-                let checked = prechecked.as_ref().map(|values| values[index].clone());
+                let checked = prechecked.as_ref().and_then(|values| values[index].clone());
                 let initializer = self
                     .adapt_call_argument(argument, concrete_ty, call_site, argument_index, checked)
                     .map_err(|mut diagnostics| {
@@ -11000,6 +11678,13 @@ impl Analyzer<'_> {
                 ty: concrete_ty,
                 origin,
             });
+        }
+        if concrete_parameters.iter().any(|parameter| {
+            self.types
+                .reference_info(*parameter)
+                .is_some_and(|(_, mutable)| mutable)
+        }) {
+            self.invalidate_nullable_aliases_after_mutating_call();
         }
         Ok(Checked {
             expr: HirExpr {
@@ -11101,6 +11786,42 @@ impl Analyzer<'_> {
         prechecked: Option<Checked>,
     ) -> Result<HirExpr, Vec<Diagnostic>> {
         let reference = self.types.reference_info(parameter_type);
+        if let Some((pointee, false)) = reference
+            && let AstExprKind::Name(name) = &source.kind
+            && let Some(local) = self.lookup(name)
+            && self.null_states.get(&local) == Some(&NullState::NonNull)
+            && self
+                .types
+                .nullable_payload(self.locals[local.0 as usize].ty)
+                == Some(pointee)
+        {
+            let declared = self.locals[local.0 as usize].ty;
+            let proof = self.fresh_non_null_proof();
+            return Ok(HirExpr {
+                kind: HirExprKind::CallScopedSharedBorrow {
+                    call_site,
+                    argument_index,
+                    pointee_type: pointee,
+                    reference_type: parameter_type,
+                    source: CallBorrowSource::Temporary(Box::new(HirExpr {
+                        kind: HirExprKind::NullablePayload {
+                            source: HirPlace {
+                                base: HirPlaceBase::Local(local),
+                                projections: Vec::new(),
+                                ty: declared,
+                            },
+                            proof,
+                            access: NullablePayloadAccess::Borrow,
+                        },
+                        ty: pointee,
+                        span: source.span,
+                    })),
+                    origin: CallBorrowOrigin::Implicit,
+                },
+                ty: parameter_type,
+                span: source.span,
+            });
+        }
         if let Some((pointee, false)) = reference
             && let Ok(place) = self.resolve_expr_place(source, false)
             && place.ty == pointee
@@ -11282,6 +12003,125 @@ impl Analyzer<'_> {
         expected: Option<TypeId>,
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
+        if matches!(op, AstBinaryOp::LogicalAnd | AstBinaryOp::LogicalOr) {
+            let left = self.expression(la, Some(TypeId::BOOL))?.expr;
+            let saved = self.null_states.clone();
+            self.refine_for_condition(la, op == AstBinaryOp::LogicalAnd);
+            let right = self.expression(ra, Some(TypeId::BOOL))?.expr;
+            self.null_states = saved;
+            let kind = if op == AstBinaryOp::LogicalAnd {
+                HirExprKind::ShortCircuitAnd {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }
+            } else {
+                HirExprKind::ShortCircuitOr {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }
+            };
+            return Ok(Checked {
+                expr: HirExpr {
+                    kind,
+                    ty: TypeId::BOOL,
+                    span,
+                },
+                constant: None,
+            });
+        }
+        if matches!(
+            op,
+            AstBinaryOp::Equal
+                | AstBinaryOp::NotEqual
+                | AstBinaryOp::Less
+                | AstBinaryOp::LessEqual
+                | AstBinaryOp::Greater
+                | AstBinaryOp::GreaterEqual
+        ) && !matches!(la.kind, AstExprKind::Null)
+            && !matches!(ra.kind, AstExprKind::Null)
+            && [la, ra].into_iter().any(|operand| {
+                let AstExprKind::Name(name) = &operand.kind else {
+                    return false;
+                };
+                self.lookup(name).is_some_and(|local| {
+                    self.types
+                        .nullable_payload(self.locals[local.0 as usize].ty)
+                        .is_some()
+                })
+            })
+        {
+            return Err(vec![type_error(
+                "general nullable equality and ordering are not supported; compare the value with null",
+                span,
+            )]);
+        }
+        if matches!(op, AstBinaryOp::Equal | AstBinaryOp::NotEqual)
+            && (matches!(la.kind, AstExprKind::Null) || matches!(ra.kind, AstExprKind::Null))
+        {
+            if matches!(la.kind, AstExprKind::Null) && matches!(ra.kind, AstExprKind::Null) {
+                return Ok(Checked {
+                    expr: HirExpr {
+                        kind: HirExprKind::Bool(op == AstBinaryOp::Equal),
+                        ty: TypeId::BOOL,
+                        span,
+                    },
+                    constant: None,
+                });
+            }
+            let other = if matches!(la.kind, AstExprKind::Null) {
+                ra
+            } else {
+                la
+            };
+            let operand = if let AstExprKind::Name(name) = &other.kind {
+                let local = self
+                    .lookup(name)
+                    .ok_or_else(|| vec![unknown_name(name, other.span)])?;
+                let ty = self.locals[local.0 as usize].ty;
+                if self.types.nullable_payload(ty).is_none() {
+                    return Err(vec![type_error(
+                        "null comparison requires a nullable operand",
+                        span,
+                    )]);
+                }
+                HirExpr {
+                    kind: HirExprKind::Local(local),
+                    ty,
+                    span: other.span,
+                }
+            } else {
+                let checked = self.expression(other, None)?.expr;
+                if self.types.nullable_payload(checked.ty).is_none() {
+                    return Err(vec![type_error(
+                        "null comparison requires a nullable operand",
+                        span,
+                    )]);
+                }
+                checked
+            };
+            let is_null = HirExpr {
+                kind: HirExprKind::NullableIsNull {
+                    operand: Box::new(operand),
+                },
+                ty: TypeId::BOOL,
+                span,
+            };
+            let expr = if op == AstBinaryOp::Equal {
+                is_null
+            } else {
+                HirExpr {
+                    kind: HirExprKind::LogicalNot {
+                        operand: Box::new(is_null),
+                    },
+                    ty: TypeId::BOOL,
+                    span,
+                }
+            };
+            return Ok(Checked {
+                expr,
+                constant: None,
+            });
+        }
         if expected == Some(TypeId::STRING) || self.ast_is_string(la) || self.ast_is_string(ra) {
             if !matches!(
                 op,
@@ -11618,6 +12458,30 @@ impl Analyzer<'_> {
     }
 
     fn string_borrow_operand(&mut self, expression: &AstExpr) -> Result<HirExpr, Vec<Diagnostic>> {
+        if let AstExprKind::Name(name) = &expression.kind
+            && let Some(local) = self.lookup(name)
+            && self.null_states.get(&local) == Some(&NullState::NonNull)
+            && self
+                .types
+                .nullable_payload(self.locals[local.0 as usize].ty)
+                == Some(TypeId::STRING)
+        {
+            let declared = self.locals[local.0 as usize].ty;
+            let proof = self.fresh_non_null_proof();
+            return Ok(HirExpr {
+                kind: HirExprKind::NullablePayload {
+                    source: HirPlace {
+                        base: HirPlaceBase::Local(local),
+                        projections: Vec::new(),
+                        ty: declared,
+                    },
+                    proof,
+                    access: NullablePayloadAccess::Borrow,
+                },
+                ty: TypeId::STRING,
+                span: expression.span,
+            });
+        }
         if let Ok(place) = self.resolve_expr_place(expression, false)
             && place.ty == TypeId::STRING
         {
@@ -11651,6 +12515,37 @@ impl Analyzer<'_> {
         let Some(to) = expected else { return Ok(c) };
         if c.expr.ty == to {
             return Ok(c);
+        }
+        if let Some(payload) = self.types.nullable_payload(to)
+            && c.expr.ty == payload
+        {
+            let span = c.expr.span;
+            return Ok(Checked {
+                expr: HirExpr {
+                    kind: HirExprKind::NullableInject {
+                        payload: Box::new(c.expr),
+                        nullable_type: to,
+                    },
+                    ty: to,
+                    span,
+                },
+                constant: None,
+            });
+        }
+        if let Some(payload) = self.types.nullable_payload(c.expr.ty)
+            && payload == to
+        {
+            return Err(vec![Diagnostic::new(
+                "E0452",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!(
+                    "cannot use {} where non-null {} is required; prove value != null on this path",
+                    self.type_name(c.expr.ty),
+                    self.type_name(to)
+                ),
+                Some(c.expr.span),
+            )]);
         }
         if let (Some(source_class), Some(target_base)) =
             (self.types.class_id(c.expr.ty), self.types.class_id(to))
@@ -11960,6 +12855,9 @@ fn bin_result(
         AstBinaryOp::GreaterEqual => HirBinaryOp::GreaterEqual,
         AstBinaryOp::Equal => HirBinaryOp::Equal,
         AstBinaryOp::NotEqual => HirBinaryOp::NotEqual,
+        AstBinaryOp::LogicalAnd | AstBinaryOp::LogicalOr => {
+            unreachable!("logical operators use dedicated short-circuit HIR")
+        }
     };
     let span = l.expr.span.through(r.expr.span);
     Checked {
@@ -14649,6 +15547,7 @@ fn ast_expr_has_call(expr: &AstExpr) -> bool {
         | AstExprKind::String(_)
         | AstExprKind::Char(_)
         | AstExprKind::Bool(_)
+        | AstExprKind::Null
         | AstExprKind::Name(_)
         | AstExprKind::QualifiedName { .. } => false,
     }

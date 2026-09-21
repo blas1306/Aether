@@ -359,6 +359,8 @@ pub enum TypeData {
     Float(FloatType),
     /// Fundamental immutable, non-null UTF-8 owner handle.
     String,
+    /// Explicit absence or exactly one payload value.
+    Nullable(TypeId),
     /// Nominal, module-owned value aggregate.
     Struct(StructId),
     /// Nominal, module-owned tagged value aggregate.
@@ -528,6 +530,7 @@ impl fmt::Display for TypeData {
             Self::Integer(v) => v.fmt(f),
             Self::Float(v) => v.fmt(f),
             Self::String => f.write_str("string"),
+            Self::Nullable(payload) => write!(f, "{payload}?"),
             Self::Void => f.write_str("void"),
             Self::Char => f.write_str("char"),
             Self::Struct(id) => write!(f, "struct#{}", id.0),
@@ -941,6 +944,25 @@ impl TypeArena {
         self.intern(TypeData::Reference { pointee, mutable })
     }
 
+    /// Interns the sole NULLABLE-V1 wrapper. Void and nested nullable are
+    /// rejected rather than normalized.
+    pub fn intern_nullable(&mut self, payload: TypeId) -> Result<TypeId, &'static str> {
+        match self.get(payload) {
+            None => Err("nullable payload is not in this TypeArena"),
+            Some(TypeData::Void) => Err("void? is not supported"),
+            Some(TypeData::Nullable(_)) => Err("nested nullable is not supported in NULLABLE-V1"),
+            Some(_) => Ok(self.intern(TypeData::Nullable(payload))),
+        }
+    }
+
+    #[must_use]
+    pub fn nullable_payload(&self, ty: TypeId) -> Option<TypeId> {
+        match self.get(ty) {
+            Some(TypeData::Nullable(payload)) => Some(*payload),
+            _ => None,
+        }
+    }
+
     /// Interns an exact structural callable signature. `void` is a result-only
     /// type and can therefore never occur in `parameters`.
     pub fn intern_function(
@@ -1125,6 +1147,7 @@ impl TypeArena {
                 })
             }
             Some(TypeData::Reference { pointee, .. }) => self.contains_generic(*pointee),
+            Some(TypeData::Nullable(payload)) => self.contains_generic(*payload),
             Some(TypeData::Function { parameters, result }) => {
                 self.contains_generic(*result)
                     || self.arguments(*parameters).is_some_and(|parameters| {
@@ -1497,6 +1520,9 @@ impl TypeArena {
                 is_storable: true,
                 needs_drop: false,
             },
+            TypeData::Nullable(payload) => {
+                self.properties_with_substitution(payload, substitution, visiting)
+            }
             TypeData::Void => TypeProperties {
                 is_known: true,
                 // The compiler's unit token is freely duplicable even though
@@ -1789,6 +1815,12 @@ impl TypeArena {
                 capability,
                 Capability::Copy | Capability::Relocatable | Capability::Storable
             ),
+            Some(TypeData::Nullable(payload)) => self.guarantees_capability_with_substitution(
+                payload,
+                capability,
+                substitution,
+                visiting,
+            ),
             Some(
                 TypeData::Reference { .. }
                 | TypeData::View { .. }
@@ -2006,6 +2038,9 @@ impl TypeArena {
                 capability == 0
                     || self.contains_capability(pointee, capability, substitution, visiting)
             }
+            Some(TypeData::Nullable(payload)) => {
+                self.contains_capability(payload, capability, substitution, visiting)
+            }
             Some(
                 TypeData::View { element, .. }
                 | TypeData::VectorView { element, .. }
@@ -2177,6 +2212,12 @@ impl TypeArena {
                 let pointee = self.substitute(pointee, substitution)?;
                 Ok(self.intern_reference(pointee, mutable))
             }
+            Some(TypeData::Nullable(payload)) => {
+                let payload = self.substitute(payload, substitution)?;
+                Ok(self
+                    .intern_nullable(payload)
+                    .expect("valid nullable substitution"))
+            }
             Some(TypeData::Function { parameters, result }) => {
                 let source = self
                     .arguments(parameters)
@@ -2284,6 +2325,13 @@ impl TypeArena {
                     .ids
                     .get(&TypeData::Reference { pointee, mutable })
                     .expect("monomorphizer interned substituted reference"))
+            }
+            Some(TypeData::Nullable(payload)) => {
+                let payload = self.substituted_existing(payload, substitution)?;
+                Ok(*self
+                    .ids
+                    .get(&TypeData::Nullable(payload))
+                    .expect("monomorphizer interned substituted nullable"))
             }
             Some(TypeData::Function { parameters, result }) => {
                 let parameters = self

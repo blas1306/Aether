@@ -315,6 +315,21 @@ pub enum Rvalue {
     },
     /// Scalar copy.
     Use(Operand),
+    NullableNull {
+        nullable_type: TypeId,
+    },
+    NullableInject {
+        payload: Operand,
+        nullable_type: TypeId,
+    },
+    NullableIsNull {
+        operand: Operand,
+    },
+    NullablePayload {
+        source: Place,
+        proof: aether_frontend::NonNullProofId,
+        access: aether_frontend::NullablePayloadAccess,
+    },
     /// Fresh source binding initialization at an ITERATION-V1 header.
     RangeBinding {
         loop_id: LoopId,
@@ -2710,6 +2725,108 @@ impl Builder<'_> {
                 ty: expression.ty,
             },
             HirExprKind::Bool(value) => Operand::Bool(*value),
+            HirExprKind::NullableNull { nullable_type } => {
+                let destination = self.temporary(*nullable_type);
+                self.assign(
+                    operand_place(&Operand::Local(destination)),
+                    Rvalue::NullableNull {
+                        nullable_type: *nullable_type,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::NullableInject {
+                payload,
+                nullable_type,
+            } => {
+                let payload = self.lower_expr(payload);
+                let destination = self.temporary(*nullable_type);
+                self.assign(
+                    operand_place(&Operand::Local(destination)),
+                    Rvalue::NullableInject {
+                        payload,
+                        nullable_type: *nullable_type,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::NullableIsNull { operand } => {
+                let operand = self.lower_expr(operand);
+                let destination = self.temporary(TypeId::BOOL);
+                self.assign(
+                    operand_place(&Operand::Local(destination)),
+                    Rvalue::NullableIsNull { operand },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::NullablePayload {
+                source,
+                proof,
+                access,
+            } => {
+                let source = self.lower_place(source);
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    operand_place(&Operand::Local(destination)),
+                    Rvalue::NullablePayload {
+                        source,
+                        proof: *proof,
+                        access: *access,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::LogicalNot { operand } => {
+                let operand = self.lower_expr(operand);
+                let destination = self.temporary(TypeId::BOOL);
+                self.assign(
+                    operand_place(&Operand::Local(destination)),
+                    Rvalue::Binary {
+                        op: BinaryOp::Equal,
+                        left: operand,
+                        right: Operand::Bool(false),
+                        trap: None,
+                        secondary_trap: None,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::ShortCircuitAnd { left, right }
+            | HirExprKind::ShortCircuitOr { left, right } => {
+                let is_and = matches!(expression.kind, HirExprKind::ShortCircuitAnd { .. });
+                let destination = self.temporary(TypeId::BOOL);
+                let left = self.lower_expr(left);
+                let rhs_block = self.new_block();
+                let short_block = self.new_block();
+                let join = self.new_block();
+                self.terminate(Terminator::Branch {
+                    condition: left,
+                    then_block: if is_and { rhs_block } else { short_block },
+                    else_block: if is_and { short_block } else { rhs_block },
+                });
+                self.current = Some(short_block);
+                self.assign(
+                    operand_place(&Operand::Local(destination)),
+                    Rvalue::Use(Operand::Bool(!is_and)),
+                    expression.span,
+                );
+                self.terminate(Terminator::Goto(join));
+                self.current = Some(rhs_block);
+                let rhs = self.lower_expr(right);
+                self.assign(
+                    operand_place(&Operand::Local(destination)),
+                    Rvalue::Use(rhs),
+                    expression.span,
+                );
+                self.terminate(Terminator::Goto(join));
+                self.current = Some(join);
+                Operand::Local(destination)
+            }
             HirExprKind::FunctionRef {
                 target,
                 function_type,
@@ -4251,7 +4368,15 @@ impl Builder<'_> {
                 let local = operand_local_id(&value)
                     .expect("verified call temporary is materialized in a local");
                 self.function.locals[local.0 as usize].address_taken = true;
-                if self.types.needs_drop(*pointee_type) {
+                if self.types.needs_drop(*pointee_type)
+                    && !matches!(
+                        initializer.kind,
+                        HirExprKind::NullablePayload {
+                            access: aether_frontend::NullablePayloadAccess::Borrow,
+                            ..
+                        }
+                    )
+                {
                     self.active_temporary_owners.push(local);
                 }
                 (
@@ -4306,7 +4431,12 @@ impl Builder<'_> {
         let operand = self.lower_expr(expression);
         if matches!(
             expression.kind,
-            HirExprKind::Local(_) | HirExprKind::Load(_)
+            HirExprKind::Local(_)
+                | HirExprKind::Load(_)
+                | HirExprKind::NullablePayload {
+                    access: aether_frontend::NullablePayloadAccess::Borrow,
+                    ..
+                }
         ) {
             return (operand, None);
         }
@@ -4774,6 +4904,26 @@ fn verify_mir_function(
     types: &TypeArena,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
+    let nullable_proofs = function
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .filter_map(|instruction| match instruction.value {
+            Rvalue::NullablePayload { proof, .. } => Some(proof.0),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let unique_nullable_proofs = nullable_proofs.iter().copied().collect::<BTreeSet<_>>();
+    if unique_nullable_proofs.len() != nullable_proofs.len()
+        || unique_nullable_proofs
+            .iter()
+            .copied()
+            .ne(0..u32::try_from(nullable_proofs.len()).expect("proof count fits u32"))
+    {
+        return Err(fail(
+            "MIR nullable payload proofs are missing, duplicated or non-canonical".into(),
+        ));
+    }
     if function.return_type != signature.return_type
         || function.parameters.len() != signature.parameters.len()
     {
@@ -6371,7 +6521,8 @@ fn verify_ownership(
                 | Rvalue::ElementwiseBinary { .. }
                 | Rvalue::BufferAlloc { .. }
                 | Rvalue::ArrayFill { .. }
-                | Rvalue::CatchBindAlias { .. } => {
+                | Rvalue::CatchBindAlias { .. }
+                | Rvalue::NullableNull { .. } => {
                     initialize_owner(function, types, &mut state, destination, fail)?;
                 }
                 Rvalue::MatrixInit { elements, .. }
@@ -6437,6 +6588,39 @@ fn verify_ownership(
                         return Err(fail("implicit copy of a non-Copy value in MIR".into()));
                     }
                 }
+                Rvalue::NullableInject { payload, .. } => {
+                    let payload_ty = operand_type(function, payload).map_err(fail)?;
+                    if !types.is_copy(payload_ty) {
+                        let local = operand_local_id(payload).ok_or_else(|| {
+                            fail("nullable owning injection payload is not materialized".into())
+                        })?;
+                        consume_owner(
+                            function,
+                            types,
+                            &mut state,
+                            local,
+                            "nullable injection",
+                            fail,
+                        )?;
+                    }
+                    initialize_owner(function, types, &mut state, destination, fail)?;
+                }
+                Rvalue::NullableIsNull { operand } => {
+                    if let Some(local) = operand_local_id(operand)
+                        && !types.is_copy(function.locals[local.0 as usize].ty)
+                    {
+                        require_place_owner(
+                            function,
+                            types,
+                            &state,
+                            &Place {
+                                base: PlaceBase::Local(local),
+                                projections: Vec::new(),
+                            },
+                            fail,
+                        )?;
+                    }
+                }
                 Rvalue::Load(place)
                 | Rvalue::Borrow { place, .. }
                 | Rvalue::MatrixAxisVectorView { source: place, .. }
@@ -6459,7 +6643,9 @@ fn verify_ownership(
                 Rvalue::Relocate { source, .. } => {
                     require_place_owner(function, types, &state, &source.root, fail)?;
                 }
-                Rvalue::CollectionBinding { source, .. } | Rvalue::ListSetLength { source, .. } => {
+                Rvalue::NullablePayload { source, .. }
+                | Rvalue::CollectionBinding { source, .. }
+                | Rvalue::ListSetLength { source, .. } => {
                     require_place_owner(function, types, &state, source, fail)?;
                 }
                 Rvalue::ListPush {
@@ -6744,6 +6930,42 @@ fn validate_rvalue(
     initialized: &[bool],
 ) -> Result<(), String> {
     match value {
+        Rvalue::NullableNull { nullable_type } => {
+            if destination != *nullable_type || types.nullable_payload(*nullable_type).is_none() {
+                return Err("MIR nullable null type mismatch".into());
+            }
+        }
+        Rvalue::NullableInject {
+            payload,
+            nullable_type,
+        } => {
+            validate_operand(function, payload, initialized)?;
+            if destination != *nullable_type
+                || types.nullable_payload(*nullable_type) != Some(operand_type(function, payload)?)
+            {
+                return Err("MIR nullable injection type mismatch".into());
+            }
+        }
+        Rvalue::NullableIsNull { operand } => {
+            validate_operand(function, operand, initialized)?;
+            if destination != TypeId::BOOL
+                || types
+                    .nullable_payload(operand_type(function, operand)?)
+                    .is_none()
+            {
+                return Err("MIR nullable presence test type mismatch".into());
+            }
+        }
+        Rvalue::NullablePayload { source, access, .. } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            let source_ty = place_type(function, source, structs, types)?;
+            if types.nullable_payload(source_ty) != Some(destination)
+                || (*access == aether_frontend::NullablePayloadAccess::Copy
+                    && !types.guarantees_copy(destination))
+            {
+                return Err("MIR nullable payload proof/type mismatch".into());
+            }
+        }
         Rvalue::RangeBinding { loop_id, current } => {
             validate_operand(function, current, initialized)?;
             if destination != TypeId::INT64
@@ -9093,5 +9315,50 @@ mod tests {
             relocation.source_after = ElementInitialization::Initialized;
         });
         assert!(verify_mir(wrong_state).is_err());
+    }
+
+    #[test]
+    fn nullable_operations_and_proofs_fail_closed_when_corrupted() {
+        let source = "int main(){int? value=1;if(value!=null){return value;}return 0;}";
+        verify_mir(mir(source)).unwrap();
+
+        let mut bad_proof = mir(source);
+        let payload = bad_proof.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| matches!(instruction.value, Rvalue::NullablePayload { .. }))
+            .unwrap();
+        if let Rvalue::NullablePayload { proof, .. } = &mut payload.value {
+            *proof = aether_frontend::NonNullProofId(99);
+        }
+        assert!(verify_mir(bad_proof).is_err());
+
+        let mut bad_inject = mir(source);
+        let inject = bad_inject.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| matches!(instruction.value, Rvalue::NullableInject { .. }))
+            .unwrap();
+        if let Rvalue::NullableInject { nullable_type, .. } = &mut inject.value {
+            *nullable_type = TypeId::INT64;
+        }
+        assert!(verify_mir(bad_inject).is_err());
+
+        let mut bad_test = mir(source);
+        let test = bad_test.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| matches!(instruction.value, Rvalue::NullableIsNull { .. }))
+            .unwrap();
+        if let Rvalue::NullableIsNull { operand } = &mut test.value {
+            *operand = Operand::Int {
+                value: 0,
+                ty: TypeId::INT64,
+            };
+        }
+        assert!(verify_mir(bad_test).is_err());
     }
 }

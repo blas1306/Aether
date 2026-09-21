@@ -1063,7 +1063,10 @@ pub fn verify_class_metadata(
         }
     }
     for (id, ty) in types.entries() {
-        if types.contains_class(id) && !types.is_object_owner(id) {
+        let nullable_class_owner = types
+            .nullable_payload(id)
+            .is_some_and(|payload| types.is_object_owner(payload));
+        if types.contains_class(id) && !types.is_object_owner(id) && !nullable_class_owner {
             return Err(
                 "class-containing storage/reference type requires separate admission".into(),
             );
@@ -1144,7 +1147,10 @@ pub fn verify_class_signature(
         ) {
             return Err("internal class tokens cannot occur in source parameters/results".into());
         }
-        if types.contains_class(ty) && !types.is_object_owner(ty) {
+        let nullable_class_owner = types
+            .nullable_payload(ty)
+            .is_some_and(|payload| types.is_object_owner(payload));
+        if types.contains_class(ty) && !types.is_object_owner(ty) && !nullable_class_owner {
             return Err("class-containing references and aggregates are unavailable".into());
         }
     }

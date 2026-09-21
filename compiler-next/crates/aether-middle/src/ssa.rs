@@ -148,6 +148,21 @@ pub enum SsaOp {
     },
     /// Scalar copy.
     Use(SsaOperand),
+    NullableNull {
+        nullable_type: TypeId,
+    },
+    NullableInject {
+        payload: SsaOperand,
+        nullable_type: TypeId,
+    },
+    NullableIsNull {
+        operand: SsaOperand,
+    },
+    NullablePayload {
+        source: SsaPlace,
+        proof: aether_frontend::NonNullProofId,
+        access: aether_frontend::NullablePayloadAccess,
+    },
     RangeBinding {
         loop_id: aether_frontend::LoopId,
         current: SsaOperand,
@@ -1003,6 +1018,28 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
                 .unwrap(),
         )),
         Rvalue::Use(operand) => SsaOp::Use(rename_operand(operand, stacks)),
+        Rvalue::NullableNull { nullable_type } => SsaOp::NullableNull {
+            nullable_type: *nullable_type,
+        },
+        Rvalue::NullableInject {
+            payload,
+            nullable_type,
+        } => SsaOp::NullableInject {
+            payload: rename_operand(payload, stacks),
+            nullable_type: *nullable_type,
+        },
+        Rvalue::NullableIsNull { operand } => SsaOp::NullableIsNull {
+            operand: rename_operand(operand, stacks),
+        },
+        Rvalue::NullablePayload {
+            source,
+            proof,
+            access,
+        } => SsaOp::NullablePayload {
+            source: rename_place(source, stacks, mir),
+            proof: *proof,
+            access: *access,
+        },
         Rvalue::RangeBinding { loop_id, current } => SsaOp::RangeBinding {
             loop_id: *loop_id,
             current: rename_operand(current, stacks),
@@ -1798,6 +1835,10 @@ pub(crate) fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<Local
             .filter_map(operand_local)
             .collect(),
         Rvalue::Use(operand)
+        | Rvalue::NullableInject {
+            payload: operand, ..
+        }
+        | Rvalue::NullableIsNull { operand }
         | Rvalue::RangeBinding {
             current: operand, ..
         }
@@ -1902,6 +1943,7 @@ pub(crate) fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<Local
             .into_iter()
             .chain(operand_local(right))
             .collect(),
+        Rvalue::NullablePayload { source, .. } => place_locals(function, source),
         Rvalue::Class(op) => op
             .operands()
             .into_iter()
@@ -1912,7 +1954,8 @@ pub(crate) fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<Local
             .into_iter()
             .chain(args.iter().filter_map(operand_local))
             .collect(),
-        Rvalue::FunctionRef { .. }
+        Rvalue::NullableNull { .. }
+        | Rvalue::FunctionRef { .. }
         | Rvalue::ExceptionMatches { .. }
         | Rvalue::CatchBindAlias { .. }
         | Rvalue::EndCatch { .. }
@@ -2046,6 +2089,26 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
         }
     }
     for (index, (signature, function)) in ssa.signatures.iter().zip(&ssa.functions).enumerate() {
+        let nullable_proofs = function
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter_map(|instruction| match instruction.op {
+                SsaOp::NullablePayload { proof, .. } => Some(proof.0),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let unique_nullable_proofs = nullable_proofs.iter().copied().collect::<BTreeSet<_>>();
+        if unique_nullable_proofs.len() != nullable_proofs.len()
+            || unique_nullable_proofs
+                .iter()
+                .copied()
+                .ne(0..u32::try_from(nullable_proofs.len()).expect("proof count fits u32"))
+        {
+            return Err(fail(
+                "SSA nullable payload proofs are missing, duplicated or non-canonical".into(),
+            ));
+        }
         if signature.id.0 as usize != index || function.id != signature.id {
             return Err(fail("SSA function identities are not canonical".into()));
         }
@@ -3366,6 +3429,13 @@ fn verify_string_ownership(
                 .filter(|instruction| {
                     carries_string_owner(instruction.ty)
                         && !matches!(instruction.op, SsaOp::Load { .. })
+                        && !matches!(
+                            instruction.op,
+                            SsaOp::NullablePayload {
+                                access: aether_frontend::NullablePayloadAccess::Borrow,
+                                ..
+                            }
+                        )
                 })
                 .map(|instruction| instruction.result),
         );
@@ -3434,6 +3504,7 @@ fn verify_string_ownership(
                     }
                 }
                 SsaOp::ListPush { value, .. }
+                | SsaOp::NullableInject { payload: value, .. }
                 | SsaOp::CollectionOwnerCapture { value, .. }
                 | SsaOp::ReplaceString { value, .. }
                 | SsaOp::Store { value, .. }
@@ -3729,6 +3800,35 @@ fn verify_op(
         Ok(true)
     };
     match op {
+        SsaOp::NullableNull { nullable_type } => {
+            if result != *nullable_type || types.nullable_payload(*nullable_type).is_none() {
+                return Err("SSA nullable null type mismatch".into());
+            }
+        }
+        SsaOp::NullableInject {
+            payload,
+            nullable_type,
+        } => {
+            if result != *nullable_type
+                || types.nullable_payload(*nullable_type) != Some(operand_ty(payload)?)
+            {
+                return Err("SSA nullable injection type mismatch".into());
+            }
+        }
+        SsaOp::NullableIsNull { operand } => {
+            if result != TypeId::BOOL || types.nullable_payload(operand_ty(operand)?).is_none() {
+                return Err("SSA nullable presence test type mismatch".into());
+            }
+        }
+        SsaOp::NullablePayload { source, access, .. } => {
+            let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
+            if types.nullable_payload(source_ty) != Some(result)
+                || (*access == aether_frontend::NullablePayloadAccess::Copy
+                    && !types.guarantees_copy(result))
+            {
+                return Err("SSA nullable payload proof/type mismatch".into());
+            }
+        }
         SsaOp::RangeBinding { loop_id, current } => {
             if result != TypeId::INT64 || operand_ty(current)? != result {
                 return Err("SSA range binding type/identity mismatch".into());
@@ -4751,6 +4851,8 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         SsaOp::Text { op, .. } => op.operands(),
         SsaOp::Core(op) => op.operands(),
         SsaOp::Use(value)
+        | SsaOp::NullableInject { payload: value, .. }
+        | SsaOp::NullableIsNull { operand: value }
         | SsaOp::RangeBinding { current: value, .. }
         | SsaOp::RangeOperand { value, .. }
         | SsaOp::CollectionOwnerCapture { value, .. }
@@ -4772,6 +4874,7 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
             .chain(std::iter::once(fixed_index))
             .collect(),
         SsaOp::Load { place }
+        | SsaOp::NullablePayload { source: place, .. }
         | SsaOp::Borrow { place, .. }
         | SsaOp::Move { source: place }
         | SsaOp::Drop { owner: place }
@@ -4851,6 +4954,7 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         }
         SsaOp::EndBorrow { reference, .. } => vec![reference],
         SsaOp::FunctionRef { .. }
+        | SsaOp::NullableNull { .. }
         | SsaOp::ExceptionMatches { .. }
         | SsaOp::CatchBindAlias { .. }
         | SsaOp::EndCatch { .. }
@@ -5880,5 +5984,35 @@ mod tests {
             .unwrap();
         relocation.increasing_order = false;
         assert!(verify_ssa(ssa).is_err());
+    }
+
+    #[test]
+    fn verifier_rejects_corrupt_nullable_operations_and_proofs() {
+        let source = "int main(){int? value=1;if(value!=null){return value;}return 0;}";
+        verify_ssa(raw_ssa(source)).unwrap();
+
+        let mut bad_proof = raw_ssa(source);
+        let payload = bad_proof.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| matches!(instruction.op, SsaOp::NullablePayload { .. }))
+            .unwrap();
+        if let SsaOp::NullablePayload { proof, .. } = &mut payload.op {
+            *proof = aether_frontend::NonNullProofId(99);
+        }
+        assert!(verify_ssa(bad_proof).is_err());
+
+        let mut bad_null = raw_ssa("int main(){int? value=null;return 0;}");
+        let null = bad_null.functions[0]
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| matches!(instruction.op, SsaOp::NullableNull { .. }))
+            .unwrap();
+        if let SsaOp::NullableNull { nullable_type } = &mut null.op {
+            *nullable_type = TypeId::INT64;
+        }
+        assert!(verify_ssa(bad_null).is_err());
     }
 }

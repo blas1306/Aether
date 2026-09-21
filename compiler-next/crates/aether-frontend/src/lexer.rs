@@ -23,6 +23,8 @@ pub enum TokenKind {
     KwTrue,
     /// `false`.
     KwFalse,
+    /// `null`.
+    KwNull,
     /// `if`.
     KwIf,
     /// `else`.
@@ -99,6 +101,14 @@ pub enum TokenKind {
     Percent,
     /// `&`.
     Ampersand,
+    /// `&&`.
+    AndAnd,
+    /// `||`.
+    OrOr,
+    /// `!`.
+    Bang,
+    /// `?`.
+    Question,
     /// `=`.
     Equal,
     /// `=>`.
@@ -303,6 +313,7 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                     "bool" => TokenKind::KwBool,
                     "true" => TokenKind::KwTrue,
                     "false" => TokenKind::KwFalse,
+                    "null" => TokenKind::KwNull,
                     "if" => TokenKind::KwIf,
                     "else" => TokenKind::KwElse,
                     "while" => TokenKind::KwWhile,
@@ -344,7 +355,16 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
             b'*' => single(&mut tokens, TokenKind::Star, source, &mut cursor),
             b'/' => single(&mut tokens, TokenKind::Slash, source, &mut cursor),
             b'%' => single(&mut tokens, TokenKind::Percent, source, &mut cursor),
+            b'&' if bytes.get(cursor + 1) == Some(&b'&') => {
+                cursor += 2;
+                push(&mut tokens, TokenKind::AndAnd, source, start, cursor);
+            }
             b'&' => single(&mut tokens, TokenKind::Ampersand, source, &mut cursor),
+            b'|' if bytes.get(cursor + 1) == Some(&b'|') => {
+                cursor += 2;
+                push(&mut tokens, TokenKind::OrOr, source, start, cursor);
+            }
+            b'?' => single(&mut tokens, TokenKind::Question, source, &mut cursor),
             b'=' if bytes.get(cursor + 1) == Some(&b'>') => {
                 cursor += 2;
                 push(&mut tokens, TokenKind::FatArrow, source, start, cursor);
@@ -374,6 +394,7 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                 cursor += 2;
                 push(&mut tokens, TokenKind::BangEqual, source, start, cursor);
             }
+            b'!' => single(&mut tokens, TokenKind::Bang, source, &mut cursor),
             byte => {
                 let len = if byte.is_ascii() {
                     1
@@ -587,12 +608,8 @@ mod tests {
             "operators.ae",
             "a / b * c <= d >= e == f != g => h & i < /*gap*/ = >/**/= =/**/= !/**/=",
         );
-        // `!` alone remains invalid, even with a following separated `=`.
-        let error = lex(&source).unwrap_err();
-        assert_eq!(error.len(), 1);
-        assert_eq!(error[0].message, "unexpected character `!`");
-        let valid = SourceFile::new("operators.ae", source.text.replace("!/**/=", ""));
-        let kinds = lex(&valid)
+        // Comments never fuse the now-valid logical `!` with a later `=`.
+        let kinds = lex(&source)
             .unwrap()
             .iter()
             .map(|t| t.kind)
@@ -622,6 +639,8 @@ mod tests {
                 Greater,
                 Equal,
                 Equal,
+                Equal,
+                TokenKind::Bang,
                 Equal,
                 TokenKind::Eof,
             ]

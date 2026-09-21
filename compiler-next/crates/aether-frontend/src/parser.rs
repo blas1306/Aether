@@ -615,6 +615,15 @@ impl Parser<'_> {
                 span,
             });
         }
+        if let Some(left) = self.consume(TokenKind::LeftParen) {
+            let grouped = self.ty()?;
+            let right = self.expect(TokenKind::RightParen, "expected `)` after grouped type")?;
+            let grouped = AstType {
+                kind: grouped.kind,
+                span: left.span.through(right.span),
+            };
+            return self.nullable_suffix(grouped);
+        }
         let token = match self.current().kind {
             TokenKind::KwInt | TokenKind::KwBool | TokenKind::Identifier => self.advance(),
             _ => return Err(self.error("E0100", "expected type name")),
@@ -670,7 +679,7 @@ impl Parser<'_> {
             let end =
                 self.expect_function(TokenKind::Greater, "expected `>` after Function type")?;
             span = span.through(end.span);
-            return Ok(AstType {
+            return self.nullable_suffix(AstType {
                 kind: crate::AstTypeKind::Function {
                     parameters,
                     result: Box::new(result),
@@ -682,11 +691,34 @@ impl Parser<'_> {
         let span = arguments
             .last()
             .map_or(span, |argument| span.through(argument.span));
-        Ok(AstType {
+        self.nullable_suffix(AstType {
             kind: crate::AstTypeKind::Named {
                 module,
                 name,
                 arguments,
+            },
+            span,
+        })
+    }
+
+    fn nullable_suffix(&mut self, payload: AstType) -> Result<AstType, Diagnostic> {
+        let Some(question) = self.consume(TokenKind::Question) else {
+            return Ok(payload);
+        };
+        if self.at(TokenKind::Question) {
+            return Err(Diagnostic::new(
+                "E0450",
+                Phase::Parse,
+                DiagnosticCategory::Type,
+                "nested nullable is not supported in NULLABLE-V1",
+                Some(payload.span.through(self.current().span)),
+            ));
+        }
+        let span = payload.span.through(question.span);
+        Ok(AstType {
+            kind: crate::AstTypeKind::Nullable {
+                payload: Box::new(payload),
+                question_span: question.span,
             },
             span,
         })
@@ -773,6 +805,29 @@ impl Parser<'_> {
     #[allow(clippy::too_many_lines)]
     fn statement(&mut self) -> Result<AstStmt, Diagnostic> {
         let start = self.current().span;
+        if self.current().kind == TokenKind::Identifier
+            && self.current().lexeme == "var"
+            && self
+                .tokens
+                .get(self.cursor + 1)
+                .is_some_and(|token| token.kind == TokenKind::Identifier)
+            && self
+                .tokens
+                .get(self.cursor + 2)
+                .is_some_and(|token| token.kind == TokenKind::Equal)
+            && self
+                .tokens
+                .get(self.cursor + 3)
+                .is_some_and(|token| token.kind == TokenKind::KwNull)
+        {
+            return Err(Diagnostic::new(
+                "E0451",
+                Phase::Parse,
+                DiagnosticCategory::Type,
+                "null cannot infer a payload type; declare a concrete T? local",
+                self.tokens.get(self.cursor + 3).map(|token| token.span),
+            ));
+        }
         let kind = match self.current().kind {
             TokenKind::KwConst => {
                 let const_token = self.advance();
@@ -810,7 +865,7 @@ impl Parser<'_> {
                     initializer,
                 }
             }
-            TokenKind::Identifier if self.looks_like_local_declaration() => {
+            TokenKind::Identifier | TokenKind::LeftParen if self.looks_like_local_declaration() => {
                 let ty = self.ty()?;
                 let name = self
                     .expect(TokenKind::Identifier, "expected local name")?
@@ -1096,7 +1151,41 @@ impl Parser<'_> {
     }
 
     fn expression(&mut self) -> Result<AstExpr, Diagnostic> {
-        self.range()
+        self.logical_or()
+    }
+
+    fn logical_or(&mut self) -> Result<AstExpr, Diagnostic> {
+        let mut expr = self.logical_and()?;
+        while self.consume(TokenKind::OrOr).is_some() {
+            let right = self.logical_and()?;
+            let span = expr.span.through(right.span);
+            expr = AstExpr {
+                kind: AstExprKind::Binary {
+                    op: AstBinaryOp::LogicalOr,
+                    left: Box::new(expr),
+                    right: Box::new(right),
+                },
+                span,
+            };
+        }
+        Ok(expr)
+    }
+
+    fn logical_and(&mut self) -> Result<AstExpr, Diagnostic> {
+        let mut expr = self.range()?;
+        while self.consume(TokenKind::AndAnd).is_some() {
+            let right = self.range()?;
+            let span = expr.span.through(right.span);
+            expr = AstExpr {
+                kind: AstExprKind::Binary {
+                    op: AstBinaryOp::LogicalAnd,
+                    left: Box::new(expr),
+                    right: Box::new(right),
+                },
+                span,
+            };
+        }
+        Ok(expr)
     }
 
     fn range(&mut self) -> Result<AstExpr, Diagnostic> {
@@ -1224,7 +1313,17 @@ impl Parser<'_> {
     }
 
     fn unary(&mut self) -> Result<AstExpr, Diagnostic> {
-        if let Some(minus) = self.consume(TokenKind::Minus) {
+        if let Some(bang) = self.consume(TokenKind::Bang) {
+            let operand = self.unary()?;
+            let span = bang.span.through(operand.span);
+            Ok(AstExpr {
+                kind: AstExprKind::Unary {
+                    op: AstUnaryOp::LogicalNot,
+                    operand: Box::new(operand),
+                },
+                span,
+            })
+        } else if let Some(minus) = self.consume(TokenKind::Minus) {
             let operand = self.unary()?;
             let span = minus.span.through(operand.span);
             Ok(AstExpr {
@@ -1290,6 +1389,10 @@ impl Parser<'_> {
             },
             TokenKind::KwFalse => AstExpr {
                 kind: AstExprKind::Bool(false),
+                span: token.span,
+            },
+            TokenKind::KwNull => AstExpr {
+                kind: AstExprKind::Null,
                 span: token.span,
             },
             TokenKind::LeftBracket => {
@@ -1642,8 +1745,16 @@ impl Parser<'_> {
         false
     }
 
+    #[allow(clippy::too_many_lines)]
     fn looks_like_local_declaration(&self) -> bool {
-        fn skip_type(tokens: &[Token], mut index: usize) -> Option<usize> {
+        fn skip_type_atom(tokens: &[Token], mut index: usize) -> Option<usize> {
+            if tokens.get(index)?.kind == TokenKind::LeftParen {
+                index = skip_type(tokens, index + 1)?;
+                if tokens.get(index)?.kind != TokenKind::RightParen {
+                    return None;
+                }
+                return Some(index + 1);
+            }
             if tokens.get(index)?.kind == TokenKind::KwRef {
                 index += 1;
                 if tokens
@@ -1720,6 +1831,18 @@ impl Parser<'_> {
             }
             Some(index)
         }
+
+        fn skip_type(tokens: &[Token], index: usize) -> Option<usize> {
+            let mut after_type = skip_type_atom(tokens, index)?;
+            if tokens
+                .get(after_type)
+                .is_some_and(|token| token.kind == TokenKind::Question)
+            {
+                after_type += 1;
+            }
+            Some(after_type)
+        }
+
         let Some(after_type) = skip_type(&self.tokens, self.cursor) else {
             return false;
         };

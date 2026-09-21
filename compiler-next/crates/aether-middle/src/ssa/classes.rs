@@ -159,6 +159,7 @@ pub(super) fn verify(
                     }
                 }
                 SsaOp::ListPush { value, .. } => consume(value, &mut state)?,
+                SsaOp::NullableInject { payload, .. } => consume(payload, &mut state)?,
                 SsaOp::Class(op) => {
                     aether_frontend::verify_class_access(
                         op,

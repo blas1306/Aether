@@ -222,6 +222,10 @@ pub enum AstTypeKind {
         parameters: Vec<AstType>,
         result: Box<AstType>,
     },
+    Nullable {
+        payload: Box<AstType>,
+        question_span: Span,
+    },
 }
 
 impl AstType {
@@ -234,7 +238,9 @@ impl AstType {
                 name,
                 arguments,
             } => Some((module.as_deref(), name, arguments)),
-            AstTypeKind::Reference(_) | AstTypeKind::Function { .. } => None,
+            AstTypeKind::Reference(_)
+            | AstTypeKind::Function { .. }
+            | AstTypeKind::Nullable { .. } => None,
         }
     }
 }
@@ -433,6 +439,8 @@ pub enum AstExprKind {
     Interpolation(Vec<AstInterpolationFragment>),
     /// Boolean literal.
     Bool(bool),
+    /// Contextually typed absence; it has no standalone semantic `TypeId`.
+    Null,
     /// Collection literal. Its concrete collection kind is selected only from
     /// the expected semantic type; future `List<T>` can reuse this node.
     CollectionLiteral(Vec<AstExpr>),
@@ -524,6 +532,8 @@ pub enum AstUnaryOp {
     BorrowShared,
     /// Writable borrow of an addressable place. It does not imply exclusivity.
     BorrowMutable,
+    /// Short-circuit logical negation.
+    LogicalNot,
 }
 
 /// Infix operators.
@@ -551,4 +561,8 @@ pub enum AstBinaryOp {
     Equal,
     /// Inequality.
     NotEqual,
+    /// Short-circuit conjunction.
+    LogicalAnd,
+    /// Short-circuit disjunction.
+    LogicalOr,
 }

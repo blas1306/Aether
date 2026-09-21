@@ -1,0 +1,13 @@
+int main() {
+    string? name = null;
+    if (name != null) {
+        println(name);
+    }
+    string? value = "Aether";
+    if (value == null) {
+        return 1;
+    } else {
+        println(value);
+    }
+    return 0;
+}

@@ -744,7 +744,8 @@ fn emit_relocation_glue(
         | TypeData::Vector { .. }
         | TypeData::Array { .. }
         | TypeData::Matrix { .. }
-        | TypeData::List { .. } => {
+        | TypeData::List { .. }
+        | TypeData::Nullable(_) => {
             writeln!(output, "  %value = load {value_ty}, ptr %source").unwrap();
             writeln!(output, "  store {value_ty} %value, ptr %destination").unwrap();
             writeln!(output, "  ret void\n}}\n").unwrap();
@@ -818,6 +819,14 @@ fn emit_drop_glue(
         }
         TypeData::Class(_) | TypeData::ClassToken { .. } => {
             classes::drop_body(output);
+        }
+        TypeData::Nullable(payload) => {
+            let payload_llvm = llvm_type(types, *payload);
+            if nullable_uses_niche(types, *payload) {
+                writeln!(output, "  %present = icmp ne ptr %value, null\n  br i1 %present, label %drop, label %done\ndrop:\n  call void @aether_drop_{}({payload_llvm} %value)\n  br label %done\ndone:\n  ret void\n}}", mangle_type(types, *payload)).unwrap();
+            } else {
+                writeln!(output, "  %tag = extractvalue {value_ty} %value, 0\n  %present = icmp eq i8 %tag, 1\n  br i1 %present, label %drop, label %done\ndrop:\n  %payload = extractvalue {value_ty} %value, 1\n  call void @aether_drop_{}({payload_llvm} %payload)\n  br label %done\ndone:\n  ret void\n}}", mangle_type(types, *payload)).unwrap();
+            }
         }
         TypeData::Buffer { element } => {
             emit_descriptor_free(output, types, *element, false, structs, enums);
@@ -1502,6 +1511,129 @@ fn emit_function(
                     llvm_operand(operand)
                 )
                 .unwrap(),
+                SsaOp::NullableNull { nullable_type } => {
+                    let payload = types
+                        .nullable_payload(*nullable_type)
+                        .expect("verified nullable");
+                    if nullable_uses_niche(types, payload) {
+                        writeln!(
+                            output,
+                            "  %v{} = select i1 true, {} null, {} null",
+                            instruction.result.0,
+                            llvm_type(types, *nullable_type),
+                            llvm_type(types, *nullable_type)
+                        )
+                        .unwrap();
+                    } else {
+                        writeln!(
+                            output,
+                            "  %v{} = insertvalue {} poison, i8 0, 0",
+                            instruction.result.0,
+                            llvm_type(types, *nullable_type)
+                        )
+                        .unwrap();
+                    }
+                }
+                SsaOp::NullableInject {
+                    payload,
+                    nullable_type,
+                } => {
+                    let payload_ty = types
+                        .nullable_payload(*nullable_type)
+                        .expect("verified nullable");
+                    if nullable_uses_niche(types, payload_ty) {
+                        writeln!(
+                            output,
+                            "  %v{} = select i1 true, {} {}, {} {}",
+                            instruction.result.0,
+                            llvm_type(types, *nullable_type),
+                            llvm_operand(payload),
+                            llvm_type(types, *nullable_type),
+                            llvm_operand(payload)
+                        )
+                        .unwrap();
+                    } else {
+                        writeln!(
+                            output,
+                            "  %nullable_tag_{} = insertvalue {} poison, i8 1, 0",
+                            instruction.result.0,
+                            llvm_type(types, *nullable_type)
+                        )
+                        .unwrap();
+                        writeln!(
+                            output,
+                            "  %v{} = insertvalue {} %nullable_tag_{}, {} {}, 1",
+                            instruction.result.0,
+                            llvm_type(types, *nullable_type),
+                            instruction.result.0,
+                            llvm_type(types, payload_ty),
+                            llvm_operand(payload)
+                        )
+                        .unwrap();
+                    }
+                }
+                SsaOp::NullableIsNull { operand } => {
+                    let nullable_ty = operand_type(function, operand);
+                    let payload = types
+                        .nullable_payload(nullable_ty)
+                        .expect("verified nullable");
+                    if nullable_uses_niche(types, payload) {
+                        writeln!(
+                            output,
+                            "  %v{} = icmp eq {} {}, null",
+                            instruction.result.0,
+                            llvm_type(types, nullable_ty),
+                            llvm_operand(operand)
+                        )
+                        .unwrap();
+                    } else {
+                        writeln!(
+                            output,
+                            "  %nullable_test_tag_{} = extractvalue {} {}, 0",
+                            instruction.result.0,
+                            llvm_type(types, nullable_ty),
+                            llvm_operand(operand)
+                        )
+                        .unwrap();
+                        writeln!(
+                            output,
+                            "  %v{} = icmp eq i8 %nullable_test_tag_{}, 0",
+                            instruction.result.0, instruction.result.0
+                        )
+                        .unwrap();
+                    }
+                }
+                SsaOp::NullablePayload { source, .. } => {
+                    let (value, nullable_ty) = emit_place_value(
+                        output,
+                        function,
+                        source,
+                        instruction.result.0,
+                        types,
+                        structs,
+                    );
+                    let payload = types
+                        .nullable_payload(nullable_ty)
+                        .expect("verified nullable");
+                    if nullable_uses_niche(types, payload) {
+                        writeln!(
+                            output,
+                            "  %v{} = select i1 true, {} {value}, {} {value}",
+                            instruction.result.0,
+                            llvm_type(types, payload),
+                            llvm_type(types, payload)
+                        )
+                        .unwrap();
+                    } else {
+                        writeln!(
+                            output,
+                            "  %v{} = extractvalue {} {value}, 1",
+                            instruction.result.0,
+                            llvm_type(types, nullable_ty)
+                        )
+                        .unwrap();
+                    }
+                }
                 SsaOp::CollectionBinding {
                     source,
                     index,
@@ -3634,6 +3766,10 @@ fn mangle_symbol_type(
             if *mutable { "m" } else { "s" },
             mangle_symbol_type(types, *pointee, modules, structs, enums)
         ),
+        TypeData::Nullable(payload) => {
+            let payload = mangle_symbol_type(types, *payload, modules, structs, enums);
+            format!("N{}x{}", payload.len(), payload)
+        }
         TypeData::Function { parameters, result } => format!(
             "Fx{}zR{}",
             types
@@ -3747,6 +3883,10 @@ fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
         | TypeData::ClassToken { .. }
         | TypeData::Reference { .. }
         | TypeData::Function { .. } => "ptr".into(),
+        TypeData::Nullable(payload) if nullable_uses_niche(types, *payload) => {
+            llvm_type(types, *payload)
+        }
+        TypeData::Nullable(payload) => format!("{{ i8, {} }}", llvm_type(types, *payload)),
         TypeData::Buffer { .. }
         | TypeData::Vector { .. }
         | TypeData::Array { .. }
@@ -3823,6 +3963,10 @@ fn mangle_type(types: &TypeArena, ty: TypeId) -> String {
             if *mutable { "m" } else { "s" },
             mangle_type(types, *pointee)
         ),
+        TypeData::Nullable(payload) => {
+            let payload = mangle_type(types, *payload);
+            format!("N{}x{}", payload.len(), payload)
+        }
         TypeData::Function { parameters, result } => format!(
             "Fx{}zR{}",
             mangle_type_arguments(types, *parameters),
@@ -3857,6 +4001,18 @@ fn mangle_type(types: &TypeArena, ty: TypeId) -> String {
         ),
         TypeData::GenericParam(_) => panic!("unresolved generic parameter reached mangling"),
     }
+}
+
+fn nullable_uses_niche(types: &TypeArena, payload: TypeId) -> bool {
+    matches!(
+        types.get(payload),
+        Some(
+            TypeData::String
+                | TypeData::Class(_)
+                | TypeData::Reference { .. }
+                | TypeData::Function { .. }
+        )
+    )
 }
 
 fn field_info(structs: &[StructInfo], id: FieldId) -> &aether_frontend::FieldInfo {
