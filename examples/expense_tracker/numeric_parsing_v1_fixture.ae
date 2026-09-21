@@ -1,0 +1,39 @@
+package expense_tracker.numeric_parsing_fixture;
+
+import std.Text;
+
+struct ParsedFields {
+    int id;
+    int category;
+    double amount;
+}
+
+// Representative persistence-boundary fixture. Policy remains with the caller.
+int parseRecord(ref string rawId, ref string rawCategory, ref string rawAmount) {
+    int id = 0;
+    int category = 0;
+    double amount = 0.0;
+    match (std.Text.parseInt(rawId)) {
+        std.Text.IntParseResult.Value(value) => { id = value; }
+        std.Text.IntParseResult.Invalid => { return 1; }
+        std.Text.IntParseResult.Overflow => { return 2; }
+    }
+    match (std.Text.parseInt(rawCategory)) {
+        std.Text.IntParseResult.Value(value) => { category = value; }
+        std.Text.IntParseResult.Invalid => { return 3; }
+        std.Text.IntParseResult.Overflow => { return 4; }
+    }
+    match (std.Text.parseDouble(rawAmount)) {
+        std.Text.DoubleParseResult.Value(value) => { amount = value; }
+        std.Text.DoubleParseResult.Invalid => { return 5; }
+        std.Text.DoubleParseResult.Overflow => { return 6; }
+        std.Text.DoubleParseResult.Underflow => { return 7; }
+    }
+    ParsedFields parsed = ParsedFields(id, category, amount);
+    if (parsed.id == 17 && parsed.category == 4 && parsed.amount == 12.75) { return 0; }
+    return 8;
+}
+
+int main() {
+    return parseRecord("17", "4", "12.75");
+}

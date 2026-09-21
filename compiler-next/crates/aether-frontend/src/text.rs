@@ -53,13 +53,23 @@ pub enum TextOp<O> {
         start: O,
         end_exclusive: O,
     },
+    ParseInt {
+        value: O,
+    },
+    ParseDouble {
+        value: O,
+    },
 }
 
 impl<O> TextOp<O> {
     #[must_use]
     pub fn operands(&self) -> Vec<&O> {
         match self {
-            Self::CodePointCount { value } | Self::Trim { value } | Self::Lines { value } => {
+            Self::CodePointCount { value }
+            | Self::Trim { value }
+            | Self::Lines { value }
+            | Self::ParseInt { value }
+            | Self::ParseDouble { value } => {
                 vec![value]
             }
             Self::Contains { value, needle }
@@ -155,6 +165,8 @@ impl<O> TextOp<O> {
                 start: f(start)?,
                 end_exclusive: f(end_exclusive)?,
             },
+            Self::ParseInt { value } => TextOp::ParseInt { value: f(value)? },
+            Self::ParseDouble { value } => TextOp::ParseDouble { value: f(value)? },
         })
     }
 }
@@ -195,6 +207,20 @@ pub fn verify_text_op<O>(
             matches!(data, TypeData::Enum(id) if *id == byte_slice.id).then_some(ty)
         })
         .ok_or("canonical Text.ByteSliceResult type is missing")?;
+    let parse_result = |name: &str| {
+        let info = enums
+            .iter()
+            .find(|e| e.name == name && e.module == scalar.module)
+            .ok_or_else(|| format!("canonical Text.{name} metadata is missing"))?;
+        types
+            .entries()
+            .find_map(|(ty, data)| {
+                matches!(data, TypeData::Enum(id) if *id == info.id).then_some(ty)
+            })
+            .ok_or_else(|| format!("canonical Text.{name} type is missing"))
+    };
+    let int_parse_ty = parse_result("IntParseResult")?;
+    let double_parse_ty = parse_result("DoubleParseResult")?;
 
     let tys = op
         .operands()
@@ -241,6 +267,8 @@ pub fn verify_text_op<O>(
         TextOp::ByteAt { .. } => (1, TypeId::USIZE, TypeId::UINT8),
         TextOp::IsByteBoundary { .. } => (1, TypeId::USIZE, TypeId::BOOL),
         TextOp::ByteSlice { .. } => (1, TypeId::USIZE, byte_slice_ty),
+        TextOp::ParseInt { .. } => (1, scalar_ty, int_parse_ty),
+        TextOp::ParseDouble { .. } => (1, scalar_ty, double_parse_ty),
     };
     if tys.iter().take(string_count).any(|ty| *ty != string_ref)
         || tys.iter().skip(string_count).any(|ty| *ty != trailing)

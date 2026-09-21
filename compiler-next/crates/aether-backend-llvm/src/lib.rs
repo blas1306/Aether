@@ -149,6 +149,16 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             .flat_map(|block| &block.instructions)
             .any(|instruction| matches!(instruction.op, SsaOp::Text { .. }))
     });
+    let has_parse_int = program.functions.iter().any(|function| {
+        function.blocks.iter().flat_map(|block| &block.instructions).any(
+            |instruction| matches!(&instruction.op, SsaOp::Text { op, .. } if matches!(op.as_ref(), aether_frontend::TextOp::ParseInt { .. })),
+        )
+    });
+    let has_parse_double = program.functions.iter().any(|function| {
+        function.blocks.iter().flat_map(|block| &block.instructions).any(
+            |instruction| matches!(&instruction.op, SsaOp::Text { op, .. } if matches!(op.as_ref(), aether_frontend::TextOp::ParseDouble { .. })),
+        )
+    });
     let core_calls = program
         .functions
         .iter()
@@ -268,7 +278,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         strings::runtime(&mut output, has_format_runtime);
     }
     if has_text_runtime {
-        text::runtime(&mut output);
+        text::runtime(&mut output, has_parse_int, has_parse_double);
     }
     if has_io_runtime {
         io::runtime(

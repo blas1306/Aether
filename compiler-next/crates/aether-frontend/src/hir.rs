@@ -11627,7 +11627,7 @@ impl Analyzer<'_> {
             })?;
         let byte_slice_ty = self.types.intern(TypeData::Enum(byte_slice_id));
         let arity = match function {
-            "scalarOffset" | "codePointCount" | "trim" | "lines" => 1,
+            "scalarOffset" | "codePointCount" | "trim" | "lines" | "parseInt" | "parseDouble" => 1,
             "contains" | "startsWith" | "endsWith" | "find" | "split" | "byteAt"
             | "isByteBoundary" => 2,
             "findFrom" | "substring" | "byteSlice" => 3,
@@ -11658,7 +11658,7 @@ impl Analyzer<'_> {
         let mut adapted = Vec::with_capacity(args.len());
         let string_count = match function {
             "codePointCount" | "trim" | "substring" | "lines" | "byteAt" | "isByteBoundary"
-            | "byteSlice" => 1,
+            | "byteSlice" | "parseInt" | "parseDouble" => 1,
             "contains" | "startsWith" | "endsWith" | "find" | "findFrom" | "split" => 2,
             _ => unreachable!(),
         };
@@ -11777,6 +11777,40 @@ impl Analyzer<'_> {
                 },
                 byte_slice_ty,
             ),
+            "parseInt" => {
+                let result = self.enum_names[module.0 as usize]
+                    .get("IntParseResult")
+                    .copied()
+                    .ok_or_else(|| {
+                        vec![type_error(
+                            "canonical Text.IntParseResult is unavailable",
+                            span,
+                        )]
+                    })?;
+                (
+                    crate::TextOp::ParseInt {
+                        value: adapted[0].clone(),
+                    },
+                    self.types.intern(TypeData::Enum(result)),
+                )
+            }
+            "parseDouble" => {
+                let result = self.enum_names[module.0 as usize]
+                    .get("DoubleParseResult")
+                    .copied()
+                    .ok_or_else(|| {
+                        vec![type_error(
+                            "canonical Text.DoubleParseResult is unavailable",
+                            span,
+                        )]
+                    })?;
+                (
+                    crate::TextOp::ParseDouble {
+                        value: adapted[0].clone(),
+                    },
+                    self.types.intern(TypeData::Enum(result)),
+                )
+            }
             _ => unreachable!(),
         };
         Ok(Checked {

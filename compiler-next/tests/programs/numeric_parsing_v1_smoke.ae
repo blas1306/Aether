@@ -1,0 +1,117 @@
+package main;
+import std.Text;
+
+int expectInt(ref string text, int wanted) {
+    match (std.Text.parseInt(text)) {
+        std.Text.IntParseResult.Value(value) => { if (value != wanted) { return 1; } }
+        std.Text.IntParseResult.Invalid => { return 2; }
+        std.Text.IntParseResult.Overflow => { return 3; }
+    }
+    return 0;
+}
+
+int expectIntInvalid(ref string text) {
+    match (std.Text.parseInt(text)) {
+        std.Text.IntParseResult.Value(value) => { return 1; }
+        std.Text.IntParseResult.Invalid => { return 0; }
+        std.Text.IntParseResult.Overflow => { return 2; }
+    }
+}
+
+int expectIntOverflow(ref string text) {
+    match (std.Text.parseInt(text)) {
+        std.Text.IntParseResult.Value(value) => { return 1; }
+        std.Text.IntParseResult.Invalid => { return 2; }
+        std.Text.IntParseResult.Overflow => { return 0; }
+    }
+}
+
+int expectDouble(ref string text, double wanted) {
+    match (std.Text.parseDouble(text)) {
+        std.Text.DoubleParseResult.Value(value) => { if (value != wanted) { return 1; } }
+        std.Text.DoubleParseResult.Invalid => { return 2; }
+        std.Text.DoubleParseResult.Overflow => { return 3; }
+        std.Text.DoubleParseResult.Underflow => { return 4; }
+    }
+    return 0;
+}
+
+int expectDoubleInvalid(ref string text) {
+    match (std.Text.parseDouble(text)) {
+        std.Text.DoubleParseResult.Value(value) => { return 1; }
+        std.Text.DoubleParseResult.Invalid => { return 0; }
+        std.Text.DoubleParseResult.Overflow => { return 2; }
+        std.Text.DoubleParseResult.Underflow => { return 3; }
+    }
+}
+
+int expectDoubleOverflow(ref string text) {
+    match (std.Text.parseDouble(text)) {
+        std.Text.DoubleParseResult.Value(value) => { return 1; }
+        std.Text.DoubleParseResult.Invalid => { return 2; }
+        std.Text.DoubleParseResult.Overflow => { return 0; }
+        std.Text.DoubleParseResult.Underflow => { return 3; }
+    }
+}
+
+int expectDoubleUnderflow(ref string text) {
+    match (std.Text.parseDouble(text)) {
+        std.Text.DoubleParseResult.Value(value) => { return 1; }
+        std.Text.DoubleParseResult.Invalid => { return 2; }
+        std.Text.DoubleParseResult.Overflow => { return 3; }
+        std.Text.DoubleParseResult.Underflow => { return 0; }
+    }
+}
+
+int main() {
+    if (expectInt("0", 0) != 0 || expectInt("-0", 0) != 0 || expectInt("+42", 42) != 0 ||
+        expectInt("0012", 12) != 0 || expectInt("9223372036854775807", 9223372036854775807) != 0 ||
+        expectInt("-9223372036854775808", -9223372036854775808) != 0) { return 1; }
+    if (expectIntOverflow("9223372036854775808") != 0 || expectIntOverflow("-9223372036854775809") != 0) { return 2; }
+    if (expectIntInvalid("") != 0 || expectIntInvalid("+") != 0 || expectIntInvalid(" 1") != 0 ||
+        expectIntInvalid("999999999999999999999999x") != 0 || expectIntInvalid("1.0") != 0 ||
+        expectIntInvalid("1_0") != 0 || expectIntInvalid("0x10") != 0 || expectIntInvalid("１２") != 0 ||
+        expectIntInvalid("1\0") != 0) { return 3; }
+
+    if (expectDouble("0", 0.0) != 0) { return 40; }
+    if (expectDouble("1.0", 1.0) != 0) { return 41; }
+    if (expectDouble(".5", 0.5) != 0) { return 42; }
+    if (expectDouble("5.", 5.0) != 0) { return 43; }
+    if (expectDouble("-1.25", -1.25) != 0) { return 44; }
+    if (expectDouble("+1.25", 1.25) != 0) { return 45; }
+    if (expectDouble("1e3", 1000.0) != 0) { return 46; }
+    if (expectDouble("1.2e-3", 0.0012) != 0) { return 47; }
+    if (expectDouble("5.e0", 5.0) != 0) { return 48; }
+    if (expectDouble("5e-324", 5e-324) != 0) { return 49; }
+    if (expectDouble("2.2250738585072014e-308", 2.2250738585072014e-308) != 0) { return 50; }
+    if (expectDouble("1.7976931348623157e308", 1.7976931348623157e308) != 0) { return 51; }
+    if (expectDouble("1.7976931348623158e308", 1.7976931348623157e308) != 0) { return 52; }
+    if (expectDoubleOverflow("1.7976931348623159e308") != 0) { return 53; }
+    if (expectDoubleUnderflow("2.4703282292062327e-324") != 0) { return 54; }
+    if (expectDouble("2.4703282292062328e-324", 5e-324) != 0) { return 55; }
+    if (expectDouble("1.00000000000000011102230246251565404236316680908203125", 1.0) != 0) { return 56; }
+    if (expectDouble("1.00000000000000033306690738754696212708950042724609375", 1.0000000000000004) != 0) { return 57; }
+    if (expectDoubleInvalid("") != 0 || expectDoubleInvalid(".") != 0 || expectDoubleInvalid("1e") != 0 ||
+        expectDoubleInvalid("1e+") != 0 || expectDoubleInvalid("1.2.3") != 0 || expectDoubleInvalid("NaN") != 0 ||
+        expectDoubleInvalid("Inf") != 0 || expectDoubleInvalid(" 1") != 0 || expectDoubleInvalid("1,5") != 0 ||
+        expectDoubleInvalid("1\0") != 0 || expectDoubleInvalid("１２") != 0) { return 5; }
+    match (std.Text.parseDouble("1e9999")) {
+        std.Text.DoubleParseResult.Overflow => {}
+        std.Text.DoubleParseResult.Value(value) => { return 6; }
+        std.Text.DoubleParseResult.Invalid => { return 7; }
+        std.Text.DoubleParseResult.Underflow => { return 8; }
+    }
+    match (std.Text.parseDouble("1e-9999")) {
+        std.Text.DoubleParseResult.Underflow => {}
+        std.Text.DoubleParseResult.Value(value) => { return 9; }
+        std.Text.DoubleParseResult.Invalid => { return 10; }
+        std.Text.DoubleParseResult.Overflow => { return 11; }
+    }
+    match (std.Text.parseDouble("-0e9999")) {
+        std.Text.DoubleParseResult.Value(value) => { if (1.0 / value != -1.0 / 0.0) { return 12; } }
+        std.Text.DoubleParseResult.Invalid => { return 13; }
+        std.Text.DoubleParseResult.Overflow => { return 14; }
+        std.Text.DoubleParseResult.Underflow => { return 15; }
+    }
+    return 0;
+}

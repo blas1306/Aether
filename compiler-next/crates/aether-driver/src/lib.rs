@@ -370,7 +370,7 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
         ),
         (
             vec!["std", "Text"],
-            "package std.Text; struct ScalarOffset { usize value; } enum FindResult { Found(ScalarOffset), NotFound, } enum ByteSliceResult { Slice(string), InvalidRange, OutOfBounds, InvalidBoundary, }",
+            "package std.Text; struct ScalarOffset { usize value; } enum FindResult { Found(ScalarOffset), NotFound, } enum ByteSliceResult { Slice(string), InvalidRange, OutOfBounds, InvalidBoundary, } enum IntParseResult { Value(int), Invalid, Overflow, } enum DoubleParseResult { Value(double), Invalid, Overflow, Underflow, }",
         ),
         (
             vec!["std", "IO"],

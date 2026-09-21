@@ -6,7 +6,7 @@ use aether_frontend::TextOp;
 use aether_middle::SsaOperand;
 
 #[allow(clippy::too_many_lines)]
-pub(super) fn runtime(output: &mut String) {
+pub(super) fn runtime(output: &mut String, parse_int: bool, parse_double: bool) {
     output.push_str(r"
 declare ptr @memmem(ptr, i64, ptr, i64) nounwind readonly
 
@@ -522,6 +522,86 @@ size_trap:
   unreachable
 }
 ");
+    if parse_int {
+        output.push_str(
+            r"
+; status: 0 Value, 1 Invalid, 2 Overflow.  Syntax is validated after overflow.
+define internal { i32, i64 } @aether_text_parse_int(ptr %value) nounwind {
+entry:
+  %length = call i64 @aether_string_length(ptr %value)
+  %data = call ptr @aether_string_data(ptr %value)
+  %empty = icmp eq i64 %length, 0
+  br i1 %empty, label %invalid, label %first
+first:
+  %head = load i8, ptr %data
+  %plus = icmp eq i8 %head, 43
+  %minus = icmp eq i8 %head, 45
+  %signed = or i1 %plus, %minus
+  %start = select i1 %signed, i64 1, i64 0
+  %sign_only = icmp eq i64 %start, %length
+  br i1 %sign_only, label %invalid, label %loop
+loop:
+  %index = phi i64 [ %start, %first ], [ %next, %digit ]
+  %magnitude = phi i64 [ 0, %first ], [ %magnitude_next, %digit ]
+  %overflowed = phi i1 [ false, %first ], [ %overflow_next, %digit ]
+  %done = icmp eq i64 %index, %length
+  br i1 %done, label %finish, label %read
+read:
+  %address = getelementptr i8, ptr %data, i64 %index
+  %byte = load i8, ptr %address
+  %decimal = add i8 %byte, -48
+  %valid = icmp ult i8 %decimal, 10
+  br i1 %valid, label %digit, label %invalid
+digit:
+  %d = zext i8 %decimal to i64
+  %limit = select i1 %minus, i64 -9223372036854775808, i64 9223372036854775807
+  %room = sub i64 %limit, %d
+  %threshold = udiv i64 %room, 10
+  %new_overflow = icmp ugt i64 %magnitude, %threshold
+  %overflow_next = or i1 %overflowed, %new_overflow
+  %product = mul i64 %magnitude, 10
+  %sum = add i64 %product, %d
+  %magnitude_next = select i1 %overflow_next, i64 %magnitude, i64 %sum
+  %next = add i64 %index, 1
+  br label %loop
+finish:
+  br i1 %overflowed, label %overflow, label %parsed_value
+parsed_value:
+  %inverted = xor i64 %magnitude, -1
+  %negated = add i64 %inverted, 1
+  %number = select i1 %minus, i64 %negated, i64 %magnitude
+  %v0 = insertvalue { i32, i64 } zeroinitializer, i32 0, 0
+  %v1 = insertvalue { i32, i64 } %v0, i64 %number, 1
+  ret { i32, i64 } %v1
+invalid:
+  %bad = insertvalue { i32, i64 } zeroinitializer, i32 1, 0
+  ret { i32, i64 } %bad
+overflow:
+  %wide = insertvalue { i32, i64 } zeroinitializer, i32 2, 0
+  ret { i32, i64 } %wide
+}
+",
+        );
+    }
+    if parse_double {
+        output.push_str(include_str!("numeric_parse_runtime.inc"));
+        output.push_str(
+            r"
+define internal { i32, double } @aether_text_parse_double(ptr %value) nounwind {
+entry:
+  %length = call i64 @aether_string_length(ptr %value)
+  %data = call ptr @aether_string_data(ptr %value)
+  %raw = call { i32, i64 } @aether_numeric_parse_double(ptr %data, i64 %length)
+  %status = extractvalue { i32, i64 } %raw, 0
+  %bits = extractvalue { i32, i64 } %raw, 1
+  %number = bitcast i64 %bits to double
+  %r0 = insertvalue { i32, double } zeroinitializer, i32 %status, 0
+  %r1 = insertvalue { i32, double } %r0, double %number, 1
+  ret { i32, double } %r1
+}
+",
+        );
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -674,6 +754,22 @@ pub(super) fn emit_op(
             writeln!(output, "  %text_byte_slice_payload_{result} = extractvalue {{ i32, ptr }} %text_byte_slice_{result}, 1").unwrap();
             writeln!(output, "  %text_byte_slice_enum_{result} = insertvalue {result_ty} zeroinitializer, i32 %text_byte_slice_tag_{result}, 0").unwrap();
             writeln!(output, "  %v{result} = insertvalue {result_ty} %text_byte_slice_enum_{result}, ptr %text_byte_slice_payload_{result}, 1, 0").unwrap();
+        }
+        TextOp::ParseInt { value } => {
+            let value = borrowed(value, "value", output);
+            writeln!(output, "  %text_parse_int_{result} = call {{ i32, i64 }} @aether_text_parse_int(ptr {value})").unwrap();
+            writeln!(output, "  %text_parse_int_tag_{result} = extractvalue {{ i32, i64 }} %text_parse_int_{result}, 0").unwrap();
+            writeln!(output, "  %text_parse_int_payload_{result} = extractvalue {{ i32, i64 }} %text_parse_int_{result}, 1").unwrap();
+            writeln!(output, "  %text_parse_int_enum_{result} = insertvalue {result_ty} zeroinitializer, i32 %text_parse_int_tag_{result}, 0").unwrap();
+            writeln!(output, "  %v{result} = insertvalue {result_ty} %text_parse_int_enum_{result}, i64 %text_parse_int_payload_{result}, 1, 0").unwrap();
+        }
+        TextOp::ParseDouble { value } => {
+            let value = borrowed(value, "value", output);
+            writeln!(output, "  %text_parse_double_{result} = call {{ i32, double }} @aether_text_parse_double(ptr {value})").unwrap();
+            writeln!(output, "  %text_parse_double_tag_{result} = extractvalue {{ i32, double }} %text_parse_double_{result}, 0").unwrap();
+            writeln!(output, "  %text_parse_double_payload_{result} = extractvalue {{ i32, double }} %text_parse_double_{result}, 1").unwrap();
+            writeln!(output, "  %text_parse_double_enum_{result} = insertvalue {result_ty} zeroinitializer, i32 %text_parse_double_tag_{result}, 0").unwrap();
+            writeln!(output, "  %v{result} = insertvalue {result_ty} %text_parse_double_enum_{result}, double %text_parse_double_payload_{result}, 1, 0").unwrap();
         }
     }
 }
