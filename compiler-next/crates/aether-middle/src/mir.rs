@@ -7885,7 +7885,7 @@ fn validate_rvalue(
                 return Err("MIR binary operands have different types".into());
             }
             let (required_operand, result, required_trap, required_secondary) =
-                binary_contract(types, *op, left_ty)?;
+                binary_contract(types, enums, *op, left_ty)?;
             if left_ty != required_operand
                 || destination != result
                 || *trap != required_trap
@@ -8203,6 +8203,7 @@ fn concrete_enum_member(
 
 pub(crate) fn binary_contract(
     types: &TypeArena,
+    enums: &[EnumInfo],
     op: BinaryOp,
     operand: TypeId,
 ) -> Result<(TypeId, TypeId, Option<TrapKind>, Option<TrapKind>), String> {
@@ -8256,7 +8257,12 @@ pub(crate) fn binary_contract(
             }
         }
         BinaryOp::Equal | BinaryOp::NotEqual
-            if operand == TypeId::BOOL || types.is_numeric(operand) =>
+            if operand == TypeId::BOOL
+                || types.is_numeric(operand)
+                || matches!(
+                    aether_frontend::classify_enum_equality(operand, operand, enums, types),
+                    aether_frontend::EnumEqualityClassification::Admitted { .. }
+                ) =>
         {
             Ok((operand, TypeId::BOOL, None, None))
         }
@@ -9442,5 +9448,101 @@ mod tests {
             };
         }
         assert!(verify_mir(bad_test).is_err());
+    }
+
+    #[test]
+    fn enum_equality_mir_contract_fails_closed_when_corrupted() {
+        fn binary(mir: &mut FlowMir) -> &mut Rvalue {
+            &mut mir.functions[0]
+                .blocks
+                .iter_mut()
+                .flat_map(|block| &mut block.instructions)
+                .find(|instruction| matches!(instruction.value, Rvalue::Binary { .. }))
+                .unwrap()
+                .value
+        }
+
+        let source = "enum A{X,Y}enum B{X,Y}int main(){A a=A.X;A b=A.Y;B other=B.X;if(a==b){return 1;}return 0;}";
+        let raw = mir(source);
+        verify_mir(raw.clone()).unwrap();
+
+        let mut nominal_mismatch = raw.clone();
+        let other = nominal_mismatch.functions[0]
+            .locals
+            .iter()
+            .find(|local| local.name.as_deref() == Some("other"))
+            .unwrap()
+            .id;
+        let Rvalue::Binary { right, .. } = binary(&mut nominal_mismatch) else {
+            unreachable!()
+        };
+        *right = Operand::Local(other);
+        let error = verify_mir(nominal_mismatch).unwrap_err();
+        assert_eq!(error[0].code, "E0300");
+
+        let mut ordered = raw.clone();
+        let Rvalue::Binary { op, .. } = binary(&mut ordered) else {
+            unreachable!()
+        };
+        *op = BinaryOp::Less;
+        assert_eq!(verify_mir(ordered).unwrap_err()[0].code, "E0300");
+
+        let mut trapping = raw.clone();
+        let Rvalue::Binary { trap, .. } = binary(&mut trapping) else {
+            unreachable!()
+        };
+        *trap = Some(TrapKind::IntegerOverflow);
+        assert_eq!(verify_mir(trapping).unwrap_err()[0].code, "E0300");
+
+        let mut secondary_trapping = raw;
+        let Rvalue::Binary { secondary_trap, .. } = binary(&mut secondary_trapping) else {
+            unreachable!()
+        };
+        *secondary_trap = Some(TrapKind::DivisionByZero);
+        assert_eq!(verify_mir(secondary_trapping).unwrap_err()[0].code, "E0300");
+
+        let mut wrong_destination = mir(source);
+        let enum_ty = wrong_destination.functions[0]
+            .locals
+            .iter()
+            .find(|local| local.name.as_deref() == Some("a"))
+            .unwrap()
+            .ty;
+        let destination = wrong_destination.functions[0]
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .find(|instruction| matches!(instruction.value, Rvalue::Binary { .. }))
+            .and_then(|instruction| match instruction.destination.base {
+                PlaceBase::Local(local) => Some(local),
+                PlaceBase::Dereference { .. } => None,
+            })
+            .unwrap();
+        wrong_destination.functions[0].locals[destination.0 as usize].ty = enum_ty;
+        assert_eq!(verify_mir(wrong_destination).unwrap_err()[0].code, "E0300");
+
+        let generic = "enum Box<T>{Empty,Full}int main(){Box<int>a=Box<int>.Empty;Box<int>b=Box<int>.Full;Box<double>other=Box<double>.Empty;if(a==b){return 1;}return 0;}";
+        let mut instance_mismatch = mir(generic);
+        let other = instance_mismatch.functions[0]
+            .locals
+            .iter()
+            .find(|local| local.name.as_deref() == Some("other"))
+            .unwrap()
+            .id;
+        let Rvalue::Binary { right, .. } = binary(&mut instance_mismatch) else {
+            unreachable!()
+        };
+        *right = Operand::Local(other);
+        assert_eq!(verify_mir(instance_mismatch).unwrap_err()[0].code, "E0300");
+
+        let mut payload = mir(source);
+        let declared_payload =
+            mir("enum Payload{None,Some(int)}int main(){Payload value=Payload.None;return 0;}")
+                .enums[0]
+                .variants[1]
+                .payloads[0]
+                .clone();
+        payload.enums[0].variants[0].payloads.push(declared_payload);
+        assert_eq!(verify_mir(payload).unwrap_err()[0].code, "E0300");
     }
 }

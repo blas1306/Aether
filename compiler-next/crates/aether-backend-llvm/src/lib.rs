@@ -2803,7 +2803,31 @@ fn emit_function(
                     | BinaryOp::Equal
                     | BinaryOp::NotEqual => {
                         let operand_ty = operand_type(function, left);
-                        if types.float_info(operand_ty).is_some() {
+                        if types.enum_id(operand_ty).is_some() {
+                            let predicate = if *op == BinaryOp::Equal { "eq" } else { "ne" };
+                            writeln!(
+                                output,
+                                "  %enum_eq_{}_left = extractvalue {} {}, 0",
+                                instruction.result.0,
+                                llvm_type(types, operand_ty),
+                                llvm_operand(left)
+                            )
+                            .unwrap();
+                            writeln!(
+                                output,
+                                "  %enum_eq_{}_right = extractvalue {} {}, 0",
+                                instruction.result.0,
+                                llvm_type(types, operand_ty),
+                                llvm_operand(right)
+                            )
+                            .unwrap();
+                            writeln!(
+                                output,
+                                "  %v{} = icmp {predicate} i32 %enum_eq_{}_left, %enum_eq_{}_right",
+                                instruction.result.0, instruction.result.0, instruction.result.0
+                            )
+                            .unwrap();
+                        } else if types.float_info(operand_ty).is_some() {
                             let predicate = match op {
                                 BinaryOp::Less => "olt",
                                 BinaryOp::LessEqual => "ole",

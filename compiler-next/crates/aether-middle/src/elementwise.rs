@@ -174,7 +174,7 @@ impl ElementwiseKernel {
                         })
             })
         };
-        let scalar = crate::mir::binary_contract(types, self.op, element)?;
+        let scalar = crate::mir::binary_contract(types, &[], self.op, element)?;
         let valid_op = if self.scalar_side.is_some() {
             types.supports_builtin_multiply(element)
                 && matches!(

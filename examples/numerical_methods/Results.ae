@@ -25,52 +25,25 @@ struct IntegrationResult {
 }
 
 bool isConverged(RootStatus status) {
-    match (status) {
-        RootStatus.Converged => { return true; }
-        RootStatus.MaxIterations => { return false; }
-        RootStatus.InvalidInterval => { return false; }
-        RootStatus.ZeroDerivative => { return false; }
-    }
+    return status == RootStatus.Converged;
 }
 
 bool isInvalidInterval(RootStatus status) {
-    match (status) {
-        RootStatus.Converged => { return false; }
-        RootStatus.MaxIterations => { return false; }
-        RootStatus.InvalidInterval => { return true; }
-        RootStatus.ZeroDerivative => { return false; }
-    }
+    return status == RootStatus.InvalidInterval;
 }
 
 bool isZeroDerivative(RootStatus status) {
-    match (status) {
-        RootStatus.Converged => { return false; }
-        RootStatus.MaxIterations => { return false; }
-        RootStatus.InvalidInterval => { return false; }
-        RootStatus.ZeroDerivative => { return true; }
-    }
+    return status == RootStatus.ZeroDerivative;
 }
 
 bool isIntegrationSuccess(IntegrationStatus status) {
-    match (status) {
-        IntegrationStatus.Success => { return true; }
-        IntegrationStatus.NonPositiveSubintervalCount => { return false; }
-        IntegrationStatus.SimpsonRequiresEvenSubintervals => { return false; }
-    }
+    return status == IntegrationStatus.Success;
 }
 
 bool isNonPositiveSubintervalCount(IntegrationStatus status) {
-    match (status) {
-        IntegrationStatus.Success => { return false; }
-        IntegrationStatus.NonPositiveSubintervalCount => { return true; }
-        IntegrationStatus.SimpsonRequiresEvenSubintervals => { return false; }
-    }
+    return status == IntegrationStatus.NonPositiveSubintervalCount;
 }
 
 bool isSimpsonRequiresEvenSubintervals(IntegrationStatus status) {
-    match (status) {
-        IntegrationStatus.Success => { return false; }
-        IntegrationStatus.NonPositiveSubintervalCount => { return false; }
-        IntegrationStatus.SimpsonRequiresEvenSubintervals => { return true; }
-    }
+    return status == IntegrationStatus.SimpsonRequiresEvenSubintervals;
 }

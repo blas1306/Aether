@@ -524,6 +524,75 @@ pub struct EnumInfo {
     pub span: Span,
 }
 
+/// Closed built-in classification for equality of nominal enum values.
+///
+/// This deliberately does not model a general equality capability: it is the
+/// shared ENUM-EQUALITY-V1 gate used by source typing and every IR verifier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EnumEqualityClassification {
+    Admitted { enum_id: EnumId, enum_type: TypeId },
+    NotBothEnums,
+    DifferentDeclarations { left: EnumId, right: EnumId },
+    DifferentInstances { enum_id: EnumId },
+    PayloadBearing { enum_id: EnumId },
+    InvalidMetadata,
+}
+
+#[must_use]
+pub fn classify_enum_equality(
+    left: TypeId,
+    right: TypeId,
+    enums: &[EnumInfo],
+    types: &TypeArena,
+) -> EnumEqualityClassification {
+    let resolve = |ty| {
+        let (id, arguments) = match types.get(ty) {
+            Some(TypeData::Enum(id)) => (*id, None),
+            Some(TypeData::EnumInstance(id, arguments)) => (*id, Some(*arguments)),
+            _ => return Ok(None),
+        };
+        let Some(info) = enums.get(id.0 as usize).filter(|info| info.id == id) else {
+            return Err(());
+        };
+        let metadata_valid = match arguments {
+            None => info.generic_parameters.is_empty(),
+            Some(arguments) => types.arguments(arguments).is_some_and(|arguments| {
+                !info.generic_parameters.is_empty()
+                    && arguments.len() == info.generic_parameters.len()
+                    && arguments.iter().all(|argument| types.is_valid(*argument))
+            }),
+        };
+        metadata_valid.then_some(Some(id)).ok_or(())
+    };
+
+    let (left_id, right_id) = match (resolve(left), resolve(right)) {
+        (Ok(Some(left)), Ok(Some(right))) => (left, right),
+        (Ok(_), Ok(_)) => return EnumEqualityClassification::NotBothEnums,
+        _ => return EnumEqualityClassification::InvalidMetadata,
+    };
+    if left_id != right_id {
+        return EnumEqualityClassification::DifferentDeclarations {
+            left: left_id,
+            right: right_id,
+        };
+    }
+    if left != right {
+        return EnumEqualityClassification::DifferentInstances { enum_id: left_id };
+    }
+    let info = &enums[left_id.0 as usize];
+    if info
+        .variants
+        .iter()
+        .any(|variant| !variant.payloads.is_empty())
+    {
+        return EnumEqualityClassification::PayloadBearing { enum_id: left_id };
+    }
+    EnumEqualityClassification::Admitted {
+        enum_id: left_id,
+        enum_type: left,
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct DeclaredProgram {
     types: TypeArena,
@@ -12631,6 +12700,64 @@ impl Analyzer<'_> {
             });
         }
         let equality = matches!(op, AstBinaryOp::Equal | AstBinaryOp::NotEqual);
+        if self.types.enum_id(l.expr.ty).is_some() || self.types.enum_id(r.expr.ty).is_some() {
+            if !equality {
+                return Err(vec![Diagnostic::new(
+                    "E0472",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    format!(
+                        "enum equality requires == or != on two values of the same enum type; found {} and {}",
+                        self.type_name(l.expr.ty),
+                        self.type_name(r.expr.ty)
+                    ),
+                    Some(span),
+                )]);
+            }
+            return match classify_enum_equality(l.expr.ty, r.expr.ty, self.enums, self.types) {
+                EnumEqualityClassification::Admitted { .. } => {
+                    Ok(bin_result(self.types, op, l, r, TypeId::BOOL, None))
+                }
+                EnumEqualityClassification::DifferentDeclarations { .. } => {
+                    Err(vec![Diagnostic::new(
+                        "E0470",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        format!(
+                            "cannot compare distinct enum types `{}` and `{}`; enum equality is nominal",
+                            self.type_name(l.expr.ty),
+                            self.type_name(r.expr.ty)
+                        ),
+                        Some(span),
+                    )])
+                }
+                EnumEqualityClassification::PayloadBearing { enum_id } => {
+                    Err(vec![Diagnostic::new(
+                        "E0471",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        format!(
+                            "equality for payload-bearing enum `{}` is not supported in ENUM-EQUALITY-V1",
+                            self.enums[enum_id.0 as usize].name
+                        ),
+                        Some(span),
+                    )])
+                }
+                EnumEqualityClassification::DifferentInstances { .. }
+                | EnumEqualityClassification::NotBothEnums
+                | EnumEqualityClassification::InvalidMetadata => Err(vec![Diagnostic::new(
+                    "E0472",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    format!(
+                        "enum equality requires two values of the same enum type; found `{}` and `{}`",
+                        self.type_name(l.expr.ty),
+                        self.type_name(r.expr.ty)
+                    ),
+                    Some(span),
+                )]),
+            };
+        }
         if self.types.reference_info(l.expr.ty).is_some()
             || self.types.reference_info(r.expr.ty).is_some()
         {
@@ -15501,7 +15628,13 @@ fn verify_expr(
                 | HirBinaryOp::Greater
                 | HirBinaryOp::GreaterEqual => types.is_numeric(left.ty) && e.ty == TypeId::BOOL,
                 HirBinaryOp::Equal | HirBinaryOp::NotEqual => {
-                    (left.ty == TypeId::BOOL || types.is_numeric(left.ty)) && e.ty == TypeId::BOOL
+                    (left.ty == TypeId::BOOL
+                        || types.is_numeric(left.ty)
+                        || matches!(
+                            classify_enum_equality(left.ty, right.ty, enums, types),
+                            EnumEqualityClassification::Admitted { .. }
+                        ))
+                        && e.ty == TypeId::BOOL
                 }
             };
             if !ok {
@@ -17784,5 +17917,72 @@ mod vertical33_tests {
                 assert!(verify_hir(&bad).is_err(), "{scalar} {case}");
             }
         }
+    }
+
+    #[test]
+    fn enum_equality_hir_contract_fails_closed_when_corrupted() {
+        fn equality(hir: &mut TypedHir) -> &mut HirExpr {
+            hir.generic_functions
+                .iter_mut()
+                .flat_map(|function| &mut function.body.statements)
+                .find_map(|statement| match &mut statement.kind {
+                    HirStmtKind::Local { initializer, .. }
+                        if matches!(initializer.kind, HirExprKind::Binary { .. }) =>
+                    {
+                        Some(initializer)
+                    }
+                    _ => None,
+                })
+                .unwrap()
+        }
+
+        let source = "enum Box<T>{Empty,Full}enum Payload{None,Some(int)}bool same<T>(Box<T>a,Box<T>b){bool result=a==b;return result;}int main(){return 0;}";
+        let hir =
+            analyze(parse_source(&SourceFile::new("enum-equality.ae", source)).unwrap()).unwrap();
+        verify_hir(&hir).unwrap();
+
+        let mut wrong_result = hir.clone();
+        let enum_ty = wrong_result.generic_functions[0].locals[0].ty;
+        equality(&mut wrong_result).ty = enum_ty;
+        let error = verify_hir(&wrong_result).unwrap_err();
+        assert_eq!(error[0].code, "E0348");
+
+        let mut ordered = hir.clone();
+        let HirExprKind::Binary { op, .. } = &mut equality(&mut ordered).kind else {
+            unreachable!()
+        };
+        *op = HirBinaryOp::Less;
+        let error = verify_hir(&ordered).unwrap_err();
+        assert_eq!(error[0].code, "E0348");
+
+        let mut nominal_mismatch = hir.clone();
+        let other_enum = nominal_mismatch
+            .types
+            .entries()
+            .find_map(|(ty, _)| {
+                (nominal_mismatch.types.enum_id(ty) == Some(EnumId(1))).then_some(ty)
+            })
+            .unwrap();
+        let HirExprKind::Binary { right, .. } = &mut equality(&mut nominal_mismatch).kind else {
+            unreachable!()
+        };
+        right.ty = other_enum;
+        assert_eq!(verify_hir(&nominal_mismatch).unwrap_err()[0].code, "E0348");
+
+        let mut instance_mismatch = hir.clone();
+        let other_instance = instance_mismatch
+            .types
+            .intern_enum_instance(EnumId(0), vec![TypeId::FLOAT64]);
+        let HirExprKind::Binary { right, .. } = &mut equality(&mut instance_mismatch).kind else {
+            unreachable!()
+        };
+        right.ty = other_instance;
+        assert_eq!(verify_hir(&instance_mismatch).unwrap_err()[0].code, "E0348");
+
+        let mut payload_bearing = hir;
+        let payload = payload_bearing.enums[1].variants[1].payloads[0].clone();
+        payload_bearing.enums[0].variants[0].payloads.push(payload);
+        let error = verify_hir(&payload_bearing).unwrap_err();
+        assert_eq!(error[0].code, "E0348");
     }
 }

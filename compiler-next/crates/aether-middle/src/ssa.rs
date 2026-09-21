@@ -4657,7 +4657,7 @@ fn verify_op(
                 return Err("SSA binary operand type mismatch".into());
             }
             let (required, output, required_trap, required_secondary) =
-                crate::mir::binary_contract(types, *op, left)?;
+                crate::mir::binary_contract(types, enums, *op, left)?;
             if left != required
                 || result != output
                 || *trap != required_trap
@@ -6096,5 +6096,122 @@ mod tests {
             *nullable_type = TypeId::INT64;
         }
         assert!(verify_ssa(bad_null).is_err());
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn enum_equality_ssa_contract_fails_closed_when_corrupted() {
+        fn binary(ssa: &mut SsaIr) -> &mut SsaInstruction {
+            ssa.functions[0]
+                .blocks
+                .iter_mut()
+                .flat_map(|block| &mut block.instructions)
+                .find(|instruction| matches!(instruction.op, SsaOp::Binary { .. }))
+                .unwrap()
+        }
+
+        let source = "enum A{X,Y}enum B{X,Y}int main(){A a=A.X;A b=A.Y;B other=B.X;if(a==b){return 1;}return 0;}";
+        let raw = raw_ssa(source);
+        verify_ssa(raw.clone()).unwrap();
+
+        let mut nominal_mismatch = raw.clone();
+        let other = nominal_mismatch.functions[0]
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .find(|instruction| {
+                matches!(
+                    instruction.op,
+                    SsaOp::EnumConstruct {
+                        enum_id: EnumId(1),
+                        ..
+                    }
+                )
+            })
+            .unwrap()
+            .result;
+        let SsaOp::Binary { right, .. } = &mut binary(&mut nominal_mismatch).op else {
+            unreachable!()
+        };
+        *right = SsaOperand::Value(other);
+        assert_eq!(verify_ssa(nominal_mismatch).unwrap_err()[0].code, "E0400");
+
+        let mut ordered = raw.clone();
+        let SsaOp::Binary { op, .. } = &mut binary(&mut ordered).op else {
+            unreachable!()
+        };
+        *op = BinaryOp::Less;
+        assert_eq!(verify_ssa(ordered).unwrap_err()[0].code, "E0400");
+
+        let mut trapping = raw.clone();
+        let SsaOp::Binary { trap, .. } = &mut binary(&mut trapping).op else {
+            unreachable!()
+        };
+        *trap = Some(TrapKind::IntegerOverflow);
+        assert_eq!(verify_ssa(trapping).unwrap_err()[0].code, "E0400");
+
+        let mut secondary_trapping = raw;
+        let SsaOp::Binary { secondary_trap, .. } = &mut binary(&mut secondary_trapping).op else {
+            unreachable!()
+        };
+        *secondary_trap = Some(TrapKind::IntegerOverflow);
+        assert_eq!(verify_ssa(secondary_trapping).unwrap_err()[0].code, "E0400");
+
+        let mut wrong_destination = raw_ssa(source);
+        let enum_ty = wrong_destination.functions[0]
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .find(|instruction| matches!(instruction.op, SsaOp::EnumConstruct { .. }))
+            .unwrap()
+            .ty;
+        binary(&mut wrong_destination).ty = enum_ty;
+        assert_eq!(verify_ssa(wrong_destination).unwrap_err()[0].code, "E0400");
+
+        let generic = "enum Box<T>{Empty,Full}int main(){Box<int>a=Box<int>.Empty;Box<int>b=Box<int>.Full;Box<double>other=Box<double>.Empty;if(a==b){return 1;}return 0;}";
+        let mut instance_mismatch = raw_ssa(generic);
+        let compared_value = {
+            let instruction = binary(&mut instance_mismatch);
+            let SsaOp::Binary {
+                left: SsaOperand::Value(left),
+                ..
+            } = &instruction.op
+            else {
+                unreachable!()
+            };
+            *left
+        };
+        let compared_type = instance_mismatch.functions[0]
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .find(|instruction| instruction.result == compared_value)
+            .unwrap()
+            .ty;
+        let other = instance_mismatch.functions[0]
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .find(|instruction| {
+                matches!(instruction.op, SsaOp::EnumConstruct { .. })
+                    && instruction.ty != compared_type
+            })
+            .unwrap()
+            .result;
+        let SsaOp::Binary { right, .. } = &mut binary(&mut instance_mismatch).op else {
+            unreachable!()
+        };
+        *right = SsaOperand::Value(other);
+        assert_eq!(verify_ssa(instance_mismatch).unwrap_err()[0].code, "E0400");
+
+        let mut payload = raw_ssa(source);
+        let declared_payload =
+            raw_ssa("enum Payload{None,Some(int)}int main(){Payload value=Payload.None;return 0;}")
+                .enums[0]
+                .variants[1]
+                .payloads[0]
+                .clone();
+        payload.enums[0].variants[0].payloads.push(declared_payload);
+        assert_eq!(verify_ssa(payload).unwrap_err()[0].code, "E0400");
     }
 }
