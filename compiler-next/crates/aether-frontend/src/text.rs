@@ -40,6 +40,19 @@ pub enum TextOp<O> {
     Lines {
         value: O,
     },
+    ByteAt {
+        value: O,
+        offset: O,
+    },
+    IsByteBoundary {
+        value: O,
+        offset: O,
+    },
+    ByteSlice {
+        value: O,
+        start: O,
+        end_exclusive: O,
+    },
 }
 
 impl<O> TextOp<O> {
@@ -61,12 +74,20 @@ impl<O> TextOp<O> {
             } => vec![value, needle],
             Self::StartsWith { value, prefix } => vec![value, prefix],
             Self::EndsWith { value, suffix } => vec![value, suffix],
+            Self::ByteAt { value, offset } | Self::IsByteBoundary { value, offset } => {
+                vec![value, offset]
+            }
             Self::Find {
                 value,
                 needle,
                 start: Some(start),
             } => vec![value, needle, start],
             Self::Substring { value, start, end } => vec![value, start, end],
+            Self::ByteSlice {
+                value,
+                start,
+                end_exclusive,
+            } => vec![value, start, end_exclusive],
         }
     }
 
@@ -74,7 +95,11 @@ impl<O> TextOp<O> {
     pub const fn creates_owner(&self) -> bool {
         matches!(
             self,
-            Self::Substring { .. } | Self::Trim { .. } | Self::Split { .. } | Self::Lines { .. }
+            Self::Substring { .. }
+                | Self::Trim { .. }
+                | Self::Split { .. }
+                | Self::Lines { .. }
+                | Self::ByteSlice { .. }
         )
     }
 
@@ -113,6 +138,23 @@ impl<O> TextOp<O> {
                 separator: f(separator)?,
             },
             Self::Lines { value } => TextOp::Lines { value: f(value)? },
+            Self::ByteAt { value, offset } => TextOp::ByteAt {
+                value: f(value)?,
+                offset: f(offset)?,
+            },
+            Self::IsByteBoundary { value, offset } => TextOp::IsByteBoundary {
+                value: f(value)?,
+                offset: f(offset)?,
+            },
+            Self::ByteSlice {
+                value,
+                start,
+                end_exclusive,
+            } => TextOp::ByteSlice {
+                value: f(value)?,
+                start: f(start)?,
+                end_exclusive: f(end_exclusive)?,
+            },
         })
     }
 }
@@ -143,6 +185,16 @@ pub fn verify_text_op<O>(
         .entries()
         .find_map(|(ty, data)| matches!(data, TypeData::Enum(id) if *id == find.id).then_some(ty))
         .ok_or("canonical Text.FindResult type is missing")?;
+    let byte_slice = enums
+        .iter()
+        .find(|e| e.name == "ByteSliceResult" && e.module == scalar.module)
+        .ok_or("canonical Text.ByteSliceResult metadata is missing")?;
+    let byte_slice_ty = types
+        .entries()
+        .find_map(|(ty, data)| {
+            matches!(data, TypeData::Enum(id) if *id == byte_slice.id).then_some(ty)
+        })
+        .ok_or("canonical Text.ByteSliceResult type is missing")?;
 
     let tys = op
         .operands()
@@ -155,15 +207,18 @@ pub fn verify_text_op<O>(
             mutable: false,
         })
         .ok_or("canonical ref string type is missing")?;
-    let (string_count, expected) = match op {
-        TextOp::CodePointCount { .. } => (1, TypeId::USIZE),
+    let (string_count, trailing, expected) = match op {
+        TextOp::CodePointCount { .. } => (1, scalar_ty, TypeId::USIZE),
         TextOp::Contains { .. } | TextOp::StartsWith { .. } | TextOp::EndsWith { .. } => {
-            (2, TypeId::BOOL)
+            (2, scalar_ty, TypeId::BOOL)
         }
-        TextOp::Find { start: None, .. } | TextOp::Find { start: Some(_), .. } => (2, find_ty),
-        TextOp::Substring { .. } | TextOp::Trim { .. } => (1, TypeId::STRING),
+        TextOp::Find { start: None, .. } | TextOp::Find { start: Some(_), .. } => {
+            (2, scalar_ty, find_ty)
+        }
+        TextOp::Substring { .. } | TextOp::Trim { .. } => (1, scalar_ty, TypeId::STRING),
         TextOp::Split { .. } => (
             2,
+            scalar_ty,
             types
                 .entries()
                 .find_map(|(ty, data)| {
@@ -174,6 +229,7 @@ pub fn verify_text_op<O>(
         ),
         TextOp::Lines { .. } => (
             1,
+            scalar_ty,
             types
                 .entries()
                 .find_map(|(ty, data)| {
@@ -182,9 +238,12 @@ pub fn verify_text_op<O>(
                 })
                 .ok_or("canonical List<string> type is missing")?,
         ),
+        TextOp::ByteAt { .. } => (1, TypeId::USIZE, TypeId::UINT8),
+        TextOp::IsByteBoundary { .. } => (1, TypeId::USIZE, TypeId::BOOL),
+        TextOp::ByteSlice { .. } => (1, TypeId::USIZE, byte_slice_ty),
     };
     if tys.iter().take(string_count).any(|ty| *ty != string_ref)
-        || tys.iter().skip(string_count).any(|ty| *ty != scalar_ty)
+        || tys.iter().skip(string_count).any(|ty| *ty != trailing)
     {
         return Err("Text operation operand type is invalid".into());
     }

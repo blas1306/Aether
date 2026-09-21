@@ -22,6 +22,7 @@ read:
   %byte = load i8, ptr %address
   ret i8 %byte
 trap:
+  ; structured Aether trap: TextByteOffsetOutOfBounds
   call void @llvm.trap()
   unreachable
 }
@@ -94,6 +95,73 @@ size_trap:
 trap:
   call void @llvm.trap()
   unreachable
+}
+
+define internal i1 @aether_text_is_byte_boundary(ptr %value, i64 %offset) nounwind {
+entry:
+  %length = call i64 @aether_string_length(ptr %value)
+  %bounded = icmp ule i64 %offset, %length
+  br i1 %bounded, label %edge_test, label %trap
+edge_test:
+  %at_zero = icmp eq i64 %offset, 0
+  %at_end = icmp eq i64 %offset, %length
+  %at_edge = or i1 %at_zero, %at_end
+  br i1 %at_edge, label %boundary, label %read
+read:
+  %byte = call i8 @aether_text_byte_at(ptr %value, i64 %offset)
+  %mask = and i8 %byte, -64
+  %continuation = icmp eq i8 %mask, -128
+  %result = xor i1 %continuation, true
+  ret i1 %result
+boundary:
+  ret i1 true
+trap:
+  ; structured Aether trap: TextByteOffsetOutOfBounds
+  call void @llvm.trap()
+  unreachable
+}
+
+; Internal bridge result: tag plus the owned Slice payload when tag is zero.
+define internal { i32, ptr } @aether_text_byte_slice(ptr %value, i64 %start, i64 %end) {
+entry:
+  %length = call i64 @aether_string_length(ptr %value)
+  %ordered = icmp ule i64 %start, %end
+  br i1 %ordered, label %bounds, label %invalid_range
+bounds:
+  %start_bounded = icmp ule i64 %start, %length
+  %end_bounded = icmp ule i64 %end, %length
+  %bounded = and i1 %start_bounded, %end_bounded
+  br i1 %bounded, label %start_boundary, label %out_of_bounds
+start_boundary:
+  %start_edge = icmp eq i64 %start, %length
+  br i1 %start_edge, label %end_boundary, label %start_read
+start_read:
+  %start_byte = call i8 @aether_text_byte_at(ptr %value, i64 %start)
+  %start_mask = and i8 %start_byte, -64
+  %start_continuation = icmp eq i8 %start_mask, -128
+  br i1 %start_continuation, label %invalid_boundary, label %end_boundary
+end_boundary:
+  %end_edge = icmp eq i64 %end, %length
+  br i1 %end_edge, label %slice, label %end_read
+end_read:
+  %end_byte = call i8 @aether_text_byte_at(ptr %value, i64 %end)
+  %end_mask = and i8 %end_byte, -64
+  %end_continuation = icmp eq i8 %end_mask, -128
+  br i1 %end_continuation, label %invalid_boundary, label %slice
+slice:
+  %owned = call ptr @aether_text_copy_range(ptr %value, i64 %start, i64 %end)
+  %slice_tag = insertvalue { i32, ptr } zeroinitializer, i32 0, 0
+  %slice_result = insertvalue { i32, ptr } %slice_tag, ptr %owned, 1
+  ret { i32, ptr } %slice_result
+invalid_range:
+  %range_result = insertvalue { i32, ptr } zeroinitializer, i32 1, 0
+  ret { i32, ptr } %range_result
+out_of_bounds:
+  %bounds_result = insertvalue { i32, ptr } zeroinitializer, i32 2, 0
+  ret { i32, ptr } %bounds_result
+invalid_boundary:
+  %boundary_result = insertvalue { i32, ptr } zeroinitializer, i32 3, 0
+  ret { i32, ptr } %boundary_result
 }
 
 define internal i64 @aether_text_code_point_count(ptr %value) nounwind {
@@ -576,6 +644,36 @@ pub(super) fn emit_op(
                 "  %v{result} = call {{ ptr, i64, i64 }} @aether_text_lines(ptr {value})"
             )
             .unwrap();
+        }
+        TextOp::ByteAt { value, offset } => {
+            let value = borrowed(value, "value", output);
+            writeln!(
+                output,
+                "  %v{result} = call i8 @aether_text_byte_at(ptr {value}, i64 {})",
+                operand(offset)
+            )
+            .unwrap();
+        }
+        TextOp::IsByteBoundary { value, offset } => {
+            let value = borrowed(value, "value", output);
+            writeln!(
+                output,
+                "  %v{result} = call i1 @aether_text_is_byte_boundary(ptr {value}, i64 {})",
+                operand(offset)
+            )
+            .unwrap();
+        }
+        TextOp::ByteSlice {
+            value,
+            start,
+            end_exclusive,
+        } => {
+            let value = borrowed(value, "value", output);
+            writeln!(output, "  %text_byte_slice_{result} = call {{ i32, ptr }} @aether_text_byte_slice(ptr {value}, i64 {}, i64 {})", operand(start), operand(end_exclusive)).unwrap();
+            writeln!(output, "  %text_byte_slice_tag_{result} = extractvalue {{ i32, ptr }} %text_byte_slice_{result}, 0").unwrap();
+            writeln!(output, "  %text_byte_slice_payload_{result} = extractvalue {{ i32, ptr }} %text_byte_slice_{result}, 1").unwrap();
+            writeln!(output, "  %text_byte_slice_enum_{result} = insertvalue {result_ty} zeroinitializer, i32 %text_byte_slice_tag_{result}, 0").unwrap();
+            writeln!(output, "  %v{result} = insertvalue {result_ty} %text_byte_slice_enum_{result}, ptr %text_byte_slice_payload_{result}, 1, 0").unwrap();
         }
     }
 }

@@ -11616,10 +11616,21 @@ impl Analyzer<'_> {
             .copied()
             .ok_or_else(|| vec![type_error("canonical Text.FindResult is unavailable", span)])?;
         let find_ty = self.types.intern(TypeData::Enum(find_id));
+        let byte_slice_id = self.enum_names[module.0 as usize]
+            .get("ByteSliceResult")
+            .copied()
+            .ok_or_else(|| {
+                vec![type_error(
+                    "canonical Text.ByteSliceResult is unavailable",
+                    span,
+                )]
+            })?;
+        let byte_slice_ty = self.types.intern(TypeData::Enum(byte_slice_id));
         let arity = match function {
             "scalarOffset" | "codePointCount" | "trim" | "lines" => 1,
-            "contains" | "startsWith" | "endsWith" | "find" | "split" => 2,
-            "findFrom" | "substring" => 3,
+            "contains" | "startsWith" | "endsWith" | "find" | "split" | "byteAt"
+            | "isByteBoundary" => 2,
+            "findFrom" | "substring" | "byteSlice" => 3,
             _ => {
                 return Err(vec![Diagnostic::new(
                     "E0222",
@@ -11646,13 +11657,16 @@ impl Analyzer<'_> {
         let string_ref = self.types.intern_reference(TypeId::STRING, false);
         let mut adapted = Vec::with_capacity(args.len());
         let string_count = match function {
-            "codePointCount" | "trim" | "substring" | "lines" => 1,
+            "codePointCount" | "trim" | "substring" | "lines" | "byteAt" | "isByteBoundary"
+            | "byteSlice" => 1,
             "contains" | "startsWith" | "endsWith" | "find" | "findFrom" | "split" => 2,
             _ => unreachable!(),
         };
         for (index, argument) in args.iter().enumerate() {
             let parameter = if index < string_count {
                 string_ref
+            } else if matches!(function, "byteAt" | "isByteBoundary" | "byteSlice") {
+                TypeId::USIZE
             } else {
                 scalar_ty
             };
@@ -11741,6 +11755,28 @@ impl Analyzer<'_> {
                     list,
                 )
             }
+            "byteAt" => (
+                crate::TextOp::ByteAt {
+                    value: adapted[0].clone(),
+                    offset: adapted[1].clone(),
+                },
+                TypeId::UINT8,
+            ),
+            "isByteBoundary" => (
+                crate::TextOp::IsByteBoundary {
+                    value: adapted[0].clone(),
+                    offset: adapted[1].clone(),
+                },
+                TypeId::BOOL,
+            ),
+            "byteSlice" => (
+                crate::TextOp::ByteSlice {
+                    value: adapted[0].clone(),
+                    start: adapted[1].clone(),
+                    end_exclusive: adapted[2].clone(),
+                },
+                byte_slice_ty,
+            ),
             _ => unreachable!(),
         };
         Ok(Checked {

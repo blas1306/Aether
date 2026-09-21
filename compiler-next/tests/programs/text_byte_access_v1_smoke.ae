@@ -1,0 +1,79 @@
+package text_byte_access_v1_smoke;
+
+import std.Text;
+
+int expectSlice(std.Text.ByteSliceResult result, ref string expected) {
+    match (result) {
+        std.Text.ByteSliceResult.Slice(value) => {
+            if (value != *expected) { return 1; }
+        }
+        std.Text.ByteSliceResult.InvalidRange => { return 2; }
+        std.Text.ByteSliceResult.OutOfBounds => { return 3; }
+        std.Text.ByteSliceResult.InvalidBoundary => { return 4; }
+    }
+    return 0;
+}
+
+int main() {
+    string ascii = "Aether";
+    if (std.Text.byteAt(ascii, 0) != 65 || std.Text.byteAt(ascii, 5) != 114) { return 1; }
+
+    string two = "éxito";
+    if (std.Text.byteAt(two, 0) != 195 || std.Text.byteAt(two, 1) != 169 ||
+        std.Text.byteAt(two, 2) != 120 || std.Text.byteAt(two, 5) != 111) { return 2; }
+    if (int(std.Text.byteAt(two, 0)) != 195 || int(std.Text.byteAt(two, 1)) != 169) { return 2; }
+    if (std.Text.byteAt("λ", 0) != 206 || std.Text.byteAt("λ", 1) != 187) { return 3; }
+    if (std.Text.byteAt("🙂", 0) != 240 || std.Text.byteAt("🙂", 1) != 159 ||
+        std.Text.byteAt("🙂", 2) != 153 || std.Text.byteAt("🙂", 3) != 130) { return 4; }
+
+    if (std.Text.isByteBoundary(two, 0) == false ||
+        std.Text.isByteBoundary(two, 1) ||
+        std.Text.isByteBoundary(two, 2) == false ||
+        std.Text.isByteBoundary(two, 6) == false) { return 5; }
+    if (std.Text.isByteBoundary("€", 0) == false || std.Text.isByteBoundary("€", 1) ||
+        std.Text.isByteBoundary("€", 2) || std.Text.isByteBoundary("€", 3) == false) { return 6; }
+    if (std.Text.isByteBoundary("🙂", 0) == false || std.Text.isByteBoundary("🙂", 1) ||
+        std.Text.isByteBoundary("🙂", 2) || std.Text.isByteBoundary("🙂", 3) ||
+        std.Text.isByteBoundary("🙂", 4) == false) { return 7; }
+
+    if (expectSlice(std.Text.byteSlice(ascii, 1, 4), "eth") != 0) { return 8; }
+    if (expectSlice(std.Text.byteSlice(two, 0, 2), "é") != 0) { return 9; }
+    if (expectSlice(std.Text.byteSlice("a€🙂z", 1, 4), "€") != 0) { return 10; }
+    if (expectSlice(std.Text.byteSlice("a€🙂z", 4, 8), "🙂") != 0) { return 11; }
+    if (expectSlice(std.Text.byteSlice(ascii, 2, 2), "") != 0) { return 12; }
+    if (expectSlice(std.Text.byteSlice(ascii, 0, 6), ascii) != 0) { return 13; }
+    if (expectSlice(std.Text.byteSlice("", 0, 0), "") != 0) { return 14; }
+    if (expectSlice(std.Text.byteSlice("\0\n\r\n:012::", 0, 10), "\0\n\r\n:012::") != 0) { return 15; }
+
+    match (std.Text.byteSlice("é", 1, 2)) {
+        std.Text.ByteSliceResult.InvalidBoundary => {}
+        std.Text.ByteSliceResult.Slice(value) => { return 16; }
+        std.Text.ByteSliceResult.InvalidRange => { return 16; }
+        std.Text.ByteSliceResult.OutOfBounds => { return 16; }
+    }
+    match (std.Text.byteSlice("é", 0, 1)) {
+        std.Text.ByteSliceResult.InvalidBoundary => {}
+        std.Text.ByteSliceResult.Slice(value) => { return 17; }
+        std.Text.ByteSliceResult.InvalidRange => { return 17; }
+        std.Text.ByteSliceResult.OutOfBounds => { return 17; }
+    }
+    match (std.Text.byteSlice("é", 4, 3)) {
+        std.Text.ByteSliceResult.InvalidRange => {}
+        std.Text.ByteSliceResult.Slice(value) => { return 18; }
+        std.Text.ByteSliceResult.OutOfBounds => { return 18; }
+        std.Text.ByteSliceResult.InvalidBoundary => { return 18; }
+    }
+    match (std.Text.byteSlice("é", 1, 3)) {
+        std.Text.ByteSliceResult.OutOfBounds => {}
+        std.Text.ByteSliceResult.Slice(value) => { return 19; }
+        std.Text.ByteSliceResult.InvalidRange => { return 19; }
+        std.Text.ByteSliceResult.InvalidBoundary => { return 19; }
+    }
+    match (std.Text.byteSlice("é", 1, 1)) {
+        std.Text.ByteSliceResult.InvalidBoundary => {}
+        std.Text.ByteSliceResult.Slice(value) => { return 20; }
+        std.Text.ByteSliceResult.InvalidRange => { return 20; }
+        std.Text.ByteSliceResult.OutOfBounds => { return 20; }
+    }
+    return 0;
+}
