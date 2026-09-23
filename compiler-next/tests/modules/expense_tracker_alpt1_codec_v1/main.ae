@@ -1,0 +1,131 @@
+package expense_tracker.codec_fixture;
+
+import expense_tracker.codec;
+import expense_tracker.model;
+import std.Text;
+
+bool failed(expense_tracker.codec.LedgerDecodeResult result) {
+    return result.status != expense_tracker.codec.LedgerStatus.Success &&
+        length(result.ledger.transactions) == 0;
+}
+
+bool sameString(ref string left, ref string right) {
+    return byteLength(*left) == byteLength(*right) && std.Text.startsWith(*left, *right);
+}
+
+int requireMalformed(ref string content, int code) {
+    expense_tracker.codec.LedgerDecodeResult decoded = expense_tracker.codec.decodeLedger(*content);
+    if (!failed(decoded)) { return code; }
+    return 0;
+}
+
+string surround(ref string prefix, string middle, ref string suffix) {
+    string result = *prefix + middle;
+    return result + *suffix;
+}
+
+int main() {
+    List<expense_tracker.model.Transaction> transactions = {
+        expense_tracker.model.Transaction(
+            -9223372036854775808,
+            expense_tracker.model.TransactionType.Expense,
+            -12345.625,
+            "café:λ🙂",
+            "spaces : LF\nCRLF\r\nNUL\0end",
+            ""
+        ),
+        expense_tracker.model.Transaction(
+            9223372036854775807,
+            expense_tracker.model.TransactionType.Income,
+            1.7976931348623157e308,
+            "ASCII",
+            "",
+            "2026-09-22"
+        ),
+        expense_tracker.model.Transaction(
+            0,
+            expense_tracker.model.TransactionType.Expense,
+            2.2250738585072014e-308,
+            "é",
+            "λ🙂: payload with spaces",
+            "\r\n"
+        )
+    };
+    expense_tracker.model.Ledger ledger = expense_tracker.model.Ledger(transactions);
+    expense_tracker.codec.LedgerEncodeResult encoded = expense_tracker.codec.encodeLedger(ledger);
+    if (encoded.status != expense_tracker.codec.LedgerStatus.Success) { return 1; }
+    expense_tracker.codec.LedgerDecodeResult decoded = expense_tracker.codec.decodeLedger(encoded.content);
+    if (decoded.status != expense_tracker.codec.LedgerStatus.Success ||
+        length(decoded.ledger.transactions) != 3) { return 2; }
+    if (decoded.ledger.transactions[0].id != -9223372036854775808 ||
+        decoded.ledger.transactions[0].type != expense_tracker.model.TransactionType.Expense ||
+        decoded.ledger.transactions[0].amount != -12345.625 ||
+        decoded.ledger.transactions[0].category != "café:λ🙂" ||
+        decoded.ledger.transactions[0].description != "spaces : LF\nCRLF\r\nNUL\0end" ||
+        decoded.ledger.transactions[0].date != "") { return 3; }
+    if (decoded.ledger.transactions[1].id != 9223372036854775807 ||
+        decoded.ledger.transactions[1].type != expense_tracker.model.TransactionType.Income ||
+        decoded.ledger.transactions[1].amount != 1.7976931348623157e308 ||
+        decoded.ledger.transactions[1].category != "ASCII" ||
+        decoded.ledger.transactions[1].description != "" ||
+        decoded.ledger.transactions[1].date != "2026-09-22") { return 4; }
+    if (decoded.ledger.transactions[2].amount != 2.2250738585072014e-308 ||
+        decoded.ledger.transactions[2].category != "é" ||
+        decoded.ledger.transactions[2].description != "λ🙂: payload with spaces" ||
+        decoded.ledger.transactions[2].date != "\r\n") { return 5; }
+    expense_tracker.codec.LedgerEncodeResult reencoded = expense_tracker.codec.encodeLedger(decoded.ledger);
+    if (reencoded.status != expense_tracker.codec.LedgerStatus.Success) { return 6; }
+    if (!sameString(reencoded.content, encoded.content)) { return 6; }
+
+    expense_tracker.model.Ledger exactLedger = expense_tracker.model.Ledger({
+        expense_tracker.model.Transaction(
+            7,
+            expense_tracker.model.TransactionType.Expense,
+            -1.5,
+            "é",
+            "a:b\n",
+            ""
+        )
+    });
+    expense_tracker.codec.LedgerEncodeResult exactEncoded = expense_tracker.codec.encodeLedger(exactLedger);
+    string exactFixture = "AETHER-PERSISTENCE\nformat-version 1\napplication aether.expense-tracker\nschema expense-ledger\nschema-revision 1\nschema-min-reader 1\nrecord-count 1\nend-header\nrecord transaction 6\nfield id int 1\n7\nfield type enum 7\nExpense\nfield amount double 4\n-1.5\nfield category string 2\né\nfield description string 4\na:b\n\nfield date string 0\n\nend-record\nend-file\n";
+    if (exactEncoded.status != expense_tracker.codec.LedgerStatus.Success ||
+        !sameString(exactEncoded.content, exactFixture)) { return 7; }
+
+    string prefix = "AETHER-PERSISTENCE\nformat-version 1\napplication aether.expense-tracker\nschema expense-ledger\nschema-revision 1\nschema-min-reader 1\nrecord-count 1\nend-header\nrecord transaction 6\n";
+    string suffix = "field type enum 7\nExpense\nfield amount double 1\n1\nfield category string 0\n\nfield description string 0\n\nfield date string 0\n\nend-record\nend-file\n";
+    if (requireMalformed(surround(prefix, "field id int x\n1\n", suffix), 10) != 0) { return 10; }
+    if (requireMalformed(surround(prefix, "field id int 999999999999999999999999999999\n1\n", suffix), 11) != 0) { return 11; }
+    if (requireMalformed(surround(prefix, "field id int 4\n1\n", suffix), 12) != 0) { return 12; }
+    if (requireMalformed(surround(prefix, "field id int 1\né\n", suffix), 13) != 0) { return 13; }
+    if (requireMalformed(surround(prefix, "field id int 1\n1X", suffix), 14) != 0) { return 14; }
+    if (requireMalformed(surround(prefix, "field id int 1\nx\n", suffix), 15) != 0) { return 15; }
+    string amountOverflow = "AETHER-PERSISTENCE\nformat-version 1\napplication aether.expense-tracker\nschema expense-ledger\nschema-revision 1\nschema-min-reader 1\nrecord-count 1\nend-header\nrecord transaction 6\nfield id int 1\n1\nfield type enum 7\nExpense\nfield amount double 6\n1e9999\nfield category string 0\n\nfield description string 0\n\nfield date string 0\n\nend-record\nend-file\n";
+    if (requireMalformed(amountOverflow, 16) != 0) { return 16; }
+    string amountUnderflow = "AETHER-PERSISTENCE\nformat-version 1\napplication aether.expense-tracker\nschema expense-ledger\nschema-revision 1\nschema-min-reader 1\nrecord-count 1\nend-header\nrecord transaction 6\nfield id int 1\n1\nfield type enum 7\nExpense\nfield amount double 7\n1e-9999\nfield category string 0\n\nfield description string 0\n\nfield date string 0\n\nend-record\nend-file\n";
+    if (requireMalformed(amountUnderflow, 17) != 0) { return 17; }
+    if (requireMalformed(encoded.content + "garbage", 18) != 0) { return 18; }
+    string wrongCount = "AETHER-PERSISTENCE\nformat-version 1\napplication aether.expense-tracker\nschema expense-ledger\nschema-revision 1\nschema-min-reader 1\nrecord-count 1\nend-header\nrecord transaction 5\nend-file\n";
+    if (requireMalformed(wrongCount, 19) != 0) { return 19; }
+    string internalDelimiters = prefix + "field id int 1\n1\nfield type enum 7\nExpense\nfield amount double 1\n1\nfield category string 8\na:b\nc\r\nd\nfield description string 0\n\nfield date string 0\n\nend-record\nend-file\n";
+    expense_tracker.codec.LedgerDecodeResult delimiterDecoded = expense_tracker.codec.decodeLedger(internalDelimiters);
+    if (delimiterDecoded.status != expense_tracker.codec.LedgerStatus.Success ||
+        delimiterDecoded.ledger.transactions[0].category != "a:b\nc\r\nd") { return 20; }
+    if (requireMalformed(prefix + "field id int 4\n1", 21) != 0) { return 21; }
+    string extended = "AETHER-PERSISTENCE\nformat-version 1\napplication aether.expense-tracker\nschema expense-ledger\nschema-revision 1\nschema-min-reader 1\nrecord-count 1\nend-header\nrecord transaction 7\nfield future-note opaque 8\nx:y\nz\r\nw\nfield date string 0\n\nfield description string 0\n\nfield amount double 2\n-2\nfield type enum 6\nIncome\nfield category string 2\né\nfield id int 2\n-7\nend-record\nend-file\n";
+    expense_tracker.codec.LedgerDecodeResult extendedDecoded = expense_tracker.codec.decodeLedger(extended);
+    if (extendedDecoded.status != expense_tracker.codec.LedgerStatus.Success ||
+        length(extendedDecoded.ledger.transactions) != 1 ||
+        extendedDecoded.ledger.transactions[0].id != -7 ||
+        extendedDecoded.ledger.transactions[0].amount != -2.0 ||
+        extendedDecoded.ledger.transactions[0].category != "é") { return 22; }
+    string duplicateUnknown = "AETHER-PERSISTENCE\nformat-version 1\napplication aether.expense-tracker\nschema expense-ledger\nschema-revision 1\nschema-min-reader 1\nrecord-count 1\nend-header\nrecord transaction 8\nfield future-note opaque 0\n\nfield future-note opaque 0\n\nfield id int 1\n1\nfield type enum 7\nExpense\nfield amount double 1\n1\nfield category string 0\n\nfield description string 0\n\nfield date string 0\n\nend-record\nend-file\n";
+    if (requireMalformed(duplicateUnknown, 23) != 0) { return 23; }
+    string optionalHeader = "AETHER-PERSISTENCE\nformat-version 1\napplication aether.expense-tracker\nschema expense-ledger\nschema-revision 1\nschema-min-reader 1\nrecord-count 0\noptional-note enabled\nend-header\nend-file\n";
+    expense_tracker.codec.LedgerDecodeResult optionalDecoded = expense_tracker.codec.decodeLedger(optionalHeader);
+    if (optionalDecoded.status != expense_tracker.codec.LedgerStatus.Success ||
+        length(optionalDecoded.ledger.transactions) != 0) { return 24; }
+    string duplicateOptional = "AETHER-PERSISTENCE\nformat-version 1\napplication aether.expense-tracker\nschema expense-ledger\nschema-revision 1\nschema-min-reader 1\nrecord-count 0\noptional-note enabled\noptional-note enabled\nend-header\nend-file\n";
+    if (requireMalformed(duplicateOptional, 25) != 0) { return 25; }
+    return 0;
+}

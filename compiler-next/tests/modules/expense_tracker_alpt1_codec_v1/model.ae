@@ -1,0 +1,19 @@
+package expense_tracker.model;
+
+enum TransactionType {
+    Expense,
+    Income,
+}
+
+struct Transaction {
+    int id;
+    TransactionType type;
+    double amount;
+    string category;
+    string description;
+    string date;
+}
+
+struct Ledger {
+    List<Transaction> transactions;
+}
