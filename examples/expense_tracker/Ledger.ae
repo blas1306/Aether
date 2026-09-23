@@ -1,26 +1,27 @@
-package Ledger;
+package expense_tracker.ledger;
 
-from Transaction import Transaction;
-from Transaction import TransactionType;
+import expense_tracker.model;
 
-public enum AddTransactionStatus {
+enum AddTransactionStatus {
     Added,
-    NonPositiveAmount
+    NonPositiveAmount,
 }
 
-public AddTransactionStatus addTransaction(
-    List<Transaction> transactions,
+AddTransactionStatus addTransaction(
+    ref mut expense_tracker.model.Ledger ledger,
     int id,
-    TransactionType type,
-    string description,
+    expense_tracker.model.TransactionType type,
     double amount,
     string category,
+    string description,
     string date
 ) {
-    if (amount <= 0.0) {
+    if (amount <= 0.0 || amount - amount != 0.0) {
         return AddTransactionStatus.NonPositiveAmount;
     }
-
-    transactions.push(Transaction(id, type, description, amount, category, date));
+    push(
+        (*ledger).transactions,
+        expense_tracker.model.Transaction(id, type, amount, category, description, date)
+    );
     return AddTransactionStatus.Added;
 }

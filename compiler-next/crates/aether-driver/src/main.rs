@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::process;
 
 use aether_driver::{
-    ClangToolchain, Compilation, Emit, OptimizationLevel, build_path, default_output, run_path,
+    ClangToolchain, Compilation, Emit, OptimizationLevel, build_path, default_output,
+    run_path_with_arguments,
 };
 use aether_frontend::SourceFile;
 
@@ -36,6 +37,7 @@ fn run_cli(args: &[String]) -> Result<i32, String> {
     let mut emits = Vec::new();
     let mut timings = false;
     let mut optimization = OptimizationLevel::O0;
+    let mut program_arguments = Vec::new();
     let mut cursor = 2;
     while cursor < args.len() {
         match args[cursor].as_str() {
@@ -53,6 +55,10 @@ fn run_cli(args: &[String]) -> Result<i32, String> {
             "--timings" => timings = true,
             "-O0" => optimization = OptimizationLevel::O0,
             "-O2" => optimization = OptimizationLevel::O2,
+            "--" if command == "run" => {
+                program_arguments.extend_from_slice(&args[cursor + 1..]);
+                break;
+            }
             value => return Err(format!("unknown argument `{value}`\n{}", usage())),
         }
         cursor += 1;
@@ -68,10 +74,12 @@ fn run_cli(args: &[String]) -> Result<i32, String> {
             0
         })
     } else {
-        run_path(&source_path, &emits, &toolchain).map(|(compilation, status)| {
-            render_outputs(&compilation, timings);
-            status.code().unwrap_or(1)
-        })
+        run_path_with_arguments(&source_path, &emits, &toolchain, &program_arguments).map(
+            |(compilation, status)| {
+                render_outputs(&compilation, timings);
+                status.code().unwrap_or(1)
+            },
+        )
     };
     result.map_err(|diagnostics| {
         diagnostics
@@ -118,5 +126,5 @@ fn render_outputs(compilation: &Compilation, timings: bool) {
 }
 
 fn usage() -> String {
-    "usage: aether-next build <source.ae> [-o artifact] [--emit ast|hir|mir|ssa|llvm] [-O0|-O2] [--timings]\n       aether-next run <source.ae> [--emit ast|hir|mir|ssa|llvm] [-O0|-O2] [--timings]".to_owned()
+    "usage: aether-next build <source.ae> [-o artifact] [--emit ast|hir|mir|ssa|llvm] [-O0|-O2] [--timings]\n       aether-next run <source.ae> [--emit ast|hir|mir|ssa|llvm] [-O0|-O2] [--timings] [-- args...]".to_owned()
 }

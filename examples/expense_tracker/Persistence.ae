@@ -1,20 +1,15 @@
-package Persistence;
+package expense_tracker.persistence;
 
-from Transaction import Transaction;
-from Transaction import TransactionType;
-import io;
-import text;
+import expense_tracker.model;
+import std.File;
+import std.IO;
+import std.Text;
 
-public enum LedgerStatus {
+enum LedgerStatus {
     Success,
     EmptyFile,
     InvalidMagic,
-    UnsupportedFormatVersion,
-    UnsupportedSchema,
-    UnsupportedSchemaRevision,
-    IncompatibleReader,
     InvalidHeader,
-    DuplicateHeader,
     InvalidRecordCount,
     InvalidFieldCount,
     InvalidRecordHeader,
@@ -22,7 +17,6 @@ public enum LedgerStatus {
     InvalidLength,
     ResourceLimitExceeded,
     UnexpectedEnd,
-    IncompleteRecord,
     DuplicateField,
     MissingField,
     TypeMismatch,
@@ -32,381 +26,403 @@ public enum LedgerStatus {
     TrailingData,
     FileNotFound,
     PermissionDenied,
-    InvalidPath,
     InvalidUtf8,
-    IoError
+    IoError,
 }
 
-public struct LedgerDecodeResult {
-    List<Transaction> transactions;
+struct LedgerDecodeResult {
+    expense_tracker.model.Ledger ledger;
     LedgerStatus status;
-    int byteOffset;
+    usize byteOffset;
 }
 
-public struct LedgerEncodeResult {
+struct LedgerEncodeResult {
     string content;
     LedgerStatus status;
 }
 
-public struct LedgerLoadResult {
-    List<Transaction> transactions;
+struct LineResult {
     LedgerStatus status;
-    int byteOffset;
+    usize startOffset;
+    usize endOffset;
+    usize nextOffset;
 }
 
-struct ControlLineResult {
-    string line;
+struct FieldHeaderResult {
+    usize nameStart;
+    usize nameEnd;
+    usize typeStart;
+    usize typeEnd;
+    usize lengthStart;
+    usize lengthEnd;
     LedgerStatus status;
-    int startOffset;
-    int nextOffset;
 }
 
-LedgerDecodeResult decodeFailure(LedgerStatus status, int offset) {
-    List<Transaction> empty = {};
-    return LedgerDecodeResult(empty, status, offset);
+enum UnsignedResult {
+    Value(int),
+    Invalid,
+    Overflow,
+}
+
+LedgerDecodeResult decodeFailure(LedgerStatus status, usize offset) {
+    return LedgerDecodeResult(expense_tracker.model.Ledger({}), status, offset);
 }
 
 LedgerEncodeResult encodeFailure(LedgerStatus status) {
     return LedgerEncodeResult("", status);
 }
 
-ControlLineResult readControlLine(string content, int offset) {
-    int length = content.byteLength;
-    if (offset >= length) {
-        return ControlLineResult("", LedgerStatus.UnexpectedEnd, offset, offset);
+LineResult readControlLine(ref string content, usize offset) {
+    usize size = byteLength(*content);
+    if (offset >= size) {
+        return LineResult(LedgerStatus.UnexpectedEnd, offset, offset, offset);
     }
-    int cursor = offset;
-    while (cursor < length && text.byteAt(content, cursor) != 10) {
+    usize cursor = offset;
+    while (cursor < size && std.Text.byteAt(*content, cursor) != 10) {
         cursor = cursor + 1;
     }
-    if (cursor == length) {
-        return ControlLineResult("", LedgerStatus.UnexpectedEnd, offset, length);
+    if (cursor == size) {
+        return LineResult(LedgerStatus.UnexpectedEnd, offset, size, size);
     }
-    string line = text.byteSlice(content, offset, cursor - offset);
-    return ControlLineResult(line, LedgerStatus.Success, offset, cursor + 1);
+    return LineResult(LedgerStatus.Success, offset, cursor, cursor + 1);
 }
 
-boolean isDigitByte(int value) {
-    return value >= 48 && value <= 57;
+UnsignedResult parseCanonicalUnsigned(ref string token) {
+    usize size = byteLength(*token);
+    if (size == 0 || (size > 1 && std.Text.byteAt(*token, 0) == 48)) {
+        return UnsignedResult.Invalid;
+    }
+    usize cursor = 0;
+    while (cursor < size) {
+        uint8 byte = std.Text.byteAt(*token, cursor);
+        if (byte < 48 || byte > 57) {
+            return UnsignedResult.Invalid;
+        }
+        cursor = cursor + 1;
+    }
+    match (std.Text.parseInt(*token)) {
+        std.Text.IntParseResult.Value(value) => {
+            if (value < 0) { return UnsignedResult.Invalid; }
+            string canonical = str(value);
+            if (canonical != *token) { return UnsignedResult.Invalid; }
+            return UnsignedResult.Value(value);
+        }
+        std.Text.IntParseResult.Invalid => { return UnsignedResult.Invalid; }
+        std.Text.IntParseResult.Overflow => { return UnsignedResult.Overflow; }
+    }
 }
 
-boolean isIdentifier(string token) {
-    if (token.byteLength == 0) {
-        return false;
+bool rangeEquals(ref string content, usize start, usize end, ref string expected) {
+    if (end - start != byteLength(*expected)) { return false; }
+    match (std.Text.byteSlice(*content, start, end)) {
+        std.Text.ByteSliceResult.Slice(value) => { return value == *expected; }
+        std.Text.ByteSliceResult.InvalidBoundary => { return false; }
+        std.Text.ByteSliceResult.InvalidRange => { return false; }
+        std.Text.ByteSliceResult.OutOfBounds => { return false; }
     }
-    int first = text.byteAt(token, 0);
-    if (first < 97 || first > 122) {
-        return false;
-    }
-    int index = 1;
-    while (index < token.byteLength) {
-        int value = text.byteAt(token, index);
-        boolean lower = value >= 97 && value <= 122;
-        boolean digit = isDigitByte(value);
-        if (!lower && !digit && value != 45 && value != 46) {
+}
+
+bool rangeStartsWith(ref string content, usize start, usize end, ref string prefix) {
+    usize prefixSize = byteLength(*prefix);
+    if (end - start < prefixSize) { return false; }
+    usize cursor = 0;
+    while (cursor < prefixSize) {
+        if (std.Text.byteAt(*content, start + cursor) != std.Text.byteAt(*prefix, cursor)) {
             return false;
         }
-        index = index + 1;
+        cursor = cursor + 1;
     }
     return true;
 }
 
-boolean isCanonicalUInt(string token) {
-    if (token.byteLength == 0) {
-        return false;
+UnsignedResult parseRangeUnsigned(ref string content, usize start, usize end) {
+    match (std.Text.byteSlice(*content, start, end)) {
+        std.Text.ByteSliceResult.Slice(token) => { return parseCanonicalUnsigned(token); }
+        std.Text.ByteSliceResult.InvalidBoundary => { return UnsignedResult.Invalid; }
+        std.Text.ByteSliceResult.InvalidRange => { return UnsignedResult.Invalid; }
+        std.Text.ByteSliceResult.OutOfBounds => { return UnsignedResult.Invalid; }
     }
-    if (token.byteLength > 1 && text.byteAt(token, 0) == 48) {
-        return false;
-    }
-    int index = 0;
-    while (index < token.byteLength) {
-        if (!isDigitByte(text.byteAt(token, index))) {
-            return false;
-        }
-        index = index + 1;
-    }
-    IntParseResult parsed = parseInt(token);
-    return parsed.status == ParseStatus.Success && text.formatInt(parsed.value) == token;
 }
 
-boolean isMandatoryHeaderKey(string key) {
-    return key == "format-version" || key == "application" ||
-        key == "schema" || key == "schema-revision" ||
-        key == "schema-min-reader" || key == "record-count";
-}
-
-LedgerDecodeResult requireHeaderLine(
-    string content,
-    int offset,
-    string expectedKey,
-    string expectedValue
+UnsignedResult parsePrefixedUnsigned(
+    ref string content,
+    usize start,
+    usize end,
+    ref string prefix
 ) {
-    ControlLineResult line = readControlLine(content, offset);
-    if (line.status != LedgerStatus.Success) {
-        return decodeFailure(line.status, line.nextOffset);
+    usize prefixSize = byteLength(*prefix);
+    usize lineSize = end - start;
+    if (lineSize <= prefixSize) {
+        return UnsignedResult.Invalid;
     }
-    Array<string> parts = line.line.split(" ");
-    if (parts.length != 2 || parts[0] != expectedKey) {
-        if (parts.length > 0 && isMandatoryHeaderKey(parts[0])) {
-            return decodeFailure(LedgerStatus.DuplicateHeader, line.startOffset);
+    usize cursor = 0;
+    while (cursor < prefixSize) {
+        if (std.Text.byteAt(*content, start + cursor) != std.Text.byteAt(*prefix, cursor)) {
+            return UnsignedResult.Invalid;
         }
-        return decodeFailure(LedgerStatus.InvalidHeader, line.startOffset);
+        cursor = cursor + 1;
     }
-    if (parts[1] != expectedValue) {
-        return decodeFailure(LedgerStatus.UnsupportedSchema, line.startOffset);
-    }
-    List<Transaction> marker = {};
-    return LedgerDecodeResult(marker, LedgerStatus.Success, line.nextOffset);
+    return parseRangeUnsigned(content, start + prefixSize, end);
 }
 
-public LedgerDecodeResult decodeLedger(string content) {
-    if (content.byteLength == 0) {
+FieldHeaderResult invalidFieldHeader(LedgerStatus status) {
+    return FieldHeaderResult(0, 0, 0, 0, 0, 0, status);
+}
+
+bool identifierRange(ref string content, usize start, usize end) {
+    if (start == end) { return false; }
+    uint8 first = std.Text.byteAt(*content, start);
+    if (first < 97 || first > 122) { return false; }
+    usize cursor = start + 1;
+    while (cursor < end) {
+        uint8 byte = std.Text.byteAt(*content, cursor);
+        bool lower = byte >= 97 && byte <= 122;
+        bool digit = byte >= 48 && byte <= 57;
+        if (!lower && !digit && byte != 45 && byte != 46) { return false; }
+        cursor = cursor + 1;
+    }
+    return true;
+}
+
+bool rememberFieldName(
+    ref mut List<string> names,
+    ref string content,
+    usize start,
+    usize end
+) {
+    match (std.Text.byteSlice(*content, start, end)) {
+        std.Text.ByteSliceResult.Slice(name) => {
+            for (ref string previous in *names) {
+                if (name == *previous) { return false; }
+            }
+            push(*names, name);
+            return true;
+        }
+        std.Text.ByteSliceResult.InvalidBoundary => { return false; }
+        std.Text.ByteSliceResult.InvalidRange => { return false; }
+        std.Text.ByteSliceResult.OutOfBounds => { return false; }
+    }
+}
+
+FieldHeaderResult parseFieldHeader(ref string content, usize start, usize end) {
+    usize first = start;
+    while (first < end && std.Text.byteAt(*content, first) != 32) {
+        first = first + 1;
+    }
+    if (first != start + 5 || end <= first + 1 || !rangeEquals(content, start, first, "field")) {
+        return invalidFieldHeader(LedgerStatus.InvalidFieldHeader);
+    }
+    usize second = first + 1;
+    while (second < end && std.Text.byteAt(*content, second) != 32) {
+        second = second + 1;
+    }
+    usize third = second + 1;
+    while (third < end && std.Text.byteAt(*content, third) != 32) {
+        third = third + 1;
+    }
+    if (second == first + 1 || second >= end || third == second + 1 || third >= end ||
+        third + 1 >= end) {
+        return invalidFieldHeader(LedgerStatus.InvalidFieldHeader);
+    }
+    if (!identifierRange(content, first + 1, second) ||
+        !identifierRange(content, second + 1, third)) {
+        return invalidFieldHeader(LedgerStatus.InvalidFieldHeader);
+    }
+    usize tail = third + 1;
+    while (tail < end) {
+        if (std.Text.byteAt(*content, tail) == 32) {
+            return invalidFieldHeader(LedgerStatus.InvalidFieldHeader);
+        }
+        tail = tail + 1;
+    }
+    return FieldHeaderResult(
+        first + 1, second, second + 1, third, third + 1, end, LedgerStatus.Success
+    );
+}
+
+LedgerDecodeResult decodeLedger(ref string content) {
+    usize size = byteLength(*content);
+    if (size == 0) {
         return decodeFailure(LedgerStatus.EmptyFile, 0);
     }
 
-    ControlLineResult magic = readControlLine(content, 0);
-    if (magic.status != LedgerStatus.Success) {
-        return decodeFailure(magic.status, magic.nextOffset);
-    }
-    if (magic.line != "AETHER-PERSISTENCE") {
-        return decodeFailure(LedgerStatus.InvalidMagic, magic.startOffset);
-    }
+    LineResult magic = readControlLine(content, 0);
+    if (magic.status != LedgerStatus.Success) { return decodeFailure(magic.status, magic.nextOffset); }
+    if (!rangeEquals(content, magic.startOffset, magic.endOffset, "AETHER-PERSISTENCE")) { return decodeFailure(LedgerStatus.InvalidMagic, 0); }
 
-    ControlLineResult formatLine = readControlLine(content, magic.nextOffset);
-    if (formatLine.status != LedgerStatus.Success) {
-        return decodeFailure(formatLine.status, formatLine.nextOffset);
-    }
-    Array<string> formatParts = formatLine.line.split(" ");
-    if (formatParts.length != 2 || formatParts[0] != "format-version" ||
-        !isCanonicalUInt(formatParts[1])) {
-        return decodeFailure(LedgerStatus.InvalidHeader, formatLine.startOffset);
-    }
-    if (formatParts[1] != "1") {
-        return decodeFailure(LedgerStatus.UnsupportedFormatVersion, formatLine.startOffset);
-    }
+    LineResult format = readControlLine(content, magic.nextOffset);
+    if (format.status != LedgerStatus.Success) { return decodeFailure(format.status, format.nextOffset); }
+    if (!rangeEquals(content, format.startOffset, format.endOffset, "format-version 1")) { return decodeFailure(LedgerStatus.InvalidHeader, format.startOffset); }
+    LineResult application = readControlLine(content, format.nextOffset);
+    if (application.status != LedgerStatus.Success) { return decodeFailure(application.status, application.nextOffset); }
+    if (!rangeEquals(content, application.startOffset, application.endOffset, "application aether.expense-tracker")) { return decodeFailure(LedgerStatus.InvalidHeader, application.startOffset); }
+    LineResult schema = readControlLine(content, application.nextOffset);
+    if (schema.status != LedgerStatus.Success) { return decodeFailure(schema.status, schema.nextOffset); }
+    if (!rangeEquals(content, schema.startOffset, schema.endOffset, "schema expense-ledger")) { return decodeFailure(LedgerStatus.InvalidHeader, schema.startOffset); }
+    LineResult revision = readControlLine(content, schema.nextOffset);
+    if (revision.status != LedgerStatus.Success) { return decodeFailure(revision.status, revision.nextOffset); }
+    if (!rangeEquals(content, revision.startOffset, revision.endOffset, "schema-revision 1")) { return decodeFailure(LedgerStatus.InvalidHeader, revision.startOffset); }
+    LineResult reader = readControlLine(content, revision.nextOffset);
+    if (reader.status != LedgerStatus.Success) { return decodeFailure(reader.status, reader.nextOffset); }
+    if (!rangeEquals(content, reader.startOffset, reader.endOffset, "schema-min-reader 1")) { return decodeFailure(LedgerStatus.InvalidHeader, reader.startOffset); }
 
-    LedgerDecodeResult application = requireHeaderLine(
-        content, formatLine.nextOffset, "application", "aether.expense-tracker"
-    );
-    if (application.status != LedgerStatus.Success) {
-        return application;
+    LineResult countLine = readControlLine(content, reader.nextOffset);
+    if (countLine.status != LedgerStatus.Success) { return decodeFailure(countLine.status, countLine.nextOffset); }
+    int recordCount = 0;
+    match (parsePrefixedUnsigned(content, countLine.startOffset, countLine.endOffset, "record-count ")) {
+        UnsignedResult.Value(value) => { recordCount = value; }
+        UnsignedResult.Invalid => { return decodeFailure(LedgerStatus.InvalidRecordCount, countLine.startOffset); }
+        UnsignedResult.Overflow => { return decodeFailure(LedgerStatus.InvalidRecordCount, countLine.startOffset); }
     }
-    LedgerDecodeResult schema = requireHeaderLine(
-        content, application.byteOffset, "schema", "expense-ledger"
-    );
-    if (schema.status != LedgerStatus.Success) {
-        return schema;
-    }
+    if (recordCount > 10000) { return decodeFailure(LedgerStatus.ResourceLimitExceeded, countLine.startOffset); }
 
-    ControlLineResult revisionLine = readControlLine(content, schema.byteOffset);
-    if (revisionLine.status != LedgerStatus.Success) {
-        return decodeFailure(revisionLine.status, revisionLine.nextOffset);
-    }
-    Array<string> revisionParts = revisionLine.line.split(" ");
-    if (revisionParts.length != 2 || revisionParts[0] != "schema-revision" ||
-        !isCanonicalUInt(revisionParts[1])) {
-        if (revisionParts.length > 0 && isMandatoryHeaderKey(revisionParts[0]) &&
-            revisionParts[0] != "schema-revision") {
-            return decodeFailure(LedgerStatus.DuplicateHeader, revisionLine.startOffset);
-        }
-        return decodeFailure(LedgerStatus.InvalidHeader, revisionLine.startOffset);
-    }
-    if (revisionParts[1] != "1") {
-        return decodeFailure(LedgerStatus.UnsupportedSchemaRevision, revisionLine.startOffset);
-    }
-
-    ControlLineResult readerLine = readControlLine(content, revisionLine.nextOffset);
-    if (readerLine.status != LedgerStatus.Success) {
-        return decodeFailure(readerLine.status, readerLine.nextOffset);
-    }
-    Array<string> readerParts = readerLine.line.split(" ");
-    if (readerParts.length != 2 || readerParts[0] != "schema-min-reader" ||
-        !isCanonicalUInt(readerParts[1])) {
-        if (readerParts.length > 0 && isMandatoryHeaderKey(readerParts[0]) &&
-            readerParts[0] != "schema-min-reader") {
-            return decodeFailure(LedgerStatus.DuplicateHeader, readerLine.startOffset);
-        }
-        return decodeFailure(LedgerStatus.InvalidHeader, readerLine.startOffset);
-    }
-    IntParseResult minimumReader = parseInt(readerParts[1]);
-    if (minimumReader.value > 1) {
-        return decodeFailure(LedgerStatus.IncompatibleReader, readerLine.startOffset);
-    }
-    if (minimumReader.value != 1) {
-        return decodeFailure(LedgerStatus.UnsupportedSchemaRevision, readerLine.startOffset);
-    }
-
-    ControlLineResult countLine = readControlLine(content, readerLine.nextOffset);
-    if (countLine.status != LedgerStatus.Success) {
-        return decodeFailure(countLine.status, countLine.nextOffset);
-    }
-    Array<string> countParts = countLine.line.split(" ");
-    if (countParts.length != 2 || countParts[0] != "record-count" ||
-        !isCanonicalUInt(countParts[1])) {
-        if (countParts.length > 0 && isMandatoryHeaderKey(countParts[0]) &&
-            countParts[0] != "record-count") {
-            return decodeFailure(LedgerStatus.DuplicateHeader, countLine.startOffset);
-        }
-        return decodeFailure(LedgerStatus.InvalidRecordCount, countLine.startOffset);
-    }
-    IntParseResult parsedRecordCount = parseInt(countParts[1]);
-    if (parsedRecordCount.value > 10000) {
-        return decodeFailure(LedgerStatus.ResourceLimitExceeded, countLine.startOffset);
-    }
-
-    int cursor = countLine.nextOffset;
-    List<string> optionalKeys = {};
-    boolean headerEnded = false;
+    usize cursor = countLine.nextOffset;
+    List<string> optionalNames = {};
+    bool headerEnded = false;
     while (!headerEnded) {
-        ControlLineResult headerLine = readControlLine(content, cursor);
-        if (headerLine.status != LedgerStatus.Success) {
-            return decodeFailure(headerLine.status, headerLine.nextOffset);
-        }
-        if (headerLine.line == "end-header") {
+        LineResult headerLine = readControlLine(content, cursor);
+        if (headerLine.status != LedgerStatus.Success) { return decodeFailure(headerLine.status, headerLine.nextOffset); }
+        if (rangeEquals(content, headerLine.startOffset, headerLine.endOffset, "end-header")) {
             cursor = headerLine.nextOffset;
             headerEnded = true;
         } else {
-            Array<string> optionalParts = headerLine.line.split(" ");
-            if (optionalParts.length != 2 || optionalParts[0].byteLength <= 9 ||
-                text.byteSlice(optionalParts[0], 0, 9) != "optional-" ||
-                !isIdentifier(optionalParts[0]) || !isIdentifier(optionalParts[1])) {
-                if (optionalParts.length > 0 && isMandatoryHeaderKey(optionalParts[0])) {
-                    return decodeFailure(LedgerStatus.DuplicateHeader, headerLine.startOffset);
-                }
+            usize separator = headerLine.startOffset;
+            while (separator < headerLine.endOffset && std.Text.byteAt(*content, separator) != 32) {
+                separator = separator + 1;
+            }
+            if (separator <= headerLine.startOffset + 9 || separator >= headerLine.endOffset ||
+                !rangeStartsWith(content, headerLine.startOffset, separator, "optional-") ||
+                !identifierRange(content, headerLine.startOffset, separator) ||
+                !identifierRange(content, separator + 1, headerLine.endOffset)) {
                 return decodeFailure(LedgerStatus.InvalidHeader, headerLine.startOffset);
             }
-            if (optionalKeys.contains(optionalParts[0])) {
-                return decodeFailure(LedgerStatus.DuplicateHeader, headerLine.startOffset);
+            if (!rememberFieldName(
+                &mut optionalNames, content, headerLine.startOffset, separator
+            )) {
+                return decodeFailure(LedgerStatus.InvalidHeader, headerLine.startOffset);
             }
-            optionalKeys.push(optionalParts[0]);
             cursor = headerLine.nextOffset;
         }
     }
 
-    List<Transaction> staged = {};
+    List<expense_tracker.model.Transaction> staged = {};
     int recordIndex = 0;
-    while (recordIndex < parsedRecordCount.value) {
-        ControlLineResult recordLine = readControlLine(content, cursor);
-        if (recordLine.status != LedgerStatus.Success) {
-            return decodeFailure(recordLine.status, recordLine.nextOffset);
+    while (recordIndex < recordCount) {
+        LineResult record = readControlLine(content, cursor);
+        if (record.status != LedgerStatus.Success) { return decodeFailure(record.status, record.nextOffset); }
+        if (!rangeStartsWith(content, record.startOffset, record.endOffset, "record transaction ")) {
+            return decodeFailure(LedgerStatus.InvalidRecordHeader, record.startOffset);
         }
-        Array<string> recordParts = recordLine.line.split(" ");
-        if (recordParts.length != 3 || recordParts[0] != "record" ||
-            recordParts[1] != "transaction" || !isCanonicalUInt(recordParts[2])) {
-            return decodeFailure(LedgerStatus.InvalidRecordHeader, recordLine.startOffset);
+        int fieldCount = 0;
+        match (parsePrefixedUnsigned(content, record.startOffset, record.endOffset, "record transaction ")) {
+            UnsignedResult.Value(value) => { fieldCount = value; }
+            UnsignedResult.Invalid => { return decodeFailure(LedgerStatus.InvalidFieldCount, record.startOffset); }
+            UnsignedResult.Overflow => { return decodeFailure(LedgerStatus.InvalidFieldCount, record.startOffset); }
         }
-        IntParseResult parsedFieldCount = parseInt(recordParts[2]);
-        if (parsedFieldCount.value > 64) {
-            return decodeFailure(LedgerStatus.ResourceLimitExceeded, recordLine.startOffset);
-        }
+        if (fieldCount > 64) { return decodeFailure(LedgerStatus.ResourceLimitExceeded, record.startOffset); }
+        cursor = record.nextOffset;
 
-        int transactionId = 0;
-        TransactionType transactionType = TransactionType.Expense;
+        int id = 0;
+        expense_tracker.model.TransactionType kind = expense_tracker.model.TransactionType.Expense;
         double amount = 0.0;
         string category = "";
         string description = "";
         string date = "";
-        boolean hasId = false;
-        boolean hasType = false;
-        boolean hasAmount = false;
-        boolean hasCategory = false;
-        boolean hasDescription = false;
-        boolean hasDate = false;
+        bool hasId = false;
+        bool hasType = false;
+        bool hasAmount = false;
+        bool hasCategory = false;
+        bool hasDescription = false;
+        bool hasDate = false;
         List<string> fieldNames = {};
 
-        cursor = recordLine.nextOffset;
         int fieldIndex = 0;
-        while (fieldIndex < parsedFieldCount.value) {
-            ControlLineResult fieldLine = readControlLine(content, cursor);
-            if (fieldLine.status != LedgerStatus.Success) {
-                return decodeFailure(fieldLine.status, fieldLine.nextOffset);
-            }
-            Array<string> fieldParts = fieldLine.line.split(" ");
-            if (fieldParts.length != 4 || fieldParts[0] != "field" ||
-                !isIdentifier(fieldParts[1]) || !isIdentifier(fieldParts[2])) {
-                return decodeFailure(LedgerStatus.InvalidFieldHeader, fieldLine.startOffset);
-            }
-            if (fieldNames.contains(fieldParts[1])) {
+        while (fieldIndex < fieldCount) {
+            LineResult fieldLine = readControlLine(content, cursor);
+            if (fieldLine.status != LedgerStatus.Success) { return decodeFailure(fieldLine.status, fieldLine.nextOffset); }
+            FieldHeaderResult field = parseFieldHeader(content, fieldLine.startOffset, fieldLine.endOffset);
+            if (field.status != LedgerStatus.Success) { return decodeFailure(field.status, fieldLine.startOffset); }
+            if (!rememberFieldName(&mut fieldNames, content, field.nameStart, field.nameEnd)) {
                 return decodeFailure(LedgerStatus.DuplicateField, fieldLine.startOffset);
             }
-            fieldNames.push(fieldParts[1]);
-            if (!isCanonicalUInt(fieldParts[3])) {
-                return decodeFailure(LedgerStatus.InvalidLength, fieldLine.startOffset);
+
+            int payloadLength = 0;
+            match (parseRangeUnsigned(content, field.lengthStart, field.lengthEnd)) {
+                UnsignedResult.Value(value) => { payloadLength = value; }
+                UnsignedResult.Invalid => { return decodeFailure(LedgerStatus.InvalidLength, fieldLine.startOffset); }
+                UnsignedResult.Overflow => { return decodeFailure(LedgerStatus.InvalidLength, fieldLine.startOffset); }
             }
-            IntParseResult parsedLength = parseInt(fieldParts[3]);
-            if (parsedLength.value > 1048576) {
-                return decodeFailure(LedgerStatus.ResourceLimitExceeded, fieldLine.startOffset);
-            }
-            int payloadStart = fieldLine.nextOffset;
-            int remaining = content.byteLength - payloadStart;
-            if (parsedLength.value >= remaining) {
-                return decodeFailure(LedgerStatus.UnexpectedEnd, content.byteLength);
-            }
-            int payloadEnd = payloadStart + parsedLength.value;
-            if (text.byteAt(content, payloadEnd) != 10) {
+            if (payloadLength > 1048576) { return decodeFailure(LedgerStatus.ResourceLimitExceeded, fieldLine.startOffset); }
+            usize payloadStart = fieldLine.nextOffset;
+            usize length = usize(payloadLength);
+            if (length >= size - payloadStart) { return decodeFailure(LedgerStatus.UnexpectedEnd, size); }
+            usize payloadEnd = payloadStart + length;
+            if (std.Text.byteAt(*content, payloadEnd) != 10) {
                 return decodeFailure(LedgerStatus.InvalidFieldHeader, payloadEnd);
             }
-            string payload = text.byteSlice(content, payloadStart, parsedLength.value);
+            string payload = "";
+            match (std.Text.byteSlice(*content, payloadStart, payloadEnd)) {
+                std.Text.ByteSliceResult.Slice(value) => { payload = value; }
+                std.Text.ByteSliceResult.InvalidBoundary => { return decodeFailure(LedgerStatus.InvalidLength, payloadEnd); }
+                std.Text.ByteSliceResult.InvalidRange => { return decodeFailure(LedgerStatus.InvalidLength, payloadStart); }
+                std.Text.ByteSliceResult.OutOfBounds => { return decodeFailure(LedgerStatus.UnexpectedEnd, size); }
+            }
             cursor = payloadEnd + 1;
 
-            if (fieldParts[1] == "id") {
-                if (fieldParts[2] != "int") {
-                    return decodeFailure(LedgerStatus.TypeMismatch, fieldLine.startOffset);
+            if (rangeEquals(content, field.nameStart, field.nameEnd, "id")) {
+                if (!rangeEquals(content, field.typeStart, field.typeEnd, "int")) { return decodeFailure(LedgerStatus.TypeMismatch, fieldLine.startOffset); }
+                match (std.Text.parseInt(payload)) {
+                    std.Text.IntParseResult.Value(value) => {
+                        if (str(value) != payload) { return decodeFailure(LedgerStatus.InvalidInteger, payloadStart); }
+                        id = value;
+                    }
+                    std.Text.IntParseResult.Invalid => { return decodeFailure(LedgerStatus.InvalidInteger, payloadStart); }
+                    std.Text.IntParseResult.Overflow => { return decodeFailure(LedgerStatus.InvalidInteger, payloadStart); }
                 }
-                IntParseResult parsedId = parseInt(payload);
-                if (parsedId.status != ParseStatus.Success || text.formatInt(parsedId.value) != payload) {
-                    return decodeFailure(LedgerStatus.InvalidInteger, payloadStart);
-                }
-                transactionId = parsedId.value;
                 hasId = true;
             } else {
-                if (fieldParts[1] == "type") {
-                    if (fieldParts[2] != "enum") {
-                        return decodeFailure(LedgerStatus.TypeMismatch, fieldLine.startOffset);
-                    }
+                if (rangeEquals(content, field.nameStart, field.nameEnd, "type")) {
+                    if (!rangeEquals(content, field.typeStart, field.typeEnd, "enum")) { return decodeFailure(LedgerStatus.TypeMismatch, fieldLine.startOffset); }
                     if (payload == "Expense") {
-                        transactionType = TransactionType.Expense;
+                        kind = expense_tracker.model.TransactionType.Expense;
                     } else {
                         if (payload == "Income") {
-                            transactionType = TransactionType.Income;
+                            kind = expense_tracker.model.TransactionType.Income;
                         } else {
                             return decodeFailure(LedgerStatus.InvalidEnum, payloadStart);
                         }
                     }
                     hasType = true;
                 } else {
-                    if (fieldParts[1] == "amount") {
-                        if (fieldParts[2] != "double") {
-                            return decodeFailure(LedgerStatus.TypeMismatch, fieldLine.startOffset);
+                    if (rangeEquals(content, field.nameStart, field.nameEnd, "amount")) {
+                        if (!rangeEquals(content, field.typeStart, field.typeEnd, "double")) { return decodeFailure(LedgerStatus.TypeMismatch, fieldLine.startOffset); }
+                        match (std.Text.parseDouble(payload)) {
+                            std.Text.DoubleParseResult.Value(value) => {
+                                if (value - value != 0.0) { return decodeFailure(LedgerStatus.InvalidDouble, payloadStart); }
+                                amount = value;
+                            }
+                            std.Text.DoubleParseResult.Invalid => { return decodeFailure(LedgerStatus.InvalidDouble, payloadStart); }
+                            std.Text.DoubleParseResult.Overflow => { return decodeFailure(LedgerStatus.InvalidDouble, payloadStart); }
+                            std.Text.DoubleParseResult.Underflow => { return decodeFailure(LedgerStatus.InvalidDouble, payloadStart); }
                         }
-                        DoubleParseResult parsedAmount = parseDouble(payload);
-                        if (parsedAmount.status != ParseStatus.Success || parsedAmount.value <= 0.0 ||
-                            parsedAmount.value - parsedAmount.value != 0.0) {
-                            return decodeFailure(LedgerStatus.InvalidDouble, payloadStart);
-                        }
-                        amount = parsedAmount.value;
                         hasAmount = true;
                     } else {
-                        if (fieldParts[1] == "category") {
-                            if (fieldParts[2] != "string") {
-                                return decodeFailure(LedgerStatus.TypeMismatch, fieldLine.startOffset);
-                            }
+                        if (rangeEquals(content, field.nameStart, field.nameEnd, "category")) {
+                            if (!rangeEquals(content, field.typeStart, field.typeEnd, "string")) { return decodeFailure(LedgerStatus.TypeMismatch, fieldLine.startOffset); }
                             category = payload;
                             hasCategory = true;
                         } else {
-                            if (fieldParts[1] == "description") {
-                                if (fieldParts[2] != "string") {
-                                    return decodeFailure(LedgerStatus.TypeMismatch, fieldLine.startOffset);
-                                }
+                            if (rangeEquals(content, field.nameStart, field.nameEnd, "description")) {
+                                if (!rangeEquals(content, field.typeStart, field.typeEnd, "string")) { return decodeFailure(LedgerStatus.TypeMismatch, fieldLine.startOffset); }
                                 description = payload;
                                 hasDescription = true;
                             } else {
-                                if (fieldParts[1] == "date") {
-                                    if (fieldParts[2] != "string") {
-                                        return decodeFailure(LedgerStatus.TypeMismatch, fieldLine.startOffset);
-                                    }
+                                if (rangeEquals(content, field.nameStart, field.nameEnd, "date")) {
+                                    if (!rangeEquals(content, field.typeStart, field.typeEnd, "string")) { return decodeFailure(LedgerStatus.TypeMismatch, fieldLine.startOffset); }
                                     date = payload;
                                     hasDate = true;
+                                } else {
+                                    // ALPT1 permits additive fields with identifier names and types.
                                 }
                             }
                         }
@@ -416,118 +432,95 @@ public LedgerDecodeResult decodeLedger(string content) {
             fieldIndex = fieldIndex + 1;
         }
 
-        ControlLineResult endRecord = readControlLine(content, cursor);
-        if (endRecord.status != LedgerStatus.Success) {
-            return decodeFailure(endRecord.status, endRecord.nextOffset);
-        }
-        if (endRecord.line != "end-record") {
-            return decodeFailure(LedgerStatus.IncompleteRecord, endRecord.startOffset);
-        }
+        LineResult endRecord = readControlLine(content, cursor);
+        if (endRecord.status != LedgerStatus.Success) { return decodeFailure(endRecord.status, endRecord.nextOffset); }
+        if (!rangeEquals(content, endRecord.startOffset, endRecord.endOffset, "end-record")) { return decodeFailure(LedgerStatus.InvalidFieldCount, endRecord.startOffset); }
         if (!hasId || !hasType || !hasAmount || !hasCategory || !hasDescription || !hasDate) {
             return decodeFailure(LedgerStatus.MissingField, endRecord.startOffset);
         }
-        staged.push(Transaction(
-            transactionId, transactionType, description, amount, category, date
-        ));
+        push(staged, expense_tracker.model.Transaction(id, kind, amount, category, description, date));
         cursor = endRecord.nextOffset;
         recordIndex = recordIndex + 1;
     }
 
-    ControlLineResult endFile = readControlLine(content, cursor);
-    if (endFile.status != LedgerStatus.Success) {
-        return decodeFailure(endFile.status, endFile.nextOffset);
-    }
-    if (endFile.line != "end-file") {
-        return decodeFailure(LedgerStatus.InvalidRecordCount, endFile.startOffset);
-    }
-    if (endFile.nextOffset != content.byteLength) {
-        return decodeFailure(LedgerStatus.TrailingData, endFile.nextOffset);
-    }
-    return LedgerDecodeResult(staged, LedgerStatus.Success, 0);
+    LineResult endFile = readControlLine(content, cursor);
+    if (endFile.status != LedgerStatus.Success) { return decodeFailure(endFile.status, endFile.nextOffset); }
+    if (!rangeEquals(content, endFile.startOffset, endFile.endOffset, "end-file")) { return decodeFailure(LedgerStatus.InvalidRecordCount, endFile.startOffset); }
+    if (endFile.nextOffset != size) { return decodeFailure(LedgerStatus.TrailingData, endFile.nextOffset); }
+    return LedgerDecodeResult(expense_tracker.model.Ledger(staged), LedgerStatus.Success, 0);
 }
 
-string fieldFragment(string name, string typeName, string payload) {
-    return "field " + name + " " + typeName + " " +
-        text.formatInt(payload.byteLength) + "\n" + payload + "\n";
+string fieldFragment(ref string name, ref string typeName, ref string payload) {
+    string fragment = "field " + *name;
+    fragment = fragment + " ";
+    fragment = fragment + *typeName;
+    fragment = fragment + " ";
+    fragment = fragment + str(byteLength(*payload));
+    fragment = fragment + "\n";
+    fragment = fragment + *payload;
+    return fragment + "\n";
 }
 
-public LedgerEncodeResult encodeLedger(List<Transaction> transactions) {
-    if (transactions.length > 10000) {
-        return encodeFailure(LedgerStatus.ResourceLimitExceeded);
-    }
-    List<string> fragments = {};
-    fragments.push(
-        "AETHER-PERSISTENCE\n" +
-        "format-version 1\n" +
-        "application aether.expense-tracker\n" +
-        "schema expense-ledger\n" +
-        "schema-revision 1\n" +
-        "schema-min-reader 1\n" +
-        "record-count " + text.formatInt(transactions.length) + "\n" +
-        "end-header\n"
-    );
-    for (Transaction transaction in transactions) {
-        if (transaction.amount <= 0.0 || transaction.amount - transaction.amount != 0.0) {
+LedgerEncodeResult encodeLedger(ref expense_tracker.model.Ledger ledger) {
+    usize count = length((*ledger).transactions);
+    if (count > 10000) { return encodeFailure(LedgerStatus.ResourceLimitExceeded); }
+    string content = "AETHER-PERSISTENCE\nformat-version 1\napplication aether.expense-tracker\nschema expense-ledger\nschema-revision 1\nschema-min-reader 1\nrecord-count ";
+    content = content + str(count);
+    content = content + "\nend-header\n";
+    for (ref expense_tracker.model.Transaction transaction in (*ledger).transactions) {
+        if ((*transaction).amount - (*transaction).amount != 0.0) {
             return encodeFailure(LedgerStatus.InvalidDouble);
         }
-        if (transaction.category.byteLength > 1048576 ||
-            transaction.description.byteLength > 1048576 ||
-            transaction.date.byteLength > 1048576) {
+        if (byteLength((*transaction).category) > 1048576 ||
+            byteLength((*transaction).description) > 1048576 ||
+            byteLength((*transaction).date) > 1048576) {
             return encodeFailure(LedgerStatus.ResourceLimitExceeded);
         }
         string typePayload = "Expense";
-        if (transaction.type == TransactionType.Income) {
+        if ((*transaction).type == expense_tracker.model.TransactionType.Income) {
             typePayload = "Income";
         }
-        string idPayload = text.formatInt(transaction.id);
-        string amountPayload = text.formatDouble(transaction.amount);
-        fragments.push("record transaction 6\n");
-        fragments.push(fieldFragment("id", "int", idPayload));
-        fragments.push(fieldFragment("type", "enum", typePayload));
-        fragments.push(fieldFragment("amount", "double", amountPayload));
-        fragments.push(fieldFragment("category", "string", transaction.category));
-        fragments.push(fieldFragment("description", "string", transaction.description));
-        fragments.push(fieldFragment("date", "string", transaction.date));
-        fragments.push("end-record\n");
+        string idPayload = str((*transaction).id);
+        string amountPayload = str((*transaction).amount);
+        content = content + "record transaction 6\n";
+        content = content + fieldFragment("id", "int", idPayload);
+        content = content + fieldFragment("type", "enum", typePayload);
+        content = content + fieldFragment("amount", "double", amountPayload);
+        content = content + fieldFragment("category", "string", (*transaction).category);
+        content = content + fieldFragment("description", "string", (*transaction).description);
+        content = content + fieldFragment("date", "string", (*transaction).date);
+        content = content + "end-record\n";
     }
-    fragments.push("end-file\n");
-    return LedgerEncodeResult(text.concatFragments(fragments), LedgerStatus.Success);
+    return LedgerEncodeResult(content + "end-file\n", LedgerStatus.Success);
 }
 
-LedgerStatus mapFileStatus(FileStatus status) {
-    if (status == FileStatus.NotFound) {
+LedgerDecodeResult loadLedger(ref string path) {
+    try {
+        string content = std.File.readText(*path);
+        LedgerDecodeResult decoded = decodeLedger(content);
+        return decoded;
+    } catch (std.File.FileNotFoundException error) {
+        return LedgerDecodeResult(expense_tracker.model.Ledger({}), LedgerStatus.FileNotFound, 0);
+    } catch (std.File.PermissionDeniedException error) {
+        return LedgerDecodeResult(expense_tracker.model.Ledger({}), LedgerStatus.PermissionDenied, 0);
+    } catch (std.IO.InvalidTextEncodingException error) {
+        return LedgerDecodeResult(expense_tracker.model.Ledger({}), LedgerStatus.InvalidUtf8, 0);
+    } catch (std.IO.IOException error) {
+        return LedgerDecodeResult(expense_tracker.model.Ledger({}), LedgerStatus.IoError, 0);
+    }
+}
+
+LedgerStatus saveLedger(ref string path, ref expense_tracker.model.Ledger ledger) {
+    LedgerEncodeResult encoded = encodeLedger(ledger);
+    if (encoded.status != LedgerStatus.Success) { return encoded.status; }
+    try {
+        std.File.writeTextAtomic(*path, encoded.content);
+        return LedgerStatus.Success;
+    } catch (std.File.FileNotFoundException error) {
         return LedgerStatus.FileNotFound;
-    }
-    if (status == FileStatus.PermissionDenied) {
+    } catch (std.File.PermissionDeniedException error) {
         return LedgerStatus.PermissionDenied;
+    } catch (std.IO.IOException error) {
+        return LedgerStatus.IoError;
     }
-    if (status == FileStatus.InvalidPath) {
-        return LedgerStatus.InvalidPath;
-    }
-    if (status == FileStatus.InvalidUtf8) {
-        return LedgerStatus.InvalidUtf8;
-    }
-    return LedgerStatus.IoError;
-}
-
-public LedgerLoadResult loadLedger(string path) {
-    FileReadResult loaded = io.readText(path);
-    if (loaded.status != FileStatus.Success) {
-        List<Transaction> empty = {};
-        return LedgerLoadResult(empty, mapFileStatus(loaded.status), 0);
-    }
-    LedgerDecodeResult decoded = decodeLedger(loaded.content);
-    return LedgerLoadResult(decoded.transactions, decoded.status, decoded.byteOffset);
-}
-
-public LedgerStatus saveLedger(string path, List<Transaction> transactions) {
-    LedgerEncodeResult encoded = encodeLedger(transactions);
-    if (encoded.status != LedgerStatus.Success) {
-        return encoded.status;
-    }
-    FileStatus saved = io.writeTextAtomic(path, encoded.content);
-    if (saved != FileStatus.Success) {
-        return mapFileStatus(saved);
-    }
-    return LedgerStatus.Success;
 }

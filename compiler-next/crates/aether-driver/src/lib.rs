@@ -1076,13 +1076,26 @@ pub fn run_path(
     emits: &[Emit],
     toolchain: &ClangToolchain,
 ) -> Result<(Compilation, ExitStatus), Vec<Diagnostic>> {
+    run_path_with_arguments(source_path, emits, toolchain, &[])
+}
+
+/// Compiles and runs one source path, forwarding arguments to the native program.
+pub fn run_path_with_arguments(
+    source_path: &Path,
+    emits: &[Emit],
+    toolchain: &ClangToolchain,
+    arguments: &[String],
+) -> Result<(Compilation, ExitStatus), Vec<Diagnostic>> {
     let executable = temporary_path("out");
     let compilation = build_path(source_path, &executable, emits, toolchain)?;
-    let status = Command::new(&executable).status().map_err(|error| {
-        vec![io_diagnostic(format!(
-            "could not execute native artifact: {error}"
-        ))]
-    })?;
+    let status = Command::new(&executable)
+        .args(arguments)
+        .status()
+        .map_err(|error| {
+            vec![io_diagnostic(format!(
+                "could not execute native artifact: {error}"
+            ))]
+        })?;
     let _ = fs::remove_file(&executable);
     Ok((compilation, status))
 }

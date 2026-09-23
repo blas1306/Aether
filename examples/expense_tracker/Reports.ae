@@ -1,55 +1,51 @@
-package Reports;
+package expense_tracker.reports;
 
-from Transaction import Transaction;
-from Transaction import TransactionType;
+import expense_tracker.model;
 
-public struct Summary {
+struct Summary {
     double income;
     double expenses;
     double balance;
 }
 
-public Summary summarize(List<Transaction> transactions) {
+Summary summarize(ref expense_tracker.model.Ledger ledger) {
     double income = 0.0;
     double expenses = 0.0;
-
-    for (Transaction transaction in transactions) {
-        if (transaction.type == TransactionType.Income) {
-            income = income + transaction.amount;
+    for (ref expense_tracker.model.Transaction transaction in (*ledger).transactions) {
+        if ((*transaction).type == expense_tracker.model.TransactionType.Income) {
+            income = income + (*transaction).amount;
         } else {
-            expenses = expenses + transaction.amount;
+            expenses = expenses + (*transaction).amount;
         }
     }
-
     return Summary(income, expenses, income - expenses);
 }
 
-public List<Transaction> filterByType(
-    List<Transaction> transactions,
-    TransactionType type
-) {
-    List<Transaction> matches = {};
-    for (Transaction transaction in transactions) {
-        if (transaction.type == type) {
-            matches.push(transaction);
-        }
-    }
-    return matches;
+string transactionLabel(ref expense_tracker.model.Transaction transaction) {
+    string label = "" + (*transaction).category;
+    label = label + ": ";
+    return label + (*transaction).description;
 }
 
-public string transactionLabel(Transaction transaction) {
-    return transaction.category + ": " + transaction.description;
+string transactionTypeLabel(expense_tracker.model.TransactionType type) {
+    if (type == expense_tracker.model.TransactionType.Income) { return "Income"; }
+    return "Expense";
 }
 
-public void printTransactions(List<Transaction> transactions) {
-    for (Transaction transaction in transactions) {
-        println(
-            "#", transaction.id,
-            " | ", transaction.type,
-            " | ", transaction.date,
-            " | ", transaction.category,
-            " | ", transaction.description,
-            " | ", transaction.amount
-        );
+void printTransactions(ref expense_tracker.model.Ledger ledger) {
+    for (ref expense_tracker.model.Transaction transaction in (*ledger).transactions) {
+        string typeLabel = transactionTypeLabel((*transaction).type);
+        string line = "#" + str((*transaction).id);
+        line = line + " | ";
+        line = line + typeLabel;
+        line = line + " | ";
+        line = line + (*transaction).date;
+        line = line + " | ";
+        line = line + (*transaction).category;
+        line = line + " | ";
+        line = line + (*transaction).description;
+        line = line + " | ";
+        line = line + str((*transaction).amount);
+        println(line);
     }
 }
