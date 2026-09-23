@@ -382,7 +382,7 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
         ),
         (
             vec!["std", "File"],
-            "package std.File; import std.IO; public class FileNotFoundException:std.IO.IOException{public init():base(){}} public class PermissionDeniedException:std.IO.IOException{public init():base(){}} string readText(ref string path){return \"\";} void writeText(ref string path,ref string value){return;}",
+            "package std.File; import std.IO; public class FileNotFoundException:std.IO.IOException{public init():base(){}} public class PermissionDeniedException:std.IO.IOException{public init():base(){}} string readText(ref string path){return \"\";} void writeText(ref string path,ref string value){return;} void writeTextAtomic(ref string path,ref string value){return;}",
         ),
         (
             vec!["std", "Process"],

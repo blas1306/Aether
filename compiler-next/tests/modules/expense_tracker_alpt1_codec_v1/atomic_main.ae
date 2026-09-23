@@ -1,0 +1,36 @@
+package expense_tracker.atomic_file_fixture;
+
+import expense_tracker.codec;
+import expense_tracker.model;
+import std.File;
+
+int main() {
+    expense_tracker.model.Ledger ledger = expense_tracker.model.Ledger({
+        expense_tracker.model.Transaction(
+            42,
+            expense_tracker.model.TransactionType.Expense,
+            -19.75,
+            "café🙂",
+            "atomic round-trip\0payload",
+            "2026-09-22"
+        )
+    });
+    expense_tracker.codec.LedgerEncodeResult encoded =
+        expense_tracker.codec.encodeLedger(ledger);
+    if (encoded.status != expense_tracker.codec.LedgerStatus.Success) { return 1; }
+
+    string path = "expense-ledger-atomic-fixture.alpt1";
+    std.File.writeTextAtomic(path, encoded.content);
+    string stored = std.File.readText(path);
+    expense_tracker.codec.LedgerDecodeResult decoded =
+        expense_tracker.codec.decodeLedger(stored);
+
+    if (decoded.status != expense_tracker.codec.LedgerStatus.Success ||
+        length(decoded.ledger.transactions) != 1) { return 2; }
+    if (decoded.ledger.transactions[0].id != 42 ||
+        decoded.ledger.transactions[0].amount != -19.75 ||
+        decoded.ledger.transactions[0].category != "café🙂" ||
+        decoded.ledger.transactions[0].description != "atomic round-trip\0payload" ||
+        decoded.ledger.transactions[0].date != "2026-09-22") { return 3; }
+    return 0;
+}

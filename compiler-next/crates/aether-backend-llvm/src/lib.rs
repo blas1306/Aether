@@ -299,6 +299,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             reachable_io
                 .iter()
                 .any(|kind| matches!(kind, io::IoFunction::ReadText | io::IoFunction::WriteText)),
+            reachable_io.contains(&io::IoFunction::WriteTextAtomic),
             stdout_exception,
         );
     }

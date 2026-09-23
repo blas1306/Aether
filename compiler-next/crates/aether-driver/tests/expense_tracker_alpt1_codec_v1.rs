@@ -84,3 +84,39 @@ fn decoder_uses_only_the_public_byte_and_numeric_surface() {
         assert!(!source.contains(forbidden), "unexpected {forbidden}");
     }
 }
+
+#[test]
+fn atomic_file_fixture_round_trips_a_real_ledger_at_o0_o2() {
+    let entry = fixture("atomic_main.ae");
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        let compilation = compile_session_with_optimization(
+            CompilationSession::discover(&entry).unwrap(),
+            &[Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+            optimization,
+        )
+        .unwrap_or_else(|errors| panic!("{optimization:?}: {errors:#?}"));
+        for phase in [Emit::Hir, Emit::Mir, Emit::Ssa] {
+            assert!(compilation.dumps[&phase].contains("writeTextAtomic"));
+        }
+        let directory = std::env::temp_dir().join(format!(
+            "aether-expense-atomic-{optimization:?}-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let artifact = Artifact::new(optimization);
+        ClangToolchain::default()
+            .with_optimization(optimization)
+            .link_executable(&compilation.llvm, &artifact.0)
+            .unwrap();
+        let output = Command::new(&artifact.0)
+            .current_dir(&directory)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(0), "{optimization:?}");
+        let ledger = directory.join("expense-ledger-atomic-fixture.alpt1");
+        let bytes = fs::read(&ledger).unwrap();
+        assert!(bytes.starts_with(b"AETHER-PERSISTENCE\n"));
+        assert!(bytes.windows(7).any(|window| window == b"payload"));
+        fs::remove_dir_all(directory).unwrap();
+    }
+}
