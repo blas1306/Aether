@@ -6,6 +6,7 @@ mod core;
 mod elementwise;
 mod io;
 mod mathematical;
+mod process;
 mod strings;
 mod text;
 
@@ -85,6 +86,17 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             )
         })
         .collect::<Vec<_>>();
+    let reachable_process = program
+        .functions
+        .iter()
+        .filter(|function| core_reachable.contains(&function.id))
+        .any(|function| {
+            process::is_args(
+                &program.signatures[function.id.0 as usize],
+                &program.modules,
+                types,
+            )
+        });
     let has_class_runtime = reachable.as_ref().is_some_and(|reachable| {
         program
             .functions
@@ -290,6 +302,9 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             stdout_exception,
         );
     }
+    if reachable_process {
+        process::runtime(&mut output, types);
+    }
     core::declarations(&mut output, &core_calls, types);
     if has_exception_routes {
         emit_exception_runtime(&mut output, types);
@@ -457,6 +472,18 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             );
             continue;
         }
+        if process::is_args(signature, &program.modules, types) {
+            process::emit_function(
+                &mut output,
+                function,
+                signature,
+                &program.modules,
+                &program.structs,
+                &program.enums,
+                types,
+            );
+            continue;
+        }
         emit_function(
             &mut output,
             function,
@@ -472,7 +499,12 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let entry = &program.signatures[program.entry.0 as usize];
     writeln!(
         output,
-        "define i32 @main(){} {{",
+        "define i32 @main({}){} {{",
+        if reachable_process {
+            "i32 %argc, ptr %argv"
+        } else {
+            ""
+        },
         if has_exception_routes {
             " personality ptr @__gxx_personality_v0"
         } else {
@@ -481,6 +513,13 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     )
     .unwrap();
     writeln!(output, "entry:").unwrap();
+    if reachable_process {
+        writeln!(
+            output,
+            "  call void @aether_process_snapshot_init(i32 %argc, ptr %argv)"
+        )
+        .unwrap();
+    }
     let entry_symbol = bootstrap_symbol(
         entry,
         &program.modules,
@@ -499,6 +538,9 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         "  %process_status = trunc i64 %aether_result to i32"
     )
     .unwrap();
+    if reachable_process {
+        writeln!(output, "  call void @aether_process_snapshot_dispose()").unwrap();
+    }
     if has_owners {
         writeln!(
             output,
@@ -547,6 +589,9 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         )
         .unwrap();
         writeln!(output, "  call void @__cxa_end_catch()").unwrap();
+        if reachable_process {
+            writeln!(output, "  call void @aether_process_snapshot_dispose()").unwrap();
+        }
         writeln!(output, "  ret i32 70").unwrap();
     }
     writeln!(output, "}}").unwrap();

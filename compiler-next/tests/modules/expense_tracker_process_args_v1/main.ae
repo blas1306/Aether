@@ -1,0 +1,38 @@
+package expense.cli;
+
+import std.Process;
+import std.Text;
+
+int main() {
+    Array<string> arguments = std.Process.args();
+    if (length(arguments) < 2 || arguments[0] != "ledger.alpt") {
+        return 64;
+    }
+    if (arguments[1] == "list") {
+        if (length(arguments) != 2) { return 65; }
+        return 0;
+    }
+    if (arguments[1] == "summary") {
+        if (length(arguments) != 2) { return 66; }
+        return 0;
+    }
+    if (arguments[1] == "add") {
+        if (length(arguments) != 5 || arguments[4] != "food") { return 67; }
+        int id = 0;
+        double amount = 0.0;
+        match (std.Text.parseInt(arguments[2])) {
+            std.Text.IntParseResult.Value(value) => { id = value; }
+            std.Text.IntParseResult.Invalid => { return 68; }
+            std.Text.IntParseResult.Overflow => { return 69; }
+        }
+        match (std.Text.parseDouble(arguments[3])) {
+            std.Text.DoubleParseResult.Value(value) => { amount = value; }
+            std.Text.DoubleParseResult.Invalid => { return 71; }
+            std.Text.DoubleParseResult.Overflow => { return 72; }
+            std.Text.DoubleParseResult.Underflow => { return 73; }
+        }
+        if (id != 42 || amount != 12.5) { return 74; }
+        return 0;
+    }
+    return 75;
+}

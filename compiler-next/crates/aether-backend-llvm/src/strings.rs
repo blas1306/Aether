@@ -281,16 +281,13 @@ pub(super) fn runtime(output: &mut String, formatting: bool) {
            unreachable\n\
          }\n\n",
     );
+    output.push_str(OWNED_COPY_RUNTIME);
     if formatting {
         output.push_str(FORMAT_RUNTIME);
     }
 }
 
-const FORMAT_RUNTIME: &str = r#"
-; FORMAT C++ to_chars dependency (qualified shortest-decimal engine)
-declare { ptr, i32 } @_ZSt8to_charsPcS_fSt12chars_format(ptr, ptr, float, i32) nounwind
-declare { ptr, i32 } @_ZSt8to_charsPcS_dSt12chars_format(ptr, ptr, double, i32) nounwind
-
+const OWNED_COPY_RUNTIME: &str = r"
 define internal ptr @aether_string_allocate(i64 %length) {
 entry:
   %empty = icmp eq i64 %length, 0
@@ -333,6 +330,12 @@ copy:
 done:
   ret ptr %object
 }
+";
+
+const FORMAT_RUNTIME: &str = r#"
+; FORMAT C++ to_chars dependency (qualified shortest-decimal engine)
+declare { ptr, i32 } @_ZSt8to_charsPcS_fSt12chars_format(ptr, ptr, float, i32) nounwind
+declare { ptr, i32 } @_ZSt8to_charsPcS_dSt12chars_format(ptr, ptr, double, i32) nounwind
 
 define internal i64 @aether_format_u64_length(i64 %value) nounwind {
 entry:

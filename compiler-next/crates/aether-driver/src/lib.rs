@@ -384,6 +384,10 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
             vec!["std", "File"],
             "package std.File; import std.IO; public class FileNotFoundException:std.IO.IOException{public init():base(){}} public class PermissionDeniedException:std.IO.IOException{public init():base(){}} string readText(ref string path){return \"\";} void writeText(ref string path,ref string value){return;}",
         ),
+        (
+            vec!["std", "Process"],
+            "package std.Process; public class InvalidArgumentEncodingException:Exception{public init(){}} Array<string> args(){Array<string> values={};return values;}",
+        ),
     ];
     for (segments, text) in toolchain_packages {
         let path = PackagePath(segments.into_iter().map(str::to_owned).collect());
