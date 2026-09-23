@@ -1,0 +1,162 @@
+package expense_tracker.main;
+
+import expense_tracker.ledger;
+import expense_tracker.model;
+import expense_tracker.persistence;
+import expense_tracker.reports;
+import std.Process;
+import std.Text;
+
+string copyArgument(ref string value) {
+    return "" + *value;
+}
+
+expense_tracker.persistence.LedgerDecodeResult loadForCommand(ref string path) {
+    expense_tracker.persistence.LedgerDecodeResult loaded =
+        expense_tracker.persistence.loadLedger(path);
+    if (loaded.status == expense_tracker.persistence.LedgerStatus.FileNotFound) {
+        return expense_tracker.persistence.LedgerDecodeResult(
+            expense_tracker.model.Ledger({}),
+            expense_tracker.persistence.LedgerStatus.Success,
+            0
+        );
+    }
+    return loaded;
+}
+
+int reportLoadFailure(ref expense_tracker.persistence.LedgerDecodeResult loaded) {
+    println("ledger load failed at byte " + str((*loaded).byteOffset));
+    return 3;
+}
+
+int runList(
+    ref Array<string> arguments,
+    ref expense_tracker.persistence.LedgerDecodeResult loaded
+) {
+    if (length(*arguments) != 2) {
+        println("invalid arguments: <ledger.alpt> list");
+        return 2;
+    }
+    expense_tracker.reports.printTransactions((*loaded).ledger);
+    return 0;
+}
+
+int runSummary(
+    ref Array<string> arguments,
+    ref expense_tracker.persistence.LedgerDecodeResult loaded
+) {
+    if (length(*arguments) != 2) {
+        println("invalid arguments: <ledger.alpt> summary");
+        return 2;
+    }
+    expense_tracker.reports.Summary totals = expense_tracker.reports.summarize((*loaded).ledger);
+    println("income: " + str(totals.income));
+    println("expenses: " + str(totals.expenses));
+    println("balance: " + str(totals.balance));
+    return 0;
+}
+
+int runAdd(
+    ref Array<string> arguments,
+    ref mut expense_tracker.persistence.LedgerDecodeResult loaded
+) {
+    if (length(*arguments) != 8) {
+        println("invalid arguments: <ledger.alpt> add <expense|income> <id> <amount> <category> <description> <date>");
+        return 2;
+    }
+
+    string rawId = std.Text.trim((*arguments)[3]);
+    int id = 0;
+    match (std.Text.parseInt(rawId)) {
+        std.Text.IntParseResult.Value(value) => { id = value; }
+        std.Text.IntParseResult.Invalid => {
+            println("invalid ID: " + (*arguments)[3]);
+            return 2;
+        }
+        std.Text.IntParseResult.Overflow => {
+            println("invalid ID: " + (*arguments)[3]);
+            return 2;
+        }
+    }
+
+    string rawAmount = std.Text.trim((*arguments)[4]);
+    double amount = 0.0;
+    match (std.Text.parseDouble(rawAmount)) {
+        std.Text.DoubleParseResult.Value(value) => { amount = value; }
+        std.Text.DoubleParseResult.Invalid => {
+            println("invalid amount: " + (*arguments)[4]);
+            return 2;
+        }
+        std.Text.DoubleParseResult.Overflow => {
+            println("invalid amount: " + (*arguments)[4]);
+            return 2;
+        }
+        std.Text.DoubleParseResult.Underflow => {
+            println("invalid amount: " + (*arguments)[4]);
+            return 2;
+        }
+    }
+    if (amount <= 0.0 || amount - amount != 0.0) {
+        println("invalid amount: " + (*arguments)[4]);
+        return 2;
+    }
+
+    expense_tracker.model.TransactionType type =
+        expense_tracker.model.TransactionType.Expense;
+    if ((*arguments)[2] == "income") {
+        type = expense_tracker.model.TransactionType.Income;
+    } else {
+        if ((*arguments)[2] != "expense") {
+            println("unknown transaction type: " + (*arguments)[2]);
+            return 2;
+        }
+    }
+
+    expense_tracker.ledger.AddTransactionStatus added =
+        expense_tracker.ledger.addTransaction(
+            &mut (*loaded).ledger,
+            id,
+            type,
+            amount,
+            copyArgument((*arguments)[5]),
+            copyArgument((*arguments)[6]),
+            copyArgument((*arguments)[7])
+        );
+    if (added != expense_tracker.ledger.AddTransactionStatus.Added) {
+        println("invalid amount: " + (*arguments)[4]);
+        return 2;
+    }
+
+    expense_tracker.persistence.LedgerStatus saved =
+        expense_tracker.persistence.saveLedger((*arguments)[0], (*loaded).ledger);
+    if (saved != expense_tracker.persistence.LedgerStatus.Success) {
+        println("ledger save failed");
+        return 4;
+    }
+    usize last = length((*loaded).ledger.transactions) - 1;
+    string label = expense_tracker.reports.transactionLabel((*loaded).ledger.transactions[last]);
+    println("transaction added: " + label);
+    return 0;
+}
+
+int runPersistentCommand(ref Array<string> arguments) {
+    if (length(*arguments) < 2) {
+        println("usage: <ledger.alpt> <add|list|summary> ...");
+        return 2;
+    }
+    expense_tracker.persistence.LedgerDecodeResult loaded =
+        loadForCommand((*arguments)[0]);
+    if (loaded.status != expense_tracker.persistence.LedgerStatus.Success) {
+        return reportLoadFailure(loaded);
+    }
+    if ((*arguments)[1] == "list") { return runList(arguments, loaded); }
+    if ((*arguments)[1] == "summary") { return runSummary(arguments, loaded); }
+    if ((*arguments)[1] == "add") { return runAdd(arguments, &mut loaded); }
+    println("unknown command: " + (*arguments)[1]);
+    return 2;
+}
+
+int main() {
+    Array<string> arguments = std.Process.args();
+    return runPersistentCommand(arguments);
+}
