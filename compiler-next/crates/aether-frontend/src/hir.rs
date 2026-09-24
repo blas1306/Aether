@@ -13884,7 +13884,18 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
             &h.types,
             &[],
             &fail,
-        )?
+        )?;
+        // Cleanup lists are proof-carrying HIR, not advisory metadata. Re-run
+        // the ownership transfer function on a clone so malformed HIR cannot
+        // omit, duplicate, reorder, or make a root's Drop conditional without
+        // being rejected independently of MIR lowering.
+        let mut expected_body = f.body.clone();
+        synthesize_ownership(&mut expected_body, &f.locals, &f.parameters, &h.types)?;
+        if expected_body != f.body {
+            return Err(fail(
+                "HIR cleanup plan does not match path-local ownership state".into(),
+            ));
+        }
     }
     Ok(())
 }
@@ -16409,6 +16420,20 @@ mod tests {
         };
         drops.push(drops[0]);
         assert!(verify_hir(&hir).is_err());
+
+        let mut missing = check(
+            "int classify(string value,bool early){if(early){return 1;}return 2;}int main(){return classify(\"x\",true)-1;}",
+        )
+        .unwrap();
+        let HirStmtKind::If { then_block, .. } = &mut missing.functions[0].body.statements[0].kind
+        else {
+            panic!("expected early-return branch");
+        };
+        let HirStmtKind::Return { drops, .. } = &mut then_block.statements[0].kind else {
+            panic!("expected early return");
+        };
+        drops.clear();
+        assert!(verify_hir(&missing).is_err());
     }
     #[test]
     fn verifier_rejects_duplicate_finally_identity() {

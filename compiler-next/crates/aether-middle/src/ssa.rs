@@ -2702,7 +2702,7 @@ fn verify_ssa_function(
     }
     aether_frontend::verify_class_metadata(types, structs, enums).map_err(fail)?;
     classes::verify(function, signatures, types, &operand_ty).map_err(fail)?;
-    verify_string_ownership(function, types, fail)?;
+    verify_ownership_ledger(function, types, fail)?;
     verify_vector_transpose_ownership(function, fail)?;
     verify_matrix_literal_ownership(function, types, fail)?;
     verify_take_protocol(function, types, fail)?;
@@ -3443,43 +3443,123 @@ fn verify_ssa_collection_loops(
     Ok(())
 }
 
-/// Every SSA value carrying a string owner, directly or structurally, must
-/// have an explicit transfer or Drop site. Borrowing string operations do not
-/// discharge ownership.
-fn consume_string_operand(
-    block: BlockId,
-    operand: &SsaOperand,
-    owners: &BTreeSet<ValueId>,
-    consumed: &mut BTreeSet<(BlockId, ValueId)>,
-) -> bool {
-    let SsaOperand::Value(value) = operand else {
-        return false;
-    };
-    owners.contains(value) && !consumed.insert((block, *value))
-}
-
-fn consume_string_operands<'a>(
-    block: BlockId,
+/// Counts transfers of one SSA owner performed by an operation. Borrowing
+/// operations deliberately do not appear here.
+fn owner_operand_count<'a>(
+    owner: ValueId,
     operands: impl IntoIterator<Item = &'a SsaOperand>,
-    owners: &BTreeSet<ValueId>,
-    consumed: &mut BTreeSet<(BlockId, ValueId)>,
-) -> bool {
+) -> usize {
     operands
         .into_iter()
-        .any(|operand| consume_string_operand(block, operand, owners, consumed))
+        .filter(|operand| matches!(operand, SsaOperand::Value(value) if *value == owner))
+        .count()
+}
+
+fn owner_from_place(function: &SsaFunction, place: &SsaPlace) -> Option<ValueId> {
+    match &place.base {
+        SsaPlaceBase::Value(SsaOperand::Value(value)) if place.projections.is_empty() => {
+            Some(*value)
+        }
+        SsaPlaceBase::MemoryLocal(local) if place.projections.is_empty() => function
+            .memory_locals
+            .iter()
+            .find(|memory| memory.local == *local)
+            .and_then(|memory| memory.parameter),
+        _ => None,
+    }
+}
+
+fn owner_consumptions(function: &SsaFunction, owner: ValueId, op: &SsaOp) -> usize {
+    match op {
+        SsaOp::Move { source }
+        | SsaOp::Drop { owner: source }
+        | SsaOp::ConsumeEnum { owner: source } => {
+            usize::from(owner_from_place(function, source) == Some(owner))
+        }
+        SsaOp::Call { args, .. } | SsaOp::IndirectCall { args, .. } => {
+            owner_operand_count(owner, args)
+        }
+        SsaOp::Aggregate { fields, .. } => {
+            owner_operand_count(owner, fields.iter().map(|(_, value)| value))
+        }
+        SsaOp::EnumConstruct { payloads, .. }
+        | SsaOp::MatrixInit {
+            elements: payloads, ..
+        }
+        | SsaOp::VectorInit {
+            elements: payloads, ..
+        }
+        | SsaOp::ArrayInit {
+            elements: payloads, ..
+        }
+        | SsaOp::ListInit {
+            elements: payloads, ..
+        } => owner_operand_count(owner, payloads),
+        SsaOp::ListPush { value, .. }
+        | SsaOp::NullableInject { payload: value, .. }
+        | SsaOp::CollectionOwnerCapture { value, .. }
+        | SsaOp::ReplaceString { value, .. }
+        | SsaOp::Store { value, .. }
+        | SsaOp::InsertField {
+            aggregate: value, ..
+        }
+        | SsaOp::VectorTransposeMove { operand: value, .. } => {
+            usize::from(matches!(value, SsaOperand::Value(candidate) if *candidate == owner))
+        }
+        _ => 0,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum SsaOwnerState {
+    Unborn,
+    Live,
+    Discharged,
+}
+
+fn transfer_ssa_owner(
+    owner: ValueId,
+    state: SsaOwnerState,
+    count: usize,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<SsaOwnerState, Vec<Diagnostic>> {
+    if count == 0 {
+        return Ok(state);
+    }
+    if count != 1 || state != SsaOwnerState::Live {
+        return Err(fail(format!(
+            "SSA owner {owner:?} is transferred or dropped more than once on one path"
+        )));
+    }
+    Ok(SsaOwnerState::Discharged)
+}
+
+fn define_ssa_owner(
+    owner: ValueId,
+    state: SsaOwnerState,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<SsaOwnerState, Vec<Diagnostic>> {
+    if state == SsaOwnerState::Live {
+        return Err(fail(format!(
+            "SSA owner {owner:?} is redefined while its previous obligation is live"
+        )));
+    }
+    Ok(SsaOwnerState::Live)
 }
 
 #[allow(clippy::too_many_lines)]
-fn verify_string_ownership(
+fn verify_ownership_ledger(
     function: &SsaFunction,
     types: &TypeArena,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
-    let carries_string_owner = |ty| types.contains_string(ty) && types.needs_drop(ty);
+    // String-containing values use ordinary value/memory roots. Class and
+    // algebraic owners retain their dedicated SSA proofs below.
+    let carries_owner = |ty| types.contains_string(ty) && types.needs_drop(ty);
     let mut owners = function
         .parameters
         .iter()
-        .filter(|parameter| carries_string_owner(parameter.ty))
+        .filter(|parameter| carries_owner(parameter.ty))
         .map(|parameter| parameter.value)
         .collect::<BTreeSet<_>>();
     for block in &function.blocks {
@@ -3487,7 +3567,7 @@ fn verify_string_ownership(
             block
                 .phis
                 .iter()
-                .filter(|phi| carries_string_owner(phi.ty))
+                .filter(|phi| carries_owner(phi.ty))
                 .map(|phi| phi.result),
         );
         owners.extend(
@@ -3495,8 +3575,10 @@ fn verify_string_ownership(
                 .instructions
                 .iter()
                 .filter(|instruction| {
-                    carries_string_owner(instruction.ty)
+                    carries_owner(instruction.ty)
                         && !matches!(instruction.op, SsaOp::Load { .. })
+                        && !matches!(instruction.op, SsaOp::EnumPayload { .. })
+                        && !matches!(instruction.op, SsaOp::ExtractField { .. })
                         && !matches!(
                             instruction.op,
                             SsaOp::NullablePayload {
@@ -3508,114 +3590,158 @@ fn verify_string_ownership(
                 .map(|instruction| instruction.result),
         );
     }
-    let mut consumed_on_path = BTreeSet::new();
-    let value_from_place = |place: &SsaPlace| match &place.base {
-        SsaPlaceBase::Value(SsaOperand::Value(value)) if place.projections.is_empty() => {
-            Some(*value)
-        }
-        _ => None,
-    };
-
-    for block in &function.blocks {
-        for phi in &block.phis {
-            if carries_string_owner(phi.ty) {
-                for (predecessor, value) in &phi.incoming {
-                    if !consumed_on_path.insert((*predecessor, *value)) {
-                        return Err(fail(
-                            "SSA string owner is consumed twice on one control-flow path".into(),
-                        ));
-                    }
-                }
-            }
-        }
-        for instruction in &block.instructions {
-            match &instruction.op {
-                SsaOp::Move { source } | SsaOp::Drop { owner: source } => {
-                    if let Some(value) = value_from_place(source)
-                        && !consumed_on_path.insert((block.id, value))
-                    {
-                        return Err(fail(
-                            "SSA string owner is consumed twice on one control-flow path".into(),
-                        ));
-                    }
-                }
-                SsaOp::Call { args, .. } | SsaOp::IndirectCall { args, .. } => {
-                    if consume_string_operands(block.id, args, &owners, &mut consumed_on_path) {
-                        return Err(fail(
-                            "SSA string owner is consumed twice on one control-flow path".into(),
-                        ));
-                    }
-                }
-                SsaOp::Aggregate { fields, .. } => {
-                    if consume_string_operands(
-                        block.id,
-                        fields.iter().map(|(_, value)| value),
-                        &owners,
-                        &mut consumed_on_path,
-                    ) {
-                        return Err(fail(
-                            "SSA string owner is consumed twice on one control-flow path".into(),
-                        ));
-                    }
-                }
-                SsaOp::EnumConstruct { payloads, .. }
-                | SsaOp::ArrayInit {
-                    elements: payloads, ..
-                }
-                | SsaOp::ListInit {
-                    elements: payloads, ..
-                } => {
-                    if consume_string_operands(block.id, payloads, &owners, &mut consumed_on_path) {
-                        return Err(fail(
-                            "SSA string owner is consumed twice on one control-flow path".into(),
-                        ));
-                    }
-                }
-                SsaOp::ListPush { value, .. }
-                | SsaOp::NullableInject { payload: value, .. }
-                | SsaOp::CollectionOwnerCapture { value, .. }
-                | SsaOp::ReplaceString { value, .. }
-                | SsaOp::Store { value, .. }
-                | SsaOp::InsertField {
-                    aggregate: value, ..
-                } => {
-                    if consume_string_operand(block.id, value, &owners, &mut consumed_on_path) {
-                        return Err(fail(
-                            "SSA string-composed owner is consumed twice on one control-flow path"
-                                .into(),
-                        ));
-                    }
-                }
-                SsaOp::ConsumeEnum { owner } => {
-                    if let Some(value) = value_from_place(owner)
-                        && !consumed_on_path.insert((block.id, value))
-                    {
-                        return Err(fail(
-                            "SSA string-composed owner is consumed twice on one control-flow path"
-                                .into(),
-                        ));
-                    }
-                }
-                _ => {}
-            }
-        }
-        if let SsaTerminator::Return(SsaOperand::Value(value)) = &block.terminator
-            && carries_string_owner(function.return_type)
-            && !consumed_on_path.insert((block.id, *value))
-        {
-            return Err(fail(
-                "SSA string owner is consumed twice on one control-flow path".into(),
-            ));
-        }
-    }
-    if owners.iter().any(|owner| {
-        !consumed_on_path
+    for owner in owners {
+        let parameter = function
+            .parameters
             .iter()
-            .any(|(_, consumed)| consumed == owner)
-    }) {
-        return Err(fail(
-            "SSA string-composed owner has no explicit Transfer or Drop".into(),
-        ));
+            .any(|parameter| parameter.value == owner);
+        let owner_local = function
+            .parameters
+            .iter()
+            .find(|parameter| parameter.value == owner)
+            .map(|parameter| parameter.local)
+            .or_else(|| {
+                function
+                    .blocks
+                    .iter()
+                    .flat_map(|block| &block.phis)
+                    .find(|phi| phi.result == owner)
+                    .map(|phi| phi.local)
+            })
+            .or_else(|| {
+                function
+                    .blocks
+                    .iter()
+                    .flat_map(|block| &block.instructions)
+                    .find(|instruction| instruction.result == owner)
+                    .and_then(|instruction| instruction.binding)
+            });
+        let flag_values = owner_local
+            .and_then(|local| {
+                function
+                    .drop_flags
+                    .iter()
+                    .find(|entry| entry.owner == local)
+                    .map(|entry| entry.flag)
+            })
+            .map(|flag| {
+                function
+                    .blocks
+                    .iter()
+                    .flat_map(|block| {
+                        block
+                            .phis
+                            .iter()
+                            .filter_map(move |phi| (phi.local == flag).then_some(phi.result))
+                            .chain(block.instructions.iter().filter_map(move |instruction| {
+                                (instruction.binding == Some(flag)).then_some(instruction.result)
+                            }))
+                    })
+                    .collect::<BTreeSet<_>>()
+            })
+            .unwrap_or_default();
+        let mut pending = VecDeque::from([(
+            function.entry,
+            if parameter {
+                SsaOwnerState::Live
+            } else {
+                SsaOwnerState::Unborn
+            },
+        )]);
+        let mut seen = BTreeSet::new();
+        while let Some((block_id, mut state)) = pending.pop_front() {
+            if !seen.insert((block_id, state)) {
+                continue;
+            }
+            let block = &function.blocks[block_id.0 as usize];
+            if block.phis.iter().any(|phi| phi.result == owner) && state != SsaOwnerState::Live {
+                state = define_ssa_owner(owner, state, fail)?;
+            }
+            for instruction in &block.instructions {
+                state = transfer_ssa_owner(
+                    owner,
+                    state,
+                    owner_consumptions(function, owner, &instruction.op),
+                    fail,
+                )?;
+                if let Some(unwind) = instruction.unwind {
+                    pending.push_back((unwind, state));
+                }
+                if instruction.result == owner {
+                    state = define_ssa_owner(owner, state, fail)?;
+                }
+            }
+            match &block.terminator {
+                SsaTerminator::Return(value) => {
+                    state = transfer_ssa_owner(
+                        owner,
+                        state,
+                        usize::from(
+                            matches!(value, SsaOperand::Value(value) if *value == owner)
+                                && carries_owner(function.return_type),
+                        ),
+                        fail,
+                    )?;
+                    if state == SsaOwnerState::Live {
+                        return Err(fail(format!(
+                            "SSA owner {owner:?} remains live at normal return"
+                        )));
+                    }
+                }
+                SsaTerminator::ResumeUnwind { .. } => {
+                    if state == SsaOwnerState::Live {
+                        return Err(fail(format!(
+                            "SSA owner {owner:?} remains live at unwind propagation in {block_id:?}"
+                        )));
+                    }
+                }
+                SsaTerminator::Trap(_) => {}
+                SsaTerminator::Throw {
+                    payload,
+                    transfer,
+                    unwind,
+                    ..
+                } => {
+                    state = transfer_ssa_owner(
+                        owner,
+                        state,
+                        usize::from(
+                            *transfer
+                                && matches!(payload, SsaOperand::Value(value) if *value == owner),
+                        ),
+                        fail,
+                    )?;
+                    if let Some(target) = unwind {
+                        pending.push_back((*target, state));
+                    }
+                }
+                terminator => {
+                    let targets = match terminator {
+                        SsaTerminator::Branch {
+                            condition: SsaOperand::Value(condition),
+                            then_block,
+                            else_block,
+                        } if flag_values.contains(condition) => match state {
+                            SsaOwnerState::Live => vec![*then_block],
+                            SsaOwnerState::Unborn | SsaOwnerState::Discharged => vec![*else_block],
+                        },
+                        _ => ssa_targets(terminator),
+                    };
+                    for target in targets {
+                        let phi_consumptions = function.blocks[target.0 as usize]
+                            .phis
+                            .iter()
+                            .flat_map(|phi| &phi.incoming)
+                            .filter(|(predecessor, value)| {
+                                *predecessor == block_id && *value == owner
+                            })
+                            .count();
+                        let outgoing = transfer_ssa_owner(owner, state, phi_consumptions, fail)?;
+                        pending.push_back((target, outgoing));
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -5824,6 +5950,37 @@ mod tests {
     fn raw_ssa(text: &str) -> SsaIr {
         let hir = analyze(parse_source(&SourceFile::new("test.ae", text)).unwrap()).unwrap();
         build_ssa(&verify_mir(lower_hir(hir)).unwrap())
+    }
+
+    #[test]
+    fn owning_parameter_early_return_is_balanced_per_path() {
+        let source = "struct L{List<string> xs;}struct R{L l;}void show(ref L l){if(length((*l).xs)!=0){println(\"x\");}}int f(Array<string>a,R r){if(length(a)!=2){return 2;}show(r.l);return 0;}int main(){Array<string>a={\"a\",\"b\"};R r=R(L({}));return f(a,r);}";
+        let ssa = raw_ssa(source);
+        verify_ssa(ssa.clone()).unwrap();
+
+        // A global "has some Drop" check accepts this mutation because the
+        // sibling return still drops the parameter. The ledger must reject the
+        // one reachable return whose cleanup was erased.
+        let mut missing_early_drop = ssa;
+        let function = &mut missing_early_drop.functions[1];
+        let drop = function
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| {
+                matches!(
+                    instruction.op,
+                    SsaOp::Drop {
+                        owner: SsaPlace {
+                            base: SsaPlaceBase::Value(SsaOperand::Value(ValueId(0))),
+                            ref projections,
+                        },
+                    } if projections.is_empty()
+                )
+            })
+            .expect("early return drops the Array parameter");
+        drop.op = SsaOp::Use(SsaOperand::Bool(false));
+        assert!(verify_ssa(missing_early_drop).is_err());
     }
 
     #[test]

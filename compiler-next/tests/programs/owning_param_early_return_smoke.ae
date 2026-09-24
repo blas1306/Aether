@@ -1,0 +1,29 @@
+struct Ledger {
+    List<string> transactions;
+}
+
+struct LedgerDecodeResult {
+    Ledger ledger;
+}
+
+void printTransactions(ref Ledger ledger) {
+    if (length((*ledger).transactions) != 0) {
+        println("unexpected transaction");
+    }
+}
+
+int runList(Array<string> arguments, LedgerDecodeResult loaded) {
+    if (length(arguments) != 2) {
+        println("invalid arguments: <ledger.alpt> list");
+        return 2;
+    }
+
+    printTransactions(loaded.ledger);
+    return 0;
+}
+
+int main() {
+    Array<string> arguments = {"ledger.alpt", "list"};
+    LedgerDecodeResult loaded = LedgerDecodeResult(Ledger({}));
+    return runList(arguments, loaded);
+}
