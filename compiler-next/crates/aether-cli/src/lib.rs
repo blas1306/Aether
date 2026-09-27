@@ -12,10 +12,11 @@ use aether_driver::{
 };
 use aether_package::{
     CacheLimits, HttpsRegistryClient, PackageName, RegistryCache, RegistryPolicy,
-    RegistrySnapshotProvider, add, add_path, remove, sync, update,
+    RegistrySnapshotProvider, add, add_path, build_publication, publish_publication, remove,
+    resolve, sync, update,
 };
 
-const USAGE: &str = "usage: aether run <file.ae|directory> [options] [-- args...]\n       aether build <file.ae|directory> [-o artifact] [options]\n       aether check <file.ae|directory> [options]\n       aether init [--lib] <packageName>\n       aether sync <project> [registry-options]\n       aether update <project> [registry-options]\n       aether add <package> <project> [--path <path>] [registry-options]\n       aether remove <package> <project> [registry-options]\n       aether <file.ae> [options] [-- args...]\noptions: -O0 | -O2, --emit ast|hir|mir|ssa|llvm, --timings\nregistry-options: --registry <https-url>, --cache-dir <path>, --offline\n         (`check` does not accept `--emit llvm`)";
+const USAGE: &str = "usage: aether run <file.ae|directory> [options] [-- args...]\n       aether build <file.ae|directory> [-o artifact] [options]\n       aether check <file.ae|directory> [options]\n       aether init [--lib] <packageName>\n       aether sync <project> [registry-options]\n       aether update <project> [registry-options]\n       aether add <package> <project> [--path <path>] [registry-options]\n       aether remove <package> <project> [registry-options]\n       aether publish <project> [--dry-run] [--registry <https-url>]\n       aether <file.ae> [options] [-- args...]\noptions: -O0 | -O2, --emit ast|hir|mir|ssa|llvm, --timings\nregistry-options: --registry <https-url>, --cache-dir <path>, --offline\n         (`check` does not accept `--emit llvm`)";
 
 /// CLI operation after shorthand normalization and argument validation.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -52,6 +53,11 @@ pub enum CliOperation {
     Remove {
         /// Exact package/import name.
         package: String,
+    },
+    /// Validate, check, and publish one immutable library version.
+    Publish {
+        /// Build and inspect the archive without authenticating or sending it.
+        dry_run: bool,
     },
 }
 
@@ -97,7 +103,10 @@ where
     if first_text == "init" {
         return parse_init(&arguments);
     }
-    if matches!(first_text.as_ref(), "sync" | "update" | "add" | "remove") {
+    if matches!(
+        first_text.as_ref(),
+        "sync" | "update" | "add" | "remove" | "publish"
+    ) {
         return parse_package_command(&arguments);
     }
     let (kind, target_index) = match first_text.as_ref() {
@@ -241,6 +250,7 @@ fn parse_package_command(arguments: &[OsString]) -> Result<CliInvocation, String
     let mut positional = Vec::new();
     let mut registry = RegistryOptions::default();
     let mut dependency_path = None;
+    let mut dry_run = false;
     let mut cursor = 1;
     while cursor < arguments.len() {
         match arguments[cursor].to_string_lossy().as_ref() {
@@ -263,6 +273,7 @@ fn parse_package_command(arguments: &[OsString]) -> Result<CliInvocation, String
                         format!("missing value for `--path`\n{}", usage())
                     })?));
             }
+            "--dry-run" if command == "publish" => dry_run = true,
             value if value.starts_with('-') => {
                 return Err(format!("unknown {command} option `{value}`\n{}", usage()));
             }
@@ -292,7 +303,11 @@ fn parse_package_command(arguments: &[OsString]) -> Result<CliInvocation, String
             },
             PathBuf::from(&positional[1]),
         ),
-        "sync" | "update" => {
+        "publish" if positional.len() == 1 => (
+            CliOperation::Publish { dry_run },
+            PathBuf::from(&positional[0]),
+        ),
+        "sync" | "update" | "publish" => {
             return Err(format!(
                 "{command} requires exactly one project target\n{}",
                 usage()
@@ -359,6 +374,7 @@ where
             | CliOperation::Update
             | CliOperation::Add { .. }
             | CliOperation::Remove { .. }
+            | CliOperation::Publish { .. }
     ) {
         return match run_package_command(&invocation) {
             Ok(()) => 0,
@@ -428,7 +444,8 @@ where
         CliOperation::Sync
         | CliOperation::Update
         | CliOperation::Add { .. }
-        | CliOperation::Remove { .. } => {
+        | CliOperation::Remove { .. }
+        | CliOperation::Publish { .. } => {
             unreachable!("package commands handled before target resolution")
         }
     };
@@ -592,6 +609,9 @@ fn run_package_command(invocation: &CliInvocation) -> Result<(), String> {
     {
         return add_path(&root, package, path).map(|_| ());
     }
+    if let CliOperation::Publish { dry_run } = invocation.operation {
+        return run_publish(&root, &invocation.registry, dry_run);
+    }
     let provider = registry_provider(&invocation.registry)?;
     let registry = provider
         .as_ref()
@@ -615,8 +635,61 @@ fn run_package_command(invocation: &CliInvocation) -> Result<(), String> {
         )
         .map(|_| ()),
         CliOperation::Remove { package } => remove(&root, package, registry).map(|_| ()),
+        CliOperation::Publish { .. } => unreachable!("publish handled above"),
         _ => unreachable!("not a package command"),
     }
+}
+
+fn run_publish(root: &Path, options: &RegistryOptions, dry_run: bool) -> Result<(), String> {
+    if options.offline || environment_flag("AETHER_OFFLINE")? {
+        return Err("publish cannot run in offline mode".to_owned());
+    }
+    let provider = registry_provider(options)?;
+    let graph = resolve(
+        root,
+        provider
+            .as_ref()
+            .map(|value| value as &dyn aether_package::RegistryProvider),
+    )?;
+    let plan = ProjectPlan::resolved(graph.root, &graph.packages).map_err(driver_messages)?;
+    if plan.kind() != ProjectKind::Library {
+        return Err("publish V1 supports library projects only".to_owned());
+    }
+    let source = plan.source().to_path_buf();
+    match execute(DriverRequest::CheckProject(ProjectCheckRequest {
+        input: plan,
+        compilation: CompilationOptions::default(),
+    })) {
+        Ok(DriverResponse::Checked(_)) => {}
+        Ok(_) => {
+            return Err("internal error: publish check returned an unexpected result".to_owned());
+        }
+        Err(diagnostics) => return Err(render_diagnostics(&source, &diagnostics)),
+    }
+    let publication = build_publication(root)?;
+    println!("package: {}@{}", publication.name, publication.version);
+    println!("checksum: {}", publication.checksum);
+    println!("archive-size: {}", publication.archive.len());
+    println!("files:");
+    for file in &publication.files {
+        println!("  {file}");
+    }
+    if dry_run {
+        println!("dry-run: no publication was sent");
+        return Ok(());
+    }
+    let endpoint = options
+        .endpoint
+        .clone()
+        .or_else(|| std::env::var("AETHER_REGISTRY_URL").ok())
+        .ok_or_else(|| {
+            "registry transport is not configured; pass `--registry <https-url>`".to_owned()
+        })?;
+    let token = std::env::var("AETHER_REGISTRY_TOKEN")
+        .map_err(|_| "publish requires `AETHER_REGISTRY_TOKEN`".to_owned())?;
+    let outcome = publish_publication(&endpoint, &token, &publication)?;
+    println!("published: {outcome:?}");
+    Ok(())
 }
 
 fn environment_flag(name: &str) -> Result<bool, String> {

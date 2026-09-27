@@ -23,7 +23,13 @@ aether check file.ae
 aether run . -- arg1 arg2
 aether init myProject
 aether init --lib myLibrary
+aether publish myLibrary --dry-run
 ```
+
+Package commands (`sync`, `update`, `add`, `remove`, and library `publish`) use
+an explicit project root. Productive registry transport requires HTTPS;
+publication credentials come from `AETHER_REGISTRY_TOKEN`, never argv. See the
+[PACKAGE-PUBLISH-V1 report](../docs/architecture/PACKAGE_PUBLISH_V1_REPORT.md).
 
 The Python CLI is available only as the frozen transitional
 `aether-legacy`. The `aether-next` driver binary remains an internal bootstrap

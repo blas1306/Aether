@@ -77,6 +77,7 @@ impl FakeClient {
                 name: name.to_owned(),
                 version: version.to_owned(),
                 yanked: false,
+                official: false,
                 checksum,
                 dependencies,
                 archive_size: archive.len() as u64,

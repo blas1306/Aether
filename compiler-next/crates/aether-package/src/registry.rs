@@ -80,6 +80,9 @@ pub struct RegistryProtocolMetadata {
     pub version: String,
     /// Current yank state.
     pub yanked: bool,
+    /// Controlled registry attestation for Official Aether Libraries.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub official: bool,
     /// `sha256:` followed by 64 lowercase hexadecimal digits.
     pub checksum: String,
     /// Direct registry dependency requirements.
@@ -87,6 +90,11 @@ pub struct RegistryProtocolMetadata {
     pub dependencies: BTreeMap<String, String>,
     /// Exact expected archive byte length.
     pub archive_size: u64,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+const fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -160,6 +168,14 @@ impl HttpsRegistryClient {
             self.endpoint,
             utf8_percent_encode(name, URL_SEGMENT)
         )
+    }
+
+    pub(crate) fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    pub(crate) fn agent(&self) -> &ureq::Agent {
+        &self.agent
     }
 
     fn read_json<T: for<'de> Deserialize<'de>>(&self, url: &str) -> Result<T, String> {
@@ -841,7 +857,7 @@ fn protocol_dependencies(
         .collect()
 }
 
-fn safe_archive_path(raw: &str) -> Result<PathBuf, String> {
+pub(crate) fn safe_archive_path(raw: &str) -> Result<PathBuf, String> {
     if raw.is_empty() || raw.contains('\\') || raw.starts_with('/') {
         return Err(format!("unsafe archive path `{raw}`"));
     }
@@ -856,7 +872,7 @@ fn safe_archive_path(raw: &str) -> Result<PathBuf, String> {
     Ok(clean)
 }
 
-fn allowed_archive_path(path: &Path, directory: bool) -> bool {
+pub(crate) fn allowed_archive_path(path: &Path, directory: bool) -> bool {
     if path == Path::new("aether.toml") {
         return !directory;
     }

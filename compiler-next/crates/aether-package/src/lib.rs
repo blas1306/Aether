@@ -3,6 +3,7 @@
 //! This crate owns package transport and materialization, but no CLI presentation or compiler
 //! policy.
 
+mod publish;
 mod registry;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -15,6 +16,10 @@ use fs2::FileExt;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
+pub use publish::{
+    Publication, PublicationContents, PublishOutcome, build_publication, inspect_publication,
+    publish_publication,
+};
 pub use registry::{
     CacheLimits, HttpsRegistryClient, RegistryCache, RegistryClient, RegistryPolicy,
     RegistryProtocolMetadata, RegistrySnapshotProvider,

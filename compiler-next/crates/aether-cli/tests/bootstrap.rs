@@ -246,6 +246,65 @@ fn project_resolution_is_exact_and_manifests_are_strict() {
 }
 
 #[test]
+fn publish_dry_run_checks_and_reports_without_authentication_or_lock_mutation() {
+    let directory = Directory::new("publish-dry-run");
+    directory.write(
+        "library/aether.toml",
+        "[package]\nname='publishableLibrary'\nversion='1.0.0'\n",
+    );
+    directory.write(
+        "library/src/lib.ae",
+        "package publishableLibrary; int answer(){return 42;}",
+    );
+    directory.write("library/README.md", "hello");
+    let output = cli(&directory, &["publish", "library", "--dry-run"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("publishableLibrary@1.0.0"));
+    assert!(stdout.contains("sha256:"));
+    assert!(stdout.contains("src/lib.ae"));
+    assert!(stdout.contains("dry-run: no publication was sent"));
+    assert!(!directory.0.join("library/aether.lock").exists());
+}
+
+#[test]
+fn publish_blocks_compilation_namespace_and_path_dependency_failures() {
+    let directory = Directory::new("publish-errors");
+    directory.write(
+        "broken/aether.toml",
+        "[package]\nname='brokenLibrary'\nversion='1.0.0'\n",
+    );
+    directory.write("broken/src/lib.ae", "package brokenLibrary; int nope( {");
+    assert!(
+        !cli(&directory, &["publish", "broken", "--dry-run"])
+            .status
+            .success()
+    );
+
+    directory.write(
+        "escaped/aether.toml",
+        "[package]\nname='safeLibrary'\nversion='1.0.0'\n",
+    );
+    directory.write("escaped/src/lib.ae", "package safeLibrary;");
+    directory.write("escaped/src/escape.ae", "package anotherLibrary;");
+    let escaped = cli(&directory, &["publish", "escaped", "--dry-run"]);
+    assert!(!escaped.status.success());
+    assert!(String::from_utf8_lossy(&escaped.stderr).contains("outside owning package root"));
+
+    directory.write(
+        "path/aether.toml",
+        "[package]\nname='pathLibrary'\nversion='1.0.0'\n[dependencies]\nlocal={path='../local'}\n",
+    );
+    directory.write("path/src/lib.ae", "package pathLibrary;");
+    let path = cli(&directory, &["publish", "path", "--dry-run"]);
+    assert!(!path.status.success());
+}
+
+#[test]
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn application_project_entry_outputs_forwarding_and_optimization() {
     let directory = Directory::new("project-app");

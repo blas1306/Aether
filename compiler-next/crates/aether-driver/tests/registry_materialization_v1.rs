@@ -107,6 +107,7 @@ fn cas_materialized_registry_package_compiles_at_o0_and_o2() {
             name: "math".to_owned(),
             version: "1.0.0".to_owned(),
             yanked: false,
+            official: false,
             checksum: format!("sha256:{:x}", Sha256::digest(&archive)),
             dependencies: BTreeMap::new(),
             archive_size: archive.len() as u64,

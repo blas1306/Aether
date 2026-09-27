@@ -1,0 +1,25 @@
+[package]
+name = "aether-registry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+aether-package = { path = "../aether-package" }
+fs2 = "0.4"
+semver = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+
+[dev-dependencies]
+aether-driver = { path = "../aether-driver" }
+
+[[bin]]
+name = "aether-registry"
+path = "src/main.rs"
+
+[lints]
+workspace = true
