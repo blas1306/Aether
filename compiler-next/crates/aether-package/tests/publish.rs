@@ -106,6 +106,22 @@ fn publication_rejects_paths_applications_and_missing_library() {
 }
 
 #[test]
+fn publication_accepts_one_source_application_tool() {
+    let application = Directory::new("application-tool");
+    application.write(
+        "aether.toml",
+        "[package]\nname='formatter'\nversion='1.0.0'\n[application]\nentry='src/tool.ae'\n",
+    );
+    application.write("src/tool.ae", "int main(){return 0;}");
+    let publication = build_publication(&application.0).unwrap();
+    assert_eq!(publication.name, "formatter");
+    assert!(publication.files.contains(&"src/tool.ae".to_owned()));
+    let inspected =
+        inspect_publication(&publication.archive, publication.archive.len() as u64).unwrap();
+    assert_eq!(inspected.name, "formatter");
+}
+
+#[test]
 #[cfg(unix)]
 fn publication_rejects_source_symlinks() {
     use std::os::unix::fs::symlink;

@@ -10,8 +10,8 @@ use std::sync::{Arc, Barrier};
 
 use aether_package::{
     CacheLimits, HttpsRegistryClient, PackageName, RegistryCache, RegistryClient, RegistryPolicy,
-    RegistryProtocolMetadata, RegistryProvider, RegistrySnapshotProvider, RegistryVersion, sync,
-    update,
+    RegistryProtocolMetadata, RegistryProvider, RegistrySnapshotProvider, RegistryVersion,
+    commit_environment, create_environment, prepare_environment_install, sync, update,
 };
 use semver::Version;
 use sha2::{Digest, Sha256};
@@ -216,6 +216,35 @@ fn retrieves_versions_metadata_downloads_and_reuses_verified_cas() {
         .metadata(&name, &Version::parse("1.2.3").unwrap())
         .unwrap();
     assert_eq!(client.downloads.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn two_environments_share_the_cas_and_the_second_installs_offline() {
+    let directory = Directory::new("environment-shared-cas");
+    let client = Arc::new(FakeClient::new(
+        "sharedLibrary",
+        "1.0.0",
+        BTreeMap::new(),
+        package_archive("sharedLibrary", "1.0.0", &[]),
+    ));
+    let first_root = directory.0.join("first environment");
+    let second_root = directory.0.join("second environment");
+    create_environment(&first_root).unwrap();
+    create_environment(&second_root).unwrap();
+
+    let online = provider(&directory, Arc::clone(&client));
+    let first = prepare_environment_install(&first_root, "sharedLibrary", &online).unwrap();
+    commit_environment(&first).unwrap();
+    assert_eq!(client.downloads.load(Ordering::Relaxed), 1);
+
+    let offline = RegistrySnapshotProvider::offline(cache(&directory, CacheLimits::default()));
+    let second = prepare_environment_install(&second_root, "sharedLibrary", &offline).unwrap();
+    commit_environment(&second).unwrap();
+    assert_eq!(client.downloads.load(Ordering::Relaxed), 1);
+    assert_ne!(
+        fs::canonicalize(first_root.join("aether.lock")).unwrap(),
+        fs::canonicalize(second_root.join("aether.lock")).unwrap()
+    );
 }
 
 #[test]

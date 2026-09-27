@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 use crate::registry::{allowed_archive_path, safe_archive_path};
 use crate::{
-    DependencySpec, Manifest, PackageName, VersionRequirement, read_manifest,
+    DependencySpec, Manifest, PackageName, VersionRequirement, read_manifest, select_source,
     validate_manifest_package,
 };
 
@@ -60,7 +60,7 @@ struct PublishResponse {
     outcome: PublishOutcome,
 }
 
-/// Validate a library checkout and build its deterministic V1 tar archive.
+/// Validate a single-target package and build its deterministic V1 tar archive.
 pub fn build_publication(root: &Path) -> Result<Publication, String> {
     let root = root
         .canonicalize()
@@ -73,14 +73,7 @@ pub fn build_publication(root: &Path) -> Result<Publication, String> {
     let manifest = read_manifest(&manifest_path)?;
     let package = validate_manifest_package(&manifest)?;
     validate_publish_manifest(&manifest)?;
-    let library = root.join("src/lib.ae");
-    reject_link(&library, "library entry")?;
-    if !library.is_file() {
-        return Err("publish requires a library with `src/lib.ae`".to_owned());
-    }
-    if manifest.application.is_some() || root.join("src/main.ae").exists() {
-        return Err("publish V1 supports one library target only".to_owned());
-    }
+    select_source(&root, manifest.application.as_ref(), true)?;
 
     let mut paths = vec![PathBuf::from("aether.toml")];
     collect_sources(&root, &root.join("src"), &mut paths)?;
@@ -208,9 +201,7 @@ pub fn inspect_publication(
         .map_err(|error| format!("invalid archived manifest: {error}"))?;
     let package = validate_manifest_package(&manifest)?;
     validate_publish_manifest(&manifest)?;
-    if !files.contains_key("src/lib.ae") {
-        return Err("publication archive has no `src/lib.ae`".to_owned());
-    }
+    validate_archived_target(&manifest, &files)?;
     let dependencies = registry_dependencies(&manifest)?;
     Ok(PublicationContents {
         name: package.name.as_str().to_owned(),
@@ -258,10 +249,49 @@ pub fn publish_publication(
 }
 
 fn validate_publish_manifest(manifest: &Manifest) -> Result<(), String> {
-    if manifest.application.is_some() {
-        return Err("publish V1 does not support an `[application]` target".to_owned());
-    }
     registry_dependencies(manifest).map(|_| ())
+}
+
+fn validate_archived_target(
+    manifest: &Manifest,
+    files: &BTreeMap<String, Vec<u8>>,
+) -> Result<(), String> {
+    let application = if let Some(entry) = manifest
+        .application
+        .as_ref()
+        .and_then(|application| application.entry.as_deref())
+    {
+        if entry.is_absolute() || entry.extension().and_then(|value| value.to_str()) != Some("ae") {
+            return Err("application.entry must be a relative path ending in `.ae`".to_owned());
+        }
+        let normalized = safe_archive_path(
+            entry
+                .to_str()
+                .ok_or_else(|| "application.entry is not UTF-8".to_owned())?,
+        )?;
+        Some(path_text(&normalized).to_owned())
+    } else if files.contains_key("src/main.ae") {
+        Some("src/main.ae".to_owned())
+    } else {
+        None
+    };
+    if let Some(entry) = &application
+        && !files.contains_key(entry)
+    {
+        return Err(format!(
+            "publication archive has no configured application entry `{entry}`"
+        ));
+    }
+    let application = application.is_some();
+    let library = files.contains_key("src/lib.ae");
+    match (application, library) {
+        (true, false) | (false, true) => Ok(()),
+        (true, true) => Err(
+            "publication has both application and library targets; multiple targets are not supported"
+                .to_owned(),
+        ),
+        (false, false) => Err("publication archive has no declared source target".to_owned()),
+    }
 }
 
 fn registry_dependencies(manifest: &Manifest) -> Result<BTreeMap<String, String>, String> {

@@ -7,16 +7,18 @@ use std::sync::Arc;
 
 use aether_driver::{
     BuildRequest, CheckRequest, Compilation, CompilationOptions, DriverRequest, DriverResponse,
-    Emit, OptimizationLevel, ProjectBuildRequest, ProjectCheckRequest, ProjectKind, ProjectPlan,
-    ProjectRunRequest, RunRequest, StandaloneFile, default_output, execute, render_diagnostics,
+    Emit, ManagedToolBuildRequest, OptimizationLevel, ProjectBuildRequest, ProjectCheckRequest,
+    ProjectKind, ProjectPlan, ProjectRunRequest, RunRequest, StandaloneFile, default_output,
+    execute, render_diagnostics,
 };
 use aether_package::{
-    CacheLimits, HttpsRegistryClient, PackageName, RegistryCache, RegistryPolicy,
-    RegistrySnapshotProvider, add, add_path, build_publication, publish_publication, remove,
-    resolve, sync, update,
+    CacheLimits, EnvironmentMutation, HttpsRegistryClient, PackageInstanceKey, PackageName,
+    RegistryCache, RegistryPolicy, RegistrySnapshotProvider, ResolvedPackage, add, add_path,
+    build_publication, commit_environment, create_environment, prepare_environment_install,
+    prepare_environment_uninstall, publish_publication, remove, resolve, sync, update,
 };
 
-const USAGE: &str = "usage: aether run <file.ae|directory> [options] [-- args...]\n       aether build <file.ae|directory> [-o artifact] [options]\n       aether check <file.ae|directory> [options]\n       aether init [--lib] <packageName>\n       aether sync <project> [registry-options]\n       aether update <project> [registry-options]\n       aether add <package> <project> [--path <path>] [registry-options]\n       aether remove <package> <project> [registry-options]\n       aether publish <project> [--dry-run] [--registry <https-url>]\n       aether <file.ae> [options] [-- args...]\noptions: -O0 | -O2, --emit ast|hir|mir|ssa|llvm, --timings\nregistry-options: --registry <https-url>, --cache-dir <path>, --offline\n         (`check` does not accept `--emit llvm`)";
+const USAGE: &str = "usage: aether run <file.ae|directory> [options] [-- args...]\n       aether build <file.ae|directory> [-o artifact] [options]\n       aether check <file.ae|directory> [options]\n       aether init [--lib] <packageName>\n       aether sync <project> [registry-options]\n       aether update <project> [registry-options]\n       aether add <package> <project> [--path <path>] [registry-options]\n       aether remove <package> <project> [registry-options]\n       aether publish <project> [--dry-run] [--registry <https-url>]\n       aether env create <path>\n       aether install <package> [--env <path>] [registry-options] [-O0|-O2]\n       aether uninstall <package> [--env <path>] [registry-options]\n       aether <file.ae> [options] [-- args...]\noptions: -O0 | -O2, --emit ast|hir|mir|ssa|llvm, --timings\nregistry-options: --registry <https-url>, --cache-dir <path>, --offline\n         (`check` does not accept `--emit llvm`)";
 
 /// CLI operation after shorthand normalization and argument validation.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -58,6 +60,22 @@ pub enum CliOperation {
     Publish {
         /// Build and inspect the archive without authenticating or sending it.
         dry_run: bool,
+    },
+    /// Create a new isolated package environment.
+    EnvCreate,
+    /// Install or coherently reinstall one environment root.
+    Install {
+        /// Exact registry package name.
+        package: String,
+        /// Explicit environment, if selected with `--env`.
+        environment: Option<PathBuf>,
+    },
+    /// Remove one direct environment root and prune its graph.
+    Uninstall {
+        /// Exact installed root name.
+        package: String,
+        /// Explicit environment, if selected with `--env`.
+        environment: Option<PathBuf>,
     },
 }
 
@@ -103,9 +121,12 @@ where
     if first_text == "init" {
         return parse_init(&arguments);
     }
+    if first_text == "env" {
+        return parse_env(&arguments);
+    }
     if matches!(
         first_text.as_ref(),
-        "sync" | "update" | "add" | "remove" | "publish"
+        "sync" | "update" | "add" | "remove" | "publish" | "install" | "uninstall"
     ) {
         return parse_package_command(&arguments);
     }
@@ -245,12 +266,31 @@ fn parse_init(arguments: &[OsString]) -> Result<CliInvocation, String> {
     })
 }
 
+fn parse_env(arguments: &[OsString]) -> Result<CliInvocation, String> {
+    if arguments.len() != 3 || arguments[1] != "create" {
+        return Err(format!("env requires `create <path>`\n{}", usage()));
+    }
+    if arguments[2].to_string_lossy().starts_with('-') {
+        return Err(format!("missing environment path\n{}", usage()));
+    }
+    Ok(CliInvocation {
+        operation: CliOperation::EnvCreate,
+        target: PathBuf::from(&arguments[2]),
+        compilation: CompilationOptions::default(),
+        timings: false,
+        registry: RegistryOptions::default(),
+    })
+}
+
+#[allow(clippy::too_many_lines)]
 fn parse_package_command(arguments: &[OsString]) -> Result<CliInvocation, String> {
     let command = arguments[0].to_string_lossy();
     let mut positional = Vec::new();
     let mut registry = RegistryOptions::default();
     let mut dependency_path = None;
+    let mut environment = None;
     let mut dry_run = false;
+    let mut optimization = OptimizationLevel::O0;
     let mut cursor = 1;
     while cursor < arguments.len() {
         match arguments[cursor].to_string_lossy().as_ref() {
@@ -273,6 +313,15 @@ fn parse_package_command(arguments: &[OsString]) -> Result<CliInvocation, String
                         format!("missing value for `--path`\n{}", usage())
                     })?));
             }
+            "--env" if command == "install" || command == "uninstall" => {
+                cursor += 1;
+                environment =
+                    Some(PathBuf::from(arguments.get(cursor).ok_or_else(|| {
+                        format!("missing value for `--env`\n{}", usage())
+                    })?));
+            }
+            "-O0" if command == "install" => optimization = OptimizationLevel::O0,
+            "-O2" if command == "install" => optimization = OptimizationLevel::O2,
             "--dry-run" if command == "publish" => dry_run = true,
             value if value.starts_with('-') => {
                 return Err(format!("unknown {command} option `{value}`\n{}", usage()));
@@ -307,6 +356,20 @@ fn parse_package_command(arguments: &[OsString]) -> Result<CliInvocation, String
             CliOperation::Publish { dry_run },
             PathBuf::from(&positional[0]),
         ),
+        "install" if positional.len() == 1 => (
+            CliOperation::Install {
+                package: positional[0].to_string_lossy().into_owned(),
+                environment,
+            },
+            PathBuf::new(),
+        ),
+        "uninstall" if positional.len() == 1 => (
+            CliOperation::Uninstall {
+                package: positional[0].to_string_lossy().into_owned(),
+                environment,
+            },
+            PathBuf::new(),
+        ),
         "sync" | "update" | "publish" => {
             return Err(format!(
                 "{command} requires exactly one project target\n{}",
@@ -323,7 +386,10 @@ fn parse_package_command(arguments: &[OsString]) -> Result<CliInvocation, String
     Ok(CliInvocation {
         operation,
         target,
-        compilation: CompilationOptions::default(),
+        compilation: CompilationOptions {
+            optimization,
+            emits: Vec::new(),
+        },
         timings: false,
         registry,
     })
@@ -361,6 +427,30 @@ where
     };
     if let CliOperation::Init { library } = invocation.operation {
         return match init_project(&invocation.target, library) {
+            Ok(()) => 0,
+            Err(message) => {
+                eprintln!("aether: error: {message}");
+                2
+            }
+        };
+    }
+    if invocation.operation == CliOperation::EnvCreate {
+        return match create_environment(&invocation.target) {
+            Ok(path) => {
+                println!("created environment: {}", path.display());
+                0
+            }
+            Err(message) => {
+                eprintln!("aether: error: {message}");
+                2
+            }
+        };
+    }
+    if matches!(
+        invocation.operation,
+        CliOperation::Install { .. } | CliOperation::Uninstall { .. }
+    ) {
+        return match run_environment_command(&invocation) {
             Ok(()) => 0,
             Err(message) => {
                 eprintln!("aether: error: {message}");
@@ -447,6 +537,9 @@ where
         | CliOperation::Remove { .. }
         | CliOperation::Publish { .. } => {
             unreachable!("package commands handled before target resolution")
+        }
+        CliOperation::EnvCreate | CliOperation::Install { .. } | CliOperation::Uninstall { .. } => {
+            unreachable!("environment commands handled before target resolution")
         }
     };
     match execute(request) {
@@ -640,6 +733,205 @@ fn run_package_command(invocation: &CliInvocation) -> Result<(), String> {
     }
 }
 
+fn run_environment_command(invocation: &CliInvocation) -> Result<(), String> {
+    let explicit = match &invocation.operation {
+        CliOperation::Install { environment, .. } | CliOperation::Uninstall { environment, .. } => {
+            environment.as_deref()
+        }
+        _ => unreachable!("not an environment command"),
+    };
+    let (environment, create_default) = selected_environment(explicit)?;
+    if create_default && !environment.exists() {
+        create_environment(&environment)?;
+    }
+    let provider = registry_provider(&invocation.registry)?;
+    let registry = provider
+        .as_ref()
+        .map(|value| value as &dyn aether_package::RegistryProvider);
+    let force_rebuild = match &invocation.operation {
+        CliOperation::Install { package, .. } => Some(package.as_str()),
+        _ => None,
+    };
+    let mutation = match &invocation.operation {
+        CliOperation::Install { package, .. } => prepare_environment_install(
+            &environment,
+            package,
+            registry.ok_or_else(|| {
+                "registry transport is not configured; pass `--registry <https-url>` or `--offline`"
+                    .to_owned()
+            })?,
+        )?,
+        CliOperation::Uninstall { package, .. } => {
+            prepare_environment_uninstall(&environment, package, registry)?
+        }
+        _ => unreachable!("not an environment command"),
+    };
+    build_environment_tools(&mutation, &invocation.compilation, force_rebuild)?;
+    commit_environment(&mutation)?;
+    println!("environment: {}", environment.display());
+    Ok(())
+}
+
+fn selected_environment(explicit: Option<&Path>) -> Result<(PathBuf, bool), String> {
+    if let Some(path) = explicit {
+        return Ok((path.to_path_buf(), false));
+    }
+    if let Some(path) = std::env::var_os("AETHER_ENV") {
+        if path.is_empty() {
+            return Err("AETHER_ENV cannot be empty".to_owned());
+        }
+        return Ok((PathBuf::from(path), false));
+    }
+    user_environment_path().map(|path| (path, true))
+}
+
+#[cfg(target_os = "windows")]
+fn user_environment_path() -> Result<PathBuf, String> {
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .map(|path| path.join("Aether/environments/default"))
+        .ok_or_else(|| "cannot locate user environment: LOCALAPPDATA is not set".to_owned())
+}
+
+#[cfg(target_os = "macos")]
+fn user_environment_path() -> Result<PathBuf, String> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|path| path.join("Library/Application Support/Aether/environments/default"))
+        .ok_or_else(|| "cannot locate user environment: HOME is not set".to_owned())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn user_environment_path() -> Result<PathBuf, String> {
+    unix_user_environment_path(std::env::var_os("XDG_DATA_HOME"), std::env::var_os("HOME"))
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn unix_user_environment_path(
+    xdg_data_home: Option<OsString>,
+    home: Option<OsString>,
+) -> Result<PathBuf, String> {
+    if let Some(path) = xdg_data_home {
+        if !path.is_empty() {
+            return Ok(PathBuf::from(path).join("aether/environments/default"));
+        }
+    }
+    home.map(PathBuf::from)
+        .map(|path| path.join(".local/share/aether/environments/default"))
+        .ok_or_else(|| "cannot locate user environment: HOME is not set".to_owned())
+}
+
+fn build_environment_tools(
+    mutation: &EnvironmentMutation,
+    compilation: &CompilationOptions,
+    force_rebuild: Option<&str>,
+) -> Result<(), String> {
+    for tool in mutation.tools() {
+        if tool.artifact.is_file() && force_rebuild != Some(tool.name.as_str()) {
+            continue;
+        }
+        let plan = environment_tool_plan(mutation, &tool.instance)?;
+        let parent = tool
+            .artifact
+            .parent()
+            .ok_or_else(|| "managed tool artifact has no parent".to_owned())?;
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "cannot create managed tool directory `{}`: {error}",
+                parent.display()
+            )
+        })?;
+        let temporary = parent.join(format!(
+            ".{}-{}-{}-new",
+            tool.name,
+            std::process::id(),
+            next_temporary_id()
+        ));
+        let response = execute(DriverRequest::BuildManagedTool(ManagedToolBuildRequest {
+            input: plan,
+            compilation: compilation.clone(),
+            output: temporary.clone(),
+        }));
+        match response {
+            Ok(DriverResponse::Built { .. }) => {}
+            Ok(_) => {
+                return Err("internal error: managed tool build returned no artifact".to_owned());
+            }
+            Err(diagnostics) => {
+                let _ = fs::remove_file(&temporary);
+                let source = mutation
+                    .graph()
+                    .packages
+                    .get(&tool.instance)
+                    .map_or_else(PathBuf::new, |node| node.source.clone());
+                return Err(render_diagnostics(&source, &diagnostics));
+            }
+        }
+        #[cfg(windows)]
+        if tool.artifact.exists() {
+            fs::remove_file(&tool.artifact).map_err(|error| {
+                format!(
+                    "cannot replace managed tool `{}`: {error}",
+                    tool.artifact.display()
+                )
+            })?;
+        }
+        fs::rename(&temporary, &tool.artifact).map_err(|error| {
+            format!(
+                "cannot publish managed tool `{}`: {error}",
+                tool.artifact.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn next_temporary_id() -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+fn environment_tool_plan(
+    mutation: &EnvironmentMutation,
+    tool: &PackageInstanceKey,
+) -> Result<ProjectPlan, String> {
+    let graph = mutation.graph();
+    let tool_node = graph
+        .packages
+        .get(tool)
+        .ok_or_else(|| "resolved environment tool is missing".to_owned())?;
+    if tool_node.kind != aether_package::ProjectKind::Application {
+        return Err("environment tool root is not an application".to_owned());
+    }
+    let root = PackageInstanceKey::Root {
+        manifest: tool_node.manifest.to_string_lossy().into_owned(),
+        name: tool_node.package.name.as_str().to_owned(),
+        version: tool_node.package.version.as_str().to_owned(),
+    };
+    let mut packages = std::collections::BTreeMap::<PackageInstanceKey, ResolvedPackage>::new();
+    let mut pending = vec![tool.clone()];
+    let mut seen = std::collections::BTreeSet::new();
+    while let Some(instance) = pending.pop() {
+        if !seen.insert(instance.clone()) {
+            continue;
+        }
+        let node = graph
+            .packages
+            .get(&instance)
+            .ok_or_else(|| "environment tool graph has a dangling edge".to_owned())?;
+        pending.extend(node.dependencies.values().cloned());
+        if instance == *tool {
+            let mut promoted = node.clone();
+            promoted.instance = root.clone();
+            packages.insert(root.clone(), promoted);
+        } else {
+            packages.insert(instance, node.clone());
+        }
+    }
+    ProjectPlan::resolved(root, &packages).map_err(driver_messages)
+}
+
 fn run_publish(root: &Path, options: &RegistryOptions, dry_run: bool) -> Result<(), String> {
     if options.offline || environment_flag("AETHER_OFFLINE")? {
         return Err("publish cannot run in offline mode".to_owned());
@@ -652,9 +944,6 @@ fn run_publish(root: &Path, options: &RegistryOptions, dry_run: bool) -> Result<
             .map(|value| value as &dyn aether_package::RegistryProvider),
     )?;
     let plan = ProjectPlan::resolved(graph.root, &graph.packages).map_err(driver_messages)?;
-    if plan.kind() != ProjectKind::Library {
-        return Err("publish V1 supports library projects only".to_owned());
-    }
     let source = plan.source().to_path_buf();
     match execute(DriverRequest::CheckProject(ProjectCheckRequest {
         input: plan,
@@ -794,7 +1083,7 @@ fn usage() -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{CliOperation, parse};
+    use super::{CliOperation, OptimizationLevel, parse};
     use std::path::PathBuf;
 
     #[test]
@@ -891,5 +1180,49 @@ mod tests {
         );
         assert!(parse(["remove", "only-name"]).is_err());
         assert!(parse(["update"]).is_err());
+
+        let created = parse(["env", "create", "environment with spaces"]).unwrap();
+        assert_eq!(created.operation, CliOperation::EnvCreate);
+        assert_eq!(created.target, PathBuf::from("environment with spaces"));
+        let installed = parse([
+            "install",
+            "formatter",
+            "--env",
+            "environment with spaces",
+            "--offline",
+            "-O2",
+        ])
+        .unwrap();
+        assert_eq!(
+            installed.operation,
+            CliOperation::Install {
+                package: "formatter".to_owned(),
+                environment: Some(PathBuf::from("environment with spaces")),
+            }
+        );
+        assert_eq!(installed.compilation.optimization, OptimizationLevel::O2);
+        assert!(installed.registry.offline);
+        assert!(matches!(
+            parse(["uninstall", "formatter"]).unwrap().operation,
+            CliOperation::Uninstall {
+                environment: None,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    fn user_environment_uses_xdg_then_the_standard_home_fallback() {
+        assert_eq!(
+            super::unix_user_environment_path(Some("/data root".into()), Some("/home/u".into()))
+                .unwrap(),
+            PathBuf::from("/data root/aether/environments/default")
+        );
+        assert_eq!(
+            super::unix_user_environment_path(None, Some("/home/u".into())).unwrap(),
+            PathBuf::from("/home/u/.local/share/aether/environments/default")
+        );
+        assert!(super::unix_user_environment_path(None, None).is_err());
     }
 }

@@ -3,6 +3,7 @@
 //! This crate owns package transport and materialization, but no CLI presentation or compiler
 //! policy.
 
+mod environment;
 mod publish;
 mod registry;
 
@@ -16,6 +17,10 @@ use fs2::FileExt;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
+pub use environment::{
+    EnvironmentMutation, EnvironmentTool, commit_environment, create_environment,
+    prepare_environment_install, prepare_environment_uninstall,
+};
 pub use publish::{
     Publication, PublicationContents, PublishOutcome, build_publication, inspect_publication,
     publish_publication,
@@ -712,6 +717,7 @@ fn resolve_and_publish(
 
 struct Resolver<'a> {
     registry: Option<&'a dyn RegistryProvider>,
+    allow_application_dependencies: bool,
     packages: BTreeMap<PackageInstanceKey, ResolvedPackage>,
     by_manifest: BTreeMap<PathBuf, PackageInstanceKey>,
     stack: Vec<(PackageInstanceKey, String)>,
@@ -721,6 +727,17 @@ impl<'a> Resolver<'a> {
     fn new(registry: Option<&'a dyn RegistryProvider>) -> Self {
         Self {
             registry,
+            allow_application_dependencies: false,
+            packages: BTreeMap::new(),
+            by_manifest: BTreeMap::new(),
+            stack: Vec::new(),
+        }
+    }
+
+    fn environment(registry: Option<&'a dyn RegistryProvider>) -> Self {
+        Self {
+            registry,
+            allow_application_dependencies: true,
             packages: BTreeMap::new(),
             by_manifest: BTreeMap::new(),
             stack: Vec::new(),
@@ -751,7 +768,12 @@ impl<'a> Resolver<'a> {
         self.by_manifest
             .insert(manifest_path.clone(), instance.clone());
         self.push(&instance, package.name.as_str())?;
-        let dependencies = self.resolve_dependencies(&root_path, &manifest.dependencies, false)?;
+        let dependencies = self.resolve_dependencies(
+            &root_path,
+            &manifest.dependencies,
+            false,
+            self.allow_application_dependencies,
+        )?;
         self.stack.pop();
         let (source, kind) = select_source(&root_path, manifest.application.as_ref(), true)?;
         self.packages.insert(
@@ -815,7 +837,12 @@ impl<'a> Resolver<'a> {
         self.by_manifest
             .insert(manifest_path.clone(), instance.clone());
         self.push(&instance, package.name.as_str())?;
-        let dependencies = self.resolve_dependencies(&root, &manifest.dependencies, false)?;
+        let dependencies = self.resolve_dependencies(
+            &root,
+            &manifest.dependencies,
+            false,
+            is_root && self.allow_application_dependencies,
+        )?;
         self.stack.pop();
         let (source, kind) = select_source(&root, manifest.application.as_ref(), is_root)?;
         self.packages.insert(
@@ -838,6 +865,7 @@ impl<'a> Resolver<'a> {
         owner_root: &Path,
         dependencies: &BTreeMap<String, DependencySpec>,
         registry_owner: bool,
+        allow_application_targets: bool,
     ) -> Result<BTreeMap<String, PackageInstanceKey>, String> {
         let mut resolved = BTreeMap::new();
         for (name, dependency) in dependencies {
@@ -858,7 +886,7 @@ impl<'a> Resolver<'a> {
                 DependencySpec::Registry(requirement) => {
                     let requirement = VersionRequirement::parse(requirement)
                         .map_err(|error| format!("dependency `{name}`: {error}"))?;
-                    self.resolve_registry(&package_name, &requirement)?
+                    self.resolve_registry(&package_name, &requirement, allow_application_targets)?
                 }
             };
             resolved.insert(name.clone(), target);
@@ -870,6 +898,7 @@ impl<'a> Resolver<'a> {
         &mut self,
         name: &PackageName,
         requirement: &VersionRequirement,
+        allow_application: bool,
     ) -> Result<PackageInstanceKey, String> {
         let provider = self.registry.ok_or_else(|| {
             format!(
@@ -924,7 +953,13 @@ impl<'a> Resolver<'a> {
         if self.stack.iter().any(|(active, _)| active == &instance) {
             return Err(self.cycle(&instance));
         }
-        if self.packages.contains_key(&instance) {
+        if let Some(existing) = self.packages.get(&instance) {
+            if !allow_application && existing.kind == ProjectKind::Application {
+                return Err(format!(
+                    "dependency `{}` must be a library; applications may only be direct environment roots",
+                    name.as_str()
+                ));
+            }
             return Ok(instance);
         }
         let root = canonical_directory(&metadata.root, "registry package materialization")?;
@@ -948,9 +983,10 @@ impl<'a> Resolver<'a> {
             ));
         }
         self.push(&instance, name.as_str())?;
-        let dependencies = self.resolve_dependencies(&root, &metadata.dependencies, true)?;
+        let dependencies = self.resolve_dependencies(&root, &metadata.dependencies, true, false)?;
         self.stack.pop();
-        let (source, kind) = select_source(&root, manifest.application.as_ref(), false)?;
+        let (source, kind) =
+            select_source(&root, manifest.application.as_ref(), allow_application)?;
         self.packages.insert(
             instance.clone(),
             ResolvedPackage {

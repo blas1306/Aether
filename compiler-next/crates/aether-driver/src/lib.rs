@@ -1654,6 +1654,17 @@ pub struct ProjectBuildRequest {
     pub compilation: CompilationOptions,
 }
 
+/// Retained application build at an explicit managed artifact path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ManagedToolBuildRequest {
+    /// Fully resolved application package graph.
+    pub input: ProjectPlan,
+    /// Compiler settings.
+    pub compilation: CompilationOptions,
+    /// Exact environment-owned output path.
+    pub output: PathBuf,
+}
+
 /// Runnable application-project request.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectRunRequest {
@@ -1678,6 +1689,8 @@ pub enum DriverRequest {
     CheckProject(ProjectCheckRequest),
     /// Build an application or library project into `.aether/build`.
     BuildProject(ProjectBuildRequest),
+    /// Build an environment tool into a caller-owned managed path.
+    BuildManagedTool(ManagedToolBuildRequest),
     /// Temporarily build and execute an application project.
     RunProject(ProjectRunRequest),
 }
@@ -1754,6 +1767,34 @@ pub fn execute_with_toolchain(
         }
         DriverRequest::BuildProject(request) => {
             build_project(&request.input, &request.compilation, &toolchain)
+        }
+        DriverRequest::BuildManagedTool(request) => {
+            if request.input.kind() != ProjectKind::Application {
+                return Err(vec![io_diagnostic(
+                    "only application packages can be built as managed tools",
+                )]);
+            }
+            let parent = request.output.parent().ok_or_else(|| {
+                vec![io_diagnostic("managed tool output has no parent directory")]
+            })?;
+            fs::create_dir_all(parent).map_err(|error| {
+                vec![io_diagnostic(format!(
+                    "could not create managed tool directory `{}`: {error}",
+                    parent.display()
+                ))]
+            })?;
+            let toolchain = toolchain.with_optimization(request.compilation.optimization);
+            let session = discover_catalog_with_plan(request.input.source(), Some(&request.input))?;
+            let compilation = compile_session_with_optimization(
+                session,
+                &request.compilation.emits,
+                request.compilation.optimization,
+            )?;
+            toolchain.link_executable(&compilation.llvm, &request.output)?;
+            Ok(DriverResponse::Built {
+                compilation,
+                artifact: request.output,
+            })
         }
         DriverRequest::RunProject(request) => {
             if request.input.kind() != ProjectKind::Application {

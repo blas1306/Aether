@@ -80,6 +80,65 @@ fn compiler_selector_is_not_part_of_the_official_cli() {
 }
 
 #[test]
+#[cfg(unix)]
+fn environment_selection_and_path_expose_tools_but_never_project_imports() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = Directory::new("environment-isolation");
+    let created = cli(&directory, &["env", "create", "environment with spaces"]);
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    let environment = directory.0.join("environment with spaces");
+    directory.write(
+        "environment with spaces/bin/environmentTool",
+        "#!/bin/sh\nexit 0\n",
+    );
+    fs::set_permissions(
+        environment.join("bin/environmentTool"),
+        fs::Permissions::from_mode(0o755),
+    )
+    .unwrap();
+    directory.write(
+        "environment with spaces/state/ambient/src/lib.ae",
+        "package ambient; int answer(){return 42;}",
+    );
+    directory.write(
+        "project/aether.toml",
+        "[package]\nname='isolatedProject'\nversion='0.1.0'\n",
+    );
+    directory.write(
+        "project/src/main.ae",
+        "import ambient; int main(){return ambient.answer();}",
+    );
+    let old_path = std::env::var_os("PATH").unwrap_or_default();
+    let joined = std::env::join_paths(
+        std::iter::once(environment.join("bin")).chain(std::env::split_paths(&old_path)),
+    )
+    .unwrap();
+    assert!(
+        Command::new("environmentTool")
+            .env("PATH", &joined)
+            .status()
+            .unwrap()
+            .success()
+    );
+    let checked = Command::new(env!("CARGO_BIN_EXE_aether"))
+        .args(["check", "project"])
+        .current_dir(&directory.0)
+        .env("AETHER_ENV", &environment)
+        .env("PATH", joined)
+        .output()
+        .unwrap();
+    assert_eq!(checked.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&checked.stderr).contains("does not declare direct dependency")
+    );
+}
+
+#[test]
 fn packaging_has_one_owner_for_each_public_cli_name() {
     let cargo = include_str!("../Cargo.toml");
     assert!(cargo.contains("name = \"aether\""));
