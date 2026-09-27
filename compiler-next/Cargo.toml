@@ -4,6 +4,7 @@ members = [
     "crates/aether-middle",
     "crates/aether-backend-llvm",
     "crates/aether-driver",
+    "crates/aether-cli",
 ]
 resolver = "3"
 

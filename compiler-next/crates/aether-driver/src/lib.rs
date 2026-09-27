@@ -1,6 +1,7 @@
 //! Development driver for the isolated compiler.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus};
@@ -13,7 +14,7 @@ use aether_frontend::{
     SourceFile, SourceId, SourceUnitKey, Span, analyze_bodies_for_target,
     collect_program_signatures, collect_signatures, parse_source,
 };
-use aether_middle::{build_ssa, lower_hir, optimize_oop, verify_mir, verify_ssa};
+use aether_middle::{VerifiedSsa, build_ssa, lower_hir, optimize_oop, verify_mir, verify_ssa};
 
 /// Native compilation profile; semantics and verification are identical.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -64,6 +65,20 @@ pub struct Compilation {
     pub dumps: BTreeMap<Emit, String>,
     /// Wall-clock nanoseconds by phase.
     pub timings_ns: BTreeMap<&'static str, u128>,
+}
+
+/// Result of semantic checking through verified SSA, before backend code generation.
+#[derive(Clone, Debug)]
+pub struct CheckedCompilation {
+    /// Requested deterministic phase dumps. LLVM can never be present here.
+    pub dumps: BTreeMap<Emit, String>,
+    /// Wall-clock nanoseconds by phase.
+    pub timings_ns: BTreeMap<&'static str, u128>,
+}
+
+struct AnalyzedSession {
+    checked: CheckedCompilation,
+    ssa: VerifiedSsa,
 }
 
 /// One source parsed exactly once during module discovery.
@@ -903,6 +918,29 @@ pub fn compile_session_with_optimization(
     emits: &[Emit],
     optimization: OptimizationLevel,
 ) -> Result<Compilation, Vec<Diagnostic>> {
+    let analyzed = analyze_session_with_optimization(session, emits, optimization)?;
+    let AnalyzedSession { mut checked, ssa } = analyzed;
+    let started = Instant::now();
+    let target = TargetDescriptor::linux_x86_64();
+    let llvm = LlvmTextBackend.emit(&ssa, &target);
+    checked
+        .timings_ns
+        .insert("backend.llvm", started.elapsed().as_nanos());
+    if emits.contains(&Emit::Llvm) {
+        checked.dumps.insert(Emit::Llvm, llvm.clone());
+    }
+    Ok(Compilation {
+        llvm,
+        dumps: checked.dumps,
+        timings_ns: checked.timings_ns,
+    })
+}
+
+fn analyze_session_with_optimization(
+    session: CompilationSession,
+    emits: &[Emit],
+    optimization: OptimizationLevel,
+) -> Result<AnalyzedSession, Vec<Diagnostic>> {
     let mut timings_ns = BTreeMap::from([
         ("module.discovery", session.discovery_ns),
         ("module.file_load", session.file_load_ns),
@@ -956,16 +994,9 @@ pub fn compile_session_with_optimization(
         dumps.insert(Emit::Ssa, ssa.dump());
     }
 
-    let started = Instant::now();
-    let llvm = LlvmTextBackend.emit(&ssa, &target);
-    timings_ns.insert("backend.llvm", started.elapsed().as_nanos());
-    if emits.contains(&Emit::Llvm) {
-        dumps.insert(Emit::Llvm, llvm.clone());
-    }
-    Ok(Compilation {
-        llvm,
-        dumps,
-        timings_ns,
+    Ok(AnalyzedSession {
+        checked: CheckedCompilation { dumps, timings_ns },
+        ssa,
     })
 }
 
@@ -1057,6 +1088,191 @@ impl ClangToolchain {
     }
 }
 
+/// A canonical standalone Aether source selected by an embedding frontend.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StandaloneFile {
+    path: PathBuf,
+}
+
+impl StandaloneFile {
+    /// Validates and canonicalizes one regular `.ae` file.
+    pub fn new(path: impl AsRef<Path>) -> Result<Self, Vec<Diagnostic>> {
+        let spelling = path.as_ref();
+        let path = spelling.canonicalize().map_err(|error| {
+            vec![io_diagnostic(format!(
+                "could not resolve standalone source `{}`: {error}",
+                spelling.display()
+            ))]
+        })?;
+        let metadata = path.metadata().map_err(|error| {
+            vec![io_diagnostic(format!(
+                "could not inspect standalone source `{}`: {error}",
+                path.display()
+            ))]
+        })?;
+        if !metadata.is_file() {
+            return Err(vec![io_diagnostic(format!(
+                "standalone source is not a regular file: `{}`",
+                path.display()
+            ))]);
+        }
+        if path.extension().and_then(|extension| extension.to_str()) != Some("ae") {
+            return Err(vec![io_diagnostic(format!(
+                "standalone source must have extension `.ae`: `{}`",
+                path.display()
+            ))]);
+        }
+        Ok(Self { path })
+    }
+
+    /// Canonical source path.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Explicit source root used for the existing standalone import graph.
+    #[must_use]
+    pub fn source_root(&self) -> &Path {
+        self.path.parent().unwrap_or_else(|| Path::new("."))
+    }
+}
+
+/// Compiler settings shared by typed driver operations.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CompilationOptions {
+    /// Physical optimization profile.
+    pub optimization: OptimizationLevel,
+    /// Deterministic compiler phase dumps requested by an embedding frontend.
+    pub emits: Vec<Emit>,
+}
+
+/// A semantic-only request. Its type has no program arguments or output path.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CheckRequest {
+    /// The only standalone input.
+    pub input: StandaloneFile,
+    /// Compiler settings.
+    pub compilation: CompilationOptions,
+}
+
+/// A retained native build request. Its type has no program arguments.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuildRequest {
+    /// The only standalone input.
+    pub input: StandaloneFile,
+    /// Compiler settings.
+    pub compilation: CompilationOptions,
+    /// Exact retained artifact path.
+    pub output: PathBuf,
+}
+
+/// A temporary native build-and-execute request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RunRequest {
+    /// The only standalone input.
+    pub input: StandaloneFile,
+    /// Compiler settings.
+    pub compilation: CompilationOptions,
+    /// Arguments forwarded verbatim after argv[0].
+    pub program_args: Vec<OsString>,
+}
+
+/// Typed in-process CLI-to-driver boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum DriverRequest {
+    /// Analyze through verified SSA without backend or toolchain work.
+    Check(CheckRequest),
+    /// Build and retain a native artifact.
+    Build(BuildRequest),
+    /// Build temporarily and execute the native artifact.
+    Run(RunRequest),
+}
+
+/// Typed result matching a [`DriverRequest`] operation.
+#[derive(Debug)]
+pub enum DriverResponse {
+    /// Semantic analysis completed.
+    Checked(CheckedCompilation),
+    /// Native artifact was retained at the requested path.
+    Built {
+        /// Full compilation, including LLVM.
+        compilation: Compilation,
+        /// Retained artifact path.
+        artifact: PathBuf,
+    },
+    /// The temporary native artifact ran to completion.
+    Ran {
+        /// Full compilation used for the run.
+        compilation: Compilation,
+        /// Native program status.
+        status: ExitStatus,
+    },
+}
+
+/// Executes a typed request using the default native toolchain.
+pub fn execute(request: DriverRequest) -> Result<DriverResponse, Vec<Diagnostic>> {
+    execute_with_toolchain(request, ClangToolchain::default())
+}
+
+/// Executes a typed request with an explicit toolchain, primarily for embedding and tests.
+pub fn execute_with_toolchain(
+    request: DriverRequest,
+    toolchain: ClangToolchain,
+) -> Result<DriverResponse, Vec<Diagnostic>> {
+    match request {
+        DriverRequest::Check(request) => {
+            let checked = check_path(
+                request.input.path(),
+                &request.compilation.emits,
+                request.compilation.optimization,
+            )?;
+            Ok(DriverResponse::Checked(checked))
+        }
+        DriverRequest::Build(request) => {
+            let toolchain = toolchain.with_optimization(request.compilation.optimization);
+            let compilation = build_path(
+                request.input.path(),
+                &request.output,
+                &request.compilation.emits,
+                &toolchain,
+            )?;
+            Ok(DriverResponse::Built {
+                compilation,
+                artifact: request.output,
+            })
+        }
+        DriverRequest::Run(request) => {
+            let toolchain = toolchain.with_optimization(request.compilation.optimization);
+            let (compilation, status) = run_path_with_os_arguments(
+                request.input.path(),
+                &request.compilation.emits,
+                &toolchain,
+                &request.program_args,
+            )?;
+            Ok(DriverResponse::Ran {
+                compilation,
+                status,
+            })
+        }
+    }
+}
+
+/// Checks a standalone path through optimized, verified SSA and stops before LLVM.
+pub fn check_path(
+    source_path: &Path,
+    emits: &[Emit],
+    optimization: OptimizationLevel,
+) -> Result<CheckedCompilation, Vec<Diagnostic>> {
+    if emits.contains(&Emit::Llvm) {
+        return Err(vec![io_diagnostic(
+            "check cannot emit LLVM because it stops before the backend",
+        )]);
+    }
+    let session = CompilationSession::discover(source_path)?;
+    analyze_session_with_optimization(session, emits, optimization).map(|analysis| analysis.checked)
+}
+
 /// Reads and compiles a path into a retained executable using the canonical pipeline.
 pub fn build_path(
     source_path: &Path,
@@ -1086,7 +1302,19 @@ pub fn run_path_with_arguments(
     toolchain: &ClangToolchain,
     arguments: &[String],
 ) -> Result<(Compilation, ExitStatus), Vec<Diagnostic>> {
+    let arguments = arguments.iter().map(OsString::from).collect::<Vec<_>>();
+    run_path_with_os_arguments(source_path, emits, toolchain, &arguments)
+}
+
+/// Compiles and runs one source path, preserving native program argument bytes.
+pub fn run_path_with_os_arguments(
+    source_path: &Path,
+    emits: &[Emit],
+    toolchain: &ClangToolchain,
+    arguments: &[OsString],
+) -> Result<(Compilation, ExitStatus), Vec<Diagnostic>> {
     let executable = temporary_path("out");
+    let _cleanup = TemporaryArtifact(executable.clone());
     let compilation = build_path(source_path, &executable, emits, toolchain)?;
     let status = Command::new(&executable)
         .args(arguments)
@@ -1096,8 +1324,15 @@ pub fn run_path_with_arguments(
                 "could not execute native artifact: {error}"
             ))]
         })?;
-    let _ = fs::remove_file(&executable);
     Ok((compilation, status))
+}
+
+struct TemporaryArtifact(PathBuf);
+
+impl Drop for TemporaryArtifact {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
 }
 
 /// Default retained artifact path for `build foo.ae`.
@@ -1127,6 +1362,37 @@ fn io_diagnostic(message: impl Into<String>) -> Diagnostic {
         message,
         None,
     )
+}
+
+/// Renders driver diagnostics against files in the standalone source root.
+#[must_use]
+pub fn render_diagnostics(source_path: &Path, diagnostics: &[Diagnostic]) -> String {
+    diagnostics
+        .iter()
+        .map(|diagnostic| {
+            let diagnostic_path = diagnostic.source_name.as_ref().map_or_else(
+                || source_path.to_path_buf(),
+                |name| {
+                    source_path
+                        .parent()
+                        .unwrap_or_else(|| Path::new("."))
+                        .join(name)
+                },
+            );
+            let source = fs::read_to_string(&diagnostic_path).ok().map(|text| {
+                let source_id = diagnostic
+                    .span
+                    .map_or_else(Default::default, |span| span.source);
+                let display_name = diagnostic
+                    .source_name
+                    .clone()
+                    .unwrap_or_else(|| source_path.display().to_string());
+                SourceFile::with_id(source_id, display_name, text)
+            });
+            diagnostic.render(source.as_ref())
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]
