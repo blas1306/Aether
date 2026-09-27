@@ -8,7 +8,7 @@ use std::process::{Command, ExitStatus};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use aether_backend_llvm::{Backend, LlvmTextBackend, TargetDescriptor};
-pub use aether_frontend::{Diagnostic, PackageInstanceKey};
+pub use aether_frontend::Diagnostic;
 use aether_frontend::{
     DiagnosticCategory, LogicalSourceKey, ModuleId, ModuleInfo, OriginKey, PackageId, PackageKey,
     PackagePath, ParsedAst, ParsedModule, ParsedProgram, Phase, ResolvedImport, SourceFile,
@@ -16,6 +16,9 @@ use aether_frontend::{
     collect_program_signatures, collect_signatures, parse_source,
 };
 use aether_middle::{VerifiedSsa, build_ssa, lower_hir, optimize_oop, verify_mir, verify_ssa};
+pub use aether_package::{
+    PackageInstanceKey, PackageMetadata, PackageName, PackageVersion, ProjectKind, ResolvedPackage,
+};
 
 /// Native compilation profile; semantics and verification are identical.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1248,154 +1251,6 @@ pub struct StandaloneFile {
     path: PathBuf,
 }
 
-/// Validated Aether package name, identical to its import namespace.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PackageName(String);
-
-impl PackageName {
-    /// Validates the exact spelling as one non-keyword Aether identifier.
-    pub fn new(value: impl Into<String>) -> Result<Self, Vec<Diagnostic>> {
-        const KEYWORDS: &[&str] = &[
-            "alias", "as", "bool", "break", "catch", "const", "continue", "else", "enum", "false",
-            "finally", "for", "if", "import", "in", "int", "match", "mut", "null", "package",
-            "ref", "return", "struct", "throw", "true", "try", "while",
-        ];
-        let value = value.into();
-        let mut bytes = value.bytes();
-        let valid_start = bytes
-            .next()
-            .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_');
-        let valid_tail = bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
-        if !valid_start || !valid_tail || KEYWORDS.contains(&value.as_str()) {
-            return Err(vec![io_diagnostic(format!(
-                "package name `{value}` is not a valid Aether namespace identifier"
-            ))]);
-        }
-        Ok(Self(value))
-    }
-
-    /// Exact, untranslated package spelling.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// Validated `SemVer` package version.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PackageVersion(String);
-
-impl PackageVersion {
-    /// Validates an exact `SemVer` spelling.
-    pub fn new(value: impl Into<String>) -> Result<Self, Vec<Diagnostic>> {
-        let value = value.into();
-        semver::Version::parse(&value).map_err(|error| {
-            vec![io_diagnostic(format!(
-                "package version `{value}` is not valid SemVer: {error}"
-            ))]
-        })?;
-        Ok(Self(value))
-    }
-
-    /// Original manifest spelling.
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// Manifest package metadata needed by the compiler driver.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PackageMetadata {
-    /// Package/import identity.
-    pub name: PackageName,
-    /// Package `SemVer`.
-    pub version: PackageVersion,
-    /// Optional Aether language compatibility line.
-    pub aether: Option<String>,
-}
-
-/// The single source target selected for a V1 project.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProjectKind {
-    /// Runnable source target.
-    Application,
-    /// Non-runnable library source target.
-    Library,
-}
-
-/// One fully resolved package node supplied by the project/package layer.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ResolvedPackage {
-    instance: PackageInstanceKey,
-    root: PathBuf,
-    manifest: PathBuf,
-    package: PackageMetadata,
-    source: PathBuf,
-    kind: ProjectKind,
-    dependencies: BTreeMap<String, PackageInstanceKey>,
-}
-
-impl ResolvedPackage {
-    /// Constructs a package node. Paths and graph consistency are revalidated by [`ProjectPlan`].
-    #[must_use]
-    pub fn new(
-        instance: PackageInstanceKey,
-        root: PathBuf,
-        manifest: PathBuf,
-        package: PackageMetadata,
-        source: PathBuf,
-        kind: ProjectKind,
-        dependencies: BTreeMap<String, PackageInstanceKey>,
-    ) -> Self {
-        Self {
-            instance,
-            root,
-            manifest,
-            package,
-            source,
-            kind,
-            dependencies,
-        }
-    }
-
-    /// Exact structural identity.
-    #[must_use]
-    pub const fn instance(&self) -> &PackageInstanceKey {
-        &self.instance
-    }
-    /// Canonical package root.
-    #[must_use]
-    pub fn root(&self) -> &Path {
-        &self.root
-    }
-    /// Canonical direct manifest.
-    #[must_use]
-    pub fn manifest(&self) -> &Path {
-        &self.manifest
-    }
-    /// Validated manifest metadata.
-    #[must_use]
-    pub const fn package(&self) -> &PackageMetadata {
-        &self.package
-    }
-    /// Selected canonical source entry.
-    #[must_use]
-    pub fn source(&self) -> &Path {
-        &self.source
-    }
-    /// Package target class.
-    #[must_use]
-    pub const fn kind(&self) -> ProjectKind {
-        self.kind
-    }
-    /// Direct import-root edges owned by this package.
-    #[must_use]
-    pub const fn dependencies(&self) -> &BTreeMap<String, PackageInstanceKey> {
-        &self.dependencies
-    }
-}
-
 /// Fully resolved and validated project boundary supplied by a frontend.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectPlan {
@@ -1501,6 +1356,11 @@ impl ProjectPlan {
         root_instance: PackageInstanceKey,
         packages: &BTreeMap<PackageInstanceKey, ResolvedPackage>,
     ) -> Result<Self, Vec<Diagnostic>> {
+        if !matches!(root_instance, PackageInstanceKey::Root { .. }) {
+            return Err(vec![io_diagnostic(
+                "resolved package graph root does not have root identity",
+            )]);
+        }
         if !packages.contains_key(&root_instance) {
             return Err(vec![io_diagnostic(
                 "resolved package graph has no root node",
@@ -1508,6 +1368,14 @@ impl ProjectPlan {
         }
         let mut validated = BTreeMap::new();
         for (key, node) in packages {
+            if key != &root_instance
+                && (matches!(key, PackageInstanceKey::Root { .. })
+                    || node.kind() != ProjectKind::Library)
+            {
+                return Err(vec![io_diagnostic(
+                    "resolved dependency nodes must be non-root library packages",
+                )]);
+            }
             if key != node.instance() {
                 return Err(vec![io_diagnostic(
                     "resolved package graph key does not match its node identity",
@@ -1535,7 +1403,16 @@ impl ProjectPlan {
                         && name == node.package.name.as_str()
                         && version == node.package.version.as_str()
                 }
-                PackageInstanceKey::Registry { .. } => false,
+                PackageInstanceKey::Registry {
+                    name,
+                    version,
+                    checksum,
+                    ..
+                } => {
+                    name == node.package.name.as_str()
+                        && version == node.package.version.as_str()
+                        && !checksum.is_empty()
+                }
             };
             if !expected {
                 return Err(vec![io_diagnostic(

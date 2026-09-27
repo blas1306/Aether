@@ -33,62 +33,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use std::time::Instant;
 
+pub use aether_package::PackageInstanceKey;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ModuleId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackageId(pub u32);
-/// Stable identity of one resolved package instance. Dense [`PackageId`] values are
-/// interned from this identity plus the logical package path for each session.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum PackageInstanceKey {
-    Root {
-        manifest: String,
-        name: String,
-        version: String,
-    },
-    Path {
-        manifest: String,
-        name: String,
-        version: String,
-    },
-    /// Reserved for the registry resolver; PACKAGE-IDENTITY-V1 never constructs it.
-    Registry {
-        registry: String,
-        name: String,
-        version: String,
-        checksum: String,
-    },
-}
-
-impl PackageInstanceKey {
-    #[must_use]
-    pub fn canonical(&self) -> String {
-        match self {
-            Self::Root {
-                manifest,
-                name,
-                version,
-            } => {
-                format!("root:{manifest}#{name}@{version}")
-            }
-            Self::Path {
-                manifest,
-                name,
-                version,
-            } => {
-                format!("path:{manifest}#{name}@{version}")
-            }
-            Self::Registry {
-                registry,
-                name,
-                version,
-                checksum,
-            } => {
-                format!("registry:{registry}:{name}@{version}#{checksum}")
-            }
-        }
-    }
-}
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum OriginKey {
     /// Legacy standalone-file catalog. It deliberately has no manifest identity.

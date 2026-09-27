@@ -15,8 +15,7 @@ name = "aether-cli"
 version = "0.1.0"
 dependencies = [
  "aether-driver",
- "serde",
- "toml",
+ "aether-package",
 ]
 
 [[package]]
@@ -26,18 +25,30 @@ dependencies = [
  "aether-backend-llvm",
  "aether-frontend",
  "aether-middle",
- "semver",
+ "aether-package",
 ]
 
 [[package]]
 name = "aether-frontend"
 version = "0.1.0"
+dependencies = [
+ "aether-package",
+]
 
 [[package]]
 name = "aether-middle"
 version = "0.1.0"
 dependencies = [
  "aether-frontend",
+]
+
+[[package]]
+name = "aether-package"
+version = "0.1.0"
+dependencies = [
+ "semver",
+ "serde",
+ "toml",
 ]
 
 [[package]]

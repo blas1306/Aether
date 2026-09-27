@@ -345,10 +345,7 @@ fn main_fallback_works_and_registry_dependencies_fail_explicitly() {
     );
     let rejected = cli(&directory, &["check", "app"]);
     assert_eq!(rejected.status.code(), Some(2));
-    assert!(
-        String::from_utf8_lossy(&rejected.stderr)
-            .contains("registry resolution is not implemented")
-    );
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("run `aether update`"));
 }
 
 #[test]
@@ -389,19 +386,21 @@ fn path_dependencies_are_recursive_owner_scoped_and_canonical() {
         "package math; struct Record{int value;} Record make(int x){return Record(x);}",
     );
 
-    let checked = cli(&directory, &["check", "app"]);
-    assert!(
-        checked.status.success(),
-        "{}",
-        String::from_utf8_lossy(&checked.stderr)
-    );
-    let ran = cli(&directory, &["run", "app"]);
-    assert_eq!(
-        ran.status.code(),
-        Some(0),
-        "{}",
-        String::from_utf8_lossy(&ran.stderr)
-    );
+    for optimization in ["-O0", "-O2"] {
+        let checked = cli(&directory, &["check", "app", optimization]);
+        assert!(
+            checked.status.success(),
+            "{}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+        let ran = cli(&directory, &["run", "app", optimization]);
+        assert_eq!(
+            ran.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&ran.stderr)
+        );
+    }
 }
 
 #[test]
