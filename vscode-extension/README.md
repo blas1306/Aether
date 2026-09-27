@@ -23,7 +23,8 @@ aether-lsp
 For a development checkout of the main repository:
 
 ```bash
-python3 -m pip install -e . --no-deps
+cargo install --path compiler-next/crates/aether-cli
+python3 -m pip install -e . --no-deps  # installs aether-lsp and aether-legacy
 ```
 
 If the executables are elsewhere, set their full paths in VS Code settings.
@@ -32,14 +33,12 @@ without invoking a shell.
 
 ## Commands
 
-- `Aether: Run` executes `aether file.ae`. The CLI's native/LLVM backend is the
-  default and is also the editor-title play button.
-- `Aether: Check` executes `aether --check file.ae`.
-- `Aether: Run with AST Backend` explicitly executes
-  `aether --backend=ast file.ae`. AST is auxiliary/experimental and is never a
-  silent fallback.
-- `Aether: Emit IR`, `Aether: Emit SSA`, and `Aether: Emit LLVM` use the audited
-  public CLI flags `--emit-ir`, `--emit-ssa`, and `--emit-llvm`.
+- `Aether: Run` executes `aether run file.ae` and is also the editor-title play
+  button.
+- `Aether: Check` executes `aether check file.ae`.
+- `Aether: Emit AST`, `Emit HIR`, `Emit MIR`, `Emit SSA`, and `Emit LLVM` use
+  the official `--emit <phase>` grammar. LLVM emission uses `build`; earlier
+  phases use `check`.
 - `Aether: Restart Language Server` restarts `aether-lsp`.
 - `Aether: Show Output` reveals the `Aether` output channel.
 
@@ -54,8 +53,7 @@ workspace.
 | --- | --- | --- |
 | `aether.executable` | `aether` | CLI executable name or path. |
 | `aether.lsp.executable` | `aether-lsp` | LSP executable name or path. |
-| `aether.defaultBackend` | `native` | Backend for `Aether: Run`: `native` or `ast`. |
-| `aether.optimizationLevel` | `O0` | `O0`, `O1`, or `O2`; currently passed only to `Emit IR`, matching the CLI contract. |
+| `aether.optimizationLevel` | `O0` | `O0` or `O2`; passed to official CLI operations. |
 | `aether.revealOutput` | `onError` | Reveal output `always`, `onError`, or `never`. |
 
 The output channel preserves stdout, stderr, process exit codes, and launch

@@ -123,7 +123,7 @@ cargo test -p aether-driver --test expense_tracker_next_port_complete
 También se ejecutó manualmente el comando público:
 
 ```text
-aether examples/expense_tracker/main.ae --compiler next -- ledger.alpt summary
+aether run examples/expense_tracker/main.ae -- ledger.alpt summary
 income: 0
 expenses: 0
 balance: 0

@@ -17,7 +17,7 @@ entries declare `native_module_emission` and are compiled without execution.
 Run the smallest official example with:
 
 ```bash
-aether examples/hello.ae
+aether run examples/hello.ae
 ```
 
 The repository keeps its existing topic directories to avoid a disruptive
@@ -35,7 +35,7 @@ capability gate, before IR/LLVM lowering.
 Use the AST backend explicitly when an entry is runnable:
 
 ```bash
-aether --backend=ast examples/linear_algebra/basic_operations.ae
+aether-legacy --backend=ast examples/linear_algebra/basic_operations.ae
 ```
 
 Some experimental entries have `run: false` because they are modules,

@@ -57,7 +57,7 @@ test("manifest consistently registers Aether, commands, and defaults", () => {
   const language = manifest.contributes.languages.find(({ id }) => id === "aether");
   assert.ok(language);
   assert.deepEqual(language.extensions, [".ae"]);
-  assert.equal(manifest.contributes.configuration.properties["aether.defaultBackend"]?.default, "native");
+  assert.equal(manifest.contributes.configuration.properties["aether.optimizationLevel"]?.default, "O0");
   assert.deepEqual(
     manifest.contributes.commands.map(({ command }) => command),
     [...COMMAND_IDS],

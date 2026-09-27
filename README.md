@@ -132,19 +132,21 @@ preferencia estética.
 
 ## Instalación y primer uso
 
-Desde un wheel RC construido localmente (no se publica automáticamente):
+La interfaz oficial es la CLI Rust de `compiler-next`. Desde el checkout se
+instala de forma portable con Cargo:
+
+```bash
+cargo install --path compiler-next/crates/aether-cli
+aether check examples/llvm/gcd_iterative.ae
+```
+
+El wheel Python conserva temporalmente el compilador histórico bajo un nombre
+inequívoco y no instala un segundo `aether`:
 
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install dist/aether_language-1.0.0rc4-py3-none-any.whl
-.venv/bin/aether --version
-```
-
-El resultado esperado identifica por separado lenguaje y perfil:
-
-```text
-Aether 1.0.0-rc.4
-Native capability profile 24
+.venv/bin/aether-legacy --version
 ```
 
 Para un checkout de desarrollo:
@@ -154,10 +156,10 @@ python3 -m pip install -r requirements.txt
 python3 -m pip install -e . --no-deps
 ```
 
-Ejecutar un archivo con el backend predeterminado LLVM/native:
+Ejecutar un archivo con la CLI oficial Rust/compiler-next:
 
 ```bash
-aether examples/llvm/gcd_iterative.ae
+aether run examples/llvm/gcd_iterative.ae
 ```
 
 Pasar argumentos al programa (el shell ya resuelve quoting):
@@ -188,10 +190,11 @@ El archivo usa ALPT1 revision 1. `saveLedger` publica mediante
 `io.writeTextAtomic`: temporal seguro, fsync, rename y fsync del directorio en
 POSIX; no añade locking ni backups.
 
-Ejecutar la superficie más amplia con el intérprete AST:
+La interfaz Python histórica queda congelada y sólo se usa explícitamente para
+la superficie aún no migrada, como el intérprete AST:
 
 ```bash
-aether --backend=ast examples/numerical_methods/main.ae
+aether-legacy --backend=ast examples/numerical_methods/main.ae
 ```
 
 Producir un ejecutable permanente:
@@ -202,7 +205,7 @@ aether build examples/llvm/gcd_iterative.ae -o build/gcd
 ```
 
 El backend native y `build` están validados para **Linux x86_64** y requieren
-`clang` en `PATH` (clang no se incluye en el wheel). Windows y POSIX genérico
+`clang` en `PATH`. Windows y POSIX genérico
 no se declaran soportados. No existe fallback silencioso a AST: si una feature
 válida solo en AST llega al compilador, el CLI falla con un diagnóstico.
 
@@ -210,7 +213,7 @@ válida solo en AST llega al compilador, el CLI falla con un diagnóstico.
 
 ### AST
 
-`--backend=ast` usa:
+`aether-legacy --backend=ast` usa:
 
 ```text
 Lexer -> Parser -> TypeChecker -> EntryPointNormalizer -> AST Interpreter
@@ -237,7 +240,9 @@ ejecuta módulos ni features AST-only.
 
 ### LLVM/native
 
-El comando simple `aether file.ae` usa:
+El comando simple `aether file.ae` es shorthand de `aether run file.ae` y usa
+el pipeline Rust de `compiler-next`. La descripción siguiente corresponde al
+pipeline histórico accesible sólo con `aether-legacy`:
 
 ```text
 Lexer -> Parser -> TypeChecker -> EntryPointNormalizer
@@ -247,8 +252,8 @@ Lexer -> Parser -> TypeChecker -> EntryPointNormalizer
 ```
 
 La ejecución temporal propaga stdout, stderr y exit code y elimina sus
-artefactos. `aether build` conserva el ejecutable; `--keep-llvm` conserva
-también el `.ll`.
+artefactos. `aether build` conserva el ejecutable; la inspección LLVM oficial
+se solicita con `--emit llvm`.
 
 El runtime LLVM actual aporta IO, contexto de argumentos y helpers checked para
 aritmética entera, strings UTF-8, allocations, Array, List, Vector, Matrix,
@@ -259,28 +264,23 @@ pública.
 ## Herramientas del compilador
 
 ```bash
-aether --tokens program.ae
-aether --ast program.ae
-aether --emit-ir program.ae
-aether --emit-ir -O0 program.ae
-aether --emit-ir -O1 --show-passes program.ae
-aether --emit-ir -O2 program.ae
-aether --emit-cfg program.ae
-aether --emit-ssa program.ae
-aether --emit-ssa --ssa-builder=pattern program.ae
-aether --emit-ssa --ssa-builder=general program.ae
-aether --emit-llvm program.ae
-aether --check program.ae
-aether --debug --emit-llvm program.ae
+aether check program.ae --emit ast
+aether check program.ae --emit hir
+aether check program.ae --emit mir
+aether check program.ae --emit ssa
+aether build program.ae --emit llvm
 ```
 
-`GeneralSSABuilder` es el builder predeterminado. Usa CFG, dominadores y
+Las herramientas históricas adicionales siguen disponibles bajo
+`aether-legacy`, sin nuevas features. `GeneralSSABuilder` es el builder
+predeterminado allí. Usa CFG, dominadores y
 fronteras de dominancia. El builder `pattern` se conserva como comparación
 temporal y soporta menos formas. Los visitantes de operandos IR/SSA son
 estructurales y la suite verifica que una instrucción nueva no quede fuera de
 DCE, SCCP o las reescrituras de valores.
 
-El perfil de optimización se aplica a toda la compilación (por defecto O0):
+En la CLI legacy, el perfil de optimización se aplica a toda la compilación
+(por defecto O0):
 
 - `-O0`: sin pases opcionales Aether y clang O0;
 - `-O1`: folding, propagación local, simplificación algebraica, dead code y
@@ -327,7 +327,7 @@ callable `Function<(double), double>` y el mismo programa multi-módulo se valid
 LLVM/native; no necesita ya la antigua interfaz `ScalarFunction`.
 
 ```bash
-aether --backend=ast examples/numerical_methods/main.ae
+aether-legacy --backend=ast examples/numerical_methods/main.ae
 ```
 
 ## Módulos y imports
@@ -350,7 +350,7 @@ inicialización compilada de módulos.
 ## REPL, LSP y editores oficiales
 
 ```bash
-aether --repl
+aether-legacy --repl
 ```
 
 El REPL usa `AetherSession`, conserva variables/funciones y revierte una entrada
@@ -370,9 +370,9 @@ clasifica también las capacidades todavía no soportadas.
 El harness de desarrollo separa preparación/compilación de ejecución:
 
 ```bash
-aether bench benchmarks/sum_to.ae --backend ast
-aether bench benchmarks/sum_to.ae --backend ir
-aether bench benchmarks/sum_to.ae --backend all --iterations 20
+aether-legacy bench benchmarks/sum_to.ae --backend ast
+aether-legacy bench benchmarks/sum_to.ae --backend ir
+aether-legacy bench benchmarks/sum_to.ae --backend all --iterations 20
 ```
 
 Los perfiles incluyen AST, IR, SSA, LLVM emit, native build y native runtime.

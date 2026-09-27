@@ -11,11 +11,10 @@ function configuration(values: Record<string, unknown>): WorkspaceConfiguration 
   } as WorkspaceConfiguration;
 }
 
-test("configuration defaults to external executables and native", () => {
+test("configuration defaults to external executables", () => {
   assert.deepEqual(readAetherConfiguration(configuration({})), {
     executable: "aether",
     lspExecutable: "aether-lsp",
-    defaultBackend: "native",
     optimizationLevel: "O0",
     revealOutput: "onError",
   });
@@ -27,7 +26,6 @@ test("configuration reads supported values and trims executable paths", () => {
       configuration({
         executable: "  C:\\Program Files\\Aether\\aether.exe  ",
         "lsp.executable": "custom-lsp",
-        defaultBackend: "ast",
         optimizationLevel: "O2",
         revealOutput: "always",
       }),
@@ -35,7 +33,6 @@ test("configuration reads supported values and trims executable paths", () => {
     {
       executable: "C:\\Program Files\\Aether\\aether.exe",
       lspExecutable: "custom-lsp",
-      defaultBackend: "ast",
       optimizationLevel: "O2",
       revealOutput: "always",
     },
@@ -44,9 +41,8 @@ test("configuration reads supported values and trims executable paths", () => {
 
 test("invalid public configuration values fall back safely", () => {
   const result = readAetherConfiguration(
-    configuration({ defaultBackend: "llvm", optimizationLevel: "O9", revealOutput: "sometimes" }),
+    configuration({ optimizationLevel: "O9", revealOutput: "sometimes" }),
   );
-  assert.equal(result.defaultBackend, "native");
   assert.equal(result.optimizationLevel, "O0");
   assert.equal(result.revealOutput, "onError");
 });

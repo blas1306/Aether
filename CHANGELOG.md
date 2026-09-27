@@ -11,6 +11,12 @@ es la spec v1 junto con el perfil native normativo.
 
 ## Unreleased
 
+- Promoted the Rust/compiler-next CLI to `aether`; the Python wheel now
+  installs its frozen historical interface as `aether-legacy`. Compiler
+  selection is by executable name, so `aether --compiler ...` is an error.
+- Kept `aether-next` only as an internal bootstrap for differential tests and
+  measurement tooling that still depends on it.
+
 - Consolidated `-O0/-O1/-O2` into one compilation-wide profile used by run,
   build, IR/SSA/LLVM inspection, benchmarks, and clang. O2 is explicitly the
   conservative Aether O1 middle-end plus clang O2; `--opt` remains a deprecated

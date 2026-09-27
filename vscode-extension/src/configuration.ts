@@ -1,19 +1,16 @@
 import type { WorkspaceConfiguration } from "vscode";
 
-export type AetherBackend = "native" | "ast";
-export type OptimizationLevel = "O0" | "O1" | "O2";
+export type OptimizationLevel = "O0" | "O2";
 export type RevealOutput = "always" | "onError" | "never";
 
 export interface AetherConfiguration {
   executable: string;
   lspExecutable: string;
-  defaultBackend: AetherBackend;
   optimizationLevel: OptimizationLevel;
   revealOutput: RevealOutput;
 }
 
-const BACKENDS = new Set<AetherBackend>(["native", "ast"]);
-const OPTIMIZATION_LEVELS = new Set<OptimizationLevel>(["O0", "O1", "O2"]);
+const OPTIMIZATION_LEVELS = new Set<OptimizationLevel>(["O0", "O2"]);
 const REVEAL_OUTPUT_VALUES = new Set<RevealOutput>(["always", "onError", "never"]);
 
 function stringSetting(configuration: WorkspaceConfiguration, key: string, fallback: string): string {
@@ -35,7 +32,6 @@ export function readAetherConfiguration(configuration: WorkspaceConfiguration): 
   return {
     executable: stringSetting(configuration, "executable", "aether"),
     lspExecutable: stringSetting(configuration, "lsp.executable", "aether-lsp"),
-    defaultBackend: enumSetting(configuration, "defaultBackend", BACKENDS, "native"),
     optimizationLevel: enumSetting(configuration, "optimizationLevel", OPTIMIZATION_LEVELS, "O0"),
     revealOutput: enumSetting(configuration, "revealOutput", REVEAL_OUTPUT_VALUES, "onError"),
   };

@@ -25,7 +25,6 @@ export class AetherRunner implements vscode.Disposable {
     const args = buildCliArguments({
       mode: options.mode,
       file: options.file,
-      defaultBackend: options.configuration.defaultBackend,
       optimizationLevel: options.configuration.optimizationLevel,
     });
 

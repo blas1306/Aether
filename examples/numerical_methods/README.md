@@ -15,11 +15,11 @@ algorithms written entirely in Aether:
 - typed top-level callables, structs by value, imports, loops, and real scalar
   mathematics.
 
-Run it with `compiler-next` from the repository root:
+Run it with the official Rust CLI from the repository root:
 
 ```bash
-aether examples/numerical_methods/main.ae --compiler next
-aether examples/numerical_methods/main.ae --compiler next -O2
+aether run examples/numerical_methods/main.ae
+aether run examples/numerical_methods/main.ae -O2
 ```
 
 The first command uses O0. Every printed validation must end in `true`, and O0

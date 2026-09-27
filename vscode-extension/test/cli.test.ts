@@ -4,37 +4,30 @@ import { buildCliArguments, formatCommand, shouldRevealOutput } from "../src/cli
 
 const base = {
   file: "/workspace/aether examples/hello world.ae",
-  defaultBackend: "native" as const,
   optimizationLevel: "O0" as const,
 };
 
-test("native is the default run backend and paths remain one argument", () => {
-  assert.deepEqual(buildCliArguments({ ...base, mode: "run" }), [base.file]);
-});
-
-test("configured and explicit AST runs use the AST backend", () => {
-  assert.deepEqual(
-    buildCliArguments({ ...base, mode: "run", defaultBackend: "ast" }),
-    ["--backend=ast", base.file],
-  );
-  assert.deepEqual(buildCliArguments({ ...base, mode: "runAst" }), ["--backend=ast", base.file]);
+test("run uses the official Rust CLI grammar and paths remain one argument", () => {
+  assert.deepEqual(buildCliArguments({ ...base, mode: "run" }), ["run", base.file, "-O0"]);
 });
 
 test("check and emission commands use the audited CLI flags", () => {
-  assert.deepEqual(buildCliArguments({ ...base, mode: "check" }), ["--check", base.file]);
-  assert.deepEqual(buildCliArguments({ ...base, mode: "emitIr", optimizationLevel: "O2" }), [
-    "--emit-ir",
-    "-O2",
+  assert.deepEqual(buildCliArguments({ ...base, mode: "check" }), ["check", base.file, "-O0"]);
+  assert.deepEqual(buildCliArguments({ ...base, mode: "emitMir", optimizationLevel: "O2" }), [
+    "check",
     base.file,
+    "--emit",
+    "mir",
+    "-O2",
   ]);
-  assert.deepEqual(buildCliArguments({ ...base, mode: "emitSsa" }), ["--emit-ssa", base.file]);
-  assert.deepEqual(buildCliArguments({ ...base, mode: "emitLlvm" }), ["--emit-llvm", base.file]);
+  assert.deepEqual(buildCliArguments({ ...base, mode: "emitSsa" }), ["check", base.file, "--emit", "ssa", "-O0"]);
+  assert.deepEqual(buildCliArguments({ ...base, mode: "emitLlvm" }), ["build", base.file, "--emit", "llvm", "-O0"]);
 });
 
 test("display formatting quotes paths but never changes the argument array", () => {
   const args = buildCliArguments({ ...base, mode: "check" });
-  assert.equal(formatCommand("aether", args), `aether --check "${base.file}"`);
-  assert.deepEqual(args, ["--check", base.file]);
+  assert.equal(formatCommand("aether", args), `aether check "${base.file}" -O0`);
+  assert.deepEqual(args, ["check", base.file, "-O0"]);
 });
 
 test("exit codes control output reveal without reinterpreting diagnostics", () => {

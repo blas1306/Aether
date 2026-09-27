@@ -1,8 +1,9 @@
 export const COMMAND_IDS = [
   "aether.run",
   "aether.check",
-  "aether.runAst",
-  "aether.emitIr",
+  "aether.emitAst",
+  "aether.emitHir",
+  "aether.emitMir",
   "aether.emitSsa",
   "aether.emitLlvm",
   "aether.restartLanguageServer",

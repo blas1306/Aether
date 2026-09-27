@@ -146,7 +146,8 @@ def test_packaging_excludes_deprecated_qt_and_legacy_surfaces() -> None:
     assert "pyqt" not in lowered
     assert "platformdirs" not in lowered
     assert "studio =" not in lowered
-    assert 'aether = "aether.cli:main"' in metadata
+    assert 'aether-legacy = "aether.cli:main"' in metadata
+    assert '\naether = "aether.cli:main"' not in metadata
     assert 'aether-lsp = "aether_lsp.server:main"' in metadata
 
     removed_paths = (
@@ -167,6 +168,18 @@ def test_packaging_excludes_deprecated_qt_and_legacy_surfaces() -> None:
     assert (ROOT / "src/aether_lsp/server.py").is_file()
     assert (ROOT / "vscode-extension/package.json").is_file()
     assert (ROOT / "tools/intellij-aether/build.gradle.kts").is_file()
+
+
+def test_versioned_python_wheel_owns_only_the_legacy_cli_name() -> None:
+    wheel = ROOT / "python-dist/aether_language-1.0.0rc4-py3-none-any.whl"
+    with zipfile.ZipFile(wheel) as archive:
+        entry_points = next(
+            name for name in archive.namelist() if name.endswith("entry_points.txt")
+        )
+        scripts = archive.read(entry_points).decode("utf-8").splitlines()
+
+    assert "aether-legacy = aether.cli:main" in scripts
+    assert "aether = aether.cli:main" not in scripts
 
 
 def test_release_archive_policy_rejects_deprecated_tooling_paths() -> None:

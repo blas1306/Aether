@@ -467,7 +467,7 @@ def test_missing_file_reports_read_error(tmp_path: Path) -> None:
 
     assert exit_code == EXIT_USAGE_ERROR
     assert stdout == ""
-    assert "aether: cannot read" in stderr
+    assert "aether-legacy: cannot read" in stderr
     assert str(missing) in stderr
 
 
@@ -487,8 +487,8 @@ def test_help_describes_direct_execution_and_tools() -> None:
     exit_code, stdout, stderr = run_cli(["--help"])
 
     assert exit_code == EXIT_SUCCESS
-    assert "usage: aether" in stdout
-    assert "aether program.ae" in stdout
+    assert "usage: aether-legacy" in stdout
+    assert "aether-legacy program.ae" in stdout
     assert "--repl" in stdout
     assert "--compiler {legacy,next}" in stdout
     assert "--tokens" in stdout
@@ -1018,7 +1018,7 @@ def test_emit_ssa_missing_file_reports_read_error(tmp_path: Path) -> None:
 
     assert exit_code == EXIT_USAGE_ERROR
     assert stdout == ""
-    assert "aether: cannot read" in stderr
+    assert "aether-legacy: cannot read" in stderr
     assert str(missing) in stderr
 
 
@@ -1697,7 +1697,7 @@ def test_emit_llvm_missing_file_reports_read_error(tmp_path: Path) -> None:
 
     assert exit_code == EXIT_USAGE_ERROR
     assert stdout == ""
-    assert "aether: cannot read" in stderr
+    assert "aether-legacy: cannot read" in stderr
     assert str(missing) in stderr
 
 
@@ -1799,7 +1799,7 @@ def test_build_missing_file_reports_read_error(tmp_path: Path) -> None:
 
     assert exit_code == EXIT_USAGE_ERROR
     assert stdout == ""
-    assert "aether: cannot read" in stderr
+    assert "aether-legacy: cannot read" in stderr
     assert str(missing) in stderr
 
 
@@ -2501,7 +2501,7 @@ def test_emit_cfg_missing_file_reports_read_error(tmp_path: Path) -> None:
 
     assert exit_code == EXIT_USAGE_ERROR
     assert stdout == ""
-    assert "aether: cannot read" in stderr
+    assert "aether-legacy: cannot read" in stderr
     assert str(missing) in stderr
 
 
@@ -3232,7 +3232,7 @@ def test_bench_missing_file_reports_read_error(tmp_path: Path) -> None:
 
     assert exit_code == EXIT_USAGE_ERROR
     assert stdout == ""
-    assert "aether: cannot read" in stderr
+    assert "aether-legacy: cannot read" in stderr
     assert str(missing) in stderr
 
 

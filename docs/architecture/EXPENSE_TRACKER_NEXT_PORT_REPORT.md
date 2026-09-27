@@ -21,7 +21,7 @@ formato.
 El comando objetivo sigue sin estar disponible:
 
 ```text
-$ aether examples/expense_tracker/main.ae --compiler next
+$ aether run examples/expense_tracker/main.ae
 error[E0700] (driver): could not read entry source `examples/expense_tracker/main.ae`: No such file or directory (os error 2)
 ```
 
@@ -29,7 +29,7 @@ El entry legacy es `Main.ae`; tampoco compila sin migración y falla primero en
 el import selectivo:
 
 ```text
-$ aether examples/expense_tracker/Main.ae --compiler next
+$ aether run examples/expense_tracker/Main.ae
 Main.ae:1:14: error[E0100] (parse): expected `(` after function name
 ```
 

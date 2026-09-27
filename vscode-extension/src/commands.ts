@@ -16,8 +16,9 @@ export function registerAetherCommands(
   const modes = new Map<string, AetherMode>([
     ["aether.run", "run"],
     ["aether.check", "check"],
-    ["aether.runAst", "runAst"],
-    ["aether.emitIr", "emitIr"],
+    ["aether.emitAst", "emitAst"],
+    ["aether.emitHir", "emitHir"],
+    ["aether.emitMir", "emitMir"],
     ["aether.emitSsa", "emitSsa"],
     ["aether.emitLlvm", "emitLlvm"],
   ]);

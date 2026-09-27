@@ -1,4 +1,4 @@
-//! Bootstrap frontend for standalone files and explicit Aether projects.
+//! Official frontend for standalone files and explicit Aether projects.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -13,7 +13,7 @@ use aether_driver::{
 };
 use serde::Deserialize;
 
-const USAGE: &str = "usage: aether-cli-next run <file.ae|directory> [options] [-- args...]\n       aether-cli-next build <file.ae|directory> [-o artifact] [options]\n       aether-cli-next check <file.ae|directory> [options]\n       aether-cli-next init [--lib] <packageName>\n       aether-cli-next <file.ae> [options] [-- args...]\noptions: -O0 | -O2, --emit ast|hir|mir|ssa|llvm, --timings\n         (`check` does not accept `--emit llvm`)";
+const USAGE: &str = "usage: aether run <file.ae|directory> [options] [-- args...]\n       aether build <file.ae|directory> [-o artifact] [options]\n       aether check <file.ae|directory> [options]\n       aether init [--lib] <packageName>\n       aether <file.ae> [options] [-- args...]\noptions: -O0 | -O2, --emit ast|hir|mir|ssa|llvm, --timings\n         (`check` does not accept `--emit llvm`)";
 
 /// CLI operation after shorthand normalization and argument validation.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -203,7 +203,7 @@ where
     let invocation = match parse(arguments) {
         Ok(invocation) => invocation,
         Err(message) => {
-            eprintln!("aether-cli-next: error: {message}");
+            eprintln!("aether: error: {message}");
             return 2;
         }
     };
@@ -211,7 +211,7 @@ where
         return match init_project(&invocation.target, library) {
             Ok(()) => 0,
             Err(message) => {
-                eprintln!("aether-cli-next: error: {message}");
+                eprintln!("aether: error: {message}");
                 2
             }
         };
@@ -219,7 +219,7 @@ where
     let target = match resolve_target(&invocation.target) {
         Ok(target) => target,
         Err(message) => {
-            eprintln!("aether-cli-next: error: {message}");
+            eprintln!("aether: error: {message}");
             return 2;
         }
     };
@@ -244,7 +244,7 @@ where
             ResolvedTarget::Project(input) => {
                 if output.is_some() {
                     eprintln!(
-                        "aether-cli-next: error: project build output is fixed under `.aether/build`; `-o` is standalone-only"
+                        "aether: error: project build output is fixed under `.aether/build`; `-o` is standalone-only"
                     );
                     return 2;
                 }
@@ -262,7 +262,7 @@ where
             }),
             ResolvedTarget::Project(input) => {
                 if input.kind() == ProjectKind::Library {
-                    eprintln!("aether-cli-next: error: library projects cannot be run");
+                    eprintln!("aether: error: library projects cannot be run");
                     return 2;
                 }
                 DriverRequest::RunProject(ProjectRunRequest {
@@ -295,9 +295,7 @@ where
             if let Some(code) = status.code() {
                 code
             } else {
-                eprintln!(
-                    "aether-cli-next: error: program terminated without a representable exit status"
-                );
+                eprintln!("aether: error: program terminated without a representable exit status");
                 1
             }
         }

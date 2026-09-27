@@ -1,4 +1,4 @@
-//! Development-name entry point for the Rust Aether CLI bootstrap.
+//! Official entry point for the Rust Aether CLI.
 
 use std::env;
 use std::process;

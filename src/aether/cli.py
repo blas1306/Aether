@@ -58,11 +58,11 @@ _COMPILERS = ("legacy", "next")
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="aether",
+        prog="aether-legacy",
         description="Run Aether language programs.",
         epilog=(
-            "The default command compiles and runs with LLVM: aether program.ae\n"
-            "Forward program arguments explicitly: aether run program.ae -- arg1 arg2\n"
+            "The default command compiles and runs with LLVM: aether-legacy program.ae\n"
+            "Forward program arguments explicitly: aether-legacy run program.ae -- arg1 arg2\n"
             "Development inspection tools: --tokens, --ast, --emit-ir, "
             "--emit-cfg, --emit-ssa, --emit-llvm, build, and bench"
         ),
@@ -169,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def build_bench_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="aether bench",
+        prog="aether-legacy bench",
         description="Measure Aether programs through development backends.",
     )
     parser.add_argument("file", help="Aether source file to benchmark.")
@@ -211,7 +211,7 @@ def build_bench_parser() -> argparse.ArgumentParser:
 
 def build_native_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="aether build",
+        prog="aether-legacy build",
         description="Build an Aether source file to a native executable with clang.",
     )
     parser.add_argument("file", help="Aether source file to build.")
@@ -254,20 +254,20 @@ def _extract_compiler_selection(
             break
         if argument == "--compiler":
             if seen:
-                print("aether: error: --compiler may only be specified once.", file=stderr)
+                print("aether-legacy: error: --compiler may only be specified once.", file=stderr)
                 return None
             seen = True
             cursor += 1
             if cursor == len(argv):
                 print(
-                    "aether: error: argument --compiler: expected one argument",
+                    "aether-legacy: error: argument --compiler: expected one argument",
                     file=stderr,
                 )
                 return None
             compiler = argv[cursor]
         elif argument.startswith("--compiler="):
             if seen:
-                print("aether: error: --compiler may only be specified once.", file=stderr)
+                print("aether-legacy: error: --compiler may only be specified once.", file=stderr)
                 return None
             seen = True
             compiler = argument.partition("=")[2]
@@ -278,7 +278,7 @@ def _extract_compiler_selection(
     if compiler not in _COMPILERS:
         choices = ", ".join(repr(choice) for choice in _COMPILERS)
         print(
-            f"aether: error: argument --compiler: invalid choice: {compiler!r} "
+            f"aether-legacy: error: argument --compiler: invalid choice: {compiler!r} "
             f"(choose from {choices})",
             file=stderr,
         )
@@ -314,7 +314,7 @@ def _main_next(
     executable = _resolve_next_compiler()
     if executable is None:
         print(
-            "aether: error: compiler-next executable `aether-next` was not found "
+            "aether-legacy: error: compiler-next executable `aether-next` was not found "
             "in the Aether installation or repository.",
             file=stderr,
         )
@@ -336,7 +336,7 @@ def _main_next(
     try:
         completed = subprocess.run(command, **kwargs)
     except OSError as exc:
-        print(f"aether: error: could not execute compiler-next: {exc}", file=stderr)
+        print(f"aether-legacy: error: could not execute compiler-next: {exc}", file=stderr)
         return EXIT_TOOLCHAIN_ERROR
     if captured_stdout and completed.stdout is not None:
         stdout.write(completed.stdout)
@@ -388,42 +388,42 @@ def main(
 
     if args.ssa_builder is not None and not args.emit_ssa:
         print(
-            "aether: error: --ssa-builder is only supported with --emit-ssa.",
+            "aether-legacy: error: --ssa-builder is only supported with --emit-ssa.",
             file=stderr,
         )
         return EXIT_USAGE_ERROR
     if args.opt and args.opt_level not in (None, "1"):
         print(
-            "aether: error: --opt is an alias for -O1 and conflicts with "
+            "aether-legacy: error: --opt is an alias for -O1 and conflicts with "
             f"-O{args.opt_level}.",
             file=stderr,
         )
         return EXIT_USAGE_ERROR
     if args.emit_ssa and args.show_passes:
         print(
-            "aether: error: --emit-ssa cannot be combined with --show-passes.",
+            "aether-legacy: error: --emit-ssa cannot be combined with --show-passes.",
             file=stderr,
         )
         return EXIT_USAGE_ERROR
     if args.emit_llvm and args.show_passes:
         print(
-            "aether: error: --emit-llvm cannot be combined with --show-passes.",
+            "aether-legacy: error: --emit-llvm cannot be combined with --show-passes.",
             file=stderr,
         )
         return EXIT_USAGE_ERROR
     if args.show_passes and not args.emit_ir:
         print(
-            "aether: error: --show-passes requires --emit-ir.",
+            "aether-legacy: error: --show-passes requires --emit-ir.",
             file=stderr,
         )
         return EXIT_USAGE_ERROR
 
     if args.repl:
         if args.backend not in (None, "ast"):
-            print("aether: error: --repl only supports --backend=ast for now.", file=stderr)
+            print("aether-legacy: error: --repl only supports --backend=ast for now.", file=stderr)
             return EXIT_USAGE_ERROR
         if args.file is not None:
-            print("aether: error: --repl does not accept a file.", file=stderr)
+            print("aether-legacy: error: --repl does not accept a file.", file=stderr)
             return EXIT_USAGE_ERROR
         return run_repl(
             stdin=stdin,
@@ -1085,13 +1085,13 @@ def _read_source(path: Path, *, stderr: TextIO) -> str | None:
         return path.read_text(encoding="utf-8")
     except UnicodeDecodeError as exc:
         print(
-            f"aether: cannot read '{path}': source is not valid UTF-8 "
+            f"aether-legacy: cannot read '{path}': source is not valid UTF-8 "
             f"(byte {exc.start})",
             file=stderr,
         )
         return None
     except OSError as exc:
-        print(f"aether: cannot read '{path}': {exc}", file=stderr)
+        print(f"aether-legacy: cannot read '{path}': {exc}", file=stderr)
         return None
 
 

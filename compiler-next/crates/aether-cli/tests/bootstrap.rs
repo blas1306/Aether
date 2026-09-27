@@ -1,4 +1,4 @@
-//! End-to-end qualification of the development-name CLI.
+//! End-to-end qualification of the official CLI.
 
 use std::fs;
 use std::path::PathBuf;
@@ -35,7 +35,7 @@ impl Drop for Directory {
 }
 
 fn cli(directory: &Directory, arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_aether-cli-next"))
+    Command::new(env!("CARGO_BIN_EXE_aether"))
         .args(arguments)
         .current_dir(&directory.0)
         .output()
@@ -61,6 +61,61 @@ fn usage_and_target_errors_exit_two() {
         assert_eq!(output.status.code(), Some(2), "{arguments:?}");
         assert!(!output.stderr.is_empty(), "{arguments:?}");
     }
+}
+
+#[test]
+fn compiler_selector_is_not_part_of_the_official_cli() {
+    let directory = Directory::new("compiler-selector");
+    directory.write("main.ae", "int main(){return 0;}");
+    for arguments in [
+        vec!["--compiler", "next", "run", "main.ae"],
+        vec!["--compiler", "legacy", "run", "main.ae"],
+        vec!["run", "main.ae", "--compiler=next"],
+        vec!["run", "main.ae", "--compiler=legacy"],
+    ] {
+        let output = cli(&directory, &arguments);
+        assert_eq!(output.status.code(), Some(2), "{arguments:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("unknown option"));
+    }
+}
+
+#[test]
+fn packaging_has_one_owner_for_each_public_cli_name() {
+    let cargo = include_str!("../Cargo.toml");
+    assert!(cargo.contains("name = \"aether\""));
+    assert!(!cargo.contains("name = \"aether-cli-next\""));
+
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let python = fs::read_to_string(repository.join("pyproject.toml")).unwrap();
+    assert!(python.contains("aether-legacy = \"aether.cli:main\""));
+    assert!(
+        !python
+            .lines()
+            .any(|line| line == "aether = \"aether.cli:main\"")
+    );
+}
+
+#[test]
+fn official_cli_does_not_shell_out_to_an_aether_cli() {
+    let source = include_str!("../src/lib.rs");
+    assert!(!source.contains("Command::new"));
+    assert!(!source.contains("aether-next"));
+    assert!(!source.contains("aether-legacy"));
+}
+
+#[test]
+fn official_name_reaches_compiler_next_authority() {
+    let directory = Directory::new("compiler-next-authority");
+    directory.write(
+        "default-parameter.ae",
+        "int add(int value, int increment = 2){return value+increment;}\nint main(){return add(40);}",
+    );
+    let output = cli(&directory, &["check", "default-parameter.ae"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

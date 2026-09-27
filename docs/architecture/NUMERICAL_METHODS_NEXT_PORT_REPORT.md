@@ -8,8 +8,8 @@ El ejemplo multi-package de métodos numéricos compila y ejecuta con
 `compiler-next` sin agregar features al lenguaje ni cambiar los algoritmos:
 
 ```bash
-aether examples/numerical_methods/main.ae --compiler next
-aether examples/numerical_methods/main.ae --compiler next -O2
+aether run examples/numerical_methods/main.ae
+aether run examples/numerical_methods/main.ae -O2
 ```
 
 Ambos niveles producen las mismas 18 validaciones exitosas. Se preservan
@@ -123,8 +123,8 @@ reversed Simpson preserves sign: true
 Comandos del ejemplo y el differential ejecutados desde la raíz del repositorio:
 
 ```bash
-.venv/bin/aether examples/numerical_methods/main.ae --compiler next
-.venv/bin/aether examples/numerical_methods/main.ae --compiler next -O2
+aether run examples/numerical_methods/main.ae
+aether run examples/numerical_methods/main.ae -O2
 bash compiler-next/tests/run-differential.sh
 ```
 

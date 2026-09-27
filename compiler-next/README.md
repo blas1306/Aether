@@ -1,19 +1,33 @@
 # Aether native compiler — OOP-POLISH-1
 
-## Official CLI architecture (CLI-ARCH-1)
+## Official CLI
 
-The future official `aether` executable is a Rust CLI that calls
+The official `aether` executable is a Rust CLI that calls
 `aether-driver` and compiler-next in-process. It uses explicit file or project
 targets, strict `--` forwarding for `run`, and a direct-root `aether.toml`
-model. The current CLI and binaries are unchanged by this architecture-only
-milestone. See the [normative design](../docs/architecture/CLI_ARCH_1.md) and
+model. Install it with `cargo install --path crates/aether-cli` from this
+directory. See the [normative design](../docs/architecture/CLI_ARCH_1.md) and
 [closure report](../docs/architecture/CLI_ARCH_1_REPORT.md).
 
 `CLI-V1-PROJECT` implements exact-root `aether.toml` projects and atomic
-application/library `init` in the development-name CLI. Project artifacts live
+application/library `init`. Project artifacts live
 under `.aether/build`; non-empty dependencies currently fail explicitly until
 package-manager support. See the
 [implementation report](../docs/architecture/CLI_V1_PROJECT_REPORT.md).
+
+```bash
+aether run file.ae
+aether file.ae                 # shorthand for run
+aether build file.ae
+aether check file.ae
+aether run . -- arg1 arg2
+aether init myProject
+aether init --lib myLibrary
+```
+
+The Python CLI is available only as the frozen transitional
+`aether-legacy`. The `aether-next` driver binary remains an internal bootstrap
+for differential tests and measurement scripts; it is not the user CLI.
 
 ## Default parameters (DEFAULT-PARAMETERS-V1)
 

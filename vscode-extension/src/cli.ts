@@ -1,11 +1,10 @@
-import type { AetherBackend, OptimizationLevel, RevealOutput } from "./configuration";
+import type { OptimizationLevel, RevealOutput } from "./configuration";
 
-export type AetherMode = "run" | "check" | "runAst" | "emitIr" | "emitSsa" | "emitLlvm";
+export type AetherMode = "run" | "check" | "emitAst" | "emitHir" | "emitMir" | "emitSsa" | "emitLlvm";
 
 export interface CliArgumentsOptions {
   mode: AetherMode;
   file: string;
-  defaultBackend: AetherBackend;
   optimizationLevel: OptimizationLevel;
 }
 
@@ -13,17 +12,19 @@ export function buildCliArguments(options: CliArgumentsOptions): string[] {
   const { mode, file } = options;
   switch (mode) {
     case "run":
-      return options.defaultBackend === "ast" ? ["--backend=ast", file] : [file];
+      return ["run", file, `-${options.optimizationLevel}`];
     case "check":
-      return ["--check", file];
-    case "runAst":
-      return ["--backend=ast", file];
-    case "emitIr":
-      return ["--emit-ir", `-${options.optimizationLevel}`, file];
+      return ["check", file, `-${options.optimizationLevel}`];
+    case "emitAst":
+      return ["check", file, "--emit", "ast", `-${options.optimizationLevel}`];
+    case "emitHir":
+      return ["check", file, "--emit", "hir", `-${options.optimizationLevel}`];
+    case "emitMir":
+      return ["check", file, "--emit", "mir", `-${options.optimizationLevel}`];
     case "emitSsa":
-      return ["--emit-ssa", file];
+      return ["check", file, "--emit", "ssa", `-${options.optimizationLevel}`];
     case "emitLlvm":
-      return ["--emit-llvm", file];
+      return ["build", file, "--emit", "llvm", `-${options.optimizationLevel}`];
   }
 }
 

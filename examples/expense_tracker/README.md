@@ -18,20 +18,21 @@ corresponde, publica una nueva versión mediante reemplazo atómico.
 Desde la raíz del repositorio:
 
 ```bash
-aether examples/expense_tracker/main.ae --compiler next -- expenses.alpt add expense 3 19.95 food "Lunch with friends" 2026-07-16
-aether examples/expense_tracker/main.ae --compiler next -- expenses.alpt add income 4 100.0 work "Side project" 2026-07-17
-aether examples/expense_tracker/main.ae --compiler next -- expenses.alpt list
-aether examples/expense_tracker/main.ae --compiler next -- expenses.alpt summary
+aether run examples/expense_tracker/main.ae -- expenses.alpt add expense 3 19.95 food "Lunch with friends" 2026-07-16
+aether run examples/expense_tracker/main.ae -- expenses.alpt add income 4 100.0 work "Side project" 2026-07-17
+aether run examples/expense_tracker/main.ae -- expenses.alpt list
+aether run examples/expense_tracker/main.ae -- expenses.alpt summary
 ```
 
 El separador `--` termina las opciones del compilador; todo lo posterior llega
 al programa mediante `std.Process.args()`. Para O2:
 
 ```bash
-aether examples/expense_tracker/main.ae --compiler next -O2 -- expenses.alpt summary
+aether run examples/expense_tracker/main.ae -O2 -- expenses.alpt summary
 ```
 
-La forma nativa explícita también está disponible:
+La herramienta bootstrap interna sigue disponible sólo para suites y
+mediciones que todavía dependen de su parser antiguo:
 
 ```bash
 compiler-next/target/debug/aether-next build examples/expense_tracker/main.ae -O2 -o expense

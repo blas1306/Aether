@@ -94,7 +94,13 @@ def test_clean_wheel_install_has_rust_verifier_metadata(
         None,
     )
     completed = subprocess.run(
-        [str(scripts / ("aether.exe" if os.name == "nt" else "aether")), "--version"],
+        [
+            str(
+                scripts
+                / ("aether-legacy.exe" if os.name == "nt" else "aether-legacy")
+            ),
+            "--version",
+        ],
         cwd=tmp_path,
         env=clean_environment,
         check=True,
@@ -102,6 +108,7 @@ def test_clean_wheel_install_has_rust_verifier_metadata(
         text=True,
     )
     assert completed.stdout
+    assert not (scripts / ("aether.exe" if os.name == "nt" else "aether")).exists()
 
     package = tmp_path / "verifier-package"
     package.mkdir()

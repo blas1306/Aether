@@ -29,8 +29,9 @@
     "onLanguage:aether",
     "onCommand:aether.run",
     "onCommand:aether.check",
-    "onCommand:aether.runAst",
-    "onCommand:aether.emitIr",
+    "onCommand:aether.emitAst",
+    "onCommand:aether.emitHir",
+    "onCommand:aether.emitMir",
     "onCommand:aether.emitSsa",
     "onCommand:aether.emitLlvm",
     "onCommand:aether.restartLanguageServer",
@@ -68,12 +69,16 @@
         "title": "Aether: Check"
       },
       {
-        "command": "aether.runAst",
-        "title": "Aether: Run with AST Backend"
+        "command": "aether.emitAst",
+        "title": "Aether: Emit AST"
       },
       {
-        "command": "aether.emitIr",
-        "title": "Aether: Emit IR"
+        "command": "aether.emitHir",
+        "title": "Aether: Emit HIR"
+      },
+      {
+        "command": "aether.emitMir",
+        "title": "Aether: Emit MIR"
       },
       {
         "command": "aether.emitSsa",
@@ -112,24 +117,29 @@
           "group": "aether@2"
         },
         {
-          "command": "aether.runAst",
+          "command": "aether.emitAst",
           "when": "editorLangId == aether",
           "group": "aether@3"
         },
         {
-          "command": "aether.emitIr",
+          "command": "aether.emitHir",
           "when": "editorLangId == aether",
           "group": "aether@4"
         },
         {
-          "command": "aether.emitSsa",
+          "command": "aether.emitMir",
           "when": "editorLangId == aether",
           "group": "aether@5"
         },
         {
-          "command": "aether.emitLlvm",
+          "command": "aether.emitSsa",
           "when": "editorLangId == aether",
           "group": "aether@6"
+        },
+        {
+          "command": "aether.emitLlvm",
+          "when": "editorLangId == aether",
+          "group": "aether@7"
         }
       ],
       "commandPalette": [
@@ -142,11 +152,15 @@
           "when": "editorLangId == aether"
         },
         {
-          "command": "aether.runAst",
+          "command": "aether.emitAst",
           "when": "editorLangId == aether"
         },
         {
-          "command": "aether.emitIr",
+          "command": "aether.emitHir",
+          "when": "editorLangId == aether"
+        },
+        {
+          "command": "aether.emitMir",
           "when": "editorLangId == aether"
         },
         {
@@ -166,7 +180,7 @@
           "type": "string",
           "default": "aether",
           "scope": "machine-overridable",
-          "description": "Aether CLI executable name or path."
+          "description": "Official Rust Aether CLI executable name or path."
         },
         "aether.lsp.executable": {
           "type": "string",
@@ -174,24 +188,14 @@
           "scope": "machine-overridable",
           "description": "Aether language server executable name or path."
         },
-        "aether.defaultBackend": {
-          "type": "string",
-          "enum": [
-            "native",
-            "ast"
-          ],
-          "default": "native",
-          "description": "Backend used by Aether: Run. Native is the primary backend; AST is auxiliary."
-        },
         "aether.optimizationLevel": {
           "type": "string",
           "enum": [
             "O0",
-            "O1",
             "O2"
           ],
           "default": "O0",
-          "description": "Optimization level passed to Aether: Emit IR. The CLI currently limits -O flags to IR emission."
+          "description": "Optimization level passed to the official Rust CLI."
         },
         "aether.revealOutput": {
           "type": "string",
