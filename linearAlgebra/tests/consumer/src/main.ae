@@ -1,0 +1,129 @@
+import linearAlgebra as la;
+
+int validate64(MatrixView<float64> expected, la.QR<float64> factor, float64 tolerance) {
+    Matrix<float64> reconstructed = matrix_view(factor.Q) * matrix_view(factor.R);
+    if (rows(reconstructed) != rows(expected)) { return 1; }
+    if (columns(reconstructed) != columns(expected)) { return 2; }
+
+    usize i = 1;
+    while (i <= rows(expected)) {
+        usize j = 1;
+        while (j <= columns(expected)) {
+            if (abs(reconstructed[i,j] - expected[i,j]) > tolerance) { return 3; }
+            if (i > j && abs(factor.R[i,j]) > tolerance) { return 4; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    Matrix<float64> orthogonal = transpose_view(factor.Q) * matrix_view(factor.Q);
+    i = 1;
+    while (i <= rows(orthogonal)) {
+        usize j = 1;
+        while (j <= columns(orthogonal)) {
+            float64 wanted = 0.0;
+            if (i == j) { wanted = 1.0; }
+            if (abs(orthogonal[i,j] - wanted) > tolerance) { return 5; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+int validate32(MatrixView<float32> expected, la.QR<float32> factor, float32 tolerance) {
+    Matrix<float32> reconstructed = matrix_view(factor.Q) * matrix_view(factor.R);
+    usize i = 1;
+    while (i <= rows(expected)) {
+        usize j = 1;
+        while (j <= columns(expected)) {
+            if (abs(reconstructed[i,j] - expected[i,j]) > tolerance) { return 1; }
+            if (i > j && abs(factor.R[i,j]) > tolerance) { return 2; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    Matrix<float32> orthogonal = transpose_view(factor.Q) * matrix_view(factor.Q);
+    i = 1;
+    while (i <= rows(orthogonal)) {
+        usize j = 1;
+        while (j <= columns(orthogonal)) {
+            float32 wanted = float32(0.0);
+            if (i == j) { wanted = float32(1.0); }
+            if (abs(orthogonal[i,j] - wanted) > tolerance) { return 3; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+int main() {
+    Matrix<float64> a22 = [12.0,-51.0;6.0,167.0];
+    Matrix<float64> e22 = [12.0,-51.0;6.0,167.0];
+    if (validate64(matrix_view(e22), la.qr(a22), 1e-10) != 0) { return 10; }
+
+    Matrix<float64> a33 = [12.0,-51.0,4.0;6.0,167.0,-68.0;-4.0,24.0,-41.0];
+    Matrix<float64> e33 = [12.0,-51.0,4.0;6.0,167.0,-68.0;-4.0,24.0,-41.0];
+    la.QR<float64> known = la.qr(a33);
+    if (validate64(matrix_view(e33), known, 1e-10) != 0) { return 20; }
+    // Classical reference example: |diag(R)| = (14, 175, 35).
+    Matrix<float64> aKnown = [12.0,-51.0,4.0;6.0,167.0,-68.0;-4.0,24.0,-41.0];
+    la.QR<float64> reference = la.qr(aKnown);
+    if (abs(abs(reference.R[1,1]) - 14.0) > 1e-10) { return 21; }
+    if (abs(abs(reference.R[2,2]) - 175.0) > 1e-10) { return 22; }
+    if (abs(abs(reference.R[3,3]) - 35.0) > 1e-10) { return 23; }
+
+    Matrix<float64> tall = [1.0,2.0;3.0,4.0;5.0,6.0;7.0,8.0];
+    Matrix<float64> tallExpected = [1.0,2.0;3.0,4.0;5.0,6.0;7.0,8.0];
+    if (validate64(matrix_view(tallExpected), la.qr(tall), 1e-10) != 0) { return 30; }
+
+    Matrix<float64> wide = [1.0,2.0,3.0,4.0;5.0,6.0,7.0,8.0];
+    Matrix<float64> wideExpected = [1.0,2.0,3.0,4.0;5.0,6.0,7.0,8.0];
+    if (validate64(matrix_view(wideExpected), la.qr(wide), 1e-10) != 0) { return 40; }
+
+    Matrix<float64> deficient = [1.0,2.0,3.0;2.0,4.0,6.0;3.0,6.0,9.0];
+    Matrix<float64> deficientExpected = [1.0,2.0,3.0;2.0,4.0,6.0;3.0,6.0,9.0];
+    if (validate64(matrix_view(deficientExpected), la.qr(deficient), 1e-9) != 0) { return 50; }
+
+    Matrix<float64> identity = [1.0,0.0,0.0;0.0,1.0,0.0;0.0,0.0,1.0];
+    Matrix<float64> identityExpected = [1.0,0.0,0.0;0.0,1.0,0.0;0.0,0.0,1.0];
+    if (validate64(matrix_view(identityExpected), la.qr(identity), 1e-10) != 0) { return 60; }
+
+    Matrix<float64> diagonal = [2.0,0.0;0.0,-3.0];
+    Matrix<float64> diagonalExpected = [2.0,0.0;0.0,-3.0];
+    if (validate64(matrix_view(diagonalExpected), la.qr(diagonal), 1e-10) != 0) { return 70; }
+
+    Matrix<float64> zero = [0.0,0.0,0.0;0.0,0.0,0.0];
+    Matrix<float64> zeroExpected = [0.0,0.0,0.0;0.0,0.0,0.0];
+    if (validate64(matrix_view(zeroExpected), la.qr(zero), 1e-10) != 0) { return 80; }
+
+    Matrix<float64> empty = [];
+    Matrix<float64> emptyExpected = [];
+    if (validate64(matrix_view(emptyExpected), la.qr(empty), 1e-10) != 0) { return 81; }
+
+    Vector<float64,Column> threeRows = [1.0,2.0,3.0];
+    Vector<float64,Row> noColumns = [];
+    Matrix<float64> zeroColumns = threeRows * noColumns;
+    Vector<float64,Column> threeRowsExpected = [1.0,2.0,3.0];
+    Vector<float64,Row> noColumnsExpected = [];
+    Matrix<float64> zeroColumnsExpected = threeRowsExpected * noColumnsExpected;
+    if (validate64(matrix_view(zeroColumnsExpected), la.qr(zeroColumns), 1e-10) != 0) { return 82; }
+
+    Vector<float64,Column> noRows = [];
+    Vector<float64,Row> threeColumns = [1.0,2.0,3.0];
+    Matrix<float64> zeroRows = noRows * threeColumns;
+    Vector<float64,Column> noRowsExpected = [];
+    Vector<float64,Row> threeColumnsExpected = [1.0,2.0,3.0];
+    Matrix<float64> zeroRowsExpected = noRowsExpected * threeColumnsExpected;
+    if (validate64(matrix_view(zeroRowsExpected), la.qr(zeroRows), 1e-10) != 0) { return 83; }
+
+    Matrix<float64> negative = [-1.0,-2.0;3.0,-4.0;-5.0,6.0];
+    Matrix<float64> negativeExpected = [-1.0,-2.0;3.0,-4.0;-5.0,6.0];
+    if (validate64(matrix_view(negativeExpected), la.qr(negative), 1e-10) != 0) { return 90; }
+
+    Matrix<float32> single = [float32(1.0),float32(2.0);float32(3.0),float32(4.0);float32(5.0),float32(6.0)];
+    Matrix<float32> singleExpected = [float32(1.0),float32(2.0);float32(3.0),float32(4.0);float32(5.0),float32(6.0)];
+    if (validate32(matrix_view(singleExpected), la.qrFloat32(single), float32(2e-5)) != 0) { return 100; }
+    return 0;
+}

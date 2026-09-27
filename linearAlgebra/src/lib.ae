@@ -1,0 +1,217 @@
+package linearAlgebra;
+
+// A materialized QR factorization.  Q is m by m and R is m by n.
+struct QR<T: Storable> {
+    Matrix<T> Q;
+    Matrix<T> R;
+}
+
+// Householder QR for the V1 default real type (float64/double).
+QR<float64> qr(Matrix<float64> A) {
+    usize m = rows(A);
+    usize n = columns(A);
+    usize p = m;
+    if (n < p) { p = n; }
+
+    // Public Matrix multiplication gives this workspace its dynamic m by m
+    // shape.  Every entry is overwritten before it is observed.
+    Matrix<float64> Q = matrix_view(A) * transpose_view(A);
+    usize i = 1;
+    usize j = 1;
+    while (i <= m) {
+        j = 1;
+        while (j <= m) {
+            if (i == j) { Q[i,j] = 1.0; }
+            else { Q[i,j] = 0.0; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    Matrix<float64> R = A;
+    usize k = 1;
+    while (k <= p) {
+        // Scaled sum of squares avoids avoidable overflow/underflow in ||x||.
+        float64 normScale = 0.0;
+        float64 scaledSquares = 1.0;
+        i = k;
+        while (i <= m) {
+            float64 magnitude = abs(R[i,k]);
+            if (magnitude != 0.0) {
+                if (normScale < magnitude) {
+                    float64 ratio = normScale / magnitude;
+                    scaledSquares = 1.0 + scaledSquares * ratio * ratio;
+                    normScale = magnitude;
+                }
+                else {
+                    float64 ratio = magnitude / normScale;
+                    scaledSquares = scaledSquares + ratio * ratio;
+                }
+            }
+            i = i + 1;
+        }
+
+        if (normScale != 0.0) {
+            float64 norm = normScale * sqrt(scaledSquares);
+            float64 alpha = norm;
+            if (R[k,k] >= 0.0) { alpha = -norm; }
+            float64 first = R[k,k] - alpha;
+            float64 reflectorSquared = 1.0;
+            i = k + 1;
+            while (i <= m) {
+                R[i,k] = R[i,k] / first;
+                reflectorSquared = reflectorSquared + R[i,k] * R[i,k];
+                i = i + 1;
+            }
+
+            // Q <- Q H.  The reflector tail still lives below R[k,k].
+            i = 1;
+            while (i <= m) {
+                float64 dot = Q[i,k];
+                usize r = k + 1;
+                while (r <= m) {
+                    dot = dot + Q[i,r] * R[r,k];
+                    r = r + 1;
+                }
+                float64 scale = (2.0 * dot) / reflectorSquared;
+                Q[i,k] = Q[i,k] - scale;
+                r = k + 1;
+                while (r <= m) {
+                    Q[i,r] = Q[i,r] - scale * R[r,k];
+                    r = r + 1;
+                }
+                i = i + 1;
+            }
+
+            // Update later columns before replacing the reflector storage.
+            j = k + 1;
+            while (j <= n) {
+                float64 dot = R[k,j];
+                i = k + 1;
+                while (i <= m) {
+                    dot = dot + R[i,k] * R[i,j];
+                    i = i + 1;
+                }
+                float64 scale = (2.0 * dot) / reflectorSquared;
+                R[k,j] = R[k,j] - scale;
+                i = k + 1;
+                while (i <= m) {
+                    R[i,j] = R[i,j] - scale * R[i,k];
+                    i = i + 1;
+                }
+                j = j + 1;
+            }
+            R[k,k] = alpha;
+            i = k + 1;
+            while (i <= m) {
+                R[i,k] = 0.0;
+                i = i + 1;
+            }
+        }
+        k = k + 1;
+    }
+    return QR<float64>(Q, R);
+}
+
+// float32 is explicit because V1 generics cannot constrain T to floating-point
+// operations (sqrt and division).  qr remains the primary float64 entry point.
+QR<float32> qrFloat32(Matrix<float32> A) {
+    usize m = rows(A);
+    usize n = columns(A);
+    usize p = m;
+    if (n < p) { p = n; }
+
+    Matrix<float32> Q = matrix_view(A) * transpose_view(A);
+    usize i = 1;
+    usize j = 1;
+    while (i <= m) {
+        j = 1;
+        while (j <= m) {
+            if (i == j) { Q[i,j] = float32(1.0); }
+            else { Q[i,j] = float32(0.0); }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    Matrix<float32> R = A;
+    usize k = 1;
+    while (k <= p) {
+        float32 normScale = float32(0.0);
+        float32 scaledSquares = float32(1.0);
+        i = k;
+        while (i <= m) {
+            float32 magnitude = abs(R[i,k]);
+            if (magnitude != float32(0.0)) {
+                if (normScale < magnitude) {
+                    float32 ratio = normScale / magnitude;
+                    scaledSquares = float32(1.0) + scaledSquares * ratio * ratio;
+                    normScale = magnitude;
+                }
+                else {
+                    float32 ratio = magnitude / normScale;
+                    scaledSquares = scaledSquares + ratio * ratio;
+                }
+            }
+            i = i + 1;
+        }
+
+        if (normScale != float32(0.0)) {
+            float32 norm = normScale * sqrt(scaledSquares);
+            float32 alpha = norm;
+            if (R[k,k] >= float32(0.0)) { alpha = -norm; }
+            float32 first = R[k,k] - alpha;
+            float32 reflectorSquared = float32(1.0);
+            i = k + 1;
+            while (i <= m) {
+                R[i,k] = R[i,k] / first;
+                reflectorSquared = reflectorSquared + R[i,k] * R[i,k];
+                i = i + 1;
+            }
+
+            i = 1;
+            while (i <= m) {
+                float32 dot = Q[i,k];
+                usize r = k + 1;
+                while (r <= m) {
+                    dot = dot + Q[i,r] * R[r,k];
+                    r = r + 1;
+                }
+                float32 scale = (float32(2.0) * dot) / reflectorSquared;
+                Q[i,k] = Q[i,k] - scale;
+                r = k + 1;
+                while (r <= m) {
+                    Q[i,r] = Q[i,r] - scale * R[r,k];
+                    r = r + 1;
+                }
+                i = i + 1;
+            }
+
+            j = k + 1;
+            while (j <= n) {
+                float32 dot = R[k,j];
+                i = k + 1;
+                while (i <= m) {
+                    dot = dot + R[i,k] * R[i,j];
+                    i = i + 1;
+                }
+                float32 scale = (float32(2.0) * dot) / reflectorSquared;
+                R[k,j] = R[k,j] - scale;
+                i = k + 1;
+                while (i <= m) {
+                    R[i,j] = R[i,j] - scale * R[i,k];
+                    i = i + 1;
+                }
+                j = j + 1;
+            }
+            R[k,k] = alpha;
+            i = k + 1;
+            while (i <= m) {
+                R[i,k] = float32(0.0);
+                i = i + 1;
+            }
+        }
+        k = k + 1;
+    }
+    return QR<float32>(Q, R);
+}

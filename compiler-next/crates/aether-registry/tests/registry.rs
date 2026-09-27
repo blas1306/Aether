@@ -282,3 +282,68 @@ fn publish_add_sync_run_locked_then_update_end_to_end() {
     let updated = fs::read_to_string(consumer.0.join("aether.lock")).unwrap();
     assert!(updated.contains("version = \"1.1.0\""));
 }
+
+#[test]
+fn linear_algebra_oal_publishes_and_runs_real_qr_consumer() {
+    let storage = Directory::new("linear-algebra-oal-storage");
+    let cache = Directory::new("linear-algebra-oal-cache");
+    let consumer = Directory::new("linear-algebra-oal-consumer");
+    let store = RegistryStore::open(&storage.0).unwrap();
+    let token = "linear-algebra-oal-owner-token";
+    store.provision_token("oal", token).unwrap();
+
+    let package_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../..")
+        .join("linearAlgebra");
+    let publication = build_publication(&package_root).unwrap();
+    assert_eq!(publication.name, "linearAlgebra");
+    assert_eq!(publication.version, "0.1.0");
+    assert_eq!(
+        publication.files,
+        ["aether.toml".to_owned(), "src/lib.ae".to_owned()]
+    );
+    assert_eq!(
+        publish(&store, token, &publication).unwrap().outcome,
+        PublishOutcome::Created
+    );
+    store.set_official("linearAlgebra", "0.1.0", true).unwrap();
+    assert!(store.metadata("linearAlgebra", "0.1.0").unwrap().official);
+
+    consumer.write(
+        "aether.toml",
+        "[package]\nname='linearAlgebraConsumer'\nversion='0.1.0'\naether='1'\n",
+    );
+    consumer.write(
+        "src/main.ae",
+        include_str!("../../../../linearAlgebra/tests/consumer/src/main.ae"),
+    );
+
+    add(&consumer.0, "linearAlgebra", &provider(&store, &cache)).unwrap();
+    assert!(
+        fs::read_to_string(consumer.0.join("aether.toml"))
+            .unwrap()
+            .contains("linearAlgebra = \"0.1\"")
+    );
+    let graph = sync(&consumer.0, Some(&provider(&store, &cache))).unwrap();
+    assert!(
+        fs::read_to_string(consumer.0.join("aether.lock"))
+            .unwrap()
+            .contains("name = \"linearAlgebra\"")
+    );
+    let plan = ProjectPlan::resolved(graph.root, &graph.packages).unwrap();
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        let response = execute(DriverRequest::RunProject(ProjectRunRequest {
+            input: plan.clone(),
+            compilation: CompilationOptions {
+                optimization,
+                emits: Vec::new(),
+            },
+            program_args: Vec::new(),
+        }))
+        .unwrap();
+        let DriverResponse::Ran { status, .. } = response else {
+            panic!("expected run response")
+        };
+        assert!(status.success(), "QR consumer failed at {optimization:?}");
+    }
+}
