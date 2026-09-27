@@ -1436,7 +1436,9 @@ pub(super) fn verify_body(
         sigs: VerificationSignatures<'_>,
     ) -> Result<(), String> {
         for s in &b.statements {
-            if let HirStmtKind::Assign { place, .. } = &s.kind {
+            if let HirStmtKind::Assign { place, .. }
+            | HirStmtKind::SliceAssign { target: place, .. } = &s.kind
+            {
                 for e in place_children(place) {
                     visit_expr(e, state, types, function, module, sigs)?;
                 }
@@ -1446,6 +1448,7 @@ pub(super) fn verify_body(
                     initializer: value, ..
                 }
                 | HirStmtKind::Assign { value, .. }
+                | HirStmtKind::SliceAssign { value, .. }
                 | HirStmtKind::Return { value, .. }
                 | HirStmtKind::Throw { value, .. } => {
                     owning_use(value, types)?;
@@ -1804,6 +1807,9 @@ mod tests {
             match &mut s.kind {
                 HirStmtKind::Local { initializer, .. }
                 | HirStmtKind::Assign {
+                    value: initializer, ..
+                }
+                | HirStmtKind::SliceAssign {
                     value: initializer, ..
                 }
                 | HirStmtKind::Return {

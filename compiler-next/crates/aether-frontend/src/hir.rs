@@ -889,6 +889,14 @@ pub enum HirStmtKind {
         place: HirPlace,
         value: HirExpr,
     },
+    SliceAssign {
+        target: HirPlace,
+        subscript: HirSubscript,
+        value: HirExpr,
+        element_type: TypeId,
+        contract: SliceAssignmentContract,
+        snapshot: SliceAssignmentSnapshot,
+    },
     ListPush {
         target: HirPlace,
         value: HirExpr,
@@ -1107,6 +1115,7 @@ impl HirStmtKind {
     #[must_use]
     pub fn mutation_effect(&self) -> Option<MutationEffect> {
         match self {
+            Self::SliceAssign { .. } => Some(MutationEffect::ElementMutation),
             Self::Assign { place, .. }
                 if place
                     .projections
@@ -1198,6 +1207,21 @@ pub enum HirSubscriptResult {
     CollectionOwner,
     VectorView { orientation: Orientation },
     MatrixView,
+}
+
+/// Exact, non-resizing contract carried by a direct slice assignment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SliceAssignmentContract {
+    CollectionExactLength,
+    VectorExactLength { orientation: Orientation },
+    MatrixAxisExactLength { orientation: Orientation },
+    MatrixExactShape,
+}
+
+/// Observable aliasing rule for V1 assignments.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SliceAssignmentSnapshot {
+    RhsBeforeWrite,
 }
 
 /// One typed selector. Endpoints retain source order and are evaluated once.
@@ -4835,6 +4859,25 @@ impl Monomorphizer<'_> {
                             place: self.substitute_place(place, substitution)?,
                             value: self.substitute_expr(value, substitution)?,
                         },
+                        HirStmtKind::SliceAssign {
+                            target,
+                            subscript,
+                            value,
+                            element_type,
+                            contract,
+                            snapshot,
+                        } => HirStmtKind::SliceAssign {
+                            target: self.substitute_place(target, substitution)?,
+                            subscript: self.substitute_subscript(subscript, substitution)?,
+                            value: self.substitute_expr(value, substitution)?,
+                            element_type: self.substitute_type(
+                                *element_type,
+                                substitution,
+                                statement.span,
+                            )?,
+                            contract: *contract,
+                            snapshot: *snapshot,
+                        },
                         HirStmtKind::StringOutput {
                             function,
                             value,
@@ -5151,6 +5194,55 @@ impl Monomorphizer<'_> {
                 })
                 .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?,
             ty: self.substitute_type(place.ty, substitution, Span::in_source(SourceId(0), 0, 0))?,
+        })
+    }
+
+    fn substitute_subscript(
+        &mut self,
+        subscript: &HirSubscript,
+        substitution: &Substitution,
+    ) -> Result<HirSubscript, Vec<Diagnostic>> {
+        Ok(HirSubscript {
+            selectors: subscript
+                .selectors
+                .iter()
+                .map(|selector| {
+                    Ok(HirSubscriptSelector {
+                        kind: match &selector.kind {
+                            HirSubscriptSelectorKind::Scalar(value) => {
+                                HirSubscriptSelectorKind::Scalar(Box::new(
+                                    self.substitute_expr(value, substitution)?,
+                                ))
+                            }
+                            HirSubscriptSelectorKind::Closed { first, last } => {
+                                HirSubscriptSelectorKind::Closed {
+                                    first: Box::new(self.substitute_expr(first, substitution)?),
+                                    last: Box::new(self.substitute_expr(last, substitution)?),
+                                }
+                            }
+                            HirSubscriptSelectorKind::Full => HirSubscriptSelectorKind::Full,
+                        },
+                        axis: selector.axis,
+                        semantics: selector.semantics,
+                        index_base: selector.index_base,
+                    })
+                })
+                .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?,
+            container_type: self.substitute_type(
+                subscript.container_type,
+                substitution,
+                subscript
+                    .selectors
+                    .first()
+                    .and_then(|selector| match &selector.kind {
+                        HirSubscriptSelectorKind::Scalar(value) => Some(value.span),
+                        HirSubscriptSelectorKind::Closed { first, .. } => Some(first.span),
+                        HirSubscriptSelectorKind::Full => None,
+                    })
+                    .unwrap_or(Span::in_source(SourceId(0), 0, 0)),
+            )?,
+            container_kind: subscript.container_kind,
+            result: subscript.result,
         })
     }
 
@@ -6498,6 +6590,27 @@ impl OwnershipAnalysis<'_> {
                         self.state[local.0 as usize] = OwnerState::Owned;
                         self.buffer_lengths[local.0 as usize] = self.known_length(value);
                         self.matrix_shapes[local.0 as usize] = self.known_matrix_shape(value);
+                    }
+                }
+                HirStmtKind::SliceAssign { target, value, .. } => {
+                    // RHS aliases are legal: the operation owns a full snapshot
+                    // transaction. Existing incompatible mutable/shared borrows of
+                    // the destination still reject the element mutation.
+                    self.expr(value)?;
+                    self.place(target, statement.span)?;
+                    if let Some(owner) = self.owner_of_place(target)
+                        && self.is_borrowed(owner)
+                        && self.derived_owner(value) != Some(owner)
+                        && !self
+                            .types
+                            .borrowed_view_info(target.ty)
+                            .is_some_and(|(_, mutable)| mutable)
+                    {
+                        return Err(self.error(
+                            "E0292",
+                            "cannot assign through a slice while an incompatible derived reference/view remains live",
+                            statement.span,
+                        ));
                     }
                 }
                 HirStmtKind::ListPush { target, value, .. } => {
@@ -8728,98 +8841,106 @@ impl Analyzer<'_> {
                     HirStmtKind::Local { local, initializer }
                 }
                 AstStmtKind::Assign { place, value } => {
-                    if let Some(initializer) = self.class_field_write(place, value) {
-                        let initializer = initializer?;
-                        let kind = self.class_sink(initializer, s.span);
-                        statements.push(HirStmt {
-                            kind,
-                            span: s.span,
-                            compiler_generated: false,
-                        });
-                        continue;
-                    }
-                    let place = self.resolve_expr_place(place, true)?;
-                    if let Some(local) = self.const_inline_root(&place) {
-                        let name = &self.locals[local.0 as usize].name;
-                        let message = if place.projections.is_empty() {
-                            format!("cannot assign to const binding '{name}'")
-                        } else {
-                            format!("cannot mutate storage of const binding '{name}'")
-                        };
-                        return Err(vec![Diagnostic::new(
-                            "E0372",
-                            Phase::Semantic,
-                            DiagnosticCategory::Type,
-                            message,
-                            Some(s.span),
-                        )]);
-                    }
-                    if place.ty == TypeId::STRING
-                        && let HirPlaceBase::Local(local) = place.base
-                        && !place.projections.is_empty()
+                    if let AstExprKind::Index { base, selectors } = &place.kind
+                        && selectors
+                            .iter()
+                            .any(|selector| !matches!(selector, AstSubscriptSelector::Scalar(_)))
                     {
-                        self.locals[local.0 as usize].address_taken = true;
-                    }
-                    if !self.types.guarantees_copy(place.ty)
-                        && place.ty != TypeId::STRING
-                        && (!place.projections.is_empty()
-                            || matches!(place.base, HirPlaceBase::Dereference { .. }))
-                    {
-                        return Err(vec![Diagnostic::new(
-                            "E0297",
-                            Phase::Semantic,
-                            DiagnosticCategory::Type,
-                            "partial replacement of a non-Copy aggregate is unsupported",
-                            Some(s.span),
-                        )]);
-                    }
-                    if let HirPlaceBase::Local(local) = &place.base
-                        && place.projections.is_empty()
-                        && (self
-                            .types
-                            .reference_info(self.locals[local.0 as usize].ty)
-                            .is_some()
-                            || self
+                        self.slice_assignment(base, selectors, value, s.span)?
+                    } else {
+                        if let Some(initializer) = self.class_field_write(place, value) {
+                            let initializer = initializer?;
+                            let kind = self.class_sink(initializer, s.span);
+                            statements.push(HirStmt {
+                                kind,
+                                span: s.span,
+                                compiler_generated: false,
+                            });
+                            continue;
+                        }
+                        let place = self.resolve_expr_place(place, true)?;
+                        if let Some(local) = self.const_inline_root(&place) {
+                            let name = &self.locals[local.0 as usize].name;
+                            let message = if place.projections.is_empty() {
+                                format!("cannot assign to const binding '{name}'")
+                            } else {
+                                format!("cannot mutate storage of const binding '{name}'")
+                            };
+                            return Err(vec![Diagnostic::new(
+                                "E0372",
+                                Phase::Semantic,
+                                DiagnosticCategory::Type,
+                                message,
+                                Some(s.span),
+                            )]);
+                        }
+                        if place.ty == TypeId::STRING
+                            && let HirPlaceBase::Local(local) = place.base
+                            && !place.projections.is_empty()
+                        {
+                            self.locals[local.0 as usize].address_taken = true;
+                        }
+                        if !self.types.guarantees_copy(place.ty)
+                            && place.ty != TypeId::STRING
+                            && (!place.projections.is_empty()
+                                || matches!(place.base, HirPlaceBase::Dereference { .. }))
+                        {
+                            return Err(vec![Diagnostic::new(
+                                "E0297",
+                                Phase::Semantic,
+                                DiagnosticCategory::Type,
+                                "partial replacement of a non-Copy aggregate is unsupported",
+                                Some(s.span),
+                            )]);
+                        }
+                        if let HirPlaceBase::Local(local) = &place.base
+                            && place.projections.is_empty()
+                            && (self
                                 .types
-                                .borrowed_view_info(self.locals[local.0 as usize].ty)
-                                .is_some())
-                    {
-                        return Err(vec![Diagnostic::new(
-                            "E0277",
-                            Phase::Semantic,
-                            DiagnosticCategory::Type,
-                            "borrowed reference/view locals are single-initialization bindings and cannot be rebound",
-                            Some(s.span),
-                        )]);
-                    }
-                    let value = self
-                        .expression(value, Some(place.ty))
-                        .map_err(|mut ds| {
-                            if !place.projections.is_empty() {
-                                if let Some(diagnostic) = ds.first_mut() {
-                                    diagnostic.code = "E0245";
-                                    diagnostic.message = format!(
-                                        "field assignment requires {}: {}",
-                                        self.type_name(place.ty),
-                                        diagnostic.message
-                                    );
+                                .reference_info(self.locals[local.0 as usize].ty)
+                                .is_some()
+                                || self
+                                    .types
+                                    .borrowed_view_info(self.locals[local.0 as usize].ty)
+                                    .is_some())
+                        {
+                            return Err(vec![Diagnostic::new(
+                                "E0277",
+                                Phase::Semantic,
+                                DiagnosticCategory::Type,
+                                "borrowed reference/view locals are single-initialization bindings and cannot be rebound",
+                                Some(s.span),
+                            )]);
+                        }
+                        let value = self
+                            .expression(value, Some(place.ty))
+                            .map_err(|mut ds| {
+                                if !place.projections.is_empty() {
+                                    if let Some(diagnostic) = ds.first_mut() {
+                                        diagnostic.code = "E0245";
+                                        diagnostic.message = format!(
+                                            "field assignment requires {}: {}",
+                                            self.type_name(place.ty),
+                                            diagnostic.message
+                                        );
+                                    }
                                 }
-                            }
-                            ds
-                        })?
-                        .expr;
-                    if let HirPlaceBase::Local(local) = &place.base
-                        && place.projections.is_empty()
-                        && self.types.nullable_payload(place.ty).is_some()
-                    {
-                        let state = match value.kind {
-                            HirExprKind::NullableNull { .. } => NullState::Null,
-                            HirExprKind::NullableInject { .. } => NullState::NonNull,
-                            _ => NullState::Unknown,
-                        };
-                        self.null_states.insert(*local, state);
+                                ds
+                            })?
+                            .expr;
+                        if let HirPlaceBase::Local(local) = &place.base
+                            && place.projections.is_empty()
+                            && self.types.nullable_payload(place.ty).is_some()
+                        {
+                            let state = match value.kind {
+                                HirExprKind::NullableNull { .. } => NullState::Null,
+                                HirExprKind::NullableInject { .. } => NullState::NonNull,
+                                _ => NullState::Unknown,
+                            };
+                            self.null_states.insert(*local, state);
+                        }
+                        HirStmtKind::Assign { place, value }
                     }
-                    HirStmtKind::Assign { place, value }
                 }
                 AstStmtKind::Expr(expression) => self.effect_statement(expression)?,
                 AstStmtKind::If {
@@ -9954,6 +10075,134 @@ impl Analyzer<'_> {
                 Some(expression.span),
             )]),
         }
+    }
+
+    fn slice_assignment(
+        &mut self,
+        base: &AstExpr,
+        selectors: &[AstSubscriptSelector],
+        rhs: &AstExpr,
+        span: Span,
+    ) -> Result<HirStmtKind, Vec<Diagnostic>> {
+        // Resolve the writable container and selector operands before the RHS. MIR
+        // preserves this source order and the backend snapshots the RHS before stores.
+        let target = self.resolve_expr_place(base, true)?;
+        if self
+            .types
+            .borrowed_view_info(target.ty)
+            .is_some_and(|(_, mutable)| !mutable)
+        {
+            return Err(vec![Diagnostic::new(
+                "E0288",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                "slice assignment requires a writable owner or mutable view",
+                Some(span),
+            )]);
+        }
+        if let Some(local) = self.const_inline_root(&target) {
+            return Err(vec![Diagnostic::new(
+                "E0372",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!(
+                    "cannot mutate storage of const binding '{}'",
+                    self.locals[local.0 as usize].name
+                ),
+                Some(span),
+            )]);
+        }
+        let subscript = self.type_subscript(target.ty, selectors, span)?;
+        debug_assert_ne!(subscript.result, HirSubscriptResult::Scalar);
+        let element_type = self
+            .types
+            .array_element(target.ty)
+            .or_else(|| self.types.list_element(target.ty))
+            .or_else(|| self.types.vector_like_info(target.ty).map(|info| info.0))
+            .or_else(|| self.types.matrix_like_element(target.ty))
+            .expect("typed slice assignment target has an element type");
+        if !self.types.guarantees_copy(element_type) {
+            return Err(vec![Diagnostic::new(
+                "E0458",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!(
+                    "slice assignment requires Copy elements, found {}",
+                    self.type_name(element_type)
+                ),
+                Some(span),
+            )]);
+        }
+
+        let value = if matches!(
+            subscript.result,
+            HirSubscriptResult::VectorView { .. } | HirSubscriptResult::MatrixView
+        ) {
+            self.readable_math_operand(rhs, None)?.expr
+        } else {
+            self.expression(rhs, None)?.expr
+        };
+        let contract = match subscript.result {
+            HirSubscriptResult::CollectionOwner => {
+                let valid = match subscript.container_kind {
+                    HirSubscriptContainerKind::Array => {
+                        self.types.array_element(value.ty) == Some(element_type)
+                    }
+                    HirSubscriptContainerKind::List => {
+                        self.types.list_element(value.ty) == Some(element_type)
+                    }
+                    _ => false,
+                };
+                if !valid {
+                    return Err(vec![type_error(
+                        "Array/List slice assignment requires an owner of the same family and element type",
+                        rhs.span,
+                    )]);
+                }
+                SliceAssignmentContract::CollectionExactLength
+            }
+            HirSubscriptResult::VectorView { orientation } => {
+                if self.types.vector_like_info(value.ty) != Some((element_type, orientation)) {
+                    return Err(vec![Diagnostic::new(
+                        "E0463",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        format!(
+                            "slice assignment requires Vector/VectorView<{}, {:?}> with exact orientation",
+                            self.type_name(element_type),
+                            orientation
+                        ),
+                        Some(rhs.span),
+                    )]);
+                }
+                if matches!(
+                    subscript.container_kind,
+                    HirSubscriptContainerKind::Matrix | HirSubscriptContainerKind::MatrixView
+                ) {
+                    SliceAssignmentContract::MatrixAxisExactLength { orientation }
+                } else {
+                    SliceAssignmentContract::VectorExactLength { orientation }
+                }
+            }
+            HirSubscriptResult::MatrixView => {
+                if self.types.matrix_like_element(value.ty) != Some(element_type) {
+                    return Err(vec![type_error(
+                        "submatrix assignment requires Matrix/MatrixView with the same element type",
+                        rhs.span,
+                    )]);
+                }
+                SliceAssignmentContract::MatrixExactShape
+            }
+            HirSubscriptResult::Scalar => unreachable!(),
+        };
+        Ok(HirStmtKind::SliceAssign {
+            target,
+            subscript,
+            value,
+            element_type,
+            contract,
+            snapshot: SliceAssignmentSnapshot::RhsBeforeWrite,
+        })
     }
 
     fn slice_read(
@@ -15267,6 +15516,199 @@ fn verify_block(
                     ));
                 }
             }
+            HirStmtKind::SliceAssign {
+                target,
+                subscript,
+                value,
+                element_type,
+                contract,
+                snapshot,
+            } => {
+                verify_expr(value, f, sigs, structs, enums, types, fail)?;
+                verify_place(target, f, sigs, structs, enums, types, fail)?;
+                let (expected_family, expected_element, expected_selectors) =
+                    match types.get(target.ty) {
+                        Some(TypeData::Array { element }) => {
+                            (HirSubscriptContainerKind::Array, *element, 1)
+                        }
+                        Some(TypeData::List { element }) => {
+                            (HirSubscriptContainerKind::List, *element, 1)
+                        }
+                        Some(TypeData::Vector {
+                            element,
+                            orientation,
+                        }) => (
+                            HirSubscriptContainerKind::Vector {
+                                orientation: *orientation,
+                            },
+                            *element,
+                            1,
+                        ),
+                        Some(TypeData::VectorView {
+                            element,
+                            orientation,
+                            ..
+                        }) => (
+                            HirSubscriptContainerKind::VectorView {
+                                orientation: *orientation,
+                            },
+                            *element,
+                            1,
+                        ),
+                        Some(TypeData::Matrix { element }) => {
+                            (HirSubscriptContainerKind::Matrix, *element, 2)
+                        }
+                        Some(TypeData::MatrixView { element, .. }) => {
+                            (HirSubscriptContainerKind::MatrixView, *element, 2)
+                        }
+                        _ => return Err(fail("HIR SliceAssign target family invalid".into())),
+                    };
+                let semantics = types
+                    .index_semantics(target.ty)
+                    .ok_or_else(|| fail("HIR SliceAssign indexing semantics missing".into()))?;
+                let expected_base = u8::from(semantics != IndexSemantics::ZeroBased);
+                if subscript.selectors.len() != expected_selectors {
+                    return Err(fail("HIR SliceAssign selector count invalid".into()));
+                }
+                let mut scalar = Vec::with_capacity(expected_selectors);
+                for (position, selector) in subscript.selectors.iter().enumerate() {
+                    let expected_axis = if expected_selectors == 1 {
+                        HirSubscriptAxis::Linear
+                    } else if position == 0 {
+                        HirSubscriptAxis::Row
+                    } else {
+                        HirSubscriptAxis::Column
+                    };
+                    if selector.axis != expected_axis
+                        || selector.semantics != semantics
+                        || selector.index_base != expected_base
+                    {
+                        return Err(fail("HIR SliceAssign base/axis contract invalid".into()));
+                    }
+                    let is_scalar = match &selector.kind {
+                        HirSubscriptSelectorKind::Scalar(index) => {
+                            verify_expr(index, f, sigs, structs, enums, types, fail)?;
+                            if index.ty != TypeId::USIZE {
+                                return Err(fail(
+                                    "HIR SliceAssign scalar selector type invalid".into(),
+                                ));
+                            }
+                            true
+                        }
+                        HirSubscriptSelectorKind::Closed { first, last } => {
+                            verify_expr(first, f, sigs, structs, enums, types, fail)?;
+                            verify_expr(last, f, sigs, structs, enums, types, fail)?;
+                            if first.ty != TypeId::USIZE || last.ty != TypeId::USIZE {
+                                return Err(fail(
+                                    "HIR SliceAssign closed bounds type invalid".into(),
+                                ));
+                            }
+                            false
+                        }
+                        HirSubscriptSelectorKind::Full => false,
+                    };
+                    scalar.push(is_scalar);
+                }
+                let expected_result = if expected_selectors == 1 {
+                    if scalar[0] {
+                        HirSubscriptResult::Scalar
+                    } else if matches!(
+                        expected_family,
+                        HirSubscriptContainerKind::Array | HirSubscriptContainerKind::List
+                    ) {
+                        HirSubscriptResult::CollectionOwner
+                    } else {
+                        let (_, orientation) = types
+                            .vector_like_info(target.ty)
+                            .expect("verified vector-like assignment target");
+                        HirSubscriptResult::VectorView { orientation }
+                    }
+                } else {
+                    match (scalar[0], scalar[1]) {
+                        (true, false) => HirSubscriptResult::VectorView {
+                            orientation: Orientation::Row,
+                        },
+                        (false, true) => HirSubscriptResult::VectorView {
+                            orientation: Orientation::Column,
+                        },
+                        (false, false) => HirSubscriptResult::MatrixView,
+                        (true, true) => HirSubscriptResult::Scalar,
+                    }
+                };
+                if !hir_place_writable(target, f, types, structs, enums)
+                    || types
+                        .borrowed_view_info(target.ty)
+                        .is_some_and(|(_, mutable)| !mutable)
+                    || hir_const_inline_root(target, f).is_some()
+                    || subscript.container_type != target.ty
+                    || subscript.container_kind != expected_family
+                    || subscript.result != expected_result
+                    || subscript.result == HirSubscriptResult::Scalar
+                    || *element_type != expected_element
+                    || !types.guarantees_copy(*element_type)
+                    || *snapshot != SliceAssignmentSnapshot::RhsBeforeWrite
+                {
+                    return Err(fail(
+                        "HIR SliceAssign mutability/snapshot contract invalid".into(),
+                    ));
+                }
+                let valid = match contract {
+                    SliceAssignmentContract::CollectionExactLength => {
+                        matches!(
+                            subscript.container_kind,
+                            HirSubscriptContainerKind::Array | HirSubscriptContainerKind::List
+                        ) && subscript.result == HirSubscriptResult::CollectionOwner
+                            && ((matches!(
+                                subscript.container_kind,
+                                HirSubscriptContainerKind::Array
+                            ) && types.array_element(value.ty) == Some(*element_type))
+                                || (matches!(
+                                    subscript.container_kind,
+                                    HirSubscriptContainerKind::List
+                                ) && types.list_element(value.ty) == Some(*element_type)))
+                    }
+                    SliceAssignmentContract::VectorExactLength { orientation } => {
+                        subscript.result
+                            == HirSubscriptResult::VectorView {
+                                orientation: *orientation,
+                            }
+                            && matches!(
+                                subscript.container_kind,
+                                HirSubscriptContainerKind::Vector { .. }
+                                    | HirSubscriptContainerKind::VectorView { .. }
+                            )
+                            && types.vector_like_info(value.ty)
+                                == Some((*element_type, *orientation))
+                    }
+                    SliceAssignmentContract::MatrixAxisExactLength { orientation } => {
+                        subscript.result
+                            == HirSubscriptResult::VectorView {
+                                orientation: *orientation,
+                            }
+                            && matches!(
+                                subscript.container_kind,
+                                HirSubscriptContainerKind::Matrix
+                                    | HirSubscriptContainerKind::MatrixView
+                            )
+                            && types.vector_like_info(value.ty)
+                                == Some((*element_type, *orientation))
+                    }
+                    SliceAssignmentContract::MatrixExactShape => {
+                        subscript.result == HirSubscriptResult::MatrixView
+                            && matches!(
+                                subscript.container_kind,
+                                HirSubscriptContainerKind::Matrix
+                                    | HirSubscriptContainerKind::MatrixView
+                            )
+                            && types.matrix_like_element(value.ty) == Some(*element_type)
+                    }
+                };
+                if !valid {
+                    return Err(fail(
+                        "HIR SliceAssign family/result/RHS contract invalid".into(),
+                    ));
+                }
+            }
             HirStmtKind::StringOutput {
                 function,
                 value,
@@ -19563,6 +20005,53 @@ mod vertical33_tests {
             // `Full` is itself valid, so corrupt the cached result with it.
             if corrupt == "selector" {
                 subscript.result = HirSubscriptResult::CollectionOwner;
+            }
+            assert!(verify_hir(&bad).is_err(), "accepted corrupt {corrupt}");
+        }
+    }
+
+    #[test]
+    fn slice_assignment_hir_contract_fails_closed_when_corrupted() {
+        let source = SourceFile::new(
+            "slice-assignment-corrupt.ae",
+            "int main(){Vector<int,Row>a=[1,2,3];Vector<int,Row>b=[4,5];a[1:2]=b;return 0;}",
+        );
+        let hir = analyze(parse_source(&source).unwrap()).unwrap();
+        verify_hir(&hir).unwrap();
+        for corrupt in [
+            "axis",
+            "base",
+            "result",
+            "container",
+            "rhs",
+            "element",
+            "contract",
+        ] {
+            let mut bad = hir.clone();
+            let statement = bad.functions[0]
+                .body
+                .statements
+                .iter_mut()
+                .find_map(|statement| match &mut statement.kind {
+                    HirStmtKind::SliceAssign {
+                        subscript,
+                        value,
+                        element_type,
+                        contract,
+                        ..
+                    } => Some((subscript, value, element_type, contract)),
+                    _ => None,
+                })
+                .unwrap();
+            match corrupt {
+                "axis" => statement.0.selectors[0].axis = HirSubscriptAxis::Row,
+                "base" => statement.0.selectors[0].index_base = 0,
+                "result" => statement.0.result = HirSubscriptResult::MatrixView,
+                "container" => statement.0.container_kind = HirSubscriptContainerKind::List,
+                "rhs" => statement.1.ty = TypeId::BOOL,
+                "element" => *statement.2 = TypeId::BOOL,
+                "contract" => *statement.3 = SliceAssignmentContract::MatrixExactShape,
+                _ => unreachable!(),
             }
             assert!(verify_hir(&bad).is_err(), "accepted corrupt {corrupt}");
         }

@@ -41,11 +41,11 @@ pub use hir::{
     MatrixAddShapeRecipe, MatrixProductExtent, ModuleId, ModuleInfo, MutationEffect,
     NonNullProofId, NullableLayout, NullablePayloadAccess, OriginKey, PackageId,
     PackageInstanceKey, PackageKey, PackagePath, ParameterSignature, ParsedModule, ParsedProgram,
-    ResolvedImport, ScalarSide, SourceUnitKey, StructInfo, StructuralMutation, SymbolKey,
-    TypeAliasInfo, TypeLayout, TypedHir, VariantInfo, VariantPayloadInfo, analyze, analyze_bodies,
-    analyze_bodies_for_target, classify_enum_equality, collect_library_program_signatures,
-    collect_program_signatures, collect_signatures, format_type, layout_of, nullable_layout_of,
-    verify_hir,
+    ResolvedImport, ScalarSide, SliceAssignmentContract, SliceAssignmentSnapshot, SourceUnitKey,
+    StructInfo, StructuralMutation, SymbolKey, TypeAliasInfo, TypeLayout, TypedHir, VariantInfo,
+    VariantPayloadInfo, analyze, analyze_bodies, analyze_bodies_for_target, classify_enum_equality,
+    collect_library_program_signatures, collect_program_signatures, collect_signatures,
+    format_type, layout_of, nullable_layout_of, verify_hir,
 };
 pub use lexer::{Token, TokenKind, lex};
 pub use parser::parse;

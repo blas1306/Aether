@@ -2158,6 +2158,204 @@ fn emit_function(
                     let done = continuation_label(block.id, id);
                     writeln!(output, "  br label %{done}\n{done}:").unwrap();
                 }
+                SsaOp::SliceAssign {
+                    target,
+                    selectors,
+                    rhs,
+                    rhs_type,
+                    element_type,
+                    contract,
+                    ..
+                } => {
+                    let id = instruction.result.0;
+                    let element_llvm = llvm_type(types, *element_type);
+                    let (target_value, target_ty) =
+                        emit_place_value(output, function, target, id, types, structs);
+                    let target_llvm = llvm_type(types, target_ty);
+                    let (rhs_value, emitted_rhs_type) =
+                        emit_place_value(output, function, rhs, id + 1_000_000, types, structs);
+                    debug_assert_eq!(emitted_rhs_type, *rhs_type);
+                    let rhs_llvm = llvm_type(types, *rhs_type);
+                    writeln!(
+                        output,
+                        "  ; SliceAssignBegin {contract:?} SnapshotRhsBeforeWrite"
+                    )
+                    .unwrap();
+                    writeln!(output, "  %sa{id}_target_ptr = extractvalue {target_llvm} {target_value}, 0\n  %sa{id}_rhs_ptr = extractvalue {rhs_llvm} {rhs_value}, 0").unwrap();
+
+                    let (target_base, logical_length, target_row_stride, target_column_stride) =
+                        match contract {
+                            aether_frontend::SliceAssignmentContract::CollectionExactLength
+                            | aether_frontend::SliceAssignmentContract::VectorExactLength {
+                                ..
+                            } => {
+                                writeln!(output, "  %sa{id}_target_extent = extractvalue {target_llvm} {target_value}, 1").unwrap();
+                                let (offset, length, _) = emit_slice_selector(
+                                    output,
+                                    &selectors[0],
+                                    &format!("%sa{id}_target_extent"),
+                                    &format!("sa{id}_linear"),
+                                );
+                                let stride = if types.vector_view_info(target_ty).is_some() {
+                                    writeln!(output, "  %sa{id}_target_stride = extractvalue {target_llvm} {target_value}, 2").unwrap();
+                                    format!("%sa{id}_target_stride")
+                                } else {
+                                    "1".into()
+                                };
+                                writeln!(output, "  %sa{id}_target_physical = mul i64 {offset}, {stride}\n  %sa{id}_target_base = getelementptr {element_llvm}, ptr %sa{id}_target_ptr, i64 %sa{id}_target_physical").unwrap();
+                                (format!("%sa{id}_target_base"), length, stride, "0".into())
+                            }
+                            aether_frontend::SliceAssignmentContract::MatrixAxisExactLength {
+                                ..
+                            }
+                            | aether_frontend::SliceAssignmentContract::MatrixExactShape => {
+                                writeln!(output, "  %sa{id}_target_rows = extractvalue {target_llvm} {target_value}, 1\n  %sa{id}_target_columns = extractvalue {target_llvm} {target_value}, 2").unwrap();
+                                let (row_stride, column_stride) = if types
+                                    .matrix_view_info(target_ty)
+                                    .is_some()
+                                {
+                                    writeln!(output, "  %sa{id}_target_rs = extractvalue {target_llvm} {target_value}, 3\n  %sa{id}_target_cs = extractvalue {target_llvm} {target_value}, 4").unwrap();
+                                    (format!("%sa{id}_target_rs"), format!("%sa{id}_target_cs"))
+                                } else {
+                                    writeln!(output, "  %sa{id}_target_rs = extractvalue {target_llvm} {target_value}, 4").unwrap();
+                                    (format!("%sa{id}_target_rs"), "1".into())
+                                };
+                                let (row_offset, row_length, _) = emit_slice_selector(
+                                    output,
+                                    &selectors[0],
+                                    &format!("%sa{id}_target_rows"),
+                                    &format!("sa{id}_row"),
+                                );
+                                let (column_offset, column_length, _) = emit_slice_selector(
+                                    output,
+                                    &selectors[1],
+                                    &format!("%sa{id}_target_columns"),
+                                    &format!("sa{id}_column"),
+                                );
+                                writeln!(output, "  %sa{id}_target_row_offset = mul i64 {row_offset}, {row_stride}\n  %sa{id}_target_column_offset = mul i64 {column_offset}, {column_stride}\n  %sa{id}_target_offset = add i64 %sa{id}_target_row_offset, %sa{id}_target_column_offset\n  %sa{id}_target_base = getelementptr {element_llvm}, ptr %sa{id}_target_ptr, i64 %sa{id}_target_offset").unwrap();
+                                let logical = match contract {
+                                    aether_frontend::SliceAssignmentContract::MatrixAxisExactLength { orientation: aether_frontend::Orientation::Row } => column_length,
+                                    aether_frontend::SliceAssignmentContract::MatrixAxisExactLength { orientation: aether_frontend::Orientation::Column } => row_length,
+                                    aether_frontend::SliceAssignmentContract::MatrixExactShape => {
+                                        writeln!(output, "  %sa{id}_logical_length = mul i64 {row_length}, {column_length}").unwrap();
+                                        format!("%sa{id}_logical_length")
+                                    }
+                                    _ => unreachable!(),
+                                };
+                                (
+                                    format!("%sa{id}_target_base"),
+                                    logical,
+                                    row_stride,
+                                    column_stride,
+                                )
+                            }
+                        };
+
+                    let (rhs_length, rhs_rows, rhs_columns, rhs_row_stride, rhs_column_stride) =
+                        match contract {
+                            aether_frontend::SliceAssignmentContract::CollectionExactLength
+                            | aether_frontend::SliceAssignmentContract::VectorExactLength {
+                                ..
+                            }
+                            | aether_frontend::SliceAssignmentContract::MatrixAxisExactLength {
+                                ..
+                            } => {
+                                writeln!(
+                                    output,
+                                    "  %sa{id}_rhs_length = extractvalue {rhs_llvm} {rhs_value}, 1"
+                                )
+                                .unwrap();
+                                let stride = if types.vector_view_info(*rhs_type).is_some() {
+                                    writeln!(output, "  %sa{id}_rhs_stride = extractvalue {rhs_llvm} {rhs_value}, 2").unwrap();
+                                    format!("%sa{id}_rhs_stride")
+                                } else {
+                                    "1".into()
+                                };
+                                (
+                                    format!("%sa{id}_rhs_length"),
+                                    "0".into(),
+                                    "0".into(),
+                                    stride,
+                                    "0".into(),
+                                )
+                            }
+                            aether_frontend::SliceAssignmentContract::MatrixExactShape => {
+                                writeln!(output, "  %sa{id}_rhs_rows = extractvalue {rhs_llvm} {rhs_value}, 1\n  %sa{id}_rhs_columns = extractvalue {rhs_llvm} {rhs_value}, 2").unwrap();
+                                let (rs, cs) = if types.matrix_view_info(*rhs_type).is_some() {
+                                    writeln!(output, "  %sa{id}_rhs_rs = extractvalue {rhs_llvm} {rhs_value}, 3\n  %sa{id}_rhs_cs = extractvalue {rhs_llvm} {rhs_value}, 4").unwrap();
+                                    (format!("%sa{id}_rhs_rs"), format!("%sa{id}_rhs_cs"))
+                                } else {
+                                    writeln!(
+                                        output,
+                                        "  %sa{id}_rhs_rs = extractvalue {rhs_llvm} {rhs_value}, 4"
+                                    )
+                                    .unwrap();
+                                    (format!("%sa{id}_rhs_rs"), "1".into())
+                                };
+                                writeln!(output, "  %sa{id}_rhs_length = mul i64 %sa{id}_rhs_rows, %sa{id}_rhs_columns").unwrap();
+                                (
+                                    format!("%sa{id}_rhs_length"),
+                                    format!("%sa{id}_rhs_rows"),
+                                    format!("%sa{id}_rhs_columns"),
+                                    rs,
+                                    cs,
+                                )
+                            }
+                        };
+
+                    let checked = format!("sa{id}_shape_checked");
+                    match contract {
+                        aether_frontend::SliceAssignmentContract::MatrixExactShape => {
+                            // Recover selected rows/columns from total and selectors without
+                            // weakening the independently checked two-dimensional contract.
+                            let row_len = match &selectors[0] {
+                                SliceSelector::Scalar { .. } => "1".to_string(),
+                                SliceSelector::Full { .. } => format!("%sa{id}_target_rows"),
+                                SliceSelector::Closed { .. } => format!("%sa{id}_row_length"),
+                            };
+                            let col_len = match &selectors[1] {
+                                SliceSelector::Scalar { .. } => "1".to_string(),
+                                SliceSelector::Full { .. } => format!("%sa{id}_target_columns"),
+                                SliceSelector::Closed { .. } => format!("%sa{id}_column_length"),
+                            };
+                            writeln!(output, "  %sa{id}_rows_match = icmp eq i64 {row_len}, {rhs_rows}\n  %sa{id}_columns_match = icmp eq i64 {col_len}, {rhs_columns}\n  %sa{id}_shape_match = and i1 %sa{id}_rows_match, %sa{id}_columns_match\n  br i1 %sa{id}_shape_match, label %{checked}, label %trap_shape_mismatch\n{checked}:").unwrap();
+                        }
+                        _ => {
+                            writeln!(output, "  %sa{id}_length_match = icmp eq i64 {logical_length}, {rhs_length}\n  br i1 %sa{id}_length_match, label %{checked}, label %trap_shape_mismatch\n{checked}:").unwrap();
+                        }
+                    }
+                    shape_trap = true;
+                    slice_order_trap |= selectors
+                        .iter()
+                        .any(|s| matches!(s, SliceSelector::Closed { .. }));
+                    slice_bounds_trap |= selectors
+                        .iter()
+                        .any(|s| matches!(s, SliceSelector::Closed { .. }));
+                    bounds_trap |= selectors
+                        .iter()
+                        .any(|s| matches!(s, SliceSelector::Scalar { .. }));
+
+                    writeln!(output, "  %sa{id}_snapshot = alloca {element_llvm}, i64 {logical_length}\n  br label %sa{id}_snapshot_loop\nsa{id}_snapshot_loop:\n  %sa{id}_read_index = phi i64 [ 0, %{checked} ], [ %sa{id}_read_next, %sa{id}_snapshot_body ]\n  %sa{id}_read_more = icmp ult i64 %sa{id}_read_index, {logical_length}\n  br i1 %sa{id}_read_more, label %sa{id}_snapshot_body, label %sa{id}_write_start\nsa{id}_snapshot_body:").unwrap();
+                    match contract {
+                        aether_frontend::SliceAssignmentContract::MatrixExactShape => {
+                            writeln!(output, "  %sa{id}_rhs_row = udiv i64 %sa{id}_read_index, {rhs_columns}\n  %sa{id}_rhs_column = urem i64 %sa{id}_read_index, {rhs_columns}\n  %sa{id}_rhs_row_physical = mul i64 %sa{id}_rhs_row, {rhs_row_stride}\n  %sa{id}_rhs_column_physical = mul i64 %sa{id}_rhs_column, {rhs_column_stride}\n  %sa{id}_rhs_physical = add i64 %sa{id}_rhs_row_physical, %sa{id}_rhs_column_physical").unwrap();
+                        }
+                        _ => writeln!(
+                            output,
+                            "  %sa{id}_rhs_physical = mul i64 %sa{id}_read_index, {rhs_row_stride}"
+                        )
+                        .unwrap(),
+                    }
+                    writeln!(output, "  %sa{id}_rhs_slot = getelementptr {element_llvm}, ptr %sa{id}_rhs_ptr, i64 %sa{id}_rhs_physical\n  %sa{id}_snapshot_value = load {element_llvm}, ptr %sa{id}_rhs_slot\n  %sa{id}_snapshot_slot = getelementptr {element_llvm}, ptr %sa{id}_snapshot, i64 %sa{id}_read_index\n  store {element_llvm} %sa{id}_snapshot_value, ptr %sa{id}_snapshot_slot\n  %sa{id}_read_next = add i64 %sa{id}_read_index, 1\n  br label %sa{id}_snapshot_loop\nsa{id}_write_start:\n  br label %sa{id}_write_loop\nsa{id}_write_loop:\n  %sa{id}_write_index = phi i64 [ 0, %sa{id}_write_start ], [ %sa{id}_write_next, %sa{id}_write_body ]\n  %sa{id}_write_more = icmp ult i64 %sa{id}_write_index, {logical_length}\n  br i1 %sa{id}_write_more, label %sa{id}_write_body, label %sa{id}_done\nsa{id}_write_body:").unwrap();
+                    match contract {
+                        aether_frontend::SliceAssignmentContract::MatrixExactShape => {
+                            writeln!(output, "  %sa{id}_target_row = udiv i64 %sa{id}_write_index, {rhs_columns}\n  %sa{id}_target_column = urem i64 %sa{id}_write_index, {rhs_columns}\n  %sa{id}_target_row_physical2 = mul i64 %sa{id}_target_row, {target_row_stride}\n  %sa{id}_target_column_physical2 = mul i64 %sa{id}_target_column, {target_column_stride}\n  %sa{id}_target_physical2 = add i64 %sa{id}_target_row_physical2, %sa{id}_target_column_physical2").unwrap();
+                        }
+                        aether_frontend::SliceAssignmentContract::MatrixAxisExactLength { orientation: aether_frontend::Orientation::Row } => writeln!(output, "  %sa{id}_target_physical2 = mul i64 %sa{id}_write_index, {target_column_stride}").unwrap(),
+                        _ => writeln!(output, "  %sa{id}_target_physical2 = mul i64 %sa{id}_write_index, {target_row_stride}").unwrap(),
+                    }
+                    writeln!(output, "  %sa{id}_write_slot = getelementptr {element_llvm}, ptr {target_base}, i64 %sa{id}_target_physical2\n  %sa{id}_write_value_slot = getelementptr {element_llvm}, ptr %sa{id}_snapshot, i64 %sa{id}_write_index\n  %sa{id}_write_value = load {element_llvm}, ptr %sa{id}_write_value_slot\n  store {element_llvm} %sa{id}_write_value, ptr %sa{id}_write_slot\n  %sa{id}_write_next = add i64 %sa{id}_write_index, 1\n  br label %sa{id}_write_loop\nsa{id}_done:\n  %v{id} = select i1 true, i1 true, i1 false\n  ; SliceAssignEnd %v{id}").unwrap();
+                }
                 SsaOp::MatrixAxisVectorView {
                     source,
                     fixed_index,
@@ -3558,6 +3756,13 @@ fn emit_function(
             SsaTerminator::Trap(TrapKind::SliceBoundsError) => {
                 slice_bounds_trap = true;
                 writeln!(output, "  br label %trap_slice_bounds_error").unwrap();
+            }
+            SsaTerminator::Trap(TrapKind::OrientationMismatch) => {
+                writeln!(
+                    output,
+                    "  ; structured trap: OrientationMismatch\n  call void @llvm.trap()\n  unreachable"
+                )
+                .unwrap();
             }
             SsaTerminator::Throw {
                 payload, unwind, ..

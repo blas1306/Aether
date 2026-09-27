@@ -245,6 +245,7 @@ pub enum TrapKind {
     IndexOutOfBounds,
     SliceOrderError,
     SliceBoundsError,
+    OrientationMismatch,
     ListEmpty,
     ZeroRangeStep,
 }
@@ -582,6 +583,23 @@ pub enum Rvalue {
         order_trap: TrapKind,
         bounds_trap: TrapKind,
         index_trap: TrapKind,
+    },
+    /// Atomic (with respect to validation) replacement through a direct slice place.
+    SliceAssign {
+        target: Place,
+        selectors: Vec<SliceSelector<Operand>>,
+        family: aether_frontend::HirSubscriptContainerKind,
+        result: aether_frontend::HirSubscriptResult,
+        rhs: Place,
+        rhs_type: TypeId,
+        element_type: TypeId,
+        contract: aether_frontend::SliceAssignmentContract,
+        snapshot: aether_frontend::SliceAssignmentSnapshot,
+        order_trap: TrapKind,
+        bounds_trap: TrapKind,
+        index_trap: TrapKind,
+        shape_trap: TrapKind,
+        orientation_trap: TrapKind,
     },
     /// Borrow the source backing. Source Place and descriptor copy/use chains
     /// retain provenance; the closed recipe is independently verified.
@@ -1026,7 +1044,8 @@ fn conditional_drop_roots(block: &HirBlock) -> BTreeSet<LocalId> {
                         }
                     }
                 }
-                HirStmtKind::Nop
+                HirStmtKind::SliceAssign { .. }
+                | HirStmtKind::Nop
                 | HirStmtKind::Local { .. }
                 | HirStmtKind::Assign { .. }
                 | HirStmtKind::ListPush { .. }
@@ -1598,6 +1617,58 @@ impl Builder<'_> {
                         if let Some(local) = destination_owner {
                             self.set_drop_flag(local, true, statement.span);
                         }
+                    }
+                }
+                HirStmtKind::SliceAssign {
+                    target,
+                    subscript,
+                    value,
+                    element_type,
+                    contract,
+                    snapshot,
+                } => {
+                    let target = self.lower_place(target);
+                    let selectors = subscript
+                        .selectors
+                        .iter()
+                        .map(|selector| self.lower_slice_selector(selector))
+                        .collect();
+                    let (rhs, drop_rhs_after) = if let HirExprKind::Load(place) = &value.kind {
+                        (self.lower_place(place), false)
+                    } else {
+                        let operand = self.lower_expr(value);
+                        (
+                            operand_place(&operand),
+                            self.types.needs_drop(value.ty)
+                                && self.types.borrowed_view_info(value.ty).is_none(),
+                        )
+                    };
+                    let token = self.temporary(TypeId::BOOL);
+                    self.assign(
+                        Place {
+                            base: PlaceBase::Local(token),
+                            projections: vec![],
+                        },
+                        Rvalue::SliceAssign {
+                            target,
+                            selectors,
+                            family: subscript.container_kind,
+                            result: subscript.result,
+                            rhs: rhs.clone(),
+                            rhs_type: value.ty,
+                            element_type: *element_type,
+                            contract: *contract,
+                            snapshot: *snapshot,
+                            order_trap: TrapKind::SliceOrderError,
+                            bounds_trap: TrapKind::SliceBoundsError,
+                            index_trap: TrapKind::IndexOutOfBounds,
+                            shape_trap: TrapKind::ShapeMismatch,
+                            orientation_trap: TrapKind::OrientationMismatch,
+                        },
+                        statement.span,
+                    );
+                    if drop_rhs_after {
+                        self.emit_drop(rhs, statement.span);
                     }
                 }
                 HirStmtKind::StringOutput {
@@ -7352,7 +7423,11 @@ fn validate_slice_selector_mir(
     Ok(scalar)
 }
 
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+#[allow(
+    clippy::if_not_else,
+    clippy::too_many_arguments,
+    clippy::too_many_lines
+)]
 fn validate_rvalue(
     function: &MirFunction,
     signatures: &[FunctionInstanceInfo],
@@ -8199,6 +8274,170 @@ fn validate_rvalue(
                 || *index_trap != TrapKind::IndexOutOfBounds
             {
                 return Err("MIR MatrixSliceView result/stride/trap contract invalid".into());
+            }
+        }
+        Rvalue::SliceAssign {
+            target,
+            selectors,
+            family,
+            result,
+            rhs,
+            rhs_type,
+            element_type,
+            contract,
+            snapshot,
+            order_trap,
+            bounds_trap,
+            index_trap,
+            shape_trap,
+            orientation_trap,
+        } => {
+            validate_place_read(function, target, structs, types, initialized)?;
+            validate_place_read(function, rhs, structs, types, initialized)?;
+            let target_ty = place_type(function, target, structs, types)?;
+            if destination != TypeId::BOOL
+                || !mir_place_writable(function, target, structs, types)?
+                || types
+                    .borrowed_view_info(target_ty)
+                    .is_some_and(|(_, mutable)| !mutable)
+                || place_type(function, rhs, structs, types)? != *rhs_type
+                || !types.guarantees_copy(*element_type)
+                || *snapshot != aether_frontend::SliceAssignmentSnapshot::RhsBeforeWrite
+                || *order_trap != TrapKind::SliceOrderError
+                || *bounds_trap != TrapKind::SliceBoundsError
+                || *index_trap != TrapKind::IndexOutOfBounds
+                || *shape_trap != TrapKind::ShapeMismatch
+                || *orientation_trap != TrapKind::OrientationMismatch
+            {
+                return Err("MIR SliceAssign mutability/snapshot/trap contract invalid".into());
+            }
+            let valid = match contract {
+                aether_frontend::SliceAssignmentContract::CollectionExactLength => {
+                    if selectors.len() != 1 {
+                        false
+                    } else {
+                        let scalar = validate_slice_selector_mir(
+                            function,
+                            &selectors[0],
+                            aether_frontend::HirSubscriptAxis::Linear,
+                            IndexSemantics::ZeroBased,
+                            initialized,
+                        )?;
+                        !scalar
+                            && *result == aether_frontend::HirSubscriptResult::CollectionOwner
+                            && match types.get(target_ty) {
+                                Some(TypeData::Array { element }) => {
+                                    *family == aether_frontend::HirSubscriptContainerKind::Array
+                                        && *element == *element_type
+                                        && types.array_element(*rhs_type) == Some(*element_type)
+                                }
+                                Some(TypeData::List { element }) => {
+                                    *family == aether_frontend::HirSubscriptContainerKind::List
+                                        && *element == *element_type
+                                        && types.list_element(*rhs_type) == Some(*element_type)
+                                }
+                                _ => false,
+                            }
+                    }
+                }
+                aether_frontend::SliceAssignmentContract::VectorExactLength { orientation } => {
+                    if selectors.len() != 1 {
+                        false
+                    } else {
+                        let expected_family = match types.get(target_ty) {
+                            Some(TypeData::Vector { .. }) => {
+                                aether_frontend::HirSubscriptContainerKind::Vector {
+                                    orientation: *orientation,
+                                }
+                            }
+                            Some(TypeData::VectorView { .. }) => {
+                                aether_frontend::HirSubscriptContainerKind::VectorView {
+                                    orientation: *orientation,
+                                }
+                            }
+                            _ => *family,
+                        };
+                        let scalar = validate_slice_selector_mir(
+                            function,
+                            &selectors[0],
+                            aether_frontend::HirSubscriptAxis::Linear,
+                            IndexSemantics::OneBased,
+                            initialized,
+                        )?;
+                        !scalar
+                            && *family == expected_family
+                            && *result
+                                == aether_frontend::HirSubscriptResult::VectorView {
+                                    orientation: *orientation,
+                                }
+                            && types.vector_like_info(target_ty)
+                                == Some((*element_type, *orientation))
+                            && types.vector_like_info(*rhs_type)
+                                == Some((*element_type, *orientation))
+                    }
+                }
+                aether_frontend::SliceAssignmentContract::MatrixAxisExactLength { .. }
+                | aether_frontend::SliceAssignmentContract::MatrixExactShape => {
+                    if selectors.len() != 2 {
+                        false
+                    } else {
+                        let row = validate_slice_selector_mir(
+                            function,
+                            &selectors[0],
+                            aether_frontend::HirSubscriptAxis::Row,
+                            IndexSemantics::OneBased2D,
+                            initialized,
+                        )?;
+                        let column = validate_slice_selector_mir(
+                            function,
+                            &selectors[1],
+                            aether_frontend::HirSubscriptAxis::Column,
+                            IndexSemantics::OneBased2D,
+                            initialized,
+                        )?;
+                        let expected = match (row, column) {
+                            (true, false) => aether_frontend::HirSubscriptResult::VectorView {
+                                orientation: aether_frontend::Orientation::Row,
+                            },
+                            (false, true) => aether_frontend::HirSubscriptResult::VectorView {
+                                orientation: aether_frontend::Orientation::Column,
+                            },
+                            (false, false) => aether_frontend::HirSubscriptResult::MatrixView,
+                            (true, true) => aether_frontend::HirSubscriptResult::Scalar,
+                        };
+                        let rhs_ok = match contract {
+                            aether_frontend::SliceAssignmentContract::MatrixAxisExactLength {
+                                orientation,
+                            } => {
+                                expected
+                                    == aether_frontend::HirSubscriptResult::VectorView {
+                                        orientation: *orientation,
+                                    }
+                                    && types.vector_like_info(*rhs_type)
+                                        == Some((*element_type, *orientation))
+                            }
+                            aether_frontend::SliceAssignmentContract::MatrixExactShape => {
+                                expected == aether_frontend::HirSubscriptResult::MatrixView
+                                    && types.matrix_like_element(*rhs_type) == Some(*element_type)
+                            }
+                            _ => false,
+                        };
+                        *result == expected
+                            && rhs_ok
+                            && types.matrix_like_element(target_ty) == Some(*element_type)
+                            && *family
+                                == if types.matrix_view_info(target_ty).is_some() {
+                                    aether_frontend::HirSubscriptContainerKind::MatrixView
+                                } else {
+                                    aether_frontend::HirSubscriptContainerKind::Matrix
+                                }
+                    }
+                }
+            };
+            if !valid {
+                return Err(
+                    "MIR SliceAssign family/axis/orientation/shape contract invalid".into(),
+                );
             }
         }
         Rvalue::MatrixAxisVectorView {
