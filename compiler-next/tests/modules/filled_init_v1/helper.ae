@@ -1,0 +1,16 @@
+package helper;
+
+struct Pair { int x; int y; }
+
+Matrix<T> matrix<T:Storable+Copy>(usize rows,usize columns,T value) {
+    return matrixFilled<T>(rows,columns,value);
+}
+
+Vector<T,Row> row<T:Storable+Copy>(usize length,T value) {
+    return vectorFilled<T,Row>(length,value);
+}
+
+Vector<T,Column> column<T:Storable+Copy>(usize length,T value) {
+    return vectorFilled<T,Column>(length,value);
+}
+

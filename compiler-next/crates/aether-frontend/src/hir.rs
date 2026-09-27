@@ -1519,6 +1519,22 @@ pub enum HirExprKind {
         element_type: TypeId,
         elements: Vec<HirExpr>,
     },
+    /// Safe runtime-length construction. The operation owns its complete
+    /// initialization transaction and publishes only the finished descriptor.
+    VectorFilled {
+        element_type: TypeId,
+        orientation: crate::types::Orientation,
+        length: Box<HirExpr>,
+        initial: Box<HirExpr>,
+    },
+    /// Safe runtime-shape construction with exact initial capacities. The
+    /// capacities are, by contract, `(rows, columns)` and are not source-visible.
+    MatrixFilled {
+        element_type: TypeId,
+        rows: Box<HirExpr>,
+        columns: Box<HirExpr>,
+        initial: Box<HirExpr>,
+    },
     /// Expected-type-resolved `{...}` collection construction.
     ArrayInit {
         element_type: TypeId,
@@ -5160,6 +5176,28 @@ impl Monomorphizer<'_> {
                     .map(|element| self.substitute_expr(element, substitution))
                     .collect::<Result<Vec<_>, _>>()?,
             },
+            HirExprKind::VectorFilled {
+                element_type,
+                orientation,
+                length,
+                initial,
+            } => HirExprKind::VectorFilled {
+                element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+                orientation: *orientation,
+                length: Box::new(self.substitute_expr(length, substitution)?),
+                initial: Box::new(self.substitute_expr(initial, substitution)?),
+            },
+            HirExprKind::MatrixFilled {
+                element_type,
+                rows,
+                columns,
+                initial,
+            } => HirExprKind::MatrixFilled {
+                element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+                rows: Box::new(self.substitute_expr(rows, substitution)?),
+                columns: Box::new(self.substitute_expr(columns, substitution)?),
+                initial: Box::new(self.substitute_expr(initial, substitution)?),
+            },
             HirExprKind::ArrayInit {
                 element_type,
                 elements,
@@ -6833,8 +6871,21 @@ impl OwnershipAnalysis<'_> {
             }
             | HirExprKind::ArrayFill {
                 length, initial, ..
+            }
+            | HirExprKind::VectorFilled {
+                length, initial, ..
             } => {
                 self.expr(length)?;
+                self.expr(initial)
+            }
+            HirExprKind::MatrixFilled {
+                rows,
+                columns,
+                initial,
+                ..
+            } => {
+                self.expr(rows)?;
+                self.expr(columns)?;
                 self.expr(initial)
             }
             HirExprKind::MatrixInit { elements, .. }
@@ -9825,6 +9876,12 @@ impl Analyzer<'_> {
                 if callee == "Array" {
                     return self.array_fill(type_arguments, args, e.span, expected);
                 }
+                if callee == "vectorFilled" {
+                    return self.vector_filled(type_arguments, args, e.span, expected);
+                }
+                if callee == "matrixFilled" {
+                    return self.matrix_filled(type_arguments, args, e.span, expected);
+                }
                 if callee == "transpose" {
                     return self.vector_transpose(type_arguments, args, e.span, expected);
                 }
@@ -10808,6 +10865,166 @@ impl Analyzer<'_> {
                 kind: HirExprKind::ArrayFill {
                     element_type: element,
                     length: Box::new(length.expr),
+                    initial: Box::new(initial),
+                },
+                ty,
+                span,
+            },
+            constant: None,
+        })
+    }
+
+    fn vector_filled(
+        &mut self,
+        type_arguments: &[AstType],
+        args: &[AstExpr],
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        if type_arguments.len() != 2 {
+            return Err(vec![generic_call_arity(
+                "vectorFilled",
+                2,
+                type_arguments.len(),
+                span,
+            )]);
+        }
+        if args.len() != 2 {
+            return Err(vec![type_error(
+                format!(
+                    "vectorFilled<T,O> expects length and initialized value, found {} arguments",
+                    args.len()
+                ),
+                span,
+            )]);
+        }
+        let element = self.resolve_type_arguments(&type_arguments[..1])?[0];
+        let orientation = match type_arguments[1].named() {
+            Some((None, "Row", [])) => Orientation::Row,
+            Some((None, "Column", [])) => Orientation::Column,
+            _ => {
+                return Err(vec![type_error(
+                    "vectorFilled orientation must be Row or Column",
+                    type_arguments[1].span,
+                )]);
+            }
+        };
+        if !self.types.is_admitted_vector_element(element) || !self.types.guarantees_copy(element) {
+            return Err(vec![type_error(
+                format!(
+                    "vectorFilled requires {}: Storable + Copy",
+                    self.type_name(element)
+                ),
+                span,
+            )]);
+        }
+        let ty = self.types.intern_vector(element, orientation);
+        if expected.is_some_and(|expected| expected != ty) {
+            return Err(vec![type_error(
+                format!(
+                    "vectorFilled produces {}, not {}",
+                    self.type_name(ty),
+                    self.type_name(expected.unwrap())
+                ),
+                span,
+            )]);
+        }
+        let length = self.expression(&args[0], Some(TypeId::USIZE))?;
+        let initial = self.expression(&args[1], Some(element))?.expr;
+        self.check_allocation_size(&length, element, args[0].span, "Vector")?;
+        Ok(Checked {
+            expr: HirExpr {
+                kind: HirExprKind::VectorFilled {
+                    element_type: element,
+                    orientation,
+                    length: Box::new(length.expr),
+                    initial: Box::new(initial),
+                },
+                ty,
+                span,
+            },
+            constant: None,
+        })
+    }
+
+    fn matrix_filled(
+        &mut self,
+        type_arguments: &[AstType],
+        args: &[AstExpr],
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        if type_arguments.len() != 1 {
+            return Err(vec![generic_call_arity(
+                "matrixFilled",
+                1,
+                type_arguments.len(),
+                span,
+            )]);
+        }
+        if args.len() != 3 {
+            return Err(vec![type_error(
+                format!(
+                    "matrixFilled<T> expects rows, columns, and initialized value, found {} arguments",
+                    args.len()
+                ),
+                span,
+            )]);
+        }
+        let element = self.resolve_type_arguments(type_arguments)?[0];
+        if !self.types.is_admitted_matrix_element(element) || !self.types.guarantees_copy(element) {
+            return Err(vec![type_error(
+                format!(
+                    "matrixFilled requires {}: Storable + Copy",
+                    self.type_name(element)
+                ),
+                span,
+            )]);
+        }
+        let ty = self.types.intern_matrix(element);
+        if expected.is_some_and(|expected| expected != ty) {
+            return Err(vec![type_error(
+                format!(
+                    "matrixFilled produces {}, not {}",
+                    self.type_name(ty),
+                    self.type_name(expected.unwrap())
+                ),
+                span,
+            )]);
+        }
+        let rows = self.expression(&args[0], Some(TypeId::USIZE))?;
+        let columns = self.expression(&args[1], Some(TypeId::USIZE))?;
+        let initial = self.expression(&args[2], Some(element))?.expr;
+        if let (Some(ConstantValue::Integer(rows)), Some(ConstantValue::Integer(columns))) =
+            (rows.constant, columns.constant)
+        {
+            let layout = layout_of(self.types, element, self.target, self.structs, self.enums)
+                .expect("admitted Matrix element has layout");
+            if u64::try_from(rows)
+                .ok()
+                .and_then(|rows| {
+                    u64::try_from(columns)
+                        .ok()
+                        .and_then(|columns| rows.checked_mul(columns))
+                })
+                .and_then(|count| count.checked_mul(layout.size))
+                .is_none()
+            {
+                return Err(vec![Diagnostic::new(
+                    "E0282",
+                    Phase::Semantic,
+                    DiagnosticCategory::Integer,
+                    "AllocationSizeOverflow: Matrix shape times element size exceeds usize",
+                    Some(span),
+                )]);
+            }
+        }
+        Ok(Checked {
+            expr: HirExpr {
+                kind: HirExprKind::MatrixFilled {
+                    element_type: element,
+                    rows: Box::new(rows.expr),
+                    columns: Box::new(columns.expr),
                     initial: Box::new(initial),
                 },
                 ty,
@@ -14943,6 +15160,43 @@ fn verify_expr(
                 ));
             }
         }
+        HirExprKind::VectorFilled {
+            element_type,
+            orientation,
+            length,
+            initial,
+        } => {
+            verify_expr(length, f, sigs, structs, enums, types, fail)?;
+            verify_expr(initial, f, sigs, structs, enums, types, fail)?;
+            if types.vector_element(e.ty) != Some(*element_type)
+                || types.vector_like_info(e.ty) != Some((*element_type, *orientation))
+                || length.ty != TypeId::USIZE
+                || initial.ty != *element_type
+                || !types.is_admitted_vector_element(*element_type)
+                || !types.guarantees_copy(*element_type)
+            {
+                return Err(fail("HIR Vector filled-init contract invalid".into()));
+            }
+        }
+        HirExprKind::MatrixFilled {
+            element_type,
+            rows,
+            columns,
+            initial,
+        } => {
+            verify_expr(rows, f, sigs, structs, enums, types, fail)?;
+            verify_expr(columns, f, sigs, structs, enums, types, fail)?;
+            verify_expr(initial, f, sigs, structs, enums, types, fail)?;
+            if types.matrix_element(e.ty) != Some(*element_type)
+                || rows.ty != TypeId::USIZE
+                || columns.ty != TypeId::USIZE
+                || initial.ty != *element_type
+                || !types.is_admitted_matrix_element(*element_type)
+                || !types.guarantees_copy(*element_type)
+            {
+                return Err(fail("HIR Matrix filled-init contract invalid".into()));
+            }
+        }
         HirExprKind::ArrayInit {
             element_type,
             elements,
@@ -16300,6 +16554,45 @@ mod tests {
     use crate::{SourceFile, parse_source};
     fn check(s: &str) -> Result<TypedHir, Vec<Diagnostic>> {
         analyze(parse_source(&SourceFile::new("test.ae", s)).unwrap())
+    }
+    #[test]
+    fn filled_init_v1_hir_corruptions_fail_closed() {
+        let hir = check(
+            "int main(){Matrix<int> a=matrixFilled<int>(2,3,7);Vector<int,Row> r=vectorFilled<int,Row>(3,8);return a[2,3]+r[3]-15;}",
+        )
+        .unwrap();
+        verify_hir(&hir).unwrap();
+        for target in ["matrix", "vector"] {
+            let mut bad = hir.clone();
+            let initializer = bad.functions[0]
+                .body
+                .statements
+                .iter_mut()
+                .find_map(|statement| match &mut statement.kind {
+                    HirStmtKind::Local { initializer, .. }
+                        if (target == "matrix"
+                            && matches!(initializer.kind, HirExprKind::MatrixFilled { .. }))
+                            || (target == "vector"
+                                && matches!(
+                                    initializer.kind,
+                                    HirExprKind::VectorFilled { .. }
+                                )) =>
+                    {
+                        Some(initializer)
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            match &mut initializer.kind {
+                HirExprKind::MatrixFilled { rows, .. } => rows.ty = TypeId::BOOL,
+                HirExprKind::VectorFilled { length, .. } => length.ty = TypeId::BOOL,
+                _ => unreachable!(),
+            }
+            assert!(
+                verify_hir(&bad).is_err(),
+                "accepted malformed {target} filled-init"
+            );
+        }
     }
     #[test]
     fn iteration_v1_hir_corruptions_fail_closed() {

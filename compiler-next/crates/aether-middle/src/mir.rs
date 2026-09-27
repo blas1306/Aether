@@ -412,6 +412,24 @@ pub enum Rvalue {
         size_trap: TrapKind,
         failure_trap: TrapKind,
     },
+    VectorFilled {
+        element_type: TypeId,
+        orientation: aether_frontend::Orientation,
+        length: Operand,
+        initial: Operand,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
+    MatrixFilled {
+        element_type: TypeId,
+        rows: Operand,
+        columns: Operand,
+        row_capacity: Operand,
+        column_capacity: Operand,
+        initial: Operand,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
     ArrayInit {
         element_type: TypeId,
         elements: Vec<Operand>,
@@ -3019,6 +3037,61 @@ impl Builder<'_> {
                     Rvalue::VectorInit {
                         element_type: *element_type,
                         elements,
+                        size_trap: TrapKind::AllocationSizeOverflow,
+                        failure_trap: TrapKind::AllocationFailure,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::VectorFilled {
+                element_type,
+                orientation,
+                length,
+                initial,
+            } => {
+                let length = self.lower_expr(length);
+                let initial = self.lower_expr(initial);
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::VectorFilled {
+                        element_type: *element_type,
+                        orientation: *orientation,
+                        length,
+                        initial,
+                        size_trap: TrapKind::AllocationSizeOverflow,
+                        failure_trap: TrapKind::AllocationFailure,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::MatrixFilled {
+                element_type,
+                rows,
+                columns,
+                initial,
+            } => {
+                let rows = self.lower_expr(rows);
+                let columns = self.lower_expr(columns);
+                let initial = self.lower_expr(initial);
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::MatrixFilled {
+                        element_type: *element_type,
+                        row_capacity: rows.clone(),
+                        column_capacity: columns.clone(),
+                        rows,
+                        columns,
+                        initial,
                         size_trap: TrapKind::AllocationSizeOverflow,
                         failure_trap: TrapKind::AllocationFailure,
                     },
@@ -6075,6 +6148,8 @@ fn verify_drop_flag_contract(
                 Rvalue::BufferAlloc { .. }
                 | Rvalue::MatrixInit { .. }
                 | Rvalue::VectorInit { .. }
+                | Rvalue::VectorFilled { .. }
+                | Rvalue::MatrixFilled { .. }
                 | Rvalue::ArrayInit { .. }
                 | Rvalue::ArrayFill { .. }
                 | Rvalue::ListInit { .. }
@@ -6595,6 +6670,8 @@ fn verify_ownership(
                 | Rvalue::ElementwiseBinary { .. }
                 | Rvalue::BufferAlloc { .. }
                 | Rvalue::ArrayFill { .. }
+                | Rvalue::VectorFilled { .. }
+                | Rvalue::MatrixFilled { .. }
                 | Rvalue::CatchBindAlias { .. }
                 | Rvalue::NullableNull { .. } => {
                     initialize_owner(function, types, &mut state, destination, fail)?;
@@ -7433,6 +7510,57 @@ fn validate_rvalue(
                 || *failure_trap != TrapKind::AllocationFailure
             {
                 return Err("MIR Array fill allocation contract invalid".into());
+            }
+        }
+        Rvalue::VectorFilled {
+            element_type,
+            orientation,
+            length,
+            initial,
+            size_trap,
+            failure_trap,
+        } => {
+            validate_operand(function, length, initialized)?;
+            validate_operand(function, initial, initialized)?;
+            if types.vector_element(destination) != Some(*element_type)
+                || types.vector_like_info(destination) != Some((*element_type, *orientation))
+                || operand_type(function, length)? != TypeId::USIZE
+                || operand_type(function, initial)? != *element_type
+                || !types.is_admitted_vector_element(*element_type)
+                || !types.is_copy(*element_type)
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("MIR Vector filled-init allocation contract invalid".into());
+            }
+        }
+        Rvalue::MatrixFilled {
+            element_type,
+            rows,
+            columns,
+            row_capacity,
+            column_capacity,
+            initial,
+            size_trap,
+            failure_trap,
+        } => {
+            for operand in [rows, columns, row_capacity, column_capacity, initial] {
+                validate_operand(function, operand, initialized)?;
+            }
+            if types.matrix_element(destination) != Some(*element_type)
+                || operand_type(function, rows)? != TypeId::USIZE
+                || operand_type(function, columns)? != TypeId::USIZE
+                || operand_type(function, row_capacity)? != TypeId::USIZE
+                || operand_type(function, column_capacity)? != TypeId::USIZE
+                || rows != row_capacity
+                || columns != column_capacity
+                || operand_type(function, initial)? != *element_type
+                || !types.is_admitted_matrix_element(*element_type)
+                || !types.is_copy(*element_type)
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("MIR Matrix filled-init allocation contract invalid".into());
             }
         }
         Rvalue::MatrixRows { source } | Rvalue::MatrixColumns { source } => {

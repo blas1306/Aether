@@ -405,6 +405,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     }
     for element in fill_elements {
         emit_fixed_fill_helper(&mut output, types, element);
+        emit_vector_fill_helper(&mut output, types, element);
     }
     for element in buffer_elements {
         emit_buffer_allocation_wrapper(&mut output, types, element);
@@ -1227,6 +1228,27 @@ fn emit_fixed_fill_helper(output: &mut String, types: &TypeArena, element: TypeI
     writeln!(output, "  br label %fill_header").unwrap();
     writeln!(output, "done:").unwrap();
     writeln!(output, "  ret {{ ptr, i64 }} %descriptor\n}}\n").unwrap();
+}
+
+/// Vector's empty owner is canonical and never crosses the allocator boundary.
+fn emit_vector_fill_helper(output: &mut String, types: &TypeArena, element: TypeId) {
+    let suffix = mangle_type(types, element);
+    let element_ty = llvm_type(types, element);
+    writeln!(
+        output,
+        r"define internal {{ ptr, i64 }} @aether_vector_fill_{suffix}(i64 %length, {element_ty} %initial) {{
+entry:
+  %empty = icmp eq i64 %length, 0
+  br i1 %empty, label %empty_result, label %nonempty
+empty_result:
+  ret {{ ptr, i64 }} zeroinitializer
+nonempty:
+  %descriptor = call {{ ptr, i64 }} @aether_fixed_fill_{suffix}(i64 %length, {element_ty} %initial)
+  ret {{ ptr, i64 }} %descriptor
+}}
+"
+    )
+    .unwrap();
 }
 
 fn emit_buffer_allocation_wrapper(output: &mut String, types: &TypeArena, element: TypeId) {
@@ -2208,6 +2230,46 @@ fn emit_function(
                         instruction.result.0,
                         mangle_type(types, *element_type),
                         llvm_operand(length),
+                        llvm_type(types, *element_type),
+                        llvm_operand(initial)
+                    )
+                    .unwrap();
+                }
+                SsaOp::VectorFilled {
+                    element_type,
+                    length,
+                    initial,
+                    ..
+                } => {
+                    writeln!(
+                        output,
+                        "  %v{} = call {{ ptr, i64 }} @aether_vector_fill_{}(i64 {}, {} {}) ; VectorFilled publishes after all stores",
+                        instruction.result.0,
+                        mangle_type(types, *element_type),
+                        llvm_operand(length),
+                        llvm_type(types, *element_type),
+                        llvm_operand(initial)
+                    )
+                    .unwrap();
+                }
+                SsaOp::MatrixFilled {
+                    element_type,
+                    rows,
+                    columns,
+                    row_capacity,
+                    column_capacity,
+                    initial,
+                    ..
+                } => {
+                    writeln!(
+                        output,
+                        "  %v{} = call {{ ptr, i64, i64, i64, i64 }} @aether_matrix_fill_{}(i64 {}, i64 {}, i64 {}, i64 {}, {} {}) ; MatrixFilled publishes after all logical stores",
+                        instruction.result.0,
+                        mangle_type(types, *element_type),
+                        llvm_operand(rows),
+                        llvm_operand(columns),
+                        llvm_operand(row_capacity),
+                        llvm_operand(column_capacity),
                         llvm_type(types, *element_type),
                         llvm_operand(initial)
                     )
@@ -4711,9 +4773,16 @@ shape:
         "%column_capacity",
         ["%d1", "%d2", "%d3", "%d4"],
     );
-    writeln!(output, r"  ret {{ ptr, i64, i64, i64, i64 }} %d4
-}}
-define internal ptr @aether_matrix_index_{suffix}({{ ptr, i64, i64, i64, i64 }} %matrix, i64 %row, i64 %column) {{
+    writeln!(
+        output,
+        r"  ret {{ ptr, i64, i64, i64, i64 }} %d4
+}}"
+    )
+    .unwrap();
+    if types.is_copy(element) {
+        emit_matrix_fill_helper(output, &suffix, &element_ty);
+    }
+    writeln!(output, r"define internal ptr @aether_matrix_index_{suffix}({{ ptr, i64, i64, i64, i64 }} %matrix, i64 %row, i64 %column) {{
 entry:
   %rows = extractvalue {{ ptr, i64, i64, i64, i64 }} %matrix, 1
   %columns = extractvalue {{ ptr, i64, i64, i64, i64 }} %matrix, 2
@@ -4742,6 +4811,35 @@ address:
   ret ptr %slot
 }}
 ").unwrap();
+}
+
+fn emit_matrix_fill_helper(output: &mut String, suffix: &str, element_ty: &str) {
+    writeln!(output, r"define internal {{ ptr, i64, i64, i64, i64 }} @aether_matrix_fill_{suffix}(i64 %rows, i64 %columns, i64 %row_capacity, i64 %column_capacity, {element_ty} %initial) {{
+entry:
+  %descriptor = call {{ ptr, i64, i64, i64, i64 }} @aether_matrix_new_{suffix}(i64 %rows, i64 %columns, i64 %row_capacity, i64 %column_capacity)
+  %data = extractvalue {{ ptr, i64, i64, i64, i64 }} %descriptor, 0
+  br label %row_header
+row_header:
+  %row = phi i64 [ 0, %entry ], [ %next_row, %row_done ]
+  %more_rows = icmp ult i64 %row, %rows
+  br i1 %more_rows, label %column_header, label %done
+column_header:
+  %column = phi i64 [ 0, %row_header ], [ %next_column, %store ]
+  %more_columns = icmp ult i64 %column, %columns
+  br i1 %more_columns, label %store, label %row_done
+store:
+  %row_offset = mul i64 %row, %column_capacity
+  %physical_index = add i64 %row_offset, %column
+  %slot = getelementptr inbounds {element_ty}, ptr %data, i64 %physical_index
+  store {element_ty} %initial, ptr %slot
+  %next_column = add i64 %column, 1
+  br label %column_header
+row_done:
+  %next_row = add i64 %row, 1
+  br label %row_header
+done:
+  ret {{ ptr, i64, i64, i64, i64 }} %descriptor
+}}").unwrap();
 }
 
 /// Both bounds dominate arithmetic. Closed recipes preserve valid backing offsets.

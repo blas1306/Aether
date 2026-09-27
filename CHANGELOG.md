@@ -11,6 +11,10 @@ es la spec v1 junto con el perfil native normativo.
 
 ## Unreleased
 
+- Added deterministic source-library publication with safe dry runs,
+  environment-only publish credentials, immutable owner-controlled versions,
+  and a persistent reference registry service implementing read, publish,
+  administrative official metadata, and yank semantics.
 - Promoted the Rust/compiler-next CLI to `aether`; the Python wheel now
   installs its frozen historical interface as `aether-legacy`. Compiler
   selection is by executable name, so `aether --compiler ...` is an error.

@@ -170,6 +170,8 @@ aether update .
 aether add linearAlgebra .
 aether add localLibrary . --path ../localLibrary
 aether remove linearAlgebra .
+aether publish myLibrary --dry-run
+AETHER_REGISTRY_TOKEN=... aether publish myLibrary --registry https://registry.example
 ```
 
 Los comandos de proyecto aceptan `--registry <https-url>`,
@@ -177,6 +179,11 @@ Los comandos de proyecto aceptan `--registry <https-url>`,
 `AETHER_REGISTRY_URL`, `AETHER_CACHE_DIR` y `AETHER_OFFLINE`; si no se indica
 un endpoint no se inventa todavía un dominio oficial. `sync` conserva el lock
 compatible, mientras que `update` vuelve a resolver sin modificar constraints.
+`publish` sólo admite libraries source V1; obtiene su credencial desde
+`AETHER_REGISTRY_TOKEN` y `--dry-run` no autentica ni muta red/lock. El servicio
+reference persistente se construye como `aether-registry`; su administración y
+frontera TLS están documentadas en
+[PACKAGE-PUBLISH-V1](docs/architecture/PACKAGE_PUBLISH_V1_REPORT.md).
 
 Pasar argumentos al programa (el shell ya resuelve quoting):
 

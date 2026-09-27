@@ -1,0 +1,37 @@
+package main;
+
+import helper;
+
+struct Owners { Matrix<int> matrix; Vector<int,Row> row; }
+
+Owners make(usize rows,usize columns) {
+    return Owners(helper.matrix<int>(rows,columns,7),helper.row<int>(columns,9));
+}
+
+int main() {
+    Owners owners=make(2,3);
+    if(rows(owners.matrix)!=2){return 1;}
+    if(columns(owners.matrix)!=3){return 2;}
+    if(owners.matrix[2,3]!=7){return 3;}
+    if(owners.row[3]!=9){return 4;}
+    MatrixView<int> view=matrix_view(owners.matrix);
+    if(view[1,2]!=7){return 5;}
+    Vector<int,Column> column=helper.column<int>(2,11);
+    if(column[2]!=11){return 6;}
+    Matrix<helper.Pair> pairs=helper.matrix<helper.Pair>(2,1,helper.Pair(4,5));
+    if(pairs[2,1].x!=4){return 7;}
+    Matrix<int> z00=helper.matrix<int>(0,0,1);
+    Matrix<int> zm0=helper.matrix<int>(3,0,1);
+    Matrix<int> z0n=helper.matrix<int>(0,4,1);
+    if(rows(z00)!=0||columns(z00)!=0){return 8;}
+    if(rows(zm0)!=3||columns(zm0)!=0){return 9;}
+    if(rows(z0n)!=0||columns(z0n)!=4){return 10;}
+    Vector<int,Row> empty=helper.row<int>(0,1);
+    if(dimension(empty)!=0){return 11;}
+    Matrix<float32> f32=helper.matrix<float32>(1,2,1.5);
+    Matrix<float64> f64=helper.matrix<float64>(2,1,2.5);
+    if(f32[1,2]!=1.5){return 12;}
+    if(f64[2,1]!=2.5){return 13;}
+    return 0;
+}
+

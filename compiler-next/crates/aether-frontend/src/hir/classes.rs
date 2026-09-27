@@ -1213,7 +1213,16 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
         }
         | E::ArrayFill {
             length, initial, ..
+        }
+        | E::VectorFilled {
+            length, initial, ..
         } => vec![length, initial],
+        E::MatrixFilled {
+            rows,
+            columns,
+            initial,
+            ..
+        } => vec![rows, columns, initial],
         E::VectorTranspose { operand, .. }
         | E::NullableInject {
             payload: operand, ..

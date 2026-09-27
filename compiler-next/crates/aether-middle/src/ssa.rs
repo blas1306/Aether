@@ -244,6 +244,24 @@ pub enum SsaOp {
         size_trap: TrapKind,
         failure_trap: TrapKind,
     },
+    VectorFilled {
+        element_type: TypeId,
+        orientation: aether_frontend::Orientation,
+        length: SsaOperand,
+        initial: SsaOperand,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
+    MatrixFilled {
+        element_type: TypeId,
+        rows: SsaOperand,
+        columns: SsaOperand,
+        row_capacity: SsaOperand,
+        column_capacity: SsaOperand,
+        initial: SsaOperand,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
     ArrayInit {
         element_type: TypeId,
         elements: Vec<SsaOperand>,
@@ -1186,6 +1204,40 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             size_trap: *size_trap,
             failure_trap: *failure_trap,
         },
+        Rvalue::VectorFilled {
+            element_type,
+            orientation,
+            length,
+            initial,
+            size_trap,
+            failure_trap,
+        } => SsaOp::VectorFilled {
+            element_type: *element_type,
+            orientation: *orientation,
+            length: rename_operand(length, stacks),
+            initial: rename_operand(initial, stacks),
+            size_trap: *size_trap,
+            failure_trap: *failure_trap,
+        },
+        Rvalue::MatrixFilled {
+            element_type,
+            rows,
+            columns,
+            row_capacity,
+            column_capacity,
+            initial,
+            size_trap,
+            failure_trap,
+        } => SsaOp::MatrixFilled {
+            element_type: *element_type,
+            rows: rename_operand(rows, stacks),
+            columns: rename_operand(columns, stacks),
+            row_capacity: rename_operand(row_capacity, stacks),
+            column_capacity: rename_operand(column_capacity, stacks),
+            initial: rename_operand(initial, stacks),
+            size_trap: *size_trap,
+            failure_trap: *failure_trap,
+        },
         Rvalue::ArrayInit {
             element_type,
             elements,
@@ -1890,9 +1942,23 @@ pub(crate) fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<Local
         }
         | Rvalue::ArrayFill {
             length, initial, ..
+        }
+        | Rvalue::VectorFilled {
+            length, initial, ..
         } => operand_local(length)
             .into_iter()
             .chain(operand_local(initial))
+            .collect(),
+        Rvalue::MatrixFilled {
+            rows,
+            columns,
+            row_capacity,
+            column_capacity,
+            initial,
+            ..
+        } => [rows, columns, row_capacity, column_capacity, initial]
+            .into_iter()
+            .filter_map(operand_local)
             .collect(),
         Rvalue::MatrixInit { elements, .. }
         | Rvalue::VectorInit { elements, .. }
@@ -4350,6 +4416,52 @@ fn verify_op(
                 return Err("SSA Array fill allocation contract invalid".into());
             }
         }
+        SsaOp::VectorFilled {
+            element_type,
+            orientation,
+            length,
+            initial,
+            size_trap,
+            failure_trap,
+        } => {
+            if types.vector_element(result) != Some(*element_type)
+                || types.vector_like_info(result) != Some((*element_type, *orientation))
+                || operand_ty(length)? != TypeId::USIZE
+                || operand_ty(initial)? != *element_type
+                || !types.is_admitted_vector_element(*element_type)
+                || !types.is_copy(*element_type)
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("SSA Vector filled-init allocation contract invalid".into());
+            }
+        }
+        SsaOp::MatrixFilled {
+            element_type,
+            rows,
+            columns,
+            row_capacity,
+            column_capacity,
+            initial,
+            size_trap,
+            failure_trap,
+        } => {
+            if types.matrix_element(result) != Some(*element_type)
+                || operand_ty(rows)? != TypeId::USIZE
+                || operand_ty(columns)? != TypeId::USIZE
+                || operand_ty(row_capacity)? != TypeId::USIZE
+                || operand_ty(column_capacity)? != TypeId::USIZE
+                || rows != row_capacity
+                || columns != column_capacity
+                || operand_ty(initial)? != *element_type
+                || !types.is_admitted_matrix_element(*element_type)
+                || !types.is_copy(*element_type)
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("SSA Matrix filled-init allocation contract invalid".into());
+            }
+        }
         SsaOp::MatrixRows { source } | SsaOp::MatrixColumns { source } => {
             let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
             if result != TypeId::USIZE || types.matrix_like_element(source_ty).is_none() {
@@ -5106,7 +5218,18 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         }
         | SsaOp::ArrayFill {
             length, initial, ..
+        }
+        | SsaOp::VectorFilled {
+            length, initial, ..
         } => vec![length, initial],
+        SsaOp::MatrixFilled {
+            rows,
+            columns,
+            row_capacity,
+            column_capacity,
+            initial,
+            ..
+        } => vec![rows, columns, row_capacity, column_capacity, initial],
         SsaOp::MatrixInit { elements, .. }
         | SsaOp::VectorInit { elements, .. }
         | SsaOp::ArrayInit { elements, .. }
