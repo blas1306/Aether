@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use aether_package::{
     DependencyPath, DependencySpec, PackageInstanceKey, PackageName, RegistryPackageMetadata,
-    RegistryProvider, RegistryVersion, resolve, sync, update,
+    RegistryProvider, RegistryVersion, add, add_path, remove, resolve, sync, update,
 };
 use semver::Version;
 
@@ -508,4 +508,95 @@ fn equal_precedence_build_metadata_uses_utf8_spelling_tiebreak() {
         ),
         ["1.0.0+zzz"]
     );
+}
+
+#[test]
+fn add_preserves_manifest_layout_and_writes_short_zero_constraints() {
+    let directory = Directory::new("add-command");
+    directory.write(
+        "app/aether.toml",
+        "# keep this comment\n[package]\nname = 'app' # identity\nversion = '0.1.0'\n\n[application]\nentry = 'src/main.ae'\n",
+    );
+    directory.write("app/src/main.ae", "int main(){return 0;}");
+    let zero = registry_package(&directory, "registry/zero", "zero", "0.3.7", &[]);
+    let tiny = registry_package(&directory, "registry/tiny", "tiny", "0.0.5", &[]);
+    let mut registry = MemoryRegistry::default();
+    registry.insert("zero", "0.3.7", "sha256:zero", zero, BTreeMap::new());
+    registry.insert("tiny", "0.0.5", "sha256:tiny", tiny, BTreeMap::new());
+
+    add(&directory.0.join("app"), "zero", &registry).unwrap();
+    add(&directory.0.join("app"), "tiny", &registry).unwrap();
+    let manifest = fs::read_to_string(directory.0.join("app/aether.toml")).unwrap();
+    assert!(manifest.contains("# keep this comment"));
+    assert!(manifest.contains("name = 'app' # identity"));
+    assert!(manifest.contains("zero = \"0.3\""));
+    assert!(manifest.contains("tiny = \"0.0.5\""));
+    assert!(directory.0.join("app/aether.lock").is_file());
+    assert!(
+        add(&directory.0.join("app"), "zero", &registry)
+            .unwrap_err()
+            .contains("already a direct dependency")
+    );
+}
+
+#[test]
+fn remove_prunes_graph_and_failed_mutations_preserve_both_files() {
+    let directory = Directory::new("remove-command");
+    directory.write(
+        "app/aether.toml",
+        "[package]\nname='app'\nversion='0.1.0'\n[dependencies]\ndirect={path='../direct'}\nkeep={path='../keep'}\n",
+    );
+    directory.write("app/src/main.ae", "int main(){return 0;}");
+    directory.write(
+        "direct/aether.toml",
+        "[package]\nname='direct'\nversion='1.0.0'\n[dependencies]\ntransitive={path='../transitive'}\n",
+    );
+    directory.write("direct/src/lib.ae", "package direct;");
+    directory.write(
+        "transitive/aether.toml",
+        &manifest("transitive", "1.0.0", &[]),
+    );
+    directory.write("transitive/src/lib.ae", "package transitive;");
+    directory.write("keep/aether.toml", &manifest("keep", "1.0.0", &[]));
+    directory.write("keep/src/lib.ae", "package keep;");
+    sync(&directory.0.join("app"), None).unwrap();
+
+    let before_manifest = fs::read(directory.0.join("app/aether.toml")).unwrap();
+    let before_lock = fs::read(directory.0.join("app/aether.lock")).unwrap();
+    assert!(
+        remove(&directory.0.join("app"), "transitive", None)
+            .unwrap_err()
+            .contains("not a direct dependency")
+    );
+    assert_eq!(
+        fs::read(directory.0.join("app/aether.toml")).unwrap(),
+        before_manifest
+    );
+    assert_eq!(
+        fs::read(directory.0.join("app/aether.lock")).unwrap(),
+        before_lock
+    );
+
+    remove(&directory.0.join("app"), "direct", None).unwrap();
+    let lock = fs::read_to_string(directory.0.join("app/aether.lock")).unwrap();
+    assert!(!lock.contains("direct@1.0.0"));
+    assert!(!lock.contains("transitive@1.0.0"));
+    assert!(lock.contains("keep@1.0.0"));
+}
+
+#[test]
+fn add_path_validates_name_and_publishes_exact_locator() {
+    let directory = Directory::new("add-path-command");
+    directory.write("app/aether.toml", &manifest("app", "0.1.0", &[]));
+    directory.write("app/src/main.ae", "int main(){return 0;}");
+    directory.write("local/aether.toml", &manifest("local", "1.0.0", &[]));
+    directory.write("local/src/lib.ae", "package local;");
+    add_path(
+        &directory.0.join("app"),
+        "local",
+        PathBuf::from("../local").as_path(),
+    )
+    .unwrap();
+    let manifest = fs::read_to_string(directory.0.join("app/aether.toml")).unwrap();
+    assert!(manifest.contains("local = { path = \"../local\" }"));
 }

@@ -162,6 +162,22 @@ Ejecutar un archivo con la CLI oficial Rust/compiler-next:
 aether run examples/llvm/gcd_iterative.ae
 ```
 
+La gestión de packages usa siempre un project root explícito:
+
+```bash
+aether sync .
+aether update .
+aether add linearAlgebra .
+aether add localLibrary . --path ../localLibrary
+aether remove linearAlgebra .
+```
+
+Los comandos de proyecto aceptan `--registry <https-url>`,
+`--cache-dir <path>` y `--offline`. Los flags tienen precedencia sobre
+`AETHER_REGISTRY_URL`, `AETHER_CACHE_DIR` y `AETHER_OFFLINE`; si no se indica
+un endpoint no se inventa todavía un dominio oficial. `sync` conserva el lock
+compatible, mientras que `update` vuelve a resolver sin modificar constraints.
+
 Pasar argumentos al programa (el shell ya resuelve quoting):
 
 ```bash

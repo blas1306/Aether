@@ -167,9 +167,9 @@ impl HttpsRegistryClient {
             .agent
             .get(url)
             .call()
-            .map_err(|error| format!("registry request `{url}` failed: {error}"))?;
+            .map_err(|_| "registry request failed".to_owned())?;
         serde_json::from_reader(response.into_body().into_reader())
-            .map_err(|error| format!("registry response `{url}` is invalid: {error}"))
+            .map_err(|error| format!("registry response is invalid: {error}"))
     }
 }
 
@@ -219,7 +219,7 @@ impl RegistryClient for HttpsRegistryClient {
             .agent
             .get(&url)
             .call()
-            .map_err(|error| format!("registry archive request `{url}` failed: {error}"))?;
+            .map_err(|_| "registry archive request failed".to_owned())?;
         Ok(Box::new(response.into_body().into_reader()))
     }
 }

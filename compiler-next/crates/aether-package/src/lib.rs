@@ -11,6 +11,7 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
+use fs2::FileExt;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
@@ -23,6 +24,16 @@ pub use registry::{
 pub const OFFICIAL_REGISTRY: &str = "official";
 /// Lockfile name at a project root.
 pub const LOCK_FILE: &str = "aether.lock";
+const MANIFEST_FILE: &str = "aether.toml";
+const TRANSACTION_FILE: &str = ".aether-package-transaction";
+const MANIFEST_BACKUP: &str = ".aether.toml.aether-backup";
+const LOCK_BACKUP: &str = ".aether.lock.aether-backup";
+const MANIFEST_TEMP: &str = ".aether.toml.aether-new";
+const LOCK_TEMP: &str = ".aether.lock.aether-new";
+const TRANSACTION_LOCK: &str = ".aether-package.lock";
+
+#[cfg(test)]
+static TRANSACTION_FAULT_PHASE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
 
 /// Stable identity of one resolved package instance.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -458,6 +469,8 @@ pub fn resolve(
 /// Reuses and validates an existing lock, or creates one atomically when absent.
 pub fn sync(root: &Path, registry: Option<&dyn RegistryProvider>) -> Result<ResolvedGraph, String> {
     let root = canonical_directory(root, "project root")?;
+    let _transaction_lock = lock_project(&root)?;
+    recover_transaction(&root)?;
     let lock_path = root.join(LOCK_FILE);
     if lock_path.exists() {
         let lock = read_lock(&lock_path)?;
@@ -476,9 +489,219 @@ pub fn update(
     registry: Option<&dyn RegistryProvider>,
 ) -> Result<ResolvedGraph, String> {
     let root = canonical_directory(root, "project root")?;
+    let _transaction_lock = lock_project(&root)?;
+    recover_transaction(&root)?;
     let graph = resolve(&root, registry)?;
     let text = serialize_lock(&root, &graph)?;
     write_atomic(&root.join(LOCK_FILE), text.as_bytes())?;
+    Ok(graph)
+}
+
+/// Adds a direct official-registry dependency and publishes manifest and lock together.
+pub fn add(
+    root: &Path,
+    name: &str,
+    registry: &dyn RegistryProvider,
+) -> Result<ResolvedGraph, String> {
+    let root = canonical_directory(root, "project root")?;
+    let _transaction_lock = lock_project(&root)?;
+    recover_transaction(&root)?;
+    let name = PackageName::new(name.to_owned())?;
+    let manifest_path = direct_manifest(&root)?;
+    let old = fs::read_to_string(&manifest_path).map_err(|error| {
+        format!(
+            "cannot read manifest `{}`: {error}",
+            manifest_path.display()
+        )
+    })?;
+    let parsed = parse_manifest_text(&manifest_path, &old)?;
+    if parsed.dependencies.contains_key(name.as_str()) {
+        return Err(format!(
+            "package `{}` is already a direct dependency",
+            name.as_str()
+        ));
+    }
+    let version = latest_registry_release(registry, &name)?;
+    let requirement = short_compatible_requirement(&version);
+    let candidate = edit_dependency(
+        &manifest_path,
+        &old,
+        name.as_str(),
+        Some(DependencySpec::Registry(requirement)),
+    )?;
+    resolve_and_publish(&root, &old, &candidate, Some(registry))
+}
+
+/// Adds a direct local path dependency after validating the target's declared name.
+pub fn add_path(root: &Path, name: &str, path: &Path) -> Result<ResolvedGraph, String> {
+    let root = canonical_directory(root, "project root")?;
+    let _transaction_lock = lock_project(&root)?;
+    recover_transaction(&root)?;
+    let name = PackageName::new(name.to_owned())?;
+    if path.as_os_str().is_empty() {
+        return Err("path dependency locator cannot be empty".to_owned());
+    }
+    let manifest_path = direct_manifest(&root)?;
+    let old = fs::read_to_string(&manifest_path).map_err(|error| {
+        format!(
+            "cannot read manifest `{}`: {error}",
+            manifest_path.display()
+        )
+    })?;
+    let parsed = parse_manifest_text(&manifest_path, &old)?;
+    if parsed.dependencies.contains_key(name.as_str()) {
+        return Err(format!(
+            "package `{}` is already a direct dependency",
+            name.as_str()
+        ));
+    }
+    let candidate = edit_dependency(
+        &manifest_path,
+        &old,
+        name.as_str(),
+        Some(DependencySpec::Path(DependencyPath {
+            path: path.to_path_buf(),
+        })),
+    )?;
+    resolve_and_publish(&root, &old, &candidate, None)
+}
+
+/// Removes one direct dependency and prunes every now-unreachable lock node.
+pub fn remove(
+    root: &Path,
+    name: &str,
+    registry: Option<&dyn RegistryProvider>,
+) -> Result<ResolvedGraph, String> {
+    let root = canonical_directory(root, "project root")?;
+    let _transaction_lock = lock_project(&root)?;
+    recover_transaction(&root)?;
+    let name = PackageName::new(name.to_owned())?;
+    let manifest_path = direct_manifest(&root)?;
+    let old = fs::read_to_string(&manifest_path).map_err(|error| {
+        format!(
+            "cannot read manifest `{}`: {error}",
+            manifest_path.display()
+        )
+    })?;
+    let parsed = parse_manifest_text(&manifest_path, &old)?;
+    if !parsed.dependencies.contains_key(name.as_str()) {
+        return Err(format!(
+            "package `{}` is not a direct dependency",
+            name.as_str()
+        ));
+    }
+    let candidate = edit_dependency(&manifest_path, &old, name.as_str(), None)?;
+    resolve_and_publish(&root, &old, &candidate, registry)
+}
+
+fn latest_registry_release(
+    registry: &dyn RegistryProvider,
+    name: &PackageName,
+) -> Result<Version, String> {
+    let versions = registry.versions(name)?;
+    if versions.is_empty() {
+        return Err(format!(
+            "package `{}` was not found in the registry",
+            name.as_str()
+        ));
+    }
+    let mut releases = Vec::new();
+    for candidate in &versions {
+        let version = Version::parse(&candidate.version).map_err(|error| {
+            format!(
+                "registry returned invalid version `{}` for `{}`: {error}",
+                candidate.version,
+                name.as_str()
+            )
+        })?;
+        if !candidate.yanked && version.pre.is_empty() {
+            releases.push((version, candidate.version.clone()));
+        }
+    }
+    releases.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+    releases.pop().map(|(version, _)| version).ok_or_else(|| {
+        if versions.iter().all(|candidate| candidate.yanked) {
+            format!("package `{}` has only yanked candidates", name.as_str())
+        } else {
+            format!("package `{}` has no compatible release", name.as_str())
+        }
+    })
+}
+
+fn short_compatible_requirement(version: &Version) -> String {
+    if version.major > 0 {
+        format!("{}.{}", version.major, version.minor)
+    } else if version.minor > 0 {
+        format!("0.{}", version.minor)
+    } else {
+        format!("0.0.{}", version.patch)
+    }
+}
+
+fn parse_manifest_text(path: &Path, text: &str) -> Result<Manifest, String> {
+    let manifest: Manifest = toml::from_str(text)
+        .map_err(|error| format!("invalid manifest `{}`: {error}", path.display()))?;
+    validate_manifest_package(&manifest)?;
+    Ok(manifest)
+}
+
+fn edit_dependency(
+    path: &Path,
+    source: &str,
+    name: &str,
+    replacement: Option<DependencySpec>,
+) -> Result<String, String> {
+    use toml_edit::{Document, InlineTable, Item, Value, value};
+
+    let mut document = source
+        .parse::<Document>()
+        .map_err(|error| format!("cannot edit manifest `{}` as TOML: {error}", path.display()))?;
+    if !document.as_table().contains_key("dependencies") {
+        document["dependencies"] = Item::Table(toml_edit::Table::new());
+    }
+    let dependencies = document["dependencies"]
+        .as_table_mut()
+        .ok_or_else(|| format!("manifest `{}` dependencies must be a table", path.display()))?;
+    match replacement {
+        Some(DependencySpec::Registry(requirement)) => {
+            dependencies.insert(name, value(requirement));
+        }
+        Some(DependencySpec::Path(locator)) => {
+            let locator = locator.path.to_str().ok_or_else(|| {
+                format!(
+                    "dependency path `{}` is not valid UTF-8",
+                    locator.path.display()
+                )
+            })?;
+            let mut inline = InlineTable::new();
+            inline.insert("path", Value::from(locator));
+            dependencies.insert(name, Item::Value(Value::InlineTable(inline)));
+        }
+        None => {
+            dependencies.remove(name);
+        }
+    }
+    let candidate = document.to_string();
+    parse_manifest_text(path, &candidate)?;
+    Ok(candidate)
+}
+
+fn resolve_and_publish(
+    root: &Path,
+    old_manifest: &str,
+    candidate_manifest: &str,
+    registry: Option<&dyn RegistryProvider>,
+) -> Result<ResolvedGraph, String> {
+    let manifest_path = root.join(MANIFEST_FILE);
+    let parsed = parse_manifest_text(&manifest_path, candidate_manifest)?;
+    let graph = Resolver::new(registry).resolve_root_manifest(root, &parsed)?;
+    let lock = serialize_lock(root, &graph)?;
+    publish_manifest_and_lock(
+        root,
+        old_manifest.as_bytes(),
+        candidate_manifest.as_bytes(),
+        lock.as_bytes(),
+    )?;
     Ok(graph)
 }
 
@@ -503,6 +726,43 @@ impl<'a> Resolver<'a> {
         let root = self.resolve_path(root, None, true)?;
         Ok(ResolvedGraph {
             root,
+            packages: self.packages,
+        })
+    }
+
+    fn resolve_root_manifest(
+        mut self,
+        root: &Path,
+        manifest: &Manifest,
+    ) -> Result<ResolvedGraph, String> {
+        let root_path = canonical_directory(root, "project root")?;
+        let manifest_path = direct_manifest(&root_path)?;
+        let package = validate_manifest_package(manifest)?;
+        let instance = PackageInstanceKey::Root {
+            manifest: path_utf8(&manifest_path)?.to_owned(),
+            name: package.name.as_str().to_owned(),
+            version: package.version.as_str().to_owned(),
+        };
+        self.by_manifest
+            .insert(manifest_path.clone(), instance.clone());
+        self.push(&instance, package.name.as_str())?;
+        let dependencies = self.resolve_dependencies(&root_path, &manifest.dependencies, false)?;
+        self.stack.pop();
+        let (source, kind) = select_source(&root_path, manifest.application.as_ref(), true)?;
+        self.packages.insert(
+            instance.clone(),
+            ResolvedPackage {
+                instance: instance.clone(),
+                root: root_path,
+                manifest: manifest_path,
+                package,
+                source,
+                kind,
+                dependencies,
+            },
+        );
+        Ok(ResolvedGraph {
+            root: instance,
             packages: self.packages,
         })
     }
@@ -1329,6 +1589,194 @@ fn validate_locked(
     Ok(graph)
 }
 
+fn publish_manifest_and_lock(
+    root: &Path,
+    old_manifest: &[u8],
+    new_manifest: &[u8],
+    new_lock: &[u8],
+) -> Result<(), String> {
+    recover_transaction(root)?;
+    let manifest = root.join(MANIFEST_FILE);
+    let lock = root.join(LOCK_FILE);
+    let current = fs::read(&manifest)
+        .map_err(|error| format!("cannot reread manifest before publication: {error}"))?;
+    if current != old_manifest {
+        return Err("manifest changed concurrently; package mutation was not published".to_owned());
+    }
+    let lock_existed = lock.is_file();
+    let manifest_backup = root.join(MANIFEST_BACKUP);
+    let lock_backup = root.join(LOCK_BACKUP);
+    let manifest_temp = root.join(MANIFEST_TEMP);
+    let lock_temp = root.join(LOCK_TEMP);
+    let marker = root.join(TRANSACTION_FILE);
+
+    let prepare = (|| {
+        write_exclusive_synced(&manifest_backup, old_manifest)?;
+        if lock_existed {
+            let old_lock = fs::read(&lock)
+                .map_err(|error| format!("cannot read existing lockfile: {error}"))?;
+            write_exclusive_synced(&lock_backup, &old_lock)?;
+        }
+        write_exclusive_synced(&manifest_temp, new_manifest)?;
+        write_exclusive_synced(&lock_temp, new_lock)?;
+        sync_directory(root)?;
+        transaction_checkpoint(1)?;
+        write_exclusive_synced(
+            &marker,
+            if lock_existed {
+                b"version=1\nlock-existed=1\n"
+            } else {
+                b"version=1\nlock-existed=0\n"
+            },
+        )?;
+        sync_directory(root)
+    })();
+    if let Err(error) = prepare {
+        if !marker.exists() {
+            cleanup_transaction_files(root);
+        }
+        return Err(format!("cannot prepare manifest/lock transaction: {error}"));
+    }
+
+    let publish: Result<(), String> = (|| {
+        transaction_checkpoint(2)?;
+        fs::rename(&manifest_temp, &manifest)
+            .map_err(|error| format!("cannot replace manifest: {error}"))?;
+        sync_directory(root)?;
+        transaction_checkpoint(3)?;
+        fs::rename(&lock_temp, &lock)
+            .map_err(|error| format!("cannot replace lockfile: {error}"))?;
+        sync_directory(root)?;
+        transaction_checkpoint(4)?;
+        fs::remove_file(&marker)
+            .map_err(|error| format!("cannot commit transaction marker: {error}"))?;
+        sync_directory(root)?;
+        let _ = fs::remove_file(&manifest_backup);
+        let _ = fs::remove_file(&lock_backup);
+        Ok(())
+    })();
+    if let Err(error) = publish {
+        return match recover_transaction(root) {
+            Ok(()) => Err(format!(
+                "manifest/lock publication failed and the previous state was recovered: {error}"
+            )),
+            Err(recovery) => Err(format!(
+                "manifest/lock publication failed ({error}); transaction recovery required and failed: {recovery}"
+            )),
+        };
+    }
+    Ok(())
+}
+
+#[cfg(not(test))]
+#[allow(clippy::unnecessary_wraps)]
+fn transaction_checkpoint(_phase: u8) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(test)]
+fn transaction_checkpoint(phase: u8) -> Result<(), String> {
+    use std::sync::atomic::Ordering;
+
+    if TRANSACTION_FAULT_PHASE.load(Ordering::SeqCst) == phase {
+        Err(format!("injected transaction failure at phase {phase}"))
+    } else {
+        Ok(())
+    }
+}
+
+fn lock_project(root: &Path) -> Result<fs::File, String> {
+    let path = root.join(TRANSACTION_LOCK);
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)
+        .map_err(|error| {
+            format!(
+                "cannot open package operation lock `{}`: {error}",
+                path.display()
+            )
+        })?;
+    file.lock_exclusive().map_err(|error| {
+        format!(
+            "cannot lock package operation `{}`: {error}",
+            path.display()
+        )
+    })?;
+    Ok(file)
+}
+
+fn recover_transaction(root: &Path) -> Result<(), String> {
+    let marker = root.join(TRANSACTION_FILE);
+    if !marker.exists() {
+        cleanup_transaction_files(root);
+        return Ok(());
+    }
+    let marker_text = fs::read_to_string(&marker)
+        .map_err(|error| format!("cannot read package transaction marker: {error}"))?;
+    let lock_existed = match marker_text.as_str() {
+        "version=1\nlock-existed=1\n" => true,
+        "version=1\nlock-existed=0\n" => false,
+        _ => return Err("package transaction marker is invalid; recovery required".to_owned()),
+    };
+    let manifest = root.join(MANIFEST_FILE);
+    let manifest_backup = root.join(MANIFEST_BACKUP);
+    if manifest_backup.exists() {
+        fs::rename(&manifest_backup, &manifest)
+            .map_err(|error| format!("cannot restore manifest during recovery: {error}"))?;
+        sync_directory(root)?;
+    }
+    let lock = root.join(LOCK_FILE);
+    let lock_backup = root.join(LOCK_BACKUP);
+    if lock_existed {
+        if lock_backup.exists() {
+            fs::rename(&lock_backup, &lock)
+                .map_err(|error| format!("cannot restore lockfile during recovery: {error}"))?;
+            sync_directory(root)?;
+        }
+    } else if lock.exists() {
+        fs::remove_file(&lock)
+            .map_err(|error| format!("cannot remove uncommitted lockfile: {error}"))?;
+        sync_directory(root)?;
+    }
+    fs::remove_file(&marker)
+        .map_err(|error| format!("cannot finish package transaction recovery: {error}"))?;
+    sync_directory(root)?;
+    cleanup_transaction_files(root);
+    Ok(())
+}
+
+fn cleanup_transaction_files(root: &Path) {
+    for name in [MANIFEST_BACKUP, LOCK_BACKUP, MANIFEST_TEMP, LOCK_TEMP] {
+        let _ = fs::remove_file(root.join(name));
+    }
+}
+
+fn write_exclusive_synced(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|error| format!("cannot create `{}`: {error}", path.display()))?;
+    file.write_all(bytes)
+        .map_err(|error| format!("cannot write `{}`: {error}", path.display()))?;
+    file.sync_all()
+        .map_err(|error| format!("cannot sync `{}`: {error}", path.display()))
+}
+
+fn sync_directory(path: &Path) -> Result<(), String> {
+    fs::File::open(path)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| {
+            format!(
+                "cannot sync project directory `{}`: {error}",
+                path.display()
+            )
+        })
+}
+
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = path
         .parent()
@@ -1371,6 +1819,7 @@ impl fmt::Display for VersionRequirement {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     #[test]
     fn requirement_grammar_and_caret_semantics() {
@@ -1416,6 +1865,54 @@ mod tests {
             "0.0.18446744073709551615",
         ] {
             assert!(VersionRequirement::parse(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
+    fn interrupted_two_file_publication_recovers_the_old_pair() {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        let root = std::env::temp_dir().join(format!(
+            "aether-package-recovery-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join(MANIFEST_FILE), b"new manifest").unwrap();
+        fs::write(root.join(LOCK_FILE), b"old lock").unwrap();
+        fs::write(root.join(MANIFEST_BACKUP), b"old manifest").unwrap();
+        fs::write(root.join(LOCK_BACKUP), b"old lock").unwrap();
+        fs::write(root.join(LOCK_TEMP), b"new lock").unwrap();
+        fs::write(root.join(TRANSACTION_FILE), b"version=1\nlock-existed=1\n").unwrap();
+
+        recover_transaction(&root).unwrap();
+        assert_eq!(fs::read(root.join(MANIFEST_FILE)).unwrap(), b"old manifest");
+        assert_eq!(fs::read(root.join(LOCK_FILE)).unwrap(), b"old lock");
+        assert!(!root.join(TRANSACTION_FILE).exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn every_transaction_publication_phase_preserves_the_old_pair_on_failure() {
+        static NEXT: AtomicU64 = AtomicU64::new(0);
+        for phase in 1..=4 {
+            let root = std::env::temp_dir().join(format!(
+                "aether-package-fault-{phase}-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir(&root).unwrap();
+            fs::write(root.join(MANIFEST_FILE), b"old manifest").unwrap();
+            fs::write(root.join(LOCK_FILE), b"old lock").unwrap();
+            TRANSACTION_FAULT_PHASE.store(phase, Ordering::SeqCst);
+            let error =
+                publish_manifest_and_lock(&root, b"old manifest", b"new manifest", b"new lock")
+                    .unwrap_err();
+            TRANSACTION_FAULT_PHASE.store(0, Ordering::SeqCst);
+            assert!(error.contains("injected transaction failure"), "{error}");
+            assert_eq!(fs::read(root.join(MANIFEST_FILE)).unwrap(), b"old manifest");
+            assert_eq!(fs::read(root.join(LOCK_FILE)).unwrap(), b"old lock");
+            assert!(!root.join(TRANSACTION_FILE).exists());
+            fs::remove_dir_all(root).unwrap();
         }
     }
 }

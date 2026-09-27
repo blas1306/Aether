@@ -137,9 +137,9 @@ compila un package realmente extraído desde el CAS en O0 y O2.
 
 ## Deuda restante
 
-Quedan fuera deliberadamente `add`, `remove`, `publish`, auth/tokens, yank
-remoto, installs/environments, signing, transparency, native dependencies,
-build scripts, binaries, private registries y git dependencies. También quedan
-para `PACKAGE-COMMANDS-V1` flags CLI públicos finales para endpoint/cache/offline
-y una UX explícita de `sync/update`; este vertical expone la API y habilita las
-operaciones de proyecto sin crear comandos parciales.
+Quedan fuera deliberadamente `publish`, auth/tokens, yank remoto,
+installs/environments, signing, transparency, native dependencies, build
+scripts, binaries, private registries y git dependencies. Los flags públicos y
+la UX de `sync/update/add/remove` fueron cerrados por
+[PACKAGE-COMMANDS-V1](PACKAGE_COMMANDS_V1_REPORT.md); este vertical conserva la
+autoridad sobre transporte, cache y materialización.

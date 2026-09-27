@@ -594,3 +594,40 @@ fn init_application_library_and_no_overwrite() {
     );
     assert!(!directory.0.join("bad-name").exists());
 }
+
+#[test]
+fn package_commands_use_explicit_project_and_path_add_is_transactional() {
+    let directory = Directory::new("package-commands");
+    directory.write(
+        "app/aether.toml",
+        "# preserved\n[package]\nname='app'\nversion='0.1.0'\n",
+    );
+    directory.write("app/src/main.ae", "int main(){return 0;}");
+    directory.write(
+        "local/aether.toml",
+        "[package]\nname='local'\nversion='1.0.0'\n",
+    );
+    directory.write("local/src/lib.ae", "package local;");
+
+    assert!(cli(&directory, &["sync", "app"]).status.success());
+    assert!(cli(&directory, &["update", "app"]).status.success());
+    assert!(
+        cli(&directory, &["add", "local", "app", "--path", "../local"])
+            .status
+            .success()
+    );
+    let manifest = fs::read_to_string(directory.0.join("app/aether.toml")).unwrap();
+    assert!(manifest.contains("# preserved"));
+    assert!(manifest.contains("local = { path = \"../local\" }"));
+    assert!(
+        cli(&directory, &["remove", "local", "app"])
+            .status
+            .success()
+    );
+    let manifest = fs::read_to_string(directory.0.join("app/aether.toml")).unwrap();
+    assert!(!manifest.contains("local ="));
+
+    let missing_target = cli(&directory, &["sync"]);
+    assert_eq!(missing_target.status.code(), Some(2));
+    assert!(!directory.0.join("aether.lock").exists());
+}
