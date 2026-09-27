@@ -1032,7 +1032,9 @@ fn emit_collection_drop(
 ) {
     let is_list = matches!(shape, DropShape::List);
     let matrix = matches!(shape, DropShape::Matrix);
-    let descriptor = if is_list || matrix {
+    let descriptor = if matrix {
+        "{ ptr, i64, i64, i64, i64 }"
+    } else if is_list {
         "{ ptr, i64, i64 }"
     } else {
         "{ ptr, i64 }"
@@ -1048,29 +1050,24 @@ fn emit_collection_drop(
     .expect("verified collection element layout");
     writeln!(output, "  %data = extractvalue {descriptor} %value, 0").unwrap();
     if matrix {
-        writeln!(output, "  %rows = extractvalue {descriptor} %value, 1\n  %columns = extractvalue {descriptor} %value, 2\n  %length = mul i64 %rows, %columns").unwrap();
+        writeln!(output, "  %rows = extractvalue {descriptor} %value, 1\n  %columns = extractvalue {descriptor} %value, 2\n  %row_capacity = extractvalue {descriptor} %value, 3\n  %column_capacity = extractvalue {descriptor} %value, 4").unwrap();
     } else {
         writeln!(output, "  %length = extractvalue {descriptor} %value, 1").unwrap();
     }
     if types.needs_drop(element) {
-        writeln!(output, "  br label %drop_header").unwrap();
-        writeln!(output, "drop_header:").unwrap();
+        if matrix {
+            writeln!(output, "  br label %drop_row_header\ndrop_row_header:\n  %row = phi i64 [ %rows, %entry ], [ %previous_row, %drop_row_done ]\n  %has_row = icmp ugt i64 %row, 0\n  br i1 %has_row, label %drop_row_start, label %free_storage\ndrop_row_start:\n  %previous_row = sub i64 %row, 1\n  br label %drop_column_header\ndrop_column_header:\n  %column = phi i64 [ %columns, %drop_row_start ], [ %previous_column, %drop_body ]\n  %has_column = icmp ugt i64 %column, 0\n  br i1 %has_column, label %drop_body, label %drop_row_done\ndrop_body:\n  %previous_column = sub i64 %column, 1\n  %row_offset = mul i64 %previous_row, %column_capacity\n  %logical_offset = add i64 %row_offset, %previous_column").unwrap();
+        } else {
+            writeln!(output, "  br label %drop_header\ndrop_header:\n  %index = phi i64 [ %length, %entry ], [ %previous, %drop_body ]\n  %more = icmp ugt i64 %index, 0\n  br i1 %more, label %drop_body, label %free_storage\ndrop_body:\n  %previous = sub i64 %index, 1").unwrap();
+        }
+        let offset = if matrix {
+            "%logical_offset"
+        } else {
+            "%previous"
+        };
         writeln!(
             output,
-            "  %index = phi i64 [ %length, %entry ], [ %previous, %drop_body ]"
-        )
-        .unwrap();
-        writeln!(output, "  %more = icmp ugt i64 %index, 0").unwrap();
-        writeln!(
-            output,
-            "  br i1 %more, label %drop_body, label %free_storage"
-        )
-        .unwrap();
-        writeln!(output, "drop_body:").unwrap();
-        writeln!(output, "  %previous = sub i64 %index, 1").unwrap();
-        writeln!(
-            output,
-            "  %slot = getelementptr inbounds {}, ptr %data, i64 %previous",
+            "  %slot = getelementptr inbounds {}, ptr %data, i64 {offset}",
             llvm_type(types, element)
         )
         .unwrap();
@@ -1087,11 +1084,27 @@ fn emit_collection_drop(
             llvm_type(types, element)
         )
         .unwrap();
-        writeln!(output, "  br label %drop_header").unwrap();
+        writeln!(
+            output,
+            "  br label %{}",
+            if matrix {
+                "drop_column_header"
+            } else {
+                "drop_header"
+            }
+        )
+        .unwrap();
+        if matrix {
+            writeln!(output, "drop_row_done:\n  br label %drop_row_header").unwrap();
+        }
         writeln!(output, "free_storage:").unwrap();
     }
     if matrix {
-        writeln!(output, "  %allocation_count = add i64 %length, 0").unwrap();
+        writeln!(
+            output,
+            "  %allocation_count = mul i64 %row_capacity, %column_capacity"
+        )
+        .unwrap();
     } else {
         writeln!(
             output,
@@ -1105,13 +1118,17 @@ fn emit_collection_drop(
         layout.size
     )
     .unwrap();
-    writeln!(
-        output,
-        "  call void @aether_free(ptr %data, i64 %size, i64 {})",
-        layout.align
-    )
-    .unwrap();
-    writeln!(output, "  ret void\n}}\n").unwrap();
+    if matrix {
+        writeln!(output, "  %has_backing = icmp ne ptr %data, null\n  br i1 %has_backing, label %free_backing, label %drop_done\nfree_backing:\n  call void @aether_free(ptr %data, i64 %size, i64 {})\n  br label %drop_done\ndrop_done:\n  ret void\n}}\n", layout.align).unwrap();
+    } else {
+        writeln!(
+            output,
+            "  call void @aether_free(ptr %data, i64 %size, i64 {})",
+            layout.align
+        )
+        .unwrap();
+        writeln!(output, "  ret void\n}}\n").unwrap();
+    }
 }
 
 fn emit_fixed_allocation_helper(
@@ -1941,13 +1958,13 @@ fn emit_function(
                         .expect("verified matrix-like source");
                     let element_llvm = llvm_type(types, element);
                     let index = llvm_operand(fixed_index);
-                    writeln!(output, "  ; MatrixAxisVectorViewBegin {source_llvm}|{descriptor}|{axis:?}|{index}|{element_llvm}").unwrap();
+                    let from_view = types.matrix_view_info(source_ty).is_some();
+                    writeln!(output, "  ; MatrixAxisVectorViewBegin {source_llvm}|{descriptor}|{axis:?}|{index}|{element_llvm}|{}", if from_view { "view" } else { "owner" }).unwrap();
                     writeln!(
                         output,
                         "  %av{id}_ptr = extractvalue {source_llvm} {descriptor}, 0"
                     )
                     .unwrap();
-                    let from_view = types.matrix_view_info(source_ty).is_some();
                     // Materialize the logical descriptor before applying the same closed
                     // projection recipe to owners and views. Never assume view layout.
                     let mut fields = Vec::new();
@@ -1961,7 +1978,9 @@ fn emit_function(
                     .enumerate()
                     {
                         let field = match field {
-                            MatrixViewField::RowStride if !from_view => MatrixViewField::Columns,
+                            MatrixViewField::RowStride if !from_view => {
+                                MatrixViewField::ColumnCapacity
+                            }
                             MatrixViewField::ColumnStride if !from_view => MatrixViewField::One,
                             field => *field,
                         };
@@ -1971,8 +1990,10 @@ fn emit_function(
                             let source_slot = match field {
                                 MatrixViewField::Rows => 1,
                                 MatrixViewField::Columns => 2,
+                                MatrixViewField::ColumnCapacity | MatrixViewField::ColumnStride => {
+                                    4
+                                }
                                 MatrixViewField::RowStride => 3,
-                                MatrixViewField::ColumnStride => 4,
                                 MatrixViewField::One => unreachable!(),
                             };
                             writeln!(output, "  %av{id}_field{slot} = extractvalue {source_llvm} {descriptor}, {source_slot}").unwrap();
@@ -2074,8 +2095,10 @@ fn emit_function(
                             let source_slot = match field {
                                 MatrixViewField::Rows => 1,
                                 MatrixViewField::Columns => 2,
+                                MatrixViewField::ColumnCapacity | MatrixViewField::ColumnStride => {
+                                    4
+                                }
                                 MatrixViewField::RowStride => 3,
-                                MatrixViewField::ColumnStride => 4,
                                 MatrixViewField::One => unreachable!(),
                             };
                             writeln!(output, "  %mv{id}_field{slot} = extractvalue {source_llvm} {descriptor}, {source_slot}").unwrap();
@@ -2199,23 +2222,41 @@ fn emit_function(
                 SsaOp::MatrixInit {
                     rows,
                     columns,
+                    row_capacity,
+                    column_capacity,
                     element_type,
                     elements,
                     ..
                 } => {
                     let id = instruction.result.0;
-                    if elements.is_empty() {
-                        writeln!(output, "  %v{id} = select i1 true, {{ ptr, i64, i64 }} zeroinitializer, {{ ptr, i64, i64 }} zeroinitializer").unwrap();
+                    if *row_capacity == 0 || *column_capacity == 0 {
+                        mathematical::emit_matrix_shape(
+                            output,
+                            "zeroinitializer",
+                            &rows.to_string(),
+                            &columns.to_string(),
+                            &row_capacity.to_string(),
+                            &column_capacity.to_string(),
+                            [
+                                &format!("%matrix{id}_rows"),
+                                &format!("%matrix{id}_columns"),
+                                &format!("%matrix{id}_row_capacity"),
+                                &format!("%v{id}"),
+                            ],
+                        );
                     } else {
-                        writeln!(output, "  %v{id} = call {{ ptr, i64, i64 }} @aether_matrix_new_{}(i64 {rows}, i64 {columns})", mangle_type(types, *element_type)).unwrap();
+                        writeln!(output, "  %v{id} = call {{ ptr, i64, i64, i64, i64 }} @aether_matrix_new_{}(i64 {rows}, i64 {columns}, i64 {row_capacity}, i64 {column_capacity})", mangle_type(types, *element_type)).unwrap();
                         writeln!(
                             output,
-                            "  %matrix{id}_data = extractvalue {{ ptr, i64, i64 }} %v{id}, 0"
+                            "  %matrix{id}_data = extractvalue {{ ptr, i64, i64, i64, i64 }} %v{id}, 0"
                         )
                         .unwrap();
                     }
                     for (index, element) in elements.iter().enumerate() {
-                        writeln!(output, "  %matrix{id}_slot{index} = getelementptr inbounds {}, ptr %matrix{id}_data, i64 {index}", llvm_type(types, *element_type)).unwrap();
+                        let row = u64::try_from(index).unwrap() / columns;
+                        let column = u64::try_from(index).unwrap() % columns;
+                        let physical_index = row * column_capacity + column;
+                        writeln!(output, "  %matrix{id}_slot{index} = getelementptr inbounds {}, ptr %matrix{id}_data, i64 {physical_index}", llvm_type(types, *element_type)).unwrap();
                         writeln!(
                             output,
                             "  store {} {}, ptr %matrix{id}_slot{index}",
@@ -3972,10 +4013,10 @@ fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
         | TypeData::Vector { .. }
         | TypeData::Array { .. }
         | TypeData::View { .. } => "{ ptr, i64 }".into(),
-        TypeData::VectorView { .. } | TypeData::Matrix { .. } | TypeData::List { .. } => {
-            "{ ptr, i64, i64 }".into()
+        TypeData::VectorView { .. } | TypeData::List { .. } => "{ ptr, i64, i64 }".into(),
+        TypeData::MatrixView { .. } | TypeData::Matrix { .. } => {
+            "{ ptr, i64, i64, i64, i64 }".into()
         }
-        TypeData::MatrixView { .. } => "{ ptr, i64, i64, i64, i64 }".into(),
         TypeData::GenericParam(_) => panic!("unresolved generic parameter reached LLVM"),
     }
 }
@@ -4620,15 +4661,28 @@ fn escape_symbol_part(name: &str) -> String {
     escaped
 }
 
-/// Owning shape is immutable. Checked allocation proves rows*columns fits usize;
-/// after all four guards, row0*columns+col0 < rows*columns. No arithmetic flags
+/// Owning shape is immutable. Exact initial capacities are checked before allocation;
+/// after all four guards, row0*columnCapacity+col0 is within the reservation. No arithmetic flags
 /// or address calculation precedes these guards. Shape is not type identity.
 fn emit_matrix_helpers(output: &mut String, types: &TypeArena, element: TypeId) {
     let suffix = mangle_type(types, element);
     let element_ty = llvm_type(types, element);
-    writeln!(output, r"define internal {{ ptr, i64, i64 }} @aether_matrix_new_{suffix}(i64 %rows, i64 %columns) {{
+    writeln!(output, r"define internal {{ ptr, i64, i64, i64, i64 }} @aether_matrix_new_{suffix}(i64 %rows, i64 %columns, i64 %row_capacity, i64 %column_capacity) {{
 entry:
-  %product = call {{ i64, i1 }} @llvm.umul.with.overflow.i64(i64 %rows, i64 %columns)
+  %rows_valid = icmp ule i64 %rows, %row_capacity
+  %columns_valid = icmp ule i64 %columns, %column_capacity
+  %shape_valid = and i1 %rows_valid, %columns_valid
+  br i1 %shape_valid, label %logical_product, label %trap_invalid_descriptor
+trap_invalid_descriptor:
+  ; structured Aether trap: InvalidMatrixDescriptor
+  call void @llvm.trap()
+  unreachable
+logical_product:
+  %logical = call {{ i64, i1 }} @llvm.umul.with.overflow.i64(i64 %rows, i64 %columns)
+  %logical_overflow = extractvalue {{ i64, i1 }} %logical, 1
+  br i1 %logical_overflow, label %trap_allocation_size_overflow, label %capacity_product
+capacity_product:
+  %product = call {{ i64, i1 }} @llvm.umul.with.overflow.i64(i64 %row_capacity, i64 %column_capacity)
   %count = extractvalue {{ i64, i1 }} %product, 0
   %overflow = extractvalue {{ i64, i1 }} %product, 1
   br i1 %overflow, label %trap_allocation_size_overflow, label %allocate
@@ -4647,14 +4701,23 @@ nonempty:
   br label %shape
 shape:
   %ptr = phi ptr [ null, %empty_result ], [ %allocated_ptr, %nonempty ]
-  %d0 = insertvalue {{ ptr, i64, i64 }} zeroinitializer, ptr %ptr, 0" ).unwrap();
-    mathematical::emit_matrix_shape(output, "%d0", "%rows", "%columns", ["%d1", "%d2"]);
-    writeln!(output, r"  ret {{ ptr, i64, i64 }} %d2
+  %d0 = insertvalue {{ ptr, i64, i64, i64, i64 }} zeroinitializer, ptr %ptr, 0" ).unwrap();
+    mathematical::emit_matrix_shape(
+        output,
+        "%d0",
+        "%rows",
+        "%columns",
+        "%row_capacity",
+        "%column_capacity",
+        ["%d1", "%d2", "%d3", "%d4"],
+    );
+    writeln!(output, r"  ret {{ ptr, i64, i64, i64, i64 }} %d4
 }}
-define internal ptr @aether_matrix_index_{suffix}({{ ptr, i64, i64 }} %matrix, i64 %row, i64 %column) {{
+define internal ptr @aether_matrix_index_{suffix}({{ ptr, i64, i64, i64, i64 }} %matrix, i64 %row, i64 %column) {{
 entry:
-  %rows = extractvalue {{ ptr, i64, i64 }} %matrix, 1
-  %columns = extractvalue {{ ptr, i64, i64 }} %matrix, 2
+  %rows = extractvalue {{ ptr, i64, i64, i64, i64 }} %matrix, 1
+  %columns = extractvalue {{ ptr, i64, i64, i64, i64 }} %matrix, 2
+  %column_capacity = extractvalue {{ ptr, i64, i64, i64, i64 }} %matrix, 4
   %row_lower = icmp uge i64 %row, 1
   br i1 %row_lower, label %row_upper_check, label %trap
 row_upper_check:
@@ -4672,9 +4735,9 @@ trap:
 address:
   %row0 = sub i64 %row, 1
   %column0 = sub i64 %column, 1
-  %row_offset = mul i64 %row0, %columns
+  %row_offset = mul i64 %row0, %column_capacity
   %linear = add i64 %row_offset, %column0
-  %data = extractvalue {{ ptr, i64, i64 }} %matrix, 0
+  %data = extractvalue {{ ptr, i64, i64, i64, i64 }} %matrix, 0
   %slot = getelementptr inbounds {element_ty}, ptr %data, i64 %linear
   ret ptr %slot
 }}

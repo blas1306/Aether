@@ -229,6 +229,8 @@ pub enum SsaOp {
     MatrixInit {
         rows: u64,
         columns: u64,
+        row_capacity: u64,
+        column_capacity: u64,
         /// Retained source row boundaries, checked independently; no runtime field.
         row_ends: Vec<u64>,
         element_type: TypeId,
@@ -1149,6 +1151,8 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
         Rvalue::MatrixInit {
             rows,
             columns,
+            row_capacity,
+            column_capacity,
             row_ends,
             element_type,
             elements,
@@ -1157,6 +1161,8 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
         } => SsaOp::MatrixInit {
             rows: *rows,
             columns: *columns,
+            row_capacity: *row_capacity,
+            column_capacity: *column_capacity,
             row_ends: row_ends.clone(),
             element_type: *element_type,
             elements: elements
@@ -4269,13 +4275,18 @@ fn verify_op(
         SsaOp::MatrixInit {
             rows,
             columns,
+            row_capacity,
+            column_capacity,
             row_ends,
             element_type,
             elements,
             size_trap,
             failure_trap,
         } => {
-            if !valid_matrix_literal_shape(*rows, *columns, row_ends, elements.len())
+            if rows > row_capacity
+                || columns > column_capacity
+                || row_capacity.checked_mul(*column_capacity).is_none()
+                || !valid_matrix_literal_shape(*rows, *columns, row_ends, elements.len())
                 || types.matrix_element(result) != Some(*element_type)
                 || elements
                     .iter()

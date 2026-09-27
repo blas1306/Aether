@@ -2677,6 +2677,9 @@ mod tests {
 pub enum MatrixViewField {
     Rows,
     Columns,
+    /// Physical owner row stride. This selector is valid only while deriving a
+    /// view directly from a `Matrix` owner; `MatrixView` descriptors use `RowStride`.
+    ColumnCapacity,
     RowStride,
     ColumnStride,
     One,
@@ -2693,11 +2696,11 @@ pub struct MatrixViewDescriptor {
 impl MatrixViewDescriptor {
     #[must_use]
     pub fn derived(from_view: bool, transpose: bool) -> Self {
-        use MatrixViewField::{ColumnStride, Columns, One, RowStride, Rows};
+        use MatrixViewField::{ColumnCapacity, ColumnStride, Columns, One, RowStride, Rows};
         let (rs, cs) = if from_view {
             (RowStride, ColumnStride)
         } else {
-            (Columns, One)
+            (ColumnCapacity, One)
         };
         if transpose {
             Self {
@@ -2745,7 +2748,7 @@ impl VectorViewDescriptor {
 }
 
 /// Closed full-axis projection over the logical Matrix-like descriptor.
-/// Owners materialize RowStride=Columns and ColumnStride=1 in the backend.
+/// Owners materialize RowStride=ColumnCapacity and ColumnStride=1 in the backend.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MatrixAxisVectorViewDescriptor {
     pub fixed_extent: MatrixViewField,

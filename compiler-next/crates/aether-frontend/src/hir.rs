@@ -352,16 +352,14 @@ pub fn layout_of(
             size: u64::from(target.pointer_width / 4),
             align: u64::from(target.pointer_width / 8),
         },
-        TypeData::MatrixView { .. } => TypeLayout {
+        TypeData::MatrixView { .. } | TypeData::Matrix { .. } => TypeLayout {
             size: 5 * u64::from(target.pointer_width / 8),
             align: u64::from(target.pointer_width / 8),
         },
-        TypeData::VectorView { .. } | TypeData::Matrix { .. } | TypeData::List { .. } => {
-            TypeLayout {
-                size: 3 * u64::from(target.pointer_width / 8),
-                align: u64::from(target.pointer_width / 8),
-            }
-        }
+        TypeData::VectorView { .. } | TypeData::List { .. } => TypeLayout {
+            size: 3 * u64::from(target.pointer_width / 8),
+            align: u64::from(target.pointer_width / 8),
+        },
         TypeData::Void | TypeData::GenericParam(_) => return None,
     })
 }
@@ -1510,6 +1508,8 @@ pub enum HirExprKind {
     MatrixInit {
         rows: u64,
         columns: u64,
+        row_capacity: u64,
+        column_capacity: u64,
         /// Retained source row boundaries, checked independently; no runtime field.
         row_ends: Vec<u64>,
         element_type: TypeId,
@@ -5133,12 +5133,16 @@ impl Monomorphizer<'_> {
             HirExprKind::MatrixInit {
                 rows,
                 columns,
+                row_capacity,
+                column_capacity,
                 row_ends,
                 element_type,
                 elements,
             } => HirExprKind::MatrixInit {
                 rows: *rows,
                 columns: *columns,
+                row_capacity: *row_capacity,
+                column_capacity: *column_capacity,
                 row_ends: row_ends.clone(),
                 element_type: self.substitute_type(*element_type, substitution, expression.span)?,
                 elements: elements
@@ -10519,6 +10523,8 @@ impl Analyzer<'_> {
                 elements,
                 rows: rows.len() as u64,
                 columns: columns as u64,
+                row_capacity: rows.len() as u64,
+                column_capacity: columns as u64,
                 row_ends: (1..=rows.len()).map(|r| (r * columns) as u64).collect(),
             }
         } else {
@@ -14899,6 +14905,8 @@ fn verify_expr(
         HirExprKind::MatrixInit {
             rows,
             columns,
+            row_capacity,
+            column_capacity,
             row_ends,
             element_type,
             elements,
@@ -14906,7 +14914,10 @@ fn verify_expr(
             for element in elements {
                 verify_expr(element, f, sigs, structs, enums, types, fail)?;
             }
-            if !valid_matrix_literal_shape(*rows, *columns, row_ends, elements.len())
+            if rows > row_capacity
+                || columns > column_capacity
+                || row_capacity.checked_mul(*column_capacity).is_none()
+                || !valid_matrix_literal_shape(*rows, *columns, row_ends, elements.len())
                 || types.matrix_element(e.ty) != Some(*element_type)
                 || elements.iter().any(|element| element.ty != *element_type)
                 || !types.is_admitted_matrix_element(*element_type)
@@ -16955,7 +16966,7 @@ mod tests {
     #[test]
     fn vertical23_hir_rejects_corrupt_matrix_contracts() {
         let hir=check("int main(){Matrix<int> a=[1,2,3;4,5,6];usize n=rows(a);usize m=columns(a);int x=a[2,3];return x+int(n+m);}").unwrap();
-        for case in 0..8 {
+        for case in 0..11 {
             let mut corrupt = hir.clone();
             let mut changed = false;
             for stmt in &mut corrupt.functions[0].body.statements {
@@ -17010,6 +17021,38 @@ mod tests {
                                     changed = true;
                                 }
                             }
+                        }
+                        (
+                            HirExprKind::MatrixInit {
+                                rows, row_capacity, ..
+                            },
+                            8,
+                        ) => {
+                            *row_capacity = rows.saturating_sub(1);
+                            changed = true;
+                        }
+                        (
+                            HirExprKind::MatrixInit {
+                                columns,
+                                column_capacity,
+                                ..
+                            },
+                            9,
+                        ) => {
+                            *column_capacity = columns.saturating_sub(1);
+                            changed = true;
+                        }
+                        (
+                            HirExprKind::MatrixInit {
+                                row_capacity,
+                                column_capacity,
+                                ..
+                            },
+                            10,
+                        ) => {
+                            *row_capacity = u64::MAX;
+                            *column_capacity = 2;
+                            changed = true;
                         }
                         _ => {}
                     }

@@ -7,7 +7,8 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use aether_driver::{
-    ClangToolchain, CompilationSession, Emit, build_path, compile_session, compile_source, run_path,
+    ClangToolchain, CompilationSession, Emit, OptimizationLevel, build_path, compile_session,
+    compile_source, compile_source_with_optimization, run_path,
 };
 use aether_frontend::{
     Capability, ModuleId, SourceFile, SourceId, TargetProperties, TypeData, analyze, layout_of,
@@ -5900,7 +5901,7 @@ fn vertical23_identity_context_and_deterministic_ir() {
         layout_of(&types, matrix, TargetProperties::LINUX_X86_64, &[], &[])
             .unwrap()
             .size,
-        24
+        40
     );
     let source = SourceFile::new(
         "matrix.ae",
@@ -6003,6 +6004,109 @@ fn v23_execute(llvm: &str) -> std::process::ExitStatus {
     let status = Command::new(&artifact).status().unwrap();
     fs::remove_file(artifact).unwrap();
     status
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn matrix_dynamic_descriptor_v1_padded_owner_and_zero_shapes_o0_o2() {
+    use aether_backend_llvm::{TargetDescriptor, emit_llvm};
+    use aether_middle::{SsaOp, build_ssa, lower_hir, verify_mir, verify_ssa};
+
+    let source = SourceFile::new(
+        "matrix-dynamic-descriptor-v1.ae",
+        "struct Holder{Matrix<int>data;}Matrix<int>keep(Matrix<int>x){return x;}int main(){Matrix<int>a=[1,2,3;4,5,6];Matrix<int>m=keep(a);Holder h=Holder(m);VectorView<int,Row>r=row(h.data,2);VectorView<int,Column>c=column(h.data,3);MatrixView<int>t=transpose_view(h.data);if(r[2]!=5||c[2]!=6||t[3,2]!=6){return 1;}Matrix<Buffer<int>>b=[Buffer<int>(1,10),Buffer<int>(1,20);Buffer<int>(1,30),Buffer<int>(1,40)];return b[2,2][0]-40;}",
+    );
+    let hir = analyze(parse_source(&source).unwrap()).unwrap();
+    let mir = verify_mir(lower_hir(hir)).unwrap();
+    let mut ssa = build_ssa(&mir);
+    let mut changed = 0;
+    for instruction in ssa
+        .functions
+        .iter_mut()
+        .flat_map(|function| &mut function.blocks)
+        .flat_map(|block| &mut block.instructions)
+    {
+        if let SsaOp::MatrixInit {
+            row_capacity,
+            column_capacity,
+            ..
+        } = &mut instruction.op
+        {
+            *row_capacity = 3;
+            *column_capacity = 5;
+            changed += 1;
+        }
+    }
+    assert_eq!(changed, 2);
+    let llvm = emit_llvm(&verify_ssa(ssa).unwrap(), &TargetDescriptor::linux_x86_64());
+    assert!(llvm.contains("%row_offset = mul i64 %row0, %column_capacity"));
+    assert!(llvm.contains("%logical_offset = add i64 %row_offset, %previous_column"));
+    assert!(llvm.contains("getelementptr inbounds i64, ptr %matrix"));
+    assert!(llvm.contains("i64 5"));
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        let artifact = temporary(&format!("matrix-dynamic-{optimization:?}"));
+        ClangToolchain::default()
+            .with_optimization(optimization)
+            .link_executable(&llvm, &artifact)
+            .unwrap();
+        let status = Command::new(&artifact).status().unwrap();
+        fs::remove_file(artifact).unwrap();
+        assert_eq!(status.code(), Some(0), "{optimization:?}");
+    }
+
+    let empty = SourceFile::new(
+        "matrix-empty-reserved.ae",
+        "int main(){Matrix<Buffer<int>>a=[];return int(rows(a)+columns(a));}",
+    );
+    let hir = analyze(parse_source(&empty).unwrap()).unwrap();
+    let mir = verify_mir(lower_hir(hir)).unwrap();
+    let mut ssa = build_ssa(&mir);
+    for instruction in ssa
+        .functions
+        .iter_mut()
+        .flat_map(|function| &mut function.blocks)
+        .flat_map(|block| &mut block.instructions)
+    {
+        if let SsaOp::MatrixInit {
+            row_capacity,
+            column_capacity,
+            ..
+        } = &mut instruction.op
+        {
+            *row_capacity = 2;
+            *column_capacity = 3;
+        }
+    }
+    let llvm = emit_llvm(&verify_ssa(ssa).unwrap(), &TargetDescriptor::linux_x86_64());
+    assert!(llvm.contains("i64 0, i64 0, i64 2, i64 3"));
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        let artifact = temporary(&format!("matrix-empty-reserved-{optimization:?}"));
+        ClangToolchain::default()
+            .with_optimization(optimization)
+            .link_executable(&v23_heap_guard(&llvm, 1), &artifact)
+            .unwrap();
+        let status = Command::new(&artifact).status().unwrap();
+        fs::remove_file(artifact).unwrap();
+        assert_eq!(status.code(), Some(0), "{optimization:?}");
+    }
+
+    let zero_shapes = "int main(){Vector<int,Column>m=[1,2];Vector<int,Column>z=[];Vector<int,Row>n=[3,4,5];Vector<int,Row>e=[];Matrix<int>m0=m*vector_view(e);Matrix<int>z0=z*vector_view(e);Matrix<int>zn=z*vector_view(n);if(rows(m0)!=2||columns(m0)!=0){return 1;}if(rows(z0)!=0||columns(z0)!=0){return 2;}if(rows(zn)!=0||columns(zn)!=3){return 3;}MatrixView<int>tm=transpose_view(m0);MatrixView<int>tn=transpose_view(zn);if(rows(tm)!=0||columns(tm)!=2||rows(tn)!=3||columns(tn)!=0){return 4;}return 0;}";
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        let compilation = compile_source_with_optimization(
+            &SourceFile::new("zero-shapes.ae", zero_shapes),
+            &[],
+            optimization,
+        )
+        .unwrap();
+        let artifact = temporary(&format!("matrix-zero-{optimization:?}"));
+        ClangToolchain::default()
+            .with_optimization(optimization)
+            .link_executable(&compilation.llvm, &artifact)
+            .unwrap();
+        let status = Command::new(&artifact).status().unwrap();
+        fs::remove_file(artifact).unwrap();
+        assert_eq!(status.code(), Some(0), "{optimization:?}");
+    }
 }
 
 #[test]
@@ -6124,7 +6228,7 @@ fn vertical23_independent_hir_mir_ssa_contract_verifiers() {
     let hir = analyze(parse_source(&source).unwrap()).unwrap();
     let mir = lower_hir(hir);
     let ssa = build_ssa(&verify_mir(mir.clone()).unwrap());
-    for case in 0..11 {
+    for case in 0..14 {
         let mut corrupt = mir.clone();
         let mut changed = false;
         for instruction in corrupt.functions[0]
@@ -6198,6 +6302,31 @@ fn vertical23_independent_hir_mir_ssa_contract_verifiers() {
                 (Rvalue::MatrixInit { rows, columns, .. }, 10) => {
                     *rows = u64::MAX;
                     *columns = 2;
+                    changed = true;
+                }
+                (Rvalue::MatrixInit { row_capacity, .. }, 11) => {
+                    *row_capacity = 1;
+                    changed = true;
+                }
+                (
+                    Rvalue::MatrixInit {
+                        column_capacity, ..
+                    },
+                    12,
+                ) => {
+                    *column_capacity = 1;
+                    changed = true;
+                }
+                (
+                    Rvalue::MatrixInit {
+                        row_capacity,
+                        column_capacity,
+                        ..
+                    },
+                    13,
+                ) => {
+                    *row_capacity = u64::MAX;
+                    *column_capacity = 2;
                     changed = true;
                 }
                 _ => {}
@@ -6278,6 +6407,31 @@ fn vertical23_independent_hir_mir_ssa_contract_verifiers() {
                 (SsaOp::MatrixInit { rows, columns, .. }, 10) => {
                     *rows = u64::MAX;
                     *columns = 2;
+                    changed = true;
+                }
+                (SsaOp::MatrixInit { row_capacity, .. }, 11) => {
+                    *row_capacity = 1;
+                    changed = true;
+                }
+                (
+                    SsaOp::MatrixInit {
+                        column_capacity, ..
+                    },
+                    12,
+                ) => {
+                    *column_capacity = 1;
+                    changed = true;
+                }
+                (
+                    SsaOp::MatrixInit {
+                        row_capacity,
+                        column_capacity,
+                        ..
+                    },
+                    13,
+                ) => {
+                    *row_capacity = u64::MAX;
+                    *column_capacity = 2;
                     changed = true;
                 }
                 _ => {}
@@ -7899,14 +8053,19 @@ fn v26_zero_cost_guard(llvm: &str, heap: u64) -> String {
             }
         } else if let Some(result) = line.trim().strip_prefix("; MatrixAxisVectorViewEnd ") {
             let fields = source_fields.take().unwrap();
-            let (ty, value, axis, index, element) =
-                (&fields[0], &fields[1], &fields[2], &fields[3], &fields[4]);
+            let (ty, value, axis, index, element, source_kind) = (
+                &fields[0], &fields[1], &fields[2], &fields[3], &fields[4], &fields[5],
+            );
             for (suffix, global) in [("a", "heap_alloc"), ("f", "heap_free"), ("r", "relocation")] {
                 writeln!(output,"  %ax{count}_{suffix}1 = load i64, ptr @aether_{global}_count\n  %ax{count}_{suffix}ok = icmp eq i64 %ax{count}_{suffix}0, %ax{count}_{suffix}1").unwrap();
             }
             writeln!(output,"  %ax{count}_p0 = extractvalue {ty} {value}, 0\n  %ax{count}_rows = extractvalue {ty} {value}, 1\n  %ax{count}_columns = extractvalue {ty} {value}, 2").unwrap();
-            if ty == "{ ptr, i64, i64 }" {
-                writeln!(output,"  %ax{count}_rs = add i64 0, %ax{count}_columns\n  %ax{count}_cs = add i64 0, 1").unwrap();
+            if source_kind == "owner" {
+                writeln!(
+                    output,
+                    "  %ax{count}_rs = extractvalue {ty} {value}, 4\n  %ax{count}_cs = add i64 0, 1"
+                )
+                .unwrap();
             } else {
                 writeln!(output,"  %ax{count}_rs = extractvalue {ty} {value}, 3\n  %ax{count}_cs = extractvalue {ty} {value}, 4").unwrap();
             }

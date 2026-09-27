@@ -115,7 +115,14 @@ impl Emitter<'_> {
                         "zeroinitializer",
                         &format!("%{p}_extent_{rows:?}"),
                         &format!("%{p}_extent_{columns:?}"),
-                        [&format!("%{p}_empty_shape"), &format!("%{p}_empty_owner")],
+                        &format!("%{p}_extent_{rows:?}"),
+                        &format!("%{p}_extent_{columns:?}"),
+                        [
+                            &format!("%{p}_empty_rows_shape"),
+                            &format!("%{p}_empty_columns_shape"),
+                            &format!("%{p}_empty_row_capacity"),
+                            &format!("%{p}_empty_owner"),
+                        ],
                     );
                     writeln!(self.output, "  br label %{cont}\n{p}_allocate:").unwrap();
                     *current = format!("{p}_allocate");
@@ -180,7 +187,7 @@ impl Emitter<'_> {
                     MathStep::Allocate { extents, .. } => {
                         if self.kernel.kind == ProductKind::MatrixMatrixKernel {
                             let suffix = mangle_type(self.types, self.kernel.element_type);
-                            writeln!(self.output, "  %{p}_allocated = call {{ ptr, i64, i64 }} @aether_matrix_new_{suffix}(i64 %{p}_extent_Rows, i64 %{p}_extent_Columns)\n  %{p}_data = extractvalue {{ ptr, i64, i64 }} %{p}_allocated, 0").unwrap();
+                            writeln!(self.output, "  %{p}_allocated = call {{ ptr, i64, i64, i64, i64 }} @aether_matrix_new_{suffix}(i64 %{p}_extent_Rows, i64 %{p}_extent_Columns, i64 %{p}_extent_Rows, i64 %{p}_extent_Columns)\n  %{p}_data = extractvalue {{ ptr, i64, i64, i64, i64 }} %{p}_allocated, 0\n  %{p}_result_ColumnCapacity = extractvalue {{ ptr, i64, i64, i64, i64 }} %{p}_allocated, 4").unwrap();
                             continue;
                         }
                         if self.kernel.matrix_input().is_some() {
@@ -191,7 +198,7 @@ impl Emitter<'_> {
                         }
                         let suffix = mangle_type(self.types, self.kernel.element_type);
                         let cont = continuation_label(self.block, self.id);
-                        writeln!(self.output, "  %{p}_allocated = call {{ ptr, i64, i64 }} @aether_matrix_new_{suffix}(i64 %{p}_extent_Rows, i64 %{p}_extent_Columns)\n  %{p}_data = extractvalue {{ ptr, i64, i64 }} %{p}_allocated, 0\n  %{p}_empty_rows = icmp eq i64 %{p}_extent_Rows, 0\n  %{p}_empty_columns = icmp eq i64 %{p}_extent_Columns, 0\n  %{p}_empty = or i1 %{p}_empty_rows, %{p}_empty_columns\n  br i1 %{p}_empty, label %{p}_empty_result, label %{p}_nonempty\n{p}_empty_result:\n  br label %{cont}\n{p}_nonempty:").unwrap();
+                        writeln!(self.output, "  %{p}_allocated = call {{ ptr, i64, i64, i64, i64 }} @aether_matrix_new_{suffix}(i64 %{p}_extent_Rows, i64 %{p}_extent_Columns, i64 %{p}_extent_Rows, i64 %{p}_extent_Columns)\n  %{p}_data = extractvalue {{ ptr, i64, i64, i64, i64 }} %{p}_allocated, 0\n  %{p}_result_ColumnCapacity = extractvalue {{ ptr, i64, i64, i64, i64 }} %{p}_allocated, 4\n  %{p}_empty_rows = icmp eq i64 %{p}_extent_Rows, 0\n  %{p}_empty_columns = icmp eq i64 %{p}_extent_Columns, 0\n  %{p}_empty = or i1 %{p}_empty_rows, %{p}_empty_columns\n  br i1 %{p}_empty, label %{p}_empty_result, label %{p}_nonempty\n{p}_empty_result:\n  br label %{cont}\n{p}_nonempty:").unwrap();
                         *current = format!("{p}_nonempty");
                     }
                     MathStep::StridedLoad { input, offset } => {
@@ -225,7 +232,7 @@ impl Emitter<'_> {
                         } else {
                             "product"
                         };
-                        writeln!(self.output, "  %{p}_row_base = mul i64 %{p}_Rows_index, %{p}_extent_Columns\n  %{p}_initialized_prefix = add i64 %{p}_row_base, %{p}_Columns_index\n  %{p}_result_slot = getelementptr {et}, ptr %{p}_data, i64 %{p}_initialized_prefix\n  store {et} %{p}_{value}, ptr %{p}_result_slot ; InitializeNext").unwrap();
+                        writeln!(self.output, "  %{p}_row_base = mul i64 %{p}_Rows_index, %{p}_result_ColumnCapacity\n  %{p}_initialized_offset = add i64 %{p}_row_base, %{p}_Columns_index\n  %{p}_result_slot = getelementptr {et}, ptr %{p}_data, i64 %{p}_initialized_offset\n  store {et} %{p}_{value}, ptr %{p}_result_slot ; InitializeNext").unwrap();
                     }
                     MathStep::YieldOwner => {
                         let cont = continuation_label(self.block, self.id);
@@ -239,7 +246,7 @@ impl Emitter<'_> {
                         } else {
                             "allocated"
                         };
-                        writeln!(self.output, "  br label %{cont}\n{cont}:\n  %v{} = phi {{ ptr, i64, i64 }} [ %{p}_{empty}, %{p}_empty_result ], [ %{p}_allocated, %{current} ]\n  ; AlgebraicEnd {}", self.id, self.id).unwrap();
+                        writeln!(self.output, "  br label %{cont}\n{cont}:\n  %v{} = phi {{ ptr, i64, i64, i64, i64 }} [ %{p}_{empty}, %{p}_empty_result ], [ %{p}_allocated, %{current} ]\n  ; AlgebraicEnd {}", self.id, self.id).unwrap();
                         *current = cont;
                     }
                     _ => unreachable!("verified closed algebraic schedule"),

@@ -36,7 +36,7 @@ pub(super) fn emit_strided_load(
     writeln!(output, "  %{prefix}_{input:?}_slot = getelementptr {element}, ptr %{prefix}_{input:?}_ptr, i64 {offset}\n  %{prefix}_{input:?}_value = load {element}, ptr %{prefix}_{input:?}_slot").unwrap();
 }
 
-/// Set both immutable Matrix shape fields on an existing pointer descriptor.
+/// Set immutable Matrix shape and exact-capacity fields on a pointer descriptor.
 /// For an empty owner base is zeroinitializer (null pointer); both axes MUST
 /// still be inserted. Allocation helpers use the same construction after their
 /// null/allocated pointer phi. This function emits no calls or guards.
@@ -45,8 +45,10 @@ pub(super) fn emit_matrix_shape(
     base: &str,
     rows: &str,
     columns: &str,
-    names: [&str; 2],
+    row_capacity_value: &str,
+    column_capacity_value: &str,
+    names: [&str; 4],
 ) {
-    let [row_shape, owner] = names;
-    writeln!(output, "  {row_shape} = insertvalue {{ ptr, i64, i64 }} {base}, i64 {rows}, 1\n  {owner} = insertvalue {{ ptr, i64, i64 }} {row_shape}, i64 {columns}, 2").unwrap();
+    let [row_shape, column_shape, row_capacity, owner] = names;
+    writeln!(output, "  {row_shape} = insertvalue {{ ptr, i64, i64, i64, i64 }} {base}, i64 {rows}, 1\n  {column_shape} = insertvalue {{ ptr, i64, i64, i64, i64 }} {row_shape}, i64 {columns}, 2\n  {row_capacity} = insertvalue {{ ptr, i64, i64, i64, i64 }} {column_shape}, i64 {row_capacity_value}, 3\n  {owner} = insertvalue {{ ptr, i64, i64, i64, i64 }} {row_capacity}, i64 {column_capacity_value}, 4").unwrap();
 }

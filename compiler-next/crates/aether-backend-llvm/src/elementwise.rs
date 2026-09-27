@@ -14,7 +14,7 @@ pub(super) fn emit(
 ) {
     let prefix = format!("ew{id}");
     let result_ty = if kernel.matrix {
-        "{ ptr, i64, i64 }"
+        "{ ptr, i64, i64, i64, i64 }"
     } else {
         "{ ptr, i64 }"
     };
@@ -101,7 +101,14 @@ impl Emitter<'_> {
                             "zeroinitializer",
                             &format!("%{p}_{source}_Rows"),
                             &format!("%{p}_{source}_Columns"),
-                            [&format!("%{p}_empty_r"), &format!("%{p}_empty_owner")],
+                            &format!("%{p}_{source}_Rows"),
+                            &format!("%{p}_{source}_Columns"),
+                            [
+                                &format!("%{p}_empty_rows_shape"),
+                                &format!("%{p}_empty_columns_shape"),
+                                &format!("%{p}_empty_row_capacity"),
+                                &format!("%{p}_empty_owner"),
+                            ],
                         );
                     }
                     writeln!(
@@ -121,7 +128,11 @@ impl Emitter<'_> {
                     } else {
                         "fixed"
                     };
-                    writeln!(self.output, "  %{p}_allocated = call {} @aether_{helper}_new_{suffix}({args})\n  %{p}_data = extractvalue {} %{p}_allocated, 0", self.result_ty,self.result_ty).unwrap();
+                    if self.kernel.matrix {
+                        writeln!(self.output, "  %{p}_allocated = call {} @aether_{helper}_new_{suffix}({args}, {args})\n  %{p}_data = extractvalue {} %{p}_allocated, 0\n  %{p}_result_ColumnCapacity = extractvalue {} %{p}_allocated, 4", self.result_ty,self.result_ty,self.result_ty).unwrap();
+                    } else {
+                        writeln!(self.output, "  %{p}_allocated = call {} @aether_{helper}_new_{suffix}({args})\n  %{p}_data = extractvalue {} %{p}_allocated, 0", self.result_ty,self.result_ty).unwrap();
+                    }
                     *current = format!("{p}_allocate");
                 }
                 MathStep::For {
@@ -175,8 +186,8 @@ impl Emitter<'_> {
                 }
                 MathStep::InitializeNext => {
                     let index = if self.kernel.matrix {
-                        writeln!(self.output, "  %{p}_row_base = mul i64 %{p}_Rows_index, %{p}_{source}_Columns\n  %{p}_initialized_prefix = add i64 %{p}_row_base, %{p}_Columns_index").unwrap();
-                        format!("%{p}_initialized_prefix")
+                        writeln!(self.output, "  %{p}_row_base = mul i64 %{p}_Rows_index, %{p}_result_ColumnCapacity\n  %{p}_initialized_offset = add i64 %{p}_row_base, %{p}_Columns_index").unwrap();
+                        format!("%{p}_initialized_offset")
                     } else {
                         format!("%{p}_{:?}_index", MathAxis::Dimension)
                     };

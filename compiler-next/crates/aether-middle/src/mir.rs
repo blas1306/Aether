@@ -397,6 +397,8 @@ pub enum Rvalue {
     MatrixInit {
         rows: u64,
         columns: u64,
+        row_capacity: u64,
+        column_capacity: u64,
         /// Retained source row boundaries, checked independently; no runtime field.
         row_ends: Vec<u64>,
         element_type: TypeId,
@@ -2969,6 +2971,8 @@ impl Builder<'_> {
             HirExprKind::MatrixInit {
                 rows,
                 columns,
+                row_capacity,
+                column_capacity,
                 row_ends,
                 element_type,
                 elements,
@@ -2986,6 +2990,8 @@ impl Builder<'_> {
                     Rvalue::MatrixInit {
                         rows: *rows,
                         columns: *columns,
+                        row_capacity: *row_capacity,
+                        column_capacity: *column_capacity,
                         row_ends: row_ends.clone(),
                         element_type: *element_type,
                         elements,
@@ -7343,6 +7349,8 @@ fn validate_rvalue(
         Rvalue::MatrixInit {
             rows,
             columns,
+            row_capacity,
+            column_capacity,
             row_ends,
             element_type,
             elements,
@@ -7352,7 +7360,10 @@ fn validate_rvalue(
             for element in elements {
                 validate_operand(function, element, initialized)?;
             }
-            if !valid_matrix_literal_shape(*rows, *columns, row_ends, elements.len())
+            if rows > row_capacity
+                || columns > column_capacity
+                || row_capacity.checked_mul(*column_capacity).is_none()
+                || !valid_matrix_literal_shape(*rows, *columns, row_ends, elements.len())
                 || types.matrix_element(destination) != Some(*element_type)
                 || elements
                     .iter()
