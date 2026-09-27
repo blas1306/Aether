@@ -1,6 +1,9 @@
 //! Reusable Aether manifest, package-resolution, and lockfile layer.
 //!
-//! This crate deliberately contains no networking, CLI presentation, or compiler policy.
+//! This crate owns package transport and materialization, but no CLI presentation or compiler
+//! policy.
+
+mod registry;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
@@ -10,6 +13,11 @@ use std::path::{Component, Path, PathBuf};
 
 use semver::Version;
 use serde::{Deserialize, Serialize};
+
+pub use registry::{
+    CacheLimits, HttpsRegistryClient, RegistryCache, RegistryClient, RegistryPolicy,
+    RegistryProtocolMetadata, RegistrySnapshotProvider,
+};
 
 /// Logical registry identity used by package-manager V1.
 pub const OFFICIAL_REGISTRY: &str = "official";
@@ -404,7 +412,7 @@ fn valid_numeric_component(value: &str) -> bool {
 }
 
 /// Version summary returned while enumerating registry candidates.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct RegistryVersion {
     /// Exact `SemVer` spelling.
     pub version: String,
@@ -412,7 +420,7 @@ pub struct RegistryVersion {
     pub yanked: bool,
 }
 
-/// Exact immutable metadata plus a conceptually materialized source root.
+/// Exact immutable metadata plus its verified, materialized source root.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RegistryPackageMetadata {
     /// Exact package name.
@@ -423,12 +431,11 @@ pub struct RegistryPackageMetadata {
     pub checksum: String,
     /// Exact direct dependency metadata.
     pub dependencies: BTreeMap<String, DependencySpec>,
-    /// Fake/provider materialization root used to build the compiler graph. No cache semantics
-    /// are implied by this field.
+    /// Canonical verified materialization root used to build the compiler graph.
     pub root: PathBuf,
 }
 
-/// Network-free registry resolution boundary.
+/// Registry resolution boundary. Transport and cache remain behind this interface.
 pub trait RegistryProvider {
     /// Enumerates all visible versions; caller imposes deterministic ordering.
     fn versions(&self, name: &PackageName) -> Result<Vec<RegistryVersion>, String>;

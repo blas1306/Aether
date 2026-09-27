@@ -3,13 +3,17 @@
 use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use aether_driver::{
     BuildRequest, CheckRequest, Compilation, CompilationOptions, DriverRequest, DriverResponse,
     Emit, OptimizationLevel, ProjectBuildRequest, ProjectCheckRequest, ProjectKind, ProjectPlan,
     ProjectRunRequest, RunRequest, StandaloneFile, default_output, execute, render_diagnostics,
 };
-use aether_package::{PackageName, sync};
+use aether_package::{
+    CacheLimits, HttpsRegistryClient, PackageName, RegistryCache, RegistryPolicy,
+    RegistrySnapshotProvider, sync,
+};
 
 const USAGE: &str = "usage: aether run <file.ae|directory> [options] [-- args...]\n       aether build <file.ae|directory> [-o artifact] [options]\n       aether check <file.ae|directory> [options]\n       aether init [--lib] <packageName>\n       aether <file.ae> [options] [-- args...]\noptions: -O0 | -O2, --emit ast|hir|mir|ssa|llvm, --timings\n         (`check` does not accept `--emit llvm`)";
 
@@ -359,8 +363,48 @@ fn resolve_target(spelling: &Path) -> Result<ResolvedTarget, String> {
 }
 
 fn resolve_project(root: &Path) -> Result<ProjectPlan, String> {
-    let graph = sync(root, None)?;
+    let offline = environment_flag("AETHER_OFFLINE")?;
+    let endpoint = std::env::var("AETHER_REGISTRY_URL").ok();
+    let provider = if offline {
+        Some(RegistrySnapshotProvider::offline(registry_cache()?))
+    } else if let Some(endpoint) = endpoint {
+        let client = HttpsRegistryClient::new(&endpoint)?;
+        Some(RegistrySnapshotProvider::new(
+            Arc::new(client),
+            registry_cache()?,
+            RegistryPolicy::Online,
+        ))
+    } else {
+        None
+    };
+    let graph = sync(
+        root,
+        provider
+            .as_ref()
+            .map(|value| value as &dyn aether_package::RegistryProvider),
+    )?;
     ProjectPlan::resolved(graph.root, &graph.packages).map_err(driver_messages)
+}
+
+fn registry_cache() -> Result<RegistryCache, String> {
+    if let Some(path) = std::env::var_os("AETHER_CACHE_DIR") {
+        RegistryCache::new(PathBuf::from(path), CacheLimits::default())
+    } else {
+        RegistryCache::from_os(CacheLimits::default())
+    }
+}
+
+fn environment_flag(name: &str) -> Result<bool, String> {
+    let Some(value) = std::env::var_os(name) else {
+        return Ok(false);
+    };
+    match value.to_string_lossy().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" => Ok(true),
+        "0" | "false" | "no" | "" => Ok(false),
+        _ => Err(format!(
+            "{name} must be one of 1, true, yes, 0, false, or no"
+        )),
+    }
 }
 
 fn driver_messages(diagnostics: Vec<aether_driver::Diagnostic>) -> String {
