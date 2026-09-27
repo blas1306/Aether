@@ -10,6 +10,7 @@ publish.workspace = true
 aether-frontend = { path = "../aether-frontend" }
 aether-middle = { path = "../aether-middle" }
 aether-backend-llvm = { path = "../aether-backend-llvm" }
+semver = "1.0"
 
 [[bin]]
 name = "aether-next"

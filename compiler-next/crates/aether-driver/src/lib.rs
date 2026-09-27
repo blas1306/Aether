@@ -8,10 +8,11 @@ use std::process::{Command, ExitStatus};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use aether_backend_llvm::{Backend, LlvmTextBackend, TargetDescriptor};
+pub use aether_frontend::Diagnostic;
 use aether_frontend::{
-    Diagnostic, DiagnosticCategory, LogicalSourceKey, ModuleId, ModuleInfo, OriginKey, PackageId,
-    PackageKey, PackagePath, ParsedAst, ParsedModule, ParsedProgram, Phase, ResolvedImport,
-    SourceFile, SourceId, SourceUnitKey, Span, analyze_bodies_for_target,
+    DiagnosticCategory, LogicalSourceKey, ModuleId, ModuleInfo, OriginKey, PackageId, PackageKey,
+    PackagePath, ParsedAst, ParsedModule, ParsedProgram, Phase, ResolvedImport, SourceFile,
+    SourceId, SourceUnitKey, Span, analyze_bodies_for_target, collect_library_program_signatures,
     collect_program_signatures, collect_signatures, parse_source,
 };
 use aether_middle::{VerifiedSsa, build_ssa, lower_hir, optimize_oop, verify_mir, verify_ssa};
@@ -941,6 +942,23 @@ fn analyze_session_with_optimization(
     emits: &[Emit],
     optimization: OptimizationLevel,
 ) -> Result<AnalyzedSession, Vec<Diagnostic>> {
+    analyze_session_for_kind(session, emits, optimization, false)
+}
+
+fn analyze_library_session_with_optimization(
+    session: CompilationSession,
+    emits: &[Emit],
+    optimization: OptimizationLevel,
+) -> Result<AnalyzedSession, Vec<Diagnostic>> {
+    analyze_session_for_kind(session, emits, optimization, true)
+}
+
+fn analyze_session_for_kind(
+    session: CompilationSession,
+    emits: &[Emit],
+    optimization: OptimizationLevel,
+    library: bool,
+) -> Result<AnalyzedSession, Vec<Diagnostic>> {
     let mut timings_ns = BTreeMap::from([
         ("module.discovery", session.discovery_ns),
         ("module.file_load", session.file_load_ns),
@@ -952,7 +970,12 @@ fn analyze_session_with_optimization(
     }
 
     let started = Instant::now();
-    let declared = collect_program_signatures(session.into_parsed_program())?;
+    let program = session.into_parsed_program();
+    let declared = if library {
+        collect_library_program_signatures(program)?
+    } else {
+        collect_program_signatures(program)?
+    };
     timings_ns.insert(
         "frontend.signature_collection",
         started.elapsed().as_nanos(),
@@ -1094,6 +1117,204 @@ pub struct StandaloneFile {
     path: PathBuf,
 }
 
+/// Validated Aether package name, identical to its import namespace.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PackageName(String);
+
+impl PackageName {
+    /// Validates the exact spelling as one non-keyword Aether identifier.
+    pub fn new(value: impl Into<String>) -> Result<Self, Vec<Diagnostic>> {
+        const KEYWORDS: &[&str] = &[
+            "alias", "as", "bool", "break", "catch", "const", "continue", "else", "enum", "false",
+            "finally", "for", "if", "import", "in", "int", "match", "mut", "null", "package",
+            "ref", "return", "struct", "throw", "true", "try", "while",
+        ];
+        let value = value.into();
+        let mut bytes = value.bytes();
+        let valid_start = bytes
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_');
+        let valid_tail = bytes.all(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
+        if !valid_start || !valid_tail || KEYWORDS.contains(&value.as_str()) {
+            return Err(vec![io_diagnostic(format!(
+                "package name `{value}` is not a valid Aether namespace identifier"
+            ))]);
+        }
+        Ok(Self(value))
+    }
+
+    /// Exact, untranslated package spelling.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Validated `SemVer` package version.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PackageVersion(String);
+
+impl PackageVersion {
+    /// Validates an exact `SemVer` spelling.
+    pub fn new(value: impl Into<String>) -> Result<Self, Vec<Diagnostic>> {
+        let value = value.into();
+        semver::Version::parse(&value).map_err(|error| {
+            vec![io_diagnostic(format!(
+                "package version `{value}` is not valid SemVer: {error}"
+            ))]
+        })?;
+        Ok(Self(value))
+    }
+
+    /// Original manifest spelling.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Manifest package metadata needed by the compiler driver.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PackageMetadata {
+    /// Package/import identity.
+    pub name: PackageName,
+    /// Package `SemVer`.
+    pub version: PackageVersion,
+    /// Optional Aether language compatibility line.
+    pub aether: Option<String>,
+}
+
+/// The single source target selected for a V1 project.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectKind {
+    /// Runnable source target.
+    Application,
+    /// Non-runnable library source target.
+    Library,
+}
+
+/// Fully resolved and validated project boundary supplied by a frontend.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectPlan {
+    root: PathBuf,
+    manifest: PathBuf,
+    package: PackageMetadata,
+    source: PathBuf,
+    kind: ProjectKind,
+}
+
+impl ProjectPlan {
+    /// Revalidates canonical paths and critical V1 project invariants.
+    pub fn new(
+        root: impl AsRef<Path>,
+        manifest: impl AsRef<Path>,
+        package: PackageMetadata,
+        source: impl AsRef<Path>,
+        kind: ProjectKind,
+    ) -> Result<Self, Vec<Diagnostic>> {
+        let root = root.as_ref().canonicalize().map_err(|error| {
+            vec![io_diagnostic(format!(
+                "could not resolve project root: {error}"
+            ))]
+        })?;
+        if !root.is_dir() {
+            return Err(vec![io_diagnostic("project root is not a directory")]);
+        }
+        if package.aether.as_deref().is_some_and(|value| value != "1") {
+            return Err(vec![io_diagnostic(
+                "package Aether compatibility currently accepts only `1`",
+            )]);
+        }
+        let expected_manifest = root.join("aether.toml").canonicalize().map_err(|error| {
+            vec![io_diagnostic(format!(
+                "could not resolve direct project manifest: {error}"
+            ))]
+        })?;
+        let manifest = manifest.as_ref().canonicalize().map_err(|error| {
+            vec![io_diagnostic(format!(
+                "could not resolve project manifest: {error}"
+            ))]
+        })?;
+        if manifest != expected_manifest || !manifest.is_file() {
+            return Err(vec![io_diagnostic(
+                "project manifest must be the regular file `<root>/aether.toml`",
+            )]);
+        }
+        let source = source.as_ref().canonicalize().map_err(|error| {
+            vec![io_diagnostic(format!(
+                "could not resolve project source: {error}"
+            ))]
+        })?;
+        if !source.starts_with(&root)
+            || !source.is_file()
+            || source.extension().and_then(|value| value.to_str()) != Some("ae")
+        {
+            return Err(vec![io_diagnostic(
+                "project source must be a regular `.ae` file confined to the project root",
+            )]);
+        }
+        if kind == ProjectKind::Library {
+            let expected_library = root.join("src/lib.ae").canonicalize().map_err(|error| {
+                vec![io_diagnostic(format!(
+                    "could not resolve V1 library source: {error}"
+                ))]
+            })?;
+            if source != expected_library {
+                return Err(vec![io_diagnostic(
+                    "V1 library source must be `<root>/src/lib.ae`",
+                )]);
+            }
+        }
+        Ok(Self {
+            root,
+            manifest,
+            package,
+            source,
+            kind,
+        })
+    }
+
+    /// Canonical project root.
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+    /// Canonical direct manifest.
+    #[must_use]
+    pub fn manifest(&self) -> &Path {
+        &self.manifest
+    }
+    /// Validated package metadata.
+    #[must_use]
+    pub const fn package(&self) -> &PackageMetadata {
+        &self.package
+    }
+    /// Canonical selected source root file.
+    #[must_use]
+    pub fn source(&self) -> &Path {
+        &self.source
+    }
+    /// Selected package class.
+    #[must_use]
+    pub const fn kind(&self) -> ProjectKind {
+        self.kind
+    }
+    /// Canonical bootstrap build directory.
+    #[must_use]
+    pub fn build_directory(&self) -> PathBuf {
+        self.root.join(".aether/build")
+    }
+    /// Canonical retained artifact path for this package.
+    #[must_use]
+    pub fn artifact_path(&self) -> PathBuf {
+        let name = self.package.name.as_str();
+        match self.kind {
+            ProjectKind::Application => self.build_directory().join(name),
+            ProjectKind::Library => self.build_directory().join(format!("{name}.aetherlib")),
+        }
+    }
+}
+
 impl StandaloneFile {
     /// Validates and canonicalizes one regular `.ae` file.
     pub fn new(path: impl AsRef<Path>) -> Result<Self, Vec<Diagnostic>> {
@@ -1178,6 +1399,35 @@ pub struct RunRequest {
     pub program_args: Vec<OsString>,
 }
 
+/// Semantic-only project request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectCheckRequest {
+    /// Fully resolved project.
+    pub input: ProjectPlan,
+    /// Compiler settings.
+    pub compilation: CompilationOptions,
+}
+
+/// Retained project build request. Its output is derived from the project plan.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectBuildRequest {
+    /// Fully resolved project.
+    pub input: ProjectPlan,
+    /// Compiler settings.
+    pub compilation: CompilationOptions,
+}
+
+/// Runnable application-project request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProjectRunRequest {
+    /// Fully resolved application project.
+    pub input: ProjectPlan,
+    /// Compiler settings.
+    pub compilation: CompilationOptions,
+    /// Arguments forwarded verbatim after argv[0].
+    pub program_args: Vec<OsString>,
+}
+
 /// Typed in-process CLI-to-driver boundary.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DriverRequest {
@@ -1187,6 +1437,12 @@ pub enum DriverRequest {
     Build(BuildRequest),
     /// Build temporarily and execute the native artifact.
     Run(RunRequest),
+    /// Analyze an application or library project.
+    CheckProject(ProjectCheckRequest),
+    /// Build an application or library project into `.aether/build`.
+    BuildProject(ProjectBuildRequest),
+    /// Temporarily build and execute an application project.
+    RunProject(ProjectRunRequest),
 }
 
 /// Typed result matching a [`DriverRequest`] operation.
@@ -1255,7 +1511,124 @@ pub fn execute_with_toolchain(
                 status,
             })
         }
+        DriverRequest::CheckProject(request) => {
+            let checked = check_project(&request.input, &request.compilation)?;
+            Ok(DriverResponse::Checked(checked))
+        }
+        DriverRequest::BuildProject(request) => {
+            build_project(&request.input, &request.compilation, &toolchain)
+        }
+        DriverRequest::RunProject(request) => {
+            if request.input.kind() != ProjectKind::Application {
+                return Err(vec![io_diagnostic("library projects cannot be run")]);
+            }
+            let toolchain = toolchain.with_optimization(request.compilation.optimization);
+            let (compilation, status) = run_path_with_os_arguments(
+                request.input.source(),
+                &request.compilation.emits,
+                &toolchain,
+                &request.program_args,
+            )?;
+            Ok(DriverResponse::Ran {
+                compilation,
+                status,
+            })
+        }
     }
+}
+
+fn check_project(
+    plan: &ProjectPlan,
+    options: &CompilationOptions,
+) -> Result<CheckedCompilation, Vec<Diagnostic>> {
+    if options.emits.contains(&Emit::Llvm) {
+        return Err(vec![io_diagnostic(
+            "check cannot emit LLVM because it stops before the backend",
+        )]);
+    }
+    let session = CompilationSession::discover(plan.source())?;
+    if plan.kind() == ProjectKind::Library {
+        analyze_library_session_with_optimization(session, &options.emits, options.optimization)
+            .map(|analysis| analysis.checked)
+    } else {
+        analyze_session_with_optimization(session, &options.emits, options.optimization)
+            .map(|analysis| analysis.checked)
+    }
+}
+
+fn build_project(
+    plan: &ProjectPlan,
+    options: &CompilationOptions,
+    toolchain: &ClangToolchain,
+) -> Result<DriverResponse, Vec<Diagnostic>> {
+    let build_directory = plan.build_directory();
+    fs::create_dir_all(&build_directory).map_err(|error| {
+        vec![io_diagnostic(format!(
+            "could not create project build directory `{}`: {error}",
+            build_directory.display()
+        ))]
+    })?;
+    let canonical_build = build_directory.canonicalize().map_err(|error| {
+        vec![io_diagnostic(format!(
+            "could not resolve project build directory `{}`: {error}",
+            build_directory.display()
+        ))]
+    })?;
+    if !canonical_build.starts_with(plan.root()) {
+        return Err(vec![io_diagnostic(
+            "project build directory escapes the project root through a symlink",
+        )]);
+    }
+    let artifact = plan.artifact_path();
+    match fs::symlink_metadata(&artifact) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(vec![io_diagnostic(format!(
+                "project artifact path `{}` is not a safe regular file",
+                artifact.display()
+            ))]);
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(vec![io_diagnostic(format!(
+                "could not inspect project artifact path `{}`: {error}",
+                artifact.display()
+            ))]);
+        }
+    }
+    if plan.kind() == ProjectKind::Application {
+        let toolchain = toolchain.clone().with_optimization(options.optimization);
+        let compilation = build_path(plan.source(), &artifact, &options.emits, &toolchain)?;
+        return Ok(DriverResponse::Built {
+            compilation,
+            artifact,
+        });
+    }
+
+    let checked = check_project(plan, options)?;
+    let metadata = format!(
+        "aether-library-bootstrap = 1\nname = {:?}\nversion = {:?}\nsource = \"{}\"\n",
+        plan.package().name.as_str(),
+        plan.package().version.as_str(),
+        plan.source()
+            .strip_prefix(plan.root())
+            .unwrap_or(plan.source())
+            .display()
+    );
+    fs::write(&artifact, metadata).map_err(|error| {
+        vec![io_diagnostic(format!(
+            "could not write library bootstrap artifact `{}`: {error}",
+            artifact.display()
+        ))]
+    })?;
+    Ok(DriverResponse::Built {
+        compilation: Compilation {
+            llvm: String::new(),
+            dumps: checked.dumps,
+            timings_ns: checked.timings_ns,
+        },
+        artifact,
+    })
 }
 
 /// Checks a standalone path through optimized, verified SSA and stops before LLVM.

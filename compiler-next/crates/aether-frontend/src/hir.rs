@@ -1745,7 +1745,39 @@ pub fn collect_signatures(ast: ParsedAst) -> Result<DeclaredProgram, Vec<Diagnos
     })
 }
 pub fn collect_program_signatures(
+    program: ParsedProgram,
+) -> Result<DeclaredProgram, Vec<Diagnostic>> {
+    collect_program_signatures_for_kind(program, true)
+}
+
+/// Collects declarations for a library compilation, which has no executable
+/// `int main()` contract. The internal entry is only an analysis root and is
+/// never emitted as a native process entry by the project driver.
+pub fn collect_library_program_signatures(
     mut program: ParsedProgram,
+) -> Result<DeclaredProgram, Vec<Diagnostic>> {
+    let entry = program.entry.0 as usize;
+    if !program.modules[entry]
+        .ast
+        .functions
+        .iter()
+        .any(|function| function.name == "main")
+    {
+        let sentinel = crate::parse_source(&crate::SourceFile::new(
+            "<library-analysis>",
+            "int main(){return 0;}",
+        ))?;
+        program.modules[entry]
+            .ast
+            .functions
+            .push(sentinel.functions[0].clone());
+    }
+    collect_program_signatures_for_kind(program, true)
+}
+
+fn collect_program_signatures_for_kind(
+    mut program: ParsedProgram,
+    require_main: bool,
 ) -> Result<DeclaredProgram, Vec<Diagnostic>> {
     classes::inject_exception_core(&mut program)?;
     classes::expand_methods(&mut program)?;
@@ -2908,34 +2940,41 @@ pub fn collect_program_signatures(
         }
     }
     let em = &program.modules[program.entry.0 as usize];
-    let Some(entry) = names[program.entry.0 as usize].get("main").copied() else {
-        return Err(vec![src(
-            Diagnostic::new(
-                "E0200",
-                Phase::Semantic,
-                DiagnosticCategory::Name,
-                "entry module requires `int main()`",
-                em.ast.functions().first().map(|f| f.span),
-            ),
-            em,
-        )]);
+    let entry = if require_main {
+        let Some(entry) = names[program.entry.0 as usize].get("main").copied() else {
+            return Err(vec![src(
+                Diagnostic::new(
+                    "E0200",
+                    Phase::Semantic,
+                    DiagnosticCategory::Name,
+                    "entry module requires `int main()`",
+                    em.ast.functions().first().map(|f| f.span),
+                ),
+                em,
+            )]);
+        };
+        let main = &signatures[entry.0 as usize];
+        if main.return_type != TypeId::INT64
+            || !main.parameters.is_empty()
+            || !main.generic_parameters.is_empty()
+        {
+            return Err(vec![src(
+                Diagnostic::new(
+                    "E0201",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    "entry function must have signature `int main()`",
+                    Some(main.span),
+                ),
+                em,
+            )]);
+        }
+        entry
+    } else {
+        signatures
+            .first()
+            .map_or(FunctionId(0), |signature| signature.id)
     };
-    let main = &signatures[entry.0 as usize];
-    if main.return_type != TypeId::INT64
-        || !main.parameters.is_empty()
-        || !main.generic_parameters.is_empty()
-    {
-        return Err(vec![src(
-            Diagnostic::new(
-                "E0201",
-                Phase::Semantic,
-                DiagnosticCategory::Type,
-                "entry function must have signature `int main()`",
-                Some(main.span),
-            ),
-            em,
-        )]);
-    }
     Ok(DeclaredProgram {
         types,
         program,

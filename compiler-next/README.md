@@ -9,6 +9,12 @@ model. The current CLI and binaries are unchanged by this architecture-only
 milestone. See the [normative design](../docs/architecture/CLI_ARCH_1.md) and
 [closure report](../docs/architecture/CLI_ARCH_1_REPORT.md).
 
+`CLI-V1-PROJECT` implements exact-root `aether.toml` projects and atomic
+application/library `init` in the development-name CLI. Project artifacts live
+under `.aether/build`; non-empty dependencies currently fail explicitly until
+package-manager support. See the
+[implementation report](../docs/architecture/CLI_V1_PROJECT_REPORT.md).
+
 ## Default parameters (DEFAULT-PARAMETERS-V1)
 
 Free user functions may declare trailing defaults with `T name = expression`.
