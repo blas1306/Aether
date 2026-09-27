@@ -83,6 +83,8 @@ impl PushInit {
 pub enum RelocationRange {
     /// Exactly the runtime prefix `[0, length)` of a List descriptor.
     ListInitializedPrefix,
+    /// Exactly `[0, rows) x [0, columns)` using the source column capacity.
+    MatrixLogicalRectangle,
     /// One initialized element transferred into a verified hole.
     SingleSlot,
 }
@@ -119,6 +121,13 @@ impl Relocate {
             destination_after: ElementInitialization::Initialized,
             increasing_order: true,
             non_trapping: true,
+        }
+    }
+
+    fn matrix_logical_rectangle(type_id: TypeId) -> Self {
+        Self {
+            range: RelocationRange::MatrixLogicalRectangle,
+            ..Self::list_initialized_prefix(type_id)
         }
     }
 }
@@ -427,6 +436,19 @@ pub enum Rvalue {
         row_capacity: Operand,
         column_capacity: Operand,
         initial: Operand,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
+    MatrixAdd {
+        source: Place,
+        vector: Operand,
+        element_type: TypeId,
+        orientation: aether_frontend::Orientation,
+        contract: aether_frontend::MatrixAddContract,
+        mutation: StructuralMutation,
+        invalidation: aether_frontend::InvalidationShape,
+        relocation: Relocate,
+        shape_trap: TrapKind,
         size_trap: TrapKind,
         failure_trap: TrapKind,
     },
@@ -954,6 +976,7 @@ fn conditional_drop_roots(block: &HirBlock) -> BTreeSet<LocalId> {
                 | HirStmtKind::Assign { .. }
                 | HirStmtKind::ListPush { .. }
                 | HirStmtKind::ListReserve { .. }
+                | HirStmtKind::MatrixAdd { .. }
                 | HirStmtKind::StringOutput { .. } => {}
             }
         }
@@ -1593,6 +1616,35 @@ impl Builder<'_> {
                             requested_capacity,
                             mutation: *mutation,
                             relocation: Relocate::list_initialized_prefix(element_type),
+                            size_trap: TrapKind::AllocationSizeOverflow,
+                            failure_trap: TrapKind::AllocationFailure,
+                        },
+                        statement.span,
+                    );
+                }
+                HirStmtKind::MatrixAdd {
+                    target,
+                    value,
+                    element_type,
+                    orientation,
+                    contract,
+                    mutation,
+                    invalidation,
+                } => {
+                    let vector = self.lower_expr(value);
+                    let target = self.lower_place(target);
+                    self.assign(
+                        target.clone(),
+                        Rvalue::MatrixAdd {
+                            source: target,
+                            vector,
+                            element_type: *element_type,
+                            orientation: *orientation,
+                            contract: *contract,
+                            mutation: *mutation,
+                            invalidation: *invalidation,
+                            relocation: Relocate::matrix_logical_rectangle(*element_type),
+                            shape_trap: TrapKind::ShapeMismatch,
                             size_trap: TrapKind::AllocationSizeOverflow,
                             failure_trap: TrapKind::AllocationFailure,
                         },
@@ -5300,7 +5352,10 @@ fn verify_mir_function(
             if !instruction.destination.projections.is_empty()
                 && !matches!(
                     instruction.value,
-                    Rvalue::Use(_) | Rvalue::ListPush { .. } | Rvalue::ListReserve { .. }
+                    Rvalue::Use(_)
+                        | Rvalue::ListPush { .. }
+                        | Rvalue::ListReserve { .. }
+                        | Rvalue::MatrixAdd { .. }
                 )
             {
                 return Err(fail(
@@ -6813,6 +6868,17 @@ fn verify_ownership(
                         consume_owner(function, types, &mut state, local, "List push", fail)?;
                     }
                 }
+                Rvalue::MatrixAdd {
+                    source: place,
+                    vector,
+                    ..
+                } => {
+                    require_place_owner(function, types, &state, place, fail)?;
+                    let local = operand_local_id(vector).ok_or_else(|| {
+                        fail("consumed MatrixAdd vector is not materialized".into())
+                    })?;
+                    consume_owner(function, types, &mut state, local, "MatrixAdd vector", fail)?;
+                }
                 Rvalue::Aggregate { fields, .. } => {
                     for (_, operand) in fields {
                         let ty = operand_type(function, operand).map_err(fail)?;
@@ -7563,6 +7629,41 @@ fn validate_rvalue(
                 return Err("MIR Matrix filled-init allocation contract invalid".into());
             }
         }
+        Rvalue::MatrixAdd {
+            source,
+            vector,
+            element_type,
+            orientation,
+            contract,
+            mutation,
+            invalidation,
+            relocation,
+            shape_trap,
+            size_trap,
+            failure_trap,
+        } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            validate_operand(function, vector, initialized)?;
+            let source_ty = place_type(function, source, structs, types)?;
+            let vector_ty = operand_type(function, vector)?;
+            if destination != source_ty
+                || types.matrix_element(source_ty) != Some(*element_type)
+                || types.vector_like_info(vector_ty) != Some((*element_type, *orientation))
+                || types.vector_element(vector_ty) != Some(*element_type)
+                || !types.is_admitted_matrix_element(*element_type)
+                || !types.is_relocatable(*element_type)
+                || *contract != aether_frontend::MatrixAddContract::V1
+                || *mutation != StructuralMutation::MatrixAdd
+                || *invalidation != aether_frontend::InvalidationShape::WholeBacking
+                || !valid_matrix_relocation(types, relocation, Some(*element_type))
+                || *shape_trap != TrapKind::ShapeMismatch
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+                || matches!(source.base, PlaceBase::Dereference { mutable: false, .. })
+            {
+                return Err("MIR MatrixAdd contract invalid".into());
+            }
+        }
         Rvalue::MatrixRows { source } | Rvalue::MatrixColumns { source } => {
             validate_place_read(function, source, structs, types, initialized)?;
             let source_ty = place_type(function, source, structs, types)?;
@@ -8144,6 +8245,23 @@ fn valid_list_relocation(
         && types.is_relocatable(relocation.type_id)
         && relocation.destination_after == ElementInitialization::Initialized
         && relocation.range == RelocationRange::ListInitializedPrefix
+        && relocation.source_before == ElementInitialization::Initialized
+        && relocation.destination_before == ElementInitialization::Uninitialized
+        && relocation.source_after == ElementInitialization::Uninitialized
+        && relocation.increasing_order
+        && relocation.non_trapping
+}
+
+fn valid_matrix_relocation(
+    types: &TypeArena,
+    relocation: &Relocate,
+    expected_element: Option<TypeId>,
+) -> bool {
+    expected_element == Some(relocation.type_id)
+        && types.is_admitted_matrix_element(relocation.type_id)
+        && types.is_relocatable(relocation.type_id)
+        && relocation.destination_after == ElementInitialization::Initialized
+        && relocation.range == RelocationRange::MatrixLogicalRectangle
         && relocation.source_before == ElementInitialization::Initialized
         && relocation.destination_before == ElementInitialization::Uninitialized
         && relocation.source_after == ElementInitialization::Uninitialized

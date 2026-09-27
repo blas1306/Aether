@@ -426,7 +426,15 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             .entries()
             .any(|(_, data)| matches!(data, TypeData::Matrix { element: e } if *e == element))
         {
-            emit_matrix_helpers(&mut output, types, element);
+            let layout = layout_of(
+                types,
+                element,
+                target.properties,
+                &program.structs,
+                &program.enums,
+            )
+            .expect("verified Matrix element has concrete layout");
+            emit_matrix_helpers(&mut output, types, element, layout.size, layout.align);
         }
         if types
             .entries()
@@ -2272,6 +2280,36 @@ fn emit_function(
                         llvm_operand(column_capacity),
                         llvm_type(types, *element_type),
                         llvm_operand(initial)
+                    )
+                    .unwrap();
+                }
+                SsaOp::MatrixAdd {
+                    source,
+                    vector,
+                    element_type,
+                    orientation,
+                    ..
+                } => {
+                    let (descriptor, matrix_ty) = emit_place_value(
+                        output,
+                        function,
+                        source,
+                        instruction.result.0,
+                        types,
+                        structs,
+                    );
+                    debug_assert_eq!(types.matrix_element(matrix_ty), Some(*element_type));
+                    let axis = match orientation {
+                        aether_frontend::Orientation::Row => "row",
+                        aether_frontend::Orientation::Column => "column",
+                    };
+                    writeln!(
+                        output,
+                        "  %v{} = call {{ ptr, i64, i64, i64, i64 }} @aether_matrix_add_{}_{}({{ ptr, i64, i64, i64, i64 }} {descriptor}, {{ ptr, i64 }} {}) ; MatrixAdd consumes Vector and publishes shape/capacity last",
+                        instruction.result.0,
+                        axis,
+                        mangle_type(types, *element_type),
+                        llvm_operand(vector)
                     )
                     .unwrap();
                 }
@@ -4726,7 +4764,14 @@ fn escape_symbol_part(name: &str) -> String {
 /// Owning shape is immutable. Exact initial capacities are checked before allocation;
 /// after all four guards, row0*columnCapacity+col0 is within the reservation. No arithmetic flags
 /// or address calculation precedes these guards. Shape is not type identity.
-fn emit_matrix_helpers(output: &mut String, types: &TypeArena, element: TypeId) {
+#[allow(clippy::too_many_lines)]
+fn emit_matrix_helpers(
+    output: &mut String,
+    types: &TypeArena,
+    element: TypeId,
+    element_size: u64,
+    element_align: u64,
+) {
     let suffix = mangle_type(types, element);
     let element_ty = llvm_type(types, element);
     writeln!(output, r"define internal {{ ptr, i64, i64, i64, i64 }} @aether_matrix_new_{suffix}(i64 %rows, i64 %columns, i64 %row_capacity, i64 %column_capacity) {{
@@ -4811,6 +4856,213 @@ address:
   ret ptr %slot
 }}
 ").unwrap();
+    if types.is_relocatable(element) {
+        emit_matrix_add_helper(
+            output,
+            &suffix,
+            &element_ty,
+            element_size,
+            element_align,
+            aether_frontend::Orientation::Row,
+        );
+        emit_matrix_add_helper(
+            output,
+            &suffix,
+            &element_ty,
+            element_size,
+            element_align,
+            aether_frontend::Orientation::Column,
+        );
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn emit_matrix_add_helper(
+    output: &mut String,
+    suffix: &str,
+    element_ty: &str,
+    element_size: u64,
+    element_align: u64,
+    orientation: aether_frontend::Orientation,
+) {
+    let axis = match orientation {
+        aether_frontend::Orientation::Row => "row",
+        aether_frontend::Orientation::Column => "column",
+    };
+    let (expected, result_rows, result_columns, required_rows, required_columns) = match orientation
+    {
+        aether_frontend::Orientation::Row => (
+            "%effective_columns",
+            "%grown_axis",
+            "%effective_columns",
+            "%grown_axis",
+            "%effective_columns",
+        ),
+        aether_frontend::Orientation::Column => (
+            "%effective_rows",
+            "%effective_rows",
+            "%grown_axis",
+            "%effective_rows",
+            "%grown_axis",
+        ),
+    };
+    writeln!(
+        output,
+        "define internal {{ ptr, i64, i64, i64, i64 }} @aether_matrix_add_{axis}_{suffix}({{ ptr, i64, i64, i64, i64 }} %matrix, {{ ptr, i64 }} %vector) {{"
+    )
+    .unwrap();
+    writeln!(
+        output,
+        r"entry:
+  %old_data = extractvalue {{ ptr, i64, i64, i64, i64 }} %matrix, 0
+  %rows = extractvalue {{ ptr, i64, i64, i64, i64 }} %matrix, 1
+  %columns = extractvalue {{ ptr, i64, i64, i64, i64 }} %matrix, 2
+  %row_capacity = extractvalue {{ ptr, i64, i64, i64, i64 }} %matrix, 3
+  %column_capacity = extractvalue {{ ptr, i64, i64, i64, i64 }} %matrix, 4
+  %vector_data = extractvalue {{ ptr, i64 }} %vector, 0
+  %vector_length = extractvalue {{ ptr, i64 }} %vector, 1
+  %rows_zero = icmp eq i64 %rows, 0
+  %columns_zero = icmp eq i64 %columns, 0
+  %virgin = and i1 %rows_zero, %columns_zero"
+    )
+    .unwrap();
+    match orientation {
+        aether_frontend::Orientation::Row => output.push_str(
+            "  %effective_rows = select i1 %virgin, i64 0, i64 %rows\n  %effective_columns = select i1 %virgin, i64 %vector_length, i64 %columns\n  %axis_base = select i1 true, i64 %rows, i64 %rows\n",
+        ),
+        aether_frontend::Orientation::Column => output.push_str(
+            "  %effective_rows = select i1 %virgin, i64 %vector_length, i64 %rows\n  %effective_columns = select i1 %virgin, i64 0, i64 %columns\n  %axis_base = select i1 true, i64 %columns, i64 %columns\n",
+        ),
+    }
+    writeln!(
+        output,
+        r"  %shape_matches = icmp eq i64 %vector_length, {expected}
+  br i1 %shape_matches, label %grow_axis, label %trap_shape_mismatch
+trap_shape_mismatch:
+  ; structured Aether trap: ShapeMismatch; matrix remains untouched
+  call void @llvm.trap()
+  unreachable
+grow_axis:
+  %grown_checked = call {{ i64, i1 }} @llvm.uadd.with.overflow.i64(i64 %axis_base, i64 1)
+  %grown_axis = extractvalue {{ i64, i1 }} %grown_checked, 0
+  %grown_overflow = extractvalue {{ i64, i1 }} %grown_checked, 1
+  br i1 %grown_overflow, label %trap_allocation_size_overflow, label %row_capacity_check
+row_capacity_check:
+  %need_rows = icmp ugt i64 {required_rows}, %row_capacity
+  br i1 %need_rows, label %grow_row_capacity, label %row_capacity_ready
+grow_row_capacity:
+  %row_double_checked = call {{ i64, i1 }} @llvm.umul.with.overflow.i64(i64 %row_capacity, i64 2)
+  %row_doubled = extractvalue {{ i64, i1 }} %row_double_checked, 0
+  %row_double_overflow = extractvalue {{ i64, i1 }} %row_double_checked, 1
+  br i1 %row_double_overflow, label %trap_allocation_size_overflow, label %choose_row_capacity
+choose_row_capacity:
+  %row_was_zero = icmp eq i64 %row_capacity, 0
+  %row_candidate0 = select i1 %row_was_zero, i64 1, i64 %row_doubled
+  %row_small = icmp ult i64 %row_candidate0, {required_rows}
+  %row_candidate = select i1 %row_small, i64 {required_rows}, i64 %row_candidate0
+  br label %row_capacity_ready
+row_capacity_ready:
+  %new_row_capacity = phi i64 [ %row_capacity, %row_capacity_check ], [ %row_candidate, %choose_row_capacity ]
+  %need_columns = icmp ugt i64 {required_columns}, %column_capacity
+  br i1 %need_columns, label %grow_column_capacity, label %column_capacity_ready
+grow_column_capacity:
+  %column_double_checked = call {{ i64, i1 }} @llvm.umul.with.overflow.i64(i64 %column_capacity, i64 2)
+  %column_doubled = extractvalue {{ i64, i1 }} %column_double_checked, 0
+  %column_double_overflow = extractvalue {{ i64, i1 }} %column_double_checked, 1
+  br i1 %column_double_overflow, label %trap_allocation_size_overflow, label %choose_column_capacity
+choose_column_capacity:
+  %column_was_zero = icmp eq i64 %column_capacity, 0
+  %column_candidate0 = select i1 %column_was_zero, i64 1, i64 %column_doubled
+  %column_small = icmp ult i64 %column_candidate0, {required_columns}
+  %column_candidate = select i1 %column_small, i64 {required_columns}, i64 %column_candidate0
+  br label %column_capacity_ready
+column_capacity_ready:
+  %new_column_capacity = phi i64 [ %column_capacity, %row_capacity_ready ], [ %column_candidate, %choose_column_capacity ]
+  %same_rows = icmp eq i64 %new_row_capacity, %row_capacity
+  %same_columns = icmp eq i64 %new_column_capacity, %column_capacity
+  %stable_capacity = and i1 %same_rows, %same_columns
+  br i1 %stable_capacity, label %stable, label %reallocate
+reallocate:
+  %fresh = call {{ ptr, i64, i64, i64, i64 }} @aether_matrix_new_{suffix}(i64 {result_rows}, i64 {result_columns}, i64 %new_row_capacity, i64 %new_column_capacity)
+  %fresh_data = extractvalue {{ ptr, i64, i64, i64, i64 }} %fresh, 0
+  br label %relocate_row_header
+relocate_row_header:
+  %relocate_row = phi i64 [ 0, %reallocate ], [ %relocate_next_row, %relocate_row_done ]
+  %relocate_more_rows = icmp ult i64 %relocate_row, %rows
+  br i1 %relocate_more_rows, label %relocate_column_header, label %relocate_done
+relocate_column_header:
+  %relocate_column = phi i64 [ 0, %relocate_row_header ], [ %relocate_next_column, %relocate_body ]
+  %relocate_more_columns = icmp ult i64 %relocate_column, %columns
+  br i1 %relocate_more_columns, label %relocate_body, label %relocate_row_done
+relocate_body:
+  %old_row_offset = mul i64 %relocate_row, %column_capacity
+  %old_index = add i64 %old_row_offset, %relocate_column
+  %old_slot = getelementptr inbounds {element_ty}, ptr %old_data, i64 %old_index
+  %fresh_row_offset = mul i64 %relocate_row, %new_column_capacity
+  %fresh_index = add i64 %fresh_row_offset, %relocate_column
+  %fresh_slot = getelementptr inbounds {element_ty}, ptr %fresh_data, i64 %fresh_index
+  call void @aether_relocate_{suffix}(ptr %old_slot, ptr %fresh_slot)
+  %matrix_relocation_count = load i64, ptr @aether_relocation_count
+  %matrix_relocation_next = add i64 %matrix_relocation_count, 1
+  store i64 %matrix_relocation_next, ptr @aether_relocation_count
+  %relocate_next_column = add i64 %relocate_column, 1
+  br label %relocate_column_header
+relocate_row_done:
+  %relocate_next_row = add i64 %relocate_row, 1
+  br label %relocate_row_header
+relocate_done:
+  %old_capacity_count = mul i64 %row_capacity, %column_capacity
+  %old_size = mul i64 %old_capacity_count, {element_size}
+  call void @aether_free(ptr %old_data, i64 %old_size, i64 {element_align})
+  br label %append_ready
+stable:
+  br label %append_ready
+append_ready:
+  %destination_data = phi ptr [ %old_data, %stable ], [ %fresh_data, %relocate_done ]
+  %destination_column_capacity = phi i64 [ %column_capacity, %stable ], [ %new_column_capacity, %relocate_done ]
+  br label %append_header
+append_header:
+  %append_index = phi i64 [ 0, %append_ready ], [ %append_next, %append_body ]
+  %append_more = icmp ult i64 %append_index, %vector_length
+  br i1 %append_more, label %append_body, label %append_done
+append_body:"
+    )
+    .unwrap();
+    match orientation {
+        aether_frontend::Orientation::Row => output.push_str(
+            "  %append_row_offset = mul i64 %rows, %destination_column_capacity\n  %append_destination_index = add i64 %append_row_offset, %append_index\n",
+        ),
+        aether_frontend::Orientation::Column => output.push_str(
+            "  %append_row_offset = mul i64 %append_index, %destination_column_capacity\n  %append_destination_index = add i64 %append_row_offset, %columns\n",
+        ),
+    }
+    writeln!(
+        output,
+        r"  %vector_slot = getelementptr inbounds {element_ty}, ptr %vector_data, i64 %append_index
+  %append_slot = getelementptr inbounds {element_ty}, ptr %destination_data, i64 %append_destination_index
+  call void @aether_relocate_{suffix}(ptr %vector_slot, ptr %append_slot)
+  %vector_relocation_count = load i64, ptr @aether_relocation_count
+  %vector_relocation_next = add i64 %vector_relocation_count, 1
+  store i64 %vector_relocation_next, ptr @aether_relocation_count
+  %append_next = add i64 %append_index, 1
+  br label %append_header
+append_done:
+  %vector_size = mul i64 %vector_length, {element_size}
+  call void @aether_free(ptr %vector_data, i64 %vector_size, i64 {element_align})
+  %result0 = insertvalue {{ ptr, i64, i64, i64, i64 }} poison, ptr %destination_data, 0
+  %result1 = insertvalue {{ ptr, i64, i64, i64, i64 }} %result0, i64 {result_rows}, 1
+  %result2 = insertvalue {{ ptr, i64, i64, i64, i64 }} %result1, i64 {result_columns}, 2
+  %result3 = insertvalue {{ ptr, i64, i64, i64, i64 }} %result2, i64 %new_row_capacity, 3
+  %result4 = insertvalue {{ ptr, i64, i64, i64, i64 }} %result3, i64 %new_column_capacity, 4
+  ret {{ ptr, i64, i64, i64, i64 }} %result4
+trap_allocation_size_overflow:
+  ; structured Aether trap: AllocationSizeOverflow; owners remain untouched
+  call void @llvm.trap()
+  unreachable
+}}
+"
+    )
+    .unwrap();
 }
 
 fn emit_matrix_fill_helper(output: &mut String, suffix: &str, element_ty: &str) {

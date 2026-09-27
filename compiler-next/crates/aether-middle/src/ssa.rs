@@ -262,6 +262,19 @@ pub enum SsaOp {
         size_trap: TrapKind,
         failure_trap: TrapKind,
     },
+    MatrixAdd {
+        source: SsaPlace,
+        vector: SsaOperand,
+        element_type: TypeId,
+        orientation: aether_frontend::Orientation,
+        contract: aether_frontend::MatrixAddContract,
+        mutation: StructuralMutation,
+        invalidation: aether_frontend::InvalidationShape,
+        relocation: Relocate,
+        shape_trap: TrapKind,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
     ArrayInit {
         element_type: TypeId,
         elements: Vec<SsaOperand>,
@@ -1238,6 +1251,31 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             size_trap: *size_trap,
             failure_trap: *failure_trap,
         },
+        Rvalue::MatrixAdd {
+            source,
+            vector,
+            element_type,
+            orientation,
+            contract,
+            mutation,
+            invalidation,
+            relocation,
+            shape_trap,
+            size_trap,
+            failure_trap,
+        } => SsaOp::MatrixAdd {
+            source: rename_place(source, stacks, mir),
+            vector: rename_operand(vector, stacks),
+            element_type: *element_type,
+            orientation: *orientation,
+            contract: *contract,
+            mutation: *mutation,
+            invalidation: *invalidation,
+            relocation: *relocation,
+            shape_trap: *shape_trap,
+            size_trap: *size_trap,
+            failure_trap: *failure_trap,
+        },
         Rvalue::ArrayInit {
             element_type,
             elements,
@@ -1959,6 +1997,10 @@ pub(crate) fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<Local
         } => [rows, columns, row_capacity, column_capacity, initial]
             .into_iter()
             .filter_map(operand_local)
+            .collect(),
+        Rvalue::MatrixAdd { source, vector, .. } => place_locals(function, source)
+            .into_iter()
+            .chain(operand_local(vector))
             .collect(),
         Rvalue::MatrixInit { elements, .. }
         | Rvalue::VectorInit { elements, .. }
@@ -3436,6 +3478,7 @@ fn verify_ssa_collection_loops(
                         | SsaOp::Move { source: place }
                         | SsaOp::ListSetLength { source: place, .. }
                         | SsaOp::ListPush { source: place, .. }
+                        | SsaOp::MatrixAdd { source: place, .. }
                         | SsaOp::ListReserve { source: place, .. } => same_root(place),
                         SsaOp::Take { slot, .. } => same_root(&slot.root),
                         SsaOp::Relocate {
@@ -3568,6 +3611,7 @@ fn owner_consumptions(function: &SsaFunction, owner: ValueId, op: &SsaOp) -> usi
             elements: payloads, ..
         } => owner_operand_count(owner, payloads),
         SsaOp::ListPush { value, .. }
+        | SsaOp::MatrixAdd { vector: value, .. }
         | SsaOp::NullableInject { payload: value, .. }
         | SsaOp::CollectionOwnerCapture { value, .. }
         | SsaOp::ReplaceString { value, .. }
@@ -4462,6 +4506,39 @@ fn verify_op(
                 return Err("SSA Matrix filled-init allocation contract invalid".into());
             }
         }
+        SsaOp::MatrixAdd {
+            source,
+            vector,
+            element_type,
+            orientation,
+            contract,
+            mutation,
+            invalidation,
+            relocation,
+            shape_trap,
+            size_trap,
+            failure_trap,
+        } => {
+            let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
+            let vector_ty = operand_ty(vector)?;
+            if result != source_ty
+                || types.matrix_element(source_ty) != Some(*element_type)
+                || types.vector_like_info(vector_ty) != Some((*element_type, *orientation))
+                || types.vector_element(vector_ty) != Some(*element_type)
+                || !types.is_admitted_matrix_element(*element_type)
+                || !types.is_relocatable(*element_type)
+                || *contract != aether_frontend::MatrixAddContract::V1
+                || *mutation != StructuralMutation::MatrixAdd
+                || *invalidation != aether_frontend::InvalidationShape::WholeBacking
+                || !valid_matrix_relocation(types, relocation, Some(*element_type))
+                || *shape_trap != TrapKind::ShapeMismatch
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+                || !writable(source)?
+            {
+                return Err("SSA MatrixAdd contract invalid".into());
+            }
+        }
         SsaOp::MatrixRows { source } | SsaOp::MatrixColumns { source } => {
             let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
             if result != TypeId::USIZE || types.matrix_like_element(source_ty).is_none() {
@@ -5017,6 +5094,23 @@ fn valid_list_relocation(
         && relocation.non_trapping
 }
 
+fn valid_matrix_relocation(
+    types: &TypeArena,
+    relocation: &Relocate,
+    expected_element: Option<TypeId>,
+) -> bool {
+    expected_element == Some(relocation.type_id)
+        && types.is_admitted_matrix_element(relocation.type_id)
+        && types.is_relocatable(relocation.type_id)
+        && relocation.destination_after == ElementInitialization::Initialized
+        && relocation.range == RelocationRange::MatrixLogicalRectangle
+        && relocation.source_before == ElementInitialization::Initialized
+        && relocation.destination_before == ElementInitialization::Uninitialized
+        && relocation.source_after == ElementInitialization::Uninitialized
+        && relocation.increasing_order
+        && relocation.non_trapping
+}
+
 fn ssa_place_type(
     place: &SsaPlace,
     memory_locals: &[SsaMemoryLocal],
@@ -5230,6 +5324,10 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
             initial,
             ..
         } => vec![rows, columns, row_capacity, column_capacity, initial],
+        SsaOp::MatrixAdd { source, vector, .. } => place_operands(source)
+            .into_iter()
+            .chain(std::iter::once(vector))
+            .collect(),
         SsaOp::MatrixInit { elements, .. }
         | SsaOp::VectorInit { elements, .. }
         | SsaOp::ArrayInit { elements, .. }

@@ -1547,7 +1547,8 @@ pub(super) fn verify_body(
                         block(&finally.body, state, init, types, function, module, sigs)?;
                     }
                 }
-                HirStmtKind::ListPush { target, value, .. } => {
+                HirStmtKind::ListPush { target, value, .. }
+                | HirStmtKind::MatrixAdd { target, value, .. } => {
                     for e in place_children(target) {
                         visit_expr(e, state, types, function, module, sigs)?;
                     }

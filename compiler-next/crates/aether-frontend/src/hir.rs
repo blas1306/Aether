@@ -899,6 +899,15 @@ pub enum HirStmtKind {
         requested_capacity: HirExpr,
         mutation: StructuralMutation,
     },
+    MatrixAdd {
+        target: HirPlace,
+        value: HirExpr,
+        element_type: TypeId,
+        orientation: Orientation,
+        contract: MatrixAddContract,
+        mutation: StructuralMutation,
+        invalidation: InvalidationShape,
+    },
     StringOutput {
         function: crate::CoreFunction,
         value: HirExpr,
@@ -1008,6 +1017,7 @@ pub struct HirFinally {
 pub enum StructuralMutation {
     Push,
     Reserve,
+    MatrixAdd,
     Pop,
     SwapRemove,
     Remove,
@@ -1028,6 +1038,55 @@ pub enum InvalidationShape {
     IndexAndTail,
     /// Every old slot at or after the HIR removal index.
     SuffixFrom,
+    /// Every address into the owner backing may become invalid.
+    WholeBacking,
+}
+
+/// Closed, inspectable descriptor recipe for MATRIX-ADD-V1. Runtime values
+/// remain in the receiver/vector descriptors; these recipes forbid an IR from
+/// silently dropping any shape, capacity, ordering, or ownership obligation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatrixAddMetadataRecipe {
+    ReceiverShapeCapacitiesAndArgumentLength,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatrixAddShapeRecipe {
+    OrientedAxisGrowthWithVirginComplement,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatrixAddCapacityRecipe {
+    IndependentGeometricDoubleMinimumOne,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatrixAddFailureOrder {
+    ShapeAndOverflowBeforeMutation,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MatrixAddArgumentOwnership {
+    Consumed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MatrixAddContract {
+    pub metadata: MatrixAddMetadataRecipe,
+    pub result_shape: MatrixAddShapeRecipe,
+    pub result_capacities: MatrixAddCapacityRecipe,
+    pub failure_order: MatrixAddFailureOrder,
+    pub argument_ownership: MatrixAddArgumentOwnership,
+}
+
+impl MatrixAddContract {
+    pub const V1: Self = Self {
+        metadata: MatrixAddMetadataRecipe::ReceiverShapeCapacitiesAndArgumentLength,
+        result_shape: MatrixAddShapeRecipe::OrientedAxisGrowthWithVirginComplement,
+        result_capacities: MatrixAddCapacityRecipe::IndependentGeometricDoubleMinimumOne,
+        failure_order: MatrixAddFailureOrder::ShapeAndOverflowBeforeMutation,
+        argument_ownership: MatrixAddArgumentOwnership::Consumed,
+    };
 }
 
 impl StructuralMutation {
@@ -1035,7 +1094,9 @@ impl StructuralMutation {
     pub const fn effect(self) -> MutationEffect {
         match self {
             Self::Pop | Self::SwapRemove | Self::Remove => MutationEffect::StableStructuralMutation,
-            Self::Push | Self::Reserve => MutationEffect::PotentiallyRelocatingMutation,
+            Self::Push | Self::Reserve | Self::MatrixAdd => {
+                MutationEffect::PotentiallyRelocatingMutation
+            }
         }
     }
 }
@@ -1054,9 +1115,9 @@ impl HirStmtKind {
             {
                 Some(MutationEffect::ElementMutation)
             }
-            Self::ListPush { mutation, .. } | Self::ListReserve { mutation, .. } => {
-                Some(mutation.effect())
-            }
+            Self::ListPush { mutation, .. }
+            | Self::ListReserve { mutation, .. }
+            | Self::MatrixAdd { mutation, .. } => Some(mutation.effect()),
             _ => None,
         }
     }
@@ -4708,6 +4769,27 @@ impl Monomorphizer<'_> {
                                 .substitute_expr(requested_capacity, substitution)?,
                             mutation: *mutation,
                         },
+                        HirStmtKind::MatrixAdd {
+                            target,
+                            value,
+                            element_type,
+                            orientation,
+                            contract,
+                            mutation,
+                            invalidation,
+                        } => HirStmtKind::MatrixAdd {
+                            target: self.substitute_place(target, substitution)?,
+                            value: self.substitute_expr(value, substitution)?,
+                            element_type: self.substitute_type(
+                                *element_type,
+                                substitution,
+                                statement.span,
+                            )?,
+                            orientation: *orientation,
+                            contract: *contract,
+                            mutation: *mutation,
+                            invalidation: *invalidation,
+                        },
                         HirStmtKind::If {
                             condition,
                             then_block,
@@ -6260,6 +6342,13 @@ impl OwnershipAnalysis<'_> {
                     self.expr(requested_capacity)?;
                     self.structural_mutation(target, statement.span)?;
                 }
+                HirStmtKind::MatrixAdd { target, value, .. } => {
+                    self.expr(value)?;
+                    self.structural_mutation(target, statement.span)?;
+                    if let Some(local) = self.local_root(target) {
+                        self.matrix_shapes[local.0 as usize] = None;
+                    }
+                }
                 HirStmtKind::StringOutput { value, .. } => self.expr(value)?,
                 HirStmtKind::Return { value, drops } => {
                     self.expr(value)?;
@@ -7275,9 +7364,16 @@ impl OwnershipAnalysis<'_> {
         if let Some(owner) = self.owner_of_place(place)
             && self.has_live_storage_borrow(owner)
         {
+            let collection = if self.types.matrix_element(place.ty).is_some() {
+                "Matrix"
+            } else {
+                "List"
+            };
             return Err(self.error(
                 "E0313",
-                "cannot structurally mutate List storage while a derived element reference/view remains live",
+                format!(
+                    "cannot structurally mutate {collection} storage while a derived element reference/view remains live"
+                ),
                 span,
             ));
         }
@@ -8913,6 +9009,49 @@ impl Analyzer<'_> {
     }
 
     fn effect_statement(&mut self, expression: &AstExpr) -> Result<HirStmtKind, Vec<Diagnostic>> {
+        if let AstExprKind::QualifiedCall {
+            module,
+            function,
+            type_arguments,
+            args,
+            ..
+        } = &expression.kind
+            && function == "add"
+        {
+            let mut path = module.split('.');
+            if let Some(root) = path.next()
+                && let Some(local) = self.lookup(root)
+            {
+                let mut target = HirPlace {
+                    base: HirPlaceBase::Local(local),
+                    projections: Vec::new(),
+                    ty: self.locals[local.0 as usize].ty,
+                };
+                for field in path {
+                    self.project_field(&mut target, field, expression.span)?;
+                }
+                if self.types.matrix_element(target.ty).is_some() {
+                    if !type_arguments.is_empty() {
+                        return Err(vec![type_error(
+                            "Matrix.add does not accept explicit type arguments",
+                            expression.span,
+                        )]);
+                    }
+                    return self.matrix_add_statement(target, args, expression.span);
+                }
+            }
+        }
+        if let AstExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+        } = &expression.kind
+            && method == "add"
+            && let Ok(target) = self.resolve_expr_place(receiver, true)
+            && self.types.matrix_element(target.ty).is_some()
+        {
+            return self.matrix_add_statement(target, args, expression.span);
+        }
         if let AstExprKind::Call {
             callee,
             type_arguments,
@@ -9021,6 +9160,73 @@ impl Analyzer<'_> {
                 mutation: StructuralMutation::Reserve,
             })
         }
+    }
+
+    fn matrix_add_statement(
+        &mut self,
+        target: HirPlace,
+        args: &[AstExpr],
+        span: Span,
+    ) -> Result<HirStmtKind, Vec<Diagnostic>> {
+        if args.len() != 1 {
+            return Err(vec![type_error(
+                "Matrix.add expects exactly one Vector<T,Row> or Vector<T,Column>",
+                span,
+            )]);
+        }
+        let element_type = self
+            .types
+            .matrix_element(target.ty)
+            .expect("Matrix.add target checked by caller");
+        if matches!(target.base, HirPlaceBase::Local(local) if self.locals[local.0 as usize].mutability == crate::BindingMutability::Const)
+        {
+            return Err(vec![type_error(
+                "Matrix.add receiver must be a writable Matrix<T> place",
+                span,
+            )]);
+        }
+        if !self
+            .types
+            .guarantees_capability(element_type, Capability::Relocatable)
+        {
+            return Err(vec![type_error(
+                format!(
+                    "Matrix.add element type `{}` does not satisfy `Relocatable`",
+                    format_type(self.types, element_type, self.structs, self.enums)
+                ),
+                args[0].span,
+            )]);
+        }
+        let value = self.expression(&args[0], None)?.expr;
+        let Some(TypeData::Vector {
+            element,
+            orientation,
+        }) = self.types.get(value.ty)
+        else {
+            return Err(vec![type_error(
+                "Matrix.add argument must be exactly an owning Vector<T,Row> or Vector<T,Column>",
+                args[0].span,
+            )]);
+        };
+        if *element != element_type {
+            return Err(vec![type_error(
+                format!(
+                    "Matrix.add requires the same element type; receiver has `{}` but vector has `{}`",
+                    format_type(self.types, element_type, self.structs, self.enums),
+                    format_type(self.types, *element, self.structs, self.enums)
+                ),
+                args[0].span,
+            )]);
+        }
+        Ok(HirStmtKind::MatrixAdd {
+            target,
+            value,
+            element_type,
+            orientation: *orientation,
+            contract: MatrixAddContract::V1,
+            mutation: StructuralMutation::MatrixAdd,
+            invalidation: InvalidationShape::WholeBacking,
+        })
     }
 
     fn match_statement(
@@ -14566,6 +14772,38 @@ fn verify_block(
                     return Err(fail("HIR List reserve contract invalid".into()));
                 }
             }
+            HirStmtKind::MatrixAdd {
+                target,
+                value,
+                element_type,
+                orientation,
+                contract,
+                mutation,
+                invalidation,
+            } => {
+                verify_place(target, f, sigs, structs, enums, types, fail)?;
+                verify_expr(value, f, sigs, structs, enums, types, fail)?;
+                if *mutation != StructuralMutation::MatrixAdd
+                    || *contract != MatrixAddContract::V1
+                    || *invalidation != InvalidationShape::WholeBacking
+                    || types.matrix_element(target.ty) != Some(*element_type)
+                    || !matches!(
+                        types.get(value.ty),
+                        Some(TypeData::Vector { element, orientation: actual })
+                            if *element == *element_type && *actual == *orientation
+                    )
+                    || !types.guarantees_capability(*element_type, Capability::Storable)
+                    || !types.guarantees_capability(*element_type, Capability::Relocatable)
+                    || matches!(
+                        target.base,
+                        HirPlaceBase::Dereference { mutable: false, .. }
+                    )
+                    || !hir_place_writable(target, f, types, structs, enums)
+                    || hir_const_inline_root(target, f).is_some()
+                {
+                    return Err(fail("HIR MatrixAdd contract invalid".into()));
+                }
+            }
             HirStmtKind::If {
                 condition,
                 then_block,
@@ -18474,5 +18712,27 @@ mod vertical33_tests {
         payload_bearing.enums[0].variants[0].payloads.push(payload);
         let error = verify_hir(&payload_bearing).unwrap_err();
         assert_eq!(error[0].code, "E0348");
+    }
+
+    #[test]
+    fn matrix_add_hir_contract_fails_closed_when_corrupted() {
+        let source = SourceFile::new(
+            "matrix-add-corrupt.ae",
+            "int main(){Matrix<int>a=[];Vector<int,Row>r=[1];a.add(r);return a[1,1]-1;}",
+        );
+        let hir = analyze(parse_source(&source).unwrap()).unwrap();
+        verify_hir(&hir).unwrap();
+        let mut bad = hir;
+        let orientation = bad.functions[0]
+            .body
+            .statements
+            .iter_mut()
+            .find_map(|statement| match &mut statement.kind {
+                HirStmtKind::MatrixAdd { orientation, .. } => Some(orientation),
+                _ => None,
+            })
+            .unwrap();
+        *orientation = Orientation::Column;
+        assert!(verify_hir(&bad).is_err());
     }
 }
