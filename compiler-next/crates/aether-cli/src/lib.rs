@@ -7,9 +7,9 @@ use std::path::{Path, PathBuf};
 
 use aether_driver::{
     BuildRequest, CheckRequest, Compilation, CompilationOptions, DriverRequest, DriverResponse,
-    Emit, OptimizationLevel, PackageMetadata, PackageName, PackageVersion, ProjectBuildRequest,
-    ProjectCheckRequest, ProjectKind, ProjectPlan, ProjectRunRequest, RunRequest, StandaloneFile,
-    default_output, execute, render_diagnostics,
+    Emit, OptimizationLevel, PackageInstanceKey, PackageMetadata, PackageName, PackageVersion,
+    ProjectBuildRequest, ProjectCheckRequest, ProjectKind, ProjectPlan, ProjectRunRequest,
+    ResolvedPackage, RunRequest, StandaloneFile, default_output, execute, render_diagnostics,
 };
 use serde::Deserialize;
 
@@ -231,7 +231,7 @@ where
                 compilation: invocation.compilation,
             }),
             ResolvedTarget::Project(input) => DriverRequest::CheckProject(ProjectCheckRequest {
-                input,
+                input: *input,
                 compilation: invocation.compilation,
             }),
         },
@@ -249,7 +249,7 @@ where
                     return 2;
                 }
                 DriverRequest::BuildProject(ProjectBuildRequest {
-                    input,
+                    input: *input,
                     compilation: invocation.compilation,
                 })
             }
@@ -266,7 +266,7 @@ where
                     return 2;
                 }
                 DriverRequest::RunProject(ProjectRunRequest {
-                    input,
+                    input: *input,
                     compilation: invocation.compilation,
                     program_args,
                 })
@@ -308,7 +308,7 @@ where
 
 enum ResolvedTarget {
     File(StandaloneFile),
-    Project(ProjectPlan),
+    Project(Box<ProjectPlan>),
 }
 
 impl ResolvedTarget {
@@ -330,7 +330,8 @@ fn resolve_target(spelling: &Path) -> Result<ResolvedTarget, String> {
     let metadata = fs::metadata(&canonical)
         .map_err(|error| format!("cannot inspect target `{}`: {error}", spelling.display()))?;
     if metadata.is_dir() {
-        return resolve_project(&canonical).map(ResolvedTarget::Project);
+        return resolve_project(&canonical)
+            .map(|project| ResolvedTarget::Project(Box::new(project)));
     }
     if !metadata.is_file() {
         return Err(format!(
@@ -396,90 +397,187 @@ struct DependencyPath {
 }
 
 fn resolve_project(root: &Path) -> Result<ProjectPlan, String> {
-    let direct_manifest = root.join("aether.toml");
-    let metadata = fs::metadata(&direct_manifest).map_err(|error| {
-        format!(
-            "project root `{}` requires direct manifest `{}`: {error}",
-            root.display(),
-            direct_manifest.display()
-        )
-    })?;
-    if !metadata.is_file() {
-        return Err(format!(
-            "direct project manifest `{}` is not a regular file",
-            direct_manifest.display()
-        ));
-    }
-    let manifest_path = fs::canonicalize(&direct_manifest).map_err(|error| {
-        format!(
-            "cannot resolve manifest `{}`: {error}",
-            direct_manifest.display()
-        )
-    })?;
-    let text = fs::read_to_string(&manifest_path).map_err(|error| {
-        format!(
-            "cannot read UTF-8 manifest `{}`: {error}",
-            direct_manifest.display()
-        )
-    })?;
-    let manifest: Manifest = toml::from_str(&text)
-        .map_err(|error| format!("invalid manifest `{}`: {error}", direct_manifest.display()))?;
-    let name = PackageName::new(manifest.package.name).map_err(driver_messages)?;
-    let version = PackageVersion::new(manifest.package.version).map_err(driver_messages)?;
-    if manifest
-        .package
-        .aether
-        .as_deref()
-        .is_some_and(|value| value != "1")
-    {
-        return Err("package.aether currently accepts only the compatibility line `1`".to_owned());
-    }
-    for (dependency_name, dependency) in &manifest.dependencies {
-        PackageName::new(dependency_name.clone()).map_err(driver_messages)?;
-        match dependency {
-            DependencySpec::Registry(requirement) if requirement.trim().is_empty() => {
+    let root = root
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve project root: {error}"))?;
+    let mut resolver = PathResolver::default();
+    let root_instance = resolver.resolve(&root, None, true)?;
+    ProjectPlan::resolved(root_instance, &resolver.packages).map_err(driver_messages)
+}
+
+#[derive(Default)]
+struct PathResolver {
+    packages: BTreeMap<PackageInstanceKey, ResolvedPackage>,
+    by_manifest: BTreeMap<PathBuf, PackageInstanceKey>,
+    stack: Vec<(PathBuf, String)>,
+}
+
+impl PathResolver {
+    #[allow(clippy::too_many_lines)]
+    fn resolve(
+        &mut self,
+        root: &Path,
+        expected_name: Option<&str>,
+        is_root: bool,
+    ) -> Result<PackageInstanceKey, String> {
+        let root = root.canonicalize().map_err(|error| {
+            format!(
+                "cannot resolve path dependency directory `{}`: {error}",
+                root.display()
+            )
+        })?;
+        if !root.is_dir() {
+            return Err(format!(
+                "path dependency target `{}` is not a directory",
+                root.display()
+            ));
+        }
+        let direct_manifest = root.join("aether.toml");
+        let manifest_path = direct_manifest.canonicalize().map_err(|error| {
+            format!(
+                "path dependency target `{}` requires direct `aether.toml`: {error}",
+                root.display()
+            )
+        })?;
+        if !manifest_path.is_file() || manifest_path.parent() != Some(root.as_path()) {
+            return Err(format!(
+                "path dependency target `{}` requires a direct regular `aether.toml`",
+                root.display()
+            ));
+        }
+        if let Some(position) = self
+            .stack
+            .iter()
+            .position(|(path, _)| path == &manifest_path)
+        {
+            let mut chain = self.stack[position..]
+                .iter()
+                .map(|(_, name)| name.clone())
+                .collect::<Vec<_>>();
+            chain.push(self.stack[position].1.clone());
+            return Err(format!("path dependency cycle: {}", chain.join(" -> ")));
+        }
+        if let Some(existing) = self.by_manifest.get(&manifest_path) {
+            if let Some(expected) = expected_name {
+                let actual = instance_name(existing);
+                if actual != expected {
+                    return Err(format!(
+                        "dependency key `{expected}` does not match package.name `{actual}`"
+                    ));
+                }
+            }
+            return Ok(existing.clone());
+        }
+        let text = fs::read_to_string(&manifest_path).map_err(|error| {
+            format!(
+                "cannot read UTF-8 manifest `{}`: {error}",
+                manifest_path.display()
+            )
+        })?;
+        let manifest: Manifest = toml::from_str(&text)
+            .map_err(|error| format!("invalid manifest `{}`: {error}", manifest_path.display()))?;
+        let name = PackageName::new(manifest.package.name).map_err(driver_messages)?;
+        let version = PackageVersion::new(manifest.package.version).map_err(driver_messages)?;
+        if let Some(expected) = expected_name {
+            if name.as_str() != expected {
                 return Err(format!(
-                    "dependency `{dependency_name}` has an empty version constraint"
+                    "dependency key `{expected}` does not match package.name `{}`",
+                    name.as_str()
                 ));
             }
-            DependencySpec::Path(path) if path.path.as_os_str().is_empty() => {
-                return Err(format!("dependency `{dependency_name}` has an empty path"));
+        }
+        if manifest
+            .package
+            .aether
+            .as_deref()
+            .is_some_and(|value| value != "1")
+        {
+            return Err(
+                "package.aether currently accepts only the compatibility line `1`".to_owned(),
+            );
+        }
+        let instance = if is_root {
+            PackageInstanceKey::Root {
+                manifest: manifest_path.to_string_lossy().into_owned(),
+                name: name.as_str().to_owned(),
+                version: version.as_str().to_owned(),
             }
-            _ => {}
+        } else {
+            PackageInstanceKey::Path {
+                manifest: manifest_path.to_string_lossy().into_owned(),
+                name: name.as_str().to_owned(),
+                version: version.as_str().to_owned(),
+            }
+        };
+        self.by_manifest
+            .insert(manifest_path.clone(), instance.clone());
+        self.stack
+            .push((manifest_path.clone(), name.as_str().to_owned()));
+        let mut dependencies = BTreeMap::new();
+        for (dependency_name, dependency) in &manifest.dependencies {
+            PackageName::new(dependency_name.clone()).map_err(driver_messages)?;
+            let target = match dependency {
+                DependencySpec::Registry(requirement) => {
+                    if requirement.trim().is_empty() {
+                        return Err(format!(
+                            "dependency `{dependency_name}` has an empty version constraint"
+                        ));
+                    }
+                    return Err(format!(
+                        "registry dependency `{dependency_name}` cannot be resolved: registry resolution is not implemented"
+                    ));
+                }
+                DependencySpec::Path(path) => {
+                    if path.path.as_os_str().is_empty() {
+                        return Err(format!("dependency `{dependency_name}` has an empty path"));
+                    }
+                    self.resolve(&root.join(&path.path), Some(dependency_name), false)?
+                }
+            };
+            dependencies.insert(dependency_name.clone(), target);
         }
-    }
-    if !manifest.dependencies.is_empty() {
-        return Err("dependencies are valid manifest entries but resolution is not supported by CLI-V1-PROJECT".to_owned());
-    }
+        self.stack.pop();
 
-    let application = if let Some(entry) = manifest.application.and_then(|table| table.entry) {
-        Some(resolve_entry(root, &entry)?)
-    } else {
-        conventional_source(root, "src/main.ae")?
-    };
-    let library = conventional_source(root, "src/lib.ae")?;
-    let (source, kind) = match (application, library) {
-        (Some(_), Some(_)) => {
-            return Err("project has both application and library targets; multiple targets are not supported".to_owned());
-        }
-        (Some(source), None) => (source, ProjectKind::Application),
-        (None, Some(source)) => (source, ProjectKind::Library),
-        (None, None) => {
-            return Err("package has no source root (`src/main.ae` or `src/lib.ae`)".to_owned());
-        }
-    };
-    ProjectPlan::new(
-        root,
-        manifest_path,
-        PackageMetadata {
+        let application = if let Some(entry) = manifest.application.and_then(|table| table.entry) {
+            Some(resolve_entry(&root, &entry)?)
+        } else {
+            conventional_source(&root, "src/main.ae")?
+        };
+        let library = conventional_source(&root, "src/lib.ae")?;
+        let (source, kind) = match (application, library) {
+            (Some(_), Some(_)) => return Err("project has both application and library targets; multiple targets are not supported".to_owned()),
+            (Some(source), None) if is_root => (source, ProjectKind::Application),
+            (Some(_), None) => return Err(format!("path dependency `{}` must be a library with `src/lib.ae`", name.as_str())),
+            (None, Some(source)) => (source, ProjectKind::Library),
+            (None, None) => return Err("package has no source root (`src/main.ae` or `src/lib.ae`)".to_owned()),
+        };
+        let metadata = PackageMetadata {
             name,
             version,
             aether: manifest.package.aether,
-        },
-        source,
-        kind,
-    )
-    .map_err(driver_messages)
+        };
+        self.packages.insert(
+            instance.clone(),
+            ResolvedPackage::new(
+                instance.clone(),
+                root,
+                manifest_path,
+                metadata,
+                source,
+                kind,
+                dependencies,
+            ),
+        );
+        Ok(instance)
+    }
+}
+
+fn instance_name(instance: &PackageInstanceKey) -> &str {
+    match instance {
+        PackageInstanceKey::Root { name, .. }
+        | PackageInstanceKey::Path { name, .. }
+        | PackageInstanceKey::Registry { name, .. } => name,
+    }
 }
 
 fn resolve_entry(root: &Path, entry: &Path) -> Result<PathBuf, String> {

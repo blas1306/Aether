@@ -37,10 +37,64 @@ use std::time::Instant;
 pub struct ModuleId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackageId(pub u32);
+/// Stable identity of one resolved package instance. Dense [`PackageId`] values are
+/// interned from this identity plus the logical package path for each session.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PackageInstanceKey {
+    Root {
+        manifest: String,
+        name: String,
+        version: String,
+    },
+    Path {
+        manifest: String,
+        name: String,
+        version: String,
+    },
+    /// Reserved for the registry resolver; PACKAGE-IDENTITY-V1 never constructs it.
+    Registry {
+        registry: String,
+        name: String,
+        version: String,
+        checksum: String,
+    },
+}
+
+impl PackageInstanceKey {
+    #[must_use]
+    pub fn canonical(&self) -> String {
+        match self {
+            Self::Root {
+                manifest,
+                name,
+                version,
+            } => {
+                format!("root:{manifest}#{name}@{version}")
+            }
+            Self::Path {
+                manifest,
+                name,
+                version,
+            } => {
+                format!("path:{manifest}#{name}@{version}")
+            }
+            Self::Registry {
+                registry,
+                name,
+                version,
+                checksum,
+            } => {
+                format!("registry:{registry}:{name}@{version}#{checksum}")
+            }
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum OriginKey {
+    /// Legacy standalone-file catalog. It deliberately has no manifest identity.
     Project,
     Toolchain,
+    Package(PackageInstanceKey),
 }
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackagePath(pub Vec<String>);
@@ -89,6 +143,22 @@ impl PackageKey {
         match self {
             Self::Named { path, .. } => path.source(),
             Self::Anonymous => "<anonymous package>".into(),
+        }
+    }
+
+    /// Exact logical identity used by symbols and fingerprints.
+    #[must_use]
+    pub fn canonical(&self) -> String {
+        match self {
+            Self::Named { origin, path } => {
+                let origin = match origin {
+                    OriginKey::Project => "standalone".to_owned(),
+                    OriginKey::Toolchain => "toolchain".to_owned(),
+                    OriginKey::Package(instance) => instance.canonical(),
+                };
+                format!("{origin}::{}", path.canonical())
+            }
+            Self::Anonymous => "anonymous".to_owned(),
         }
     }
 }

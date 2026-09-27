@@ -3778,10 +3778,11 @@ fn mangle_symbol_type(
         let module = &modules[module.0 as usize];
         match &module.key.package {
             aether_frontend::PackageKey::Named { .. } => {
+                let identity = module_symbol_identity(module);
                 format!(
                     "{prefix}{}_{}{}_{name}",
-                    module.display_name.len(),
-                    module.display_name,
+                    identity.len(),
+                    escape_symbol_part(&identity),
                     name.len()
                 )
             }
@@ -4587,13 +4588,23 @@ pub fn bootstrap_symbol_for(module: &str, function: &str) -> String {
 fn bootstrap_symbol_for_module(module: &ModuleInfo, function: &str) -> String {
     match &module.key.package {
         aether_frontend::PackageKey::Named { .. } => {
-            bootstrap_symbol_for(&module.display_name, function)
+            bootstrap_symbol_for(&module_symbol_identity(module), function)
         }
         aether_frontend::PackageKey::Anonymous => format!(
             "__aether_v2_a0_f{}_{}",
             function.len(),
             escape_symbol_part(function)
         ),
+    }
+}
+
+fn module_symbol_identity(module: &ModuleInfo) -> String {
+    match &module.key.package {
+        aether_frontend::PackageKey::Named {
+            origin: aether_frontend::OriginKey::Package(instance),
+            path,
+        } => format!("{}::{}", instance.canonical(), path.canonical()),
+        _ => module.display_name.clone(),
     }
 }
 

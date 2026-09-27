@@ -8,7 +8,7 @@ use std::process::{Command, ExitStatus};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use aether_backend_llvm::{Backend, LlvmTextBackend, TargetDescriptor};
-pub use aether_frontend::Diagnostic;
+pub use aether_frontend::{Diagnostic, PackageInstanceKey};
 use aether_frontend::{
     DiagnosticCategory, LogicalSourceKey, ModuleId, ModuleInfo, OriginKey, PackageId, PackageKey,
     PackagePath, ParsedAst, ParsedModule, ParsedProgram, Phase, ResolvedImport, SourceFile,
@@ -170,6 +170,7 @@ struct CatalogUnit {
     ast: ParsedAst,
     package: PackageKey,
     toolchain: bool,
+    owner: Option<PackageInstanceKey>,
 }
 
 struct SourceCandidate {
@@ -177,10 +178,20 @@ struct SourceCandidate {
     logical: String,
     text: String,
     package_path: Option<Vec<String>>,
+    owner: Option<PackageInstanceKey>,
+    owner_name: Option<String>,
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::too_many_lines)]
 fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnostic>> {
+    discover_catalog_with_plan(entry_path, None)
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::too_many_lines)]
+fn discover_catalog_with_plan(
+    entry_path: &Path,
+    project: Option<&ProjectPlan>,
+) -> Result<CompilationSession, Vec<Diagnostic>> {
     let discovery_started = Instant::now();
     let entry_absolute = entry_path.canonicalize().map_err(|error| {
         vec![io_diagnostic(format!(
@@ -190,11 +201,36 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
     })?;
     let source_root = source_root_for_entry(&entry_absolute);
     let mut paths = Vec::new();
-    collect_source_paths(&source_root, &source_root, &mut paths)?;
+    if let Some(plan) = project {
+        for (instance, package) in plan.packages() {
+            let root = package
+                .source()
+                .parent()
+                .ok_or_else(|| vec![io_diagnostic("package source has no provider root")])?;
+            let mut provider_paths = Vec::new();
+            collect_source_paths(root, root, &mut provider_paths)?;
+            for (logical, path) in provider_paths {
+                paths.push((
+                    format!("{}::{logical}", instance.canonical()),
+                    path,
+                    Some(instance.clone()),
+                    Some(package.package().name.as_str().to_owned()),
+                ));
+            }
+        }
+    } else {
+        let mut standalone_paths = Vec::new();
+        collect_source_paths(&source_root, &source_root, &mut standalone_paths)?;
+        paths.extend(
+            standalone_paths
+                .into_iter()
+                .map(|(logical, path)| (logical, path, None, None)),
+        );
+    }
     paths.sort_by(|left, right| left.0.cmp(&right.0));
     let mut file_load_ns = 0_u128;
     let mut candidates = Vec::new();
-    for (logical, path) in paths {
+    for (logical, path, owner, owner_name) in paths {
         let started = Instant::now();
         let text = fs::read_to_string(&path).map_err(|error| {
             vec![io_diagnostic(format!(
@@ -223,6 +259,8 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
             logical,
             text,
             package_path,
+            owner,
+            owner_name,
         });
     }
     let entry_candidate = candidates
@@ -243,7 +281,67 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
     let mut descendant_grants = BTreeSet::new();
     let mut visited = BTreeSet::new();
     let mut loaded_sources = BTreeSet::new();
-    if let Some(package) = entry_package {
+    if project.is_some() {
+        for candidate in &candidates {
+            let source_id = SourceId(units.len() as u32);
+            let source =
+                SourceFile::with_id(source_id, candidate.logical.clone(), candidate.text.clone());
+            let started = Instant::now();
+            let ast = parse_source(&source).map_err(|diagnostics| {
+                diagnostics
+                    .into_iter()
+                    .map(|d| d.with_source_name(&candidate.logical))
+                    .collect::<Vec<_>>()
+            })?;
+            parse_ns += started.elapsed().as_nanos();
+            let is_entry = candidate.path.canonicalize().ok().as_ref() == Some(&entry_absolute);
+            let package = match ast.package() {
+                Some(declaration) => {
+                    let owner_name = candidate
+                        .owner_name
+                        .as_deref()
+                        .expect("project candidate owner");
+                    if declaration.path.first().map(String::as_str) != Some(owner_name) {
+                        return Err(vec![Diagnostic::new("E0241", Phase::Semantic, DiagnosticCategory::Name, format!("source package `{}` is outside owning package root `{owner_name}`", declaration.path.join(".")), Some(declaration.span)).with_source_name(&candidate.logical)]);
+                    }
+                    PackageKey::named(
+                        OriginKey::Package(
+                            candidate.owner.clone().expect("project candidate owner"),
+                        ),
+                        PackagePath(declaration.path.clone()),
+                    )
+                }
+                None if is_entry
+                    && project.is_some_and(|plan| {
+                        plan.root_instance() == candidate.owner.as_ref().expect("owner")
+                    }) =>
+                {
+                    PackageKey::Anonymous
+                }
+                None => {
+                    return Err(vec![
+                        Diagnostic::new(
+                            "E0220",
+                            Phase::Semantic,
+                            DiagnosticCategory::Name,
+                            "non-entry package source must declare its owning package",
+                            None,
+                        )
+                        .with_source_name(&candidate.logical),
+                    ]);
+                }
+            };
+            units.push(CatalogUnit {
+                path: candidate.path.clone(),
+                logical: candidate.logical.clone(),
+                source,
+                ast,
+                package,
+                toolchain: false,
+                owner: candidate.owner.clone(),
+            });
+        }
+    } else if let Some(package) = entry_package {
         pending.insert(package);
     } else {
         let candidate = &candidates[entry_candidate];
@@ -282,6 +380,7 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
             ast,
             package: PackageKey::Anonymous,
             toolchain: false,
+            owner: None,
         });
     }
     while let Some(package) = pending.pop_first() {
@@ -343,6 +442,7 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
                 ast,
                 package: verified,
                 toolchain: false,
+                owner: None,
             });
         }
     }
@@ -425,6 +525,7 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
             ast: std_ast,
             package: PackageKey::named(OriginKey::Toolchain, path),
             toolchain: true,
+            owner: None,
         });
     }
 
@@ -483,7 +584,8 @@ fn discover_catalog(entry_path: &Path) -> Result<CompilationSession, Vec<Diagnos
         })
         .collect::<Vec<_>>();
     for (index, unit) in units.iter().enumerate() {
-        modules[index].info.imports = resolve_imports(unit, &package_ids, &representatives)?;
+        modules[index].info.imports =
+            resolve_imports(unit, &package_ids, &representatives, project)?;
     }
     let entry = units
         .iter()
@@ -623,6 +725,7 @@ fn resolve_imports(
     unit: &CatalogUnit,
     packages: &BTreeMap<PackageKey, PackageId>,
     representatives: &BTreeMap<PackageKey, ModuleId>,
+    project: Option<&ProjectPlan>,
 ) -> Result<Vec<ResolvedImport>, Vec<Diagnostic>> {
     let mut seen_targets = BTreeSet::new();
     let mut bindings = BTreeMap::<String, Span>::new();
@@ -666,6 +769,34 @@ fn resolve_imports(
         }
         let origin = if import.path.first().is_some_and(|segment| segment == "std") {
             OriginKey::Toolchain
+        } else if let Some(plan) = project {
+            let owner = unit.owner.as_ref().ok_or_else(|| {
+                vec![io_diagnostic(
+                    "non-toolchain project source has no owning package instance",
+                )]
+            })?;
+            let owner_node = plan.packages().get(owner).expect("validated owner node");
+            let import_root = &import.path[0];
+            let target_instance = if import_root == owner_node.package().name.as_str() {
+                owner.clone()
+            } else if let Some(target) = owner_node.dependencies().get(import_root) {
+                target.clone()
+            } else {
+                return Err(vec![
+                    Diagnostic::new(
+                        "E0242",
+                        Phase::Semantic,
+                        DiagnosticCategory::Name,
+                        format!(
+                            "package `{}` does not declare direct dependency `{import_root}`",
+                            owner_node.package().name.as_str()
+                        ),
+                        Some(import.span),
+                    )
+                    .with_source_name(&unit.logical),
+                ]);
+            };
+            OriginKey::Package(target_instance)
         } else {
             OriginKey::Project
         };
@@ -1193,6 +1324,78 @@ pub enum ProjectKind {
     Library,
 }
 
+/// One fully resolved package node supplied by the project/package layer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedPackage {
+    instance: PackageInstanceKey,
+    root: PathBuf,
+    manifest: PathBuf,
+    package: PackageMetadata,
+    source: PathBuf,
+    kind: ProjectKind,
+    dependencies: BTreeMap<String, PackageInstanceKey>,
+}
+
+impl ResolvedPackage {
+    /// Constructs a package node. Paths and graph consistency are revalidated by [`ProjectPlan`].
+    #[must_use]
+    pub fn new(
+        instance: PackageInstanceKey,
+        root: PathBuf,
+        manifest: PathBuf,
+        package: PackageMetadata,
+        source: PathBuf,
+        kind: ProjectKind,
+        dependencies: BTreeMap<String, PackageInstanceKey>,
+    ) -> Self {
+        Self {
+            instance,
+            root,
+            manifest,
+            package,
+            source,
+            kind,
+            dependencies,
+        }
+    }
+
+    /// Exact structural identity.
+    #[must_use]
+    pub const fn instance(&self) -> &PackageInstanceKey {
+        &self.instance
+    }
+    /// Canonical package root.
+    #[must_use]
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+    /// Canonical direct manifest.
+    #[must_use]
+    pub fn manifest(&self) -> &Path {
+        &self.manifest
+    }
+    /// Validated manifest metadata.
+    #[must_use]
+    pub const fn package(&self) -> &PackageMetadata {
+        &self.package
+    }
+    /// Selected canonical source entry.
+    #[must_use]
+    pub fn source(&self) -> &Path {
+        &self.source
+    }
+    /// Package target class.
+    #[must_use]
+    pub const fn kind(&self) -> ProjectKind {
+        self.kind
+    }
+    /// Direct import-root edges owned by this package.
+    #[must_use]
+    pub const fn dependencies(&self) -> &BTreeMap<String, PackageInstanceKey> {
+        &self.dependencies
+    }
+}
+
 /// Fully resolved and validated project boundary supplied by a frontend.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProjectPlan {
@@ -1201,6 +1404,8 @@ pub struct ProjectPlan {
     package: PackageMetadata,
     source: PathBuf,
     kind: ProjectKind,
+    root_instance: PackageInstanceKey,
+    packages: BTreeMap<PackageInstanceKey, ResolvedPackage>,
 }
 
 impl ProjectPlan {
@@ -1265,12 +1470,106 @@ impl ProjectPlan {
                 )]);
             }
         }
+        let root_instance = PackageInstanceKey::Root {
+            manifest: manifest.to_string_lossy().into_owned(),
+            name: package.name.as_str().to_owned(),
+            version: package.version.as_str().to_owned(),
+        };
+        let root_package = ResolvedPackage::new(
+            root_instance.clone(),
+            root.clone(),
+            manifest.clone(),
+            package.clone(),
+            source.clone(),
+            kind,
+            BTreeMap::new(),
+        );
         Ok(Self {
             root,
             manifest,
             package,
             source,
             kind,
+            root_instance: root_instance.clone(),
+            packages: BTreeMap::from([(root_instance, root_package)]),
+        })
+    }
+
+    /// Builds a resolved multi-root graph. The compiler receives only canonical package nodes
+    /// and exact dependency edges; it never reads manifests or dependency locators.
+    pub fn resolved(
+        root_instance: PackageInstanceKey,
+        packages: &BTreeMap<PackageInstanceKey, ResolvedPackage>,
+    ) -> Result<Self, Vec<Diagnostic>> {
+        if !packages.contains_key(&root_instance) {
+            return Err(vec![io_diagnostic(
+                "resolved package graph has no root node",
+            )]);
+        }
+        let mut validated = BTreeMap::new();
+        for (key, node) in packages {
+            if key != node.instance() {
+                return Err(vec![io_diagnostic(
+                    "resolved package graph key does not match its node identity",
+                )]);
+            }
+            let rebuilt = Self::new(
+                node.root(),
+                node.manifest(),
+                node.package.clone(),
+                node.source(),
+                node.kind,
+            )?;
+            let expected = match key {
+                PackageInstanceKey::Root {
+                    manifest,
+                    name,
+                    version,
+                }
+                | PackageInstanceKey::Path {
+                    manifest,
+                    name,
+                    version,
+                } => {
+                    manifest == &node.manifest.to_string_lossy()
+                        && name == node.package.name.as_str()
+                        && version == node.package.version.as_str()
+                }
+                PackageInstanceKey::Registry { .. } => false,
+            };
+            if !expected {
+                return Err(vec![io_diagnostic(
+                    "package instance identity does not match canonical manifest metadata",
+                )]);
+            }
+            for (name, target) in &node.dependencies {
+                let Some(target_node) = packages.get(target) else {
+                    return Err(vec![io_diagnostic(format!(
+                        "dependency edge `{name}` has no resolved target"
+                    ))]);
+                };
+                if name != target_node.package.name.as_str() {
+                    return Err(vec![io_diagnostic(format!(
+                        "dependency edge `{name}` does not match target package `{}`",
+                        target_node.package.name.as_str()
+                    ))]);
+                }
+            }
+            let mut canonical = rebuilt.packages.into_values().next().expect("root package");
+            canonical.instance = key.clone();
+            canonical.dependencies.clone_from(&node.dependencies);
+            validated.insert(key.clone(), canonical);
+        }
+        validate_resolved_acyclic(&validated)?;
+        let root_package = validated.get(&root_instance).expect("validated root");
+        Ok(Self {
+            root: root_package.root.clone(),
+            manifest: root_package.manifest.clone(),
+            package: root_package.package.clone(),
+            source: root_package.source.clone(),
+            kind: root_package.kind,
+            root_instance,
+            packages: validated,
         })
     }
 
@@ -1299,6 +1598,16 @@ impl ProjectPlan {
     pub const fn kind(&self) -> ProjectKind {
         self.kind
     }
+    /// Exact root instance identity.
+    #[must_use]
+    pub const fn root_instance(&self) -> &PackageInstanceKey {
+        &self.root_instance
+    }
+    /// All resolved nodes indexed by exact identity.
+    #[must_use]
+    pub const fn packages(&self) -> &BTreeMap<PackageInstanceKey, ResolvedPackage> {
+        &self.packages
+    }
     /// Canonical bootstrap build directory.
     #[must_use]
     pub fn build_directory(&self) -> PathBuf {
@@ -1313,6 +1622,57 @@ impl ProjectPlan {
             ProjectKind::Library => self.build_directory().join(format!("{name}.aetherlib")),
         }
     }
+}
+
+fn instance_display_name(instance: &PackageInstanceKey) -> String {
+    match instance {
+        PackageInstanceKey::Root { name, .. }
+        | PackageInstanceKey::Path { name, .. }
+        | PackageInstanceKey::Registry { name, .. } => name.clone(),
+    }
+}
+
+fn validate_resolved_acyclic(
+    packages: &BTreeMap<PackageInstanceKey, ResolvedPackage>,
+) -> Result<(), Vec<Diagnostic>> {
+    fn visit(
+        key: &PackageInstanceKey,
+        packages: &BTreeMap<PackageInstanceKey, ResolvedPackage>,
+        states: &mut BTreeMap<PackageInstanceKey, u8>,
+        stack: &mut Vec<PackageInstanceKey>,
+    ) -> Result<(), Vec<Diagnostic>> {
+        match states.get(key).copied() {
+            Some(2) => return Ok(()),
+            Some(1) => {
+                let position = stack.iter().position(|item| item == key).unwrap_or(0);
+                let mut names = stack[position..]
+                    .iter()
+                    .map(instance_display_name)
+                    .collect::<Vec<_>>();
+                names.push(instance_display_name(key));
+                return Err(vec![io_diagnostic(format!(
+                    "resolved package cycle: {}",
+                    names.join(" -> ")
+                ))]);
+            }
+            _ => {}
+        }
+        states.insert(key.clone(), 1);
+        stack.push(key.clone());
+        for target in packages[key].dependencies.values() {
+            visit(target, packages, states, stack)?;
+        }
+        stack.pop();
+        states.insert(key.clone(), 2);
+        Ok(())
+    }
+
+    let mut states = BTreeMap::new();
+    let mut stack = Vec::new();
+    for key in packages.keys() {
+        visit(key, packages, &mut states, &mut stack)?;
+    }
+    Ok(())
 }
 
 impl StandaloneFile {
@@ -1523,12 +1883,23 @@ pub fn execute_with_toolchain(
                 return Err(vec![io_diagnostic("library projects cannot be run")]);
             }
             let toolchain = toolchain.with_optimization(request.compilation.optimization);
-            let (compilation, status) = run_path_with_os_arguments(
-                request.input.source(),
+            let executable = temporary_path("out");
+            let _cleanup = TemporaryArtifact(executable.clone());
+            let session = discover_catalog_with_plan(request.input.source(), Some(&request.input))?;
+            let compilation = compile_session_with_optimization(
+                session,
                 &request.compilation.emits,
-                &toolchain,
-                &request.program_args,
+                request.compilation.optimization,
             )?;
+            toolchain.link_executable(&compilation.llvm, &executable)?;
+            let status = Command::new(&executable)
+                .args(&request.program_args)
+                .status()
+                .map_err(|error| {
+                    vec![io_diagnostic(format!(
+                        "could not execute native artifact: {error}"
+                    ))]
+                })?;
             Ok(DriverResponse::Ran {
                 compilation,
                 status,
@@ -1546,7 +1917,7 @@ fn check_project(
             "check cannot emit LLVM because it stops before the backend",
         )]);
     }
-    let session = CompilationSession::discover(plan.source())?;
+    let session = discover_catalog_with_plan(plan.source(), Some(plan))?;
     if plan.kind() == ProjectKind::Library {
         analyze_library_session_with_optimization(session, &options.emits, options.optimization)
             .map(|analysis| analysis.checked)
@@ -1598,7 +1969,10 @@ fn build_project(
     }
     if plan.kind() == ProjectKind::Application {
         let toolchain = toolchain.clone().with_optimization(options.optimization);
-        let compilation = build_path(plan.source(), &artifact, &options.emits, &toolchain)?;
+        let session = discover_catalog_with_plan(plan.source(), Some(plan))?;
+        let compilation =
+            compile_session_with_optimization(session, &options.emits, options.optimization)?;
+        toolchain.link_executable(&compilation.llvm, &artifact)?;
         return Ok(DriverResponse::Built {
             compilation,
             artifact,

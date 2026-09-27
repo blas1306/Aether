@@ -333,7 +333,7 @@ fn explicit_entry_never_falls_back_and_cannot_escape() {
 }
 
 #[test]
-fn main_fallback_works_and_dependencies_fail_explicitly() {
+fn main_fallback_works_and_registry_dependencies_fail_explicitly() {
     let directory = Directory::new("fallback-dependencies");
     directory.write("app/aether.toml", &manifest("app"));
     directory.write("app/src/main.ae", "int main(){return 0;}");
@@ -345,7 +345,227 @@ fn main_fallback_works_and_dependencies_fail_explicitly() {
     );
     let rejected = cli(&directory, &["check", "app"]);
     assert_eq!(rejected.status.code(), Some(2));
-    assert!(String::from_utf8_lossy(&rejected.stderr).contains("resolution is not supported"));
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr)
+            .contains("registry resolution is not implemented")
+    );
+}
+
+#[test]
+fn path_dependencies_are_recursive_owner_scoped_and_canonical() {
+    let directory = Directory::new("path-graph");
+    directory.write("app/aether.toml", "[package]\nname='app'\nversion='0.1.0'\n[dependencies]\na={path='../a'}\nb={path='../b'}\n");
+    directory.write(
+        "app/src/main.ae",
+        "import a; import b; int main(){return a.answer()+b.answer()-42;}",
+    );
+    directory.write(
+        "a/aether.toml",
+        "[package]\nname='a'\nversion='1.0.0'\n[dependencies]\nmath={path='../math-v1'}\n",
+    );
+    directory.write(
+        "a/src/lib.ae",
+        "package a; import math; int answer(){math.Record v=math.make(20);return v.value;}",
+    );
+    directory.write("b/aether.toml", "[package]\nname='b'\nversion='1.0.0'\n[dependencies]\nmath={path='../math-v2/../math-v2'}\n");
+    directory.write(
+        "b/src/lib.ae",
+        "package b; import math; int answer(){math.Record v=math.make(22);return v.value;}",
+    );
+    directory.write(
+        "math-v1/aether.toml",
+        "[package]\nname='math'\nversion='1.5.0'\n",
+    );
+    directory.write(
+        "math-v1/src/lib.ae",
+        "package math; struct Record{int value;} Record make(int x){return Record(x);}",
+    );
+    directory.write(
+        "math-v2/aether.toml",
+        "[package]\nname='math'\nversion='2.1.0'\n",
+    );
+    directory.write(
+        "math-v2/src/lib.ae",
+        "package math; struct Record{int value;} Record make(int x){return Record(x);}",
+    );
+
+    let checked = cli(&directory, &["check", "app"]);
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    let ran = cli(&directory, &["run", "app"]);
+    assert_eq!(
+        ran.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&ran.stderr)
+    );
+}
+
+#[test]
+fn cross_version_nominal_types_do_not_mix() {
+    let directory = Directory::new("path-nominal");
+    directory.write("app/aether.toml", "[package]\nname='app'\nversion='0.1.0'\n[dependencies]\na={path='../a'}\nb={path='../b'}\n");
+    directory.write(
+        "app/src/main.ae",
+        "import a; import b; int main(){return b.consume(a.make());}",
+    );
+    directory.write(
+        "a/aether.toml",
+        "[package]\nname='a'\nversion='1.0.0'\n[dependencies]\nmath={path='../math1'}\n",
+    );
+    directory.write(
+        "a/src/lib.ae",
+        "package a; import math; math.Record make(){return math.Record(1);}",
+    );
+    directory.write(
+        "b/aether.toml",
+        "[package]\nname='b'\nversion='1.0.0'\n[dependencies]\nmath={path='../math2'}\n",
+    );
+    directory.write(
+        "b/src/lib.ae",
+        "package b; import math; int consume(math.Record value){return value.x;}",
+    );
+    directory.write(
+        "math1/aether.toml",
+        "[package]\nname='math'\nversion='1.0.0'\n",
+    );
+    directory.write("math1/src/lib.ae", "package math; struct Record{int x;}");
+    directory.write(
+        "math2/aether.toml",
+        "[package]\nname='math'\nversion='2.0.0'\n",
+    );
+    directory.write("math2/src/lib.ae", "package math; struct Record{int x;}");
+
+    let rejected = cli(&directory, &["check", "app"]);
+    assert_eq!(rejected.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("argument"),
+        "{}",
+        String::from_utf8_lossy(&rejected.stderr)
+    );
+}
+
+#[test]
+fn path_dependency_validation_reports_name_missing_manifest_and_cycles() {
+    let directory = Directory::new("path-errors");
+    directory.write("app/src/main.ae", "int main(){return 0;}");
+    directory.write(
+        "wrong/aether.toml",
+        "[package]\nname='actual'\nversion='1.0.0'\n",
+    );
+    directory.write("wrong/src/lib.ae", "package actual;");
+    directory.write(
+        "app/aether.toml",
+        "[package]\nname='app'\nversion='0.1.0'\n[dependencies]\nexpected={path='../wrong'}\n",
+    );
+    let mismatch = cli(&directory, &["check", "app"]);
+    assert!(String::from_utf8_lossy(&mismatch.stderr).contains("does not match package.name"));
+
+    directory.write(
+        "app/aether.toml",
+        "[package]\nname='app'\nversion='0.1.0'\n[dependencies]\nmissing={path='../missing'}\n",
+    );
+    directory.write("missing/README", "no manifest here");
+    let missing = cli(&directory, &["check", "app"]);
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("requires direct `aether.toml`"));
+
+    directory.write(
+        "app/aether.toml",
+        "[package]\nname='app'\nversion='0.1.0'\n[dependencies]\na={path='../a'}\n",
+    );
+    directory.write(
+        "a/aether.toml",
+        "[package]\nname='a'\nversion='1.0.0'\n[dependencies]\napp={path='../app/./'}\n",
+    );
+    directory.write("a/src/lib.ae", "package a;");
+    let cycle = cli(&directory, &["check", "app"]);
+    assert!(
+        String::from_utf8_lossy(&cycle.stderr).contains("path dependency cycle: app -> a -> app")
+    );
+}
+
+#[test]
+fn transitive_dependency_is_not_visible_without_a_direct_edge() {
+    let directory = Directory::new("path-no-leak");
+    directory.write(
+        "app/aether.toml",
+        "[package]\nname='app'\nversion='0.1.0'\n[dependencies]\na={path='../a'}\n",
+    );
+    directory.write(
+        "app/src/main.ae",
+        "import hidden; int main(){return hidden.value();}",
+    );
+    directory.write(
+        "a/aether.toml",
+        "[package]\nname='a'\nversion='1.0.0'\n[dependencies]\nhidden={path='../hidden'}\n",
+    );
+    directory.write(
+        "a/src/lib.ae",
+        "package a; import hidden; int value(){return hidden.value();}",
+    );
+    directory.write(
+        "hidden/aether.toml",
+        "[package]\nname='hidden'\nversion='1.0.0'\n",
+    );
+    directory.write(
+        "hidden/src/lib.ae",
+        "package hidden; int value(){return 1;}",
+    );
+    let rejected = cli(&directory, &["check", "app"]);
+    assert_eq!(rejected.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr)
+            .contains("does not declare direct dependency `hidden`")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn diamond_and_symlink_spellings_share_one_canonical_package_instance() {
+    use std::os::unix::fs::symlink;
+
+    let directory = Directory::new("path-diamond-symlink");
+    directory.write("app/aether.toml", "[package]\nname='app'\nversion='0.1.0'\n[dependencies]\na={path='../a'}\nb={path='../b'}\n");
+    directory.write(
+        "app/src/main.ae",
+        "import a; import b; int main(){return a.value()+b.value()-2;}",
+    );
+    directory.write(
+        "a/aether.toml",
+        "[package]\nname='a'\nversion='1.0.0'\n[dependencies]\ncommon={path='../common'}\n",
+    );
+    directory.write(
+        "a/src/lib.ae",
+        "package a; import common; int value(){return common.value();}",
+    );
+    directory.write(
+        "b/aether.toml",
+        "[package]\nname='b'\nversion='1.0.0'\n[dependencies]\ncommon={path='../common-link'}\n",
+    );
+    directory.write(
+        "b/src/lib.ae",
+        "package b; import common; int value(){return common.value();}",
+    );
+    directory.write(
+        "common/aether.toml",
+        "[package]\nname='common'\nversion='1.0.0'\n",
+    );
+    directory.write(
+        "common/src/lib.ae",
+        "package common; int value(){return 1;}",
+    );
+    symlink(directory.0.join("common"), directory.0.join("common-link")).unwrap();
+
+    let output = cli(&directory, &["run", "app"]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]
