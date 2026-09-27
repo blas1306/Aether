@@ -24,8 +24,8 @@ use crate::mir::{
 };
 use crate::{
     BinaryOp, BlockId, ElementInitialization, MirDropFlag, MirFunction, Operand, Place, PlaceBase,
-    PlaceProjection, PushInit, Relocate, RelocationRange, Rvalue, SlotPlace, TakeState, Terminator,
-    TrapKind, UnaryOp, VerifiedMir,
+    PlaceProjection, PushInit, Relocate, RelocationRange, Rvalue, SliceSelector, SlotPlace,
+    TakeState, Terminator, TrapKind, UnaryOp, VerifiedMir,
 };
 
 /// Fresh SSA value identity.
@@ -348,6 +348,35 @@ pub enum SsaOp {
         relocation: Relocate,
         size_trap: TrapKind,
         failure_trap: TrapKind,
+    },
+    CollectionSliceCopy {
+        source: SsaPlace,
+        selector: SliceSelector<SsaOperand>,
+        family: aether_frontend::HirSubscriptContainerKind,
+        element_type: TypeId,
+        order_trap: TrapKind,
+        bounds_trap: TrapKind,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
+    VectorSliceView {
+        source: SsaPlace,
+        selector: SliceSelector<SsaOperand>,
+        family: aether_frontend::HirSubscriptContainerKind,
+        orientation: aether_frontend::Orientation,
+        descriptor: aether_frontend::VectorViewDescriptor,
+        order_trap: TrapKind,
+        bounds_trap: TrapKind,
+    },
+    MatrixSliceView {
+        source: SsaPlace,
+        selectors: [SliceSelector<SsaOperand>; 2],
+        family: aether_frontend::HirSubscriptContainerKind,
+        result: aether_frontend::HirSubscriptResult,
+        descriptor: aether_frontend::MatrixViewDescriptor,
+        order_trap: TrapKind,
+        bounds_trap: TrapKind,
+        index_trap: TrapKind,
     },
     /// Borrow the source backing. Source Place and descriptor copy/use chains
     /// retain provenance; the closed recipe is independently verified.
@@ -1420,6 +1449,64 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             right: rename_operand(right, stacks),
             kernel: kernel.clone(),
         },
+        Rvalue::CollectionSliceCopy {
+            source,
+            selector,
+            family,
+            element_type,
+            order_trap,
+            bounds_trap,
+            size_trap,
+            failure_trap,
+        } => SsaOp::CollectionSliceCopy {
+            source: rename_place(source, stacks, mir),
+            selector: rename_slice_selector(selector, stacks),
+            family: *family,
+            element_type: *element_type,
+            order_trap: *order_trap,
+            bounds_trap: *bounds_trap,
+            size_trap: *size_trap,
+            failure_trap: *failure_trap,
+        },
+        Rvalue::VectorSliceView {
+            source,
+            selector,
+            family,
+            orientation,
+            descriptor,
+            order_trap,
+            bounds_trap,
+        } => SsaOp::VectorSliceView {
+            source: rename_place(source, stacks, mir),
+            selector: rename_slice_selector(selector, stacks),
+            family: *family,
+            orientation: *orientation,
+            descriptor: *descriptor,
+            order_trap: *order_trap,
+            bounds_trap: *bounds_trap,
+        },
+        Rvalue::MatrixSliceView {
+            source,
+            selectors,
+            family,
+            result,
+            descriptor,
+            order_trap,
+            bounds_trap,
+            index_trap,
+        } => SsaOp::MatrixSliceView {
+            source: rename_place(source, stacks, mir),
+            selectors: [
+                rename_slice_selector(&selectors[0], stacks),
+                rename_slice_selector(&selectors[1], stacks),
+            ],
+            family: *family,
+            result: *result,
+            descriptor: *descriptor,
+            order_trap: *order_trap,
+            bounds_trap: *bounds_trap,
+            index_trap: *index_trap,
+        },
         Rvalue::MatrixAxisVectorView {
             source,
             fixed_index,
@@ -1683,6 +1770,47 @@ fn rename_operand(operand: &Operand, stacks: &[Vec<ValueId>]) -> SsaOperand {
             ty: *ty,
         },
         Operand::Bool(value) => SsaOperand::Bool(*value),
+    }
+}
+
+fn rename_slice_selector(
+    selector: &SliceSelector<Operand>,
+    stacks: &[Vec<ValueId>],
+) -> SliceSelector<SsaOperand> {
+    match selector {
+        SliceSelector::Scalar {
+            value,
+            axis,
+            semantics,
+            index_base,
+        } => SliceSelector::Scalar {
+            value: rename_operand(value, stacks),
+            axis: *axis,
+            semantics: *semantics,
+            index_base: *index_base,
+        },
+        SliceSelector::Closed {
+            first,
+            last,
+            axis,
+            semantics,
+            index_base,
+        } => SliceSelector::Closed {
+            first: rename_operand(first, stacks),
+            last: rename_operand(last, stacks),
+            axis: *axis,
+            semantics: *semantics,
+            index_base: *index_base,
+        },
+        SliceSelector::Full {
+            axis,
+            semantics,
+            index_base,
+        } => SliceSelector::Full {
+            axis: *axis,
+            semantics: *semantics,
+            index_base: *index_base,
+        },
     }
 }
 
@@ -1957,6 +2085,30 @@ pub(crate) fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<Local
             .into_iter()
             .chain(operand_local(fixed_index))
             .collect(),
+        Rvalue::CollectionSliceCopy {
+            source, selector, ..
+        }
+        | Rvalue::VectorSliceView {
+            source, selector, ..
+        } => place_locals(function, source)
+            .into_iter()
+            .chain(
+                slice_selector_operands(selector)
+                    .into_iter()
+                    .filter_map(operand_local),
+            )
+            .collect(),
+        Rvalue::MatrixSliceView {
+            source, selectors, ..
+        } => place_locals(function, source)
+            .into_iter()
+            .chain(
+                selectors
+                    .iter()
+                    .flat_map(slice_selector_operands)
+                    .filter_map(operand_local),
+            )
+            .collect(),
         Rvalue::Load(place)
         | Rvalue::Borrow { place, .. }
         | Rvalue::Move { source: place }
@@ -2076,6 +2228,14 @@ pub(crate) fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<Local
         | Rvalue::SetPendingFinally { .. }
         | Rvalue::EnterFinally { .. }
         | Rvalue::ExitFinally { .. } => vec![],
+    }
+}
+
+fn slice_selector_operands<O>(selector: &SliceSelector<O>) -> Vec<&O> {
+    match selector {
+        SliceSelector::Scalar { value, .. } => vec![value],
+        SliceSelector::Closed { first, last, .. } => vec![first, last],
+        SliceSelector::Full { .. } => vec![],
     }
 }
 
@@ -4109,6 +4269,42 @@ fn verify_op(
         }
         Ok(true)
     };
+    let validate_slice_selector = |selector: &SliceSelector<SsaOperand>,
+                                   axis: aether_frontend::HirSubscriptAxis,
+                                   semantics: IndexSemantics|
+     -> Result<bool, String> {
+        let (operands, actual_axis, actual_semantics, base, scalar) = match selector {
+            SliceSelector::Scalar {
+                value,
+                axis,
+                semantics,
+                index_base,
+            } => (vec![value], *axis, *semantics, *index_base, true),
+            SliceSelector::Closed {
+                first,
+                last,
+                axis,
+                semantics,
+                index_base,
+            } => (vec![first, last], *axis, *semantics, *index_base, false),
+            SliceSelector::Full {
+                axis,
+                semantics,
+                index_base,
+            } => (vec![], *axis, *semantics, *index_base, false),
+        };
+        if operands
+            .into_iter()
+            .any(|operand| operand_ty(operand) != Ok(TypeId::USIZE))
+        {
+            return Err("SSA slice selector operand is not usize".into());
+        }
+        let expected_base = u8::from(semantics != IndexSemantics::ZeroBased);
+        if actual_axis != axis || actual_semantics != semantics || base != expected_base {
+            return Err("SSA slice selector axis/base/semantics contract invalid".into());
+        }
+        Ok(scalar)
+    };
     match op {
         SsaOp::NullableNull { nullable_type } => {
             if result != *nullable_type || types.nullable_payload(*nullable_type).is_none() {
@@ -4677,6 +4873,150 @@ fn verify_op(
                 || *failure_trap != TrapKind::AllocationFailure
             {
                 return Err("SSA List reserve contract invalid".into());
+            }
+        }
+        SsaOp::CollectionSliceCopy {
+            source,
+            selector,
+            family,
+            element_type,
+            order_trap,
+            bounds_trap,
+            size_trap,
+            failure_trap,
+        } => {
+            let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
+            let expected = match types.get(source_ty) {
+                Some(TypeData::Array { element }) => {
+                    (aether_frontend::HirSubscriptContainerKind::Array, *element)
+                }
+                Some(TypeData::List { element }) => {
+                    (aether_frontend::HirSubscriptContainerKind::List, *element)
+                }
+                _ => return Err("SSA CollectionSliceCopy source family invalid".into()),
+            };
+            if validate_slice_selector(
+                selector,
+                aether_frontend::HirSubscriptAxis::Linear,
+                IndexSemantics::ZeroBased,
+            )? || result != source_ty
+                || *family != expected.0
+                || *element_type != expected.1
+                || !types.guarantees_copy(*element_type)
+                || *order_trap != TrapKind::SliceOrderError
+                || *bounds_trap != TrapKind::SliceBoundsError
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("SSA CollectionSliceCopy contract invalid".into());
+            }
+        }
+        SsaOp::VectorSliceView {
+            source,
+            selector,
+            family,
+            orientation,
+            descriptor,
+            order_trap,
+            bounds_trap,
+        } => {
+            let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
+            let (element, source_orientation) = types
+                .vector_like_info(source_ty)
+                .ok_or_else(|| "SSA VectorSliceView source family invalid".to_string())?;
+            let expected_family = match types.get(source_ty) {
+                Some(TypeData::Vector { .. }) => {
+                    aether_frontend::HirSubscriptContainerKind::Vector {
+                        orientation: source_orientation,
+                    }
+                }
+                Some(TypeData::VectorView { .. }) => {
+                    aether_frontend::HirSubscriptContainerKind::VectorView {
+                        orientation: source_orientation,
+                    }
+                }
+                _ => return Err("SSA VectorSliceView exact family invalid".into()),
+            };
+            if validate_slice_selector(
+                selector,
+                aether_frontend::HirSubscriptAxis::Linear,
+                IndexSemantics::OneBased,
+            )? || types.vector_view_info(result) != Some((element, source_orientation, false))
+                || *orientation != source_orientation
+                || *family != expected_family
+                || *descriptor
+                    != aether_frontend::VectorViewDescriptor::derived(
+                        types.vector_view_info(source_ty).is_some(),
+                    )
+                || *order_trap != TrapKind::SliceOrderError
+                || *bounds_trap != TrapKind::SliceBoundsError
+            {
+                return Err("SSA VectorSliceView result/stride/trap contract invalid".into());
+            }
+        }
+        SsaOp::MatrixSliceView {
+            source,
+            selectors,
+            family,
+            result: slice_result,
+            descriptor,
+            order_trap,
+            bounds_trap,
+            index_trap,
+        } => {
+            let source_ty = ssa_place_type(source, memory_locals, structs, types, operand_ty)?;
+            let element = types
+                .matrix_like_element(source_ty)
+                .ok_or_else(|| "SSA MatrixSliceView source family invalid".to_string())?;
+            let expected_family = match types.get(source_ty) {
+                Some(TypeData::Matrix { .. }) => aether_frontend::HirSubscriptContainerKind::Matrix,
+                Some(TypeData::MatrixView { .. }) => {
+                    aether_frontend::HirSubscriptContainerKind::MatrixView
+                }
+                _ => return Err("SSA MatrixSliceView exact family invalid".into()),
+            };
+            let row_scalar = validate_slice_selector(
+                &selectors[0],
+                aether_frontend::HirSubscriptAxis::Row,
+                IndexSemantics::OneBased2D,
+            )?;
+            let column_scalar = validate_slice_selector(
+                &selectors[1],
+                aether_frontend::HirSubscriptAxis::Column,
+                IndexSemantics::OneBased2D,
+            )?;
+            let expected_result = match (row_scalar, column_scalar) {
+                (true, false) => aether_frontend::HirSubscriptResult::VectorView {
+                    orientation: aether_frontend::Orientation::Row,
+                },
+                (false, true) => aether_frontend::HirSubscriptResult::VectorView {
+                    orientation: aether_frontend::Orientation::Column,
+                },
+                (false, false) => aether_frontend::HirSubscriptResult::MatrixView,
+                (true, true) => return Err("SSA MatrixSliceView cannot be scalar/scalar".into()),
+            };
+            let result_ok = match expected_result {
+                aether_frontend::HirSubscriptResult::VectorView { orientation } => {
+                    types.vector_view_info(result) == Some((element, orientation, false))
+                }
+                aether_frontend::HirSubscriptResult::MatrixView => {
+                    types.matrix_view_info(result) == Some((element, false))
+                }
+                _ => false,
+            };
+            if *family != expected_family
+                || *slice_result != expected_result
+                || !result_ok
+                || *descriptor
+                    != aether_frontend::MatrixViewDescriptor::derived(
+                        types.matrix_view_info(source_ty).is_some(),
+                        false,
+                    )
+                || *order_trap != TrapKind::SliceOrderError
+                || *bounds_trap != TrapKind::SliceBoundsError
+                || *index_trap != TrapKind::IndexOutOfBounds
+            {
+                return Err("SSA MatrixSliceView result/stride/trap contract invalid".into());
             }
         }
         SsaOp::MatrixAxisVectorView {
@@ -5283,6 +5623,21 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         } => place_operands(source)
             .into_iter()
             .chain(std::iter::once(fixed_index))
+            .collect(),
+        SsaOp::CollectionSliceCopy {
+            source, selector, ..
+        }
+        | SsaOp::VectorSliceView {
+            source, selector, ..
+        } => place_operands(source)
+            .into_iter()
+            .chain(slice_selector_operands(selector))
+            .collect(),
+        SsaOp::MatrixSliceView {
+            source, selectors, ..
+        } => place_operands(source)
+            .into_iter()
+            .chain(selectors.iter().flat_map(slice_selector_operands))
             .collect(),
         SsaOp::Load { place }
         | SsaOp::NullablePayload { source: place, .. }

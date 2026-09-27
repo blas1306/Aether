@@ -1719,6 +1719,13 @@ pub enum HirExprKind {
     ListCapacity {
         source: HirPlace,
     },
+    /// Read-only V1 slice. Collection families materialize a fresh owner;
+    /// mathematical families borrow the source backing through a shared view.
+    SliceRead {
+        source: HirPlace,
+        subscript: HirSubscript,
+        element_type: TypeId,
+    },
     ListSwapRemove {
         source: HirPlace,
         index: Box<HirExpr>,
@@ -5480,6 +5487,54 @@ impl Monomorphizer<'_> {
             HirExprKind::ListCapacity { source } => HirExprKind::ListCapacity {
                 source: self.substitute_place(source, substitution)?,
             },
+            HirExprKind::SliceRead {
+                source,
+                subscript,
+                element_type,
+            } => HirExprKind::SliceRead {
+                source: self.substitute_place(source, substitution)?,
+                subscript: HirSubscript {
+                    selectors: subscript
+                        .selectors
+                        .iter()
+                        .map(|selector| {
+                            Ok(HirSubscriptSelector {
+                                kind: match &selector.kind {
+                                    HirSubscriptSelectorKind::Scalar(value) => {
+                                        HirSubscriptSelectorKind::Scalar(Box::new(
+                                            self.substitute_expr(value, substitution)?,
+                                        ))
+                                    }
+                                    HirSubscriptSelectorKind::Closed { first, last } => {
+                                        HirSubscriptSelectorKind::Closed {
+                                            first: Box::new(
+                                                self.substitute_expr(first, substitution)?,
+                                            ),
+                                            last: Box::new(
+                                                self.substitute_expr(last, substitution)?,
+                                            ),
+                                        }
+                                    }
+                                    HirSubscriptSelectorKind::Full => {
+                                        HirSubscriptSelectorKind::Full
+                                    }
+                                },
+                                axis: selector.axis,
+                                semantics: selector.semantics,
+                                index_base: selector.index_base,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?,
+                    container_type: self.substitute_type(
+                        subscript.container_type,
+                        substitution,
+                        expression.span,
+                    )?,
+                    container_kind: subscript.container_kind,
+                    result: subscript.result,
+                },
+                element_type: self.substitute_type(*element_type, substitution, expression.span)?,
+            },
             HirExprKind::MatrixAxisVectorView {
                 source,
                 fixed_index,
@@ -6998,6 +7053,95 @@ impl OwnershipAnalysis<'_> {
                 }
                 Ok(())
             }
+            HirExprKind::SliceRead {
+                source, subscript, ..
+            } => {
+                self.place(source, expr.span)?;
+                let owner = self.owner_of_place(source);
+                self.borrowed.push(owner.into_iter().collect());
+                self.storage_borrowed.push(owner.into_iter().collect());
+                self.storage_ranges
+                    .push(owner.into_iter().map(|root| (root, None)).collect());
+                for selector in &subscript.selectors {
+                    match &selector.kind {
+                        HirSubscriptSelectorKind::Scalar(value) => self.expr(value)?,
+                        HirSubscriptSelectorKind::Closed { first, last } => {
+                            self.expr(first)?;
+                            self.expr(last)?;
+                        }
+                        HirSubscriptSelectorKind::Full => {}
+                    }
+                }
+                self.borrowed.pop();
+                self.storage_borrowed.pop();
+                self.storage_ranges.pop();
+
+                let direct_local = match source.base {
+                    HirPlaceBase::Local(local) if source.projections.is_empty() => Some(local),
+                    _ => None,
+                };
+                let linear_extent =
+                    direct_local.and_then(|local| self.buffer_lengths[local.0 as usize]);
+                let matrix_shape =
+                    direct_local.and_then(|local| self.matrix_shapes[local.0 as usize]);
+                for selector in &subscript.selectors {
+                    let extent = match selector.axis {
+                        HirSubscriptAxis::Linear => linear_extent,
+                        HirSubscriptAxis::Row => matrix_shape.map(|shape| shape.0),
+                        HirSubscriptAxis::Column => matrix_shape.map(|shape| shape.1),
+                    };
+                    let HirSubscriptSelectorKind::Closed { first, last } = &selector.kind else {
+                        continue;
+                    };
+                    if let (HirExprKind::Int(first_value), HirExprKind::Int(last_value)) =
+                        (&first.kind, &last.kind)
+                    {
+                        if first_value > last_value {
+                            return Err(self.error(
+                                "E0459",
+                                format!(
+                                    "SliceOrderError: first endpoint {first_value} exceeds last endpoint {last_value}"
+                                ),
+                                expr.span,
+                            ));
+                        }
+                        let in_domain = |value: i128| {
+                            u64::try_from(value).is_ok_and(|value| {
+                                selector
+                                    .semantics
+                                    .contains(value, extent.unwrap_or(u64::MAX))
+                            })
+                        };
+                        if !in_domain(*first_value)
+                            || !in_domain(*last_value)
+                            || extent.is_some_and(|extent| {
+                                !selector.semantics.contains(
+                                    u64::try_from(*first_value).unwrap_or(u64::MAX),
+                                    extent,
+                                ) || !selector.semantics.contains(
+                                    u64::try_from(*last_value).unwrap_or(u64::MAX),
+                                    extent,
+                                )
+                            })
+                        {
+                            return Err(self.error(
+                                "E0460",
+                                format!(
+                                    "SliceBoundsError: {:?} {:?}-based closed range {first_value}:{last_value}, extent {extent:?}",
+                                    selector.axis, selector.index_base
+                                ),
+                                expr.span,
+                            ));
+                        }
+                    }
+                }
+                if let Some(owner) = owner
+                    && !self.types.guarantees_copy(self.locals[owner.0 as usize].ty)
+                {
+                    self.require_owned(owner, expr.span)?;
+                }
+                Ok(())
+            }
             HirExprKind::ListSwapRemove { source, index, .. } => {
                 self.place(source, expr.span)?;
                 self.expr(index)?;
@@ -7470,6 +7614,11 @@ impl OwnershipAnalysis<'_> {
             HirExprKind::Load(place) if self.types.mathematical_view_info(expr.ty).is_some() => {
                 self.owner_of_place(place)
             }
+            HirExprKind::SliceRead { source, .. }
+                if self.types.mathematical_view_info(expr.ty).is_some() =>
+            {
+                self.owner_of_place(source)
+            }
             HirExprKind::Local(local) => self.provenance[local.0 as usize],
             _ => None,
         }
@@ -7540,7 +7689,11 @@ impl OwnershipAnalysis<'_> {
             HirExprKind::MatrixAxisVectorView { .. }
             | HirExprKind::VectorView { .. }
             | HirExprKind::MatrixView { .. } => true,
-            HirExprKind::Load(_) if self.types.mathematical_view_info(expr.ty).is_some() => true,
+            HirExprKind::SliceRead { .. } | HirExprKind::Load(_)
+                if self.types.mathematical_view_info(expr.ty).is_some() =>
+            {
+                true
+            }
             HirExprKind::View { source, .. } => self.types.list_element(source.ty).is_some(),
             HirExprKind::Local(local) => self.storage_references[local.0 as usize],
             _ => false,
@@ -7587,6 +7740,31 @@ impl OwnershipAnalysis<'_> {
                 } else {
                     None
                 }
+            }
+            HirExprKind::SliceRead {
+                source, subscript, ..
+            } if matches!(subscript.result, HirSubscriptResult::MatrixView) => {
+                let shape = if let HirPlaceBase::Local(local) = source.base
+                    && source.projections.is_empty()
+                {
+                    self.matrix_shapes[local.0 as usize]
+                } else {
+                    None
+                }?;
+                let selected = |selector: &HirSubscriptSelector, extent: u64| match &selector.kind {
+                    HirSubscriptSelectorKind::Full => Some(extent),
+                    HirSubscriptSelectorKind::Closed { first, last } => {
+                        match (&first.kind, &last.kind) {
+                            (HirExprKind::Int(first), HirExprKind::Int(last)) => {
+                                u64::try_from(last - first + 1).ok()
+                            }
+                            _ => None,
+                        }
+                    }
+                    HirSubscriptSelectorKind::Scalar(_) => None,
+                };
+                selected(&subscript.selectors[0], shape.0)
+                    .zip(selected(&subscript.selectors[1], shape.1))
             }
             HirExprKind::Move(local) | HirExprKind::Local(local) => {
                 self.matrix_shapes[local.0 as usize]
@@ -7644,6 +7822,56 @@ impl OwnershipAnalysis<'_> {
                     self.buffer_lengths[local.0 as usize]
                 } else {
                     None
+                }
+            }
+            HirExprKind::SliceRead {
+                source, subscript, ..
+            } => {
+                let extent = if let HirPlaceBase::Local(local) = source.base
+                    && source.projections.is_empty()
+                {
+                    if self.types.matrix_like_element(source.ty).is_some() {
+                        self.matrix_shapes[local.0 as usize].map(|(rows, columns)| {
+                            if matches!(
+                                subscript.result,
+                                HirSubscriptResult::VectorView {
+                                    orientation: Orientation::Row
+                                }
+                            ) {
+                                columns
+                            } else {
+                                rows
+                            }
+                        })
+                    } else {
+                        self.buffer_lengths[local.0 as usize]
+                    }
+                } else {
+                    None
+                }?;
+                let selector = if subscript.selectors.len() == 1 {
+                    &subscript.selectors[0]
+                } else if matches!(
+                    subscript.result,
+                    HirSubscriptResult::VectorView {
+                        orientation: Orientation::Row
+                    }
+                ) {
+                    &subscript.selectors[1]
+                } else {
+                    &subscript.selectors[0]
+                };
+                match &selector.kind {
+                    HirSubscriptSelectorKind::Full => Some(extent),
+                    HirSubscriptSelectorKind::Closed { first, last } => {
+                        match (&first.kind, &last.kind) {
+                            (HirExprKind::Int(first), HirExprKind::Int(last)) => {
+                                u64::try_from(last - first + 1).ok()
+                            }
+                            _ => None,
+                        }
+                    }
+                    HirSubscriptSelectorKind::Scalar(_) => None,
                 }
             }
             HirExprKind::BufferInit { length, .. } | HirExprKind::ArrayFill { length, .. } => {
@@ -9728,6 +9956,75 @@ impl Analyzer<'_> {
         }
     }
 
+    fn slice_read(
+        &mut self,
+        base: &AstExpr,
+        selectors: &[AstSubscriptSelector],
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        // Resolve the container before typing any endpoint. Besides matching source
+        // evaluation order, this freezes the exact Place/provenance borrowed by a
+        // mathematical slice.
+        let source = self.resolve_expr_place(base, false)?;
+        let subscript = self.type_subscript(source.ty, selectors, span)?;
+        debug_assert_ne!(subscript.result, HirSubscriptResult::Scalar);
+        let element_type = self
+            .types
+            .array_element(source.ty)
+            .or_else(|| self.types.list_element(source.ty))
+            .or_else(|| self.types.vector_element(source.ty))
+            .or_else(|| self.types.matrix_element(source.ty))
+            .or_else(|| {
+                self.types
+                    .borrowed_view_info(source.ty)
+                    .map(|(element, _)| element)
+            })
+            .expect("typed slice source has an element type");
+
+        if matches!(
+            subscript.container_kind,
+            HirSubscriptContainerKind::Array | HirSubscriptContainerKind::List
+        ) && !self.types.guarantees_copy(element_type)
+        {
+            return Err(vec![Diagnostic::new(
+                "E0458",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!(
+                    "owning Array/List slice read requires Copy elements, found {}",
+                    self.type_name(element_type)
+                ),
+                Some(span),
+            )]);
+        }
+
+        let result_type = match subscript.result {
+            HirSubscriptResult::Scalar => unreachable!("slice_read requires a slice selector"),
+            HirSubscriptResult::CollectionOwner => source.ty,
+            HirSubscriptResult::VectorView { orientation } => {
+                self.types
+                    .intern_vector_view(element_type, orientation, false)
+            }
+            HirSubscriptResult::MatrixView => self.types.intern_matrix_view(element_type, false),
+        };
+        self.coerce(
+            Checked {
+                expr: HirExpr {
+                    kind: HirExprKind::SliceRead {
+                        source,
+                        subscript,
+                        element_type,
+                    },
+                    ty: result_type,
+                    span,
+                },
+                constant: None,
+            },
+            expected,
+        )
+    }
+
     fn type_subscript(
         &mut self,
         container_type: TypeId,
@@ -9776,6 +10073,20 @@ impl Analyzer<'_> {
                 AstSubscriptSelector::Closed { first, last } => {
                     let first = self.expression(first, Some(TypeId::USIZE))?.expr;
                     let last = self.expression(last, Some(TypeId::USIZE))?.expr;
+                    if let (HirExprKind::Int(first_value), HirExprKind::Int(last_value)) =
+                        (&first.kind, &last.kind)
+                        && first_value > last_value
+                    {
+                        return Err(vec![Diagnostic::new(
+                            "E0459",
+                            Phase::Semantic,
+                            DiagnosticCategory::Type,
+                            format!(
+                                "SliceOrderError: closed slice first endpoint {first_value} exceeds last endpoint {last_value}"
+                            ),
+                            Some(span),
+                        )]);
+                    }
                     HirSubscriptSelectorKind::Closed {
                         first: Box::new(first),
                         last: Box::new(last),
@@ -10556,6 +10867,13 @@ impl Analyzer<'_> {
                     let place = self.resolve_expr_place(e, false)?;
                     self.load_place(place, e.span)?
                 }
+            }
+            AstExprKind::Index { base, selectors }
+                if selectors
+                    .iter()
+                    .any(|selector| !matches!(selector, AstSubscriptSelector::Scalar(_))) =>
+            {
+                self.slice_read(base, selectors, e.span, expected)?
             }
             AstExprKind::Index { .. }
             | AstExprKind::Unary {
@@ -15806,6 +16124,133 @@ fn verify_expr(
                 return Err(fail("HIR List metadata query contract invalid".into()));
             }
         }
+        HirExprKind::SliceRead {
+            source,
+            subscript,
+            element_type,
+        } => {
+            verify_place(source, f, sigs, structs, enums, types, fail)?;
+            let expected_element = types
+                .array_element(source.ty)
+                .or_else(|| types.list_element(source.ty))
+                .or_else(|| types.vector_element(source.ty))
+                .or_else(|| types.matrix_element(source.ty))
+                .or_else(|| types.borrowed_view_info(source.ty).map(|(ty, _)| ty))
+                .ok_or_else(|| fail("HIR SliceRead source family invalid".into()))?;
+            let expected_kind = match types.get(source.ty) {
+                Some(TypeData::Array { .. }) => HirSubscriptContainerKind::Array,
+                Some(TypeData::List { .. }) => HirSubscriptContainerKind::List,
+                Some(TypeData::Vector { orientation, .. }) => HirSubscriptContainerKind::Vector {
+                    orientation: *orientation,
+                },
+                Some(TypeData::VectorView { orientation, .. }) => {
+                    HirSubscriptContainerKind::VectorView {
+                        orientation: *orientation,
+                    }
+                }
+                Some(TypeData::Matrix { .. }) => HirSubscriptContainerKind::Matrix,
+                Some(TypeData::MatrixView { .. }) => HirSubscriptContainerKind::MatrixView,
+                _ => return Err(fail("HIR SliceRead container family invalid".into())),
+            };
+            let matrix = types.matrix_like_element(source.ty).is_some();
+            let expected_count = if matrix { 2 } else { 1 };
+            if subscript.selectors.len() != expected_count {
+                return Err(fail("HIR SliceRead selector count invalid".into()));
+            }
+            let semantics = types.index_semantics(source.ty);
+            let base = match semantics {
+                Some(IndexSemantics::ZeroBased) => 0,
+                Some(IndexSemantics::OneBased | IndexSemantics::OneBased2D) => 1,
+                None => return Err(fail("HIR SliceRead semantics invalid".into())),
+            };
+            let mut scalar_flags = Vec::with_capacity(subscript.selectors.len());
+            for (position, selector) in subscript.selectors.iter().enumerate() {
+                let expected_axis = if matrix {
+                    if position == 0 {
+                        HirSubscriptAxis::Row
+                    } else {
+                        HirSubscriptAxis::Column
+                    }
+                } else {
+                    HirSubscriptAxis::Linear
+                };
+                let scalar = match &selector.kind {
+                    HirSubscriptSelectorKind::Scalar(value) => {
+                        verify_expr(value, f, sigs, structs, enums, types, fail)?;
+                        if value.ty != TypeId::USIZE {
+                            return Err(fail("HIR SliceRead scalar selector type invalid".into()));
+                        }
+                        true
+                    }
+                    HirSubscriptSelectorKind::Closed { first, last } => {
+                        verify_expr(first, f, sigs, structs, enums, types, fail)?;
+                        verify_expr(last, f, sigs, structs, enums, types, fail)?;
+                        if first.ty != TypeId::USIZE || last.ty != TypeId::USIZE {
+                            return Err(fail("HIR SliceRead closed bounds type invalid".into()));
+                        }
+                        false
+                    }
+                    HirSubscriptSelectorKind::Full => false,
+                };
+                if selector.axis != expected_axis
+                    || Some(selector.semantics) != semantics
+                    || selector.index_base != base
+                {
+                    return Err(fail("HIR SliceRead base/axis contract invalid".into()));
+                }
+                scalar_flags.push(scalar);
+            }
+            let expected_result = if scalar_flags.iter().all(|scalar| *scalar) {
+                HirSubscriptResult::Scalar
+            } else if !matrix {
+                match expected_kind {
+                    HirSubscriptContainerKind::Array | HirSubscriptContainerKind::List => {
+                        HirSubscriptResult::CollectionOwner
+                    }
+                    HirSubscriptContainerKind::Vector { orientation }
+                    | HirSubscriptContainerKind::VectorView { orientation } => {
+                        HirSubscriptResult::VectorView { orientation }
+                    }
+                    _ => return Err(fail("HIR SliceRead linear result family invalid".into())),
+                }
+            } else {
+                match (scalar_flags[0], scalar_flags[1]) {
+                    (true, false) => HirSubscriptResult::VectorView {
+                        orientation: Orientation::Row,
+                    },
+                    (false, true) => HirSubscriptResult::VectorView {
+                        orientation: Orientation::Column,
+                    },
+                    (false, false) => HirSubscriptResult::MatrixView,
+                    (true, true) => HirSubscriptResult::Scalar,
+                }
+            };
+            let result_type_ok = match expected_result {
+                HirSubscriptResult::Scalar => false,
+                HirSubscriptResult::CollectionOwner => e.ty == source.ty,
+                HirSubscriptResult::VectorView { orientation } => {
+                    types.vector_view_info(e.ty) == Some((expected_element, orientation, false))
+                }
+                HirSubscriptResult::MatrixView => {
+                    types.matrix_view_info(e.ty) == Some((expected_element, false))
+                }
+            };
+            if subscript.container_type != source.ty
+                || subscript.container_kind != expected_kind
+                || subscript.selectors.len() != expected_count
+                || subscript.result != expected_result
+                || *element_type != expected_element
+                || !result_type_ok
+                || (matches!(
+                    expected_kind,
+                    HirSubscriptContainerKind::Array | HirSubscriptContainerKind::List
+                ) && !types.guarantees_copy(expected_element))
+            {
+                return Err(fail(
+                    "HIR SliceRead container/result/bounds contract invalid".into(),
+                ));
+            }
+        }
         HirExprKind::MatrixAxisVectorView {
             source,
             fixed_index,
@@ -19075,6 +19520,49 @@ mod vertical33_tests {
                 "container" => subscript.container_kind = HirSubscriptContainerKind::List,
                 "selector" => subscript.selectors[0].kind = HirSubscriptSelectorKind::Full,
                 _ => unreachable!(),
+            }
+            assert!(verify_hir(&bad).is_err(), "accepted corrupt {corrupt}");
+        }
+    }
+
+    #[test]
+    fn slice_read_hir_contract_fails_closed_when_corrupted() {
+        let source = SourceFile::new(
+            "slice-read-corrupt.ae",
+            "int main(){Vector<int,Row>a=[1,2];VectorView<int,Row>b=a[1:2];return b[1];}",
+        );
+        let hir = analyze(parse_source(&source).unwrap()).unwrap();
+        verify_hir(&hir).unwrap();
+        for corrupt in ["axis", "base", "result", "container", "selector", "type"] {
+            let mut bad = hir.clone();
+            let initializer = bad.functions[0]
+                .body
+                .statements
+                .iter_mut()
+                .find_map(|statement| match &mut statement.kind {
+                    HirStmtKind::Local { initializer, .. }
+                        if matches!(initializer.kind, HirExprKind::SliceRead { .. }) =>
+                    {
+                        Some(initializer)
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            let HirExprKind::SliceRead { subscript, .. } = &mut initializer.kind else {
+                unreachable!()
+            };
+            match corrupt {
+                "axis" => subscript.selectors[0].axis = HirSubscriptAxis::Column,
+                "base" => subscript.selectors[0].index_base = 0,
+                "result" => subscript.result = HirSubscriptResult::CollectionOwner,
+                "container" => subscript.container_kind = HirSubscriptContainerKind::List,
+                "selector" => subscript.selectors[0].kind = HirSubscriptSelectorKind::Full,
+                "type" => initializer.ty = subscript.container_type,
+                _ => unreachable!(),
+            }
+            // `Full` is itself valid, so corrupt the cached result with it.
+            if corrupt == "selector" {
+                subscript.result = HirSubscriptResult::CollectionOwner;
             }
             assert!(verify_hir(&bad).is_err(), "accepted corrupt {corrupt}");
         }

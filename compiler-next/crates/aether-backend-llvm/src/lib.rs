@@ -19,8 +19,8 @@ use aether_frontend::{
     Substitution, TargetProperties, TypeArena, TypeData, TypeId, layout_of,
 };
 use aether_middle::{
-    BinaryOp, BlockId, SsaFunction, SsaOp, SsaOperand, SsaPlace, SsaPlaceBase, SsaPlaceProjection,
-    SsaTerminator, TrapKind, UnaryOp, VerifiedSsa,
+    BinaryOp, BlockId, SliceSelector, SsaFunction, SsaOp, SsaOperand, SsaPlace, SsaPlaceBase,
+    SsaPlaceProjection, SsaTerminator, TrapKind, UnaryOp, VerifiedSsa,
 };
 
 /// Minimal explicit target contract for the admitted bootstrap platform.
@@ -1518,6 +1518,8 @@ fn emit_function(
     let mut allocation_size_trap = false;
     let mut allocation_failure_trap = false;
     let mut bounds_trap = false;
+    let mut slice_order_trap = false;
+    let mut slice_bounds_trap = false;
     let mut shape_trap = false;
     for block in &function.blocks {
         writeln!(output, "{}:", block_label(block.id)).unwrap();
@@ -1969,6 +1971,192 @@ fn emit_function(
                         instruction.result.0,
                         block.id,
                     );
+                }
+                SsaOp::CollectionSliceCopy {
+                    source,
+                    selector,
+                    family,
+                    element_type,
+                    ..
+                } => {
+                    let id = instruction.result.0;
+                    let (source_value, source_ty) =
+                        emit_place_value(output, function, source, id, types, structs);
+                    let source_llvm = llvm_type(types, source_ty);
+                    let result_llvm = llvm_type(types, instruction.ty);
+                    writeln!(output, "  ; CollectionSliceCopyBegin {family:?}").unwrap();
+                    writeln!(output, "  %slice{id}_source_ptr = extractvalue {source_llvm} {source_value}, 0\n  %slice{id}_extent = extractvalue {source_llvm} {source_value}, 1").unwrap();
+                    let (offset, length, _) = emit_slice_selector(
+                        output,
+                        selector,
+                        &format!("%slice{id}_extent"),
+                        &format!("slice{id}_selector"),
+                    );
+                    slice_order_trap |= matches!(selector, SliceSelector::Closed { .. });
+                    slice_bounds_trap |= matches!(selector, SliceSelector::Closed { .. });
+                    let zero_label = format!("slice{id}_zero");
+                    let allocate_label = format!("slice{id}_allocate");
+                    let loop_label = format!("slice{id}_copy_loop");
+                    let body_label = format!("slice{id}_copy_body");
+                    let copied_label = format!("slice{id}_copied");
+                    let done_label = continuation_label(block.id, id);
+                    writeln!(output, "  %slice{id}_empty = icmp eq i64 {length}, 0\n  br i1 %slice{id}_empty, label %{zero_label}, label %{allocate_label}\n{zero_label}:\n  br label %{done_label}\n{allocate_label}:").unwrap();
+                    let allocator =
+                        if matches!(family, aether_frontend::HirSubscriptContainerKind::Array) {
+                            "fixed"
+                        } else {
+                            "list"
+                        };
+                    writeln!(output, "  %slice{id}_allocated = call {result_llvm} @aether_{allocator}_new_{}(i64 {length})", mangle_type(types, *element_type)).unwrap();
+                    writeln!(output, "  %slice{id}_destination_ptr = extractvalue {result_llvm} %slice{id}_allocated, 0\n  br label %{loop_label}\n{loop_label}:\n  %slice{id}_copy_index = phi i64 [ 0, %{allocate_label} ], [ %slice{id}_copy_next, %{body_label} ]\n  %slice{id}_copy_more = icmp ult i64 %slice{id}_copy_index, {length}\n  br i1 %slice{id}_copy_more, label %{body_label}, label %{copied_label}\n{body_label}:\n  %slice{id}_source_index = add i64 {offset}, %slice{id}_copy_index\n  %slice{id}_source_slot = getelementptr {}, ptr %slice{id}_source_ptr, i64 %slice{id}_source_index\n  %slice{id}_element = load {}, ptr %slice{id}_source_slot\n  %slice{id}_destination_slot = getelementptr {}, ptr %slice{id}_destination_ptr, i64 %slice{id}_copy_index\n  store {} %slice{id}_element, ptr %slice{id}_destination_slot\n  %slice{id}_copy_next = add i64 %slice{id}_copy_index, 1\n  br label %{loop_label}\n{copied_label}:\n  br label %{done_label}\n{done_label}:\n  %v{id} = phi {result_llvm} [ zeroinitializer, %{zero_label} ], [ %slice{id}_allocated, %{copied_label} ]\n  ; CollectionSliceCopyEnd %v{id}", llvm_type(types, *element_type), llvm_type(types, *element_type), llvm_type(types, *element_type), llvm_type(types, *element_type)).unwrap();
+                }
+                SsaOp::VectorSliceView {
+                    source,
+                    selector,
+                    descriptor: recipe,
+                    ..
+                } => {
+                    use aether_frontend::VectorViewField;
+                    let id = instruction.result.0;
+                    let (source_value, source_ty) =
+                        emit_place_value(output, function, source, id, types, structs);
+                    let source_llvm = llvm_type(types, source_ty);
+                    let view_llvm = llvm_type(types, instruction.ty);
+                    writeln!(
+                        output,
+                        "  ; VectorSliceViewBegin {source_llvm}|{source_value}"
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  %vs{id}_source_ptr = extractvalue {source_llvm} {source_value}, 0"
+                    )
+                    .unwrap();
+                    let dimension_slot = match recipe.dimension {
+                        VectorViewField::Dimension => 1,
+                        _ => unreachable!("verified slice dimension recipe"),
+                    };
+                    writeln!(output, "  %vs{id}_extent = extractvalue {source_llvm} {source_value}, {dimension_slot}").unwrap();
+                    let stride = if recipe.stride == VectorViewField::One {
+                        "1".to_string()
+                    } else {
+                        writeln!(
+                            output,
+                            "  %vs{id}_stride = extractvalue {source_llvm} {source_value}, 2"
+                        )
+                        .unwrap();
+                        format!("%vs{id}_stride")
+                    };
+                    let (offset, length, _) = emit_slice_selector(
+                        output,
+                        selector,
+                        &format!("%vs{id}_extent"),
+                        &format!("vs{id}_selector"),
+                    );
+                    slice_order_trap |= matches!(selector, SliceSelector::Closed { .. });
+                    slice_bounds_trap |= matches!(selector, SliceSelector::Closed { .. });
+                    let element = types
+                        .vector_like_info(source_ty)
+                        .expect("verified vector-like source")
+                        .0;
+                    writeln!(output, "  %vs{id}_physical_offset = mul i64 {offset}, {stride}\n  %vs{id}_base = getelementptr {}, ptr %vs{id}_source_ptr, i64 %vs{id}_physical_offset\n  %vs{id}_0 = insertvalue {view_llvm} poison, ptr %vs{id}_base, 0\n  %vs{id}_1 = insertvalue {view_llvm} %vs{id}_0, i64 {length}, 1\n  %v{id} = insertvalue {view_llvm} %vs{id}_1, i64 {stride}, 2\n  ; VectorSliceViewEnd %v{id}", llvm_type(types, element)).unwrap();
+                    let done = continuation_label(block.id, id);
+                    writeln!(output, "  br label %{done}\n{done}:").unwrap();
+                }
+                SsaOp::MatrixSliceView {
+                    source,
+                    selectors,
+                    result,
+                    descriptor: recipe,
+                    ..
+                } => {
+                    use aether_frontend::MatrixViewField;
+                    let id = instruction.result.0;
+                    let (source_value, source_ty) =
+                        emit_place_value(output, function, source, id, types, structs);
+                    let source_llvm = llvm_type(types, source_ty);
+                    let result_llvm = llvm_type(types, instruction.ty);
+                    let from_view = types.matrix_view_info(source_ty).is_some();
+                    writeln!(
+                        output,
+                        "  ; MatrixSliceViewBegin {source_llvm}|{source_value}|{result:?}"
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  %ms{id}_source_ptr = extractvalue {source_llvm} {source_value}, 0"
+                    )
+                    .unwrap();
+                    let mut fields = Vec::new();
+                    for (slot, field) in [
+                        recipe.rows,
+                        recipe.columns,
+                        recipe.row_stride,
+                        recipe.column_stride,
+                    ]
+                    .iter()
+                    .enumerate()
+                    {
+                        let source_slot = match field {
+                            MatrixViewField::Rows => 1,
+                            MatrixViewField::Columns => 2,
+                            MatrixViewField::ColumnCapacity | MatrixViewField::ColumnStride => 4,
+                            MatrixViewField::RowStride => 3,
+                            MatrixViewField::One => {
+                                fields.push("1".to_string());
+                                continue;
+                            }
+                        };
+                        writeln!(output, "  %ms{id}_field{slot} = extractvalue {source_llvm} {source_value}, {source_slot}").unwrap();
+                        fields.push(format!("%ms{id}_field{slot}"));
+                    }
+                    debug_assert_eq!(
+                        from_view,
+                        matches!(recipe.row_stride, MatrixViewField::RowStride)
+                    );
+                    let (row_offset, row_length, row_scalar) = emit_slice_selector(
+                        output,
+                        &selectors[0],
+                        &fields[0],
+                        &format!("ms{id}_row"),
+                    );
+                    let (column_offset, column_length, column_scalar) = emit_slice_selector(
+                        output,
+                        &selectors[1],
+                        &fields[1],
+                        &format!("ms{id}_column"),
+                    );
+                    bounds_trap |= row_scalar || column_scalar;
+                    slice_order_trap |= selectors
+                        .iter()
+                        .any(|selector| matches!(selector, SliceSelector::Closed { .. }));
+                    slice_bounds_trap |= selectors
+                        .iter()
+                        .any(|selector| matches!(selector, SliceSelector::Closed { .. }));
+                    let element = types
+                        .matrix_like_element(source_ty)
+                        .expect("verified matrix slice");
+                    let element_llvm = llvm_type(types, element);
+                    writeln!(output, "  %ms{id}_row_physical = mul i64 {row_offset}, {}\n  %ms{id}_column_physical = mul i64 {column_offset}, {}\n  %ms{id}_physical = add i64 %ms{id}_row_physical, %ms{id}_column_physical\n  %ms{id}_base = getelementptr {element_llvm}, ptr %ms{id}_source_ptr, i64 %ms{id}_physical", fields[2], fields[3]).unwrap();
+                    match result {
+                        aether_frontend::HirSubscriptResult::VectorView {
+                            orientation: aether_frontend::Orientation::Row,
+                        } => {
+                            writeln!(output, "  %ms{id}_0 = insertvalue {result_llvm} poison, ptr %ms{id}_base, 0\n  %ms{id}_1 = insertvalue {result_llvm} %ms{id}_0, i64 {column_length}, 1\n  %v{id} = insertvalue {result_llvm} %ms{id}_1, i64 {}, 2", fields[3]).unwrap();
+                        }
+                        aether_frontend::HirSubscriptResult::VectorView {
+                            orientation: aether_frontend::Orientation::Column,
+                        } => {
+                            writeln!(output, "  %ms{id}_0 = insertvalue {result_llvm} poison, ptr %ms{id}_base, 0\n  %ms{id}_1 = insertvalue {result_llvm} %ms{id}_0, i64 {row_length}, 1\n  %v{id} = insertvalue {result_llvm} %ms{id}_1, i64 {}, 2", fields[2]).unwrap();
+                        }
+                        aether_frontend::HirSubscriptResult::MatrixView => {
+                            writeln!(output, "  %ms{id}_0 = insertvalue {result_llvm} poison, ptr %ms{id}_base, 0\n  %ms{id}_1 = insertvalue {result_llvm} %ms{id}_0, i64 {row_length}, 1\n  %ms{id}_2 = insertvalue {result_llvm} %ms{id}_1, i64 {column_length}, 2\n  %ms{id}_3 = insertvalue {result_llvm} %ms{id}_2, i64 {}, 3\n  %v{id} = insertvalue {result_llvm} %ms{id}_3, i64 {}, 4", fields[2], fields[3]).unwrap();
+                        }
+                        _ => unreachable!("verified matrix slice result"),
+                    }
+                    writeln!(output, "  ; MatrixSliceViewEnd %v{id}").unwrap();
+                    let done = continuation_label(block.id, id);
+                    writeln!(output, "  br label %{done}\n{done}:").unwrap();
                 }
                 SsaOp::MatrixAxisVectorView {
                     source,
@@ -3363,6 +3551,14 @@ fn emit_function(
                 bounds_trap = true;
                 writeln!(output, "  br label %trap_index_out_of_bounds").unwrap();
             }
+            SsaTerminator::Trap(TrapKind::SliceOrderError) => {
+                slice_order_trap = true;
+                writeln!(output, "  br label %trap_slice_order_error").unwrap();
+            }
+            SsaTerminator::Trap(TrapKind::SliceBoundsError) => {
+                slice_bounds_trap = true;
+                writeln!(output, "  br label %trap_slice_bounds_error").unwrap();
+            }
             SsaTerminator::Throw {
                 payload, unwind, ..
             } => {
@@ -3455,7 +3651,99 @@ fn emit_function(
     if bounds_trap {
         writeln!(output, "trap_index_out_of_bounds:\n  ; structured Aether trap: IndexOutOfBounds\n  call void @llvm.trap()\n  unreachable").unwrap();
     }
+    if slice_order_trap {
+        writeln!(output, "trap_slice_order_error:\n  ; structured Aether trap: SliceOrderError\n  call void @llvm.trap()\n  unreachable").unwrap();
+    }
+    if slice_bounds_trap {
+        writeln!(output, "trap_slice_bounds_error:\n  ; structured Aether trap: SliceBoundsError\n  call void @llvm.trap()\n  unreachable").unwrap();
+    }
     writeln!(output, "}}\n").unwrap();
+}
+
+fn emit_slice_selector(
+    output: &mut String,
+    selector: &SliceSelector<SsaOperand>,
+    extent: &str,
+    prefix: &str,
+) -> (String, String, bool) {
+    match selector {
+        SliceSelector::Full { .. } => ("0".into(), extent.into(), false),
+        SliceSelector::Scalar {
+            value, index_base, ..
+        } => {
+            let value = llvm_operand(value);
+            let offset = if *index_base == 0 {
+                value.clone()
+            } else {
+                format!("%{prefix}_offset")
+            };
+            let comparison = if *index_base == 0 { "ult" } else { "ule" };
+            if *index_base == 1 {
+                writeln!(
+                    output,
+                    "  %{prefix}_lower = icmp uge i64 {value}, 1\n  br i1 %{prefix}_lower, label %{prefix}_upper_check, label %trap_index_out_of_bounds\n{prefix}_upper_check:"
+                )
+                .unwrap();
+            }
+            writeln!(
+                output,
+                "  %{prefix}_upper = icmp {comparison} i64 {value}, {extent}\n  br i1 %{prefix}_upper, label %{prefix}_valid, label %trap_index_out_of_bounds\n{prefix}_valid:"
+            )
+            .unwrap();
+            if *index_base == 1 {
+                writeln!(output, "  %{prefix}_offset = sub i64 {value}, 1").unwrap();
+            }
+            (offset, "1".into(), true)
+        }
+        SliceSelector::Closed {
+            first,
+            last,
+            index_base,
+            ..
+        } => {
+            let first = llvm_operand(first);
+            let last = llvm_operand(last);
+            writeln!(
+                output,
+                "  %{prefix}_ordered = icmp ule i64 {first}, {last}\n  br i1 %{prefix}_ordered, label %{prefix}_bounds, label %trap_slice_order_error\n{prefix}_bounds:"
+            )
+            .unwrap();
+            let first_ok = if *index_base == 0 {
+                format!("icmp ult i64 {first}, {extent}")
+            } else {
+                writeln!(output, "  %{prefix}_first_lower = icmp uge i64 {first}, 1").unwrap();
+                format!("icmp ule i64 {first}, {extent}")
+            };
+            writeln!(output, "  %{prefix}_first_upper = {first_ok}").unwrap();
+            if *index_base == 1 {
+                writeln!(
+                    output,
+                    "  %{prefix}_first_ok = and i1 %{prefix}_first_lower, %{prefix}_first_upper"
+                )
+                .unwrap();
+            }
+            let first_valid = if *index_base == 0 {
+                format!("%{prefix}_first_upper")
+            } else {
+                format!("%{prefix}_first_ok")
+            };
+            let last_cmp = if *index_base == 0 { "ult" } else { "ule" };
+            writeln!(
+                output,
+                "  %{prefix}_last_upper = icmp {last_cmp} i64 {last}, {extent}"
+            )
+            .unwrap();
+            writeln!(output, "  %{prefix}_in_bounds = and i1 {first_valid}, %{prefix}_last_upper\n  br i1 %{prefix}_in_bounds, label %{prefix}_valid, label %trap_slice_bounds_error\n{prefix}_valid:").unwrap();
+            let offset = if *index_base == 0 {
+                first.clone()
+            } else {
+                writeln!(output, "  %{prefix}_offset = sub i64 {first}, 1").unwrap();
+                format!("%{prefix}_offset")
+            };
+            writeln!(output, "  %{prefix}_difference = sub i64 {last}, {first}\n  %{prefix}_length = add i64 %{prefix}_difference, 1").unwrap();
+            (offset, format!("%{prefix}_length"), false)
+        }
+    }
 }
 
 fn emit_checked(
@@ -3862,6 +4150,9 @@ fn is_checked(op: &SsaOp) -> bool {
         SsaOp::AlgebraicProduct { .. }
             | SsaOp::ElementwiseBinary { .. }
             | SsaOp::MatrixAxisVectorView { .. }
+            | SsaOp::CollectionSliceCopy { .. }
+            | SsaOp::VectorSliceView { .. }
+            | SsaOp::MatrixSliceView { .. }
             | SsaOp::Unary {
                 op: UnaryOp::NegateIntegerChecked,
                 ..

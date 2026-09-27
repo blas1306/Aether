@@ -1199,6 +1199,22 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
         | E::VectorView { source, .. }
         | E::MatrixView { source, .. }
         | E::View { source, .. } => place_children(source),
+        E::SliceRead {
+            source, subscript, ..
+        } => {
+            let mut children = place_children(source);
+            for selector in &subscript.selectors {
+                match &selector.kind {
+                    crate::HirSubscriptSelectorKind::Scalar(value) => children.push(value),
+                    crate::HirSubscriptSelectorKind::Closed { first, last } => {
+                        children.push(first);
+                        children.push(last);
+                    }
+                    crate::HirSubscriptSelectorKind::Full => {}
+                }
+            }
+            children
+        }
         E::CallScopedSharedBorrow { source, .. } => match source {
             crate::CallBorrowSource::Place(place) => place_children(place),
             crate::CallBorrowSource::Temporary(initializer) => vec![initializer],

@@ -14,9 +14,10 @@ use aether_frontend::{
     CastKind, CoercionKind, CollectionIterationSource, Diagnostic, DiagnosticCategory, EnumId,
     EnumInfo, FieldId, FloatType, FloatValue, FunctionInstanceInfo, HirBinaryOp, HirBlock,
     HirCallTarget, HirDrop, HirExpr, HirExprKind, HirFinally, HirFunction, HirMatchArm, HirPlace,
-    HirPlaceBase, HirPlaceProjection, HirStmtKind, HirUnaryOp, InstanceId, LocalId, MatchMode,
-    ModuleInfo, Phase, Span, StructId, StructInfo, StructuralMutation, Substitution, TypeArena,
-    TypeData, TypeId, TypedHir, VariantId, format_type,
+    HirPlaceBase, HirPlaceProjection, HirStmtKind, HirSubscriptResult, HirSubscriptSelector,
+    HirSubscriptSelectorKind, HirUnaryOp, InstanceId, LocalId, MatchMode, ModuleInfo, Phase, Span,
+    StructId, StructInfo, StructuralMutation, Substitution, TypeArena, TypeData, TypeId, TypedHir,
+    VariantId, format_type,
 };
 
 /// Basic-block identity, equal to its stable vector index.
@@ -242,8 +243,33 @@ pub enum TrapKind {
     AllocationSizeOverflow,
     AllocationFailure,
     IndexOutOfBounds,
+    SliceOrderError,
+    SliceBoundsError,
     ListEmpty,
     ZeroRangeStep,
+}
+
+/// A lowered selector retaining its verified axis/base contract.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SliceSelector<O> {
+    Scalar {
+        value: O,
+        axis: aether_frontend::HirSubscriptAxis,
+        semantics: IndexSemantics,
+        index_base: u8,
+    },
+    Closed {
+        first: O,
+        last: O,
+        axis: aether_frontend::HirSubscriptAxis,
+        semantics: IndexSemantics,
+        index_base: u8,
+    },
+    Full {
+        axis: aether_frontend::HirSubscriptAxis,
+        semantics: IndexSemantics,
+        index_base: u8,
+    },
 }
 
 /// Explicit scalar unary operations.
@@ -527,6 +553,35 @@ pub enum Rvalue {
         relocation: Relocate,
         size_trap: TrapKind,
         failure_trap: TrapKind,
+    },
+    CollectionSliceCopy {
+        source: Place,
+        selector: SliceSelector<Operand>,
+        family: aether_frontend::HirSubscriptContainerKind,
+        element_type: TypeId,
+        order_trap: TrapKind,
+        bounds_trap: TrapKind,
+        size_trap: TrapKind,
+        failure_trap: TrapKind,
+    },
+    VectorSliceView {
+        source: Place,
+        selector: SliceSelector<Operand>,
+        family: aether_frontend::HirSubscriptContainerKind,
+        orientation: aether_frontend::Orientation,
+        descriptor: aether_frontend::VectorViewDescriptor,
+        order_trap: TrapKind,
+        bounds_trap: TrapKind,
+    },
+    MatrixSliceView {
+        source: Place,
+        selectors: [SliceSelector<Operand>; 2],
+        family: aether_frontend::HirSubscriptContainerKind,
+        result: aether_frontend::HirSubscriptResult,
+        descriptor: aether_frontend::MatrixViewDescriptor,
+        order_trap: TrapKind,
+        bounds_trap: TrapKind,
+        index_trap: TrapKind,
     },
     /// Borrow the source backing. Source Place and descriptor copy/use chains
     /// retain provenance; the closed recipe is independently verified.
@@ -3629,6 +3684,95 @@ impl Builder<'_> {
                 );
                 Operand::Local(destination)
             }
+            HirExprKind::SliceRead {
+                source,
+                subscript,
+                element_type,
+            } => {
+                let source_type = source.ty;
+                let mut source = self.lower_place(source);
+                // A projected/dereferenced descriptor is resolved exactly once before
+                // endpoint evaluation; the shared reference also retains provenance.
+                if !source.projections.is_empty()
+                    || matches!(source.base, PlaceBase::Dereference { .. })
+                {
+                    if let PlaceBase::Local(local) = source.base
+                        && !place_has_index(&source)
+                    {
+                        self.function.locals[local.0 as usize].address_taken = true;
+                    }
+                    let reference_type = self.types.intern_reference(source_type, false);
+                    let reference = Operand::Local(self.temporary(reference_type));
+                    self.assign(
+                        operand_place(&reference),
+                        Rvalue::Borrow {
+                            place: source,
+                            mutable: false,
+                            call: None,
+                        },
+                        expression.span,
+                    );
+                    source = Place {
+                        base: PlaceBase::Dereference {
+                            reference,
+                            mutable: false,
+                        },
+                        projections: vec![],
+                    };
+                }
+                let mut lowered = Vec::with_capacity(subscript.selectors.len());
+                for selector in &subscript.selectors {
+                    lowered.push(self.lower_slice_selector(selector));
+                }
+                let destination = Operand::Local(self.temporary(expression.ty));
+                let value = match subscript.result {
+                    HirSubscriptResult::CollectionOwner => Rvalue::CollectionSliceCopy {
+                        source,
+                        selector: lowered.pop().expect("linear slice selector"),
+                        family: subscript.container_kind,
+                        element_type: *element_type,
+                        order_trap: TrapKind::SliceOrderError,
+                        bounds_trap: TrapKind::SliceBoundsError,
+                        size_trap: TrapKind::AllocationSizeOverflow,
+                        failure_trap: TrapKind::AllocationFailure,
+                    },
+                    HirSubscriptResult::VectorView { orientation }
+                        if subscript.selectors.len() == 1 =>
+                    {
+                        Rvalue::VectorSliceView {
+                            source,
+                            selector: lowered.pop().expect("linear slice selector"),
+                            family: subscript.container_kind,
+                            orientation,
+                            descriptor: aether_frontend::VectorViewDescriptor::derived(
+                                self.types.vector_view_info(source_type).is_some(),
+                            ),
+                            order_trap: TrapKind::SliceOrderError,
+                            bounds_trap: TrapKind::SliceBoundsError,
+                        }
+                    }
+                    HirSubscriptResult::VectorView { .. } | HirSubscriptResult::MatrixView => {
+                        let selectors: [SliceSelector<Operand>; 2] =
+                            lowered.try_into().expect("matrix slice has two selectors");
+                        Rvalue::MatrixSliceView {
+                            source,
+                            selectors,
+                            family: subscript.container_kind,
+                            result: subscript.result,
+                            descriptor: aether_frontend::MatrixViewDescriptor::derived(
+                                self.types.matrix_view_info(source_type).is_some(),
+                                false,
+                            ),
+                            order_trap: TrapKind::SliceOrderError,
+                            bounds_trap: TrapKind::SliceBoundsError,
+                            index_trap: TrapKind::IndexOutOfBounds,
+                        }
+                    }
+                    HirSubscriptResult::Scalar => unreachable!("SliceRead cannot be scalar"),
+                };
+                self.assign(operand_place(&destination), value, expression.span);
+                destination
+            }
             HirExprKind::MatrixAxisVectorView {
                 source,
                 fixed_index,
@@ -4847,6 +4991,33 @@ impl Builder<'_> {
             expr.span,
         );
         Operand::Local(local)
+    }
+
+    fn lower_slice_selector(&mut self, selector: &HirSubscriptSelector) -> SliceSelector<Operand> {
+        match &selector.kind {
+            HirSubscriptSelectorKind::Scalar(value) => SliceSelector::Scalar {
+                value: self.lower_frozen_expr(value),
+                axis: selector.axis,
+                semantics: selector.semantics,
+                index_base: selector.index_base,
+            },
+            HirSubscriptSelectorKind::Closed { first, last } => {
+                let first = self.lower_frozen_expr(first);
+                let last = self.lower_frozen_expr(last);
+                SliceSelector::Closed {
+                    first,
+                    last,
+                    axis: selector.axis,
+                    semantics: selector.semantics,
+                    index_base: selector.index_base,
+                }
+            }
+            HirSubscriptSelectorKind::Full => SliceSelector::Full {
+                axis: selector.axis,
+                semantics: selector.semantics,
+                index_base: selector.index_base,
+            },
+        }
     }
 
     fn lower_place(&mut self, place: &HirPlace) -> Place {
@@ -6731,6 +6902,7 @@ fn verify_ownership(
                 | Rvalue::ArrayFill { .. }
                 | Rvalue::VectorFilled { .. }
                 | Rvalue::MatrixFilled { .. }
+                | Rvalue::CollectionSliceCopy { .. }
                 | Rvalue::CatchBindAlias { .. }
                 | Rvalue::NullableNull { .. } => {
                     initialize_owner(function, types, &mut state, destination, fail)?;
@@ -7137,6 +7309,47 @@ fn operand_local_id(operand: &Operand) -> Option<LocalId> {
         Operand::Local(local) => Some(*local),
         _ => None,
     }
+}
+
+fn validate_slice_selector_mir(
+    function: &MirFunction,
+    selector: &SliceSelector<Operand>,
+    axis: aether_frontend::HirSubscriptAxis,
+    semantics: IndexSemantics,
+    initialized: &[bool],
+) -> Result<bool, String> {
+    let (operands, actual_axis, actual_semantics, base, scalar): (Vec<&Operand>, _, _, _, _) =
+        match selector {
+            SliceSelector::Scalar {
+                value,
+                axis,
+                semantics,
+                index_base,
+            } => (vec![value], *axis, *semantics, *index_base, true),
+            SliceSelector::Closed {
+                first,
+                last,
+                axis,
+                semantics,
+                index_base,
+            } => (vec![first, last], *axis, *semantics, *index_base, false),
+            SliceSelector::Full {
+                axis,
+                semantics,
+                index_base,
+            } => (vec![], *axis, *semantics, *index_base, false),
+        };
+    for operand in operands {
+        validate_operand(function, operand, initialized)?;
+        if operand_type(function, operand)? != TypeId::USIZE {
+            return Err("MIR slice selector operand is not usize".into());
+        }
+    }
+    let expected_base = u8::from(semantics != IndexSemantics::ZeroBased);
+    if actual_axis != axis || actual_semantics != semantics || base != expected_base {
+        return Err("MIR slice selector axis/base/semantics contract invalid".into());
+    }
+    Ok(scalar)
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -7827,6 +8040,165 @@ fn validate_rvalue(
                 || *failure_trap != TrapKind::AllocationFailure
             {
                 return Err("MIR List reserve contract invalid".into());
+            }
+        }
+        Rvalue::CollectionSliceCopy {
+            source,
+            selector,
+            family,
+            element_type,
+            order_trap,
+            bounds_trap,
+            size_trap,
+            failure_trap,
+        } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            let source_ty = place_type(function, source, structs, types)?;
+            let expected = match types.get(source_ty) {
+                Some(TypeData::Array { element }) => {
+                    (aether_frontend::HirSubscriptContainerKind::Array, *element)
+                }
+                Some(TypeData::List { element }) => {
+                    (aether_frontend::HirSubscriptContainerKind::List, *element)
+                }
+                _ => return Err("MIR CollectionSliceCopy source family invalid".into()),
+            };
+            let scalar = validate_slice_selector_mir(
+                function,
+                selector,
+                aether_frontend::HirSubscriptAxis::Linear,
+                IndexSemantics::ZeroBased,
+                initialized,
+            )?;
+            if scalar
+                || destination != source_ty
+                || *family != expected.0
+                || *element_type != expected.1
+                || !types.guarantees_copy(*element_type)
+                || *order_trap != TrapKind::SliceOrderError
+                || *bounds_trap != TrapKind::SliceBoundsError
+                || *size_trap != TrapKind::AllocationSizeOverflow
+                || *failure_trap != TrapKind::AllocationFailure
+            {
+                return Err("MIR CollectionSliceCopy contract invalid".into());
+            }
+        }
+        Rvalue::VectorSliceView {
+            source,
+            selector,
+            family,
+            orientation,
+            descriptor,
+            order_trap,
+            bounds_trap,
+        } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            let source_ty = place_type(function, source, structs, types)?;
+            let (element, source_orientation) = types
+                .vector_like_info(source_ty)
+                .ok_or_else(|| "MIR VectorSliceView source family invalid".to_string())?;
+            let expected_family = match types.get(source_ty) {
+                Some(TypeData::Vector { .. }) => {
+                    aether_frontend::HirSubscriptContainerKind::Vector {
+                        orientation: source_orientation,
+                    }
+                }
+                Some(TypeData::VectorView { .. }) => {
+                    aether_frontend::HirSubscriptContainerKind::VectorView {
+                        orientation: source_orientation,
+                    }
+                }
+                _ => return Err("MIR VectorSliceView exact family invalid".into()),
+            };
+            let scalar = validate_slice_selector_mir(
+                function,
+                selector,
+                aether_frontend::HirSubscriptAxis::Linear,
+                IndexSemantics::OneBased,
+                initialized,
+            )?;
+            if scalar
+                || types.vector_view_info(destination) != Some((element, source_orientation, false))
+                || *orientation != source_orientation
+                || *family != expected_family
+                || *descriptor
+                    != aether_frontend::VectorViewDescriptor::derived(
+                        types.vector_view_info(source_ty).is_some(),
+                    )
+                || *order_trap != TrapKind::SliceOrderError
+                || *bounds_trap != TrapKind::SliceBoundsError
+            {
+                return Err("MIR VectorSliceView result/stride/trap contract invalid".into());
+            }
+        }
+        Rvalue::MatrixSliceView {
+            source,
+            selectors,
+            family,
+            result,
+            descriptor,
+            order_trap,
+            bounds_trap,
+            index_trap,
+        } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            let source_ty = place_type(function, source, structs, types)?;
+            let element = types
+                .matrix_like_element(source_ty)
+                .ok_or_else(|| "MIR MatrixSliceView source family invalid".to_string())?;
+            let expected_family = match types.get(source_ty) {
+                Some(TypeData::Matrix { .. }) => aether_frontend::HirSubscriptContainerKind::Matrix,
+                Some(TypeData::MatrixView { .. }) => {
+                    aether_frontend::HirSubscriptContainerKind::MatrixView
+                }
+                _ => return Err("MIR MatrixSliceView exact family invalid".into()),
+            };
+            let row_scalar = validate_slice_selector_mir(
+                function,
+                &selectors[0],
+                aether_frontend::HirSubscriptAxis::Row,
+                IndexSemantics::OneBased2D,
+                initialized,
+            )?;
+            let column_scalar = validate_slice_selector_mir(
+                function,
+                &selectors[1],
+                aether_frontend::HirSubscriptAxis::Column,
+                IndexSemantics::OneBased2D,
+                initialized,
+            )?;
+            let expected_result = match (row_scalar, column_scalar) {
+                (true, false) => aether_frontend::HirSubscriptResult::VectorView {
+                    orientation: aether_frontend::Orientation::Row,
+                },
+                (false, true) => aether_frontend::HirSubscriptResult::VectorView {
+                    orientation: aether_frontend::Orientation::Column,
+                },
+                (false, false) => aether_frontend::HirSubscriptResult::MatrixView,
+                (true, true) => return Err("MIR MatrixSliceView cannot be scalar/scalar".into()),
+            };
+            let result_ok = match expected_result {
+                aether_frontend::HirSubscriptResult::VectorView { orientation } => {
+                    types.vector_view_info(destination) == Some((element, orientation, false))
+                }
+                aether_frontend::HirSubscriptResult::MatrixView => {
+                    types.matrix_view_info(destination) == Some((element, false))
+                }
+                _ => false,
+            };
+            if *family != expected_family
+                || *result != expected_result
+                || !result_ok
+                || *descriptor
+                    != aether_frontend::MatrixViewDescriptor::derived(
+                        types.matrix_view_info(source_ty).is_some(),
+                        false,
+                    )
+                || *order_trap != TrapKind::SliceOrderError
+                || *bounds_trap != TrapKind::SliceBoundsError
+                || *index_trap != TrapKind::IndexOutOfBounds
+            {
+                return Err("MIR MatrixSliceView result/stride/trap contract invalid".into());
             }
         }
         Rvalue::MatrixAxisVectorView {

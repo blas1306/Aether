@@ -125,53 +125,63 @@ fn selector_count_is_checked_by_container_rank() {
 }
 
 #[test]
-fn typed_slice_metadata_resolves_base_axis_container_and_future_rank() {
+fn typed_slice_metadata_resolves_base_axis_container_and_result_rank() {
     for (body, fragments) in [
         (
             "Array<int>a={1};Array<int>b=a[:];",
-            &["CollectionOwner", "Array", "axes [Linear]", "base 0"][..],
+            &["CollectionOwner", "Array", "axis: Linear", "index_base: 0"][..],
         ),
         (
             "List<int>a={1};List<int>b=a[0:0];",
-            &["CollectionOwner", "List", "axes [Linear]", "base 0"],
+            &["CollectionOwner", "List", "axis: Linear", "index_base: 0"],
         ),
         (
             "Vector<int,Row>a=[1];VectorView<int,Row>b=a[:];",
             &[
-                "VectorView { orientation: Row }",
-                "Vector { orientation: Row }",
-                "base 1",
+                "orientation: Row",
+                "container_kind: Vector",
+                "index_base: 1",
             ],
         ),
         (
             "Matrix<int>a=[];MatrixView<int>b=a[:,:];",
-            &["MatrixView", "Matrix", "axes [Row, Column]", "base 1"],
+            &[
+                "MatrixView",
+                "Matrix",
+                "axis: Row",
+                "axis: Column",
+                "index_base: 1",
+            ],
         ),
         (
             "Matrix<int>a=[1];VectorView<int,Row>b=a[1,:];",
             &[
-                "VectorView { orientation: Row }",
-                "axes [Row, Column]",
-                "base 1",
+                "orientation: Row",
+                "axis: Row",
+                "axis: Column",
+                "index_base: 1",
             ],
         ),
         (
             "Matrix<int>a=[1];VectorView<int,Column>b=a[:,1];",
             &[
-                "VectorView { orientation: Column }",
-                "axes [Row, Column]",
-                "base 1",
+                "orientation: Column",
+                "axis: Row",
+                "axis: Column",
+                "index_base: 1",
             ],
         ),
     ] {
-        let error = first_error(&format!("int main(){{{body}return 0;}}"));
-        assert_eq!(error.code, "E0456", "{body}: {error:?}");
+        let source = format!("int main(){{{body}return 0;}}");
+        let hir = analyze(parse(&source)).unwrap_or_else(|errors| panic!("{body}: {errors:?}"));
+        let dump = hir.dump();
         for fragment in fragments {
             assert!(
-                error.message.contains(fragment),
-                "{body}: {fragment}: {error:?}"
+                dump.contains(fragment),
+                "{body}: missing {fragment}: {dump}"
             );
         }
+        assert!(dump.contains("SliceRead"), "{body}: {dump}");
     }
 }
 
