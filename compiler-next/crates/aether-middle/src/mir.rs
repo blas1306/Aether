@@ -4864,22 +4864,26 @@ impl Builder<'_> {
                 .map(|projection| match projection {
                     HirPlaceProjection::Field(field) => PlaceProjection::Field(*field),
                     HirPlaceProjection::Index {
-                        index,
-                        column,
+                        subscript,
                         element_type,
                         checked: _,
-                        semantics,
-                    } => PlaceProjection::Index {
-                        index: if column.is_some() {
-                            self.lower_frozen_expr(index)
-                        } else {
-                            self.lower_expr(index)
-                        },
-                        column: column.as_ref().map(|c| self.lower_expr(c)),
-                        element_type: *element_type,
-                        bounds_trap: TrapKind::IndexOutOfBounds,
-                        semantics: *semantics,
-                    },
+                    } => {
+                        let (index, column) = subscript
+                            .scalar_indices()
+                            .expect("verified HIR place projections are scalar");
+                        let semantics = subscript.selectors[0].semantics;
+                        PlaceProjection::Index {
+                            index: if column.is_some() {
+                                self.lower_frozen_expr(index)
+                            } else {
+                                self.lower_expr(index)
+                            },
+                            column: column.as_ref().map(|c| self.lower_expr(c)),
+                            element_type: *element_type,
+                            bounds_trap: TrapKind::IndexOutOfBounds,
+                            semantics,
+                        }
+                    }
                 })
                 .collect(),
         }

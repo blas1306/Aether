@@ -485,11 +485,11 @@ pub enum AstExprKind {
         name: String,
         name_span: Span,
     },
-    /// Zero-based checked indexing. Semantic analysis resolves the indexed
-    /// container and contextualizes the index to `usize`.
+    /// Contextual subscript. Semantic analysis resolves the container, index
+    /// base and axis after parsing the source-ordered selectors.
     Index {
         base: Box<AstExpr>,
-        indices: Vec<AstExpr>,
+        selectors: Vec<AstSubscriptSelector>,
     },
     /// Prefix operation.
     Unary {
@@ -509,6 +509,25 @@ pub enum AstExprKind {
         step: Option<Box<AstExpr>>,
         end: Box<AstExpr>,
     },
+}
+
+/// One source-ordered selector inside a subscript.
+///
+/// Slice syntax deliberately does not reuse [`AstExprKind::Range`]: slice
+/// intervals are closed, while `Full` has no endpoints at all.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AstSubscriptSelector {
+    /// An ordinary scalar index expression.
+    Scalar(AstExpr),
+    /// A closed interval including both endpoints.
+    Closed {
+        /// Inclusive first endpoint.
+        first: AstExpr,
+        /// Inclusive last endpoint.
+        last: AstExpr,
+    },
+    /// The complete axis, including an axis whose extent is zero.
+    Full,
 }
 
 /// One parsed component of an interpolated string literal.

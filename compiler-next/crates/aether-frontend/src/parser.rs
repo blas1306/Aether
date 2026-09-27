@@ -1500,22 +1500,143 @@ impl Parser<'_> {
                     span,
                 };
             } else if self.consume(TokenKind::LeftBracket).is_some() {
-                let mut indices = vec![self.expression()?];
-                while self.consume(TokenKind::Comma).is_some() {
-                    indices.push(self.expression()?);
-                }
+                let selectors = self.subscript_selectors()?;
                 let right = self.expect(TokenKind::RightBracket, "expected `]` after index")?;
                 let span = expr.span.through(right.span);
                 expr = AstExpr {
                     kind: AstExprKind::Index {
                         base: Box::new(expr),
-                        indices,
+                        selectors,
                     },
                     span,
                 };
             } else {
                 break;
             }
+        }
+        Ok(expr)
+    }
+
+    fn subscript_selectors(&mut self) -> Result<Vec<crate::AstSubscriptSelector>, Diagnostic> {
+        if self.at(TokenKind::RightBracket) || self.at(TokenKind::Comma) {
+            return Err(self.error(
+                "E0455",
+                "malformed subscript: expected a selector before `]` or `,`",
+            ));
+        }
+        let mut selectors = Vec::new();
+        loop {
+            selectors.push(self.subscript_selector()?);
+            if self.consume(TokenKind::Comma).is_none() {
+                if !self.at(TokenKind::RightBracket) {
+                    return Err(self.error(
+                        "E0455",
+                        "malformed matrix selector syntax: expected `,` or `]`",
+                    ));
+                }
+                break;
+            }
+            if self.at(TokenKind::RightBracket) || self.at(TokenKind::Comma) {
+                return Err(self.error(
+                    "E0455",
+                    "malformed matrix selector syntax: expected a selector after `,`",
+                ));
+            }
+        }
+        Ok(selectors)
+    }
+
+    fn subscript_selector(&mut self) -> Result<crate::AstSubscriptSelector, Diagnostic> {
+        if self.consume(TokenKind::Colon).is_some() {
+            if self.at(TokenKind::Colon) {
+                return Err(self.invalid_subscript_colons());
+            }
+            if self.at(TokenKind::Comma) || self.at(TokenKind::RightBracket) {
+                return Ok(crate::AstSubscriptSelector::Full);
+            }
+            // Consume the endpoint solely to keep the diagnostic attached to
+            // the complete legacy spelling instead of silently treating it as Full.
+            let _ = self.subscript_expression()?;
+            if self.at(TokenKind::Colon) {
+                return Err(self.invalid_subscript_colons());
+            }
+            return Err(self.error(
+                "E0452",
+                "partial slice `:b` is not supported; use a closed `a:b` slice or `:`",
+            ));
+        }
+
+        let first = self.subscript_expression()?;
+        if self.consume(TokenKind::Colon).is_none() {
+            return Ok(crate::AstSubscriptSelector::Scalar(first));
+        }
+        if self.at(TokenKind::Colon) {
+            return Err(self.invalid_subscript_colons());
+        }
+        if self.at(TokenKind::Comma) || self.at(TokenKind::RightBracket) {
+            return Err(self.error(
+                "E0452",
+                "partial slice `a:` is not supported; use a closed `a:b` slice or `:`",
+            ));
+        }
+        let last = self.subscript_expression()?;
+        if self.at(TokenKind::Colon) {
+            return Err(self.invalid_subscript_colons());
+        }
+        Ok(crate::AstSubscriptSelector::Closed { first, last })
+    }
+
+    fn invalid_subscript_colons(&self) -> Diagnostic {
+        let multiple = self
+            .tokens
+            .iter()
+            .skip(self.cursor)
+            .take_while(|token| !matches!(token.kind, TokenKind::Comma | TokenKind::RightBracket))
+            .filter(|token| token.kind == TokenKind::Colon)
+            .count()
+            > 1;
+        self.error(
+            if multiple { "E0454" } else { "E0453" },
+            if multiple {
+                "multiple colons are not supported in a V1 subscript selector"
+            } else {
+                "stride and reverse slice syntax are not supported in V1"
+            },
+        )
+    }
+
+    // The colon at this precedence belongs to the surrounding selector. A
+    // parenthesized expression still uses the ordinary expression grammar.
+    fn subscript_expression(&mut self) -> Result<AstExpr, Diagnostic> {
+        let mut expr = self.subscript_logical_and()?;
+        while self.consume(TokenKind::OrOr).is_some() {
+            let right = self.subscript_logical_and()?;
+            let span = expr.span.through(right.span);
+            expr = AstExpr {
+                kind: AstExprKind::Binary {
+                    op: AstBinaryOp::LogicalOr,
+                    left: Box::new(expr),
+                    right: Box::new(right),
+                },
+                span,
+            };
+        }
+        Ok(expr)
+    }
+
+    fn subscript_logical_and(&mut self) -> Result<AstExpr, Diagnostic> {
+        let mut expr = self.equality()?;
+        while self.consume(TokenKind::AndAnd).is_some() {
+            let right = self.equality()?;
+            let span = expr.span.through(right.span);
+            expr = AstExpr {
+                kind: AstExprKind::Binary {
+                    op: AstBinaryOp::LogicalAnd,
+                    left: Box::new(expr),
+                    right: Box::new(right),
+                },
+                span,
+            };
         }
         Ok(expr)
     }

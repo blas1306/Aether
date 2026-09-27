@@ -1152,10 +1152,16 @@ fn place_children(place: &HirPlace) -> Vec<&HirExpr> {
         result.push(reference.as_ref());
     }
     for projection in &place.projections {
-        if let HirPlaceProjection::Index { index, column, .. } = projection {
-            result.push(index.as_ref());
-            if let Some(column) = column {
-                result.push(column.as_ref());
+        if let HirPlaceProjection::Index { subscript, .. } = projection {
+            for selector in &subscript.selectors {
+                match &selector.kind {
+                    crate::HirSubscriptSelectorKind::Scalar(value) => result.push(value.as_ref()),
+                    crate::HirSubscriptSelectorKind::Closed { first, last } => {
+                        result.push(first.as_ref());
+                        result.push(last.as_ref());
+                    }
+                    crate::HirSubscriptSelectorKind::Full => {}
+                }
             }
         }
     }

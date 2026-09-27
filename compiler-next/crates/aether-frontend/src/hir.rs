@@ -23,10 +23,10 @@ use mathematical::{
 use crate::AlgebraicCapability;
 use crate::{
     AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstMatchArm, AstMatchMode,
-    AstStmtKind, AstType, AstUnaryOp, BehavioralCapability, Capability, CollectionElementAdmission,
-    CollectionKind, Diagnostic, DiagnosticCategory, EnumId, FieldId, FloatType, GenericOwner,
-    GenericParamId, IntegerType, ParsedAst, Phase, SourceId, Span, StructId, Substitution,
-    TargetProperties, TypeArena, TypeData, TypeId, VariantId,
+    AstStmtKind, AstSubscriptSelector, AstType, AstUnaryOp, BehavioralCapability, Capability,
+    CollectionElementAdmission, CollectionKind, Diagnostic, DiagnosticCategory, EnumId, FieldId,
+    FloatType, GenericOwner, GenericParamId, IntegerType, ParsedAst, Phase, SourceId, Span,
+    StructId, Substitution, TargetProperties, TypeArena, TypeData, TypeId, VariantId,
 };
 use crate::{IndexSemantics, Orientation};
 use std::collections::{BTreeMap, BTreeSet};
@@ -1169,16 +1169,94 @@ pub struct HirPlace {
     pub projections: Vec<HirPlaceProjection>,
     pub ty: TypeId,
 }
+
+/// Canonical source container family attached to a typed subscript.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HirSubscriptContainerKind {
+    Buffer,
+    Array,
+    List,
+    View,
+    Vector { orientation: Orientation },
+    VectorView { orientation: Orientation },
+    Matrix,
+    MatrixView,
+}
+
+/// Logical axis selected after the container type is known.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HirSubscriptAxis {
+    Linear,
+    Row,
+    Column,
+}
+
+/// Future result shape fixed by selector kinds, without materializing a slice.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HirSubscriptResult {
+    Scalar,
+    CollectionOwner,
+    VectorView { orientation: Orientation },
+    MatrixView,
+}
+
+/// One typed selector. Endpoints retain source order and are evaluated once.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HirSubscriptSelectorKind {
+    Scalar(Box<HirExpr>),
+    Closed {
+        first: Box<HirExpr>,
+        last: Box<HirExpr>,
+    },
+    Full,
+}
+
+/// A selector plus the resolved indexing contract of its axis.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HirSubscriptSelector {
+    pub kind: HirSubscriptSelectorKind,
+    pub axis: HirSubscriptAxis,
+    pub semantics: IndexSemantics,
+    pub index_base: u8,
+}
+
+/// Complete typed metadata for one source subscript.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HirSubscript {
+    pub selectors: Vec<HirSubscriptSelector>,
+    pub container_type: TypeId,
+    pub container_kind: HirSubscriptContainerKind,
+    pub result: HirSubscriptResult,
+}
+
+impl HirSubscript {
+    /// Scalar operands in source order. `None` means a slice selector is present.
+    #[must_use]
+    pub fn scalar_indices(&self) -> Option<(&HirExpr, Option<&HirExpr>)> {
+        let mut values = self.selectors.iter().map(|selector| match &selector.kind {
+            HirSubscriptSelectorKind::Scalar(value) => Some(value.as_ref()),
+            HirSubscriptSelectorKind::Closed { .. } | HirSubscriptSelectorKind::Full => None,
+        });
+        let first = values.next()??;
+        let second = match values.next() {
+            Some(Some(value)) => Some(value),
+            Some(None) => return None,
+            None => None,
+        };
+        if values.next().is_some() {
+            return None;
+        }
+        Some((first, second))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HirPlaceProjection {
     Field(FieldId),
     Index {
-        index: Box<HirExpr>,
-        /// Present exactly for `OneBased2D` Matrix projections.
-        column: Option<Box<HirExpr>>,
+        subscript: HirSubscript,
         element_type: TypeId,
         checked: bool,
-        semantics: IndexSemantics,
     },
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1269,10 +1347,19 @@ fn nullable_loop_expression_effects(
         AstExprKind::Field { base, .. } => {
             nullable_loop_expression_effects(base, written_roots, has_call);
         }
-        AstExprKind::Index { base, indices } => {
+        AstExprKind::Index { base, selectors } => {
             nullable_loop_expression_effects(base, written_roots, has_call);
-            for index in indices {
-                nullable_loop_expression_effects(index, written_roots, has_call);
+            for selector in selectors {
+                match selector {
+                    AstSubscriptSelector::Scalar(index) => {
+                        nullable_loop_expression_effects(index, written_roots, has_call);
+                    }
+                    AstSubscriptSelector::Closed { first, last } => {
+                        nullable_loop_expression_effects(first, written_roots, has_call);
+                        nullable_loop_expression_effects(last, written_roots, has_call);
+                    }
+                    AstSubscriptSelector::Full => {}
+                }
             }
         }
         AstExprKind::Integer(_)
@@ -5004,24 +5091,55 @@ impl Monomorphizer<'_> {
                 .map(|projection| match projection {
                     HirPlaceProjection::Field(field) => Ok(HirPlaceProjection::Field(*field)),
                     HirPlaceProjection::Index {
-                        index,
-                        column,
+                        subscript,
                         element_type,
                         checked,
-                        semantics,
                     } => Ok(HirPlaceProjection::Index {
-                        index: Box::new(self.substitute_expr(index, substitution)?),
-                        column: column
-                            .as_ref()
-                            .map(|c| self.substitute_expr(c, substitution).map(Box::new))
-                            .transpose()?,
+                        subscript: HirSubscript {
+                            selectors: subscript
+                                .selectors
+                                .iter()
+                                .map(|selector| {
+                                    let kind = match &selector.kind {
+                                        HirSubscriptSelectorKind::Scalar(value) => {
+                                            HirSubscriptSelectorKind::Scalar(Box::new(
+                                                self.substitute_expr(value, substitution)?,
+                                            ))
+                                        }
+                                        HirSubscriptSelectorKind::Closed { first, last } => {
+                                            HirSubscriptSelectorKind::Closed {
+                                                first: Box::new(
+                                                    self.substitute_expr(first, substitution)?,
+                                                ),
+                                                last: Box::new(
+                                                    self.substitute_expr(last, substitution)?,
+                                                ),
+                                            }
+                                        }
+                                        HirSubscriptSelectorKind::Full => {
+                                            HirSubscriptSelectorKind::Full
+                                        }
+                                    };
+                                    Ok(HirSubscriptSelector {
+                                        kind,
+                                        ..selector.clone()
+                                    })
+                                })
+                                .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?,
+                            container_type: self.substitute_type(
+                                subscript.container_type,
+                                substitution,
+                                Span::in_source(SourceId(0), 0, 0),
+                            )?,
+                            container_kind: subscript.container_kind,
+                            result: subscript.result,
+                        },
                         element_type: self.substitute_type(
                             *element_type,
                             substitution,
-                            index.span,
+                            Span::in_source(SourceId(0), 0, 0),
                         )?,
                         checked: *checked,
-                        semantics: *semantics,
                     }),
                 })
                 .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?,
@@ -7156,13 +7274,15 @@ impl OwnershipAnalysis<'_> {
             self.expr(reference)?;
         }
         for (position, projection) in place.projections.iter().enumerate() {
-            if let HirPlaceProjection::Index {
-                index,
-                column,
-                semantics,
-                ..
-            } = projection
-            {
+            if let HirPlaceProjection::Index { subscript, .. } = projection {
+                let Some((index, column)) = subscript.scalar_indices() else {
+                    continue;
+                };
+                let semantics = subscript
+                    .selectors
+                    .first()
+                    .map(|selector| selector.semantics)
+                    .expect("subscript has at least one selector");
                 self.expr(index)?;
                 if let Some(column) = column {
                     self.expr(column)?;
@@ -7173,8 +7293,8 @@ impl OwnershipAnalysis<'_> {
                         _ => None,
                     };
                     for (axis, expr, extent) in [
-                        ("row", index.as_ref(), shape.map(|s| s.0)),
-                        ("column", column.as_ref(), shape.map(|s| s.1)),
+                        ("row", index, shape.map(|s| s.0)),
+                        ("column", column, shape.map(|s| s.1)),
                     ] {
                         if let HirExprKind::Int(value) = expr.kind
                             && (value == 0 || extent.is_some_and(|n| value > i128::from(n)))
@@ -7393,13 +7513,9 @@ impl OwnershipAnalysis<'_> {
                         .types
                         .list_element(self.locals[local.0 as usize].ty)
                         .is_some()
-                    && let [
-                        HirPlaceProjection::Index {
-                            index,
-                            column: None,
-                            ..
-                        },
-                    ] = place.projections.as_slice()
+                    && let [HirPlaceProjection::Index { subscript, .. }] =
+                        place.projections.as_slice()
+                    && let Some((index, None)) = subscript.scalar_indices()
                     && let HirExprKind::Int(index) = index.kind
                 {
                     u64::try_from(index).ok()
@@ -9518,22 +9634,22 @@ impl Analyzer<'_> {
                 self.project_field(&mut place, name, *name_span)?;
                 Ok(place)
             }
-            AstExprKind::Index { base, indices } => {
+            AstExprKind::Index { base, selectors } => {
                 let mut place = self.resolve_expr_place(base, writable)?;
                 let rank = if self.types.matrix_like_element(place.ty).is_some() {
                     2
                 } else {
                     1
                 };
-                if indices.len() != rank {
+                if selectors.len() != rank {
                     return Err(vec![Diagnostic::new(
                         "E0334",
                         Phase::Semantic,
                         DiagnosticCategory::Type,
                         format!(
-                            "{} indexing expects {rank} indices, found {}",
+                            "{} subscript expects {rank} selectors, found {}",
                             self.type_name(place.ty),
-                            indices.len()
+                            selectors.len()
                         ),
                         Some(expression.span),
                     )]);
@@ -9573,23 +9689,31 @@ impl Analyzer<'_> {
                         Some(expression.span),
                     )]);
                 }
-                let index = self.expression(&indices[0], Some(TypeId::USIZE))?.expr;
-                let column = indices
-                    .get(1)
-                    .map(|c| {
-                        self.expression(c, Some(TypeId::USIZE))
-                            .map(|c| Box::new(c.expr))
-                    })
-                    .transpose()?;
+                let subscript = self.type_subscript(place.ty, selectors, expression.span)?;
+                if subscript.result != HirSubscriptResult::Scalar {
+                    let axes = subscript
+                        .selectors
+                        .iter()
+                        .map(|selector| format!("{:?}", selector.axis))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return Err(vec![Diagnostic::new(
+                        "E0456",
+                        Phase::Semantic,
+                        DiagnosticCategory::Unsupported,
+                        format!(
+                            "slice selector is represented and typed as {:?} on {:?} (axes [{axes}], base {}), but slice read/assignment semantics belong to the next milestone",
+                            subscript.result,
+                            subscript.container_kind,
+                            subscript.selectors[0].index_base,
+                        ),
+                        Some(expression.span),
+                    )]);
+                }
                 place.projections.push(HirPlaceProjection::Index {
-                    index: Box::new(index),
-                    column,
+                    subscript,
                     element_type,
                     checked: true,
-                    semantics: self
-                        .types
-                        .index_semantics(place.ty)
-                        .expect("indexable type"),
                 });
                 place.ty = element_type;
                 Ok(place)
@@ -9602,6 +9726,114 @@ impl Analyzer<'_> {
                 Some(expression.span),
             )]),
         }
+    }
+
+    fn type_subscript(
+        &mut self,
+        container_type: TypeId,
+        selectors: &[AstSubscriptSelector],
+        span: Span,
+    ) -> Result<HirSubscript, Vec<Diagnostic>> {
+        let semantics = self
+            .types
+            .index_semantics(container_type)
+            .expect("indexable type");
+        let index_base = match semantics {
+            IndexSemantics::ZeroBased => 0,
+            IndexSemantics::OneBased | IndexSemantics::OneBased2D => 1,
+        };
+        let container_kind = match self.types.get(container_type) {
+            Some(TypeData::Buffer { .. }) => HirSubscriptContainerKind::Buffer,
+            Some(TypeData::Array { .. }) => HirSubscriptContainerKind::Array,
+            Some(TypeData::List { .. }) => HirSubscriptContainerKind::List,
+            Some(TypeData::View { .. }) => HirSubscriptContainerKind::View,
+            Some(TypeData::Vector { orientation, .. }) => HirSubscriptContainerKind::Vector {
+                orientation: *orientation,
+            },
+            Some(TypeData::VectorView { orientation, .. }) => {
+                HirSubscriptContainerKind::VectorView {
+                    orientation: *orientation,
+                }
+            }
+            Some(TypeData::Matrix { .. }) => HirSubscriptContainerKind::Matrix,
+            Some(TypeData::MatrixView { .. }) => HirSubscriptContainerKind::MatrixView,
+            _ => unreachable!("type_subscript requires an indexable type"),
+        };
+
+        let mut typed = Vec::with_capacity(selectors.len());
+        for (position, selector) in selectors.iter().enumerate() {
+            let axis = if selectors.len() == 1 {
+                HirSubscriptAxis::Linear
+            } else if position == 0 {
+                HirSubscriptAxis::Row
+            } else {
+                HirSubscriptAxis::Column
+            };
+            let kind = match selector {
+                AstSubscriptSelector::Scalar(index) => HirSubscriptSelectorKind::Scalar(Box::new(
+                    self.expression(index, Some(TypeId::USIZE))?.expr,
+                )),
+                AstSubscriptSelector::Closed { first, last } => {
+                    let first = self.expression(first, Some(TypeId::USIZE))?.expr;
+                    let last = self.expression(last, Some(TypeId::USIZE))?.expr;
+                    HirSubscriptSelectorKind::Closed {
+                        first: Box::new(first),
+                        last: Box::new(last),
+                    }
+                }
+                AstSubscriptSelector::Full => HirSubscriptSelectorKind::Full,
+            };
+            typed.push(HirSubscriptSelector {
+                kind,
+                axis,
+                semantics,
+                index_base,
+            });
+        }
+
+        let scalar = |selector: &HirSubscriptSelector| {
+            matches!(selector.kind, HirSubscriptSelectorKind::Scalar(_))
+        };
+        let result = if typed.iter().all(scalar) {
+            HirSubscriptResult::Scalar
+        } else {
+            match container_kind {
+                HirSubscriptContainerKind::Array | HirSubscriptContainerKind::List => {
+                    HirSubscriptResult::CollectionOwner
+                }
+                HirSubscriptContainerKind::Vector { orientation }
+                | HirSubscriptContainerKind::VectorView { orientation } => {
+                    HirSubscriptResult::VectorView { orientation }
+                }
+                HirSubscriptContainerKind::Matrix | HirSubscriptContainerKind::MatrixView => {
+                    match (scalar(&typed[0]), scalar(&typed[1])) {
+                        (true, false) => HirSubscriptResult::VectorView {
+                            orientation: Orientation::Row,
+                        },
+                        (false, true) => HirSubscriptResult::VectorView {
+                            orientation: Orientation::Column,
+                        },
+                        (false, false) => HirSubscriptResult::MatrixView,
+                        (true, true) => unreachable!("handled above"),
+                    }
+                }
+                HirSubscriptContainerKind::Buffer | HirSubscriptContainerKind::View => {
+                    return Err(vec![Diagnostic::new(
+                        "E0457",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "slice selectors require Array, List, Vector, Matrix, or a mathematical view",
+                        Some(span),
+                    )]);
+                }
+            }
+        };
+        Ok(HirSubscript {
+            selectors: typed,
+            container_type,
+            container_kind,
+            result,
+        })
     }
 
     fn project_field(
@@ -16467,15 +16699,21 @@ fn verify_place(
                     .ok_or_else(|| fail("HIR place substitution incomplete".into()))?;
             }
             HirPlaceProjection::Index {
-                index,
-                column,
+                subscript,
                 element_type,
                 checked,
-                semantics,
             } => {
-                verify_expr(index, function, sigs, structs, enums, types, fail)?;
-                if let Some(column) = column {
-                    verify_expr(column, function, sigs, structs, enums, types, fail)?;
+                for selector in &subscript.selectors {
+                    match &selector.kind {
+                        HirSubscriptSelectorKind::Scalar(value) => {
+                            verify_expr(value, function, sigs, structs, enums, types, fail)?;
+                        }
+                        HirSubscriptSelectorKind::Closed { first, last } => {
+                            verify_expr(first, function, sigs, structs, enums, types, fail)?;
+                            verify_expr(last, function, sigs, structs, enums, types, fail)?;
+                        }
+                        HirSubscriptSelectorKind::Full => {}
+                    }
                 }
                 let element = types
                     .buffer_element(ty)
@@ -16485,14 +16723,66 @@ fn verify_place(
                     .or_else(|| types.list_element(ty))
                     .or_else(|| types.borrowed_view_info(ty).map(|(element, _)| element))
                     .ok_or_else(|| fail("HIR index projection has non-contiguous base".into()))?;
-                if column.is_some() != (types.matrix_like_element(ty).is_some())
-                    || column.as_ref().is_some_and(|c| c.ty != TypeId::USIZE)
-                    || index.ty != TypeId::USIZE
+                let matrix = types.matrix_like_element(ty).is_some();
+                let expected_count = if matrix { 2 } else { 1 };
+                let expected_semantics = types.index_semantics(ty);
+                let expected_base = match expected_semantics {
+                    Some(IndexSemantics::ZeroBased) => 0,
+                    Some(IndexSemantics::OneBased | IndexSemantics::OneBased2D) => 1,
+                    None => return Err(fail("HIR subscript has no index semantics".into())),
+                };
+                let expected_kind = match types.get(ty) {
+                    Some(TypeData::Buffer { .. }) => HirSubscriptContainerKind::Buffer,
+                    Some(TypeData::Array { .. }) => HirSubscriptContainerKind::Array,
+                    Some(TypeData::List { .. }) => HirSubscriptContainerKind::List,
+                    Some(TypeData::View { .. }) => HirSubscriptContainerKind::View,
+                    Some(TypeData::Vector { orientation, .. }) => {
+                        HirSubscriptContainerKind::Vector {
+                            orientation: *orientation,
+                        }
+                    }
+                    Some(TypeData::VectorView { orientation, .. }) => {
+                        HirSubscriptContainerKind::VectorView {
+                            orientation: *orientation,
+                        }
+                    }
+                    Some(TypeData::Matrix { .. }) => HirSubscriptContainerKind::Matrix,
+                    Some(TypeData::MatrixView { .. }) => HirSubscriptContainerKind::MatrixView,
+                    _ => return Err(fail("HIR subscript container kind invalid".into())),
+                };
+                let selector_contract =
+                    subscript
+                        .selectors
+                        .iter()
+                        .enumerate()
+                        .all(|(position, selector)| {
+                            let expected_axis = if matrix {
+                                if position == 0 {
+                                    HirSubscriptAxis::Row
+                                } else {
+                                    HirSubscriptAxis::Column
+                                }
+                            } else {
+                                HirSubscriptAxis::Linear
+                            };
+                            matches!(
+                                &selector.kind,
+                                HirSubscriptSelectorKind::Scalar(value) if value.ty == TypeId::USIZE
+                            ) && selector.axis == expected_axis
+                                && Some(selector.semantics) == expected_semantics
+                                && selector.index_base == expected_base
+                        });
+                if subscript.container_type != ty
+                    || subscript.container_kind != expected_kind
+                    || subscript.result != HirSubscriptResult::Scalar
+                    || subscript.selectors.len() != expected_count
+                    || !selector_contract
                     || element != *element_type
                     || !*checked
-                    || types.index_semantics(ty) != Some(*semantics)
                 {
-                    return Err(fail("HIR index projection contract invalid".into()));
+                    return Err(fail(
+                        "HIR typed subscript projection contract invalid".into(),
+                    ));
                 }
                 ty = element;
             }
@@ -16708,8 +16998,15 @@ fn ast_expr_has_call(expr: &AstExpr) -> bool {
             crate::AstInterpolationFragment::Text { .. } => false,
         }),
         AstExprKind::Field { base, .. } => ast_expr_has_call(base),
-        AstExprKind::Index { base, indices } => {
-            ast_expr_has_call(base) || indices.iter().any(ast_expr_has_call)
+        AstExprKind::Index { base, selectors } => {
+            ast_expr_has_call(base)
+                || selectors.iter().any(|selector| match selector {
+                    AstSubscriptSelector::Scalar(index) => ast_expr_has_call(index),
+                    AstSubscriptSelector::Closed { first, last } => {
+                        ast_expr_has_call(first) || ast_expr_has_call(last)
+                    }
+                    AstSubscriptSelector::Full => false,
+                })
         }
         AstExprKind::Unary { operand, .. } => ast_expr_has_call(operand),
         AstExprKind::Binary { left, right, .. } => {
@@ -17538,15 +17835,17 @@ mod tests {
                         (HirExprKind::Load(place), 5..=7) => {
                             for projection in &mut place.projections {
                                 if let HirPlaceProjection::Index {
-                                    column,
-                                    semantics,
-                                    checked,
-                                    ..
+                                    subscript, checked, ..
                                 } = projection
                                 {
                                     match case {
-                                        5 => *column = None,
-                                        6 => *semantics = IndexSemantics::OneBased,
+                                        5 => {
+                                            subscript.selectors.pop();
+                                        }
+                                        6 => {
+                                            subscript.selectors[0].semantics =
+                                                IndexSemantics::OneBased;
+                                        }
                                         _ => *checked = false,
                                     }
                                     changed = true;
@@ -17624,8 +17923,8 @@ mod tests {
                         }
                         (HirExprKind::Load(place), 2) => {
                             for projection in &mut place.projections {
-                                if let HirPlaceProjection::Index { semantics, .. } = projection {
-                                    *semantics = IndexSemantics::ZeroBased;
+                                if let HirPlaceProjection::Index { subscript, .. } = projection {
+                                    subscript.selectors[0].semantics = IndexSemantics::ZeroBased;
                                     changed = true;
                                 }
                             }
@@ -18734,5 +19033,50 @@ mod vertical33_tests {
             .unwrap();
         *orientation = Orientation::Column;
         assert!(verify_hir(&bad).is_err());
+    }
+
+    #[test]
+    fn typed_subscript_hir_contract_fails_closed_when_corrupted() {
+        let source = SourceFile::new(
+            "subscript-corrupt.ae",
+            "int main(){Array<int>a={1};int x=a[0];return x;}",
+        );
+        let hir = analyze(parse_source(&source).unwrap()).unwrap();
+        verify_hir(&hir).unwrap();
+
+        for corrupt in ["axis", "base", "result", "container", "selector"] {
+            let mut bad = hir.clone();
+            let subscript = bad.functions[0]
+                .body
+                .statements
+                .iter_mut()
+                .find_map(|statement| match &mut statement.kind {
+                    HirStmtKind::Local {
+                        initializer:
+                            HirExpr {
+                                kind: HirExprKind::Load(place),
+                                ..
+                            },
+                        ..
+                    } => place
+                        .projections
+                        .iter_mut()
+                        .find_map(|projection| match projection {
+                            HirPlaceProjection::Index { subscript, .. } => Some(subscript),
+                            HirPlaceProjection::Field(_) => None,
+                        }),
+                    _ => None,
+                })
+                .unwrap();
+            match corrupt {
+                "axis" => subscript.selectors[0].axis = HirSubscriptAxis::Column,
+                "base" => subscript.selectors[0].index_base = 1,
+                "result" => subscript.result = HirSubscriptResult::CollectionOwner,
+                "container" => subscript.container_kind = HirSubscriptContainerKind::List,
+                "selector" => subscript.selectors[0].kind = HirSubscriptSelectorKind::Full,
+                _ => unreachable!(),
+            }
+            assert!(verify_hir(&bad).is_err(), "accepted corrupt {corrupt}");
+        }
     }
 }
