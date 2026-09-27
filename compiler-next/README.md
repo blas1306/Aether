@@ -1,5 +1,14 @@
 # Aether native compiler — OOP-POLISH-1
 
+## Official CLI architecture (CLI-ARCH-1)
+
+The future official `aether` executable is a Rust CLI that calls
+`aether-driver` and compiler-next in-process. It uses explicit file or project
+targets, strict `--` forwarding for `run`, and a direct-root `aether.toml`
+model. The current CLI and binaries are unchanged by this architecture-only
+milestone. See the [normative design](../docs/architecture/CLI_ARCH_1.md) and
+[closure report](../docs/architecture/CLI_ARCH_1_REPORT.md).
+
 ## Default parameters (DEFAULT-PARAMETERS-V1)
 
 Free user functions may declare trailing defaults with `T name = expression`.
