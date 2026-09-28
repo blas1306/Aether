@@ -1,104 +1,127 @@
-# LINEAR-ALGEBRA-GENERIC-DET-V1 — reporte de bloqueo
+# LINEAR-ALGEBRA-GENERIC-DET-V1 — reporte de implementación
 
-Estado: **BLOQUEADO SIN CAMBIOS PRODUCTIVOS**, 2026-09-28.
+Estado: **IMPLEMENTADO**, 2026-09-28.
 
 Autoridad normativa:
 
-- [NUMERIC_CAPABILITIES_ARCH_1](NUMERIC_CAPABILITIES_ARCH_1.md)
-- [NUMERIC_CAPABILITIES_V1_REPORT](NUMERIC_CAPABILITIES_V1_REPORT.md)
-- [LINEAR_ALGEBRA_DET_V1_REPORT](LINEAR_ALGEBRA_DET_V1_REPORT.md)
-- [LINEAR_ALGEBRA_GENERIC_CONSTRUCTORS_V1_REPORT](LINEAR_ALGEBRA_GENERIC_CONSTRUCTORS_V1_REPORT.md)
+- [NUMERIC_CAPABILITIES_ARCH_1](NUMERIC_CAPABILITIES_ARCH_1.md);
+- [NUMERIC_CAPABILITIES_V1_REPORT](NUMERIC_CAPABILITIES_V1_REPORT.md);
+- [LINEAR_ALGEBRA_DET_V1_REPORT](LINEAR_ALGEBRA_DET_V1_REPORT.md);
+- [LINEAR_ALGEBRA_GENERIC_LU_V1_REPORT](LINEAR_ALGEBRA_GENERIC_LU_V1_REPORT.md).
 
-## Resultado de la auditoría obligatoria
+## Desbloqueo y API final
 
-La ruta de factor puede expresarse con el kernel requerido:
+El bloqueo del reporte anterior quedó resuelto por
+`LINEAR-ALGEBRA-GENERIC-LU-V1`: `lu` es ahora una única declaración
+`LU<T> lu<T: IEEEFloat>(Matrix<T> A)`. Por eso la ruta Matrix de `det` resuelve
+directamente esa identidad genérica durante el análisis paramétrico. No se
+implementó ni se necesitó resolución diferida de overloads.
 
-```aether
-T det<T: IEEEFloat>(ref LU<T> factor) {
-    // los cuatro shape guards DET-V1, en su orden actual
-    T result = 1;
-    if ((*factor).permutationSign < 0) {
-        result = -result;
-    }
-    // producto diagonal en orden ascendente
-}
-```
-
-`IEEEFloat` aporta `One`, `Negate` y `Mul`, por lo que esta ruta no necesita un
-cast integer-to-`T`, un helper de signo ni una rama por precisión.
-
-La ruta owning requerida no es tipable mientras `lu` conserve únicamente sus
-dos overloads concretos. Se probó el body normativo exacto:
+Los cuatro overloads concretos fueron reemplazados por exactamente estas dos
+declaraciones públicas:
 
 ```aether
-T det<T: IEEEFloat>(Matrix<T> A) {
-    shapeGuard(rows(A) == columns(A));
-    LU<T> factor = lu(A);
-    return det(factor);
-}
+T det<T: IEEEFloat>(ref LU<T> factor);
+T det<T: IEEEFloat>(Matrix<T> A);
 ```
 
-con los overloads vigentes:
+No quedan declaraciones `det` concretas para `float32` o `float64`, wrappers,
+helpers por precisión, `TypeId` ni dispatch runtime. El dominio público sigue
+siendo exactamente `float32` y `float64` mediante el marker sellado
+`IEEEFloat`.
+
+## Kernels y equivalencia con DET-V1
+
+La ruta owning conserva primero:
 
 ```aether
-LU<float64> lu(Matrix<float64> A);
-LU<float32> lu(Matrix<float32> A);
+shapeGuard(rows(A) == columns(A));
 ```
 
-`compiler-next/target/debug/aether check linearAlgebra` falla durante el análisis
-paramétrico, antes de crear instancias, con:
+Después construye `LU<T> factor = lu(A);` una sola vez y retorna
+`det(factor)`. No existe un segundo kernel ni una copia defensiva.
+
+La ruta de factor mantiene exactamente los cuatro guards DET-V1 y su orden:
 
 ```text
-error[E0460] (semantic): no matching overload for `lu`; candidates:
-  - lu(Matrix<float64>) -> LU<float64>
-  - lu(Matrix<float32>) -> LU<float32>
+rows(L) == columns(L)
+rows(U) == columns(U)
+rows(L) == rows(U)
+dimension(permutation) == rows(U)
 ```
 
-El resolver actual exige elegir una identidad de declaración al construir el
-HIR paramétrico. No representa un call a un overload set pendiente que pueda
-resolverse después de sustituir `T`; la monomorfización sólo sustituye tipos y
-reifica las operaciones capability de calls ya resueltos.
+Luego inicializa `T result = 1`, lo niega sólo cuando
+`permutationSign < 0`, y multiplica `U[i,i]` en orden ascendente para
+`i = 1..n`. El signo entero nunca se convierte a `T`.
 
-## Decisión de alcance
+Esto preserva el oráculo DET-V1: singular devuelve cero sin
+`SingularMatrixException`, no existe epsilon, `det(0×0) = +1`, el signo viene
+de `permutationSign` y el producto conserva el orden anterior. `+0.0`, `-0.0`,
+NaN, infinito y subnormales pasan por las mismas operaciones IEEE de cada
+precisión, sin normalización ni promoción.
 
-No se dejó una migración parcial: el milestone exige exactamente dos `det`
-públicos y ambas rutas deben ser genéricas. Conservar wrappers concretos para
-la ruta Matrix, duplicar el body por precisión, consultar `TypeId`, agregar
-witnesses/vtables o reconocer `linearAlgebra.lu` en el compilador violaría la
-superficie y las restricciones estructurales del milestone.
+## HIR, MIR, SSA y LLVM
 
-Tampoco se migró LU anticipadamente. Esa sería la salida arquitectónica
-natural ya prevista por `NUMERIC_CAPABILITIES_ARCH_1`, pero ensancha de forma
-material el scope solicitado y altera un kernel numérico que este milestone
-ordena mantener intacto.
+El HIR paramétrico del kernel contiene exactamente las familias numéricas que
+requiere su source:
 
-En consecuencia, `linearAlgebra/src/lib.ae`, sus tests y el comportamiento
-DET-V1 permanecen sin cambios. No corresponde afirmar qualification de
-`LINEAR-ALGEBRA-GENERIC-DET-V1` ni ejecutar la matriz final como si la
-implementación existiera.
+- `AlgebraicValue::One` para el acumulador;
+- `CapabilityUnary::Negate` para aplicar el signo;
+- `CapabilityBinary::Mul` para el producto diagonal.
 
-## Condición de desbloqueo
+Las instancias HIR concretas sustituyen completamente `T` y usan las
+operaciones float ordinarias `NegateFloat` y `MultiplyFloat`; no retienen nodos
+capability. MIR y SSA contienen sólo operaciones concretas de `float32` o
+`float64`, sin `GenericParam`, witnesses ni vtables. LLVM emite instancias
+separadas para ambas precisiones, con `fneg`/`fmul` concretos y llamadas
+directas; no hay `TypeId`, witnesses, vtables ni indirect dispatch.
 
-El milestone puede reabrirse cuando ocurra una de estas dos decisiones
-arquitectónicas explícitas:
+## Ownership, allocations y costo
 
-1. migrar primero `lu` a `LU<T> lu<T: IEEEFloat>(Matrix<T> A)`, conforme al
-   plan de arquitectura; o
-2. especificar e implementar en el lenguaje una representación general de
-   overload resolution diferida para cuerpos paramétricos, con reglas de
-   exhaustividad, ambigüedad, ownership e identidad de símbolo y qualification
-   independiente de `linearAlgebra`.
+`det(Matrix<T>)` consume `A`, ejecuta una sola LU y cuesta O(n³) más el loop
+O(n). Reutiliza el backing de entrada según el contrato de LU y no agrega
+copias ni allocations a las propias de la factorización.
 
-La primera alternativa es acotada al roadmap numérico. La segunda no es un
-arreglo local para `det`: sería una nueva capacidad general del frontend, HIR,
-verificación y monomorfización.
+`det(ref LU<T>)` conserva un shared borrow, cuesta O(n), hace cero allocations
+y no mueve ni copia `L`, `U` o `permutation`. No materializa `P`; el mismo
+factor puede reutilizarse después con `solve` y con nuevas llamadas a `det`.
 
-## Validación efectuada
+## Qualification
 
-Se restauró completamente el intento sobre `linearAlgebra/src/lib.ae`. El
-único cambio del milestone es este reporte de bloqueo. Se validó el diff con:
+El consumer versionado compara las instancias genéricas `float64` y `float32`
+contra la cobertura del oráculo DET-V1: `0×0`, `1×1`, identidad, diagonal,
+triangulares, uno y varios swaps, singular, matriz cero, fila cero, `-0.0`, el
+caso conocido de determinante 100 y reutilización del factor con `solve`. La
+cobertura IEEE vigente de LU conserva además NaN, infinito y subnormales sin
+cambiar el orden ni las operaciones del determinante.
+
+La prueba Rust fija también la deduplicación de source, la única llamada a
+`lu`, ausencia del cast de signo, orden y presencia de los guards, ownership,
+cero allocations en la ruta factor, diagnósticos, lowering paramétrico y
+reificación concreta en O0/O2.
+
+Constructores genéricos, LU genérico, los overloads concretos de `solve`
+Vector/Matrix, QR concreto y el consumer completo permanecen dentro de la
+regresión. `solve` y QR no fueron migrados.
+
+## Validación
+
+Se ejecutó la matriz requerida con el binario `aether` del checkout:
 
 ```text
+aether check linearAlgebra
+aether run linearAlgebra/tests/consumer -O0
+aether run linearAlgebra/tests/consumer -O2
+cargo test --workspace
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+bash compiler-next/tests/run-differential.sh
 git diff --check
 ```
 
+## Fuera de scope
+
+No se implementaron resolución diferida de overloads, migración genérica de
+`solve` o QR, determinant de `MatrixView`, epsilon/tolerancias, una excepción
+de singularidad, matriz `P` densa, `Complex`, witnesses, vtables ni dispatch
+por tipo.

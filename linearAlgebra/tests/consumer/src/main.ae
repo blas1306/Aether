@@ -452,7 +452,7 @@ int testSolveMatrix32() {
     Matrix<float32> q1B = [float32(5.0);float32(4.0);float32(4.0)];
     Matrix<float32> q1X = la.solve(factor, q1B);
     if (columns(q1X) != 1 || abs(q1X[1,1] - vectorX[1]) > float32(2e-5) || abs(q1X[3,1] - vectorX[3]) > float32(2e-5)) { return 2; }
-    if (abs(la.det(factor) - float32(13.0)) > float32(2e-4)) { return 3; }
+    if (abs(la.det<float32>(factor) - float32(13.0)) > float32(2e-4)) { return 3; }
 
     Matrix<float32> scalar = [float32(2.0)];
     Matrix<float32> scalarB = [float32(0.0),float32(2.0),float32(-4.0)];
@@ -807,7 +807,7 @@ int testDet64() {
     if (la.det(empty) != 1.0) { return 1; }
     Matrix<float64> emptyForFactor = la.zeros(0,0);
     la.LU<float64> emptyFactor = la.lu(emptyForFactor);
-    if (la.det(emptyFactor) != 1.0 || dimension(emptyFactor.permutation) != 0) { return 2; }
+    if (la.det<float64>(emptyFactor) != 1.0 || dimension(emptyFactor.permutation) != 0) { return 2; }
 
     Matrix<float64> scalar = [-7.0];
     if (la.det(scalar) != -7.0) { return 3; }
@@ -824,11 +824,11 @@ int testDet64() {
     la.LU<float64> oneSwapFactor = la.lu(oneSwap);
     float64 oneSwapDiagonal = oneSwapFactor.U[1,1] * oneSwapFactor.U[2,2];
     if (oneSwapFactor.permutationSign != -1 || abs(oneSwapDiagonal - 2.0) > 1e-12) { return 8; }
-    if (abs(la.det(oneSwapFactor) + 2.0) > 1e-12) { return 9; }
+    if (abs(la.det<float64>(oneSwapFactor) + 2.0) > 1e-12) { return 9; }
 
     Matrix<float64> multipleSwaps = [0.0,2.0,1.0;1.0,0.0,3.0;2.0,1.0,0.0];
     la.LU<float64> multipleFactor = la.lu(multipleSwaps);
-    if (multipleFactor.permutationSign != 1 || abs(la.det(multipleFactor) - 13.0) > 1e-12) { return 10; }
+    if (multipleFactor.permutationSign != 1 || abs(la.det<float64>(multipleFactor) - 13.0) > 1e-12) { return 10; }
 
     Matrix<float64> known = [3.0,-2.0,1.0;2.0,4.0,-3.0;-1.0,2.0,5.0];
     if (abs(la.det(known) - 100.0) > 1e-11) { return 11; }
@@ -859,7 +859,7 @@ int testDet32() {
     if (la.det(empty) != float32(1.0)) { return 1; }
     Matrix<float32> emptyForFactor = la.zeros(0,0);
     la.LU<float32> emptyFactor = la.lu(emptyForFactor);
-    if (la.det(emptyFactor) != float32(1.0) || dimension(emptyFactor.permutation) != 0) { return 2; }
+    if (la.det<float32>(emptyFactor) != float32(1.0) || dimension(emptyFactor.permutation) != 0) { return 2; }
 
     Matrix<float32> scalar = [float32(-7.0)];
     if (la.det(scalar) != float32(-7.0)) { return 3; }
@@ -876,11 +876,11 @@ int testDet32() {
     la.LU<float32> oneSwapFactor = la.lu(oneSwap);
     float32 oneSwapDiagonal = oneSwapFactor.U[1,1] * oneSwapFactor.U[2,2];
     if (oneSwapFactor.permutationSign != -1 || abs(oneSwapDiagonal - float32(2.0)) > float32(2e-5)) { return 8; }
-    if (abs(la.det(oneSwapFactor) + float32(2.0)) > float32(2e-5)) { return 9; }
+    if (abs(la.det<float32>(oneSwapFactor) + float32(2.0)) > float32(2e-5)) { return 9; }
 
     Matrix<float32> multipleSwaps = [float32(0.0),float32(2.0),float32(1.0);float32(1.0),float32(0.0),float32(3.0);float32(2.0),float32(1.0),float32(0.0)];
     la.LU<float32> multipleFactor = la.lu(multipleSwaps);
-    if (multipleFactor.permutationSign != 1 || abs(la.det(multipleFactor) - float32(13.0)) > float32(2e-5)) { return 10; }
+    if (multipleFactor.permutationSign != 1 || abs(la.det<float32>(multipleFactor) - float32(13.0)) > float32(2e-5)) { return 10; }
 
     Matrix<float32> known = [float32(3.0),float32(-2.0),float32(1.0);float32(2.0),float32(4.0),float32(-3.0);float32(-1.0),float32(2.0),float32(5.0)];
     if (abs(la.det(known) - float32(100.0)) > float32(2e-4)) { return 11; }

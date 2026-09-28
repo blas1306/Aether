@@ -155,13 +155,16 @@ LU<T> lu<T: IEEEFloat>(Matrix<T> A) {
     return LU<T>(permutation, permutationSign, A, U);
 }
 
-float64 det(ref LU<float64> factor) {
+T det<T: IEEEFloat>(ref LU<T> factor) {
     shapeGuard(rows((*factor).L) == columns((*factor).L));
     shapeGuard(rows((*factor).U) == columns((*factor).U));
     shapeGuard(rows((*factor).L) == rows((*factor).U));
     shapeGuard(dimension((*factor).permutation) == rows((*factor).U));
 
-    float64 result = float64((*factor).permutationSign);
+    T result = 1;
+    if ((*factor).permutationSign < 0) {
+        result = -result;
+    }
     usize i = 1;
     while (i <= rows((*factor).U)) {
         result = result * (*factor).U[i,i];
@@ -170,30 +173,9 @@ float64 det(ref LU<float64> factor) {
     return result;
 }
 
-float32 det(ref LU<float32> factor) {
-    shapeGuard(rows((*factor).L) == columns((*factor).L));
-    shapeGuard(rows((*factor).U) == columns((*factor).U));
-    shapeGuard(rows((*factor).L) == rows((*factor).U));
-    shapeGuard(dimension((*factor).permutation) == rows((*factor).U));
-
-    float32 result = float32((*factor).permutationSign);
-    usize i = 1;
-    while (i <= rows((*factor).U)) {
-        result = result * (*factor).U[i,i];
-        i = i + 1;
-    }
-    return result;
-}
-
-float64 det(Matrix<float64> A) {
+T det<T: IEEEFloat>(Matrix<T> A) {
     shapeGuard(rows(A) == columns(A));
-    LU<float64> factor = lu(A);
-    return det(factor);
-}
-
-float32 det(Matrix<float32> A) {
-    shapeGuard(rows(A) == columns(A));
-    LU<float32> factor = lu(A);
+    LU<T> factor = lu(A);
     return det(factor);
 }
 

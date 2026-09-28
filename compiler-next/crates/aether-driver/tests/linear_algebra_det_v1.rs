@@ -1,4 +1,4 @@
-//! LINEAR-ALGEBRA-DET-V1 package, diagnostics, lowering and ownership qualification.
+//! LINEAR-ALGEBRA-GENERIC-DET-V1 package, diagnostics, lowering and ownership qualification.
 
 use std::{fs, path::PathBuf, process::Command};
 
@@ -70,38 +70,50 @@ fn status_llvm(llvm: &str, optimization: OptimizationLevel) -> std::process::Exi
 }
 
 #[test]
-fn det_has_exactly_the_closed_public_surface_and_delegates_once() {
-    let det_start = LIBRARY.find("float64 det(ref LU<float64> factor)").unwrap();
+fn det_has_exactly_two_generic_declarations_and_delegates_once() {
+    let det_start = LIBRARY
+        .find("T det<T: IEEEFloat>(ref LU<T> factor)")
+        .unwrap();
+    let factor_end = LIBRARY.find("T det<T: IEEEFloat>(Matrix<T> A)").unwrap();
     let det_end = LIBRARY.find("Vector<float64,Column> solve(").unwrap();
+    let factor_implementation = &LIBRARY[det_start..factor_end];
     let det_implementation = &LIBRARY[det_start..det_end];
-    assert_eq!(LIBRARY.matches("float64 det(").count(), 2);
-    assert_eq!(LIBRARY.matches("float32 det(").count(), 2);
-    assert_eq!(LIBRARY.matches("float64 det(Matrix<float64> A)").count(), 1);
-    assert_eq!(LIBRARY.matches("float32 det(Matrix<float32> A)").count(), 1);
     assert_eq!(
         LIBRARY
-            .matches("float64 det(ref LU<float64> factor)")
+            .matches("T det<T: IEEEFloat>(ref LU<T> factor)")
             .count(),
         1
     );
     assert_eq!(
-        LIBRARY
-            .matches("float32 det(ref LU<float32> factor)")
-            .count(),
+        LIBRARY.matches("T det<T: IEEEFloat>(Matrix<T> A)").count(),
         1
     );
+    assert_eq!(LIBRARY.matches(" det<").count(), 2);
+    assert!(!LIBRARY.contains("float64 det("));
+    assert!(!LIBRARY.contains("float32 det("));
     assert_eq!(
-        det_implementation
-            .matches("LU<float64> factor = lu(A);")
-            .count(),
+        det_implementation.matches("LU<T> factor = lu(A);").count(),
         1
     );
-    assert_eq!(
-        det_implementation
-            .matches("LU<float32> factor = lu(A);")
-            .count(),
-        1
-    );
+    assert_eq!(det_implementation.matches("lu(A)").count(), 1);
+    assert!(det_implementation.contains("T result = 1;"));
+    assert!(det_implementation.contains("result = -result;"));
+    assert_eq!(factor_implementation.matches("shapeGuard(").count(), 4);
+    let guards = [
+        "shapeGuard(rows((*factor).L) == columns((*factor).L));",
+        "shapeGuard(rows((*factor).U) == columns((*factor).U));",
+        "shapeGuard(rows((*factor).L) == rows((*factor).U));",
+        "shapeGuard(dimension((*factor).permutation) == rows((*factor).U));",
+    ];
+    let mut previous = 0;
+    for guard in guards {
+        let position = factor_implementation.find(guard).unwrap();
+        assert!(position >= previous, "guard out of order: {guard}");
+        previous = position;
+    }
+    assert!(factor_implementation.contains("result = result * (*factor).U[i,i];"));
+    assert!(!det_implementation.contains("float32((*factor).permutationSign)"));
+    assert!(!det_implementation.contains("float64((*factor).permutationSign)"));
     assert!(!LIBRARY.contains("determinant("));
     assert!(!LIBRARY.contains("detFloat32"));
     assert!(!LIBRARY.contains("aether_det"));
@@ -111,8 +123,8 @@ fn det_has_exactly_the_closed_public_surface_and_delegates_once() {
 }
 
 #[test]
-fn det_lowers_as_ordinary_borrowing_package_code_in_every_phase() {
-    let source = "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[0.0,1.0;2.0,3.0];la.LU<float64>f=la.lu(a);float64 x=la.det(f);Matrix<float32>b=[float32(-4.0)];float32 y=la.det(b);return int(x+float64(y)+6.0);}";
+fn det_reifies_capability_operations_before_mir_and_emits_concrete_instances() {
+    let source = "package consumer;import linearAlgebra as la;T forward<T:IEEEFloat>(ref la.LU<T>f){return la.det(f);}int main(){Matrix<float64>a=[0.0,1.0;2.0,3.0];la.LU<float64>f=la.lu(a);float64 x=forward(f);Matrix<float32>b=[float32(-4.0)];float32 y=la.det(b);return int(x+float64(y)+6.0);}";
     for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
         let compilation = compile(source, optimization);
         for phase in [Emit::Hir, Emit::Mir, Emit::Ssa] {
@@ -123,10 +135,60 @@ fn det_lowers_as_ordinary_borrowing_package_code_in_every_phase() {
             assert!(!dump.contains("MatrixProduct"), "{phase:?}");
             assert!(!dump.contains("aether_det"), "{phase:?}");
         }
+        let hir = &compilation.dumps[&Emit::Hir];
+        for operation in [
+            "AlgebraicValue",
+            "capability: One",
+            "CapabilityUnary",
+            "operation: Negate",
+            "CapabilityBinary",
+            "behavior: Mul",
+        ] {
+            assert!(hir.contains(operation), "missing parametric {operation}");
+        }
+        for concrete_operation in ["NegateFloat", "MultiplyFloat"] {
+            assert!(
+                hir.contains(concrete_operation),
+                "missing concrete HIR {concrete_operation}"
+            );
+        }
+        for phase in [Emit::Mir, Emit::Ssa] {
+            let dump = &compilation.dumps[&phase];
+            for residue in [
+                "AlgebraicValue",
+                "CapabilityUnary",
+                "CapabilityBinary",
+                "GenericParam(",
+                "witness",
+                "vtable",
+            ] {
+                assert!(!dump.contains(residue), "{phase:?} contains {residue}");
+            }
+        }
         assert!(compilation.llvm.contains("@aether_matrix_index_fFloat64"));
         assert!(compilation.llvm.contains("@aether_matrix_index_fFloat32"));
         assert!(compilation.llvm.contains("fmul double"));
         assert!(compilation.llvm.contains("fmul float"));
+        assert!(
+            compilation
+                .llvm
+                .contains("linearAlgebra_f3_det__o13__gfFloat64"),
+            "missing float64 det instance\n{}",
+            compilation.llvm
+        );
+        assert!(
+            compilation
+                .llvm
+                .contains("linearAlgebra_f3_det__o13__gfFloat32"),
+            "missing float32 det instance\n{}",
+            compilation.llvm
+        );
+        for residue in ["Capability", "GenericParam", "TypeId", "witness", "vtable"] {
+            assert!(
+                !compilation.llvm.contains(residue),
+                "LLVM contains {residue}"
+            );
+        }
         assert!(!compilation.llvm.contains("aether_det"));
         assert_eq!(status_llvm(&compilation.llvm, optimization).code(), Some(0));
     }
