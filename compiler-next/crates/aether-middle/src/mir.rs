@@ -3,7 +3,8 @@
 
 use aether_frontend::{
     CallBorrowOrigin, CallBorrowSource, CallSiteId, CatchId, ClassId, ClassOp, ClassTokenKind,
-    CollectionKind, FinallyId, IndexSemantics, IterationBindingCategory, LoopId,
+    CollectionKind, FinallyId, FormatBorrowOrigin, FormatBorrowSource, FormatSiteId,
+    IndexSemantics, IterationBindingCategory, LoopId,
 };
 mod classes;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -212,6 +213,23 @@ pub struct CallBorrowMetadata {
     pub origin: CallBorrowOrigin,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FormatBorrowSourceKind {
+    Place,
+    Temporary(LocalId),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FormatBorrowMetadata {
+    pub format_site: FormatSiteId,
+    pub fragment_index: u32,
+    pub pointee_type: TypeId,
+    pub reference_type: TypeId,
+    pub root_type: TypeId,
+    pub source: FormatBorrowSourceKind,
+    pub origin: FormatBorrowOrigin,
+}
+
 /// MIR operand for scalar or aggregate values.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operand {
@@ -398,9 +416,14 @@ pub enum Rvalue {
         place: Place,
         mutable: bool,
         call: Option<CallBorrowMetadata>,
+        format: Option<FormatBorrowMetadata>,
     },
     EndBorrow {
         call: CallBorrowMetadata,
+        reference: Operand,
+    },
+    FormatEndBorrow {
+        format: FormatBorrowMetadata,
         reference: Operand,
     },
     /// Transfer one move-only owner out of an existing place.
@@ -1150,6 +1173,7 @@ fn lower_function(
         root_event: None,
         active_temporary_owners: Vec::new(),
         active_call_borrows: Vec::new(),
+        active_format_borrows: Vec::new(),
         construction_state: function
             .constructor_unwind
             .as_ref()
@@ -1218,6 +1242,7 @@ struct Builder<'a> {
     root_event: Option<ExceptionEventId>,
     active_temporary_owners: Vec<LocalId>,
     active_call_borrows: Vec<(CallBorrowMetadata, Operand)>,
+    active_format_borrows: Vec<(FormatBorrowMetadata, Operand)>,
     construction_state: Option<aether_frontend::ClassInitializationState>,
     loops: Vec<(BlockId, BlockId, usize)>,
     finalizers: Vec<FinalizerContext>,
@@ -1455,6 +1480,10 @@ impl Builder<'_> {
         let borrows = self.active_call_borrows.clone();
         for (call, reference) in borrows.into_iter().rev() {
             self.emit_end_borrow(call, reference, span);
+        }
+        let format_borrows = self.active_format_borrows.clone();
+        for (format, reference) in format_borrows.into_iter().rev() {
+            self.emit_format_end_borrow(format, reference, span);
         }
         for owner in temporaries.into_iter().rev() {
             self.emit_hir_drop(HirDrop::Unconditional(owner), span);
@@ -3149,6 +3178,7 @@ impl Builder<'_> {
                         place,
                         mutable: *mutable,
                         call: None,
+                        format: None,
                     },
                     expression.span,
                 );
@@ -3156,6 +3186,9 @@ impl Builder<'_> {
             }
             HirExprKind::CallScopedSharedBorrow { .. } => {
                 unreachable!("call-scoped borrow must be lowered by its enclosing call")
+            }
+            HirExprKind::FormatScopedSharedBorrow { .. } => {
+                unreachable!("format-scoped borrow must be lowered by its interpolation")
             }
             HirExprKind::BufferInit {
                 element_type,
@@ -3575,6 +3608,7 @@ impl Builder<'_> {
                             place: source,
                             mutable: true,
                             call: None,
+                            format: None,
                         },
                         expression.span,
                     );
@@ -3819,6 +3853,7 @@ impl Builder<'_> {
                             place: source,
                             mutable: false,
                             call: None,
+                            format: None,
                         },
                         expression.span,
                     );
@@ -3910,6 +3945,7 @@ impl Builder<'_> {
                             place: source,
                             mutable: *mutable,
                             call: None,
+                            format: None,
                         },
                         expression.span,
                     );
@@ -4446,6 +4482,8 @@ impl Builder<'_> {
     ) -> Operand {
         use aether_frontend::StringOp;
         let temporary_active_start = self.active_temporary_owners.len();
+        let format_borrow_start = self.active_format_borrows.len();
+        let mut format_borrows = Vec::new();
         let (op, owners): (StringOp<Operand>, Vec<Place>) = match op {
             StringOp::Literal { bytes } => (
                 StringOp::Literal {
@@ -4504,26 +4542,29 @@ impl Builder<'_> {
                         }
                         aether_frontend::InterpolationFragment::Hole {
                             value,
-                            ty,
+                            formatted_type,
+                            access,
                             conversion,
                             span,
                         } => {
-                            let temporary_string = *ty == TypeId::STRING
-                                && !matches!(
-                                    value.kind,
-                                    HirExprKind::Local(_) | HirExprKind::Load(_)
-                                );
-                            let operand = self.lower_expr(value);
-                            if temporary_string {
-                                let owner = operand_place(&operand);
-                                if let Some(local) = place_root_local(&owner) {
-                                    self.active_temporary_owners.push(local);
+                            let operand = if matches!(
+                                value.kind,
+                                HirExprKind::FormatScopedSharedBorrow { .. }
+                            ) {
+                                let (operand, metadata, temporary) =
+                                    self.lower_format_borrow(value);
+                                format_borrows.push((metadata, operand.clone()));
+                                if let Some(owner) = temporary {
+                                    owners.push(owner);
                                 }
-                                owners.push(owner);
-                            }
+                                operand
+                            } else {
+                                self.lower_expr(value)
+                            };
                             aether_frontend::InterpolationFragment::Hole {
                                 value: operand,
-                                ty: *ty,
+                                formatted_type: *formatted_type,
+                                access: *access,
                                 conversion: *conversion,
                                 span: *span,
                             }
@@ -4550,12 +4591,107 @@ impl Builder<'_> {
             Rvalue::String(Box::new(op)),
             span,
         );
+        for (format, reference) in format_borrows.into_iter().rev() {
+            self.emit_format_end_borrow(format, reference, span);
+        }
+        self.active_format_borrows.truncate(format_borrow_start);
         self.active_temporary_owners
             .truncate(temporary_active_start);
         for owner in owners {
             self.emit_drop(owner, span);
         }
         Operand::Local(destination)
+    }
+
+    fn lower_format_borrow(
+        &mut self,
+        argument: &HirExpr,
+    ) -> (Operand, FormatBorrowMetadata, Option<Place>) {
+        let HirExprKind::FormatScopedSharedBorrow {
+            format_site,
+            fragment_index,
+            pointee_type,
+            reference_type,
+            source,
+            origin,
+        } = &argument.kind
+        else {
+            unreachable!("verified format borrow")
+        };
+        let (place, source_kind, root_type, temporary) = match source {
+            FormatBorrowSource::Place(place) => (
+                self.lower_place(place),
+                FormatBorrowSourceKind::Place,
+                *pointee_type,
+                None,
+            ),
+            FormatBorrowSource::Temporary(initializer) => {
+                let value = self.lower_expr(initializer);
+                let local = operand_local_id(&value)
+                    .expect("verified format temporary is materialized in a local");
+                self.function.locals[local.0 as usize].address_taken = true;
+                let place = operand_place(&value);
+                self.active_temporary_owners.push(local);
+                (
+                    place.clone(),
+                    FormatBorrowSourceKind::Temporary(local),
+                    initializer.ty,
+                    Some(place),
+                )
+            }
+            FormatBorrowSource::ProjectedTemporary {
+                initializer,
+                projections,
+            } => {
+                let value = self.lower_expr(initializer);
+                let local = operand_local_id(&value)
+                    .expect("verified projected format temporary is materialized in a local");
+                self.function.locals[local.0 as usize].address_taken = true;
+                self.active_temporary_owners.push(local);
+                let root = operand_place(&value);
+                let place = Place {
+                    base: root.base.clone(),
+                    projections: projections
+                        .iter()
+                        .map(|projection| match projection {
+                            HirPlaceProjection::Field(field) => PlaceProjection::Field(*field),
+                            HirPlaceProjection::Index { .. } => {
+                                unreachable!("verified field projection")
+                            }
+                        })
+                        .collect(),
+                };
+                (
+                    place,
+                    FormatBorrowSourceKind::Temporary(local),
+                    initializer.ty,
+                    Some(root),
+                )
+            }
+        };
+        let metadata = FormatBorrowMetadata {
+            format_site: *format_site,
+            fragment_index: *fragment_index,
+            pointee_type: *pointee_type,
+            reference_type: *reference_type,
+            root_type,
+            source: source_kind,
+            origin: *origin,
+        };
+        let reference = Operand::Local(self.temporary(*reference_type));
+        self.assign(
+            operand_place(&reference),
+            Rvalue::Borrow {
+                place,
+                mutable: false,
+                call: None,
+                format: Some(metadata),
+            },
+            argument.span,
+        );
+        self.active_format_borrows
+            .push((metadata, reference.clone()));
+        (reference, metadata, temporary)
     }
 
     fn lower_text(
@@ -4786,6 +4922,7 @@ impl Builder<'_> {
                 place,
                 mutable: false,
                 call: Some(metadata),
+                format: None,
             },
             argument.span,
         );
@@ -5015,6 +5152,20 @@ impl Builder<'_> {
         self.assign(
             operand_place(&Operand::Local(token)),
             Rvalue::EndBorrow { call, reference },
+            span,
+        );
+    }
+
+    fn emit_format_end_borrow(
+        &mut self,
+        format: FormatBorrowMetadata,
+        reference: Operand,
+        span: Span,
+    ) {
+        let token = self.temporary(TypeId::BOOL);
+        self.assign(
+            operand_place(&Operand::Local(token)),
+            Rvalue::FormatEndBorrow { format, reference },
             span,
         );
     }
@@ -5849,6 +6000,73 @@ fn verify_mir_function(
     }
     verify_take_protocol(function, fail)?;
     verify_call_borrow_regions(function, fail)?;
+    verify_format_borrow_regions(function, fail)?;
+    Ok(())
+}
+
+fn verify_format_borrow_regions(
+    function: &MirFunction,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut borrows = BTreeMap::new();
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            if let Rvalue::Borrow {
+                format: Some(metadata),
+                ..
+            } = instruction.value
+            {
+                let Some(reference) = place_root_local(&instruction.destination) else {
+                    return Err(fail("MIR format borrow result is not a local".into()));
+                };
+                if borrows.insert(reference, metadata).is_some() {
+                    return Err(fail(
+                        "MIR format borrow local has duplicate definitions".into(),
+                    ));
+                }
+            }
+        }
+    }
+    for (reference, metadata) in borrows {
+        let mut format_uses = 0;
+        let mut end_uses = 0;
+        for block in &function.blocks {
+            for instruction in &block.instructions {
+                let allowed = match &instruction.value {
+                    Rvalue::String(op) => {
+                        matches!(op.as_ref(), aether_frontend::StringOp::Interpolate { fragments, .. }
+                        if fragments.get(metadata.fragment_index as usize).is_some_and(|fragment|
+                            matches!(fragment, aether_frontend::InterpolationFragment::Hole { value: Operand::Local(value), access: aether_frontend::InterpolationAccess::SharedObservation, .. } if *value == reference)))
+                    }
+                    Rvalue::FormatEndBorrow {
+                        format,
+                        reference: Operand::Local(value),
+                    } if *format == metadata && *value == reference => true,
+                    _ => false,
+                };
+                let uses = crate::ssa::rvalue_locals(function, &instruction.value)
+                    .into_iter()
+                    .filter(|local| *local == reference)
+                    .count();
+                if uses != 0 && !allowed {
+                    return Err(fail(
+                        "MIR format-scoped reference escapes interpolation".into(),
+                    ));
+                }
+                match &instruction.value {
+                    Rvalue::String(_) if allowed => format_uses += 1,
+                    Rvalue::FormatEndBorrow { .. } if allowed => end_uses += 1,
+                    _ => {}
+                }
+            }
+        }
+        if format_uses != 1 || end_uses == 0 {
+            return Err(fail(
+                "MIR format borrow requires one matching interpolation use and FormatEndBorrow"
+                    .into(),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -7717,6 +7935,7 @@ fn validate_rvalue(
             place,
             mutable,
             call,
+            format,
         } => {
             validate_place_read(function, place, structs, types, initialized)?;
             let pointee = place_type(function, place, structs, types)?;
@@ -7756,6 +7975,25 @@ fn validate_rvalue(
                     }
                 }
             }
+            if let Some(format) = format {
+                if *mutable
+                    || call.is_some()
+                    || format.pointee_type != pointee
+                    || format.reference_type != destination
+                    || types.reference_info(format.reference_type)
+                        != Some((format.pointee_type, false))
+                {
+                    return Err("MIR format borrow metadata/type contract invalid".into());
+                }
+                if let FormatBorrowSourceKind::Temporary(local) = format.source
+                    && (place.base != PlaceBase::Local(local)
+                        || function.locals.get(local.0 as usize).is_none_or(|slot| {
+                            slot.ty != format.root_type || !slot.temporary || !slot.address_taken
+                        }))
+                {
+                    return Err("MIR format borrow temporary provenance invalid".into());
+                }
+            }
         }
         Rvalue::EndBorrow { call, reference } => {
             validate_operand(function, reference, initialized)?;
@@ -7764,6 +8002,15 @@ fn validate_rvalue(
                 || types.reference_info(call.reference_type) != Some((call.pointee_type, false))
             {
                 return Err("MIR EndBorrow metadata/type contract invalid".into());
+            }
+        }
+        Rvalue::FormatEndBorrow { format, reference } => {
+            validate_operand(function, reference, initialized)?;
+            if destination != TypeId::BOOL
+                || operand_type(function, reference)? != format.reference_type
+                || types.reference_info(format.reference_type) != Some((format.pointee_type, false))
+            {
+                return Err("MIR FormatEndBorrow metadata/type contract invalid".into());
             }
         }
         Rvalue::AlgebraicProduct {

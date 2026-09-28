@@ -169,6 +169,9 @@ pub struct LoopId(pub u32);
 /// Function-local call identity, assigned in source evaluation order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CallSiteId(pub u32);
+/// Function-local interpolation identity, derived from its source location.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FormatSiteId(pub u32);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParameterSignature {
     pub name: String,
@@ -1496,6 +1499,21 @@ pub enum CallBorrowSource {
     Temporary(Box<HirExpr>),
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FormatBorrowOrigin {
+    Owner,
+    Ref,
+    RefMut,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FormatBorrowSource {
+    Place(HirPlace),
+    Temporary(Box<HirExpr>),
+    ProjectedTemporary {
+        initializer: Box<HirExpr>,
+        projections: Vec<HirPlaceProjection>,
+    },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FloatValue {
     Float32(u32),
     Float64(u64),
@@ -1683,6 +1701,15 @@ pub enum HirExprKind {
         reference_type: TypeId,
         source: CallBorrowSource,
         origin: CallBorrowOrigin,
+    },
+    /// Shared observation whose lifetime is exactly one interpolation plan.
+    FormatScopedSharedBorrow {
+        format_site: FormatSiteId,
+        fragment_index: u32,
+        pointee_type: TypeId,
+        reference_type: TypeId,
+        source: FormatBorrowSource,
+        origin: FormatBorrowOrigin,
     },
     BufferInit {
         element_type: TypeId,
@@ -5567,6 +5594,47 @@ impl Monomorphizer<'_> {
                 },
                 origin: *origin,
             },
+            HirExprKind::FormatScopedSharedBorrow {
+                format_site,
+                fragment_index,
+                pointee_type,
+                reference_type,
+                source,
+                origin,
+            } => HirExprKind::FormatScopedSharedBorrow {
+                format_site: *format_site,
+                fragment_index: *fragment_index,
+                pointee_type: self.substitute_type(*pointee_type, substitution, expression.span)?,
+                reference_type: self.substitute_type(
+                    *reference_type,
+                    substitution,
+                    expression.span,
+                )?,
+                source: match source {
+                    FormatBorrowSource::Place(place) => {
+                        FormatBorrowSource::Place(self.substitute_place(place, substitution)?)
+                    }
+                    FormatBorrowSource::Temporary(initializer) => FormatBorrowSource::Temporary(
+                        Box::new(self.substitute_expr(initializer, substitution)?),
+                    ),
+                    FormatBorrowSource::ProjectedTemporary {
+                        initializer,
+                        projections,
+                    } => {
+                        let mut place = HirPlace {
+                            base: HirPlaceBase::Local(LocalId(u32::MAX)),
+                            projections: projections.clone(),
+                            ty: *pointee_type,
+                        };
+                        place = self.substitute_place(&place, substitution)?;
+                        FormatBorrowSource::ProjectedTemporary {
+                            initializer: Box::new(self.substitute_expr(initializer, substitution)?),
+                            projections: place.projections,
+                        }
+                    }
+                },
+                origin: *origin,
+            },
             HirExprKind::BufferInit {
                 element_type,
                 length,
@@ -7233,9 +7301,25 @@ impl OwnershipAnalysis<'_> {
                 Ok(())
             }
             HirExprKind::String(op) => {
+                self.borrowed.push(BTreeSet::new());
+                self.storage_borrowed.push(BTreeSet::new());
+                self.storage_ranges.push(Vec::new());
                 for operand in op.operands() {
                     self.expr(operand)?;
+                    if let HirExprKind::FormatScopedSharedBorrow {
+                        source: FormatBorrowSource::Place(place),
+                        ..
+                    } = &operand.kind
+                        && let Some(owner) = self.owner_of_place(place)
+                    {
+                        self.borrowed.last_mut().unwrap().insert(owner);
+                        self.storage_borrowed.last_mut().unwrap().insert(owner);
+                        self.storage_ranges.last_mut().unwrap().push((owner, None));
+                    }
                 }
+                self.borrowed.pop();
+                self.storage_borrowed.pop();
+                self.storage_ranges.pop();
                 Ok(())
             }
             HirExprKind::Text { op, .. } => {
@@ -7253,6 +7337,13 @@ impl OwnershipAnalysis<'_> {
             HirExprKind::CallScopedSharedBorrow { source, .. } => match source {
                 CallBorrowSource::Place(place) => self.place(place, expr.span),
                 CallBorrowSource::Temporary(initializer) => self.expr(initializer),
+            },
+            HirExprKind::FormatScopedSharedBorrow { source, .. } => match source {
+                FormatBorrowSource::Place(place) => self.place(place, expr.span),
+                FormatBorrowSource::Temporary(initializer)
+                | FormatBorrowSource::ProjectedTemporary { initializer, .. } => {
+                    self.expr(initializer)
+                }
             },
             HirExprKind::Move(local) => self.move_local(*local, expr.span),
             HirExprKind::Local(local) => {
@@ -7871,6 +7962,10 @@ impl OwnershipAnalysis<'_> {
             | HirExprKind::CallScopedSharedBorrow {
                 source: CallBorrowSource::Place(place),
                 ..
+            }
+            | HirExprKind::FormatScopedSharedBorrow {
+                source: FormatBorrowSource::Place(place),
+                ..
             } => self.owner_of_place(place),
             HirExprKind::Load(place) if self.types.mathematical_view_info(expr.ty).is_some() => {
                 self.owner_of_place(place)
@@ -8279,6 +8374,7 @@ struct Checked {
     expr: HirExpr,
     constant: Option<ConstantValue>,
 }
+type FormatProjectedTemporary = (HirExpr, Vec<HirPlaceProjection>, TypeId);
 #[derive(Clone, Copy)]
 enum ConstantValue {
     Integer(i128),
@@ -10903,7 +10999,8 @@ impl Analyzer<'_> {
         }
         if let AstExprKind::Interpolation(fragments) = &e.kind {
             let mut plan = Vec::with_capacity(fragments.len());
-            for fragment in fragments {
+            let format_site = FormatSiteId(u32::try_from(e.span.start).unwrap_or(u32::MAX));
+            for (fragment_index, fragment) in fragments.iter().enumerate() {
                 match fragment {
                     crate::AstInterpolationFragment::Text { value, span } => {
                         plan.push(crate::InterpolationFragment::Text {
@@ -10912,45 +11009,144 @@ impl Analyzer<'_> {
                         });
                     }
                     crate::AstInterpolationFragment::Hole { expression, span } => {
-                        let mut value = match self.resolve_expr_place(expression, false) {
-                            Ok(place) if place.ty == TypeId::STRING => {
+                        let resolved_place = self.resolve_expr_place(expression, false).ok();
+                        let (value, formatted_type, access) = if let Some(mut place) =
+                            resolved_place
+                        {
+                            let mut origin = FormatBorrowOrigin::Owner;
+                            while let Some((pointee, mutable)) = self.types.reference_info(place.ty)
+                            {
+                                origin = if mutable {
+                                    FormatBorrowOrigin::RefMut
+                                } else {
+                                    FormatBorrowOrigin::Ref
+                                };
+                                let reference = HirExpr {
+                                    kind: match place.base {
+                                        HirPlaceBase::Local(local)
+                                            if place.projections.is_empty() =>
+                                        {
+                                            HirExprKind::Local(local)
+                                        }
+                                        _ => HirExprKind::Load(place.clone()),
+                                    },
+                                    ty: place.ty,
+                                    span: expression.span,
+                                };
+                                place = HirPlace {
+                                    base: HirPlaceBase::Dereference {
+                                        reference: Box::new(reference),
+                                        mutable,
+                                    },
+                                    projections: Vec::new(),
+                                    ty: pointee,
+                                };
+                            }
+                            let formatted_type = place.ty;
+                            let observe = origin != FormatBorrowOrigin::Owner
+                                || !self.types.guarantees_copy(formatted_type);
+                            if observe {
+                                if let HirPlaceBase::Local(local) = place.base
+                                    && !place.projections.iter().any(|projection| {
+                                        matches!(projection, HirPlaceProjection::Index { .. })
+                                    })
+                                {
+                                    self.locals[local.0 as usize].address_taken = true;
+                                }
+                                let reference_type =
+                                    self.types.intern_reference(formatted_type, false);
+                                (
+                                    HirExpr {
+                                        kind: HirExprKind::FormatScopedSharedBorrow {
+                                            format_site,
+                                            fragment_index: fragment_index as u32,
+                                            pointee_type: formatted_type,
+                                            reference_type,
+                                            source: FormatBorrowSource::Place(place),
+                                            origin,
+                                        },
+                                        ty: reference_type,
+                                        span: expression.span,
+                                    },
+                                    formatted_type,
+                                    crate::InterpolationAccess::SharedObservation,
+                                )
+                            } else {
                                 let kind = match place.base {
                                     HirPlaceBase::Local(local) if place.projections.is_empty() => {
                                         HirExprKind::Local(local)
                                     }
                                     _ => HirExprKind::Load(place),
                                 };
-                                HirExpr {
-                                    kind,
-                                    ty: TypeId::STRING,
-                                    span: expression.span,
-                                }
-                            }
-                            _ => self.expression(expression, None)?.expr,
-                        };
-                        let ty = value.ty;
-                        let conversion = if ty == TypeId::STRING {
-                            if let HirExprKind::String(op) = value.kind {
-                                value = match *op {
-                                    crate::StringOp::Alias { source } => source,
-                                    other => HirExpr {
-                                        kind: HirExprKind::String(Box::new(other)),
-                                        ty,
-                                        span: value.span,
+                                (
+                                    HirExpr {
+                                        kind,
+                                        ty: formatted_type,
+                                        span: expression.span,
                                     },
-                                };
+                                    formatted_type,
+                                    crate::InterpolationAccess::CopyValue,
+                                )
                             }
-                            crate::InterpolationConversion::StringBorrow
-                        } else if matches!(
-                            self.types.get(ty),
-                            Some(
-                                TypeData::Bool
-                                    | TypeData::Char
-                                    | TypeData::Integer(_)
-                                    | TypeData::Float(_)
+                        } else if let Some((initializer, projections, formatted_type)) =
+                            self.format_projected_temporary(expression)?
+                        {
+                            let reference_type = self.types.intern_reference(formatted_type, false);
+                            (
+                                HirExpr {
+                                    kind: HirExprKind::FormatScopedSharedBorrow {
+                                        format_site,
+                                        fragment_index: fragment_index as u32,
+                                        pointee_type: formatted_type,
+                                        reference_type,
+                                        source: FormatBorrowSource::ProjectedTemporary {
+                                            initializer: Box::new(initializer),
+                                            projections,
+                                        },
+                                        origin: FormatBorrowOrigin::Owner,
+                                    },
+                                    ty: reference_type,
+                                    span: expression.span,
+                                },
+                                formatted_type,
+                                crate::InterpolationAccess::SharedObservation,
                             )
-                        ) {
+                        } else {
+                            let value = self.expression(expression, None)?.expr;
+                            let formatted_type = value.ty;
+                            if self.types.guarantees_copy(formatted_type) {
+                                (value, formatted_type, crate::InterpolationAccess::CopyValue)
+                            } else {
+                                let reference_type =
+                                    self.types.intern_reference(formatted_type, false);
+                                (
+                                    HirExpr {
+                                        kind: HirExprKind::FormatScopedSharedBorrow {
+                                            format_site,
+                                            fragment_index: fragment_index as u32,
+                                            pointee_type: formatted_type,
+                                            reference_type,
+                                            source: FormatBorrowSource::Temporary(Box::new(value)),
+                                            origin: FormatBorrowOrigin::Owner,
+                                        },
+                                        ty: reference_type,
+                                        span: expression.span,
+                                    },
+                                    formatted_type,
+                                    crate::InterpolationAccess::SharedObservation,
+                                )
+                            }
+                        };
+                        let conversion = if formatted_type == TypeId::STRING {
+                            crate::InterpolationConversion::StringBorrow
+                        } else if crate::scalar_interpolation_conversion(self.types, formatted_type)
+                            == Some(crate::ScalarInterpolationConversion::CanonicalScalarFormat)
+                        {
                             crate::InterpolationConversion::CanonicalScalarFormat
+                        } else if let Some(recipe) =
+                            crate::mathematical_format(self.types, formatted_type)
+                        {
+                            crate::InterpolationConversion::MathematicalAggregateFormat(recipe)
                         } else {
                             return Err(vec![Diagnostic::new(
                                 "E0340",
@@ -10958,14 +11154,15 @@ impl Analyzer<'_> {
                                 DiagnosticCategory::Type,
                                 format!(
                                     "type {} is not interpolable in FORMAT-V1",
-                                    self.type_name(ty)
+                                    self.type_name(formatted_type)
                                 ),
                                 Some(*span),
                             )]);
                         };
                         plan.push(crate::InterpolationFragment::Hole {
                             value,
-                            ty,
+                            formatted_type,
+                            access,
                             conversion,
                             span: *span,
                         });
@@ -11634,6 +11831,36 @@ impl Analyzer<'_> {
             _ => unreachable!(),
         };
         self.coerce(c, expected)
+    }
+
+    fn format_projected_temporary(
+        &mut self,
+        expression: &AstExpr,
+    ) -> Result<Option<FormatProjectedTemporary>, Vec<Diagnostic>> {
+        let mut fields = Vec::new();
+        let mut root = expression;
+        while let AstExprKind::Field {
+            base,
+            name,
+            name_span,
+        } = &root.kind
+        {
+            fields.push((name.as_str(), *name_span));
+            root = base;
+        }
+        if fields.is_empty() || self.resolve_expr_place(root, false).is_ok() {
+            return Ok(None);
+        }
+        let initializer = self.expression(root, None)?.expr;
+        let mut projected = HirPlace {
+            base: HirPlaceBase::Local(LocalId(u32::MAX)),
+            projections: Vec::new(),
+            ty: initializer.ty,
+        };
+        for (name, span) in fields.into_iter().rev() {
+            self.project_field(&mut projected, name, span)?;
+        }
+        Ok(Some((initializer, projected.projections, projected.ty)))
     }
 
     fn load_place(&self, place: HirPlace, span: Span) -> Result<Checked, Vec<Diagnostic>> {
@@ -16855,8 +17082,44 @@ fn verify_expr(
             }
         }
         HirExprKind::String(op) => {
-            for operand in op.operands() {
-                verify_expr(operand, f, sigs, structs, enums, types, fail)?;
+            if let crate::StringOp::Interpolate { fragments, .. } = op.as_ref() {
+                let expected_site = fragments.iter().find_map(|fragment| match fragment {
+                    crate::InterpolationFragment::Hole { value, .. } => {
+                        if let HirExprKind::FormatScopedSharedBorrow { format_site, .. } =
+                            value.kind
+                        {
+                            Some(format_site)
+                        } else {
+                            None
+                        }
+                    }
+                    crate::InterpolationFragment::Text { .. } => None,
+                });
+                for (index, fragment) in fragments.iter().enumerate() {
+                    if let crate::InterpolationFragment::Hole { value, access, .. } = fragment {
+                        if *access == crate::InterpolationAccess::SharedObservation {
+                            verify_format_borrow(
+                                value,
+                                expected_site.ok_or_else(|| {
+                                    fail("HIR interpolation observation has no format site".into())
+                                })?,
+                                index,
+                                f,
+                                sigs,
+                                structs,
+                                enums,
+                                types,
+                                fail,
+                            )?;
+                        } else {
+                            verify_expr(value, f, sigs, structs, enums, types, fail)?;
+                        }
+                    }
+                }
+            } else {
+                for operand in op.operands() {
+                    verify_expr(operand, f, sigs, structs, enums, types, fail)?;
+                }
             }
             crate::verify_string_op(op, e.ty, types, |operand| Ok(operand.ty)).map_err(fail)?;
             if let crate::StringOp::Alias { source } = op.as_ref()
@@ -16936,6 +17199,11 @@ fn verify_expr(
         HirExprKind::CallScopedSharedBorrow { .. } => {
             return Err(fail(
                 "HIR call-scoped borrow appears outside its exact argument slot".into(),
+            ));
+        }
+        HirExprKind::FormatScopedSharedBorrow { .. } => {
+            return Err(fail(
+                "HIR format-scoped borrow appears outside its exact interpolation hole".into(),
             ));
         }
         HirExprKind::BufferInit {
@@ -18097,6 +18365,119 @@ fn verify_call_borrow(
                 return Err(fail(
                     "HIR call temporary requires one exact unconverted T initializer".into(),
                 ));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_format_borrow(
+    expression: &HirExpr,
+    expected_site: FormatSiteId,
+    expected_index: usize,
+    function: &VerificationFunction<'_>,
+    signatures: VerificationSignatures<'_>,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+    types: &TypeArena,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let HirExprKind::FormatScopedSharedBorrow {
+        format_site,
+        fragment_index,
+        pointee_type,
+        reference_type,
+        source,
+        ..
+    } = &expression.kind
+    else {
+        return Err(fail(
+            "HIR observed interpolation hole is not a format borrow".into(),
+        ));
+    };
+    if *format_site != expected_site
+        || *fragment_index as usize != expected_index
+        || expression.ty != *reference_type
+        || types.reference_info(*reference_type) != Some((*pointee_type, false))
+    {
+        return Err(fail(
+            "HIR format borrow identity/index/type contract invalid".into(),
+        ));
+    }
+    match source {
+        FormatBorrowSource::Place(place) => {
+            verify_place(place, function, signatures, structs, enums, types, fail)?;
+            if place.ty != *pointee_type {
+                return Err(fail("HIR format borrow Place type mismatch".into()));
+            }
+            if let HirPlaceBase::Local(local) = place.base
+                && !place
+                    .projections
+                    .iter()
+                    .any(|projection| matches!(projection, HirPlaceProjection::Index { .. }))
+                && !function.locals[local.0 as usize].address_taken
+            {
+                return Err(fail(
+                    "HIR format-borrowed local is not marked address-taken".into(),
+                ));
+            }
+        }
+        FormatBorrowSource::Temporary(initializer) => {
+            verify_expr(
+                initializer,
+                function,
+                signatures,
+                structs,
+                enums,
+                types,
+                fail,
+            )?;
+            if initializer.ty != *pointee_type {
+                return Err(fail("HIR format temporary type mismatch".into()));
+            }
+        }
+        FormatBorrowSource::ProjectedTemporary {
+            initializer,
+            projections,
+        } => {
+            verify_expr(
+                initializer,
+                function,
+                signatures,
+                structs,
+                enums,
+                types,
+                fail,
+            )?;
+            let mut projected = initializer.ty;
+            for projection in projections {
+                let HirPlaceProjection::Field(field) = projection else {
+                    return Err(fail(
+                        "HIR format projected temporary contains a non-field projection".into(),
+                    ));
+                };
+                let Some(struct_id) = types.struct_id(projected) else {
+                    return Err(fail(
+                        "HIR format projected temporary crosses a non-struct".into(),
+                    ));
+                };
+                let Some(info) = structs[struct_id.0 as usize]
+                    .fields
+                    .iter()
+                    .find(|info| info.id == *field)
+                else {
+                    return Err(fail(
+                        "HIR format projected temporary field is invalid".into(),
+                    ));
+                };
+                projected = concrete_member_type(types, projected, info.ty, structs, enums)
+                    .ok_or_else(|| {
+                        fail("HIR format projected temporary specialization failed".into())
+                    })?;
+            }
+            if projected != *pointee_type || projections.is_empty() {
+                return Err(fail("HIR format projected temporary type mismatch".into()));
             }
         }
     }

@@ -1,12 +1,53 @@
 //! Explicit semantic operations for the GENERAL-V1 immutable string owner.
 #![allow(missing_docs)]
 
-use crate::{Span, TypeArena, TypeData, TypeId};
+use crate::{Orientation, Span, TypeArena, TypeData, TypeId};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InterpolationAccess {
+    CopyValue,
+    SharedObservation,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MathematicalAggregateKind {
+    Vector(Orientation),
+    Matrix,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MathematicalTraversal {
+    LogicalVector,
+    LogicalMatrixRowMajor,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MathematicalEmptyRepresentation {
+    OrientedVector,
+    ShapedMatrix,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MathematicalAggregateFormat {
+    pub kind: MathematicalAggregateKind,
+    pub aggregate_type: TypeId,
+    pub element_type: TypeId,
+    pub element_conversion: ScalarInterpolationConversion,
+    pub traversal: MathematicalTraversal,
+    pub empty_representation: MathematicalEmptyRepresentation,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScalarInterpolationConversion {
+    StringBorrow,
+    CanonicalScalarFormat,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InterpolationConversion {
     StringBorrow,
     CanonicalScalarFormat,
+    MathematicalAggregateFormat(MathematicalAggregateFormat),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -31,7 +72,8 @@ pub enum InterpolationFragment<O> {
     },
     Hole {
         value: O,
-        ty: TypeId,
+        formatted_type: TypeId,
+        access: InterpolationAccess,
         conversion: InterpolationConversion,
         span: Span,
     },
@@ -138,12 +180,14 @@ impl<O> StringOp<O> {
                             }
                             InterpolationFragment::Hole {
                                 value,
-                                ty,
+                                formatted_type,
+                                access,
                                 conversion,
                                 span,
                             } => InterpolationFragment::Hole {
                                 value: f(value)?,
-                                ty,
+                                formatted_type,
+                                access,
                                 conversion,
                                 span,
                             },
@@ -209,19 +253,28 @@ pub fn verify_string_op<O>(
                     }
                     InterpolationFragment::Hole {
                         value,
-                        ty,
+                        formatted_type,
+                        access,
                         conversion,
                         ..
                     } => {
-                        if operand_ty(value)? != *ty {
-                            return Err(
-                                "interpolation hole TypeId disagrees with its operand".into()
-                            );
+                        let operand_type = operand_ty(value)?;
+                        match access {
+                            InterpolationAccess::CopyValue if operand_type != *formatted_type => {
+                                return Err("interpolation copy operand TypeId disagrees with its formatted type".into());
+                            }
+                            InterpolationAccess::SharedObservation
+                                if types.reference_info(operand_type)
+                                    != Some((*formatted_type, false)) =>
+                            {
+                                return Err("interpolation observation is not a shared reference to its formatted type".into());
+                            }
+                            _ => {}
                         }
-                        let expected = if *ty == TypeId::STRING {
+                        let expected = if *formatted_type == TypeId::STRING {
                             InterpolationConversion::StringBorrow
                         } else if matches!(
-                            types.get(*ty),
+                            types.get(*formatted_type),
                             Some(
                                 TypeData::Bool
                                     | TypeData::Char
@@ -230,6 +283,8 @@ pub fn verify_string_op<O>(
                             )
                         ) {
                             InterpolationConversion::CanonicalScalarFormat
+                        } else if let Some(recipe) = mathematical_format(types, *formatted_type) {
+                            InterpolationConversion::MathematicalAggregateFormat(recipe)
                         } else {
                             return Err("interpolation hole has an unsupported type".into());
                         };
@@ -246,4 +301,56 @@ pub fn verify_string_op<O>(
         return Err("string operation result type is invalid".into());
     }
     Ok(())
+}
+
+#[must_use]
+pub fn scalar_interpolation_conversion(
+    types: &TypeArena,
+    ty: TypeId,
+) -> Option<ScalarInterpolationConversion> {
+    if ty == TypeId::STRING {
+        Some(ScalarInterpolationConversion::StringBorrow)
+    } else if matches!(
+        types.get(ty),
+        Some(TypeData::Bool | TypeData::Char | TypeData::Integer(_) | TypeData::Float(_))
+    ) {
+        Some(ScalarInterpolationConversion::CanonicalScalarFormat)
+    } else {
+        None
+    }
+}
+
+#[must_use]
+pub fn mathematical_format(types: &TypeArena, ty: TypeId) -> Option<MathematicalAggregateFormat> {
+    let (kind, element_type, traversal, empty_representation, admitted) = match types.get(ty)? {
+        TypeData::Vector {
+            element,
+            orientation,
+        } => (
+            MathematicalAggregateKind::Vector(*orientation),
+            *element,
+            MathematicalTraversal::LogicalVector,
+            MathematicalEmptyRepresentation::OrientedVector,
+            types.is_admitted_vector_element(*element),
+        ),
+        TypeData::Matrix { element } => (
+            MathematicalAggregateKind::Matrix,
+            *element,
+            MathematicalTraversal::LogicalMatrixRowMajor,
+            MathematicalEmptyRepresentation::ShapedMatrix,
+            types.is_admitted_matrix_element(*element),
+        ),
+        _ => return None,
+    };
+    if !admitted {
+        return None;
+    }
+    Some(MathematicalAggregateFormat {
+        kind,
+        aggregate_type: ty,
+        element_type,
+        element_conversion: scalar_interpolation_conversion(types, element_type)?,
+        traversal,
+        empty_representation,
+    })
 }

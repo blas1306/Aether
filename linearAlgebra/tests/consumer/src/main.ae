@@ -902,6 +902,22 @@ int testDet32() {
     return 0;
 }
 
+int testFormatBorrowLU() {
+    Matrix<float64> A = [0.0,1.0;2.0,3.0];
+    var factor = la.lu(A);
+
+    println("L = ${factor.L}");
+    println("U = ${factor.U}");
+
+    Vector<float64,Column> b = [2.0,8.0];
+    var x = la.solve(factor, b);
+    float64 d = la.det(factor);
+    if (abs(x[1] - 1.0) > 1e-12 || abs(x[2] - 2.0) > 1e-12) { return 1; }
+    if (abs(d + 2.0) > 1e-12) { return 2; }
+    if (factor.permutationSign != -1 || factor.U[1,1] != 2.0) { return 3; }
+    return 0;
+}
+
 int main() {
     Matrix<float64> zeroSquare = la.zeros(3);
     Matrix<float64> zeroTall = la.zeros(4,2);
@@ -1063,5 +1079,7 @@ int main() {
     if (det64Status != 0) { return 220 + det64Status; }
     int det32Status = testDet32();
     if (det32Status != 0) { return 240 + det32Status; }
+    int formatBorrowStatus = testFormatBorrowLU();
+    if (formatBorrowStatus != 0) { return 260 + formatBorrowStatus; }
     return 0;
 }

@@ -1221,6 +1221,13 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
             crate::CallBorrowSource::Place(place) => place_children(place),
             crate::CallBorrowSource::Temporary(initializer) => vec![initializer],
         },
+        E::FormatScopedSharedBorrow { source, .. } => match source {
+            crate::FormatBorrowSource::Place(place) => place_children(place),
+            crate::FormatBorrowSource::Temporary(initializer)
+            | crate::FormatBorrowSource::ProjectedTemporary { initializer, .. } => {
+                vec![initializer]
+            }
+        },
         E::ListSwapRemove { source, index, .. }
         | E::ListRemove { source, index, .. }
         | E::MatrixAxisVectorView {

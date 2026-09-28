@@ -3,7 +3,10 @@
 use std::collections::BTreeSet;
 use std::fmt::Write;
 
-use aether_frontend::{FloatType, InterpolationFragment, StringOp, TypeArena, TypeData};
+use aether_frontend::{
+    FloatType, InterpolationAccess, InterpolationConversion, InterpolationFragment,
+    MathematicalAggregateKind, Orientation, StringOp, TypeArena, TypeData,
+};
 use aether_middle::{SsaIr, SsaOp, SsaOperand};
 
 fn literal_name(bytes: &[u8]) -> String {
@@ -887,6 +890,7 @@ fn widened_scalar_operand(
     format!("%{name}")
 }
 
+#[allow(clippy::too_many_lines)]
 fn emit_interpolation(
     output: &mut String,
     fragments: &[InterpolationFragment<SsaOperand>],
@@ -895,12 +899,32 @@ fn emit_interpolation(
     operand: impl Fn(&SsaOperand) -> String,
 ) {
     for (index, fragment) in fragments.iter().enumerate() {
-        if let InterpolationFragment::Hole { value, ty, .. } = fragment {
-            if *ty == aether_frontend::TypeId::STRING {
+        if let InterpolationFragment::Hole {
+            value,
+            formatted_type,
+            access,
+            conversion,
+            ..
+        } = fragment
+        {
+            if let InterpolationConversion::MathematicalAggregateFormat(recipe) = conversion {
+                emit_math_count(
+                    output, result, index, value, *access, *recipe, types, &operand,
+                );
+            } else if *formatted_type == aether_frontend::TypeId::STRING {
+                let value = observed_value(
+                    output,
+                    result,
+                    index,
+                    value,
+                    *access,
+                    *formatted_type,
+                    types,
+                    &operand,
+                );
                 writeln!(
                     output,
-                    "  %fmt_len{result}_{index} = call i64 @aether_string_length(ptr {})",
-                    operand(value)
+                    "  %fmt_len{result}_{index} = call i64 @aether_string_length(ptr {value})"
                 )
                 .unwrap();
             } else {
@@ -909,12 +933,22 @@ fn emit_interpolation(
                     "  %fmt_buf{result}_{index} = alloca [128 x i8], align 8"
                 )
                 .unwrap();
-                let (formatter, llvm_ty) = scalar_formatter(types, *ty);
+                let (formatter, llvm_ty) = scalar_formatter(types, *formatted_type);
+                let observed = observed_value(
+                    output,
+                    result,
+                    index,
+                    value,
+                    *access,
+                    *formatted_type,
+                    types,
+                    &operand,
+                );
                 let value = widened_scalar_operand(
                     output,
                     types,
-                    *ty,
-                    &operand(value),
+                    *formatted_type,
+                    &observed,
                     &format!("fmt_wide{result}_{index}"),
                 );
                 writeln!(output, "  %fmt_len{result}_{index} = call i64 @{formatter}(ptr %fmt_buf{result}_{index}, {llvm_ty} {value})").unwrap();
@@ -951,18 +985,42 @@ fn emit_interpolation(
     .unwrap();
     writeln!(output, "  %fmt_offset{result}_0 = add i64 0, 0").unwrap();
     for (index, fragment) in fragments.iter().enumerate() {
+        if let InterpolationFragment::Hole {
+            value,
+            access,
+            conversion: InterpolationConversion::MathematicalAggregateFormat(recipe),
+            ..
+        } = fragment
+        {
+            emit_math_write(
+                output, result, index, value, *access, *recipe, types, &operand,
+            );
+            continue;
+        }
         let (source, length) = match fragment {
             InterpolationFragment::Text { bytes, .. } => (
                 format!("getelementptr (i8, ptr @{}, i64 24)", literal_name(bytes)),
                 bytes.len().to_string(),
             ),
-            InterpolationFragment::Hole { value, ty, .. }
-                if *ty == aether_frontend::TypeId::STRING =>
-            {
+            InterpolationFragment::Hole {
+                value,
+                formatted_type,
+                access,
+                ..
+            } if *formatted_type == aether_frontend::TypeId::STRING => {
+                let observed = observed_value(
+                    output,
+                    result,
+                    index,
+                    value,
+                    *access,
+                    *formatted_type,
+                    types,
+                    &operand,
+                );
                 writeln!(
                     output,
-                    "  %fmt_src{result}_{index} = call ptr @aether_string_data(ptr {})",
-                    operand(value)
+                    "  %fmt_src{result}_{index} = call ptr @aether_string_data(ptr {observed})"
                 )
                 .unwrap();
                 (
@@ -989,4 +1047,160 @@ fn emit_interpolation(
     writeln!(output, "  call void @llvm.trap()").unwrap();
     writeln!(output, "  unreachable").unwrap();
     writeln!(output, "fmt_done{result}:").unwrap();
+}
+
+#[allow(clippy::too_many_arguments)]
+fn observed_value(
+    output: &mut String,
+    result: u32,
+    index: usize,
+    value: &SsaOperand,
+    access: InterpolationAccess,
+    ty: aether_frontend::TypeId,
+    types: &TypeArena,
+    operand: &impl Fn(&SsaOperand) -> String,
+) -> String {
+    if access == InterpolationAccess::CopyValue {
+        return operand(value);
+    }
+    let name = format!("%fmt_observed{result}_{index}");
+    writeln!(
+        output,
+        "  {name} = load {}, ptr {}",
+        super::llvm_type(types, ty),
+        operand(value)
+    )
+    .unwrap();
+    name
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_math_count(
+    output: &mut String,
+    result: u32,
+    index: usize,
+    value: &SsaOperand,
+    access: InterpolationAccess,
+    recipe: aether_frontend::MathematicalAggregateFormat,
+    types: &TypeArena,
+    operand: &impl Fn(&SsaOperand) -> String,
+) {
+    let tag = format!("fmt_math{result}_{index}");
+    let descriptor = observed_value(
+        output,
+        result,
+        index,
+        value,
+        access,
+        recipe.aggregate_type,
+        types,
+        operand,
+    );
+    let descriptor_ty = super::llvm_type(types, recipe.aggregate_type);
+    let (count, columns, stride) = match recipe.kind {
+        MathematicalAggregateKind::Vector(_) => {
+            writeln!(
+                output,
+                "  %{tag}_count = extractvalue {descriptor_ty} {descriptor}, 1"
+            )
+            .unwrap();
+            (format!("%{tag}_count"), None, None)
+        }
+        MathematicalAggregateKind::Matrix => {
+            writeln!(output, "  %{tag}_rows = extractvalue {descriptor_ty} {descriptor}, 1\n  %{tag}_columns = extractvalue {descriptor_ty} {descriptor}, 2\n  %{tag}_stride = extractvalue {descriptor_ty} {descriptor}, 4\n  %{tag}_count = mul i64 %{tag}_rows, %{tag}_columns").unwrap();
+            (
+                format!("%{tag}_count"),
+                Some(format!("%{tag}_columns")),
+                Some(format!("%{tag}_stride")),
+            )
+        }
+    };
+    writeln!(output, "  %{tag}_data = extractvalue {descriptor_ty} {descriptor}, 0\n  %{tag}_empty = icmp eq i64 {count}, 0\n  %{tag}_scratch = alloca [128 x i8], align 8").unwrap();
+    if recipe.kind == MathematicalAggregateKind::Matrix {
+        writeln!(output, "  %{tag}_row_len = call i64 @aether_format_u64(ptr %{tag}_scratch, i64 %{tag}_rows)\n  %{tag}_col_scratch = alloca [128 x i8], align 8\n  %{tag}_column_len = call i64 @aether_format_u64(ptr %{tag}_col_scratch, i64 %{tag}_columns)\n  %{tag}_empty_base = add i64 %{tag}_row_len, 11\n  %{tag}_empty_len = add i64 %{tag}_empty_base, %{tag}_column_len").unwrap();
+    }
+    writeln!(output, "  br i1 %{tag}_empty, label %{tag}_empty_count, label %{tag}_count_preheader\n{tag}_empty_count:\n  br label %{tag}_count_done\n{tag}_count_preheader:\n  br label %{tag}_count_header").unwrap();
+    match recipe.kind {
+        MathematicalAggregateKind::Vector(_) | MathematicalAggregateKind::Matrix => {}
+    }
+    writeln!(output, "{tag}_count_header:\n  %{tag}_i = phi i64 [ 0, %{tag}_count_preheader ], [ %{tag}_next, %{tag}_count_body ]\n  %{tag}_acc = phi i64 [ 2, %{tag}_count_preheader ], [ %{tag}_acc_next, %{tag}_count_body ]\n  %{tag}_more = icmp ult i64 %{tag}_i, {count}\n  br i1 %{tag}_more, label %{tag}_count_body, label %{tag}_count_finish\n{tag}_count_body:").unwrap();
+    let element_ty = super::llvm_type(types, recipe.element_type);
+    let physical = if let (Some(columns), Some(stride)) = (&columns, &stride) {
+        writeln!(output, "  %{tag}_row = udiv i64 %{tag}_i, {columns}\n  %{tag}_column = urem i64 %{tag}_i, {columns}\n  %{tag}_row_offset = mul i64 %{tag}_row, {stride}\n  %{tag}_physical = add i64 %{tag}_row_offset, %{tag}_column").unwrap();
+        format!("%{tag}_physical")
+    } else {
+        format!("%{tag}_i")
+    };
+    writeln!(output, "  %{tag}_element_ptr = getelementptr {element_ty}, ptr %{tag}_data, i64 {physical}\n  %{tag}_element = load {element_ty}, ptr %{tag}_element_ptr").unwrap();
+    let (formatter, formatter_ty) = scalar_formatter(types, recipe.element_type);
+    let widened = widened_scalar_operand(
+        output,
+        types,
+        recipe.element_type,
+        &format!("%{tag}_element"),
+        &format!("{tag}_wide"),
+    );
+    writeln!(output, "  %{tag}_element_len = call i64 @{formatter}(ptr %{tag}_scratch, {formatter_ty} {widened})\n  %{tag}_first = icmp eq i64 %{tag}_i, 0\n  %{tag}_separator = select i1 %{tag}_first, i64 0, i64 2\n  %{tag}_part = add i64 %{tag}_element_len, %{tag}_separator\n  %{tag}_checked = call {{ i64, i1 }} @llvm.uadd.with.overflow.i64(i64 %{tag}_acc, i64 %{tag}_part)\n  %{tag}_acc_next = extractvalue {{ i64, i1 }} %{tag}_checked, 0\n  %{tag}_overflow = extractvalue {{ i64, i1 }} %{tag}_checked, 1\n  %{tag}_next = add i64 %{tag}_i, 1\n  br i1 %{tag}_overflow, label %fmt_trap{result}, label %{tag}_count_header\n{tag}_count_finish:\n  br label %{tag}_count_done\n{tag}_count_done:").unwrap();
+    let empty_length = match recipe.kind {
+        MathematicalAggregateKind::Vector(Orientation::Row) => "5".to_string(),
+        MathematicalAggregateKind::Vector(Orientation::Column) => "8".to_string(),
+        MathematicalAggregateKind::Matrix => format!("%{tag}_empty_len"),
+    };
+    writeln!(output, "  %fmt_len{result}_{index} = phi i64 [ {empty_length}, %{tag}_empty_count ], [ %{tag}_acc, %{tag}_count_finish ]").unwrap();
+}
+
+#[allow(clippy::too_many_arguments)]
+fn emit_math_write(
+    output: &mut String,
+    result: u32,
+    index: usize,
+    _value: &SsaOperand,
+    _access: InterpolationAccess,
+    recipe: aether_frontend::MathematicalAggregateFormat,
+    types: &TypeArena,
+    _operand: &impl Fn(&SsaOperand) -> String,
+) {
+    let tag = format!("fmt_math{result}_{index}");
+    writeln!(output, "  ; MathematicalAggregateFormat Write LogicalExtents columnCapacity\n  br i1 %{tag}_empty, label %{tag}_write_empty, label %{tag}_write_nonempty\n{tag}_write_empty:").unwrap();
+    let prefix = match recipe.kind {
+        MathematicalAggregateKind::Vector(Orientation::Row) => b"Row[]".as_slice(),
+        MathematicalAggregateKind::Vector(Orientation::Column) => b"Column[]".as_slice(),
+        MathematicalAggregateKind::Matrix => b"Matrix(".as_slice(),
+    };
+    for (offset, byte) in prefix.iter().enumerate() {
+        writeln!(output, "  %{tag}_empty_ptr_{offset} = getelementptr i8, ptr %fmt_build{result}, i64 %fmt_offset{result}_{index}\n  %{tag}_empty_byte_{offset} = getelementptr i8, ptr %{tag}_empty_ptr_{offset}, i64 {offset}\n  store i8 {byte}, ptr %{tag}_empty_byte_{offset}").unwrap();
+    }
+    match recipe.kind {
+        MathematicalAggregateKind::Vector(_) => {}
+        MathematicalAggregateKind::Matrix => {
+            writeln!(output, "  %{tag}_empty_row_dst = getelementptr i8, ptr %fmt_build{result}, i64 %fmt_offset{result}_{index}\n  %{tag}_empty_row_at = getelementptr i8, ptr %{tag}_empty_row_dst, i64 7\n  call void @llvm.memcpy.p0.p0.i64(ptr %{tag}_empty_row_at, ptr %{tag}_scratch, i64 %{tag}_row_len, i1 false)\n  %{tag}_empty_comma_offset = add i64 7, %{tag}_row_len\n  %{tag}_empty_comma = getelementptr i8, ptr %{tag}_empty_row_dst, i64 %{tag}_empty_comma_offset\n  store i8 44, ptr %{tag}_empty_comma\n  %{tag}_empty_col_offset = add i64 %{tag}_empty_comma_offset, 1\n  %{tag}_empty_col_at = getelementptr i8, ptr %{tag}_empty_row_dst, i64 %{tag}_empty_col_offset\n  call void @llvm.memcpy.p0.p0.i64(ptr %{tag}_empty_col_at, ptr %{tag}_col_scratch, i64 %{tag}_column_len, i1 false)\n  %{tag}_empty_suffix_offset = add i64 %{tag}_empty_col_offset, %{tag}_column_len\n  %{tag}_empty_suffix0 = getelementptr i8, ptr %{tag}_empty_row_dst, i64 %{tag}_empty_suffix_offset\n  store i8 41, ptr %{tag}_empty_suffix0\n  %{tag}_empty_suffix1 = getelementptr i8, ptr %{tag}_empty_suffix0, i64 1\n  store i8 91, ptr %{tag}_empty_suffix1\n  %{tag}_empty_suffix2 = getelementptr i8, ptr %{tag}_empty_suffix0, i64 2\n  store i8 93, ptr %{tag}_empty_suffix2").unwrap();
+        }
+    }
+    writeln!(output, "  %{tag}_empty_next = add i64 %fmt_offset{result}_{index}, %fmt_len{result}_{index}\n  br label %{tag}_write_done\n{tag}_write_nonempty:\n  %{tag}_open_ptr = getelementptr i8, ptr %fmt_build{result}, i64 %fmt_offset{result}_{index}\n  store i8 91, ptr %{tag}_open_ptr\n  %{tag}_initial_offset = add i64 %fmt_offset{result}_{index}, 1\n  br label %{tag}_write_header\n{tag}_write_header:\n  %{tag}_write_i = phi i64 [ 0, %{tag}_write_nonempty ], [ %{tag}_write_next_i, %{tag}_write_body ]\n  %{tag}_write_offset = phi i64 [ %{tag}_initial_offset, %{tag}_write_nonempty ], [ %{tag}_write_next_offset, %{tag}_write_body ]\n  %{tag}_write_more = icmp ult i64 %{tag}_write_i, %{tag}_count\n  br i1 %{tag}_write_more, label %{tag}_write_body, label %{tag}_write_finish\n{tag}_write_body:").unwrap();
+    let delimiter = match recipe.kind {
+        MathematicalAggregateKind::Vector(Orientation::Row) => "44".to_string(),
+        MathematicalAggregateKind::Vector(Orientation::Column) => "59".to_string(),
+        MathematicalAggregateKind::Matrix => {
+            writeln!(output, "  %{tag}_write_column = urem i64 %{tag}_write_i, %{tag}_columns\n  %{tag}_new_row = icmp eq i64 %{tag}_write_column, 0\n  %{tag}_delimiter = select i1 %{tag}_new_row, i8 59, i8 44").unwrap();
+            format!("%{tag}_delimiter")
+        }
+    };
+    writeln!(output, "  %{tag}_delimiter_ptr = getelementptr i8, ptr %fmt_build{result}, i64 %{tag}_write_offset\n  store i8 {delimiter}, ptr %{tag}_delimiter_ptr\n  %{tag}_delimiter_space = getelementptr i8, ptr %{tag}_delimiter_ptr, i64 1\n  store i8 32, ptr %{tag}_delimiter_space\n  %{tag}_write_first = icmp eq i64 %{tag}_write_i, 0\n  %{tag}_write_separator_len = select i1 %{tag}_write_first, i64 0, i64 2\n  %{tag}_element_offset = add i64 %{tag}_write_offset, %{tag}_write_separator_len").unwrap();
+    let physical = if recipe.kind == MathematicalAggregateKind::Matrix {
+        writeln!(output, "  %{tag}_write_row = udiv i64 %{tag}_write_i, %{tag}_columns\n  %{tag}_write_col = urem i64 %{tag}_write_i, %{tag}_columns\n  %{tag}_write_row_offset = mul i64 %{tag}_write_row, %{tag}_stride\n  %{tag}_write_physical = add i64 %{tag}_write_row_offset, %{tag}_write_col").unwrap();
+        format!("%{tag}_write_physical")
+    } else {
+        format!("%{tag}_write_i")
+    };
+    let element_ty = super::llvm_type(types, recipe.element_type);
+    writeln!(output, "  %{tag}_write_element_ptr = getelementptr {element_ty}, ptr %{tag}_data, i64 {physical}\n  %{tag}_write_element = load {element_ty}, ptr %{tag}_write_element_ptr").unwrap();
+    let (formatter, formatter_ty) = scalar_formatter(types, recipe.element_type);
+    let widened = widened_scalar_operand(
+        output,
+        types,
+        recipe.element_type,
+        &format!("%{tag}_write_element"),
+        &format!("{tag}_write_wide"),
+    );
+    writeln!(output, "  %{tag}_write_len = call i64 @{formatter}(ptr %{tag}_scratch, {formatter_ty} {widened})\n  %{tag}_element_dst = getelementptr i8, ptr %fmt_build{result}, i64 %{tag}_element_offset\n  call void @llvm.memcpy.p0.p0.i64(ptr %{tag}_element_dst, ptr %{tag}_scratch, i64 %{tag}_write_len, i1 false)\n  %{tag}_write_next_offset = add i64 %{tag}_element_offset, %{tag}_write_len\n  %{tag}_write_next_i = add i64 %{tag}_write_i, 1\n  br label %{tag}_write_header\n{tag}_write_finish:\n  %{tag}_close_ptr = getelementptr i8, ptr %fmt_build{result}, i64 %{tag}_write_offset\n  store i8 93, ptr %{tag}_close_ptr\n  %{tag}_nonempty_next = add i64 %{tag}_write_offset, 1\n  br label %{tag}_write_done\n{tag}_write_done:\n  %fmt_offset{result}_{} = phi i64 [ %{tag}_empty_next, %{tag}_write_empty ], [ %{tag}_nonempty_next, %{tag}_write_finish ]", index + 1).unwrap();
 }

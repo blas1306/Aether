@@ -29,17 +29,18 @@ pub use diagnostic::{Diagnostic, DiagnosticCategory, FixIt, Phase, SourceFile, S
 pub use hir::{
     AlgebraicProductKind, CallBorrowOrigin, CallBorrowSource, CallSiteId, CastKind, CatchId,
     CoercionKind, CollectionIterationSource, DeclaredProgram, DefaultArgumentTemplate,
-    EnumEqualityClassification, EnumInfo, FieldInfo, FinallyId, FloatValue, FunctionId,
-    FunctionInstanceInfo, FunctionSignature, GenericHirFunction, GenericParamInfo, HirBinaryOp,
-    HirBlock, HirCallArgument, HirCallArgumentOrigin, HirCallTarget, HirCatch, HirDrop, HirExpr,
-    HirExprKind, HirFinally, HirFunction, HirLocal, HirMatchArm, HirMatchBinding, HirParameter,
-    HirPlace, HirPlaceBase, HirPlaceProjection, HirStmt, HirStmtKind, HirSubscript,
-    HirSubscriptAxis, HirSubscriptContainerKind, HirSubscriptResult, HirSubscriptSelector,
-    HirSubscriptSelectorKind, HirTrapKind, HirUnaryOp, InvalidationShape, IterationBindingCategory,
-    LocalId, LogicalSourceKey, LoopId, MatchMode, MathElementOp, MathShapeCheck,
-    MatrixAddArgumentOwnership, MatrixAddCapacityRecipe, MatrixAddContract, MatrixAddFailureOrder,
-    MatrixAddMetadataRecipe, MatrixAddShapeRecipe, MatrixProductExtent, ModuleId, ModuleInfo,
-    MutationEffect, NonNullProofId, NullableLayout, NullablePayloadAccess, OriginKey, PackageId,
+    EnumEqualityClassification, EnumInfo, FieldInfo, FinallyId, FloatValue, FormatBorrowOrigin,
+    FormatBorrowSource, FormatSiteId, FunctionId, FunctionInstanceInfo, FunctionSignature,
+    GenericHirFunction, GenericParamInfo, HirBinaryOp, HirBlock, HirCallArgument,
+    HirCallArgumentOrigin, HirCallTarget, HirCatch, HirDrop, HirExpr, HirExprKind, HirFinally,
+    HirFunction, HirLocal, HirMatchArm, HirMatchBinding, HirParameter, HirPlace, HirPlaceBase,
+    HirPlaceProjection, HirStmt, HirStmtKind, HirSubscript, HirSubscriptAxis,
+    HirSubscriptContainerKind, HirSubscriptResult, HirSubscriptSelector, HirSubscriptSelectorKind,
+    HirTrapKind, HirUnaryOp, InvalidationShape, IterationBindingCategory, LocalId,
+    LogicalSourceKey, LoopId, MatchMode, MathElementOp, MathShapeCheck, MatrixAddArgumentOwnership,
+    MatrixAddCapacityRecipe, MatrixAddContract, MatrixAddFailureOrder, MatrixAddMetadataRecipe,
+    MatrixAddShapeRecipe, MatrixProductExtent, ModuleId, ModuleInfo, MutationEffect,
+    NonNullProofId, NullableLayout, NullablePayloadAccess, OriginKey, PackageId,
     PackageInstanceKey, PackageKey, PackagePath, ParameterSignature, ParsedModule, ParsedProgram,
     ResolvedImport, ScalarSide, SliceAssignmentContract, SliceAssignmentSnapshot, SourceUnitKey,
     StructInfo, StructuralMutation, SymbolKey, TypeAliasInfo, TypeLayout, TypedHir, VariantInfo,
@@ -50,8 +51,10 @@ pub use hir::{
 pub use lexer::{Token, TokenKind, lex};
 pub use parser::parse;
 pub use strings::{
-    InterpolationConversion, InterpolationFragment, InterpolationSizePlan, StringOp,
-    StringOwnership, verify_string_op,
+    InterpolationAccess, InterpolationConversion, InterpolationFragment, InterpolationSizePlan,
+    MathematicalAggregateFormat, MathematicalAggregateKind, MathematicalEmptyRepresentation,
+    MathematicalTraversal, ScalarInterpolationConversion, StringOp, StringOwnership,
+    mathematical_format, scalar_interpolation_conversion, verify_string_op,
 };
 pub use text::{TextOp, verify_text_op};
 pub use types::{

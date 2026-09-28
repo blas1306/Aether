@@ -20,7 +20,7 @@ use aether_frontend::{
 
 use crate::mir::{
     CallBorrowMetadata, CallBorrowSourceKind, CollectionLoop, ExceptionEventId, FinallyRegion,
-    RangeLoop, place_type,
+    FormatBorrowMetadata, FormatBorrowSourceKind, RangeLoop, place_type,
 };
 use crate::{
     BinaryOp, BlockId, ElementInitialization, MirDropFlag, MirFunction, Operand, Place, PlaceBase,
@@ -199,9 +199,14 @@ pub enum SsaOp {
         place: SsaPlace,
         mutable: bool,
         call: Option<CallBorrowMetadata>,
+        format: Option<FormatBorrowMetadata>,
     },
     EndBorrow {
         call: CallBorrowMetadata,
+        reference: SsaOperand,
+    },
+    FormatEndBorrow {
+        format: FormatBorrowMetadata,
         reference: SsaOperand,
     },
     Move {
@@ -1192,13 +1197,19 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             place,
             mutable,
             call,
+            format,
         } => SsaOp::Borrow {
             place: rename_place(place, stacks, mir),
             mutable: *mutable,
             call: *call,
+            format: *format,
         },
         Rvalue::EndBorrow { call, reference } => SsaOp::EndBorrow {
             call: *call,
+            reference: rename_operand(reference, stacks),
+        },
+        Rvalue::FormatEndBorrow { format, reference } => SsaOp::FormatEndBorrow {
+            format: *format,
             reference: rename_operand(reference, stacks),
         },
         Rvalue::Move { source } => SsaOp::Move {
@@ -2142,7 +2153,9 @@ pub(crate) fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<Local
         | Rvalue::Coerce { operand, .. }
         | Rvalue::Cast { operand, .. }
         | Rvalue::Unary { operand, .. } => operand_local(operand).into_iter().collect(),
-        Rvalue::EndBorrow { reference, .. } => operand_local(reference).into_iter().collect(),
+        Rvalue::EndBorrow { reference, .. } | Rvalue::FormatEndBorrow { reference, .. } => {
+            operand_local(reference).into_iter().collect()
+        }
         Rvalue::CollectionBinding { source, index, .. } => place_locals(function, source)
             .into_iter()
             .chain(operand_local(index))
@@ -3103,6 +3116,7 @@ fn verify_ssa_function(
     verify_matrix_literal_ownership(function, types, fail)?;
     verify_take_protocol(function, types, fail)?;
     verify_call_borrow_regions(function, fail)?;
+    verify_format_borrow_regions(function, fail)?;
     Ok(())
 }
 
@@ -3397,6 +3411,77 @@ fn verify_call_borrow_regions(
         {
             return Err(fail(
                 "SSA non-abortive exit retains a live call borrow".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn verify_format_borrow_regions(
+    function: &SsaFunction,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut borrows = BTreeMap::new();
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            if let SsaOp::Borrow {
+                format: Some(metadata),
+                ..
+            } = instruction.op
+                && borrows.insert(instruction.result, metadata).is_some()
+            {
+                return Err(fail(
+                    "SSA format borrow value has duplicate definitions".into(),
+                ));
+            }
+        }
+    }
+    for (reference, metadata) in borrows {
+        let mut format_uses = 0;
+        let mut end_uses = 0;
+        for block in &function.blocks {
+            if block
+                .phis
+                .iter()
+                .any(|phi| phi.incoming.iter().any(|(_, value)| *value == reference))
+            {
+                return Err(fail(
+                    "SSA format-scoped reference escapes through phi".into(),
+                ));
+            }
+            for instruction in &block.instructions {
+                let allowed = match &instruction.op {
+                    SsaOp::String(op) => {
+                        matches!(op.as_ref(), aether_frontend::StringOp::Interpolate { fragments, .. }
+                        if fragments.get(metadata.fragment_index as usize).is_some_and(|fragment|
+                            matches!(fragment, aether_frontend::InterpolationFragment::Hole { value: SsaOperand::Value(value), access: aether_frontend::InterpolationAccess::SharedObservation, .. } if *value == reference)))
+                    }
+                    SsaOp::FormatEndBorrow {
+                        format,
+                        reference: SsaOperand::Value(value),
+                    } if *format == metadata && *value == reference => true,
+                    _ => false,
+                };
+                let uses = op_operands(&instruction.op)
+                    .into_iter()
+                    .filter(|operand| **operand == SsaOperand::Value(reference))
+                    .count();
+                if uses != 0 && !allowed {
+                    return Err(fail(
+                        "SSA format-scoped reference escapes interpolation".into(),
+                    ));
+                }
+                match &instruction.op {
+                    SsaOp::String(_) if allowed => format_uses += 1,
+                    SsaOp::FormatEndBorrow { .. } if allowed => end_uses += 1,
+                    _ => {}
+                }
+            }
+        }
+        if format_uses != 1 || end_uses == 0 {
+            return Err(fail(
+                "SSA format borrow requires one matching interpolation use and FormatEndBorrow"
+                    .into(),
             ));
         }
     }
@@ -4598,6 +4683,7 @@ fn verify_op(
             place,
             mutable,
             call,
+            format,
         } => {
             let pointee = ssa_place_type(place, memory_locals, structs, types, operand_ty)?;
             if types.reference_info(result) != Some((pointee, *mutable)) {
@@ -4626,6 +4712,26 @@ fn verify_op(
             {
                 return Err("SSA call borrow temporary provenance invalid".into());
             }
+            if let Some(format) = format
+                && (*mutable
+                    || call.is_some()
+                    || format.pointee_type != pointee
+                    || format.reference_type != result
+                    || types.reference_info(format.reference_type)
+                        != Some((format.pointee_type, false)))
+            {
+                return Err("SSA format borrow metadata/type contract invalid".into());
+            }
+            if let Some(format) = format
+                && let FormatBorrowSourceKind::Temporary(local) = format.source
+                && (!matches!(place.base, SsaPlaceBase::MemoryLocal(root) if root == local)
+                    || memory_locals
+                        .iter()
+                        .find(|memory| memory.local == local)
+                        .is_none_or(|memory| memory.ty != format.root_type))
+            {
+                return Err("SSA format borrow temporary provenance invalid".into());
+            }
         }
         SsaOp::EndBorrow { call, reference } => {
             if result != TypeId::BOOL
@@ -4633,6 +4739,14 @@ fn verify_op(
                 || types.reference_info(call.reference_type) != Some((call.pointee_type, false))
             {
                 return Err("SSA EndBorrow metadata/type contract invalid".into());
+            }
+        }
+        SsaOp::FormatEndBorrow { format, reference } => {
+            if result != TypeId::BOOL
+                || operand_ty(reference)? != format.reference_type
+                || types.reference_info(format.reference_type) != Some((format.pointee_type, false))
+            {
+                return Err("SSA FormatEndBorrow metadata/type contract invalid".into());
             }
         }
         SsaOp::AlgebraicProduct {
@@ -6014,7 +6128,9 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         SsaOp::IndirectCall { callee, args, .. } => {
             std::iter::once(callee).chain(args.iter()).collect()
         }
-        SsaOp::EndBorrow { reference, .. } => vec![reference],
+        SsaOp::EndBorrow { reference, .. } | SsaOp::FormatEndBorrow { reference, .. } => {
+            vec![reference]
+        }
         SsaOp::FunctionRef { .. }
         | SsaOp::NullableNull { .. }
         | SsaOp::ExceptionMatches { .. }

@@ -168,6 +168,102 @@ fn format_runtime_is_reachable_only_from_str_or_interpolation() {
 }
 
 #[test]
+fn mathematical_owners_format_without_consuming_them() {
+    let source = r#"int main(){
+Vector<int,Row> r=[1,2,3];Vector<int,Column> c=[1,2,3];
+Matrix<int> m=[1,2;3,4];
+println("${r}|${c}|${m}");println("${m}");
+return m[2,2]-4;
+}"#;
+    let expected = b"[1, 2, 3]|[1; 2; 3]|[1, 2; 3, 4]\n[1, 2; 3, 4]\n";
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        let compilation = compile(source, optimization);
+        assert!(compilation.dumps[&Emit::Hir].contains("FormatScopedSharedBorrow"));
+        assert!(compilation.dumps[&Emit::Hir].contains("MathematicalAggregateFormat"));
+        assert!(compilation.dumps[&Emit::Mir].contains("FormatEndBorrow"));
+        assert!(compilation.dumps[&Emit::Ssa].contains("FormatEndBorrow"));
+        let output = execute(&compilation.llvm, optimization);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, expected);
+    }
+}
+
+#[test]
+fn mathematical_zero_shapes_and_references_are_exact() {
+    let source = r#"struct Holder{Matrix<int> value;}
+int main(){
+Vector<int,Row> r=[];Vector<int,Column> c=[];
+Matrix<int> z00=matrixFilled<int>(0,0,7);
+Matrix<int> z0n=matrixFilled<int>(0,3,7);
+Matrix<int> zm0=matrixFilled<int>(2,0,7);
+Matrix<int> m=[1,2;3,4];Matrix<int> n=[1,2;3,4];Holder h=Holder(m);
+ref Matrix<int> p=&h.value;ref mut Matrix<int> q=&mut n;
+println("${r}|${c}|${z00}|${z0n}|${zm0}|${p}|${q}");
+(*q)[1,1]=9;return n[1,1]-9;
+}"#;
+    let expected =
+        b"Row[]|Column[]|Matrix(0,0)[]|Matrix(0,3)[]|Matrix(2,0)[]|[1, 2; 3, 4]|[1, 2; 3, 4]\n";
+    let compilation = compile(source, OptimizationLevel::O0);
+    let output = execute(&compilation.llvm, OptimizationLevel::O0);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, expected);
+}
+
+#[test]
+fn mathematical_temporaries_keep_their_complete_root_alive() {
+    let source = r#"struct Holder{Matrix<int> value;}
+Holder make(){Matrix<int> m=[5,6];return Holder(m);}
+int main(){println("${matrixFilled<int>(1,2,7)}|${make().value}");return 0;}"#;
+    let compilation = compile(source, OptimizationLevel::O0);
+    let output = execute(&compilation.llvm, OptimizationLevel::O0);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"[7, 7]|[5, 6]\n");
+    assert!(compilation.dumps[&Emit::Hir].contains("ProjectedTemporary"));
+}
+
+#[test]
+fn mathematical_formatting_keeps_closed_boundaries() {
+    for (source, code) in [
+        (
+            "int main(){Matrix<int> m=[1];MatrixView<int> v=matrix_view(m);println(\"${v}\");return 0;}",
+            "E0340",
+        ),
+        (
+            "int main(){Vector<int,Row> r=[1];VectorView<int,Row> v=row(r);println(\"${v}\");return 0;}",
+            "E0340",
+        ),
+        (
+            "int main(){Matrix<Buffer<int>> m=[Buffer<int>(1,0)];println(\"${m}\");return 0;}",
+            "E0340",
+        ),
+        (
+            "struct Holder{Matrix<int> value;}int main(){Matrix<int> m=[1];Holder h=Holder(m);Matrix<int> moved=h.value;return 0;}",
+            "E0293",
+        ),
+    ] {
+        let errors = compile_source_with_optimization(
+            &SourceFile::new("math_format_negative.ae", source),
+            &[],
+            OptimizationLevel::O0,
+        )
+        .unwrap_err();
+        assert!(errors.iter().any(|error| error.code == code), "{errors:#?}");
+    }
+}
+
+#[test]
 fn mir_and_ssa_reject_independent_interpolation_corruptions() {
     let source = SourceFile::new("corrupt.ae", "int main(){string x=\"${1}${2}\";return 0;}");
     let mir = lower_hir(analyze(parse_source(&source).unwrap()).unwrap());
@@ -196,7 +292,10 @@ fn mir_and_ssa_reject_independent_interpolation_corruptions() {
         match corruption {
             0 => fragments.swap(0, 1),
             1 => {
-                let InterpolationFragment::Hole { ty, .. } = &mut fragments[0] else {
+                let InterpolationFragment::Hole {
+                    formatted_type: ty, ..
+                } = &mut fragments[0]
+                else {
                     unreachable!()
                 };
                 *ty = aether_frontend::TypeId::BOOL;

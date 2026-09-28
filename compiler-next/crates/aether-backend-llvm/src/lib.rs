@@ -1904,6 +1904,14 @@ fn emit_function(
                     )
                     .unwrap();
                 }
+                SsaOp::FormatEndBorrow { .. } => {
+                    writeln!(
+                        output,
+                        "  %v{} = select i1 true, i1 true, i1 true ; FormatEndBorrow",
+                        instruction.result.0
+                    )
+                    .unwrap();
+                }
                 SsaOp::Move { source } => {
                     let (value, ty) = emit_place_value(
                         output,
