@@ -1,5 +1,31 @@
 import linearAlgebra as la;
 
+int filled64(MatrixView<float64> value, float64 expected) {
+    usize i = 1;
+    while (i <= rows(value)) {
+        usize j = 1;
+        while (j <= columns(value)) {
+            if (value[i,j] != expected) { return 1; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+int filled32(MatrixView<float32> value, float32 expected) {
+    usize i = 1;
+    while (i <= rows(value)) {
+        usize j = 1;
+        while (j <= columns(value)) {
+            if (value[i,j] != expected) { return 1; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
 int validate64(MatrixView<float64> expected, la.QR<float64> factor, float64 tolerance) {
     Matrix<float64> reconstructed = matrix_view(factor.Q) * matrix_view(factor.R);
     if (rows(reconstructed) != rows(expected)) { return 1; }
@@ -59,6 +85,86 @@ int validate32(MatrixView<float32> expected, la.QR<float32> factor, float32 tole
 }
 
 int main() {
+    Matrix<float64> zeroSquare = la.zeros(3);
+    Matrix<float64> zeroTall = la.zeros(4,2);
+    Matrix<float64> zeroWide = la.zeros(2,4);
+    Matrix<float64> oneSquare = la.ones(2);
+    Matrix<float64> oneTall = la.ones(3,2);
+    Matrix<float64> oneWide = la.ones(2,3);
+    Matrix<float64> unit = la.identity(4);
+    if (rows(zeroSquare) != 3 || columns(zeroSquare) != 3) { return 1; }
+    if (rows(zeroTall) != 4 || columns(zeroTall) != 2) { return 2; }
+    if (rows(zeroWide) != 2 || columns(zeroWide) != 4) { return 3; }
+    if (filled64(matrix_view(zeroSquare), 0.0) != 0) { return 4; }
+    if (filled64(matrix_view(zeroTall), 0.0) != 0) { return 4; }
+    if (filled64(matrix_view(zeroWide), 0.0) != 0) { return 4; }
+    if (filled64(matrix_view(oneSquare), 1.0) != 0) { return 5; }
+    if (filled64(matrix_view(oneTall), 1.0) != 0) { return 5; }
+    if (filled64(matrix_view(oneWide), 1.0) != 0) { return 5; }
+    usize constructorRow = 1;
+    while (constructorRow <= 4) {
+        usize constructorColumn = 1;
+        while (constructorColumn <= 4) {
+            float64 wanted = 0.0;
+            if (constructorRow == constructorColumn) { wanted = 1.0; }
+            if (unit[constructorRow,constructorColumn] != wanted) { return 6; }
+            constructorColumn = constructorColumn + 1;
+        }
+        constructorRow = constructorRow + 1;
+    }
+
+    Matrix<float64> zero00 = la.zeros(0);
+    Matrix<float64> zeroM0 = la.zeros(3,0);
+    Matrix<float64> zero0N = la.zeros(0,3);
+    Matrix<float64> oneM0 = la.ones(3,0);
+    Matrix<float64> one0N = la.ones(0,3);
+    Matrix<float64> unit0 = la.identity(0);
+    if (rows(zero00) != 0 || columns(zero00) != 0) { return 7; }
+    if (rows(zeroM0) != 3 || columns(zeroM0) != 0) { return 8; }
+    if (rows(zero0N) != 0 || columns(zero0N) != 3) { return 9; }
+    if (rows(oneM0) != 3 || columns(oneM0) != 0) { return 9; }
+    if (rows(one0N) != 0 || columns(one0N) != 3) { return 9; }
+    if (rows(unit0) != 0 || columns(unit0) != 0) { return 11; }
+
+    Vector<float64,Row> zeroRow = la.zeros(3);
+    Vector<float64,Column> zeroColumn = la.zeros(3);
+    Vector<float64,Row> oneRow = la.ones(3);
+    Vector<float64,Column> oneColumn = la.ones(3);
+    Vector<float64,Row> emptyRow = la.zeros(0);
+    Vector<float64,Column> emptyZeroColumn = la.zeros(0);
+    Vector<float64,Row> emptyOneRow = la.ones(0);
+    Vector<float64,Column> emptyColumn = la.ones(0);
+    if (dimension(zeroRow) != 3 || dimension(zeroColumn) != 3) { return 12; }
+    if (dimension(oneRow) != 3 || dimension(oneColumn) != 3) { return 13; }
+    usize vectorIndex = 1;
+    while (vectorIndex <= 3) {
+        if (zeroRow[vectorIndex] != 0.0 || zeroColumn[vectorIndex] != 0.0) { return 14; }
+        if (oneRow[vectorIndex] != 1.0 || oneColumn[vectorIndex] != 1.0) { return 15; }
+        vectorIndex = vectorIndex + 1;
+    }
+    if (dimension(emptyRow) != 0 || dimension(emptyZeroColumn) != 0) { return 16; }
+    if (dimension(emptyOneRow) != 0 || dimension(emptyColumn) != 0) { return 16; }
+
+    Matrix<float32> zero32 = la.zeros(2,3);
+    Matrix<float32> one32 = la.ones(2);
+    Matrix<float32> unit32 = la.identity(2);
+    Vector<float32,Row> row32 = la.zeros(2);
+    Vector<float32,Column> column32 = la.ones(2);
+    if (filled32(matrix_view(zero32), float32(0.0)) != 0) { return 17; }
+    if (filled32(matrix_view(one32), float32(1.0)) != 0) { return 17; }
+    usize row32Index = 1;
+    while (row32Index <= 2) {
+        usize column32Index = 1;
+        while (column32Index <= 2) {
+            float32 wanted32 = float32(0.0);
+            if (row32Index == column32Index) { wanted32 = float32(1.0); }
+            if (unit32[row32Index,column32Index] != wanted32) { return 18; }
+            column32Index = column32Index + 1;
+        }
+        if (row32[row32Index] != float32(0.0) || column32[row32Index] != float32(1.0)) { return 19; }
+        row32Index = row32Index + 1;
+    }
+
     Matrix<float64> a22 = [12.0,-51.0;6.0,167.0];
     Matrix<float64> e22 = [12.0,-51.0;6.0,167.0];
     if (validate64(matrix_view(e22), la.qr(a22), 1e-10) != 0) { return 10; }

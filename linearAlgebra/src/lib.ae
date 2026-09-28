@@ -1,5 +1,91 @@
 package linearAlgebra;
 
+// Runtime-shape constructors are ordinary overloads.  The expected result type
+// selects both the element type and, for vectors, the orientation.
+Matrix<float64> zeros(usize size) {
+    return matrixFilled<float64>(size, size, 0.0);
+}
+
+Matrix<float32> zeros(usize size) {
+    return matrixFilled<float32>(size, size, float32(0.0));
+}
+
+Matrix<float64> zeros(usize rowCount, usize columnCount) {
+    return matrixFilled<float64>(rowCount, columnCount, 0.0);
+}
+
+Matrix<float32> zeros(usize rowCount, usize columnCount) {
+    return matrixFilled<float32>(rowCount, columnCount, float32(0.0));
+}
+
+Vector<float64,Row> zeros(usize length) {
+    return vectorFilled<float64,Row>(length, 0.0);
+}
+
+Vector<float64,Column> zeros(usize length) {
+    return vectorFilled<float64,Column>(length, 0.0);
+}
+
+Vector<float32,Row> zeros(usize length) {
+    return vectorFilled<float32,Row>(length, float32(0.0));
+}
+
+Vector<float32,Column> zeros(usize length) {
+    return vectorFilled<float32,Column>(length, float32(0.0));
+}
+
+Matrix<float64> ones(usize size) {
+    return matrixFilled<float64>(size, size, 1.0);
+}
+
+Matrix<float32> ones(usize size) {
+    return matrixFilled<float32>(size, size, float32(1.0));
+}
+
+Matrix<float64> ones(usize rowCount, usize columnCount) {
+    return matrixFilled<float64>(rowCount, columnCount, 1.0);
+}
+
+Matrix<float32> ones(usize rowCount, usize columnCount) {
+    return matrixFilled<float32>(rowCount, columnCount, float32(1.0));
+}
+
+Vector<float64,Row> ones(usize length) {
+    return vectorFilled<float64,Row>(length, 1.0);
+}
+
+Vector<float64,Column> ones(usize length) {
+    return vectorFilled<float64,Column>(length, 1.0);
+}
+
+Vector<float32,Row> ones(usize length) {
+    return vectorFilled<float32,Row>(length, float32(1.0));
+}
+
+Vector<float32,Column> ones(usize length) {
+    return vectorFilled<float32,Column>(length, float32(1.0));
+}
+
+Matrix<float64> identity(usize size) {
+    Matrix<float64> result = zeros(size, size);
+    usize index = 1;
+    while (index <= size) {
+        result[index,index] = 1.0;
+        index = index + 1;
+    }
+    return result;
+}
+
+Matrix<float32> identity(usize size) {
+    Matrix<float32> result = zeros(size, size);
+    usize index = 1;
+    while (index <= size) {
+        result[index,index] = float32(1.0);
+        index = index + 1;
+    }
+    return result;
+}
+
 // A materialized QR factorization.  Q is m by m and R is m by n.
 struct QR<T: Storable> {
     Matrix<T> Q;
@@ -13,20 +99,9 @@ QR<float64> qr(Matrix<float64> A) {
     usize p = m;
     if (n < p) { p = n; }
 
-    // Public Matrix multiplication gives this workspace its dynamic m by m
-    // shape.  Every entry is overwritten before it is observed.
-    Matrix<float64> Q = matrix_view(A) * transpose_view(A);
+    Matrix<float64> Q = identity(m);
     usize i = 1;
     usize j = 1;
-    while (i <= m) {
-        j = 1;
-        while (j <= m) {
-            if (i == j) { Q[i,j] = 1.0; }
-            else { Q[i,j] = 0.0; }
-            j = j + 1;
-        }
-        i = i + 1;
-    }
 
     Matrix<float64> R = A;
     usize k = 1;
@@ -121,18 +196,9 @@ QR<float32> qrFloat32(Matrix<float32> A) {
     usize p = m;
     if (n < p) { p = n; }
 
-    Matrix<float32> Q = matrix_view(A) * transpose_view(A);
+    Matrix<float32> Q = identity(m);
     usize i = 1;
     usize j = 1;
-    while (i <= m) {
-        j = 1;
-        while (j <= m) {
-            if (i == j) { Q[i,j] = float32(1.0); }
-            else { Q[i,j] = float32(0.0); }
-            j = j + 1;
-        }
-        i = i + 1;
-    }
 
     Matrix<float32> R = A;
     usize k = 1;
