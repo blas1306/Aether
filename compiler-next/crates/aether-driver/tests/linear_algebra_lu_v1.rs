@@ -50,6 +50,9 @@ fn diagnostics(source: &str) -> String {
 
 #[test]
 fn lu_has_exactly_one_ieee_float_source_kernel() {
+    let lu_start = LIBRARY.find("LU<T> lu<T: IEEEFloat>(Matrix<T> A)").unwrap();
+    let lu_end = LIBRARY.find("T det<T: IEEEFloat>(").unwrap();
+    let lu_implementation = &LIBRARY[lu_start..lu_end];
     assert_eq!(
         LIBRARY
             .matches("LU<T> lu<T: IEEEFloat>(Matrix<T> A)")
@@ -58,8 +61,8 @@ fn lu_has_exactly_one_ieee_float_source_kernel() {
     );
     assert!(!LIBRARY.contains("LU<float64> lu("));
     assert!(!LIBRARY.contains("LU<float32> lu("));
-    assert_eq!(LIBRARY.matches("T zero = 0;").count(), 1);
-    assert_eq!(LIBRARY.matches("T one = 1;").count(), 1);
+    assert_eq!(lu_implementation.matches("T zero = 0;").count(), 1);
+    assert_eq!(lu_implementation.matches("T one = 1;").count(), 1);
     assert!(!LIBRARY.contains("luPartial"));
     assert!(!LIBRARY.contains("permutationMatrix"));
     assert!(!LIBRARY.contains("permuteRows"));

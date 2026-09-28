@@ -75,7 +75,9 @@ fn det_has_exactly_two_generic_declarations_and_delegates_once() {
         .find("T det<T: IEEEFloat>(ref LU<T> factor)")
         .unwrap();
     let factor_end = LIBRARY.find("T det<T: IEEEFloat>(Matrix<T> A)").unwrap();
-    let det_end = LIBRARY.find("Vector<float64,Column> solve(").unwrap();
+    let det_end = LIBRARY
+        .find("Vector<T,Column> solve<T: IEEEFloat>(")
+        .unwrap();
     let factor_implementation = &LIBRARY[det_start..factor_end];
     let det_implementation = &LIBRARY[det_start..det_end];
     assert_eq!(

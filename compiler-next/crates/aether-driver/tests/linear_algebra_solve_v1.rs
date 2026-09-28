@@ -1,4 +1,4 @@
-//! LINEAR-ALGEBRA-SOLVE-V1 package, diagnostics, lowering and ownership qualification.
+//! LINEAR-ALGEBRA-GENERIC-SOLVE-V1 package, diagnostics, lowering and ownership qualification.
 
 use std::{fs, path::PathBuf, process::Command};
 
@@ -70,12 +70,22 @@ fn status_llvm(llvm: &str, optimization: OptimizationLevel) -> std::process::Exi
 }
 
 #[test]
-fn solve_has_exactly_the_closed_public_surface_and_one_kernel_per_precision() {
-    let solve_start = LIBRARY.find("Vector<float64,Column> solve(").unwrap();
-    let solve_end = LIBRARY.find("Matrix<float64> solve(").unwrap();
+fn solve_has_exactly_four_generic_declarations_and_one_vector_kernel() {
+    let solve_start = LIBRARY
+        .find("Vector<T,Column> solve<T: IEEEFloat>(")
+        .unwrap();
+    let solve_end = LIBRARY.find("Matrix<T> solve<T: IEEEFloat>(").unwrap();
     let solve_implementation = &LIBRARY[solve_start..solve_end];
-    assert_eq!(LIBRARY.matches("Vector<float64,Column> solve(").count(), 2);
-    assert_eq!(LIBRARY.matches("Vector<float32,Column> solve(").count(), 2);
+    assert_eq!(
+        LIBRARY
+            .matches("Vector<T,Column> solve<T: IEEEFloat>(")
+            .count(),
+        2
+    );
+    assert_eq!(LIBRARY.matches("Matrix<T> solve<T: IEEEFloat>(").count(), 2);
+    assert_eq!(LIBRARY.matches(" solve<T: IEEEFloat>(").count(), 4);
+    assert!(!LIBRARY.contains("Vector<float64,Column> solve("));
+    assert!(!LIBRARY.contains("Vector<float32,Column> solve("));
     assert_eq!(
         LIBRARY
             .matches("public class SingularMatrixException : Exception")
@@ -84,13 +94,14 @@ fn solve_has_exactly_the_closed_public_surface_and_one_kernel_per_precision() {
     );
     assert_eq!(
         solve_implementation
-            .matches("LU<float64> factor = lu(A);")
+            .matches("LU<T> factor = lu(A);")
             .count(),
         1
     );
+    assert_eq!(solve_implementation.matches("lu(A)").count(), 1);
     assert_eq!(
         solve_implementation
-            .matches("LU<float32> factor = lu(A);")
+            .matches("Vector<T,Column> w = vectorFilled<T,Column>(n, zero);")
             .count(),
         1
     );
@@ -102,7 +113,7 @@ fn solve_has_exactly_the_closed_public_surface_and_one_kernel_per_precision() {
 
 #[test]
 fn solve_lowers_as_ordinary_borrowing_package_code_in_every_phase() {
-    let source = "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[0.0,1.0;2.0,3.0];la.LU<float64>f=la.lu(a);Vector<float64,Column>b=[2.0,8.0];Vector<float64,Column>x=la.solve(f,b);Matrix<float32>c=[float32(2.0)];Vector<float32,Column>d=[float32(6.0)];Vector<float32,Column>y=la.solve(c,d);return int(x[1]+float64(y[1])-4.0);}";
+    let source = "package consumer;import linearAlgebra as la;Vector<T,Column> forwardVector<T:IEEEFloat>(ref la.LU<T>f,ref Vector<T,Column>b){return la.solve(f,b);}Matrix<T> forwardMatrix<T:IEEEFloat>(ref la.LU<T>f,ref Matrix<T>b){return la.solve(f,b);}int main(){Matrix<float64>a=[0.0,1.0;2.0,3.0];la.LU<float64>f=la.lu(a);Vector<float64,Column>b=[2.0,8.0];Vector<float64,Column>x=forwardVector(f,b);Matrix<float32>c=[float32(2.0)];la.LU<float32>g=la.lu(c);Matrix<float32>d=[float32(6.0),float32(4.0)];Matrix<float32>y=forwardMatrix(g,d);return int(x[1]+float64(y[1,1])-4.0);}";
     for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
         let compilation = compile(source, optimization);
         for phase in [Emit::Hir, Emit::Mir, Emit::Ssa] {
@@ -110,9 +121,55 @@ fn solve_lowers_as_ordinary_borrowing_package_code_in_every_phase() {
             assert!(dump.contains("ShapeGuard"), "{phase:?}");
             assert!(dump.contains("VectorFilled"), "{phase:?}");
         }
+        let hir = &compilation.dumps[&Emit::Hir];
+        for operation in [
+            "AlgebraicValue",
+            "capability: Zero",
+            "CapabilityCompare",
+            "CapabilityBinary",
+            "behavior: Sub",
+            "behavior: Mul",
+            "behavior: Div",
+        ] {
+            assert!(hir.contains(operation), "missing parametric {operation}");
+        }
+        for operation in ["SubtractFloat", "MultiplyFloat", "DivideFloat"] {
+            assert!(hir.contains(operation), "missing concrete HIR {operation}");
+        }
+        for phase in [Emit::Mir, Emit::Ssa] {
+            let dump = &compilation.dumps[&phase];
+            for residue in [
+                "AlgebraicValue",
+                "CapabilityCompare",
+                "CapabilityBinary",
+                "GenericParam(",
+                "witness",
+                "vtable",
+            ] {
+                assert!(!dump.contains(residue), "{phase:?} contains {residue}");
+            }
+        }
         assert!(compilation.llvm.contains("aether_vector_fill_fFloat64"));
-        assert!(compilation.llvm.contains("aether_vector_fill_fFloat32"));
+        assert!(compilation.llvm.contains("aether_matrix_fill_fFloat32"));
+        assert!(compilation.llvm.contains("linearAlgebra_f5_solve"));
+        assert!(compilation.llvm.contains("__gfFloat64"));
+        assert!(compilation.llvm.contains("__gfFloat32"));
+        for residue in ["Capability", "GenericParam", "TypeId", "witness", "vtable"] {
+            assert!(
+                !compilation.llvm.contains(residue),
+                "LLVM contains {residue}"
+            );
+        }
         assert!(!compilation.llvm.contains("aether_solve"));
+        assert_eq!(status_llvm(&compilation.llvm, optimization).code(), Some(0));
+    }
+}
+
+#[test]
+fn matrix_arguments_infer_t_and_factor_var_calls_accept_explicit_t() {
+    let source = "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[2.0];Vector<float64,Column>b=[6.0];var x=la.solve(a,b);Matrix<float32>c=[float32(4.0)];la.LU<float32>f=la.lu(c);Vector<float32,Column>d=[float32(8.0)];var y=la.solve<float32>(f,d);Matrix<float32>e=[float32(12.0),float32(16.0)];var z=la.solve<float32>(f,e);return int(x[1]+float64(y[1])+float64(z[1,1])-8.0);}";
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        let compilation = compile(source, optimization);
         assert_eq!(status_llvm(&compilation.llvm, optimization).code(), Some(0));
     }
 }
@@ -126,7 +183,8 @@ fn unsupported_rhs_orientation_precision_and_element_types_are_e0460() {
     ];
     for source in rejected {
         let errors = diagnostics(source);
-        assert!(errors.contains("E0460 no matching overload"), "{errors}");
+        assert!(errors.contains("E0460"), "{errors}");
+        assert!(errors.contains("no matching overload"), "{errors}");
     }
 }
 

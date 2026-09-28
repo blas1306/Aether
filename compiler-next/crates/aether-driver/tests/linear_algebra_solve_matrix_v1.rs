@@ -1,4 +1,4 @@
-//! LINEAR-ALGEBRA-SOLVE-MATRIX-V1 package, diagnostics, lowering and ownership qualification.
+//! LINEAR-ALGEBRA-GENERIC-SOLVE-V1 matrix package qualification.
 
 use std::{fs, path::PathBuf, process::Command};
 
@@ -70,41 +70,26 @@ fn status_llvm(llvm: &str, optimization: OptimizationLevel) -> std::process::Exi
 }
 
 #[test]
-fn solve_has_exactly_eight_overloads_and_the_four_closed_matrix_overloads() {
-    let solve_declarations = LIBRARY.matches("Vector<float64,Column> solve(").count()
-        + LIBRARY.matches("Vector<float32,Column> solve(").count()
-        + LIBRARY.matches("Matrix<float64> solve(").count()
-        + LIBRARY.matches("Matrix<float32> solve(").count();
-    assert_eq!(solve_declarations, 8);
-    assert_eq!(LIBRARY.matches("Vector<float64,Column> solve(").count(), 2);
-    assert_eq!(LIBRARY.matches("Vector<float32,Column> solve(").count(), 2);
-    assert_eq!(LIBRARY.matches("Matrix<float64> solve(").count(), 2);
-    assert_eq!(LIBRARY.matches("Matrix<float32> solve(").count(), 2);
+fn solve_has_exactly_four_generic_overloads_and_one_matrix_kernel() {
+    assert_eq!(LIBRARY.matches(" solve<T: IEEEFloat>(").count(), 4);
+    assert_eq!(
+        LIBRARY
+            .matches("Vector<T,Column> solve<T: IEEEFloat>(")
+            .count(),
+        2
+    );
+    assert_eq!(LIBRARY.matches("Matrix<T> solve<T: IEEEFloat>(").count(), 2);
+    assert!(!LIBRARY.contains("Matrix<float64> solve("));
+    assert!(!LIBRARY.contains("Matrix<float32> solve("));
 
-    let start = LIBRARY.find("Matrix<float64> solve(").unwrap();
+    let start = LIBRARY.find("Matrix<T> solve<T: IEEEFloat>(").unwrap();
     let end = LIBRARY.find("// A materialized QR factorization").unwrap();
     let implementation = &LIBRARY[start..end];
+    assert_eq!(implementation.matches("LU<T> factor = lu(A);").count(), 1);
+    assert_eq!(implementation.matches("lu(A)").count(), 1);
     assert_eq!(
         implementation
-            .matches("LU<float64> factor = lu(A);")
-            .count(),
-        1
-    );
-    assert_eq!(
-        implementation
-            .matches("LU<float32> factor = lu(A);")
-            .count(),
-        1
-    );
-    assert_eq!(
-        implementation
-            .matches("Matrix<float64> W = matrixFilled<float64>(n, q, 0.0);")
-            .count(),
-        1
-    );
-    assert_eq!(
-        implementation
-            .matches("Matrix<float32> W = matrixFilled<float32>(n, q, float32(0.0));")
+            .matches("Matrix<T> W = matrixFilled<T>(n, q, zero);")
             .count(),
         1
     );
@@ -140,7 +125,8 @@ fn unsupported_precision_element_and_rhs_view_types_are_e0460() {
     ];
     for source in rejected {
         let errors = diagnostics(source);
-        assert!(errors.contains("E0460 no matching overload"), "{errors}");
+        assert!(errors.contains("E0460"), "{errors}");
+        assert!(errors.contains("no matching overload"), "{errors}");
     }
 }
 
