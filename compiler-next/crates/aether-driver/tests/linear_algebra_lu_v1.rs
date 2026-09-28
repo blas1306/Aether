@@ -1,4 +1,4 @@
-//! LINEAR-ALGEBRA-LU-V1 package, lowering, and allocation qualification.
+//! LINEAR-ALGEBRA-GENERIC-LU-V1 package, lowering, diagnostics, and allocation qualification.
 
 use std::{fs, path::PathBuf, process::Command};
 
@@ -37,10 +37,29 @@ impl Drop for Directory {
     }
 }
 
+fn diagnostics(source: &str) -> String {
+    let directory = Directory::new("diagnostic");
+    let entry = directory.entry(source);
+    compile_session(CompilationSession::discover(&entry).unwrap(), &[])
+        .unwrap_err()
+        .into_iter()
+        .map(|diagnostic| format!("{} {}", diagnostic.code, diagnostic.message))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
-fn lu_has_exactly_the_closed_public_surface() {
-    assert_eq!(LIBRARY.matches("LU<float64> lu(").count(), 1);
-    assert_eq!(LIBRARY.matches("LU<float32> lu(").count(), 1);
+fn lu_has_exactly_one_ieee_float_source_kernel() {
+    assert_eq!(
+        LIBRARY
+            .matches("LU<T> lu<T: IEEEFloat>(Matrix<T> A)")
+            .count(),
+        1
+    );
+    assert!(!LIBRARY.contains("LU<float64> lu("));
+    assert!(!LIBRARY.contains("LU<float32> lu("));
+    assert_eq!(LIBRARY.matches("T zero = 0;").count(), 1);
+    assert_eq!(LIBRARY.matches("T one = 1;").count(), 1);
     assert!(!LIBRARY.contains("luPartial"));
     assert!(!LIBRARY.contains("permutationMatrix"));
     assert!(!LIBRARY.contains("permuteRows"));
@@ -51,7 +70,7 @@ fn lu_has_exactly_the_closed_public_surface() {
 fn lu_lowers_as_ordinary_package_code_in_every_phase() {
     let directory = Directory::new("lowering");
     let entry = directory.entry(
-        "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[0.0,2.0;3.0,4.0];la.LU<float64>x=la.lu(a);Matrix<float32>b=[float32(1.0)];la.LU<float32>y=la.lu(b);return x.permutationSign+y.permutationSign;}",
+        "package consumer;import linearAlgebra as la;la.LU<T> forward<T:IEEEFloat>(Matrix<T>a){return la.lu(a);}int main(){Matrix<float64>a=[0.0,2.0;3.0,4.0];var x=la.lu(a);Matrix<float32>b=[float32(1.0)];la.LU<float32>y=la.lu<float32>(b);Matrix<float64>c=[1.0];la.LU<float64>z=forward(c);return x.permutationSign+y.permutationSign+z.permutationSign;}",
     );
     let compilation = compile_session(
         CompilationSession::discover(&entry).unwrap(),
@@ -65,12 +84,59 @@ fn lu_lowers_as_ordinary_package_code_in_every_phase() {
         assert!(dump.contains("MatrixFilled"), "{phase:?}");
         assert!(dump.contains("VectorFilled"), "{phase:?}");
     }
+    let hir = &compilation.dumps[&Emit::Hir];
+    for capability_operation in [
+        "AlgebraicValue",
+        "CapabilityMath",
+        "CapabilityCompare",
+        "CapabilityBinary",
+    ] {
+        assert!(hir.contains(capability_operation), "{capability_operation}");
+        for phase in [Emit::Mir, Emit::Ssa] {
+            assert!(!compilation.dumps[&phase].contains(capability_operation));
+        }
+        assert!(!compilation.llvm.contains(capability_operation));
+    }
+    for exact_operation in [
+        "capability: Zero",
+        "capability: One",
+        "operation: Abs",
+        "operation: NotEqual",
+        "operation: Greater",
+        "behavior: Div",
+        "behavior: Sub",
+        "behavior: Mul",
+    ] {
+        assert!(hir.contains(exact_operation), "{exact_operation}");
+    }
+    for generic_residue in ["GenericParam(", "witness", "vtable"] {
+        assert!(!compilation.dumps[&Emit::Mir].contains(generic_residue));
+        assert!(!compilation.dumps[&Emit::Ssa].contains(generic_residue));
+        assert!(!compilation.llvm.contains(generic_residue));
+    }
+    assert!(!compilation.llvm.contains("TypeId"));
     assert!(compilation.llvm.contains("@aether_matrix_index_fFloat64"));
     assert!(compilation.llvm.contains("@aether_matrix_index_fFloat32"));
     assert!(compilation.llvm.contains("@aether_matrix_fill_fFloat64"));
     assert!(compilation.llvm.contains("@aether_matrix_fill_fFloat32"));
     assert!(compilation.llvm.contains("@aether_vector_fill_iUsize"));
+    assert!(compilation.llvm.contains("call double @fabs(double"));
+    assert!(compilation.llvm.contains("call float @fabsf(float"));
+    assert!(compilation.llvm.contains("linearAlgebra_f2_lu__gfFloat64"));
+    assert!(compilation.llvm.contains("linearAlgebra_f2_lu__gfFloat32"));
     assert!(!compilation.llvm.contains("aether_lu"));
+}
+
+#[test]
+fn lu_rejects_non_ieee_elements_through_the_general_constraint() {
+    for source in [
+        "package consumer;import linearAlgebra as la;int main(){Matrix<int>a=[1];var f=la.lu(a);return 0;}",
+        "package consumer;import linearAlgebra as la;int main(){Matrix<int>a=[1];var f=la.lu<int>(a);return 0;}",
+    ] {
+        let output = diagnostics(source);
+        assert!(output.contains("IEEEFloat"), "{source}: {output}");
+        assert!(!output.contains("linearAlgebra only"), "{source}: {output}");
+    }
 }
 
 #[test]

@@ -1,5 +1,9 @@
 import linearAlgebra as la;
 
+la.LU<T> genericLU<T: IEEEFloat>(Matrix<T> A) {
+    return la.lu(A);
+}
+
 int filled64(MatrixView<float64> value, float64 expected) {
     usize i = 1;
     while (i <= rows(value)) {
@@ -918,6 +922,16 @@ int testFormatBorrowLU() {
     return 0;
 }
 
+int testGenericLUForwarding() {
+    Matrix<float64> A = [0.0,1.0;2.0,3.0];
+    la.LU<float64> inferred = genericLU(A);
+    Matrix<float32> B = [float32(2.0)];
+    la.LU<float32> explicit = la.lu<float32>(B);
+    if (inferred.permutationSign != -1 || inferred.permutation[1] != 2) { return 1; }
+    if (explicit.permutationSign != 1 || explicit.U[1,1] != float32(2.0)) { return 2; }
+    return 0;
+}
+
 int main() {
     Matrix<float64> zeroSquare = la.zeros(3);
     Matrix<float64> zeroTall = la.zeros(4,2);
@@ -1093,5 +1107,7 @@ int main() {
     if (det32Status != 0) { return 240 + det32Status; }
     int formatBorrowStatus = testFormatBorrowLU();
     if (formatBorrowStatus != 0) { return 260 + formatBorrowStatus; }
+    int genericLUStatus = testGenericLUForwarding();
+    if (genericLUStatus != 0) { return 270 + genericLUStatus; }
     return 0;
 }
