@@ -190,6 +190,195 @@ int validateLU32(MatrixView<float32> expected, la.LU<float32> factor, int expect
     return 0;
 }
 
+int validateSolve64(
+    MatrixView<float64> A,
+    ref Vector<float64,Column> b,
+    ref Vector<float64,Column> x,
+    ref Vector<float64,Column> expected,
+    float64 tolerance) {
+    if (dimension(*x) != dimension(*expected)) { return 1; }
+    usize i = 1;
+    while (i <= dimension(*x)) {
+        if (abs((*x)[i] - (*expected)[i]) > tolerance) { return 2; }
+        float64 residual = -(*b)[i];
+        usize j = 1;
+        while (j <= dimension(*x)) {
+            residual = residual + A[i,j] * (*x)[j];
+            j = j + 1;
+        }
+        if (abs(residual) > tolerance) { return 3; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+int validateSolve32(
+    MatrixView<float32> A,
+    ref Vector<float32,Column> b,
+    ref Vector<float32,Column> x,
+    ref Vector<float32,Column> expected,
+    float32 tolerance) {
+    if (dimension(*x) != dimension(*expected)) { return 1; }
+    usize i = 1;
+    while (i <= dimension(*x)) {
+        if (abs((*x)[i] - (*expected)[i]) > tolerance) { return 2; }
+        float32 residual = -(*b)[i];
+        usize j = 1;
+        while (j <= dimension(*x)) {
+            residual = residual + A[i,j] * (*x)[j];
+            j = j + 1;
+        }
+        if (abs(residual) > tolerance) { return 3; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+int testSolve64() {
+    Matrix<float64> identity = [1.0,0.0,0.0;0.0,1.0,0.0;0.0,0.0,1.0];
+    Matrix<float64> identityExpected = [1.0,0.0,0.0;0.0,1.0,0.0;0.0,0.0,1.0];
+    Vector<float64,Column> identityB = [2.0,-3.0,4.0];
+    Vector<float64,Column> identityX = [2.0,-3.0,4.0];
+    Vector<float64,Column> identityResult = la.solve(identity, identityB);
+    if (validateSolve64(matrix_view(identityExpected), identityB, identityResult, identityX, 1e-12) != 0) { return 1; }
+    if (identityB[1] != 2.0 || identityB[2] != -3.0 || identityB[3] != 4.0) { return 2; }
+
+    Matrix<float64> diagonal = [2.0,0.0,0.0;0.0,-3.0,0.0;0.0,0.0,4.0];
+    Matrix<float64> diagonalExpected = [2.0,0.0,0.0;0.0,-3.0,0.0;0.0,0.0,4.0];
+    Vector<float64,Column> diagonalB = [3.0,6.0,-2.0];
+    Vector<float64,Column> diagonalX = [1.5,-2.0,-0.5];
+    Vector<float64,Column> diagonalResult = la.solve(diagonal, diagonalB);
+    if (validateSolve64(matrix_view(diagonalExpected), diagonalB, diagonalResult, diagonalX, 1e-12) != 0) { return 3; }
+
+    Matrix<float64> upper = [2.0,1.0,-1.0;0.0,3.0,2.0;0.0,0.0,4.0];
+    Matrix<float64> upperExpected = [2.0,1.0,-1.0;0.0,3.0,2.0;0.0,0.0,4.0];
+    Vector<float64,Column> upperB = [-3.0,7.0,8.0];
+    Vector<float64,Column> upperX = [-1.0,1.0,2.0];
+    Vector<float64,Column> upperResult = la.solve(upper, upperB);
+    if (validateSolve64(matrix_view(upperExpected), upperB, upperResult, upperX, 1e-12) != 0) { return 4; }
+
+    Matrix<float64> lower = [2.0,0.0,0.0;1.0,3.0,0.0;-1.0,2.0,4.0];
+    Matrix<float64> lowerExpected = [2.0,0.0,0.0;1.0,3.0,0.0;-1.0,2.0,4.0];
+    Vector<float64,Column> lowerB = [-2.0,2.0,11.0];
+    Vector<float64,Column> lowerX = [-1.0,1.0,2.0];
+    Vector<float64,Column> lowerResult = la.solve(lower, lowerB);
+    if (validateSolve64(matrix_view(lowerExpected), lowerB, lowerResult, lowerX, 1e-12) != 0) { return 5; }
+
+    Matrix<float64> swaps = [0.0,2.0,1.0;1.0,0.0,3.0;2.0,1.0,0.0];
+    Matrix<float64> swapsExpected = [0.0,2.0,1.0;1.0,0.0,3.0;2.0,1.0,0.0];
+    Vector<float64,Column> swapsB = [5.0,4.0,4.0];
+    Vector<float64,Column> swapsX = [1.0,2.0,1.0];
+    Vector<float64,Column> swapsResult = la.solve(swaps, swapsB);
+    if (validateSolve64(matrix_view(swapsExpected), swapsB, swapsResult, swapsX, 1e-12) != 0) { return 6; }
+
+    Matrix<float64> random = [3.0,-2.0,1.0;2.0,4.0,-3.0;-1.0,2.0,5.0];
+    Matrix<float64> randomExpected = [3.0,-2.0,1.0;2.0,4.0,-3.0;-1.0,2.0,5.0];
+    Vector<float64,Column> randomB = [6.5,1.0,-15.5];
+    Vector<float64,Column> randomX = [1.5,-2.0,-2.0];
+    Vector<float64,Column> randomResult = la.solve(random, randomB);
+    if (validateSolve64(matrix_view(randomExpected), randomB, randomResult, randomX, 1e-11) != 0) { return 7; }
+
+    Matrix<float64> reusableMatrix = [0.0,1.0;2.0,3.0];
+    Matrix<float64> reusableExpected = [0.0,1.0;2.0,3.0];
+    la.LU<float64> factor = la.lu(reusableMatrix);
+    Vector<float64,Column> firstB = [2.0,8.0];
+    Vector<float64,Column> firstX = [1.0,2.0];
+    Vector<float64,Column> firstResult = la.solve(factor, firstB);
+    if (validateSolve64(matrix_view(reusableExpected), firstB, firstResult, firstX, 1e-12) != 0) { return 8; }
+    Vector<float64,Column> secondB = [-1.0,-1.0];
+    Vector<float64,Column> secondX = [1.0,-1.0];
+    Vector<float64,Column> secondResult = la.solve(factor, secondB);
+    if (validateSolve64(matrix_view(reusableExpected), secondB, secondResult, secondX, 1e-12) != 0) { return 9; }
+    if (factor.permutation[1] != 2 || factor.permutation[2] != 1 || firstB[1] != 2.0 || secondB[2] != -1.0) { return 10; }
+
+    Matrix<float64> zeroRhsMatrix = [2.0,1.0;1.0,2.0];
+    Vector<float64,Column> zeroB = [0.0,0.0];
+    Vector<float64,Column> zeroResult = la.solve(zeroRhsMatrix, zeroB);
+    if (zeroResult[1] != 0.0 || zeroResult[2] != 0.0) { return 11; }
+
+    Matrix<float64> emptyMatrix = la.zeros(0,0);
+    Vector<float64,Column> emptyB = la.zeros(0);
+    Vector<float64,Column> emptyResult = la.solve(emptyMatrix, emptyB);
+    if (dimension(emptyResult) != 0) { return 12; }
+    Matrix<float64> emptyFactorMatrix = la.zeros(0,0);
+    la.LU<float64> emptyFactor = la.lu(emptyFactorMatrix);
+    Vector<float64,Column> emptyResult2 = la.solve(emptyFactor, emptyB);
+    if (dimension(emptyResult2) != 0 || dimension(emptyFactor.permutation) != 0) { return 13; }
+
+    Matrix<float64> scalar = [-4.0];
+    Vector<float64,Column> scalarB = [10.0];
+    Vector<float64,Column> scalarResult = la.solve(scalar, scalarB);
+    if (abs(scalarResult[1] + 2.5) > 1e-12) { return 14; }
+    Matrix<float64> almost = [1e-20,0.0;0.0,2.0];
+    Vector<float64,Column> almostB = [1e-20,4.0];
+    Vector<float64,Column> almostResult = la.solve(almost, almostB);
+    if (abs(almostResult[1] - 1.0) > 1e-12 || abs(almostResult[2] - 2.0) > 1e-12) { return 15; }
+
+    int caught = 0;
+    try {
+        Matrix<float64> singular = [1.0,2.0;2.0,4.0];
+        Vector<float64,Column> compatible = [3.0,6.0];
+        Vector<float64,Column> ignored = la.solve(singular, compatible);
+    } catch (la.SingularMatrixException error) {
+        caught = caught + 1;
+    }
+    try {
+        Matrix<float64> singular = [1.0,2.0;2.0,4.0];
+        la.LU<float64> singularFactor = la.lu(singular);
+        Vector<float64,Column> incompatible = [3.0,7.0];
+        try {
+            Vector<float64,Column> ignored = la.solve(singularFactor, incompatible);
+        } catch (la.SingularMatrixException error) {
+            if (incompatible[1] == 3.0 && singularFactor.permutation[1] == 2) { caught = caught + 1; }
+        }
+    } catch (Exception wrong) {
+        return 16;
+    }
+    if (caught != 2) { return 17; }
+    return 0;
+}
+
+int testSolve32() {
+    Matrix<float32> swaps = [float32(0.0),float32(2.0),float32(1.0);float32(1.0),float32(0.0),float32(3.0);float32(2.0),float32(1.0),float32(0.0)];
+    Matrix<float32> expected = [float32(0.0),float32(2.0),float32(1.0);float32(1.0),float32(0.0),float32(3.0);float32(2.0),float32(1.0),float32(0.0)];
+    Vector<float32,Column> b = [float32(5.0),float32(4.0),float32(4.0)];
+    Vector<float32,Column> xKnown = [float32(1.0),float32(2.0),float32(1.0)];
+    Vector<float32,Column> x = la.solve(swaps, b);
+    if (validateSolve32(matrix_view(expected), b, x, xKnown, float32(2e-5)) != 0) { return 1; }
+
+    Matrix<float32> reusable = [float32(4.0),float32(0.0);float32(2.0),float32(3.0)];
+    Matrix<float32> reusableExpected = [float32(4.0),float32(0.0);float32(2.0),float32(3.0)];
+    la.LU<float32> factor = la.lu(reusable);
+    Vector<float32,Column> b1 = [float32(4.0),float32(8.0)];
+    Vector<float32,Column> x1Known = [float32(1.0),float32(2.0)];
+    Vector<float32,Column> x1 = la.solve(factor, b1);
+    if (validateSolve32(matrix_view(reusableExpected), b1, x1, x1Known, float32(2e-5)) != 0) { return 2; }
+    Vector<float32,Column> b2 = [float32(-4.0),float32(1.0)];
+    Vector<float32,Column> x2Known = [float32(-1.0),float32(1.0)];
+    Vector<float32,Column> x2 = la.solve(factor, b2);
+    if (validateSolve32(matrix_view(reusableExpected), b2, x2, x2Known, float32(2e-5)) != 0) { return 3; }
+
+    Matrix<float32> emptyMatrix = la.zeros(0,0);
+    Vector<float32,Column> emptyB = la.zeros(0);
+    Vector<float32,Column> emptyX = la.solve(emptyMatrix, emptyB);
+    if (dimension(emptyX) != 0) { return 4; }
+    Matrix<float32> almost = [float32(1e-10),float32(0.0);float32(0.0),float32(2.0)];
+    Vector<float32,Column> almostB = [float32(1e-10),float32(4.0)];
+    Vector<float32,Column> almostX = la.solve(almost, almostB);
+    if (abs(almostX[1] - float32(1.0)) > float32(2e-5)) { return 5; }
+
+    int caught = 0;
+    try {
+        Matrix<float32> singular = [float32(-0.0)];
+        Vector<float32,Column> singularB = [float32(0.0)];
+        Vector<float32,Column> ignored = la.solve(singular, singularB);
+    } catch (la.SingularMatrixException error) {
+        caught = 1;
+    }
+    if (caught != 1) { return 6; }
+    return 0;
+}
+
 int testLU64() {
     Matrix<float64> noSwap = [4.0,1.0;2.0,3.0];
     Matrix<float64> noSwapExpected = [4.0,1.0;2.0,3.0];
@@ -494,5 +683,9 @@ int main() {
     if (validate32(matrix_view(singleExpected), la.qrFloat32(single), float32(2e-5)) != 0) { return 100; }
     if (testLU64() != 0) { return 110; }
     if (testLU32() != 0) { return 120; }
+    int solve64Status = testSolve64();
+    if (solve64Status != 0) { return solve64Status; }
+    int solve32Status = testSolve32();
+    if (solve32Status != 0) { return 200 + solve32Status; }
     return 0;
 }

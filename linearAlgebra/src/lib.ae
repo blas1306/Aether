@@ -95,6 +95,10 @@ struct LU<T: Storable> {
     Matrix<T> U;
 }
 
+public class SingularMatrixException : Exception {
+    public init() {}
+}
+
 LU<float64> lu(Matrix<float64> A) {
     usize m = rows(A);
     usize n = columns(A);
@@ -285,6 +289,118 @@ LU<float32> lu(Matrix<float32> A) {
         i = i + 1;
     }
     return LU<float32>(permutation, permutationSign, A, U);
+}
+
+Vector<float64,Column> solve(
+    ref LU<float64> factor,
+    ref Vector<float64,Column> b) {
+    shapeGuard(rows((*factor).L) == columns((*factor).L));
+    shapeGuard(rows((*factor).U) == columns((*factor).U));
+    shapeGuard(rows((*factor).L) == rows((*factor).U));
+    shapeGuard(dimension((*factor).permutation) == rows((*factor).L));
+    shapeGuard(dimension(*b) == rows((*factor).L));
+
+    usize n = rows((*factor).U);
+    Vector<float64,Column> w = vectorFilled<float64,Column>(n, 0.0);
+    usize i = 1;
+    while (i <= n) {
+        w[i] = (*b)[(*factor).permutation[i]];
+        i = i + 1;
+    }
+
+    i = 1;
+    while (i <= n) {
+        float64 value = w[i];
+        usize j = 1;
+        while (j < i) {
+            value = value - (*factor).L[i,j] * w[j];
+            j = j + 1;
+        }
+        w[i] = value;
+        i = i + 1;
+    }
+
+    i = n;
+    while (i > 0) {
+        if ((*factor).U[i,i] == 0.0) {
+            throw SingularMatrixException();
+        }
+        float64 value = w[i];
+        usize j = i + 1;
+        while (j <= n) {
+            value = value - (*factor).U[i,j] * w[j];
+            j = j + 1;
+        }
+        w[i] = value / (*factor).U[i,i];
+        if (i == 1) { break; }
+        i = i - 1;
+    }
+    return w;
+}
+
+Vector<float32,Column> solve(
+    ref LU<float32> factor,
+    ref Vector<float32,Column> b) {
+    shapeGuard(rows((*factor).L) == columns((*factor).L));
+    shapeGuard(rows((*factor).U) == columns((*factor).U));
+    shapeGuard(rows((*factor).L) == rows((*factor).U));
+    shapeGuard(dimension((*factor).permutation) == rows((*factor).L));
+    shapeGuard(dimension(*b) == rows((*factor).L));
+
+    usize n = rows((*factor).U);
+    Vector<float32,Column> w = vectorFilled<float32,Column>(n, float32(0.0));
+    usize i = 1;
+    while (i <= n) {
+        w[i] = (*b)[(*factor).permutation[i]];
+        i = i + 1;
+    }
+
+    i = 1;
+    while (i <= n) {
+        float32 value = w[i];
+        usize j = 1;
+        while (j < i) {
+            value = value - (*factor).L[i,j] * w[j];
+            j = j + 1;
+        }
+        w[i] = value;
+        i = i + 1;
+    }
+
+    i = n;
+    while (i > 0) {
+        if ((*factor).U[i,i] == float32(0.0)) {
+            throw SingularMatrixException();
+        }
+        float32 value = w[i];
+        usize j = i + 1;
+        while (j <= n) {
+            value = value - (*factor).U[i,j] * w[j];
+            j = j + 1;
+        }
+        w[i] = value / (*factor).U[i,i];
+        if (i == 1) { break; }
+        i = i - 1;
+    }
+    return w;
+}
+
+Vector<float64,Column> solve(
+    Matrix<float64> A,
+    ref Vector<float64,Column> b) {
+    shapeGuard(rows(A) == columns(A));
+    shapeGuard(dimension(*b) == rows(A));
+    LU<float64> factor = lu(A);
+    return solve(factor, b);
+}
+
+Vector<float32,Column> solve(
+    Matrix<float32> A,
+    ref Vector<float32,Column> b) {
+    shapeGuard(rows(A) == columns(A));
+    shapeGuard(dimension(*b) == rows(A));
+    LU<float32> factor = lu(A);
+    return solve(factor, b);
 }
 
 // A materialized QR factorization.  Q is m by m and R is m by n.

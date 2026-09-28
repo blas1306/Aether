@@ -344,6 +344,10 @@ fn linear_algebra_oal_publishes_and_runs_real_qr_consumer() {
         let DriverResponse::Ran { status, .. } = response else {
             panic!("expected run response")
         };
-        assert!(status.success(), "QR consumer failed at {optimization:?}");
+        assert!(
+            status.success(),
+            "linearAlgebra consumer failed at {optimization:?}: {:?}",
+            status.code()
+        );
     }
 }
