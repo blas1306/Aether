@@ -59,7 +59,8 @@ fn duplicate_and_child_collisions_are_global() {
     let duplicate = Directory::new("duplicate");
     let entry = duplicate.write("main.ae", "package P; int main(){} int value(){return 1;}");
     duplicate.write("other.ae", "package P; int value(){return 2;}");
-    assert!(diagnostics(&entry).contains("E0240"));
+    let errors = compile_session(CompilationSession::discover(&entry).unwrap(), &[]).unwrap_err();
+    assert!(format!("{errors:#?}").contains("E0211"));
 
     let collision = Directory::new("collision");
     let entry = collision.write(

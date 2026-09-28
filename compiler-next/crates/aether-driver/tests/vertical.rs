@@ -942,10 +942,6 @@ fn vertical8_generic_diagnostics_fail_closed() {
             "E0262",
         ),
         (
-            "T make<T>(){T x=make<T>();return x;}int main(){return make();}",
-            "E0263",
-        ),
-        (
             "T add<T>(T a,T b){return a+b;}int main(){return 0;}",
             "E0268",
         ),

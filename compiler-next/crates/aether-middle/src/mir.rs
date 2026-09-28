@@ -10008,6 +10008,7 @@ mod tests {
                 type_arguments: vec![],
                 parameters: vec![],
                 return_type: TypeId::INT64,
+                overload_disambiguator: None,
                 span: Span::new(0, 0),
             }],
             functions: vec![MirFunction {

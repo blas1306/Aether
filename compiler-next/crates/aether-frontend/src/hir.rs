@@ -191,6 +191,8 @@ pub struct FunctionSignature {
     pub generic_parameters: Vec<GenericParamInfo>,
     pub parameters: Vec<ParameterSignature>,
     pub return_type: TypeId,
+    /// Present only when the source name denotes an overload set in its package.
+    pub overload_disambiguator: Option<u32>,
     pub span: Span,
 }
 
@@ -209,7 +211,10 @@ impl FunctionSignature {
     pub fn symbol_key(&self, modules: &[ModuleInfo]) -> SymbolKey {
         SymbolKey {
             package: modules[self.module.0 as usize].key.package.clone(),
-            member: self.name.clone(),
+            member: self.overload_disambiguator.map_or_else(
+                || self.name.clone(),
+                |disambiguator| format!("{}#overload{disambiguator}", self.name),
+            ),
         }
     }
 }
@@ -616,7 +621,7 @@ pub struct DeclaredProgram {
     types: TypeArena,
     program: ParsedProgram,
     signatures: Vec<FunctionSignature>,
-    names: Vec<BTreeMap<String, FunctionId>>,
+    names: Vec<BTreeMap<String, Vec<FunctionId>>>,
     imports: Vec<BTreeMap<String, ModuleId>>,
     import_bindings: Vec<BTreeSet<String>>,
     module_names: BTreeMap<String, ModuleId>,
@@ -861,6 +866,7 @@ pub struct FunctionInstanceInfo {
     pub type_arguments: Vec<TypeId>,
     pub parameters: Vec<ParameterSignature>,
     pub return_type: TypeId,
+    pub overload_disambiguator: Option<u32>,
     pub span: Span,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1929,6 +1935,27 @@ fn merge_package_tables<T: Copy>(program: &ParsedProgram, tables: &mut [BTreeMap
     }
 }
 
+fn merge_package_overloads(
+    program: &ParsedProgram,
+    tables: &mut [BTreeMap<String, Vec<FunctionId>>],
+) {
+    let mut package_tables = BTreeMap::<PackageId, BTreeMap<String, Vec<FunctionId>>>::new();
+    for module in &program.modules {
+        package_tables.entry(module.info.package).or_default();
+        for (name, ids) in &tables[module.info.id.0 as usize] {
+            package_tables
+                .entry(module.info.package)
+                .or_default()
+                .entry(name.clone())
+                .or_default()
+                .extend(ids.iter().copied());
+        }
+    }
+    for module in &program.modules {
+        tables[module.info.id.0 as usize] = package_tables[&module.info.package].clone();
+    }
+}
+
 pub fn collect_signatures(ast: ParsedAst) -> Result<DeclaredProgram, Vec<Diagnostic>> {
     let source = ast.functions.first().map_or(SourceId(0), |f| f.span.source);
     let package_key = ast.package().map_or(PackageKey::Anonymous, |package| {
@@ -2124,6 +2151,9 @@ fn collect_program_signatures_for_kind(
                     (kind, module.info.id, span),
                 )
             {
+                if kind == "function" && previous_kind == "function" {
+                    continue;
+                }
                 return Err(vec![src(
                     Diagnostic::new(
                         if kind == "function" && previous_kind == "function" {
@@ -2222,7 +2252,7 @@ fn collect_program_signatures_for_kind(
             if name == "Function"
                 || builtin(name).is_some()
                 || intrinsic_type_arity(name).is_some()
-                || previous.is_some()
+                || previous.is_some_and(|previous| previous != "function" || kind != "function")
             {
                 let code = match previous {
                     Some("function") if kind == "function" => "E0211",
@@ -2781,11 +2811,14 @@ fn collect_program_signatures_for_kind(
         nominal_validation_started,
     );
     let mut signatures = vec![];
-    let mut names = vec![BTreeMap::new(); program.modules.len()];
+    let mut names = vec![BTreeMap::<String, Vec<FunctionId>>::new(); program.modules.len()];
     for module in &program.modules {
         for f in module.ast.functions() {
             let id = FunctionId(signatures.len() as u32);
-            names[module.info.id.0 as usize].insert(f.name.clone(), id);
+            names[module.info.id.0 as usize]
+                .entry(f.name.clone())
+                .or_default()
+                .push(id);
             if types.class_method(id).is_some()
                 && let Some(parameter) = f.parameters.iter().find(|p| p.default.is_some())
             {
@@ -2936,11 +2969,77 @@ fn collect_program_signatures_for_kind(
                 generic_parameters,
                 parameters,
                 return_type,
+                overload_disambiguator: None,
                 span: f.span,
             });
         }
     }
-    merge_package_tables(&program, &mut names);
+    for (index, right) in signatures.iter().enumerate() {
+        for left in &signatures[..index] {
+            if left.name != right.name
+                || program.modules[left.module.0 as usize].info.package
+                    != program.modules[right.module.0 as usize].info.package
+                || left.generic_parameters.len() != right.generic_parameters.len()
+            {
+                continue;
+            }
+            let constraints_match = left
+                .generic_parameters
+                .iter()
+                .zip(&right.generic_parameters)
+                .all(|(left, right)| left.capabilities == right.capabilities);
+            let substitution = Substitution::new(
+                left.generic_parameters.iter().map(|parameter| parameter.id),
+                right
+                    .generic_parameters
+                    .iter()
+                    .map(|parameter| parameter.ty),
+            );
+            let parameters_match = left.parameters.len() == right.parameters.len()
+                && left
+                    .parameters
+                    .iter()
+                    .zip(&right.parameters)
+                    .all(|(left, right)| {
+                        types.substitute(left.ty, &substitution).ok() == Some(right.ty)
+                    });
+            let result_matches =
+                types.substitute(left.return_type, &substitution).ok() == Some(right.return_type);
+            if constraints_match && parameters_match && result_matches {
+                let module = &program.modules[right.module.0 as usize];
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0211",
+                        Phase::Semantic,
+                        DiagnosticCategory::Name,
+                        format!(
+                            "duplicate package member `{}`: duplicate overload signature; overloads must differ by arity, argument types, constraints, or result type",
+                            right.name
+                        ),
+                        Some(right.span),
+                    ),
+                    module,
+                )]);
+            }
+        }
+    }
+    for index in 0..signatures.len() {
+        let package = program.modules[signatures[index].module.0 as usize]
+            .info
+            .package;
+        let overloaded = signatures
+            .iter()
+            .filter(|candidate| {
+                candidate.name == signatures[index].name
+                    && program.modules[candidate.module.0 as usize].info.package == package
+            })
+            .count()
+            > 1;
+        if overloaded {
+            signatures[index].overload_disambiguator = Some(signatures[index].id.0);
+        }
+    }
+    merge_package_overloads(&program, &mut names);
     for c in &mut types.classes {
         for m in &mut c.methods {
             let s = &signatures[m.function.0 as usize];
@@ -3156,7 +3255,7 @@ fn collect_program_signatures_for_kind(
     }
     let em = &program.modules[program.entry.0 as usize];
     let entry = if require_main {
-        let Some(entry) = names[program.entry.0 as usize].get("main").copied() else {
+        let Some(entries) = names[program.entry.0 as usize].get("main") else {
             return Err(vec![src(
                 Diagnostic::new(
                     "E0200",
@@ -3168,23 +3267,31 @@ fn collect_program_signatures_for_kind(
                 em,
             )]);
         };
-        let main = &signatures[entry.0 as usize];
-        if main.return_type != TypeId::INT64
-            || !main.parameters.is_empty()
-            || !main.generic_parameters.is_empty()
-        {
+        let valid = entries
+            .iter()
+            .copied()
+            .filter(|entry| {
+                let main = &signatures[entry.0 as usize];
+                main.return_type == TypeId::INT64
+                    && main.parameters.is_empty()
+                    && main.generic_parameters.is_empty()
+            })
+            .collect::<Vec<_>>();
+        if entries.len() != 1 || valid.len() != 1 {
             return Err(vec![src(
                 Diagnostic::new(
                     "E0201",
                     Phase::Semantic,
                     DiagnosticCategory::Type,
-                    "entry function must have signature `int main()`",
-                    Some(main.span),
+                    "entry overload set must contain exactly one `int main()`",
+                    entries
+                        .first()
+                        .map(|entry| signatures[entry.0 as usize].span),
                 ),
                 em,
             )]);
         }
-        entry
+        valid[0]
     } else {
         signatures
             .first()
@@ -4813,6 +4920,7 @@ impl Monomorphizer<'_> {
             type_arguments: key.arguments,
             parameters,
             return_type,
+            overload_disambiguator: signature.overload_disambiguator,
             span: signature.span,
         });
         self.functions.push(HirFunction {
@@ -8034,7 +8142,7 @@ struct Analyzer<'a> {
     scopes: Vec<BTreeMap<String, LocalId>>,
     locals: Vec<HirLocal>,
     signatures: &'a [FunctionSignature],
-    names: &'a [BTreeMap<String, FunctionId>],
+    names: &'a [BTreeMap<String, Vec<FunctionId>>],
     imports: &'a [BTreeMap<String, ModuleId>],
     import_bindings: &'a [BTreeSet<String>],
     used_modules: BTreeSet<ModuleId>,
@@ -8053,6 +8161,28 @@ struct Analyzer<'a> {
     module: ModuleId,
     return_type: TypeId,
     target: TargetProperties,
+    class_method: Option<(ClassId, crate::ClassMethodInfo)>,
+    initialized_fields: BTreeSet<FieldId>,
+    active_catches: Vec<CatchId>,
+    next_catch: u32,
+    loop_depth: usize,
+    inside_finally: usize,
+    next_finally: u32,
+    next_loop: u32,
+    next_call_site: u32,
+    default_forbidden: Option<(String, BTreeMap<String, bool>)>,
+    null_states: BTreeMap<LocalId, NullState>,
+    next_non_null_proof: u32,
+}
+
+#[derive(Clone)]
+struct AnalyzerCheckpoint {
+    scopes: Vec<BTreeMap<String, LocalId>>,
+    locals: Vec<HirLocal>,
+    used_modules: BTreeSet<ModuleId>,
+    types: TypeArena,
+    generic_scope: BTreeMap<String, TypeId>,
+    module: ModuleId,
     class_method: Option<(ClassId, crate::ClassMethodInfo)>,
     initialized_fields: BTreeSet<FieldId>,
     active_catches: Vec<CatchId>,
@@ -8101,6 +8231,7 @@ struct LocalTypePattern {
 enum LocalTypeExpectation {
     Exact(TypeId),
     InferRoot(LocalTypePattern),
+    InferAny,
 }
 
 #[derive(Clone)]
@@ -8114,6 +8245,103 @@ enum ConstantValue {
     Float(FloatValue),
 }
 impl Analyzer<'_> {
+    fn checkpoint(&self) -> AnalyzerCheckpoint {
+        AnalyzerCheckpoint {
+            scopes: self.scopes.clone(),
+            locals: self.locals.clone(),
+            used_modules: self.used_modules.clone(),
+            types: self.types.clone(),
+            generic_scope: self.generic_scope.clone(),
+            module: self.module,
+            class_method: self.class_method.clone(),
+            initialized_fields: self.initialized_fields.clone(),
+            active_catches: self.active_catches.clone(),
+            next_catch: self.next_catch,
+            loop_depth: self.loop_depth,
+            inside_finally: self.inside_finally,
+            next_finally: self.next_finally,
+            next_loop: self.next_loop,
+            next_call_site: self.next_call_site,
+            default_forbidden: self.default_forbidden.clone(),
+            null_states: self.null_states.clone(),
+            next_non_null_proof: self.next_non_null_proof,
+        }
+    }
+
+    fn restore(&mut self, checkpoint: &AnalyzerCheckpoint) {
+        self.scopes.clone_from(&checkpoint.scopes);
+        self.locals.clone_from(&checkpoint.locals);
+        self.used_modules.clone_from(&checkpoint.used_modules);
+        *self.types = checkpoint.types.clone();
+        self.generic_scope = checkpoint.generic_scope.clone();
+        self.module = checkpoint.module;
+        self.class_method.clone_from(&checkpoint.class_method);
+        self.initialized_fields
+            .clone_from(&checkpoint.initialized_fields);
+        self.active_catches.clone_from(&checkpoint.active_catches);
+        self.next_catch = checkpoint.next_catch;
+        self.loop_depth = checkpoint.loop_depth;
+        self.inside_finally = checkpoint.inside_finally;
+        self.next_finally = checkpoint.next_finally;
+        self.next_loop = checkpoint.next_loop;
+        self.next_call_site = checkpoint.next_call_site;
+        self.default_forbidden
+            .clone_from(&checkpoint.default_forbidden);
+        self.null_states = checkpoint.null_states.clone();
+        self.next_non_null_proof = checkpoint.next_non_null_proof;
+    }
+
+    fn resolve_function_reference(
+        &mut self,
+        candidates: &[FunctionId],
+        expected: Option<TypeId>,
+        name: &str,
+        span: Span,
+    ) -> Result<FunctionId, Vec<Diagnostic>> {
+        if let [id] = candidates {
+            return Ok(*id);
+        }
+        let expected = expected.and_then(|ty| self.types.nullable_payload(ty).or(Some(ty)));
+        let mut viable = Vec::new();
+        for id in candidates {
+            let signature = self.signatures[id.0 as usize].clone();
+            if !signature.generic_parameters.is_empty() {
+                continue;
+            }
+            let function_type = self
+                .types
+                .intern_function(
+                    signature
+                        .parameters
+                        .iter()
+                        .map(|parameter| parameter.ty)
+                        .collect(),
+                    signature.return_type,
+                )
+                .expect("collected function signature is valid");
+            if expected.is_none_or(|expected| expected == function_type) {
+                viable.push(*id);
+            }
+        }
+        match viable.as_slice() {
+            [id] => Ok(*id),
+            [] => Err(vec![Diagnostic::new(
+                "E0460",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!("no matching overload for function reference `{name}`"),
+                Some(span),
+            )]),
+            _ => Err(vec![Diagnostic::new(
+                "E0461",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!("ambiguous overload for function reference `{name}`"),
+                Some(span),
+            )]),
+        }
+    }
+
     fn intrinsic_generic_constructor(name: &str) -> Option<IntrinsicGenericConstructor> {
         match name {
             "Buffer" => Some(IntrinsicGenericConstructor::Buffer),
@@ -8189,6 +8417,9 @@ impl Analyzer<'_> {
         &mut self,
         ty: &AstType,
     ) -> Result<LocalTypeExpectation, Vec<Diagnostic>> {
+        if matches!(ty.named(), Some((None, "var", arguments)) if arguments.is_empty()) {
+            return Ok(LocalTypeExpectation::InferAny);
+        }
         let arity_diagnostics = match self.resolve_source_type(ty) {
             Ok(exact) => return Ok(LocalTypeExpectation::Exact(exact)),
             Err(diagnostics)
@@ -8810,6 +9041,10 @@ impl Analyzer<'_> {
                                 initializer.span,
                             )?;
                             (ty, initializer)
+                        }
+                        LocalTypeExpectation::InferAny => {
+                            let initializer = self.expression(initializer, None)?.expr;
+                            (initializer.ty, initializer)
                         }
                     };
                     if ty == TypeId::VOID {
@@ -10742,7 +10977,9 @@ impl Analyzer<'_> {
                     )]);
                 }
                 let Some(l) = self.lookup(n) else {
-                    if let Some(id) = self.names[self.module.0 as usize].get(n).copied() {
+                    if let Some(candidates) = self.names[self.module.0 as usize].get(n).cloned() {
+                        let id =
+                            self.resolve_function_reference(&candidates, expected, n, e.span)?;
                         let signature = self.signatures[id.0 as usize].clone();
                         if !signature.generic_parameters.is_empty() {
                             return Err(vec![Diagnostic::new(
@@ -10996,7 +11233,7 @@ impl Analyzer<'_> {
                         self.qualified_enum_type(namespace, enum_name, type_arguments, e.span)?;
                     self.enum_init(enum_ty, function, args, *parenthesized, e.span)?
                 } else {
-                    self.qualified_apply(module, function, type_arguments, args, e.span)?
+                    self.qualified_apply(module, function, type_arguments, args, e.span, expected)?
                 }
             }
             AstExprKind::VariantCall {
@@ -11016,9 +11253,16 @@ impl Analyzer<'_> {
                     && self.lookup(module).is_none()
                     && let Some(target_module) =
                         self.imports[self.module.0 as usize].get(module).copied()
-                    && let Some(id) = self.names[target_module.0 as usize].get(name).copied()
+                    && let Some(candidates) =
+                        self.names[target_module.0 as usize].get(name).cloned()
                 {
                     self.used_modules.insert(target_module);
+                    let id = self.resolve_function_reference(
+                        &candidates,
+                        expected,
+                        &format!("{module}.{name}"),
+                        e.span,
+                    )?;
                     let signature = self.signatures[id.0 as usize].clone();
                     if !signature.generic_parameters.is_empty() {
                         return Err(vec![Diagnostic::new(
@@ -12614,8 +12858,8 @@ impl Analyzer<'_> {
                 constant: None,
             });
         }
-        if let Some(id) = self.names[self.module.0 as usize].get(n).copied() {
-            return self.call_id(id, n, type_arguments, args, span);
+        if let Some(candidates) = self.names[self.module.0 as usize].get(n).cloned() {
+            return self.resolve_overload(&candidates, n, type_arguments, args, span, expected);
         }
         if let Some(symbol) = crate::prelude_symbol(n) {
             return self.core_call(symbol, type_arguments, args, span, expected);
@@ -12830,6 +13074,7 @@ impl Analyzer<'_> {
         type_arguments: &[AstType],
         args: &[AstExpr],
         span: Span,
+        expected: Option<TypeId>,
     ) -> Result<Checked, Vec<Diagnostic>> {
         let Some(mid) = self.imports[self.module.0 as usize].get(m).copied() else {
             let known = self.module_names.contains_key(m);
@@ -12849,8 +13094,15 @@ impl Analyzer<'_> {
         if self.module_names.get("std.Text") == Some(&mid) {
             return self.text_apply(mid, f, type_arguments, args, span);
         }
-        if let Some(id) = self.names[mid.0 as usize].get(f).copied() {
-            return self.call_id(id, &format!("{m}.{f}"), type_arguments, args, span);
+        if let Some(candidates) = self.names[mid.0 as usize].get(f).cloned() {
+            return self.resolve_overload(
+                &candidates,
+                &format!("{m}.{f}"),
+                type_arguments,
+                args,
+                span,
+                expected,
+            );
         }
         if let Some(id) = self.struct_names[mid.0 as usize].get(f).copied() {
             let resolved = self.resolve_type_arguments(type_arguments)?;
@@ -13258,6 +13510,150 @@ impl Analyzer<'_> {
             constant: None,
         })
     }
+    fn overload_signature(&self, id: FunctionId) -> String {
+        let signature = &self.signatures[id.0 as usize];
+        let generics = if signature.generic_parameters.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "<{}>",
+                signature
+                    .generic_parameters
+                    .iter()
+                    .map(|parameter| parameter.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        };
+        let parameters = signature
+            .parameters
+            .iter()
+            .map(|parameter| self.type_name(parameter.ty))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "{}{}({parameters}) -> {}",
+            signature.name,
+            generics,
+            self.type_name(signature.return_type)
+        )
+    }
+
+    fn resolve_overload(
+        &mut self,
+        candidates: &[FunctionId],
+        name: &str,
+        type_arguments: &[AstType],
+        args: &[AstExpr],
+        span: Span,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        if let [id] = candidates {
+            return self.call_id(*id, name, type_arguments, args, span, expected);
+        }
+        let arity_candidates = candidates
+            .iter()
+            .copied()
+            .filter(|id| {
+                let signature = &self.signatures[id.0 as usize];
+                args.len() >= signature.minimum_arity() && args.len() <= signature.parameters.len()
+            })
+            .collect::<Vec<_>>();
+        let checkpoint = self.checkpoint();
+        let mut viable = Vec::new();
+        let mut missing_context = Vec::new();
+        let mut result_mismatch = false;
+        for id in &arity_candidates {
+            self.restore(&checkpoint);
+            match self.call_id(*id, name, type_arguments, args, span, expected) {
+                Ok(_) => viable.push(*id),
+                Err(diagnostics) => {
+                    if diagnostics
+                        .iter()
+                        .any(|diagnostic| diagnostic.code == "E0263")
+                    {
+                        missing_context.push(*id);
+                    }
+                    result_mismatch |= diagnostics.iter().any(|diagnostic| {
+                        matches!(diagnostic.code, "E0464" | "E0205" | "E0218" | "E0452")
+                    });
+                }
+            }
+        }
+        self.restore(&checkpoint);
+        if viable.len() == 1 {
+            return self.call_id(viable[0], name, type_arguments, args, span, expected);
+        }
+        let display = |ids: &[FunctionId]| {
+            ids.iter()
+                .map(|id| format!("  - {}", self.overload_signature(*id)))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        if viable.len() > 1 {
+            let orientation_ambiguity = viable.iter().all(|id| {
+                matches!(
+                    self.types.get(self.signatures[id.0 as usize].return_type),
+                    Some(TypeData::Vector { .. })
+                )
+            });
+            return Err(vec![Diagnostic::new(
+                "E0461",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!(
+                    "{} for `{name}`; viable candidates:\n{}",
+                    if orientation_ambiguity {
+                        "orientation ambiguity"
+                    } else {
+                        "ambiguous overload"
+                    },
+                    display(&viable)
+                ),
+                Some(span),
+            )]);
+        }
+        if expected.is_none() && missing_context.len() > 1 {
+            return Err(vec![Diagnostic::new(
+                "E0461",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!(
+                    "ambiguous overload for `{name}` without an expected result type; candidates:\n{}",
+                    display(&missing_context)
+                ),
+                Some(span),
+            )]);
+        }
+        if expected.is_none() && missing_context.len() == 1 {
+            return Err(vec![Diagnostic::new(
+                "E0462",
+                Phase::Semantic,
+                DiagnosticCategory::Type,
+                format!(
+                    "type parameter for `{name}` is only inferable from a missing expected result type; candidate:\n{}",
+                    display(&missing_context)
+                ),
+                Some(span),
+            )]);
+        }
+        Err(vec![Diagnostic::new(
+            "E0460",
+            Phase::Semantic,
+            DiagnosticCategory::Type,
+            format!(
+                "{} for `{name}`; candidates:\n{}",
+                if result_mismatch {
+                    "result type mismatch: no matching overload"
+                } else {
+                    "no matching overload"
+                },
+                display(candidates)
+            ),
+            Some(span),
+        )])
+    }
+
     fn call_id(
         &mut self,
         id: FunctionId,
@@ -13265,6 +13661,7 @@ impl Analyzer<'_> {
         source_type_arguments: &[AstType],
         args: &[AstExpr],
         span: Span,
+        expected: Option<TypeId>,
     ) -> Result<Checked, Vec<Diagnostic>> {
         let s = self.signatures[id.0 as usize].clone();
         let minimum_arity = s.minimum_arity();
@@ -13300,28 +13697,42 @@ impl Analyzer<'_> {
         let inferred_application =
             source_type_arguments.is_empty() && !s.generic_parameters.is_empty();
         if inferred_application {
-            let checked = args
-                .iter()
-                .zip(&s.parameters)
-                .map(|(argument, parameter)| {
-                    if matches!(argument.kind, AstExprKind::Null) {
-                        return Ok(None);
-                    }
-                    let expected =
-                        (!self.types.contains_generic(parameter.ty)).then_some(parameter.ty);
-                    self.expression(argument, expected).map(Some)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
             let mut inferred = BTreeMap::new();
-            for (parameter, argument) in s.parameters.iter().zip(&checked) {
-                if let Some(argument) = argument {
-                    infer_generic_arguments(
-                        self.types,
-                        parameter.ty,
-                        argument.expr.ty,
-                        &mut inferred,
-                    )?;
+            if let Some(expected) = expected {
+                infer_generic_arguments(self.types, s.return_type, expected, &mut inferred)
+                    .map_err(|_| {
+                        vec![Diagnostic::new(
+                            "E0464",
+                            Phase::Semantic,
+                            DiagnosticCategory::Type,
+                            format!(
+                                "result type {} does not match expected {} for `{name}`",
+                                self.type_name(s.return_type),
+                                self.type_name(expected)
+                            ),
+                            Some(span),
+                        )]
+                    })?;
+            }
+            let mut checked = Vec::with_capacity(args.len());
+            for (argument, parameter) in args.iter().zip(&s.parameters) {
+                if matches!(argument.kind, AstExprKind::Null) {
+                    checked.push(None);
+                    continue;
                 }
+                let partial =
+                    Substitution::new(inferred.keys().copied(), inferred.values().copied());
+                let expected = self
+                    .types
+                    .substitute(parameter.ty, &partial)
+                    .ok()
+                    .or_else(|| {
+                        (!self.types.contains_generic(parameter.ty)).then_some(parameter.ty)
+                    })
+                    .filter(|_| self.types.reference_info(parameter.ty).is_none());
+                let argument = self.expression(argument, expected)?;
+                infer_generic_arguments(self.types, parameter.ty, argument.expr.ty, &mut inferred)?;
+                checked.push(Some(argument));
             }
             for parameter in &s.generic_parameters {
                 let Some(argument) = inferred.get(&parameter.id).copied() else {
@@ -13447,19 +13858,22 @@ impl Analyzer<'_> {
         }) {
             self.invalidate_nullable_aliases_after_mutating_call();
         }
-        Ok(Checked {
-            expr: HirExpr {
-                kind: HirExprKind::Call {
-                    call_site,
-                    callee: HirCallTarget::Declaration(id),
-                    type_arguments,
-                    args: out,
+        self.coerce(
+            Checked {
+                expr: HirExpr {
+                    kind: HirExprKind::Call {
+                        call_site,
+                        callee: HirCallTarget::Declaration(id),
+                        type_arguments,
+                        args: out,
+                    },
+                    ty: return_type,
+                    span,
                 },
-                ty: return_type,
-                span,
+                constant: None,
             },
-            constant: None,
-        })
+            expected,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -14265,13 +14679,19 @@ impl Analyzer<'_> {
             } => self.ast_is_string(left) || self.ast_is_string(right),
             AstExprKind::Call { callee, .. } => self.names[self.module.0 as usize]
                 .get(callee)
-                .is_some_and(|id| self.signatures[id.0 as usize].return_type == TypeId::STRING),
+                .is_some_and(|ids| {
+                    ids.iter()
+                        .any(|id| self.signatures[id.0 as usize].return_type == TypeId::STRING)
+                }),
             AstExprKind::QualifiedCall {
                 module, function, ..
             } => self.imports[self.module.0 as usize]
                 .get(module)
                 .and_then(|target| self.names[target.0 as usize].get(function))
-                .is_some_and(|id| self.signatures[id.0 as usize].return_type == TypeId::STRING),
+                .is_some_and(|ids| {
+                    ids.iter()
+                        .any(|id| self.signatures[id.0 as usize].return_type == TypeId::STRING)
+                }),
             _ => false,
         }
     }
@@ -14996,6 +15416,22 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
     {
         return Err(fail("HIR cardinality invalid".into()));
     }
+    for signature in &h.signatures {
+        let package = h.modules[signature.module.0 as usize].package;
+        let overloaded = h
+            .signatures
+            .iter()
+            .filter(|candidate| {
+                candidate.name == signature.name
+                    && h.modules[candidate.module.0 as usize].package == package
+            })
+            .count()
+            > 1;
+        let expected = overloaded.then_some(signature.id.0);
+        if signature.overload_disambiguator != expected {
+            return Err(fail("HIR overload declaration identity invalid".into()));
+        }
+    }
     if h.types.entries().any(|(_, data)| match data {
         TypeData::Buffer { element } | TypeData::View { element, .. } => {
             !h.types.is_admitted_buffer_element(*element)
@@ -15113,6 +15549,13 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
             || f.id != s.id
             || f.function_id != s.function_id
             || f.module != s.module
+            || h.signatures
+                .get(s.function_id.0 as usize)
+                .is_none_or(|declaration| {
+                    declaration.name != s.name
+                        || declaration.module != s.module
+                        || declaration.overload_disambiguator != s.overload_disambiguator
+                })
         {
             return Err(fail("HIR function identity mismatch".into()));
         }
@@ -20055,5 +20498,28 @@ mod vertical33_tests {
             }
             assert!(verify_hir(&bad).is_err(), "accepted corrupt {corrupt}");
         }
+    }
+
+    #[test]
+    fn contextual_overload_identity_corruption_is_rejected() {
+        let source = SourceFile::new(
+            "contextual-overload-corrupt.ae",
+            "int choice(bool value){return 1;}bool choice(bool value){return value;}int main(){int value=choice(true);return value-1;}",
+        );
+        let hir = analyze(parse_source(&source).unwrap()).unwrap();
+        verify_hir(&hir).unwrap();
+
+        let mut declaration = hir.clone();
+        declaration.signatures[0].overload_disambiguator = None;
+        assert!(verify_hir(&declaration).is_err());
+
+        let mut instance = hir.clone();
+        let selected = instance
+            .instances
+            .iter_mut()
+            .find(|signature| signature.name == "choice")
+            .unwrap();
+        selected.overload_disambiguator = None;
+        assert!(verify_hir(&instance).is_err());
     }
 }

@@ -4387,7 +4387,10 @@ fn bootstrap_symbol(
     types: &TypeArena,
 ) -> String {
     let module = &modules[signature.module.0 as usize];
-    let base = bootstrap_symbol_for_module(module, &signature.name);
+    let mut base = bootstrap_symbol_for_module(module, &signature.name);
+    if let Some(disambiguator) = signature.overload_disambiguator {
+        write!(base, "__o{disambiguator}").unwrap();
+    }
     if signature.type_arguments.is_empty() {
         base
     } else {

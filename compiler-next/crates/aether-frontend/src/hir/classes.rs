@@ -497,9 +497,11 @@ impl Analyzer<'_> {
                 self.class_named(self.module, callee).or_else(|| {
                     self.names[self.module.0 as usize]
                         .get(callee)
-                        .and_then(|f| {
-                            self.types
-                                .class_id(self.signatures[f.0 as usize].return_type)
+                        .and_then(|functions| {
+                            functions.iter().find_map(|f| {
+                                self.types
+                                    .class_id(self.signatures[f.0 as usize].return_type)
+                            })
                         })
                 })
             }

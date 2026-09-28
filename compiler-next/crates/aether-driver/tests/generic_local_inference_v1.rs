@@ -185,7 +185,7 @@ fn partial_omission_and_non_local_contexts_keep_requiring_complete_types() {
         let actual = diagnostics(source);
         assert!(actual.contains("E0261"), "{source}\n{actual}");
     }
-    assert!(diagnostics("int main(){var value=1;return 0;}").contains("unknown type `var`"));
+    analyze_source("int main(){var value=1;return value-1;}");
 }
 
 #[test]

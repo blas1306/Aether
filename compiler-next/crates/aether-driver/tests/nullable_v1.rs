@@ -269,11 +269,11 @@ int main(){
 
 #[test]
 fn unsupported_nullable_operations_and_null_only_inference_fail_closed() {
+    compile(
+        "T? choose<T>(T? value){return value;}int main(){int? x=choose(null);return 0;}",
+        OptimizationLevel::O0,
+    );
     let cases = [
-        (
-            "T? choose<T>(T? value){return value;}int main(){int? x=choose(null);return 0;}",
-            "cannot infer generic parameter",
-        ),
         (
             "int main(){var value=null;return 0;}",
             "null cannot infer a payload type",

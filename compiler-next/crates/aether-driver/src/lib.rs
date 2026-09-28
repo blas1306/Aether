@@ -933,6 +933,9 @@ fn validate_package_members(units: &[CatalogUnit]) -> Result<(), Vec<Diagnostic>
             if let Some((previous_kind, previous_span, previous_source)) =
                 table.insert(name.clone(), (kind, span, &unit.logical))
             {
+                if kind == "function" && previous_kind == "function" {
+                    continue;
+                }
                 return Err(vec![Diagnostic::new("E0240", Phase::Semantic, DiagnosticCategory::Name, format!("duplicate package member `{}` across `{previous_source}` ({previous_kind} at {}..{}) and `{}` ({kind})", name, previous_span.start, previous_span.end, unit.logical), Some(span)).with_source_name(&unit.logical)]);
             }
         }
