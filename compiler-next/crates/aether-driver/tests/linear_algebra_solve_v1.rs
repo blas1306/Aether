@@ -72,7 +72,7 @@ fn status_llvm(llvm: &str, optimization: OptimizationLevel) -> std::process::Exi
 #[test]
 fn solve_has_exactly_the_closed_public_surface_and_one_kernel_per_precision() {
     let solve_start = LIBRARY.find("Vector<float64,Column> solve(").unwrap();
-    let solve_end = LIBRARY.find("// A materialized QR factorization").unwrap();
+    let solve_end = LIBRARY.find("Matrix<float64> solve(").unwrap();
     let solve_implementation = &LIBRARY[solve_start..solve_end];
     assert_eq!(LIBRARY.matches("Vector<float64,Column> solve(").count(), 2);
     assert_eq!(LIBRARY.matches("Vector<float32,Column> solve(").count(), 2);

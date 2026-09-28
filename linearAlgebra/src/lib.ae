@@ -445,6 +445,152 @@ Vector<float32,Column> solve(
     return solve(factor, b);
 }
 
+Matrix<float64> solve(
+    ref LU<float64> factor,
+    ref Matrix<float64> B) {
+    shapeGuard(rows((*factor).L) == columns((*factor).L));
+    shapeGuard(rows((*factor).U) == columns((*factor).U));
+    shapeGuard(rows((*factor).L) == rows((*factor).U));
+    shapeGuard(dimension((*factor).permutation) == rows((*factor).U));
+    shapeGuard(rows(*B) == rows((*factor).U));
+
+    usize n = rows((*factor).U);
+    usize q = columns(*B);
+    Matrix<float64> W = matrixFilled<float64>(n, q, 0.0);
+    usize i = 1;
+    while (i <= n) {
+        usize c = 1;
+        while (c <= q) {
+            W[i,c] = (*B)[(*factor).permutation[i],c];
+            c = c + 1;
+        }
+        i = i + 1;
+    }
+
+    i = 1;
+    while (i <= n) {
+        usize j = 1;
+        while (j < i) {
+            float64 coefficient = (*factor).L[i,j];
+            usize c = 1;
+            while (c <= q) {
+                W[i,c] = W[i,c] - coefficient * W[j,c];
+                c = c + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    i = n;
+    while (i > 0) {
+        float64 diagonal = (*factor).U[i,i];
+        if (diagonal == 0.0) {
+            throw SingularMatrixException();
+        }
+        usize j = i + 1;
+        while (j <= n) {
+            float64 coefficient = (*factor).U[i,j];
+            usize c = 1;
+            while (c <= q) {
+                W[i,c] = W[i,c] - coefficient * W[j,c];
+                c = c + 1;
+            }
+            j = j + 1;
+        }
+        usize c = 1;
+        while (c <= q) {
+            W[i,c] = W[i,c] / diagonal;
+            c = c + 1;
+        }
+        if (i == 1) { break; }
+        i = i - 1;
+    }
+    return W;
+}
+
+Matrix<float32> solve(
+    ref LU<float32> factor,
+    ref Matrix<float32> B) {
+    shapeGuard(rows((*factor).L) == columns((*factor).L));
+    shapeGuard(rows((*factor).U) == columns((*factor).U));
+    shapeGuard(rows((*factor).L) == rows((*factor).U));
+    shapeGuard(dimension((*factor).permutation) == rows((*factor).U));
+    shapeGuard(rows(*B) == rows((*factor).U));
+
+    usize n = rows((*factor).U);
+    usize q = columns(*B);
+    Matrix<float32> W = matrixFilled<float32>(n, q, float32(0.0));
+    usize i = 1;
+    while (i <= n) {
+        usize c = 1;
+        while (c <= q) {
+            W[i,c] = (*B)[(*factor).permutation[i],c];
+            c = c + 1;
+        }
+        i = i + 1;
+    }
+
+    i = 1;
+    while (i <= n) {
+        usize j = 1;
+        while (j < i) {
+            float32 coefficient = (*factor).L[i,j];
+            usize c = 1;
+            while (c <= q) {
+                W[i,c] = W[i,c] - coefficient * W[j,c];
+                c = c + 1;
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    i = n;
+    while (i > 0) {
+        float32 diagonal = (*factor).U[i,i];
+        if (diagonal == float32(0.0)) {
+            throw SingularMatrixException();
+        }
+        usize j = i + 1;
+        while (j <= n) {
+            float32 coefficient = (*factor).U[i,j];
+            usize c = 1;
+            while (c <= q) {
+                W[i,c] = W[i,c] - coefficient * W[j,c];
+                c = c + 1;
+            }
+            j = j + 1;
+        }
+        usize c = 1;
+        while (c <= q) {
+            W[i,c] = W[i,c] / diagonal;
+            c = c + 1;
+        }
+        if (i == 1) { break; }
+        i = i - 1;
+    }
+    return W;
+}
+
+Matrix<float64> solve(
+    Matrix<float64> A,
+    ref Matrix<float64> B) {
+    shapeGuard(rows(A) == columns(A));
+    shapeGuard(rows(*B) == rows(A));
+    LU<float64> factor = lu(A);
+    return solve(factor, B);
+}
+
+Matrix<float32> solve(
+    Matrix<float32> A,
+    ref Matrix<float32> B) {
+    shapeGuard(rows(A) == columns(A));
+    shapeGuard(rows(*B) == rows(A));
+    LU<float32> factor = lu(A);
+    return solve(factor, B);
+}
+
 // A materialized QR factorization.  Q is m by m and R is m by n.
 struct QR<T: Storable> {
     Matrix<T> Q;
