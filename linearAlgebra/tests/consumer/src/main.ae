@@ -4,6 +4,10 @@ la.LU<T> genericLU<T: IEEEFloat>(Matrix<T> A) {
     return la.lu(A);
 }
 
+la.QR<T> genericQR<T: IEEEFloat>(Matrix<T> A) {
+    return la.qr(A);
+}
+
 int filled64(MatrixView<float64> value, float64 expected) {
     usize i = 1;
     while (i <= rows(value)) {
@@ -63,12 +67,14 @@ int validate64(MatrixView<float64> expected, la.QR<float64> factor, float64 tole
 
 int validate32(MatrixView<float32> expected, la.QR<float32> factor, float32 tolerance) {
     Matrix<float32> reconstructed = matrix_view(factor.Q) * matrix_view(factor.R);
+    if (rows(reconstructed) != rows(expected)) { return 1; }
+    if (columns(reconstructed) != columns(expected)) { return 2; }
     usize i = 1;
     while (i <= rows(expected)) {
         usize j = 1;
         while (j <= columns(expected)) {
-            if (abs(reconstructed[i,j] - expected[i,j]) > tolerance) { return 1; }
-            if (i > j && abs(factor.R[i,j]) > tolerance) { return 2; }
+            if (abs(reconstructed[i,j] - expected[i,j]) > tolerance) { return 3; }
+            if (i > j && abs(factor.R[i,j]) > tolerance) { return 4; }
             j = j + 1;
         }
         i = i + 1;
@@ -80,7 +86,31 @@ int validate32(MatrixView<float32> expected, la.QR<float32> factor, float32 tole
         while (j <= columns(orthogonal)) {
             float32 wanted = float32(0.0);
             if (i == j) { wanted = float32(1.0); }
-            if (abs(orthogonal[i,j] - wanted) > tolerance) { return 3; }
+            if (abs(orthogonal[i,j] - wanted) > tolerance) { return 5; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+int equalQR32(la.QR<float32> left, la.QR<float32> right) {
+    if (rows(left.Q) != rows(right.Q) || columns(left.Q) != columns(right.Q)) { return 1; }
+    if (rows(left.R) != rows(right.R) || columns(left.R) != columns(right.R)) { return 2; }
+    usize i = 1;
+    while (i <= rows(left.Q)) {
+        usize j = 1;
+        while (j <= columns(left.Q)) {
+            if (left.Q[i,j] != right.Q[i,j]) { return 3; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    i = 1;
+    while (i <= rows(left.R)) {
+        usize j = 1;
+        while (j <= columns(left.R)) {
+            if (left.R[i,j] != right.R[i,j]) { return 4; }
             j = j + 1;
         }
         i = i + 1;
@@ -932,6 +962,46 @@ int testGenericLUForwarding() {
     return 0;
 }
 
+int testQR32Coverage() {
+    float32 tolerance = float32(3e-5);
+    Matrix<float32> scalar = [float32(-2.0)];
+    Matrix<float32> scalarExpected = [float32(-2.0)];
+    if (validate32(matrix_view(scalarExpected), la.qr(scalar), tolerance) != 0) { return 1; }
+    Matrix<float32> square = [float32(12.0),float32(-51.0),float32(4.0);float32(6.0),float32(167.0),float32(-68.0);float32(-4.0),float32(24.0),float32(-41.0)];
+    Matrix<float32> squareExpected = [float32(12.0),float32(-51.0),float32(4.0);float32(6.0),float32(167.0),float32(-68.0);float32(-4.0),float32(24.0),float32(-41.0)];
+    if (validate32(matrix_view(squareExpected), la.qr(square), tolerance) != 0) { return 2; }
+    Matrix<float32> wide = [float32(1.0),float32(2.0),float32(3.0),float32(4.0);float32(5.0),float32(6.0),float32(7.0),float32(8.0)];
+    Matrix<float32> wideExpected = [float32(1.0),float32(2.0),float32(3.0),float32(4.0);float32(5.0),float32(6.0),float32(7.0),float32(8.0)];
+    if (validate32(matrix_view(wideExpected), la.qr(wide), tolerance) != 0) { return 3; }
+    Matrix<float32> deficient = [float32(1.0),float32(2.0),float32(3.0);float32(2.0),float32(4.0),float32(6.0);float32(3.0),float32(6.0),float32(9.0)];
+    Matrix<float32> deficientExpected = [float32(1.0),float32(2.0),float32(3.0);float32(2.0),float32(4.0),float32(6.0);float32(3.0),float32(6.0),float32(9.0)];
+    if (validate32(matrix_view(deficientExpected), la.qr(deficient), float32(2e-4)) != 0) { return 4; }
+    Matrix<float32> diagonal = [float32(2.0),float32(0.0);float32(0.0),float32(-3.0)];
+    Matrix<float32> diagonalExpected = [float32(2.0),float32(0.0);float32(0.0),float32(-3.0)];
+    if (validate32(matrix_view(diagonalExpected), la.qr(diagonal), tolerance) != 0) { return 5; }
+    Matrix<float32> zero = [float32(-0.0),float32(0.0);float32(0.0),float32(-0.0)];
+    Matrix<float32> zeroExpected = [float32(-0.0),float32(0.0);float32(0.0),float32(-0.0)];
+    if (validate32(matrix_view(zeroExpected), la.qr(zero), tolerance) != 0) { return 6; }
+    Matrix<float32> empty = [];
+    Matrix<float32> emptyExpected = [];
+    if (validate32(matrix_view(emptyExpected), la.qr(empty), tolerance) != 0) { return 7; }
+    Vector<float32,Column> threeRows = [float32(1.0),float32(2.0),float32(3.0)];
+    Vector<float32,Row> noColumns = [];
+    Matrix<float32> zeroColumns = threeRows * noColumns;
+    Vector<float32,Column> threeRowsExpected = [float32(1.0),float32(2.0),float32(3.0)];
+    Vector<float32,Row> noColumnsExpected = [];
+    Matrix<float32> zeroColumnsExpected = threeRowsExpected * noColumnsExpected;
+    if (validate32(matrix_view(zeroColumnsExpected), la.qr(zeroColumns), tolerance) != 0) { return 8; }
+    Vector<float32,Column> noRows = [];
+    Vector<float32,Row> threeColumns = [float32(1.0),float32(2.0),float32(3.0)];
+    Matrix<float32> zeroRows = noRows * threeColumns;
+    Vector<float32,Column> noRowsExpected = [];
+    Vector<float32,Row> threeColumnsExpected = [float32(1.0),float32(2.0),float32(3.0)];
+    Matrix<float32> zeroRowsExpected = noRowsExpected * threeColumnsExpected;
+    if (validate32(matrix_view(zeroRowsExpected), la.qr(zeroRows), tolerance) != 0) { return 9; }
+    return 0;
+}
+
 int main() {
     Matrix<float64> zeroSquare = la.zeros(3);
     Matrix<float64> zeroTall = la.zeros(4,2);
@@ -1090,7 +1160,19 @@ int main() {
 
     Matrix<float32> single = [float32(1.0),float32(2.0);float32(3.0),float32(4.0);float32(5.0),float32(6.0)];
     Matrix<float32> singleExpected = [float32(1.0),float32(2.0);float32(3.0),float32(4.0);float32(5.0),float32(6.0)];
-    if (validate32(matrix_view(singleExpected), la.qrFloat32(single), float32(2e-5)) != 0) { return 100; }
+    if (validate32(matrix_view(singleExpected), la.qr(single), float32(2e-5)) != 0) { return 100; }
+    Matrix<float32> explicitInput = [float32(12.0),float32(-51.0),float32(4.0);float32(6.0),float32(167.0),float32(-68.0);float32(-4.0),float32(24.0),float32(-41.0)];
+    Matrix<float32> explicitExpected = [float32(12.0),float32(-51.0),float32(4.0);float32(6.0),float32(167.0),float32(-68.0);float32(-4.0),float32(24.0),float32(-41.0)];
+    la.QR<float32> explicitFactor = la.qr<float32>(explicitInput);
+    if (validate32(matrix_view(explicitExpected), explicitFactor, float32(3e-5)) != 0) { return 101; }
+    Matrix<float64> genericInput = [1.0,2.0;3.0,4.0;5.0,6.0];
+    Matrix<float64> genericExpected = [1.0,2.0;3.0,4.0;5.0,6.0];
+    if (validate64(matrix_view(genericExpected), genericQR(genericInput), 1e-10) != 0) { return 102; }
+    Matrix<float32> wrapperInput = [float32(1.0),float32(2.0);float32(3.0),float32(4.0);float32(5.0),float32(6.0)];
+    Matrix<float32> directInput = [float32(1.0),float32(2.0);float32(3.0),float32(4.0);float32(5.0),float32(6.0)];
+    if (equalQR32(la.qrFloat32(wrapperInput), la.qr(directInput)) != 0) { return 103; }
+    int qr32Status = testQR32Coverage();
+    if (qr32Status != 0) { return 280 + qr32Status; }
     if (testLU64() != 0) { return 110; }
     if (testLU32() != 0) { return 120; }
     int solveMatrix64Status = testSolveMatrix64();
