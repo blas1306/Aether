@@ -291,6 +291,48 @@ LU<float32> lu(Matrix<float32> A) {
     return LU<float32>(permutation, permutationSign, A, U);
 }
 
+float64 det(ref LU<float64> factor) {
+    shapeGuard(rows((*factor).L) == columns((*factor).L));
+    shapeGuard(rows((*factor).U) == columns((*factor).U));
+    shapeGuard(rows((*factor).L) == rows((*factor).U));
+    shapeGuard(dimension((*factor).permutation) == rows((*factor).U));
+
+    float64 result = float64((*factor).permutationSign);
+    usize i = 1;
+    while (i <= rows((*factor).U)) {
+        result = result * (*factor).U[i,i];
+        i = i + 1;
+    }
+    return result;
+}
+
+float32 det(ref LU<float32> factor) {
+    shapeGuard(rows((*factor).L) == columns((*factor).L));
+    shapeGuard(rows((*factor).U) == columns((*factor).U));
+    shapeGuard(rows((*factor).L) == rows((*factor).U));
+    shapeGuard(dimension((*factor).permutation) == rows((*factor).U));
+
+    float32 result = float32((*factor).permutationSign);
+    usize i = 1;
+    while (i <= rows((*factor).U)) {
+        result = result * (*factor).U[i,i];
+        i = i + 1;
+    }
+    return result;
+}
+
+float64 det(Matrix<float64> A) {
+    shapeGuard(rows(A) == columns(A));
+    LU<float64> factor = lu(A);
+    return det(factor);
+}
+
+float32 det(Matrix<float32> A) {
+    shapeGuard(rows(A) == columns(A));
+    LU<float32> factor = lu(A);
+    return det(factor);
+}
+
 Vector<float64,Column> solve(
     ref LU<float64> factor,
     ref Vector<float64,Column> b) {

@@ -534,6 +534,110 @@ int testLU32() {
     return 0;
 }
 
+int testDet64() {
+    Matrix<float64> empty = la.zeros(0,0);
+    if (la.det(empty) != 1.0) { return 1; }
+    Matrix<float64> emptyForFactor = la.zeros(0,0);
+    la.LU<float64> emptyFactor = la.lu(emptyForFactor);
+    if (la.det(emptyFactor) != 1.0 || dimension(emptyFactor.permutation) != 0) { return 2; }
+
+    Matrix<float64> scalar = [-7.0];
+    if (la.det(scalar) != -7.0) { return 3; }
+    Matrix<float64> identity = [1.0,0.0,0.0;0.0,1.0,0.0;0.0,0.0,1.0];
+    if (la.det(identity) != 1.0) { return 4; }
+    Matrix<float64> diagonal = [-2.0,0.0,0.0;0.0,3.0,0.0;0.0,0.0,-4.0];
+    if (la.det(diagonal) != 24.0) { return 5; }
+    Matrix<float64> upper = [2.0,1.0,-1.0;0.0,-3.0,2.0;0.0,0.0,4.0];
+    if (la.det(upper) != -24.0) { return 6; }
+    Matrix<float64> lower = [2.0,0.0,0.0;1.0,3.0,0.0;-1.0,2.0,4.0];
+    if (la.det(lower) != 24.0) { return 7; }
+
+    Matrix<float64> oneSwap = [0.0,1.0;2.0,3.0];
+    la.LU<float64> oneSwapFactor = la.lu(oneSwap);
+    float64 oneSwapDiagonal = oneSwapFactor.U[1,1] * oneSwapFactor.U[2,2];
+    if (oneSwapFactor.permutationSign != -1 || abs(oneSwapDiagonal - 2.0) > 1e-12) { return 8; }
+    if (abs(la.det(oneSwapFactor) + 2.0) > 1e-12) { return 9; }
+
+    Matrix<float64> multipleSwaps = [0.0,2.0,1.0;1.0,0.0,3.0;2.0,1.0,0.0];
+    la.LU<float64> multipleFactor = la.lu(multipleSwaps);
+    if (multipleFactor.permutationSign != 1 || abs(la.det(multipleFactor) - 13.0) > 1e-12) { return 10; }
+
+    Matrix<float64> known = [3.0,-2.0,1.0;2.0,4.0,-3.0;-1.0,2.0,5.0];
+    if (abs(la.det(known) - 100.0) > 1e-11) { return 11; }
+    Matrix<float64> singular = [1.0,2.0;2.0,4.0];
+    if (la.det(singular) != 0.0) { return 12; }
+    Matrix<float64> zeroRow = [2.0,3.0;0.0,0.0];
+    if (la.det(zeroRow) != 0.0) { return 13; }
+    Matrix<float64> zero = [0.0,0.0,0.0;0.0,0.0,0.0;0.0,0.0,0.0];
+    if (la.det(zero) != 0.0) { return 14; }
+    Matrix<float64> negativeZero = [-0.0];
+    float64 negativeZeroResult = la.det(negativeZero);
+    if (negativeZeroResult != 0.0 || 1.0 / negativeZeroResult != -1.0 / 0.0) { return 15; }
+
+    Matrix<float64> reusable = [0.0,1.0;2.0,3.0];
+    la.LU<float64> factor = la.lu(reusable);
+    float64 d1 = la.det(factor);
+    Vector<float64,Column> b = [2.0,8.0];
+    Vector<float64,Column> x = la.solve(factor, b);
+    float64 d2 = la.det(factor);
+    if (abs(d1 + 2.0) > 1e-12 || abs(d1 - d2) > 1e-12) { return 16; }
+    if (abs(x[1] - 1.0) > 1e-12 || abs(x[2] - 2.0) > 1e-12) { return 17; }
+    if (factor.permutationSign != -1 || factor.permutation[1] != 2 || factor.permutation[2] != 1) { return 18; }
+    return 0;
+}
+
+int testDet32() {
+    Matrix<float32> empty = la.zeros(0,0);
+    if (la.det(empty) != float32(1.0)) { return 1; }
+    Matrix<float32> emptyForFactor = la.zeros(0,0);
+    la.LU<float32> emptyFactor = la.lu(emptyForFactor);
+    if (la.det(emptyFactor) != float32(1.0) || dimension(emptyFactor.permutation) != 0) { return 2; }
+
+    Matrix<float32> scalar = [float32(-7.0)];
+    if (la.det(scalar) != float32(-7.0)) { return 3; }
+    Matrix<float32> identity = [float32(1.0),float32(0.0),float32(0.0);float32(0.0),float32(1.0),float32(0.0);float32(0.0),float32(0.0),float32(1.0)];
+    if (la.det(identity) != float32(1.0)) { return 4; }
+    Matrix<float32> diagonal = [float32(-2.0),float32(0.0),float32(0.0);float32(0.0),float32(3.0),float32(0.0);float32(0.0),float32(0.0),float32(-4.0)];
+    if (la.det(diagonal) != float32(24.0)) { return 5; }
+    Matrix<float32> upper = [float32(2.0),float32(1.0),float32(-1.0);float32(0.0),float32(-3.0),float32(2.0);float32(0.0),float32(0.0),float32(4.0)];
+    if (la.det(upper) != float32(-24.0)) { return 6; }
+    Matrix<float32> lower = [float32(2.0),float32(0.0),float32(0.0);float32(1.0),float32(3.0),float32(0.0);float32(-1.0),float32(2.0),float32(4.0)];
+    if (la.det(lower) != float32(24.0)) { return 7; }
+
+    Matrix<float32> oneSwap = [float32(0.0),float32(1.0);float32(2.0),float32(3.0)];
+    la.LU<float32> oneSwapFactor = la.lu(oneSwap);
+    float32 oneSwapDiagonal = oneSwapFactor.U[1,1] * oneSwapFactor.U[2,2];
+    if (oneSwapFactor.permutationSign != -1 || abs(oneSwapDiagonal - float32(2.0)) > float32(2e-5)) { return 8; }
+    if (abs(la.det(oneSwapFactor) + float32(2.0)) > float32(2e-5)) { return 9; }
+
+    Matrix<float32> multipleSwaps = [float32(0.0),float32(2.0),float32(1.0);float32(1.0),float32(0.0),float32(3.0);float32(2.0),float32(1.0),float32(0.0)];
+    la.LU<float32> multipleFactor = la.lu(multipleSwaps);
+    if (multipleFactor.permutationSign != 1 || abs(la.det(multipleFactor) - float32(13.0)) > float32(2e-5)) { return 10; }
+
+    Matrix<float32> known = [float32(3.0),float32(-2.0),float32(1.0);float32(2.0),float32(4.0),float32(-3.0);float32(-1.0),float32(2.0),float32(5.0)];
+    if (abs(la.det(known) - float32(100.0)) > float32(2e-4)) { return 11; }
+    Matrix<float32> singular = [float32(1.0),float32(2.0);float32(2.0),float32(4.0)];
+    if (la.det(singular) != float32(0.0)) { return 12; }
+    Matrix<float32> zeroRow = [float32(2.0),float32(3.0);float32(0.0),float32(0.0)];
+    if (la.det(zeroRow) != float32(0.0)) { return 13; }
+    Matrix<float32> zero = [float32(0.0),float32(0.0);float32(0.0),float32(0.0)];
+    if (la.det(zero) != float32(0.0)) { return 14; }
+    Matrix<float32> negativeZero = [float32(-0.0)];
+    float32 negativeZeroResult = la.det(negativeZero);
+    if (negativeZeroResult != float32(0.0) || float32(1.0) / negativeZeroResult != float32(-1.0) / float32(0.0)) { return 15; }
+
+    Matrix<float32> reusable = [float32(0.0),float32(1.0);float32(2.0),float32(3.0)];
+    la.LU<float32> factor = la.lu(reusable);
+    float32 d1 = la.det(factor);
+    Vector<float32,Column> b = [float32(2.0),float32(8.0)];
+    Vector<float32,Column> x = la.solve(factor, b);
+    float32 d2 = la.det(factor);
+    if (abs(d1 + float32(2.0)) > float32(2e-5) || abs(d1 - d2) > float32(2e-5)) { return 16; }
+    if (abs(x[1] - float32(1.0)) > float32(2e-5) || abs(x[2] - float32(2.0)) > float32(2e-5)) { return 17; }
+    if (factor.permutationSign != -1 || factor.permutation[1] != 2 || factor.permutation[2] != 1) { return 18; }
+    return 0;
+}
+
 int main() {
     Matrix<float64> zeroSquare = la.zeros(3);
     Matrix<float64> zeroTall = la.zeros(4,2);
@@ -687,5 +791,9 @@ int main() {
     if (solve64Status != 0) { return solve64Status; }
     int solve32Status = testSolve32();
     if (solve32Status != 0) { return 200 + solve32Status; }
+    int det64Status = testDet64();
+    if (det64Status != 0) { return 220 + det64Status; }
+    int det32Status = testDet32();
+    if (det32Status != 0) { return 240 + det32Status; }
     return 0;
 }
