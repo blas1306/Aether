@@ -84,6 +84,267 @@ int validate32(MatrixView<float32> expected, la.QR<float32> factor, float32 tole
     return 0;
 }
 
+int validateLU64(MatrixView<float64> expected, la.LU<float64> factor, int expectedSign, float64 tolerance) {
+    usize m = rows(expected);
+    usize n = columns(expected);
+    usize r = m;
+    if (n < r) { r = n; }
+    if (dimension(factor.permutation) != m) { return 1; }
+    if (rows(factor.L) != m || columns(factor.L) != r) { return 2; }
+    if (rows(factor.U) != r || columns(factor.U) != n) { return 3; }
+    if (factor.permutationSign != expectedSign) { return 4; }
+    if (factor.permutationSign != 1 && factor.permutationSign != -1) { return 5; }
+
+    usize i = 1;
+    while (i <= m) {
+        if (factor.permutation[i] < 1 || factor.permutation[i] > m) { return 6; }
+        usize count = 0;
+        usize q = 1;
+        while (q <= m) {
+            if (factor.permutation[q] == i) { count = count + 1; }
+            q = q + 1;
+        }
+        if (count != 1) { return 7; }
+        usize j = 1;
+        while (j <= r) {
+            if (i < j && factor.L[i,j] != 0.0) { return 8; }
+            if (i == j && factor.L[i,j] != 1.0) { return 9; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    i = 1;
+    while (i <= r) {
+        usize j = 1;
+        while (j <= n) {
+            if (i > j && factor.U[i,j] != 0.0) { return 10; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    Matrix<float64> reconstructed = matrix_view(factor.L) * matrix_view(factor.U);
+    i = 1;
+    while (i <= m) {
+        usize j = 1;
+        while (j <= n) {
+            float64 permuted = expected[factor.permutation[i],j];
+            if (abs(reconstructed[i,j] - permuted) > tolerance) { return 11; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+int validateLU32(MatrixView<float32> expected, la.LU<float32> factor, int expectedSign, float32 tolerance) {
+    usize m = rows(expected);
+    usize n = columns(expected);
+    usize r = m;
+    if (n < r) { r = n; }
+    if (dimension(factor.permutation) != m) { return 1; }
+    if (rows(factor.L) != m || columns(factor.L) != r) { return 2; }
+    if (rows(factor.U) != r || columns(factor.U) != n) { return 3; }
+    if (factor.permutationSign != expectedSign) { return 4; }
+    if (factor.permutationSign != 1 && factor.permutationSign != -1) { return 5; }
+
+    usize i = 1;
+    while (i <= m) {
+        if (factor.permutation[i] < 1 || factor.permutation[i] > m) { return 6; }
+        usize count = 0;
+        usize q = 1;
+        while (q <= m) {
+            if (factor.permutation[q] == i) { count = count + 1; }
+            q = q + 1;
+        }
+        if (count != 1) { return 7; }
+        usize j = 1;
+        while (j <= r) {
+            if (i < j && factor.L[i,j] != float32(0.0)) { return 8; }
+            if (i == j && factor.L[i,j] != float32(1.0)) { return 9; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    i = 1;
+    while (i <= r) {
+        usize j = 1;
+        while (j <= n) {
+            if (i > j && factor.U[i,j] != float32(0.0)) { return 10; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    Matrix<float32> reconstructed = matrix_view(factor.L) * matrix_view(factor.U);
+    i = 1;
+    while (i <= m) {
+        usize j = 1;
+        while (j <= n) {
+            float32 permuted = expected[factor.permutation[i],j];
+            if (abs(reconstructed[i,j] - permuted) > tolerance) { return 11; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+int testLU64() {
+    Matrix<float64> noSwap = [4.0,1.0;2.0,3.0];
+    Matrix<float64> noSwapExpected = [4.0,1.0;2.0,3.0];
+    if (validateLU64(matrix_view(noSwapExpected), la.lu(noSwap), 1, 1e-12) != 0) { return 1; }
+
+    Matrix<float64> oneSwap = [0.0,1.0;2.0,3.0];
+    Matrix<float64> oneSwapExpected = [0.0,1.0;2.0,3.0];
+    la.LU<float64> oneSwapFactor = la.lu(oneSwap);
+    if (oneSwapFactor.permutation[1] != 2 || oneSwapFactor.permutation[2] != 1) { return 2; }
+    if (validateLU64(matrix_view(oneSwapExpected), oneSwapFactor, -1, 1e-12) != 0) { return 3; }
+
+    Matrix<float64> multiple = [0.0,2.0,1.0;1.0,0.0,3.0;2.0,1.0,0.0];
+    Matrix<float64> multipleExpected = [0.0,2.0,1.0;1.0,0.0,3.0;2.0,1.0,0.0];
+    la.LU<float64> multipleFactor = la.lu(multiple);
+    if (multipleFactor.permutation[1] != 3 || multipleFactor.permutation[2] != 1 || multipleFactor.permutation[3] != 2) { return 4; }
+    if (validateLU64(matrix_view(multipleExpected), multipleFactor, 1, 1e-12) != 0) { return 5; }
+
+    Matrix<float64> tie = [-2.0,1.0;2.0,3.0];
+    Matrix<float64> tieExpected = [-2.0,1.0;2.0,3.0];
+    la.LU<float64> tieFactor = la.lu(tie);
+    if (tieFactor.permutation[1] != 1 || tieFactor.permutation[2] != 2) { return 6; }
+    if (validateLU64(matrix_view(tieExpected), tieFactor, 1, 1e-12) != 0) { return 7; }
+
+    Matrix<float64> identity = [1.0,0.0,0.0;0.0,1.0,0.0;0.0,0.0,1.0];
+    Matrix<float64> identityExpected = [1.0,0.0,0.0;0.0,1.0,0.0;0.0,0.0,1.0];
+    if (validateLU64(matrix_view(identityExpected), la.lu(identity), 1, 1e-12) != 0) { return 8; }
+    Matrix<float64> diagonal = [-2.0,0.0,0.0;0.0,3.0,0.0;0.0,0.0,-4.0];
+    Matrix<float64> diagonalExpected = [-2.0,0.0,0.0;0.0,3.0,0.0;0.0,0.0,-4.0];
+    if (validateLU64(matrix_view(diagonalExpected), la.lu(diagonal), 1, 1e-12) != 0) { return 9; }
+    Matrix<float64> upper = [4.0,2.0,1.0;0.0,-3.0,2.0;0.0,0.0,5.0];
+    Matrix<float64> upperExpected = [4.0,2.0,1.0;0.0,-3.0,2.0;0.0,0.0,5.0];
+    if (validateLU64(matrix_view(upperExpected), la.lu(upper), 1, 1e-12) != 0) { return 10; }
+    Matrix<float64> lower = [4.0,0.0,0.0;2.0,3.0,0.0;1.0,2.0,5.0];
+    Matrix<float64> lowerExpected = [4.0,0.0,0.0;2.0,3.0,0.0;1.0,2.0,5.0];
+    if (validateLU64(matrix_view(lowerExpected), la.lu(lower), 1, 1e-12) != 0) { return 11; }
+    Matrix<float64> negative = [-4.0,1.0;2.0,-3.0];
+    Matrix<float64> negativeExpected = [-4.0,1.0;2.0,-3.0];
+    if (validateLU64(matrix_view(negativeExpected), la.lu(negative), 1, 1e-12) != 0) { return 12; }
+
+    Matrix<float64> negativeZero = [-0.0,1.0;0.0,2.0];
+    Matrix<float64> negativeZeroExpected = [-0.0,1.0;0.0,2.0];
+    if (validateLU64(matrix_view(negativeZeroExpected), la.lu(negativeZero), 1, 1e-12) != 0) { return 13; }
+    Matrix<float64> singular = [2.0,4.0;1.0,2.0];
+    Matrix<float64> singularExpected = [2.0,4.0;1.0,2.0];
+    if (validateLU64(matrix_view(singularExpected), la.lu(singular), 1, 1e-12) != 0) { return 14; }
+    Matrix<float64> zeroRow = [0.0,0.0;2.0,3.0];
+    Matrix<float64> zeroRowExpected = [0.0,0.0;2.0,3.0];
+    if (validateLU64(matrix_view(zeroRowExpected), la.lu(zeroRow), -1, 1e-12) != 0) { return 15; }
+    Matrix<float64> zero = [0.0,0.0,0.0;0.0,0.0,0.0];
+    Matrix<float64> zeroExpected = [0.0,0.0,0.0;0.0,0.0,0.0];
+    if (validateLU64(matrix_view(zeroExpected), la.lu(zero), 1, 1e-12) != 0) { return 16; }
+
+    Matrix<float64> empty = la.zeros(0,0);
+    Matrix<float64> emptyExpected = la.zeros(0,0);
+    if (validateLU64(matrix_view(emptyExpected), la.lu(empty), 1, 1e-12) != 0) { return 17; }
+    Matrix<float64> m0 = la.zeros(3,0);
+    Matrix<float64> m0Expected = la.zeros(3,0);
+    if (validateLU64(matrix_view(m0Expected), la.lu(m0), 1, 1e-12) != 0) { return 18; }
+    Matrix<float64> zeroN = la.zeros(0,3);
+    Matrix<float64> zeroNExpected = la.zeros(0,3);
+    if (validateLU64(matrix_view(zeroNExpected), la.lu(zeroN), 1, 1e-12) != 0) { return 19; }
+    Matrix<float64> scalar = [-7.0];
+    Matrix<float64> scalarExpected = [-7.0];
+    if (validateLU64(matrix_view(scalarExpected), la.lu(scalar), 1, 1e-12) != 0) { return 20; }
+
+    Matrix<float64> tall = [4.0,1.0;2.0,3.0;1.0,2.0];
+    Matrix<float64> tallExpected = [4.0,1.0;2.0,3.0;1.0,2.0];
+    if (validateLU64(matrix_view(tallExpected), la.lu(tall), 1, 1e-12) != 0) { return 21; }
+    Matrix<float64> tallDeficient = [2.0,4.0;1.0,2.0;0.0,0.0];
+    Matrix<float64> tallDeficientExpected = [2.0,4.0;1.0,2.0;0.0,0.0];
+    if (validateLU64(matrix_view(tallDeficientExpected), la.lu(tallDeficient), 1, 1e-12) != 0) { return 22; }
+    Matrix<float64> wide = [4.0,1.0,2.0;2.0,3.0,4.0];
+    Matrix<float64> wideExpected = [4.0,1.0,2.0;2.0,3.0,4.0];
+    if (validateLU64(matrix_view(wideExpected), la.lu(wide), 1, 1e-12) != 0) { return 23; }
+    Matrix<float64> wideDeficient = [2.0,4.0,6.0;1.0,2.0,3.0];
+    Matrix<float64> wideDeficientExpected = [2.0,4.0,6.0;1.0,2.0,3.0];
+    if (validateLU64(matrix_view(wideDeficientExpected), la.lu(wideDeficient), 1, 1e-12) != 0) { return 24; }
+    return 0;
+}
+
+int testLU32() {
+    Matrix<float32> noSwap = [float32(4.0),float32(1.0);float32(2.0),float32(3.0)];
+    Matrix<float32> noSwapExpected = [float32(4.0),float32(1.0);float32(2.0),float32(3.0)];
+    if (validateLU32(matrix_view(noSwapExpected), la.lu(noSwap), 1, float32(2e-5)) != 0) { return 1; }
+    Matrix<float32> oneSwap = [float32(0.0),float32(1.0);float32(2.0),float32(3.0)];
+    Matrix<float32> oneSwapExpected = [float32(0.0),float32(1.0);float32(2.0),float32(3.0)];
+    la.LU<float32> oneSwapFactor = la.lu(oneSwap);
+    if (oneSwapFactor.permutation[1] != 2 || oneSwapFactor.permutation[2] != 1) { return 2; }
+    if (validateLU32(matrix_view(oneSwapExpected), oneSwapFactor, -1, float32(2e-5)) != 0) { return 3; }
+    Matrix<float32> multiple = [float32(0.0),float32(2.0),float32(1.0);float32(1.0),float32(0.0),float32(3.0);float32(2.0),float32(1.0),float32(0.0)];
+    Matrix<float32> multipleExpected = [float32(0.0),float32(2.0),float32(1.0);float32(1.0),float32(0.0),float32(3.0);float32(2.0),float32(1.0),float32(0.0)];
+    la.LU<float32> multipleFactor = la.lu(multiple);
+    if (multipleFactor.permutation[1] != 3 || multipleFactor.permutation[2] != 1 || multipleFactor.permutation[3] != 2) { return 4; }
+    if (validateLU32(matrix_view(multipleExpected), multipleFactor, 1, float32(2e-5)) != 0) { return 5; }
+    Matrix<float32> tie = [float32(-2.0),float32(1.0);float32(2.0),float32(3.0)];
+    Matrix<float32> tieExpected = [float32(-2.0),float32(1.0);float32(2.0),float32(3.0)];
+    la.LU<float32> tieFactor = la.lu(tie);
+    if (tieFactor.permutation[1] != 1 || tieFactor.permutation[2] != 2) { return 6; }
+    if (validateLU32(matrix_view(tieExpected), tieFactor, 1, float32(2e-5)) != 0) { return 7; }
+
+    Matrix<float32> identity = [float32(1.0),float32(0.0),float32(0.0);float32(0.0),float32(1.0),float32(0.0);float32(0.0),float32(0.0),float32(1.0)];
+    Matrix<float32> identityExpected = [float32(1.0),float32(0.0),float32(0.0);float32(0.0),float32(1.0),float32(0.0);float32(0.0),float32(0.0),float32(1.0)];
+    if (validateLU32(matrix_view(identityExpected), la.lu(identity), 1, float32(2e-5)) != 0) { return 8; }
+    Matrix<float32> diagonal = [float32(-2.0),float32(0.0);float32(0.0),float32(3.0)];
+    Matrix<float32> diagonalExpected = [float32(-2.0),float32(0.0);float32(0.0),float32(3.0)];
+    if (validateLU32(matrix_view(diagonalExpected), la.lu(diagonal), 1, float32(2e-5)) != 0) { return 9; }
+    Matrix<float32> upper = [float32(4.0),float32(2.0),float32(1.0);float32(0.0),float32(-3.0),float32(2.0);float32(0.0),float32(0.0),float32(5.0)];
+    Matrix<float32> upperExpected = [float32(4.0),float32(2.0),float32(1.0);float32(0.0),float32(-3.0),float32(2.0);float32(0.0),float32(0.0),float32(5.0)];
+    if (validateLU32(matrix_view(upperExpected), la.lu(upper), 1, float32(2e-5)) != 0) { return 10; }
+    Matrix<float32> lower = [float32(4.0),float32(0.0),float32(0.0);float32(2.0),float32(3.0),float32(0.0);float32(1.0),float32(2.0),float32(5.0)];
+    Matrix<float32> lowerExpected = [float32(4.0),float32(0.0),float32(0.0);float32(2.0),float32(3.0),float32(0.0);float32(1.0),float32(2.0),float32(5.0)];
+    if (validateLU32(matrix_view(lowerExpected), la.lu(lower), 1, float32(2e-5)) != 0) { return 11; }
+    Matrix<float32> negative = [float32(-4.0),float32(1.0);float32(2.0),float32(-3.0)];
+    Matrix<float32> negativeExpected = [float32(-4.0),float32(1.0);float32(2.0),float32(-3.0)];
+    if (validateLU32(matrix_view(negativeExpected), la.lu(negative), 1, float32(2e-5)) != 0) { return 12; }
+    Matrix<float32> negativeZero = [float32(-0.0),float32(1.0);float32(0.0),float32(2.0)];
+    Matrix<float32> negativeZeroExpected = [float32(-0.0),float32(1.0);float32(0.0),float32(2.0)];
+    if (validateLU32(matrix_view(negativeZeroExpected), la.lu(negativeZero), 1, float32(2e-5)) != 0) { return 13; }
+    Matrix<float32> singular = [float32(2.0),float32(4.0);float32(1.0),float32(2.0)];
+    Matrix<float32> singularExpected = [float32(2.0),float32(4.0);float32(1.0),float32(2.0)];
+    if (validateLU32(matrix_view(singularExpected), la.lu(singular), 1, float32(2e-5)) != 0) { return 14; }
+    Matrix<float32> zeroRow = [float32(0.0),float32(0.0);float32(2.0),float32(3.0)];
+    Matrix<float32> zeroRowExpected = [float32(0.0),float32(0.0);float32(2.0),float32(3.0)];
+    if (validateLU32(matrix_view(zeroRowExpected), la.lu(zeroRow), -1, float32(2e-5)) != 0) { return 15; }
+    Matrix<float32> zero = [float32(0.0),float32(0.0),float32(0.0);float32(0.0),float32(0.0),float32(0.0)];
+    Matrix<float32> zeroExpected = [float32(0.0),float32(0.0),float32(0.0);float32(0.0),float32(0.0),float32(0.0)];
+    if (validateLU32(matrix_view(zeroExpected), la.lu(zero), 1, float32(2e-5)) != 0) { return 16; }
+
+    Matrix<float32> empty = la.zeros(0,0);
+    Matrix<float32> emptyExpected = la.zeros(0,0);
+    if (validateLU32(matrix_view(emptyExpected), la.lu(empty), 1, float32(2e-5)) != 0) { return 17; }
+    Matrix<float32> m0 = la.zeros(3,0);
+    Matrix<float32> m0Expected = la.zeros(3,0);
+    if (validateLU32(matrix_view(m0Expected), la.lu(m0), 1, float32(2e-5)) != 0) { return 18; }
+    Matrix<float32> zeroN = la.zeros(0,3);
+    Matrix<float32> zeroNExpected = la.zeros(0,3);
+    if (validateLU32(matrix_view(zeroNExpected), la.lu(zeroN), 1, float32(2e-5)) != 0) { return 19; }
+    Matrix<float32> scalar = [float32(-7.0)];
+    Matrix<float32> scalarExpected = [float32(-7.0)];
+    if (validateLU32(matrix_view(scalarExpected), la.lu(scalar), 1, float32(2e-5)) != 0) { return 20; }
+    Matrix<float32> tall = [float32(4.0),float32(1.0);float32(2.0),float32(3.0);float32(1.0),float32(2.0)];
+    Matrix<float32> tallExpected = [float32(4.0),float32(1.0);float32(2.0),float32(3.0);float32(1.0),float32(2.0)];
+    if (validateLU32(matrix_view(tallExpected), la.lu(tall), 1, float32(2e-5)) != 0) { return 21; }
+    Matrix<float32> tallDeficient = [float32(2.0),float32(4.0);float32(1.0),float32(2.0);float32(0.0),float32(0.0)];
+    Matrix<float32> tallDeficientExpected = [float32(2.0),float32(4.0);float32(1.0),float32(2.0);float32(0.0),float32(0.0)];
+    if (validateLU32(matrix_view(tallDeficientExpected), la.lu(tallDeficient), 1, float32(2e-5)) != 0) { return 22; }
+    Matrix<float32> wide = [float32(4.0),float32(1.0),float32(2.0);float32(2.0),float32(3.0),float32(4.0)];
+    Matrix<float32> wideExpected = [float32(4.0),float32(1.0),float32(2.0);float32(2.0),float32(3.0),float32(4.0)];
+    if (validateLU32(matrix_view(wideExpected), la.lu(wide), 1, float32(2e-5)) != 0) { return 23; }
+    Matrix<float32> wideDeficient = [float32(2.0),float32(4.0),float32(6.0);float32(1.0),float32(2.0),float32(3.0)];
+    Matrix<float32> wideDeficientExpected = [float32(2.0),float32(4.0),float32(6.0);float32(1.0),float32(2.0),float32(3.0)];
+    if (validateLU32(matrix_view(wideDeficientExpected), la.lu(wideDeficient), 1, float32(2e-5)) != 0) { return 24; }
+    return 0;
+}
+
 int main() {
     Matrix<float64> zeroSquare = la.zeros(3);
     Matrix<float64> zeroTall = la.zeros(4,2);
@@ -231,5 +492,7 @@ int main() {
     Matrix<float32> single = [float32(1.0),float32(2.0);float32(3.0),float32(4.0);float32(5.0),float32(6.0)];
     Matrix<float32> singleExpected = [float32(1.0),float32(2.0);float32(3.0),float32(4.0);float32(5.0),float32(6.0)];
     if (validate32(matrix_view(singleExpected), la.qrFloat32(single), float32(2e-5)) != 0) { return 100; }
+    if (testLU64() != 0) { return 110; }
+    if (testLU32() != 0) { return 120; }
     return 0;
 }

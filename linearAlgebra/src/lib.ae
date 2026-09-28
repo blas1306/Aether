@@ -86,6 +86,207 @@ Matrix<float32> identity(usize size) {
     return result;
 }
 
+// An economic LU factorization with a 1-based row permutation.  The
+// permutation represents P directly: (P A)[i,j] = A[permutation[i],j].
+struct LU<T: Storable> {
+    Vector<usize,Column> permutation;
+    int permutationSign;
+    Matrix<T> L;
+    Matrix<T> U;
+}
+
+LU<float64> lu(Matrix<float64> A) {
+    usize m = rows(A);
+    usize n = columns(A);
+    usize r = m;
+    if (n < r) { r = n; }
+
+    Vector<usize,Column> permutation = vectorFilled<usize,Column>(m, 0);
+    usize i = 1;
+    while (i <= m) {
+        permutation[i] = i;
+        i = i + 1;
+    }
+    int permutationSign = 1;
+
+    usize k = 1;
+    while (k <= r) {
+        usize p = k;
+        float64 best = abs(A[k,k]);
+        i = k + 1;
+        while (i <= m) {
+            float64 magnitude = abs(A[i,k]);
+            if (magnitude > best) {
+                p = i;
+                best = magnitude;
+            }
+            i = i + 1;
+        }
+
+        if (p != k) {
+            usize j = 1;
+            while (j <= n) {
+                float64 temporary = A[k,j];
+                A[k,j] = A[p,j];
+                A[p,j] = temporary;
+                j = j + 1;
+            }
+            usize permutationTemporary = permutation[k];
+            permutation[k] = permutation[p];
+            permutation[p] = permutationTemporary;
+            permutationSign = -permutationSign;
+        }
+
+        if (A[k,k] != 0.0) {
+            i = k + 1;
+            while (i <= m) {
+                A[i,k] = A[i,k] / A[k,k];
+                usize j = k + 1;
+                while (j <= n) {
+                    A[i,j] = A[i,j] - A[i,k] * A[k,j];
+                    j = j + 1;
+                }
+                i = i + 1;
+            }
+        }
+        k = k + 1;
+    }
+
+    if (m <= n) {
+        Matrix<float64> L = matrixFilled<float64>(m, m, 0.0);
+        i = 1;
+        while (i <= m) {
+            usize j = 1;
+            while (j < i) {
+                L[i,j] = A[i,j];
+                A[i,j] = 0.0;
+                j = j + 1;
+            }
+            L[i,i] = 1.0;
+            i = i + 1;
+        }
+        return LU<float64>(permutation, permutationSign, L, A);
+    }
+
+    Matrix<float64> U = matrixFilled<float64>(n, n, 0.0);
+    i = 1;
+    while (i <= n) {
+        usize j = i;
+        while (j <= n) {
+            U[i,j] = A[i,j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    i = 1;
+    while (i <= m) {
+        usize j = i + 1;
+        while (j <= n) {
+            A[i,j] = 0.0;
+            j = j + 1;
+        }
+        if (i <= n) { A[i,i] = 1.0; }
+        i = i + 1;
+    }
+    return LU<float64>(permutation, permutationSign, A, U);
+}
+
+LU<float32> lu(Matrix<float32> A) {
+    usize m = rows(A);
+    usize n = columns(A);
+    usize r = m;
+    if (n < r) { r = n; }
+
+    Vector<usize,Column> permutation = vectorFilled<usize,Column>(m, 0);
+    usize i = 1;
+    while (i <= m) {
+        permutation[i] = i;
+        i = i + 1;
+    }
+    int permutationSign = 1;
+
+    usize k = 1;
+    while (k <= r) {
+        usize p = k;
+        float32 best = abs(A[k,k]);
+        i = k + 1;
+        while (i <= m) {
+            float32 magnitude = abs(A[i,k]);
+            if (magnitude > best) {
+                p = i;
+                best = magnitude;
+            }
+            i = i + 1;
+        }
+
+        if (p != k) {
+            usize j = 1;
+            while (j <= n) {
+                float32 temporary = A[k,j];
+                A[k,j] = A[p,j];
+                A[p,j] = temporary;
+                j = j + 1;
+            }
+            usize permutationTemporary = permutation[k];
+            permutation[k] = permutation[p];
+            permutation[p] = permutationTemporary;
+            permutationSign = -permutationSign;
+        }
+
+        if (A[k,k] != float32(0.0)) {
+            i = k + 1;
+            while (i <= m) {
+                A[i,k] = A[i,k] / A[k,k];
+                usize j = k + 1;
+                while (j <= n) {
+                    A[i,j] = A[i,j] - A[i,k] * A[k,j];
+                    j = j + 1;
+                }
+                i = i + 1;
+            }
+        }
+        k = k + 1;
+    }
+
+    if (m <= n) {
+        Matrix<float32> L = matrixFilled<float32>(m, m, float32(0.0));
+        i = 1;
+        while (i <= m) {
+            usize j = 1;
+            while (j < i) {
+                L[i,j] = A[i,j];
+                A[i,j] = float32(0.0);
+                j = j + 1;
+            }
+            L[i,i] = float32(1.0);
+            i = i + 1;
+        }
+        return LU<float32>(permutation, permutationSign, L, A);
+    }
+
+    Matrix<float32> U = matrixFilled<float32>(n, n, float32(0.0));
+    i = 1;
+    while (i <= n) {
+        usize j = i;
+        while (j <= n) {
+            U[i,j] = A[i,j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    i = 1;
+    while (i <= m) {
+        usize j = i + 1;
+        while (j <= n) {
+            A[i,j] = float32(0.0);
+            j = j + 1;
+        }
+        if (i <= n) { A[i,i] = float32(1.0); }
+        i = i + 1;
+    }
+    return LU<float32>(permutation, permutationSign, A, U);
+}
+
 // A materialized QR factorization.  Q is m by m and R is m by n.
 struct QR<T: Storable> {
     Matrix<T> Q;
