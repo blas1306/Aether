@@ -1594,6 +1594,9 @@ pub(super) fn verify_body(
                 HirStmtKind::StringOutput { value, .. } => {
                     visit_expr(value, state, types, function, module, sigs)?;
                 }
+                HirStmtKind::ShapeGuard { condition, .. } => {
+                    visit_expr(condition, state, types, function, module, sigs)?;
+                }
                 HirStmtKind::Nop
                 | HirStmtKind::Break { .. }
                 | HirStmtKind::Continue { .. }

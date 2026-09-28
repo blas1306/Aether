@@ -3672,6 +3672,19 @@ fn emit_function(
                 block_label(*else_block)
             )
             .unwrap(),
+            SsaTerminator::ShapeGuard {
+                condition,
+                success,
+                failure,
+                ..
+            } => writeln!(
+                output,
+                "  br i1 {}, label %{}, label %{}",
+                llvm_operand(condition),
+                block_label(*success),
+                block_label(*failure)
+            )
+            .unwrap(),
             SsaTerminator::Switch {
                 discriminant,
                 cases,

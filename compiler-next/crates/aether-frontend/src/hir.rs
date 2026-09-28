@@ -884,6 +884,14 @@ pub struct HirStmt {
     /// Provenance only; generated returns use ordinary typing and lowering.
     pub compiler_generated: bool,
 }
+/// Closed frontend trap vocabulary carried by source-authorized HIR nodes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HirTrapKind {
+    ShapeMismatch,
+    /// Closed non-source value retained so verification can reject trap corruption.
+    IntegerOverflow,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HirStmtKind {
     Nop,
@@ -926,6 +934,11 @@ pub enum HirStmtKind {
         function: crate::CoreFunction,
         value: HirExpr,
         newline: bool,
+    },
+    /// Source `shapeGuard(condition);`; deliberately not an expression/call.
+    ShapeGuard {
+        condition: HirExpr,
+        trap: HirTrapKind,
     },
     If {
         condition: HirExpr,
@@ -2190,6 +2203,18 @@ fn collect_program_signatures_for_kind(
                     .0[0]
                     .clone()
             });
+            if binding == "shapeGuard" {
+                return Err(vec![src(
+                    Diagnostic::new(
+                        "E0473",
+                        Phase::Semantic,
+                        DiagnosticCategory::Name,
+                        "`shapeGuard` is a reserved global statement intrinsic",
+                        Some(import.span),
+                    ),
+                    module,
+                )]);
+            }
             if package_declarations.contains_key(&(module.info.package, binding.clone())) {
                 return Err(vec![src(
                     Diagnostic::new(
@@ -2250,6 +2275,7 @@ fn collect_program_signatures_for_kind(
         {
             let previous = declarations.insert(name.clone(), kind);
             if name == "Function"
+                || name == "shapeGuard"
                 || builtin(name).is_some()
                 || intrinsic_type_arity(name).is_some()
                 || previous.is_some_and(|previous| previous != "function" || kind != "function")
@@ -4995,6 +5021,10 @@ impl Monomorphizer<'_> {
                             value: self.substitute_expr(value, substitution)?,
                             newline: *newline,
                         },
+                        HirStmtKind::ShapeGuard { condition, trap } => HirStmtKind::ShapeGuard {
+                            condition: self.substitute_expr(condition, substitution)?,
+                            trap: *trap,
+                        },
                         HirStmtKind::ListPush {
                             target,
                             value,
@@ -6380,6 +6410,15 @@ fn analyze_function(
     };
     let mut parameters = vec![];
     for p in &sig.parameters {
+        if p.name == "shapeGuard" {
+            return Err(vec![Diagnostic::new(
+                "E0473",
+                Phase::Semantic,
+                DiagnosticCategory::Name,
+                "`shapeGuard` is a reserved global statement intrinsic",
+                Some(p.span),
+            )]);
+        }
         if a.import_bindings[module.0 as usize].contains(&p.name) {
             return Err(vec![Diagnostic::new(
                 "E0235",
@@ -6744,6 +6783,7 @@ impl OwnershipAnalysis<'_> {
                     }
                 }
                 HirStmtKind::StringOutput { value, .. } => self.expr(value)?,
+                HirStmtKind::ShapeGuard { condition, .. } => self.expr(condition)?,
                 HirStmtKind::Return { value, drops } => {
                     self.expr(value)?;
                     *drops = self
@@ -8988,6 +9028,15 @@ impl Analyzer<'_> {
                     name,
                     initializer,
                 } => {
+                    if name == "shapeGuard" {
+                        return Err(vec![Diagnostic::new(
+                            "E0473",
+                            Phase::Semantic,
+                            DiagnosticCategory::Name,
+                            "`shapeGuard` is a reserved global statement intrinsic",
+                            Some(s.span),
+                        )]);
+                    }
                     if self.import_bindings[self.module.0 as usize].contains(name) {
                         return Err(vec![Diagnostic::new(
                             "E0235",
@@ -9266,6 +9315,15 @@ impl Analyzer<'_> {
                     iterable,
                     body,
                 } => {
+                    if binding.name == "shapeGuard" {
+                        return Err(vec![Diagnostic::new(
+                            "E0473",
+                            Phase::Semantic,
+                            DiagnosticCategory::Name,
+                            "`shapeGuard` is a reserved global statement intrinsic",
+                            Some(binding.span),
+                        )]);
+                    }
                     let loop_id = LoopId(self.next_loop);
                     self.next_loop += 1;
                     if let AstExprKind::Range { start, step, end } = &iterable.kind {
@@ -9513,6 +9571,15 @@ impl Analyzer<'_> {
                     let mut previous = Vec::new();
                     let mut handlers = Vec::new();
                     for catch in catches {
+                        if catch.name == "shapeGuard" {
+                            return Err(vec![Diagnostic::new(
+                                "E0473",
+                                Phase::Semantic,
+                                DiagnosticCategory::Name,
+                                "`shapeGuard` is a reserved global statement intrinsic",
+                                Some(catch.span),
+                            )]);
+                        }
                         let ty = self.resolve_source_type(&catch.ty)?;
                         let Some(class) = self.types.class_id(ty) else {
                             return Err(vec![classes::error(
@@ -9709,6 +9776,65 @@ impl Analyzer<'_> {
     }
 
     fn effect_statement(&mut self, expression: &AstExpr) -> Result<HirStmtKind, Vec<Diagnostic>> {
+        match &expression.kind {
+            AstExprKind::Call {
+                callee,
+                type_arguments,
+                args,
+            } if callee == "shapeGuard" => {
+                if !type_arguments.is_empty() {
+                    return Err(vec![Diagnostic::new(
+                        "E0473",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "shapeGuard does not accept type arguments",
+                        Some(expression.span),
+                    )]);
+                }
+                if args.len() != 1 {
+                    return Err(vec![Diagnostic::new(
+                        "E0473",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "shapeGuard expects exactly one bool argument",
+                        Some(expression.span),
+                    )]);
+                }
+                let condition = self.expression(&args[0], Some(TypeId::BOOL))?.expr;
+                if condition.ty != TypeId::BOOL {
+                    return Err(vec![Diagnostic::new(
+                        "E0473",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "shapeGuard condition must be exactly bool",
+                        Some(args[0].span),
+                    )]);
+                }
+                return Ok(HirStmtKind::ShapeGuard {
+                    condition,
+                    trap: HirTrapKind::ShapeMismatch,
+                });
+            }
+            AstExprKind::QualifiedCall { function, .. } if function == "shapeGuard" => {
+                return Err(vec![Diagnostic::new(
+                    "E0473",
+                    Phase::Semantic,
+                    DiagnosticCategory::Unsupported,
+                    "shapeGuard must be used in unqualified global statement form",
+                    Some(expression.span),
+                )]);
+            }
+            AstExprKind::MethodCall { method, .. } if method == "shapeGuard" => {
+                return Err(vec![Diagnostic::new(
+                    "E0473",
+                    Phase::Semantic,
+                    DiagnosticCategory::Unsupported,
+                    "shapeGuard has no method form",
+                    Some(expression.span),
+                )]);
+            }
+            _ => {}
+        }
         if let AstExprKind::QualifiedCall {
             module,
             function,
@@ -10078,6 +10204,16 @@ impl Analyzer<'_> {
             self.scopes.push(BTreeMap::new());
             let mut bindings = Vec::new();
             for ((name, span), payload) in arm.pattern.bindings.iter().zip(&variant.payloads) {
+                if name == "shapeGuard" {
+                    self.scopes.pop();
+                    return Err(vec![Diagnostic::new(
+                        "E0473",
+                        Phase::Semantic,
+                        DiagnosticCategory::Name,
+                        "`shapeGuard` is a reserved global statement intrinsic",
+                        Some(*span),
+                    )]);
+                }
                 if self.scopes.last().unwrap().contains_key(name) {
                     self.scopes.pop();
                     return Err(vec![duplicate("match binding", name, *span)]);
@@ -10674,6 +10810,36 @@ impl Analyzer<'_> {
         e: &AstExpr,
         expected: Option<TypeId>,
     ) -> Result<Checked, Vec<Diagnostic>> {
+        if matches!(&e.kind, AstExprKind::Call { callee, .. } if callee == "shapeGuard")
+            || matches!(&e.kind, AstExprKind::Name(name) if name == "shapeGuard")
+        {
+            return Err(vec![Diagnostic::new(
+                "E0473",
+                Phase::Semantic,
+                DiagnosticCategory::Unsupported,
+                "shapeGuard is statement-only and produces no value",
+                Some(e.span),
+            )]);
+        }
+        if matches!(&e.kind, AstExprKind::QualifiedCall { function, .. } if function == "shapeGuard")
+        {
+            return Err(vec![Diagnostic::new(
+                "E0473",
+                Phase::Semantic,
+                DiagnosticCategory::Unsupported,
+                "shapeGuard must be used in unqualified global statement form",
+                Some(e.span),
+            )]);
+        }
+        if matches!(&e.kind, AstExprKind::MethodCall { method, .. } if method == "shapeGuard") {
+            return Err(vec![Diagnostic::new(
+                "E0473",
+                Phase::Semantic,
+                DiagnosticCategory::Unsupported,
+                "shapeGuard has no method form",
+                Some(e.span),
+            )]);
+        }
         if let Some(result) = self.class_expression(e, expected) {
             return result;
         }
@@ -16172,6 +16338,19 @@ fn verify_block(
                     return Err(fail("HIR string output operand is not string".into()));
                 }
             }
+            HirStmtKind::ShapeGuard { condition, trap } => {
+                verify_expr(condition, f, sigs, structs, enums, types, fail)?;
+                if condition.ty != TypeId::BOOL
+                    || *trap != HirTrapKind::ShapeMismatch
+                    || s.compiler_generated
+                    || s.span.start >= s.span.end
+                    || condition.span.source != s.span.source
+                    || condition.span.start < s.span.start
+                    || condition.span.end > s.span.end
+                {
+                    return Err(fail("HIR shapeGuard contract is invalid".into()));
+                }
+            }
             HirStmtKind::ListPush {
                 target,
                 value,
@@ -20521,5 +20700,46 @@ mod vertical33_tests {
             .unwrap();
         selected.overload_disambiguator = None;
         assert!(verify_hir(&instance).is_err());
+    }
+
+    #[test]
+    fn shape_guard_hir_contract_fails_closed() {
+        let hir = analyze(
+            parse_source(&SourceFile::new(
+                "shape-guard-corrupt.ae",
+                "int main(){shapeGuard(true);return 0;}",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        verify_hir(&hir).unwrap();
+        for corrupt in 0..4 {
+            let mut bad = hir.clone();
+            let statement = &mut bad.functions[0].body.statements[0];
+            match corrupt {
+                0 => {
+                    let HirStmtKind::ShapeGuard { condition, .. } = &mut statement.kind else {
+                        unreachable!()
+                    };
+                    condition.ty = TypeId::INT64;
+                }
+                1 => {
+                    let HirStmtKind::ShapeGuard { condition, .. } = &statement.kind else {
+                        unreachable!()
+                    };
+                    statement.kind = HirStmtKind::ShapeGuard {
+                        condition: condition.clone(),
+                        trap: HirTrapKind::IntegerOverflow,
+                    };
+                }
+                2 => statement.span = Span::default(),
+                3 => statement.compiler_generated = true,
+                _ => unreachable!(),
+            }
+            assert!(
+                verify_hir(&bad).is_err(),
+                "accepted HIR corruption {corrupt}"
+            );
+        }
     }
 }

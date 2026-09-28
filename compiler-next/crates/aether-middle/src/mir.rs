@@ -748,6 +748,14 @@ pub enum Terminator {
         then_block: BlockId,
         else_block: BlockId,
     },
+    /// Source-authorized abortive shape guard.
+    ShapeGuard {
+        condition: Operand,
+        success: BlockId,
+        failure: BlockId,
+        trap: TrapKind,
+        span: Span,
+    },
     /// Reusable integral multi-way control flow. `exhaustive_enum` records the
     /// stronger contract emitted by source enum matching.
     Switch {
@@ -1051,7 +1059,8 @@ fn conditional_drop_roots(block: &HirBlock) -> BTreeSet<LocalId> {
                 | HirStmtKind::ListPush { .. }
                 | HirStmtKind::ListReserve { .. }
                 | HirStmtKind::MatrixAdd { .. }
-                | HirStmtKind::StringOutput { .. } => {}
+                | HirStmtKind::StringOutput { .. }
+                | HirStmtKind::ShapeGuard { .. } => {}
             }
         }
     }
@@ -1698,6 +1707,36 @@ impl Builder<'_> {
                         self.active_temporary_owners.pop();
                         self.emit_drop(owner, statement.span);
                     }
+                }
+                HirStmtKind::ShapeGuard { condition, trap } => {
+                    let evaluated = self.lower_expr(condition);
+                    let condition = self.temporary(TypeId::BOOL);
+                    self.assign(
+                        Place {
+                            base: PlaceBase::Local(condition),
+                            projections: Vec::new(),
+                        },
+                        Rvalue::Use(evaluated),
+                        statement.span,
+                    );
+                    let failure = self.new_block();
+                    let success = self.new_block();
+                    let trap = match trap {
+                        aether_frontend::HirTrapKind::ShapeMismatch => TrapKind::ShapeMismatch,
+                        aether_frontend::HirTrapKind::IntegerOverflow => {
+                            unreachable!("verified shapeGuard trap")
+                        }
+                    };
+                    self.terminate(Terminator::ShapeGuard {
+                        condition: Operand::Local(condition),
+                        success,
+                        failure,
+                        trap,
+                        span: statement.span,
+                    });
+                    self.current = Some(failure);
+                    self.terminate(Terminator::Trap(TrapKind::ShapeMismatch));
+                    self.current = Some(success);
                 }
                 HirStmtKind::ListPush {
                     target,
@@ -5655,6 +5694,47 @@ fn verify_mir_function(
                     return Err(fail("MIR branch condition is not bool".into()));
                 }
             }
+            Terminator::ShapeGuard {
+                condition,
+                success,
+                failure,
+                trap,
+                span,
+            } => {
+                validate_operand(function, condition, &initialized)
+                    .map_err(|message| fail(message.clone()))?;
+                let failure_block = &function.blocks[failure.0 as usize];
+                let materialized = match (condition, block.instructions.last()) {
+                    (Operand::Local(local), Some(instruction)) => {
+                        instruction.destination
+                            == (Place {
+                                base: PlaceBase::Local(*local),
+                                projections: Vec::new(),
+                            })
+                            && instruction.span == *span
+                            && instruction.unwind.is_none()
+                            && matches!(instruction.value, Rvalue::Use(_))
+                    }
+                    _ => false,
+                };
+                if operand_type(function, condition).map_err(|message| fail(message.clone()))?
+                    != TypeId::BOOL
+                    || !materialized
+                    || success == failure
+                    || failure.0.checked_add(1) != Some(success.0)
+                    || *trap != TrapKind::ShapeMismatch
+                    || span.start >= span.end
+                    || !failure_block.instructions.is_empty()
+                    || failure_block.landing_pad.is_some()
+                    || failure_block.landing_pad_catches
+                    || failure_block.terminator != Some(Terminator::Trap(TrapKind::ShapeMismatch))
+                    || predecessors[failure.0 as usize] != [block.id]
+                    || predecessors[success.0 as usize] != [block.id]
+                    || unwind_predecessors[failure.0 as usize] != 0
+                {
+                    return Err(fail("MIR ShapeGuard contract is invalid".into()));
+                }
+            }
             Terminator::Switch {
                 discriminant,
                 cases,
@@ -5920,6 +6000,7 @@ fn verify_call_borrow_regions(
             }
             let terminator_uses = match block.terminator.as_ref().expect("verified MIR") {
                 Terminator::Branch { condition, .. }
+                | Terminator::ShapeGuard { condition, .. }
                 | Terminator::Switch {
                     discriminant: condition,
                     ..
@@ -9253,6 +9334,9 @@ fn targets(terminator: &Terminator) -> Vec<BlockId> {
             else_block,
             ..
         } => vec![*then_block, *else_block],
+        Terminator::ShapeGuard {
+            success, failure, ..
+        } => vec![*success, *failure],
         Terminator::Switch {
             cases, otherwise, ..
         } => {

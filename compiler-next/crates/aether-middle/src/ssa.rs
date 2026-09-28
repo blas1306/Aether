@@ -553,6 +553,13 @@ pub enum SsaTerminator {
         then_block: BlockId,
         else_block: BlockId,
     },
+    ShapeGuard {
+        condition: SsaOperand,
+        success: BlockId,
+        failure: BlockId,
+        trap: TrapKind,
+        span: Span,
+    },
     Switch {
         discriminant: SsaOperand,
         cases: Vec<(u32, BlockId)>,
@@ -1876,6 +1883,19 @@ fn rename_terminator(terminator: &Terminator, stacks: &[Vec<ValueId>]) -> SsaTer
             then_block: *then_block,
             else_block: *else_block,
         },
+        Terminator::ShapeGuard {
+            condition,
+            success,
+            failure,
+            trap,
+            span,
+        } => SsaTerminator::ShapeGuard {
+            condition: rename_operand(condition, stacks),
+            success: *success,
+            failure: *failure,
+            trap: *trap,
+            span: *span,
+        },
         Terminator::Switch {
             discriminant,
             cases,
@@ -2324,9 +2344,9 @@ fn place_locals(function: &MirFunction, place: &Place) -> Vec<LocalId> {
 
 fn terminator_locals(terminator: &Terminator) -> Vec<LocalId> {
     match terminator {
-        Terminator::Branch { condition, .. } | Terminator::Return(condition) => {
-            operand_local(condition).into_iter().collect()
-        }
+        Terminator::Branch { condition, .. }
+        | Terminator::ShapeGuard { condition, .. }
+        | Terminator::Return(condition) => operand_local(condition).into_iter().collect(),
         Terminator::Switch { discriminant, .. } => {
             operand_local(discriminant).into_iter().collect()
         }
@@ -2941,6 +2961,43 @@ fn verify_ssa_function(
                     return Err(fail("SSA branch condition is not bool".into()));
                 }
             }
+            SsaTerminator::ShapeGuard {
+                condition,
+                success,
+                failure,
+                trap,
+                span,
+            } => {
+                validate_use(condition, block.id, Some(block.instructions.len())).map_err(&fail)?;
+                let failure_block = &function.blocks[failure.0 as usize];
+                let materialized = match (condition, block.instructions.last()) {
+                    (SsaOperand::Value(value), Some(instruction)) => {
+                        instruction.result == *value
+                            && instruction.ty == TypeId::BOOL
+                            && instruction.span == *span
+                            && instruction.unwind.is_none()
+                            && matches!(instruction.op, SsaOp::Use(_))
+                    }
+                    _ => false,
+                };
+                if operand_ty(condition).map_err(&fail)? != TypeId::BOOL
+                    || !materialized
+                    || success == failure
+                    || failure.0.checked_add(1) != Some(success.0)
+                    || *trap != TrapKind::ShapeMismatch
+                    || span.start >= span.end
+                    || !failure_block.phis.is_empty()
+                    || !failure_block.instructions.is_empty()
+                    || failure_block.landing_pad.is_some()
+                    || failure_block.landing_pad_catches
+                    || failure_block.terminator != SsaTerminator::Trap(TrapKind::ShapeMismatch)
+                    || cfg.predecessors[failure.0 as usize] != [block.id]
+                    || cfg.predecessors[success.0 as usize] != [block.id]
+                    || unwind_predecessors[failure.0 as usize] != 0
+                {
+                    return Err(fail("SSA ShapeGuard contract is invalid".into()));
+                }
+            }
             SsaTerminator::Switch {
                 discriminant,
                 cases,
@@ -3246,6 +3303,7 @@ fn verify_call_borrow_regions(
             }
             let terminator_uses = match &block.terminator {
                 SsaTerminator::Branch { condition, .. }
+                | SsaTerminator::ShapeGuard { condition, .. }
                 | SsaTerminator::Switch {
                     discriminant: condition,
                     ..
@@ -3734,6 +3792,7 @@ fn verify_ssa_collection_loops(
                     .any(|instruction| op_operands(&instruction.op).into_iter().any(is_binding));
                 let terminator_use = match &outside.terminator {
                     SsaTerminator::Branch { condition, .. }
+                    | SsaTerminator::ShapeGuard { condition, .. }
                     | SsaTerminator::Switch {
                         discriminant: condition,
                         ..
@@ -5993,6 +6052,9 @@ fn mir_targets(terminator: &Terminator) -> Vec<BlockId> {
             else_block,
             ..
         } => vec![*then_block, *else_block],
+        Terminator::ShapeGuard {
+            success, failure, ..
+        } => vec![*success, *failure],
         Terminator::Switch {
             cases, otherwise, ..
         } => {
@@ -6017,6 +6079,9 @@ fn ssa_targets(terminator: &SsaTerminator) -> Vec<BlockId> {
             else_block,
             ..
         } => vec![*then_block, *else_block],
+        SsaTerminator::ShapeGuard {
+            success, failure, ..
+        } => vec![*success, *failure],
         SsaTerminator::Switch {
             cases, otherwise, ..
         } => {
