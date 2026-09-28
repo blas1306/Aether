@@ -4400,8 +4400,12 @@ impl Builder<'_> {
                 }
                 Operand::Local(destination)
             }
-            HirExprKind::AlgebraicValue { .. } | HirExprKind::CapabilityBinary { .. } => {
-                unreachable!("verified concrete HIR cannot contain CapabilityBinary")
+            HirExprKind::AlgebraicValue { .. }
+            | HirExprKind::CapabilityBinary { .. }
+            | HirExprKind::CapabilityUnary { .. }
+            | HirExprKind::CapabilityCompare { .. }
+            | HirExprKind::CapabilityMath { .. } => {
+                unreachable!("verified concrete HIR cannot contain capability operations")
             }
             HirExprKind::Binary { op, left, right } => {
                 let left = self.lower_expr(left);

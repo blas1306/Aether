@@ -41,12 +41,20 @@ pub enum Capability {
     Storable,
     Behavioral(BehavioralCapability),
     Algebraic(AlgebraicCapability),
+    Negate,
+    Equal,
+    Order,
+    Abs,
+    Sqrt,
+    /// Nominal, compiler-sealed marker. Only the two built-in IEEE floats satisfy it.
+    IEEEFloat,
 }
 
 /// Canonical algebraic values, independent of binary behavior and storage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum AlgebraicCapability {
     Zero,
+    One,
 }
 
 /// Homogeneous executable contracts, independent of representation properties.
@@ -55,10 +63,11 @@ pub enum BehavioralCapability {
     Add,
     Sub,
     Mul,
+    Div,
 }
 
 impl BehavioralCapability {
-    pub const ALL: [Self; 3] = [Self::Add, Self::Sub, Self::Mul];
+    pub const ALL: [Self; 4] = [Self::Add, Self::Sub, Self::Mul, Self::Div];
 
     #[must_use]
     pub fn symbol(self) -> &'static str {
@@ -66,6 +75,7 @@ impl BehavioralCapability {
             Self::Add => "+",
             Self::Sub => "-",
             Self::Mul => "*",
+            Self::Div => "/",
         }
     }
 }
@@ -76,15 +86,32 @@ impl fmt::Display for BehavioralCapability {
             Self::Add => "Add",
             Self::Sub => "Sub",
             Self::Mul => "Mul",
+            Self::Div => "Div",
         })
     }
 }
 
 impl Capability {
-    /// Central V15 implication lattice: `Copy` implies `Relocatable`.
+    /// Closed implication lattice. Aliases are expanded during collection;
+    /// `IEEEFloat` remains nominal while providing its documented closure.
     #[must_use]
     pub fn implies(self, required: Self) -> bool {
-        self == required || matches!((self, required), (Self::Copy, Self::Relocatable))
+        self == required
+            || matches!((self, required), (Self::Copy, Self::Relocatable))
+            || matches!(self, Self::IEEEFloat)
+                && matches!(
+                    required,
+                    Self::Copy
+                        | Self::Relocatable
+                        | Self::Storable
+                        | Self::Behavioral(_)
+                        | Self::Algebraic(_)
+                        | Self::Negate
+                        | Self::Equal
+                        | Self::Order
+                        | Self::Abs
+                        | Self::Sqrt
+                )
     }
 }
 
@@ -95,10 +122,17 @@ impl fmt::Display for Capability {
         }
         f.write_str(match self {
             Self::Algebraic(AlgebraicCapability::Zero) => "Zero",
+            Self::Algebraic(AlgebraicCapability::One) => "One",
             Self::Behavioral(_) => unreachable!(),
             Self::Copy => "Copy",
             Self::Relocatable => "Relocatable",
             Self::Storable => "Storable",
+            Self::Negate => "Negate",
+            Self::Equal => "Equal",
+            Self::Order => "Order",
+            Self::Abs => "Abs",
+            Self::Sqrt => "Sqrt",
+            Self::IEEEFloat => "IEEEFloat",
         })
     }
 }
@@ -1248,15 +1282,19 @@ impl TypeArena {
                     Some(TypeData::Integer(_) | TypeData::Float(_))
                 )
             }
+            BehavioralCapability::Div => matches!(self.get(id), Some(TypeData::Float(_))),
         }
     }
 
     #[must_use]
     pub fn guarantees_behavior(&self, id: TypeId, behavior: BehavioralCapability) -> bool {
         match self.get(id) {
-            Some(TypeData::GenericParam(parameter)) => self
-                .generic_capabilities(*parameter)
-                .is_some_and(|caps| caps.contains(&Capability::Behavioral(behavior))),
+            Some(TypeData::GenericParam(parameter)) => {
+                self.generic_capabilities(*parameter).is_some_and(|caps| {
+                    caps.iter()
+                        .any(|provided| provided.implies(Capability::Behavioral(behavior)))
+                })
+            }
             _ => self.satisfies_behavior(id, behavior),
         }
     }
@@ -1708,23 +1746,26 @@ impl TypeArena {
     /// a capability in its current declaration context.
     #[must_use]
     pub fn guarantees_capability(&self, id: TypeId, capability: Capability) -> bool {
-        if let Capability::Algebraic(AlgebraicCapability::Zero) = capability {
+        if Self::is_numeric_capability(capability) {
             return match self.get(id) {
                 Some(TypeData::GenericParam(parameter)) => self
                     .generic_capabilities(*parameter)
-                    .is_some_and(|caps| caps.contains(&capability)),
-                Some(TypeData::Integer(_) | TypeData::Float(_)) => true,
-                _ => false,
+                    .is_some_and(|caps| caps.iter().any(|provided| provided.implies(capability))),
+                _ => self.satisfies_capability(id, capability),
             };
-        }
-        if let Capability::Behavioral(behavior) = capability {
-            return self.guarantees_behavior(id, behavior);
         }
         if !self.contains_generic(id) {
             return self
                 .properties(id)
                 .is_some_and(|properties| match capability {
-                    Capability::Behavioral(_) | Capability::Algebraic(_) => {
+                    Capability::Behavioral(_)
+                    | Capability::Algebraic(_)
+                    | Capability::Negate
+                    | Capability::Equal
+                    | Capability::Order
+                    | Capability::Abs
+                    | Capability::Sqrt
+                    | Capability::IEEEFloat => {
                         unreachable!("behavior is not layout")
                     }
                     Capability::Copy => properties.is_copy,
@@ -1739,6 +1780,45 @@ impl TypeArena {
             &HashMap::new(),
             &mut BTreeSet::new(),
         )
+    }
+
+    fn is_numeric_capability(capability: Capability) -> bool {
+        matches!(
+            capability,
+            Capability::Behavioral(_)
+                | Capability::Algebraic(_)
+                | Capability::Negate
+                | Capability::Equal
+                | Capability::Order
+                | Capability::Abs
+                | Capability::Sqrt
+                | Capability::IEEEFloat
+        )
+    }
+
+    /// Concrete, closed satisfaction table for numeric capabilities.
+    #[must_use]
+    pub fn satisfies_capability(&self, id: TypeId, capability: Capability) -> bool {
+        let data = self.get(id);
+        match capability {
+            Capability::Behavioral(behavior) => self.satisfies_behavior(id, behavior),
+            Capability::Algebraic(AlgebraicCapability::Zero | AlgebraicCapability::One)
+            | Capability::Equal
+            | Capability::Order => {
+                matches!(data, Some(TypeData::Integer(_) | TypeData::Float(_)))
+            }
+            Capability::Negate | Capability::Abs => match data {
+                Some(TypeData::Integer(integer)) => integer.is_signed(),
+                Some(TypeData::Float(_)) => true,
+                _ => false,
+            },
+            Capability::Sqrt | Capability::IEEEFloat => {
+                matches!(data, Some(TypeData::Float(_)))
+            }
+            Capability::Copy => self.is_copy(id),
+            Capability::Relocatable => self.is_relocatable(id),
+            Capability::Storable => self.is_storable(id),
+        }
     }
 
     #[must_use]
@@ -1841,9 +1921,6 @@ impl TypeArena {
                 | TypeData::Array { element }
                 | TypeData::List { element },
             ) => match capability {
-                Capability::Behavioral(_) | Capability::Algebraic(_) => {
-                    unreachable!("behavior cannot derive structurally")
-                }
                 Capability::Copy => false,
                 Capability::Relocatable => true,
                 Capability::Storable => self.guarantees_capability_with_substitution(
@@ -1852,6 +1929,7 @@ impl TypeArena {
                     substitution,
                     visiting,
                 ),
+                _ => unreachable!("behavior cannot derive structurally"),
             },
             Some(TypeData::Void) | None => false,
         };
@@ -1948,7 +2026,15 @@ impl TypeArena {
                 return match requirement {
                     Capability::Storable => CollectionElementAdmission::MissingStorable,
                     Capability::Relocatable => CollectionElementAdmission::MissingRelocatable,
-                    Capability::Copy | Capability::Behavioral(_) | Capability::Algebraic(_) => {
+                    Capability::Copy
+                    | Capability::Behavioral(_)
+                    | Capability::Algebraic(_)
+                    | Capability::Negate
+                    | Capability::Equal
+                    | Capability::Order
+                    | Capability::Abs
+                    | Capability::Sqrt
+                    | Capability::IEEEFloat => {
                         unreachable!("storage requires only structural admission")
                     }
                 };

@@ -430,5 +430,7 @@ pub(super) fn concrete_behavior_op(
         (BehavioralCapability::Add, true) => HirBinaryOp::AddFloat,
         (BehavioralCapability::Sub, true) => HirBinaryOp::SubtractFloat,
         (BehavioralCapability::Mul, true) => HirBinaryOp::MultiplyFloat,
+        (BehavioralCapability::Div, true) => HirBinaryOp::DivideFloat,
+        (BehavioralCapability::Div, false) => return None,
     })
 }

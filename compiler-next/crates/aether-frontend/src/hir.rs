@@ -33,6 +33,26 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 use std::time::Instant;
 
+fn algebraic_one_value(types: &TypeArena, ty: TypeId, span: Span) -> Option<HirExpr> {
+    if !types.guarantees_capability(ty, Capability::Algebraic(AlgebraicCapability::One)) {
+        return None;
+    }
+    let kind = match types.get(ty)? {
+        TypeData::GenericParam(_) => HirExprKind::AlgebraicValue {
+            capability: AlgebraicCapability::One,
+        },
+        TypeData::Integer(_) => HirExprKind::Int(1),
+        TypeData::Float(FloatType::Float32) => {
+            HirExprKind::Float(FloatValue::Float32(1.0f32.to_bits()))
+        }
+        TypeData::Float(FloatType::Float64) => {
+            HirExprKind::Float(FloatValue::Float64(1.0f64.to_bits()))
+        }
+        _ => return None,
+    };
+    Some(HirExpr { kind, ty, span })
+}
+
 pub use aether_package::PackageInstanceKey;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -222,10 +242,18 @@ impl FunctionSignature {
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GenericConstraintSpelling {
+    pub spelling: String,
+    pub span: Span,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GenericParamInfo {
     pub id: GenericParamId,
     pub name: String,
     pub ty: TypeId,
+    /// Exact source spellings and spans; aliases remain visible for diagnostics/dumps.
+    pub declared_constraints: Vec<GenericConstraintSpelling>,
+    /// Normalized atomic closure used for proofs.
     pub capabilities: BTreeSet<Capability>,
     pub span: Span,
 }
@@ -1550,6 +1578,24 @@ pub enum MathElementOp {
     Concrete(HirBinaryOp),
     Behavioral(BehavioralCapability),
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CapabilityUnaryOp {
+    Negate,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CapabilityCompareOp {
+    Equal,
+    NotEqual,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CapabilityMathOp {
+    Abs,
+    Sqrt,
+}
 /// Closed semantic products with distinct orientation and result-shape contracts.
 /// Computational loop forms are selected only after scalar concretization.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1616,6 +1662,23 @@ pub enum HirExprKind {
         behavior: BehavioralCapability,
         left: Box<HirExpr>,
         right: Box<HirExpr>,
+    },
+    /// Parametric unary numeric operation; reified during monomorphization.
+    CapabilityUnary {
+        operation: CapabilityUnaryOp,
+        operand: Box<HirExpr>,
+    },
+    /// Parametric homogeneous comparison with a boolean result.
+    CapabilityCompare {
+        operation: CapabilityCompareOp,
+        left: Box<HirExpr>,
+        right: Box<HirExpr>,
+    },
+    /// Parametric Core math operation. V1 has `result_type` == operand type.
+    CapabilityMath {
+        operation: CapabilityMathOp,
+        operand: Box<HirExpr>,
+        result_type: TypeId,
     },
     VectorScalarMultiply {
         left: Box<HirExpr>,
@@ -3972,14 +4035,27 @@ fn collect_generic_parameters(
             };
             let mut capabilities = BTreeSet::new();
             for constraint in &parameter.constraints {
-                let capability = match constraint.name.as_str() {
-                    "Copy" => Capability::Copy,
-                    "Relocatable" => Capability::Relocatable,
-                    "Storable" => Capability::Storable,
-                    "Add" => Capability::Behavioral(BehavioralCapability::Add),
-                    "Sub" => Capability::Behavioral(BehavioralCapability::Sub),
-                    "Mul" => Capability::Behavioral(BehavioralCapability::Mul),
-                    "Zero" => Capability::Algebraic(AlgebraicCapability::Zero),
+                let expanded: Vec<Capability> = match constraint.name.as_str() {
+                    "Copy" => vec![Capability::Copy],
+                    "Relocatable" => vec![Capability::Relocatable],
+                    "Storable" => vec![Capability::Storable],
+                    "Add" => vec![Capability::Behavioral(BehavioralCapability::Add)],
+                    "Sub" => vec![Capability::Behavioral(BehavioralCapability::Sub)],
+                    "Mul" => vec![Capability::Behavioral(BehavioralCapability::Mul)],
+                    "Div" => vec![Capability::Behavioral(BehavioralCapability::Div)],
+                    "Zero" => vec![Capability::Algebraic(AlgebraicCapability::Zero)],
+                    "One" => vec![Capability::Algebraic(AlgebraicCapability::One)],
+                    "Negate" => vec![Capability::Negate],
+                    "Equal" => vec![Capability::Equal],
+                    "Order" => vec![Capability::Order],
+                    "Abs" => vec![Capability::Abs],
+                    "Sqrt" => vec![Capability::Sqrt],
+                    // The sealed marker remains in metadata while its complete
+                    // implication closure becomes directly available to proofs.
+                    "IEEEFloat" => all_capabilities().to_vec(),
+                    "RingOps" => ring_ops().to_vec(),
+                    "FieldOps" => field_ops().to_vec(),
+                    "RealOps" => real_ops().to_vec(),
                     _ => {
                         return Err(Diagnostic::new(
                             "E0314",
@@ -3990,17 +4066,19 @@ fn collect_generic_parameters(
                         ));
                     }
                 };
-                if !capabilities.insert(capability) {
-                    return Err(Diagnostic::new(
-                        "E0315",
-                        Phase::Semantic,
-                        DiagnosticCategory::Type,
-                        format!(
-                            "duplicate `{capability}` constraint on generic parameter `{}`",
-                            parameter.name
-                        ),
-                        Some(constraint.span),
-                    ));
+                for capability in expanded {
+                    if !capabilities.insert(capability) {
+                        return Err(Diagnostic::new(
+                            "E0315",
+                            Phase::Semantic,
+                            DiagnosticCategory::Type,
+                            format!(
+                                "duplicate `{capability}` constraint on generic parameter `{}` (through `{}`)",
+                                parameter.name, constraint.name
+                            ),
+                            Some(constraint.span),
+                        ));
+                    }
                 }
             }
             types.register_generic_capabilities(
@@ -4012,6 +4090,14 @@ fn collect_generic_parameters(
                 id,
                 name: parameter.name.clone(),
                 ty: types.intern(TypeData::GenericParam(id)),
+                declared_constraints: parameter
+                    .constraints
+                    .iter()
+                    .map(|constraint| GenericConstraintSpelling {
+                        spelling: constraint.name.clone(),
+                        span: constraint.span,
+                    })
+                    .collect(),
                 capabilities,
                 span: parameter.span,
             })
@@ -4019,6 +4105,69 @@ fn collect_generic_parameters(
         .collect();
     types.record_semantic_time("frontend.detail.constraint_resolution", started);
     result
+}
+
+fn ring_ops() -> [Capability; 7] {
+    [
+        Capability::Algebraic(AlgebraicCapability::Zero),
+        Capability::Algebraic(AlgebraicCapability::One),
+        Capability::Behavioral(BehavioralCapability::Add),
+        Capability::Behavioral(BehavioralCapability::Sub),
+        Capability::Behavioral(BehavioralCapability::Mul),
+        Capability::Negate,
+        Capability::Equal,
+    ]
+}
+
+fn field_ops() -> [Capability; 8] {
+    let ring = ring_ops();
+    [
+        ring[0],
+        ring[1],
+        ring[2],
+        ring[3],
+        ring[4],
+        ring[5],
+        ring[6],
+        Capability::Behavioral(BehavioralCapability::Div),
+    ]
+}
+
+fn real_ops() -> [Capability; 11] {
+    let field = field_ops();
+    [
+        field[0],
+        field[1],
+        field[2],
+        field[3],
+        field[4],
+        field[5],
+        field[6],
+        field[7],
+        Capability::Order,
+        Capability::Abs,
+        Capability::Sqrt,
+    ]
+}
+
+fn all_capabilities() -> [Capability; 15] {
+    [
+        Capability::Copy,
+        Capability::Relocatable,
+        Capability::Storable,
+        Capability::Algebraic(AlgebraicCapability::Zero),
+        Capability::Algebraic(AlgebraicCapability::One),
+        Capability::Behavioral(BehavioralCapability::Add),
+        Capability::Behavioral(BehavioralCapability::Sub),
+        Capability::Behavioral(BehavioralCapability::Mul),
+        Capability::Behavioral(BehavioralCapability::Div),
+        Capability::Negate,
+        Capability::Equal,
+        Capability::Order,
+        Capability::Abs,
+        Capability::Sqrt,
+        Capability::IEEEFloat,
+    ]
 }
 
 fn generic_call_arity(name: &str, expected: usize, found: usize, span: Span) -> Diagnostic {
@@ -4050,8 +4199,12 @@ fn validate_generic_constraints(
     }
 
     for (parameter, argument) in parameters.iter().zip(arguments) {
-        for capability in &parameter.capabilities {
-            if !types.guarantees_capability(*argument, *capability) {
+        let mut requirements = parameter.capabilities.iter().copied().collect::<Vec<_>>();
+        // A sealed nominal mismatch is more fundamental than any missing
+        // operation from the marker's implied closure.
+        requirements.sort_by_key(|capability| *capability != Capability::IEEEFloat);
+        for capability in requirements {
+            if !types.guarantees_capability(*argument, capability) {
                 let actual = format_type(types, *argument, structs, enums);
                 let symbolic = types.contains_generic(*argument);
                 let detail = if symbolic {
@@ -4059,18 +4212,12 @@ fn validate_generic_constraints(
                 } else {
                     "does not satisfy"
                 };
-                let available = [
-                    Capability::Copy,
-                    Capability::Relocatable,
-                    Capability::Storable,
-                ]
-                .into_iter()
-                .chain(BehavioralCapability::ALL.map(Capability::Behavioral))
-                .chain([Capability::Algebraic(AlgebraicCapability::Zero)])
-                .filter(|available| types.guarantees_capability(*argument, *available))
-                .map(|available| available.to_string())
-                .collect::<Vec<_>>()
-                .join(" + ");
+                let available = all_capabilities()
+                    .into_iter()
+                    .filter(|available| types.guarantees_capability(*argument, *available))
+                    .map(|available| available.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" + ");
                 let subject = if inferred {
                     format!("inference succeeded, but inferred type `{actual}`")
                 } else if symbolic {
@@ -5972,13 +6119,105 @@ impl Monomorphizer<'_> {
                 op: *op,
                 operand: Box::new(self.substitute_expr(operand, substitution)?),
             },
-            HirExprKind::AlgebraicValue {
-                capability: AlgebraicCapability::Zero,
-            } => {
-                zero_value(self.types, ty, expression.span)
-                    .expect("verified Zero substitution")
-                    .kind
+            HirExprKind::CapabilityUnary { operation, operand } => {
+                if *operation != CapabilityUnaryOp::Negate
+                    || !self.types.satisfies_capability(ty, Capability::Negate)
+                {
+                    return Err(vec![Diagnostic::new(
+                        "E0348",
+                        Phase::Semantic,
+                        DiagnosticCategory::Verification,
+                        "capability unary operation did not resolve to a concrete built-in scalar",
+                        Some(expression.span),
+                    )]);
+                }
+                let op = if self.types.float_info(ty).is_some() {
+                    HirUnaryOp::NegateFloat
+                } else {
+                    HirUnaryOp::NegateIntegerChecked
+                };
+                HirExprKind::Unary {
+                    op,
+                    operand: Box::new(self.substitute_expr(operand, substitution)?),
+                }
             }
+            HirExprKind::CapabilityCompare {
+                operation,
+                left,
+                right,
+            } => {
+                let operand_ty = self.substitute_type(left.ty, substitution, expression.span)?;
+                let required = match operation {
+                    CapabilityCompareOp::Equal | CapabilityCompareOp::NotEqual => Capability::Equal,
+                    CapabilityCompareOp::Less
+                    | CapabilityCompareOp::LessEqual
+                    | CapabilityCompareOp::Greater
+                    | CapabilityCompareOp::GreaterEqual => Capability::Order,
+                };
+                if ty != TypeId::BOOL || !self.types.satisfies_capability(operand_ty, required) {
+                    return Err(vec![Diagnostic::new(
+                        "E0348",
+                        Phase::Semantic,
+                        DiagnosticCategory::Verification,
+                        "capability comparison did not resolve to a concrete built-in scalar",
+                        Some(expression.span),
+                    )]);
+                }
+                let op = match operation {
+                    CapabilityCompareOp::Equal => HirBinaryOp::Equal,
+                    CapabilityCompareOp::NotEqual => HirBinaryOp::NotEqual,
+                    CapabilityCompareOp::Less => HirBinaryOp::Less,
+                    CapabilityCompareOp::LessEqual => HirBinaryOp::LessEqual,
+                    CapabilityCompareOp::Greater => HirBinaryOp::Greater,
+                    CapabilityCompareOp::GreaterEqual => HirBinaryOp::GreaterEqual,
+                };
+                HirExprKind::Binary {
+                    op,
+                    left: Box::new(self.substitute_expr(left, substitution)?),
+                    right: Box::new(self.substitute_expr(right, substitution)?),
+                }
+            }
+            HirExprKind::CapabilityMath {
+                operation,
+                operand,
+                result_type,
+            } => {
+                let operand = self.substitute_expr(operand, substitution)?;
+                let concrete_result =
+                    self.substitute_type(*result_type, substitution, expression.span)?;
+                let (symbol, required) = match operation {
+                    CapabilityMathOp::Abs => (crate::CoreSymbol::Abs, Capability::Abs),
+                    CapabilityMathOp::Sqrt => (crate::CoreSymbol::Sqrt, Capability::Sqrt),
+                };
+                if operand.ty != concrete_result
+                    || ty != concrete_result
+                    || !self.types.satisfies_capability(operand.ty, required)
+                {
+                    return Err(vec![Diagnostic::new(
+                        "E0348",
+                        Phase::Semantic,
+                        DiagnosticCategory::Verification,
+                        "capability math operation did not resolve to a concrete Core signature",
+                        Some(expression.span),
+                    )]);
+                }
+                HirExprKind::Core(Box::new(crate::CoreCall {
+                    function: crate::CoreFunction::resolve(symbol, operand.ty),
+                    arguments: vec![operand],
+                }))
+            }
+            HirExprKind::AlgebraicValue { capability } => match capability {
+                AlgebraicCapability::Zero => {
+                    zero_value(self.types, ty, expression.span)
+                        .expect("verified Zero substitution")
+                        .kind
+                }
+                AlgebraicCapability::One => {
+                    algebraic_one_value(self.types, ty, expression.span)
+                        .expect("verified One substitution")
+                        .kind
+                }
+            },
             HirExprKind::AlgebraicProduct {
                 left,
                 right,
@@ -7637,7 +7876,9 @@ impl OwnershipAnalysis<'_> {
             HirExprKind::VectorTranspose { operand, .. }
             | HirExprKind::Coerce { operand, .. }
             | HirExprKind::ExplicitCast { operand, .. }
-            | HirExprKind::Unary { operand, .. } => self.expr(operand),
+            | HirExprKind::Unary { operand, .. }
+            | HirExprKind::CapabilityUnary { operand, .. }
+            | HirExprKind::CapabilityMath { operand, .. } => self.expr(operand),
             HirExprKind::AlgebraicProduct {
                 left,
                 right,
@@ -7753,6 +7994,7 @@ impl OwnershipAnalysis<'_> {
             HirExprKind::ShortCircuitAnd { left, right }
             | HirExprKind::ShortCircuitOr { left, right }
             | HirExprKind::CapabilityBinary { left, right, .. }
+            | HirExprKind::CapabilityCompare { left, right, .. }
             | HirExprKind::Binary { left, right, .. } => {
                 self.expr(left)?;
                 self.expr(right)
@@ -11906,6 +12148,36 @@ impl Analyzer<'_> {
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
         let ty = expected.unwrap_or(TypeId::INT64);
+        if self.types.generic_param(ty).is_some() && !neg {
+            let capability = match text {
+                "0" => Some(AlgebraicCapability::Zero),
+                "1" => Some(AlgebraicCapability::One),
+                _ => None,
+            };
+            if let Some(capability) = capability {
+                let required = Capability::Algebraic(capability);
+                if !self.types.guarantees_capability(ty, required) {
+                    return Err(vec![Diagnostic::new(
+                        "E0268",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        format!(
+                            "literal `{text}` for generic parameter {} requires capability {required}",
+                            self.type_name(ty)
+                        ),
+                        Some(span),
+                    )]);
+                }
+                return Ok(Checked {
+                    expr: HirExpr {
+                        kind: HirExprKind::AlgebraicValue { capability },
+                        ty,
+                        span,
+                    },
+                    constant: None,
+                });
+            }
+        }
         // Contextual numeric literals are selected directly in their target
         // type. This is literal typing, not a runtime integer-to-float cast.
         if self.types.float_info(ty).is_some() {
@@ -12002,6 +12274,31 @@ impl Analyzer<'_> {
     fn negate(&mut self, o: &AstExpr, span: Span) -> Result<Checked, Vec<Diagnostic>> {
         let c = self.expression(o, None)?;
         let ty = c.expr.ty;
+        if self.types.generic_param(ty).is_some() {
+            if !self.types.guarantees_capability(ty, Capability::Negate) {
+                return Err(vec![Diagnostic::new(
+                    "E0268",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    format!(
+                        "unary `-` on generic parameter {} requires capability Negate",
+                        self.type_name(ty)
+                    ),
+                    Some(span),
+                )]);
+            }
+            return Ok(Checked {
+                expr: HirExpr {
+                    kind: HirExprKind::CapabilityUnary {
+                        operation: CapabilityUnaryOp::Negate,
+                        operand: Box::new(c.expr),
+                    },
+                    ty,
+                    span,
+                },
+                constant: None,
+            });
+        }
         let op = match self.types.get(ty) {
             Some(TypeData::Integer(i)) if i.is_signed() => HirUnaryOp::NegateIntegerChecked,
             Some(TypeData::Integer(_)) => {
@@ -13371,6 +13668,47 @@ impl Analyzer<'_> {
                         span,
                     )]
                 })?;
+        }
+        if self.types.generic_param(parameter_type).is_some()
+            && matches!(symbol, crate::CoreSymbol::Abs | crate::CoreSymbol::Sqrt)
+        {
+            let (operation, required) = if symbol == crate::CoreSymbol::Abs {
+                (CapabilityMathOp::Abs, Capability::Abs)
+            } else {
+                (CapabilityMathOp::Sqrt, Capability::Sqrt)
+            };
+            if !self.types.guarantees_capability(parameter_type, required) {
+                return Err(vec![Diagnostic::new(
+                    "E0268",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    format!(
+                        "Core function `{}` on generic parameter {} requires capability {required}",
+                        symbol.member(),
+                        self.type_name(parameter_type)
+                    ),
+                    Some(span),
+                )]);
+            }
+            let operand = checked
+                .pop()
+                .expect("abs/sqrt have one checked argument")
+                .expr;
+            return self.coerce(
+                Checked {
+                    expr: HirExpr {
+                        kind: HirExprKind::CapabilityMath {
+                            operation,
+                            operand: Box::new(operand),
+                            result_type: parameter_type,
+                        },
+                        ty: parameter_type,
+                        span,
+                    },
+                    constant: None,
+                },
+                expected,
+            );
         }
         let signature_valid = match symbol {
             crate::CoreSymbol::Abs => {
@@ -14955,6 +15293,7 @@ impl Analyzer<'_> {
                 AstBinaryOp::Add => Some(BehavioralCapability::Add),
                 AstBinaryOp::Subtract => Some(BehavioralCapability::Sub),
                 AstBinaryOp::Multiply => Some(BehavioralCapability::Mul),
+                AstBinaryOp::Divide => Some(BehavioralCapability::Div),
                 _ => None,
             };
             if let Some(behavior) = behavior {
@@ -14992,6 +15331,53 @@ impl Analyzer<'_> {
                             right: Box::new(r.expr),
                         },
                         ty,
+                        span,
+                    },
+                    constant: None,
+                });
+            }
+            let comparison = match op {
+                AstBinaryOp::Equal => Some((CapabilityCompareOp::Equal, Capability::Equal)),
+                AstBinaryOp::NotEqual => Some((CapabilityCompareOp::NotEqual, Capability::Equal)),
+                AstBinaryOp::Less => Some((CapabilityCompareOp::Less, Capability::Order)),
+                AstBinaryOp::LessEqual => Some((CapabilityCompareOp::LessEqual, Capability::Order)),
+                AstBinaryOp::Greater => Some((CapabilityCompareOp::Greater, Capability::Order)),
+                AstBinaryOp::GreaterEqual => {
+                    Some((CapabilityCompareOp::GreaterEqual, Capability::Order))
+                }
+                _ => None,
+            };
+            if let Some((operation, required)) = comparison {
+                let ty = l.expr.ty;
+                if ty != r.expr.ty {
+                    return Err(vec![Diagnostic::new(
+                        "E0347",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        format!("capability {required} requires homogeneous operands"),
+                        Some(span),
+                    )]);
+                }
+                if !self.types.guarantees_capability(ty, required) {
+                    return Err(vec![Diagnostic::new(
+                        "E0268",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        format!(
+                            "operator on generic parameter {} requires capability {required}",
+                            self.type_name(ty)
+                        ),
+                        Some(span),
+                    )]);
+                }
+                return Ok(Checked {
+                    expr: HirExpr {
+                        kind: HirExprKind::CapabilityCompare {
+                            operation,
+                            left: Box::new(l.expr),
+                            right: Box::new(r.expr),
+                        },
+                        ty: TypeId::BOOL,
                         span,
                     },
                     constant: None,
@@ -17968,6 +18354,59 @@ fn verify_expr(
                 return Err(fail("HIR unary invalid".into()));
             }
         }
+        HirExprKind::CapabilityUnary { operation, operand } => {
+            verify_expr(operand, f, sigs, structs, enums, types, fail)?;
+            if matches!(sigs, VerificationSignatures::Concrete(_))
+                || *operation != CapabilityUnaryOp::Negate
+                || e.ty != operand.ty
+                || types.generic_param(operand.ty).is_none()
+                || !types.guarantees_capability(operand.ty, Capability::Negate)
+            {
+                return Err(fail("HIR unresolved/invalid CapabilityUnary".into()));
+            }
+        }
+        HirExprKind::CapabilityCompare {
+            operation,
+            left,
+            right,
+        } => {
+            verify_expr(left, f, sigs, structs, enums, types, fail)?;
+            verify_expr(right, f, sigs, structs, enums, types, fail)?;
+            let required = match operation {
+                CapabilityCompareOp::Equal | CapabilityCompareOp::NotEqual => Capability::Equal,
+                CapabilityCompareOp::Less
+                | CapabilityCompareOp::LessEqual
+                | CapabilityCompareOp::Greater
+                | CapabilityCompareOp::GreaterEqual => Capability::Order,
+            };
+            if matches!(sigs, VerificationSignatures::Concrete(_))
+                || e.ty != TypeId::BOOL
+                || left.ty != right.ty
+                || types.generic_param(left.ty).is_none()
+                || !types.guarantees_capability(left.ty, required)
+            {
+                return Err(fail("HIR unresolved/invalid CapabilityCompare".into()));
+            }
+        }
+        HirExprKind::CapabilityMath {
+            operation,
+            operand,
+            result_type,
+        } => {
+            verify_expr(operand, f, sigs, structs, enums, types, fail)?;
+            let required = match operation {
+                CapabilityMathOp::Abs => Capability::Abs,
+                CapabilityMathOp::Sqrt => Capability::Sqrt,
+            };
+            if matches!(sigs, VerificationSignatures::Concrete(_))
+                || e.ty != *result_type
+                || operand.ty != *result_type
+                || types.generic_param(operand.ty).is_none()
+                || !types.guarantees_capability(operand.ty, required)
+            {
+                return Err(fail("HIR unresolved/invalid CapabilityMath".into()));
+            }
+        }
         HirExprKind::AlgebraicValue { capability } => {
             if matches!(sigs, VerificationSignatures::Concrete(_))
                 || types.generic_param(e.ty).is_none()
@@ -19990,10 +20429,22 @@ mod tests {
         let types = &h.types;
         for (ty, data) in types.entries() {
             for behavior in BehavioralCapability::ALL {
-                let numeric = matches!(data, TypeData::Integer(_) | TypeData::Float(_));
-                assert_eq!(types.satisfies_behavior(ty, behavior), numeric, "{data:?}");
+                let satisfies = if behavior == BehavioralCapability::Div {
+                    matches!(data, TypeData::Float(_))
+                } else {
+                    matches!(data, TypeData::Integer(_) | TypeData::Float(_))
+                };
+                assert_eq!(
+                    types.satisfies_behavior(ty, behavior),
+                    satisfies,
+                    "{data:?}"
+                );
                 if !matches!(data, TypeData::GenericParam(_)) {
-                    assert_eq!(types.guarantees_behavior(ty, behavior), numeric, "{data:?}");
+                    assert_eq!(
+                        types.guarantees_behavior(ty, behavior),
+                        satisfies,
+                        "{data:?}"
+                    );
                 }
             }
         }

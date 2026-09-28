@@ -27,14 +27,15 @@ pub use core::{
 };
 pub use diagnostic::{Diagnostic, DiagnosticCategory, FixIt, Phase, SourceFile, SourceId, Span};
 pub use hir::{
-    AlgebraicProductKind, CallBorrowOrigin, CallBorrowSource, CallSiteId, CastKind, CatchId,
-    CoercionKind, CollectionIterationSource, DeclaredProgram, DefaultArgumentTemplate,
+    AlgebraicProductKind, CallBorrowOrigin, CallBorrowSource, CallSiteId, CapabilityCompareOp,
+    CapabilityMathOp, CapabilityUnaryOp, CastKind, CatchId, CoercionKind,
+    CollectionIterationSource, DeclaredProgram, DefaultArgumentTemplate,
     EnumEqualityClassification, EnumInfo, FieldInfo, FinallyId, FloatValue, FormatBorrowOrigin,
     FormatBorrowSource, FormatSiteId, FunctionId, FunctionInstanceInfo, FunctionSignature,
-    GenericHirFunction, GenericParamInfo, HirBinaryOp, HirBlock, HirCallArgument,
-    HirCallArgumentOrigin, HirCallTarget, HirCatch, HirDrop, HirExpr, HirExprKind, HirFinally,
-    HirFunction, HirLocal, HirMatchArm, HirMatchBinding, HirParameter, HirPlace, HirPlaceBase,
-    HirPlaceProjection, HirStmt, HirStmtKind, HirSubscript, HirSubscriptAxis,
+    GenericConstraintSpelling, GenericHirFunction, GenericParamInfo, HirBinaryOp, HirBlock,
+    HirCallArgument, HirCallArgumentOrigin, HirCallTarget, HirCatch, HirDrop, HirExpr, HirExprKind,
+    HirFinally, HirFunction, HirLocal, HirMatchArm, HirMatchBinding, HirParameter, HirPlace,
+    HirPlaceBase, HirPlaceProjection, HirStmt, HirStmtKind, HirSubscript, HirSubscriptAxis,
     HirSubscriptContainerKind, HirSubscriptResult, HirSubscriptSelector, HirSubscriptSelectorKind,
     HirTrapKind, HirUnaryOp, InvalidationShape, IterationBindingCategory, LocalId,
     LogicalSourceKey, LoopId, MatchMode, MathElementOp, MathShapeCheck, MatrixAddArgumentOwnership,

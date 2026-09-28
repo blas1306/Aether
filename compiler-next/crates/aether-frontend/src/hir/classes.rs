@@ -1262,7 +1262,9 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
         | E::LogicalNot { operand }
         | E::Coerce { operand, .. }
         | E::ExplicitCast { operand, .. }
-        | E::Unary { operand, .. } => vec![operand],
+        | E::Unary { operand, .. }
+        | E::CapabilityUnary { operand, .. }
+        | E::CapabilityMath { operand, .. } => vec![operand],
         E::MatrixInit { elements, .. }
         | E::VectorInit { elements, .. }
         | E::ArrayInit { elements, .. }
@@ -1276,6 +1278,7 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
             .collect(),
         E::StructInit { fields, .. } => fields.iter().map(|(_, e)| e).collect(),
         E::CapabilityBinary { left, right, .. }
+        | E::CapabilityCompare { left, right, .. }
         | E::VectorScalarMultiply { left, right, .. }
         | E::MatrixScalarMultiply { left, right, .. }
         | E::VectorElementwiseBinary { left, right, .. }
