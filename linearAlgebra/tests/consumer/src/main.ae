@@ -999,6 +999,18 @@ int main() {
         row32Index = row32Index + 1;
     }
 
+    Matrix<float32> explicitZero32 = la.zeros<float32>(2);
+    Matrix<float64> explicitOnes64 = la.ones<float64>(2,3);
+    Matrix<int> integerZeros = la.zeros(2,3);
+    Matrix<int> integerOnes = la.ones<int>(2);
+    Matrix<int> integerIdentity = la.identity(3);
+    Vector<int,Row> integerZeroRow = la.zeros(2);
+    Vector<int,Column> integerOneColumn = la.ones<int>(2);
+    if (explicitZero32[2,2] != float32(0.0) || explicitOnes64[2,3] != 1.0) { return 70; }
+    if (integerZeros[2,3] != 0 || integerOnes[2,2] != 1) { return 71; }
+    if (integerIdentity[1,2] != 0 || integerIdentity[3,3] != 1) { return 72; }
+    if (integerZeroRow[2] != 0 || integerOneColumn[2] != 1) { return 73; }
+
     Matrix<float64> a22 = [12.0,-51.0;6.0,167.0];
     Matrix<float64> e22 = [12.0,-51.0;6.0,167.0];
     if (validate64(matrix_view(e22), la.qr(a22), 1e-10) != 0) { return 10; }

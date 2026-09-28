@@ -1,86 +1,44 @@
 package linearAlgebra;
 
-// Runtime-shape constructors are ordinary overloads.  The expected result type
-// selects both the element type and, for vectors, the orientation.
-Matrix<float64> zeros(usize size) {
-    return matrixFilled<float64>(size, size, 0.0);
+// Runtime-shape constructors are ordinary generic overloads.  The expected
+// result type selects the element type and, for vectors, the orientation.
+Matrix<T> zeros<T: Storable + Copy + Zero>(usize size) {
+    return matrixFilled<T>(size, size, 0);
 }
 
-Matrix<float32> zeros(usize size) {
-    return matrixFilled<float32>(size, size, float32(0.0));
+Matrix<T> zeros<T: Storable + Copy + Zero>(usize rowCount, usize columnCount) {
+    return matrixFilled<T>(rowCount, columnCount, 0);
 }
 
-Matrix<float64> zeros(usize rowCount, usize columnCount) {
-    return matrixFilled<float64>(rowCount, columnCount, 0.0);
+Vector<T,Row> zeros<T: Storable + Copy + Zero>(usize length) {
+    return vectorFilled<T,Row>(length, 0);
 }
 
-Matrix<float32> zeros(usize rowCount, usize columnCount) {
-    return matrixFilled<float32>(rowCount, columnCount, float32(0.0));
+Vector<T,Column> zeros<T: Storable + Copy + Zero>(usize length) {
+    return vectorFilled<T,Column>(length, 0);
 }
 
-Vector<float64,Row> zeros(usize length) {
-    return vectorFilled<float64,Row>(length, 0.0);
+Matrix<T> ones<T: Storable + Copy + One>(usize size) {
+    return matrixFilled<T>(size, size, 1);
 }
 
-Vector<float64,Column> zeros(usize length) {
-    return vectorFilled<float64,Column>(length, 0.0);
+Matrix<T> ones<T: Storable + Copy + One>(usize rowCount, usize columnCount) {
+    return matrixFilled<T>(rowCount, columnCount, 1);
 }
 
-Vector<float32,Row> zeros(usize length) {
-    return vectorFilled<float32,Row>(length, float32(0.0));
+Vector<T,Row> ones<T: Storable + Copy + One>(usize length) {
+    return vectorFilled<T,Row>(length, 1);
 }
 
-Vector<float32,Column> zeros(usize length) {
-    return vectorFilled<float32,Column>(length, float32(0.0));
+Vector<T,Column> ones<T: Storable + Copy + One>(usize length) {
+    return vectorFilled<T,Column>(length, 1);
 }
 
-Matrix<float64> ones(usize size) {
-    return matrixFilled<float64>(size, size, 1.0);
-}
-
-Matrix<float32> ones(usize size) {
-    return matrixFilled<float32>(size, size, float32(1.0));
-}
-
-Matrix<float64> ones(usize rowCount, usize columnCount) {
-    return matrixFilled<float64>(rowCount, columnCount, 1.0);
-}
-
-Matrix<float32> ones(usize rowCount, usize columnCount) {
-    return matrixFilled<float32>(rowCount, columnCount, float32(1.0));
-}
-
-Vector<float64,Row> ones(usize length) {
-    return vectorFilled<float64,Row>(length, 1.0);
-}
-
-Vector<float64,Column> ones(usize length) {
-    return vectorFilled<float64,Column>(length, 1.0);
-}
-
-Vector<float32,Row> ones(usize length) {
-    return vectorFilled<float32,Row>(length, float32(1.0));
-}
-
-Vector<float32,Column> ones(usize length) {
-    return vectorFilled<float32,Column>(length, float32(1.0));
-}
-
-Matrix<float64> identity(usize size) {
-    Matrix<float64> result = zeros(size, size);
+Matrix<T> identity<T: Storable + Copy + Zero + One>(usize size) {
+    Matrix<T> result = zeros<T>(size, size);
     usize index = 1;
     while (index <= size) {
-        result[index,index] = 1.0;
-        index = index + 1;
-    }
-    return result;
-}
-
-Matrix<float32> identity(usize size) {
-    Matrix<float32> result = zeros(size, size);
-    usize index = 1;
-    while (index <= size) {
-        result[index,index] = float32(1.0);
+        result[index,index] = 1;
         index = index + 1;
     }
     return result;
