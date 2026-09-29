@@ -310,6 +310,87 @@ Matrix<T> solve<T: IEEEFloat>(
     return solve(factor, B);
 }
 
+// A lower-triangular Cholesky factor with A = L L^T.
+struct Cholesky<T: Storable> {
+    Matrix<T> L;
+}
+
+public class NotSymmetricMatrixException : Exception {
+    public init() {}
+}
+
+public class NotPositiveDefiniteException : Exception {
+    public init() {}
+}
+
+// Checked, in-place Cholesky factorization for the IEEE floating-point types.
+Cholesky<T> cholesky<T: IEEEFloat>(Matrix<T> A) {
+    shapeGuard(rows(A) == columns(A));
+
+    T zero = 0;
+    usize n = rows(A);
+    usize i = 1;
+    while (i <= n) {
+        T diagonal = A[i,i];
+        if (!((diagonal - diagonal) == zero)) {
+            throw NotPositiveDefiniteException();
+        }
+
+        usize j = 1;
+        while (j < i) {
+            T lower = A[i,j];
+            T upper = A[j,i];
+            if (!((lower - lower) == zero)) {
+                throw NotPositiveDefiniteException();
+            }
+            if (!((upper - upper) == zero)) {
+                throw NotPositiveDefiniteException();
+            }
+            if (!(lower == upper)) {
+                throw NotSymmetricMatrixException();
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    i = 1;
+    while (i <= n) {
+        usize j = 1;
+        while (j <= i) {
+            T value = A[i,j];
+            usize k = 1;
+            while (k < j) {
+                value = value - A[i,k] * A[j,k];
+                k = k + 1;
+            }
+
+            if (i == j) {
+                if (!((value - value) == zero) || !(value > zero)) {
+                    throw NotPositiveDefiniteException();
+                }
+                A[i,i] = sqrt(value);
+            }
+            else {
+                A[i,j] = value / A[j,j];
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+
+    i = 1;
+    while (i <= n) {
+        usize j = i + 1;
+        while (j <= n) {
+            A[i,j] = zero;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return Cholesky<T>(A);
+}
+
 // A materialized QR factorization.  Q is m by m and R is m by n.
 struct QR<T: Storable> {
     Matrix<T> Q;

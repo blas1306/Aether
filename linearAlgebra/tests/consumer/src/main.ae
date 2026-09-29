@@ -8,6 +8,10 @@ la.QR<T> genericQR<T: IEEEFloat>(Matrix<T> A) {
     return la.qr(A);
 }
 
+la.Cholesky<T> genericCholesky<T: IEEEFloat>(Matrix<T> A) {
+    return la.cholesky(A);
+}
+
 int filled64(MatrixView<float64> value, float64 expected) {
     usize i = 1;
     while (i <= rows(value)) {
@@ -87,6 +91,52 @@ int validate32(MatrixView<float32> expected, la.QR<float32> factor, float32 tole
             float32 wanted = float32(0.0);
             if (i == j) { wanted = float32(1.0); }
             if (abs(orthogonal[i,j] - wanted) > tolerance) { return 5; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+int validateCholesky64(MatrixView<float64> expected, la.Cholesky<float64> factor, float64 tolerance) {
+    if (rows(factor.L) != rows(expected) || columns(factor.L) != columns(expected)) { return 1; }
+    usize i = 1;
+    while (i <= rows(expected)) {
+        if (!(factor.L[i,i] > 0.0) || !((factor.L[i,i] - factor.L[i,i]) == 0.0)) { return 2; }
+        usize j = 1;
+        while (j <= columns(expected)) {
+            if (j > i && (factor.L[i,j] != 0.0 || 1.0 / factor.L[i,j] != 1.0 / 0.0)) { return 3; }
+            if (!((factor.L[i,j] - factor.L[i,j]) == 0.0)) { return 4; }
+            float64 reconstructed = 0.0;
+            usize k = 1;
+            while (k <= i && k <= j) {
+                reconstructed = reconstructed + factor.L[i,k] * factor.L[j,k];
+                k = k + 1;
+            }
+            if (abs(reconstructed - expected[i,j]) > tolerance) { return 5; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+int validateCholesky32(MatrixView<float32> expected, la.Cholesky<float32> factor, float32 tolerance) {
+    if (rows(factor.L) != rows(expected) || columns(factor.L) != columns(expected)) { return 1; }
+    usize i = 1;
+    while (i <= rows(expected)) {
+        if (!(factor.L[i,i] > float32(0.0)) || !((factor.L[i,i] - factor.L[i,i]) == float32(0.0))) { return 2; }
+        usize j = 1;
+        while (j <= columns(expected)) {
+            if (j > i && (factor.L[i,j] != float32(0.0) || float32(1.0) / factor.L[i,j] != float32(1.0) / float32(0.0))) { return 3; }
+            if (!((factor.L[i,j] - factor.L[i,j]) == float32(0.0))) { return 4; }
+            float32 reconstructed = float32(0.0);
+            usize k = 1;
+            while (k <= i && k <= j) {
+                reconstructed = reconstructed + factor.L[i,k] * factor.L[j,k];
+                k = k + 1;
+            }
+            if (abs(reconstructed - expected[i,j]) > tolerance) { return 5; }
             j = j + 1;
         }
         i = i + 1;
@@ -952,6 +1002,13 @@ int testFormatBorrowLU() {
     println("Q = ${qrf.Q}");
     println("R = ${qrf.R}");
 
+    Matrix<float64> positive64 = [4.0,2.0;2.0,5.0];
+    var cholesky64 = la.cholesky(positive64);
+    println("L = ${cholesky64.L}");
+    Matrix<float32> positive32 = [float32(4.0),float32(2.0);float32(2.0),float32(5.0)];
+    var cholesky32 = la.cholesky(positive32);
+    println("L32 = ${cholesky32.L}");
+
     if (abs(x[1] - 1.0) > 1e-12 || abs(x[2] - 2.0) > 1e-12) { return 1; }
     if (abs(d + 2.0) > 1e-12) { return 2; }
     if (factor.permutationSign != -1 || factor.U[1,1] != 2.0) { return 3; }
@@ -1005,6 +1062,59 @@ int testQR32Coverage() {
     Vector<float32,Row> threeColumnsExpected = [float32(1.0),float32(2.0),float32(3.0)];
     Matrix<float32> zeroRowsExpected = noRowsExpected * threeColumnsExpected;
     if (validate32(matrix_view(zeroRowsExpected), la.qr(zeroRows), tolerance) != 0) { return 9; }
+    return 0;
+}
+
+int testCholesky64() {
+    Matrix<float64> empty = la.zeros(0,0);
+    Matrix<float64> emptyExpected = la.zeros(0,0);
+    if (validateCholesky64(matrix_view(emptyExpected), la.cholesky(empty), 1e-12) != 0) { return 1; }
+
+    Matrix<float64> scalar = [9.0];
+    Matrix<float64> scalarExpected = [9.0];
+    if (validateCholesky64(matrix_view(scalarExpected), la.cholesky(scalar), 1e-12) != 0) { return 2; }
+    Matrix<float64> identity = [1.0,0.0,0.0;0.0,1.0,0.0;0.0,0.0,1.0];
+    Matrix<float64> identityExpected = [1.0,0.0,0.0;0.0,1.0,0.0;0.0,0.0,1.0];
+    if (validateCholesky64(matrix_view(identityExpected), la.cholesky(identity), 1e-12) != 0) { return 3; }
+    Matrix<float64> diagonal = [4.0,0.0,0.0;0.0,9.0,0.0;0.0,0.0,16.0];
+    Matrix<float64> diagonalExpected = [4.0,0.0,0.0;0.0,9.0,0.0;0.0,0.0,16.0];
+    if (validateCholesky64(matrix_view(diagonalExpected), la.cholesky(diagonal), 1e-12) != 0) { return 4; }
+    Matrix<float64> dense = [4.0,12.0,-16.0;12.0,37.0,-43.0;-16.0,-43.0,98.0];
+    Matrix<float64> denseExpected = [4.0,12.0,-16.0;12.0,37.0,-43.0;-16.0,-43.0,98.0];
+    if (validateCholesky64(matrix_view(denseExpected), la.cholesky(dense), 1e-11) != 0) { return 5; }
+    Matrix<float64> general = [25.0,15.0,-5.0;15.0,18.0,0.0;-5.0,0.0,11.0];
+    Matrix<float64> generalExpected = [25.0,15.0,-5.0;15.0,18.0,0.0;-5.0,0.0,11.0];
+    if (validateCholesky64(matrix_view(generalExpected), genericCholesky(general), 1e-11) != 0) { return 6; }
+    Matrix<float64> conditioned = [1.0,0.999999;0.999999,1.0];
+    Matrix<float64> conditionedExpected = [1.0,0.999999;0.999999,1.0];
+    if (validateCholesky64(matrix_view(conditionedExpected), la.cholesky<float64>(conditioned), 1e-11) != 0) { return 7; }
+
+    int caughtSymmetric = 0;
+    Matrix<float64> asymmetric = [2.0,1.0;0.0,2.0];
+    try { var unused = la.cholesky(asymmetric); }
+    catch (la.NotSymmetricMatrixException e) { caughtSymmetric = 1; }
+    if (caughtSymmetric != 1) { return 8; }
+    int caughtPositive = 0;
+    Matrix<float64> indefinite = [1.0,2.0;2.0,1.0];
+    try { var unused = la.cholesky(indefinite); }
+    catch (la.NotPositiveDefiniteException e) { caughtPositive = 1; }
+    if (caughtPositive != 1) { return 9; }
+    return 0;
+}
+
+int testCholesky32() {
+    Matrix<float32> empty = la.zeros(0,0);
+    Matrix<float32> emptyExpected = la.zeros(0,0);
+    if (validateCholesky32(matrix_view(emptyExpected), la.cholesky(empty), float32(2e-5)) != 0) { return 1; }
+    Matrix<float32> dense = [float32(4.0),float32(12.0),float32(-16.0);float32(12.0),float32(37.0),float32(-43.0);float32(-16.0),float32(-43.0),float32(98.0)];
+    Matrix<float32> denseExpected = [float32(4.0),float32(12.0),float32(-16.0);float32(12.0),float32(37.0),float32(-43.0);float32(-16.0),float32(-43.0),float32(98.0)];
+    if (validateCholesky32(matrix_view(denseExpected), la.cholesky(dense), float32(2e-4)) != 0) { return 2; }
+    Matrix<float32> diagonal = [float32(4.0),float32(0.0);float32(-0.0),float32(9.0)];
+    Matrix<float32> diagonalExpected = [float32(4.0),float32(0.0);float32(-0.0),float32(9.0)];
+    if (validateCholesky32(matrix_view(diagonalExpected), la.cholesky<float32>(diagonal), float32(2e-5)) != 0) { return 3; }
+    Matrix<float32> conditioned = [float32(1.0),float32(0.99);float32(0.99),float32(1.0)];
+    Matrix<float32> conditionedExpected = [float32(1.0),float32(0.99);float32(0.99),float32(1.0)];
+    if (validateCholesky32(matrix_view(conditionedExpected), genericCholesky(conditioned), float32(2e-5)) != 0) { return 4; }
     return 0;
 }
 
@@ -1197,5 +1307,9 @@ int main() {
     if (formatBorrowStatus != 0) { return 260 + formatBorrowStatus; }
     int genericLUStatus = testGenericLUForwarding();
     if (genericLUStatus != 0) { return 270 + genericLUStatus; }
+    int cholesky64Status = testCholesky64();
+    if (cholesky64Status != 0) { return 300 + cholesky64Status; }
+    int cholesky32Status = testCholesky32();
+    if (cholesky32Status != 0) { return 320 + cholesky32Status; }
     return 0;
 }
