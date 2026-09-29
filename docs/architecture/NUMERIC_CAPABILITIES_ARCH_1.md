@@ -782,17 +782,22 @@ El orden posterior queda cerrado así:
    `linearAlgebra`.
 6. **Constructores.** Migrar `zeros`, `ones`, `identity`; preservar overloads de
    Matrix/Row/Column e inferencia expected-result.
-7. **det desde LU.** Migrar usando `one` y `Negate` en vez de cast desde
+7. **LU.** Migrar primero el kernel completo y comparar con los overloads
+   oracles antes de retirarlos.
+8. **det desde LU.** Migrar usando `one` y `Negate` en vez de cast desde
    `permutationSign`; calificar resultados bitwise/IEEE.
-8. **solve Vector y Matrix.** Migrar ambos pares factor/matrix conservando shape
+9. **solve Vector y Matrix.** Migrar ambos pares factor/matrix conservando shape
    guards, allocations y exception behavior.
-9. **LU.** Migrar el kernel completo y comparar con los overloads oracles antes
-   de retirarlos.
 10. **QR.** Migrar Householder, agregar `qr<float32>`, convertir `qrFloat32` en
     wrapper y preservar operación/order exactos.
-11. **Limpieza y regresión.** Eliminar sólo kernels concretos redundantes,
-    actualizar docs y correr qualification completa.
+11. **Closure.** Eliminar sólo kernels concretos redundantes, actualizar docs y
+    correr qualification conjunta completa.
 12. **Cholesky.** Recién después, abrir su milestone de arquitectura/algoritmo.
+
+LU debe preceder `det` y `solve`: el resolver elige identidades de calls durante
+el análisis paramétrico. No difiere overload resolution hasta después de la
+monomorfización, de modo que un body genérico que llama a `lu(A)` necesita que
+`lu` ya sea una única declaración genérica resoluble.
 
 Cada familia se cambia atómicamente. Mientras se compara contra el oracle, el
 kernel histórico puede vivir bajo un nombre test-only/interno no visible al

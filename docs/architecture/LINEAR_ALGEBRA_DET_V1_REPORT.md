@@ -1,6 +1,12 @@
 # LINEAR-ALGEBRA-DET-V1 — reporte de implementación
 
-Estado: **IMPLEMENTADO**, 2026-09-28.
+Estado: **IMPLEMENTADO; API HISTÓRICA SUPERADA**, 2026-09-28.
+
+Este reporte conserva el contrato y el oráculo del determinant concreto
+original. La autoridad vigente para la API deduplicada y para el desbloqueo de
+la migración es
+[LINEAR-ALGEBRA-GENERIC-DET-V1](LINEAR_ALGEBRA_GENERIC_DET_V1_REPORT.md): `det`
+ya no está bloqueado y expone dos overloads genéricos `T: IEEEFloat`.
 
 Autoridad relacionada:
 

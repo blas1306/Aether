@@ -173,12 +173,18 @@ El orden cerrado es:
 4. Abs/Sqrt en Core genérico;
 5. qualification completa del lenguaje;
 6. constructors;
-7. det;
-8. solve Vector/Matrix;
-9. LU;
+7. LU;
+8. det;
+9. solve Vector/Matrix;
 10. QR y wrapper `qrFloat32`;
-11. eliminación de kernels redundantes y regresión completa;
+11. closure: eliminación de kernels redundantes y regresión completa;
 12. recién entonces, milestone Cholesky.
+
+La dependencia LU → det/solve no es sólo algorítmica. El resolver fija la
+identidad de cada call durante el análisis paramétrico y no repite overload
+resolution tras monomorfizar. Por eso `lu` tuvo que ser genérico antes de que
+los bodies genéricos de `det(Matrix<T>)` y `solve(Matrix<T>, ...)` pudieran
+resolver `lu(A)` sin rediseñar el resolver.
 
 Los tests actuales de constructors, LU, solve, det y QR serán oracles. La
 qualification exigirá equivalencia float32/float64, operación/order y valores
