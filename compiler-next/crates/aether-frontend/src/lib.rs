@@ -41,21 +41,22 @@ pub use hir::{
     LogicalSourceKey, LoopId, MatchMode, MathElementOp, MathShapeCheck, MatrixAddArgumentOwnership,
     MatrixAddCapacityRecipe, MatrixAddContract, MatrixAddFailureOrder, MatrixAddMetadataRecipe,
     MatrixAddShapeRecipe, MatrixProductExtent, ModuleId, ModuleInfo, MutationEffect,
-    NonNullProofId, NullableLayout, NullablePayloadAccess, OriginKey, PackageId,
-    PackageInstanceKey, PackageKey, PackagePath, ParameterSignature, ParsedModule, ParsedProgram,
-    ResolvedImport, ScalarSide, SliceAssignmentContract, SliceAssignmentSnapshot, SourceUnitKey,
-    StructInfo, StructuralMutation, SymbolKey, TypeAliasInfo, TypeLayout, TypedHir, VariantInfo,
-    VariantPayloadInfo, analyze, analyze_bodies, analyze_bodies_for_target, classify_enum_equality,
-    collect_library_program_signatures, collect_program_signatures, collect_signatures,
-    format_type, layout_of, nullable_layout_of, verify_hir,
+    NonNullProofId, NullableLayout, NullablePayloadAccess, OriginKey, OutputArgumentKind,
+    PackageId, PackageInstanceKey, PackageKey, PackagePath, ParameterSignature, ParsedModule,
+    ParsedProgram, ResolvedImport, ScalarSide, SliceAssignmentContract, SliceAssignmentSnapshot,
+    SourceUnitKey, StructInfo, StructuralMutation, SymbolKey, TypeAliasInfo, TypeLayout, TypedHir,
+    VariantInfo, VariantPayloadInfo, analyze, analyze_bodies, analyze_bodies_for_target,
+    classify_enum_equality, collect_library_program_signatures, collect_program_signatures,
+    collect_signatures, format_type, layout_of, nullable_layout_of, verify_hir,
 };
 pub use lexer::{Token, TokenKind, lex};
 pub use parser::parse;
 pub use strings::{
-    InterpolationAccess, InterpolationConversion, InterpolationFragment, InterpolationSizePlan,
-    MathematicalAggregateFormat, MathematicalAggregateKind, MathematicalEmptyRepresentation,
-    MathematicalTraversal, ScalarInterpolationConversion, StringOp, StringOwnership,
-    mathematical_format, scalar_interpolation_conversion, verify_string_op,
+    FormatAdmission, InterpolationAccess, InterpolationConversion, InterpolationFragment,
+    InterpolationSizePlan, MathematicalAggregateFormat, MathematicalAggregateKind,
+    MathematicalEmptyRepresentation, MathematicalTraversal, ScalarInterpolationConversion,
+    StringOp, StringOwnership, format_admission, mathematical_format,
+    scalar_interpolation_conversion, verify_string_op,
 };
 pub use text::{TextOp, verify_text_op};
 pub use types::{

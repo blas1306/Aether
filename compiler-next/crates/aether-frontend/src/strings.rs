@@ -50,6 +50,27 @@ pub enum InterpolationConversion {
     MathematicalAggregateFormat(MathematicalAggregateFormat),
 }
 
+/// The single closed FORMAT admission result shared by interpolation holes and
+/// direct-value output.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FormatAdmission {
+    StringBorrow,
+    CanonicalScalarFormat,
+    MathematicalAggregateFormat(MathematicalAggregateFormat),
+}
+
+impl From<FormatAdmission> for InterpolationConversion {
+    fn from(value: FormatAdmission) -> Self {
+        match value {
+            FormatAdmission::StringBorrow => Self::StringBorrow,
+            FormatAdmission::CanonicalScalarFormat => Self::CanonicalScalarFormat,
+            FormatAdmission::MathematicalAggregateFormat(recipe) => {
+                Self::MathematicalAggregateFormat(recipe)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StringOwnership {
     Fresh,
@@ -271,24 +292,10 @@ pub fn verify_string_op<O>(
                             }
                             _ => {}
                         }
-                        let expected = if *formatted_type == TypeId::STRING {
-                            InterpolationConversion::StringBorrow
-                        } else if matches!(
-                            types.get(*formatted_type),
-                            Some(
-                                TypeData::Bool
-                                    | TypeData::Char
-                                    | TypeData::Integer(_)
-                                    | TypeData::Float(_)
-                            )
-                        ) {
-                            InterpolationConversion::CanonicalScalarFormat
-                        } else if let Some(recipe) = mathematical_format(types, *formatted_type) {
-                            InterpolationConversion::MathematicalAggregateFormat(recipe)
-                        } else {
+                        let Some(expected) = format_admission(types, *formatted_type) else {
                             return Err("interpolation hole has an unsupported type".into());
                         };
-                        if *conversion != expected {
+                        if *conversion != expected.into() {
                             return Err("interpolation conversion kind is invalid".into());
                         }
                     }
@@ -301,6 +308,20 @@ pub fn verify_string_op<O>(
         return Err("string operation result type is invalid".into());
     }
     Ok(())
+}
+
+#[must_use]
+pub fn format_admission(types: &TypeArena, ty: TypeId) -> Option<FormatAdmission> {
+    if ty == TypeId::STRING {
+        Some(FormatAdmission::StringBorrow)
+    } else if matches!(
+        types.get(ty),
+        Some(TypeData::Bool | TypeData::Char | TypeData::Integer(_) | TypeData::Float(_))
+    ) {
+        Some(FormatAdmission::CanonicalScalarFormat)
+    } else {
+        mathematical_format(types, ty).map(FormatAdmission::MathematicalAggregateFormat)
+    }
 }
 
 #[must_use]

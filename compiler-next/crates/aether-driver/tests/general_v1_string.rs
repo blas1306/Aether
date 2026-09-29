@@ -300,8 +300,6 @@ fn out_of_scope_text_surfaces_are_rejected() {
         "int main(){Buffer<string> x=Buffer<string>(1,\"a\");}",
         "int main(){Matrix<string> x={{\"a\"}};}",
         "int main(){Vector<string,Row> x={\"a\"};}",
-        "int main(){print(1);}",
-        "int main(){println(true);}",
     ];
     for source in cases {
         assert!(

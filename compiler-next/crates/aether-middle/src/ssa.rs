@@ -3460,6 +3460,24 @@ fn verify_format_borrow_regions(
                         format,
                         reference: SsaOperand::Value(value),
                     } if *format == metadata && *value == reference => true,
+                    SsaOp::Load {
+                        place:
+                            SsaPlace {
+                                base:
+                                    SsaPlaceBase::Dereference {
+                                        reference: SsaOperand::Value(value),
+                                        mutable: false,
+                                    },
+                                projections,
+                            },
+                    } if *value == reference
+                        && projections.is_empty()
+                        && instruction.ty == TypeId::STRING
+                        && metadata.pointee_type == TypeId::STRING
+                        && matches!(metadata.source, FormatBorrowSourceKind::Temporary(_)) =>
+                    {
+                        true
+                    }
                     _ => false,
                 };
                 let uses = op_operands(&instruction.op)
@@ -3472,7 +3490,7 @@ fn verify_format_borrow_regions(
                     ));
                 }
                 match &instruction.op {
-                    SsaOp::String(_) if allowed => format_uses += 1,
+                    SsaOp::String(_) | SsaOp::Load { .. } if allowed => format_uses += 1,
                     SsaOp::FormatEndBorrow { .. } if allowed => end_uses += 1,
                     _ => {}
                 }

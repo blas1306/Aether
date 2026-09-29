@@ -1713,8 +1713,60 @@ impl Builder<'_> {
                     function,
                     value,
                     newline: _,
+                    argument_kind,
                 } => {
-                    let (source, owner) = self.lower_string_read(value);
+                    let mut direct_roots = Vec::new();
+                    let (source, owner) = match argument_kind {
+                        aether_frontend::OutputArgumentKind::ExistingString => {
+                            if matches!(value.kind, HirExprKind::FormatScopedSharedBorrow { .. }) {
+                                let format_borrow_start = self.active_format_borrows.len();
+                                let temporary_active_start = self.active_temporary_owners.len();
+                                let (reference, metadata, root) = self.lower_format_borrow(value);
+                                let destination = self.temporary(TypeId::STRING);
+                                self.assign(
+                                    Place {
+                                        base: PlaceBase::Local(destination),
+                                        projections: Vec::new(),
+                                    },
+                                    Rvalue::Load(Place {
+                                        base: PlaceBase::Dereference {
+                                            reference: reference.clone(),
+                                            mutable: false,
+                                        },
+                                        projections: Vec::new(),
+                                    }),
+                                    value.span,
+                                );
+                                self.emit_format_end_borrow(metadata, reference, value.span);
+                                self.active_format_borrows.truncate(format_borrow_start);
+                                self.active_temporary_owners
+                                    .truncate(temporary_active_start);
+                                if let Some(root) = root {
+                                    direct_roots.push(root);
+                                }
+                                (Operand::Local(destination), None)
+                            } else {
+                                self.lower_string_read(value)
+                            }
+                        }
+                        aether_frontend::OutputArgumentKind::DirectFormat { .. } => {
+                            let HirExprKind::String(op) = &value.kind else {
+                                unreachable!("verified direct format plan")
+                            };
+                            let source = self.lower_string(
+                                op,
+                                value.ty,
+                                value.span,
+                                Some(&mut direct_roots),
+                            );
+                            (source.clone(), Some(operand_place(&source)))
+                        }
+                    };
+                    for root in &direct_roots {
+                        if let Some(local) = place_root_local(root) {
+                            self.active_temporary_owners.push(local);
+                        }
+                    }
                     if let Some(owner) = &owner
                         && let Some(local) = place_root_local(owner)
                     {
@@ -1735,6 +1787,10 @@ impl Builder<'_> {
                     if let Some(owner) = owner {
                         self.active_temporary_owners.pop();
                         self.emit_drop(owner, statement.span);
+                    }
+                    for root in direct_roots {
+                        self.active_temporary_owners.pop();
+                        self.emit_drop(root, statement.span);
                     }
                 }
                 HirStmtKind::ShapeGuard { condition, trap } => {
@@ -2977,7 +3033,7 @@ impl Builder<'_> {
         match &expression.kind {
             HirExprKind::Unit => Operand::Unit,
             HirExprKind::Class(op) => self.lower_class(op, expression.ty, expression.span),
-            HirExprKind::String(op) => self.lower_string(op, expression.ty, expression.span),
+            HirExprKind::String(op) => self.lower_string(op, expression.ty, expression.span, None),
             HirExprKind::Text { call_site, op } => {
                 self.lower_text(*call_site, op, expression.ty, expression.span)
             }
@@ -4483,6 +4539,7 @@ impl Builder<'_> {
         op: &aether_frontend::StringOp<HirExpr>,
         ty: TypeId,
         span: Span,
+        mut deferred_format_owners: Option<&mut Vec<Place>>,
     ) -> Operand {
         use aether_frontend::StringOp;
         let temporary_active_start = self.active_temporary_owners.len();
@@ -4601,8 +4658,12 @@ impl Builder<'_> {
         self.active_format_borrows.truncate(format_borrow_start);
         self.active_temporary_owners
             .truncate(temporary_active_start);
-        for owner in owners {
-            self.emit_drop(owner, span);
+        if let Some(deferred) = deferred_format_owners.as_mut() {
+            deferred.extend(owners);
+        } else {
+            for owner in owners {
+                self.emit_drop(owner, span);
+            }
         }
         Operand::Local(destination)
     }
@@ -6046,6 +6107,23 @@ fn verify_format_borrow_regions(
                         format,
                         reference: Operand::Local(value),
                     } if *format == metadata && *value == reference => true,
+                    Rvalue::Load(Place {
+                        base:
+                            PlaceBase::Dereference {
+                                reference: Operand::Local(value),
+                                mutable: false,
+                            },
+                        projections,
+                    }) if *value == reference
+                        && projections.is_empty()
+                        && metadata.pointee_type == TypeId::STRING
+                        && matches!(metadata.source, FormatBorrowSourceKind::Temporary(_))
+                        && place_root_local(&instruction.destination).is_some_and(|local| {
+                            function.locals[local.0 as usize].ty == TypeId::STRING
+                        }) =>
+                    {
+                        true
+                    }
                     _ => false,
                 };
                 let uses = crate::ssa::rvalue_locals(function, &instruction.value)
@@ -6058,7 +6136,7 @@ fn verify_format_borrow_regions(
                     ));
                 }
                 match &instruction.value {
-                    Rvalue::String(_) if allowed => format_uses += 1,
+                    Rvalue::String(_) | Rvalue::Load(_) if allowed => format_uses += 1,
                     Rvalue::FormatEndBorrow { .. } if allowed => end_uses += 1,
                     _ => {}
                 }

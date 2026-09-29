@@ -192,6 +192,11 @@ pub struct CallSiteId(pub u32);
 /// Function-local interpolation identity, derived from its source location.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FormatSiteId(pub u32);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutputArgumentKind {
+    ExistingString,
+    DirectFormat { format_site: FormatSiteId },
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParameterSignature {
     pub name: String,
@@ -965,6 +970,7 @@ pub enum HirStmtKind {
         function: crate::CoreFunction,
         value: HirExpr,
         newline: bool,
+        argument_kind: OutputArgumentKind,
     },
     /// Source `shapeGuard(condition);`; deliberately not an expression/call.
     ShapeGuard {
@@ -5190,10 +5196,12 @@ impl Monomorphizer<'_> {
                             function,
                             value,
                             newline,
+                            argument_kind,
                         } => HirStmtKind::StringOutput {
                             function: function.clone(),
                             value: self.substitute_expr(value, substitution)?,
                             newline: *newline,
+                            argument_kind: *argument_kind,
                         },
                         HirStmtKind::ShapeGuard { condition, trap } => HirStmtKind::ShapeGuard {
                             condition: self.substitute_expr(condition, substitution)?,
@@ -10230,11 +10238,96 @@ impl Analyzer<'_> {
         {
             if !type_arguments.is_empty() || args.len() != 1 {
                 return Err(vec![type_error(
-                    "print/println accept exactly one string and no type arguments",
+                    "print/println accept exactly one value and no type arguments",
                     expression.span,
                 )]);
             }
-            let value = self.string_borrow_operand(&args[0])?;
+            let argument = &args[0];
+            if let AstExprKind::Name(name) = &argument.kind
+                && let Some(local) = self.lookup(name)
+                && self.null_states.get(&local) == Some(&NullState::NonNull)
+                && self
+                    .types
+                    .nullable_payload(self.locals[local.0 as usize].ty)
+                    == Some(TypeId::STRING)
+            {
+                let value = self.string_borrow_operand(argument)?;
+                return Ok(HirStmtKind::StringOutput {
+                    function: crate::CoreFunction::resolve(
+                        crate::prelude_symbol(callee).expect("checked Core output symbol"),
+                        TypeId::STRING,
+                    ),
+                    value,
+                    newline: callee == "println",
+                    argument_kind: OutputArgumentKind::ExistingString,
+                });
+            }
+            let format_site = FormatSiteId(u32::try_from(argument.span.start).unwrap_or(u32::MAX));
+            let synthetic = AstExpr {
+                kind: AstExprKind::Interpolation(vec![crate::AstInterpolationFragment::Hole {
+                    expression: argument.clone(),
+                    span: argument.span,
+                }]),
+                span: argument.span,
+            };
+            let formatted = self
+                .expression(&synthetic, Some(TypeId::STRING))
+                .map_err(|mut diagnostics| {
+                    for diagnostic in &mut diagnostics {
+                        if diagnostic.code == "E0340" {
+                            write!(diagnostic.message, " as the argument of `{callee}`").unwrap();
+                        }
+                    }
+                    diagnostics
+                })?
+                .expr;
+            let HirExprKind::String(plan) = formatted.kind else {
+                unreachable!("synthetic interpolation always produces a string plan")
+            };
+            let crate::StringOp::Interpolate { fragments, .. } = plan.as_ref() else {
+                unreachable!("synthetic interpolation always produces Interpolate")
+            };
+            let conversion = match &fragments[0] {
+                crate::InterpolationFragment::Hole { conversion, .. } => *conversion,
+                crate::InterpolationFragment::Text { .. } => unreachable!("one synthetic hole"),
+            };
+            let (value, argument_kind) = if conversion
+                == crate::InterpolationConversion::StringBorrow
+            {
+                let crate::StringOp::Interpolate { mut fragments, .. } = *plan else {
+                    unreachable!()
+                };
+                let crate::InterpolationFragment::Hole { value, .. } = fragments.remove(0) else {
+                    unreachable!()
+                };
+                let value = match &value.kind {
+                    HirExprKind::FormatScopedSharedBorrow { source, .. } => match source {
+                        FormatBorrowSource::Place(place) => HirExpr {
+                            kind: match &place.base {
+                                HirPlaceBase::Local(local) if place.projections.is_empty() => {
+                                    HirExprKind::Local(*local)
+                                }
+                                _ => HirExprKind::Load(place.clone()),
+                            },
+                            ty: TypeId::STRING,
+                            span: argument.span,
+                        },
+                        FormatBorrowSource::Temporary(initializer) => *initializer.clone(),
+                        FormatBorrowSource::ProjectedTemporary { .. } => value,
+                    },
+                    _ => value,
+                };
+                (value, OutputArgumentKind::ExistingString)
+            } else {
+                (
+                    HirExpr {
+                        kind: HirExprKind::String(plan),
+                        ty: TypeId::STRING,
+                        span: argument.span,
+                    },
+                    OutputArgumentKind::DirectFormat { format_site },
+                )
+            };
             return Ok(HirStmtKind::StringOutput {
                 function: crate::CoreFunction::resolve(
                     crate::prelude_symbol(callee).expect("checked Core output symbol"),
@@ -10242,6 +10335,7 @@ impl Analyzer<'_> {
                 ),
                 value,
                 newline: callee == "println",
+                argument_kind,
             });
         }
         if !matches!(&expression.kind, AstExprKind::Call { callee, .. }
@@ -11379,17 +11473,8 @@ impl Analyzer<'_> {
                                 )
                             }
                         };
-                        let conversion = if formatted_type == TypeId::STRING {
-                            crate::InterpolationConversion::StringBorrow
-                        } else if crate::scalar_interpolation_conversion(self.types, formatted_type)
-                            == Some(crate::ScalarInterpolationConversion::CanonicalScalarFormat)
-                        {
-                            crate::InterpolationConversion::CanonicalScalarFormat
-                        } else if let Some(recipe) =
-                            crate::mathematical_format(self.types, formatted_type)
-                        {
-                            crate::InterpolationConversion::MathematicalAggregateFormat(recipe)
-                        } else {
+                        let Some(admission) = crate::format_admission(self.types, formatted_type)
+                        else {
                             return Err(vec![Diagnostic::new(
                                 "E0340",
                                 Phase::Semantic,
@@ -11401,6 +11486,7 @@ impl Analyzer<'_> {
                                 Some(*span),
                             )]);
                         };
+                        let conversion = admission.into();
                         plan.push(crate::InterpolationFragment::Hole {
                             value,
                             formatted_type,
@@ -16935,20 +17021,135 @@ fn verify_block(
                 function,
                 value,
                 newline,
+                argument_kind,
             } => {
-                verify_expr(value, f, sigs, structs, enums, types, fail)?;
-                let call = crate::CoreCall {
-                    function: function.clone(),
-                    arguments: vec![value.clone()],
+                let projected_string_borrow = if let HirExprKind::FormatScopedSharedBorrow {
+                    format_site,
+                    pointee_type,
+                    source: FormatBorrowSource::ProjectedTemporary { .. },
+                    ..
+                } = &value.kind
+                {
+                    if *pointee_type != TypeId::STRING {
+                        return Err(fail(
+                            "HIR output projected string borrow has the wrong pointee".into(),
+                        ));
+                    }
+                    verify_format_borrow(
+                        value,
+                        *format_site,
+                        0,
+                        f,
+                        sigs,
+                        structs,
+                        enums,
+                        types,
+                        fail,
+                    )?;
+                    true
+                } else {
+                    verify_expr(value, f, sigs, structs, enums, types, fail)?;
+                    false
                 };
                 if !matches!(
                     function.symbol,
                     crate::CoreSymbol::Print | crate::CoreSymbol::Println
                 ) || *newline != (function.symbol == crate::CoreSymbol::Println)
-                    || crate::verify_core_call(&call, TypeId::BOOL, types, |operand| Ok(operand.ty))
-                        .is_err()
+                    || *function != crate::CoreFunction::resolve(function.symbol, TypeId::STRING)
+                    || (!projected_string_borrow && value.ty != TypeId::STRING)
                 {
                     return Err(fail("HIR string output operand is not string".into()));
+                }
+                match argument_kind {
+                    OutputArgumentKind::ExistingString => {
+                        if projected_string_borrow {
+                            continue;
+                        }
+                        if let HirExprKind::String(op) = &value.kind
+                            && let crate::StringOp::Interpolate { fragments, .. } = op.as_ref()
+                            && fragments.len() == 1
+                            && matches!(
+                                &fragments[0],
+                                crate::InterpolationFragment::Hole { span, .. }
+                                    if *span == value.span
+                            )
+                        {
+                            return Err(fail(
+                                "HIR synthetic direct-format plan is mislabeled as an existing string"
+                                    .into(),
+                            ));
+                        }
+                    }
+                    OutputArgumentKind::DirectFormat { format_site } => {
+                        let HirExprKind::String(op) = &value.kind else {
+                            return Err(fail(
+                                "HIR direct-format output is not an interpolation plan".into(),
+                            ));
+                        };
+                        let crate::StringOp::Interpolate {
+                            fragments,
+                            ownership,
+                            size_plan,
+                        } = op.as_ref()
+                        else {
+                            return Err(fail(
+                                "HIR direct-format output is not an interpolation plan".into(),
+                            ));
+                        };
+                        if *ownership != crate::StringOwnership::Fresh
+                            || *size_plan != crate::InterpolationSizePlan::CheckedExact
+                            || fragments.len() != 1
+                        {
+                            return Err(fail(
+                                "HIR direct-format output plan is not one exact hole".into(),
+                            ));
+                        }
+                        let crate::InterpolationFragment::Hole {
+                            value: hole,
+                            formatted_type,
+                            access,
+                            conversion,
+                            ..
+                        } = &fragments[0]
+                        else {
+                            return Err(fail("HIR direct-format output contains text".into()));
+                        };
+                        let Some(admission) = crate::format_admission(types, *formatted_type)
+                        else {
+                            return Err(fail(
+                                "HIR direct-format output type is not FORMAT-admitted".into(),
+                            ));
+                        };
+                        if *formatted_type == TypeId::STRING || *conversion != admission.into() {
+                            return Err(fail(
+                                "HIR direct-format output conversion is incoherent".into(),
+                            ));
+                        }
+                        match access {
+                            crate::InterpolationAccess::CopyValue => {
+                                if hole.ty != *formatted_type
+                                    || matches!(hole.kind, HirExprKind::Move(_))
+                                {
+                                    return Err(fail(
+                                        "HIR direct-format copy access is invalid".into(),
+                                    ));
+                                }
+                            }
+                            crate::InterpolationAccess::SharedObservation => {
+                                verify_format_borrow(
+                                    hole,
+                                    *format_site,
+                                    0,
+                                    f,
+                                    sigs,
+                                    structs,
+                                    enums,
+                                    types,
+                                    fail,
+                                )?;
+                            }
+                        }
+                    }
                 }
             }
             HirStmtKind::ShapeGuard { condition, trap } => {
