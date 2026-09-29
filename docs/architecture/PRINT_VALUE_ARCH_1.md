@@ -1,6 +1,6 @@
 # PRINT-VALUE-ARCH-1 — output de un valor mediante FORMAT
 
-Estado: **ARQUITECTURA CERRADA; NO IMPLEMENTADA**, 2026-09-29.
+Estado: **ARQUITECTURA CERRADA; IMPLEMENTADA EN PRINT-VALUE-V1**, 2026-09-29.
 
 Este milestone amplía la superficie Core de `print` y `println` para aceptar un
 único valor perteneciente al perfil FORMAT activo. La representación, la
