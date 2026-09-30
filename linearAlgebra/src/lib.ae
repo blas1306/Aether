@@ -360,6 +360,18 @@ struct Cholesky<T: Storable> {
     Matrix<T> L;
 }
 
+T det<T: IEEEFloat>(ref Cholesky<T> factor) {
+    shapeGuard(rows((*factor).L) == columns((*factor).L));
+    usize n = rows((*factor).L);
+    T p = 1;
+    usize i = 1;
+    while (i <= n) {
+        p = p * (*factor).L[i,i];
+        i = i + 1;
+    }
+    return p * p;
+}
+
 public class NotSymmetricMatrixException : Exception {
     public init() {}
 }

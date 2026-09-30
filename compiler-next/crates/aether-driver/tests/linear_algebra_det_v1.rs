@@ -94,7 +94,7 @@ fn det_has_two_preserving_overloads_and_one_in_place_entry_point() {
             .count(),
         1
     );
-    assert_eq!(LIBRARY.matches(" det<").count(), 2);
+    assert_eq!(LIBRARY.matches(" det<").count(), 3);
     assert_eq!(
         LIBRARY
             .matches("T detInPlace<T: IEEEFloat>(Matrix<T> A)")

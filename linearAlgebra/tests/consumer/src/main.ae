@@ -1200,6 +1200,30 @@ int testCholeskySolve32() {
     return 0;
 }
 
+int testCholeskyDetConsumer() {
+    Matrix<float64> A64 = [4.0,2.0;2.0,5.0];
+    var ch64 = la.cholesky(A64);
+    var d64 = la.det(ch64);
+    println(ch64.L);
+    println(d64);
+    Vector<float64,Column> b64 = [8.0,12.0];
+    var x64 = la.solve(ch64, b64);
+    println(x64);
+    if (abs(d64 - 16.0) > 1e-12 || x64[1] != 1.0 || x64[2] != 2.0) { return 1; }
+
+    Matrix<float32> A32 = [float32(4.0),float32(2.0);float32(2.0),float32(5.0)];
+    var ch32 = la.cholesky(A32);
+    var d32 = la.det(ch32);
+    println(ch32.L);
+    println(d32);
+    Vector<float32,Column> b32 = [float32(8.0),float32(12.0)];
+    var x32 = la.solve(ch32, b32);
+    println(x32);
+    if (abs(d32 - float32(16.0)) > float32(2e-5)) { return 2; }
+    if (abs(x32[1] - float32(1.0)) > float32(2e-5) || abs(x32[2] - float32(2.0)) > float32(2e-5)) { return 3; }
+    return 0;
+}
+
 int main() {
     Matrix<float64> zeroSquare = la.zeros(3);
     Matrix<float64> zeroTall = la.zeros(4,2);
@@ -1397,5 +1421,7 @@ int main() {
     if (choleskySolve64Status != 0) { return 340 + choleskySolve64Status; }
     int choleskySolve32Status = testCholeskySolve32();
     if (choleskySolve32Status != 0) { return 360 + choleskySolve32Status; }
+    int choleskyDetStatus = testCholeskyDetConsumer();
+    if (choleskyDetStatus != 0) { return 380 + choleskyDetStatus; }
     return 0;
 }
