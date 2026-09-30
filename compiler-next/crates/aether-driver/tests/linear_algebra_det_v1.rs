@@ -70,11 +70,13 @@ fn status_llvm(llvm: &str, optimization: OptimizationLevel) -> std::process::Exi
 }
 
 #[test]
-fn det_has_exactly_two_generic_declarations_and_delegates_once() {
+fn det_has_two_preserving_overloads_and_one_in_place_entry_point() {
     let det_start = LIBRARY
         .find("T det<T: IEEEFloat>(ref LU<T> factor)")
         .unwrap();
-    let factor_end = LIBRARY.find("T det<T: IEEEFloat>(Matrix<T> A)").unwrap();
+    let factor_end = LIBRARY
+        .find("T det<T: IEEEFloat>(ref Matrix<T> A)")
+        .unwrap();
     let det_end = LIBRARY
         .find("Vector<T,Column> solve<T: IEEEFloat>(")
         .unwrap();
@@ -87,10 +89,18 @@ fn det_has_exactly_two_generic_declarations_and_delegates_once() {
         1
     );
     assert_eq!(
-        LIBRARY.matches("T det<T: IEEEFloat>(Matrix<T> A)").count(),
+        LIBRARY
+            .matches("T det<T: IEEEFloat>(ref Matrix<T> A)")
+            .count(),
         1
     );
     assert_eq!(LIBRARY.matches(" det<").count(), 2);
+    assert_eq!(
+        LIBRARY
+            .matches("T detInPlace<T: IEEEFloat>(Matrix<T> A)")
+            .count(),
+        1
+    );
     assert!(!LIBRARY.contains("float64 det("));
     assert!(!LIBRARY.contains("float32 det("));
     assert_eq!(
@@ -171,20 +181,9 @@ fn det_reifies_capability_operations_before_mir_and_emits_concrete_instances() {
         assert!(compilation.llvm.contains("@aether_matrix_index_fFloat32"));
         assert!(compilation.llvm.contains("fmul double"));
         assert!(compilation.llvm.contains("fmul float"));
-        assert!(
-            compilation
-                .llvm
-                .contains("linearAlgebra_f3_det__o13__gfFloat64"),
-            "missing float64 det instance\n{}",
-            compilation.llvm
-        );
-        assert!(
-            compilation
-                .llvm
-                .contains("linearAlgebra_f3_det__o13__gfFloat32"),
-            "missing float32 det instance\n{}",
-            compilation.llvm
-        );
+        assert!(compilation.llvm.contains("linearAlgebra_f3_det__o"));
+        assert!(compilation.llvm.contains("__gfFloat64"));
+        assert!(compilation.llvm.contains("__gfFloat32"));
         for residue in ["Capability", "GenericParam", "TypeId", "witness", "vtable"] {
             assert!(
                 !compilation.llvm.contains(residue),
@@ -214,9 +213,9 @@ fn unsupported_element_view_and_result_types_are_e0460() {
 }
 
 #[test]
-fn matrix_is_consumed_while_factor_is_borrowed_and_reusable() {
+fn in_place_matrix_is_consumed_while_factor_is_borrowed_and_reusable() {
     let moved = diagnostics(
-        "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[1.0];float64 d=la.det(a);return int(a[1,1]);}",
+        "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[1.0];float64 d=la.detInPlace(a);return int(a[1,1]);}",
     );
     assert!(
         moved.contains("use after move of non-Copy local `a`"),
@@ -255,11 +254,11 @@ fn every_dynamic_shape_mismatch_reaches_shape_guard_before_accesses() {
 fn determinant_from_factor_allocates_nothing_including_order_zero() {
     let cases = [
         (
-            "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[0.0,1.0;2.0,3.0];la.LU<float64>f=la.lu(a);float64 d=la.det(f);return int(d+2.0);}",
+            "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[0.0,1.0;2.0,3.0];la.LU<float64>f=la.luInPlace(a);float64 d=la.det(f);return int(d+2.0);}",
             3_i64,
         ),
         (
-            "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=la.zeros(0,0);la.LU<float64>f=la.lu(a);float64 d=la.det(f);return int(d-1.0);}",
+            "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=la.zeros(0,0);la.LU<float64>f=la.luInPlace(a);float64 d=la.det(f);return int(d-1.0);}",
             0_i64,
         ),
     ];

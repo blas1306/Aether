@@ -50,7 +50,9 @@ fn diagnostics(source: &str) -> String {
 
 #[test]
 fn qr_has_one_ieee_float_kernel_and_only_a_compatibility_wrapper() {
-    let qr_start = LIBRARY.find("QR<T> qr<T: IEEEFloat>(Matrix<T> A)").unwrap();
+    let qr_start = LIBRARY
+        .find("QR<T> qrInPlace<T: IEEEFloat>(Matrix<T> A)")
+        .unwrap();
     let wrapper_start = LIBRARY
         .find("QR<float32> qrFloat32(Matrix<float32> A)")
         .unwrap();
@@ -59,7 +61,7 @@ fn qr_has_one_ieee_float_kernel_and_only_a_compatibility_wrapper() {
 
     assert_eq!(
         LIBRARY
-            .matches("QR<T> qr<T: IEEEFloat>(Matrix<T> A)")
+            .matches("QR<T> qrInPlace<T: IEEEFloat>(Matrix<T> A)")
             .count(),
         1
     );
@@ -70,7 +72,7 @@ fn qr_has_one_ieee_float_kernel_and_only_a_compatibility_wrapper() {
     assert_eq!(kernel.matches("identity<T>(m)").count(), 1);
     assert!(!kernel.contains("float32"));
     assert!(!kernel.contains("float64"));
-    assert!(wrapper.contains("return qr(A);"));
+    assert!(wrapper.contains("return qrInPlace(A);"));
     assert_eq!(wrapper.matches("while (").count(), 0);
 }
 
@@ -78,7 +80,7 @@ fn qr_has_one_ieee_float_kernel_and_only_a_compatibility_wrapper() {
 fn qr_lowers_as_parametric_package_code_and_concrete_float_instances() {
     let directory = Directory::new("lowering");
     let entry = directory.entry(
-        "package consumer;import linearAlgebra as la;la.QR<T> forward<T:IEEEFloat>(Matrix<T>a){return la.qr(a);}int main(){Matrix<float64>a=[12.0,-51.0;6.0,167.0];var x=la.qr(a);Matrix<float32>b=[float32(1.0),float32(2.0);float32(3.0),float32(4.0)];la.QR<float32>y=la.qr<float32>(b);Matrix<float64>c=[1.0];la.QR<float64>z=forward(c);return int(rows(x.Q)+rows(y.Q)+rows(z.Q)-5);}",
+        "package consumer;import linearAlgebra as la;la.QR<T> forward<T:IEEEFloat>(ref Matrix<T>a){return la.qr(a);}int main(){Matrix<float64>a=[12.0,-51.0;6.0,167.0];var x=la.qr(a);Matrix<float32>b=[float32(1.0),float32(2.0);float32(3.0),float32(4.0)];la.QR<float32>y=la.qr<float32>(b);Matrix<float64>c=[1.0];la.QR<float64>z=forward(c);return int(rows(x.Q)+rows(y.Q)+rows(z.Q)-5);}",
     );
     let compilation = compile_session(
         CompilationSession::discover(&entry).unwrap(),
@@ -143,7 +145,7 @@ fn qr_rejects_non_ieee_elements_through_the_general_constraint() {
 
 #[test]
 fn qr_allocates_only_the_input_and_materialized_q() {
-    let source = "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[1.0,2.0;3.0,4.0;5.0,6.0];la.QR<float64>f=la.qr(a);return int(rows(f.Q)+columns(f.R)-5);}";
+    let source = "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[1.0,2.0;3.0,4.0;5.0,6.0];la.QR<float64>f=la.qrInPlace(a);return int(rows(f.Q)+columns(f.R)-5);}";
     for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
         let directory = Directory::new("allocations");
         let entry = directory.entry(source);

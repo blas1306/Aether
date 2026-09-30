@@ -162,7 +162,7 @@ int main(){{string path="{path}";string a=std.File.readText(path);string b=std.F
 }
 
 #[test]
-fn generics_are_determined_before_borrow_adaptation() {
+fn generic_shared_borrows_infer_from_the_exact_pointee_type() {
     let source = r"
 int explicitRead<T>(ref T value){return 3;}
 int pair<T>(T tag,ref T value){return 4;}
@@ -170,8 +170,7 @@ int main(){int x=1;if(explicitRead<int>(x)!=3){return 1;}if(pair(x,x)!=4){return
 ";
     assert_eq!(status(source, OptimizationLevel::O0), 0);
     let inferred_only = "int read<T>(ref T value){return 0;}int main(){int x=1;return read(x);}";
-    let errors = compile_source(&SourceFile::new("infer.ae", inferred_only), &[]).unwrap_err();
-    assert_eq!(errors[0].code, "E0263");
+    assert_eq!(status(inferred_only, OptimizationLevel::O0), 0);
 }
 
 #[test]

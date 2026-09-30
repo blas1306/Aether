@@ -64,7 +64,7 @@ fn public_source_is_one_generic_kernel_per_family() {
         .split_once("QR<float32> qrFloat32(Matrix<float32> A)")
         .unwrap()
         .1;
-    assert!(wrapper.contains("return qr(A);"));
+    assert!(wrapper.contains("return qrInPlace(A);"));
     assert!(!wrapper.contains("while ("));
 
     for forbidden in [

@@ -189,9 +189,9 @@ fn unsupported_rhs_orientation_precision_and_element_types_are_e0460() {
 }
 
 #[test]
-fn matrix_is_consumed_while_factor_and_rhs_are_only_borrowed() {
+fn in_place_matrix_is_consumed_while_factor_and_rhs_are_only_borrowed() {
     let moved = diagnostics(
-        "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[1.0];Vector<float64,Column>b=[2.0];Vector<float64,Column>x=la.solve(a,b);return int(a[1,1]);}",
+        "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[1.0];Vector<float64,Column>b=[2.0];Vector<float64,Column>x=la.solveInPlace(a,b);return int(a[1,1]);}",
     );
     assert!(
         moved.contains("use after move of non-Copy local `a`"),
@@ -227,8 +227,8 @@ fn every_dynamic_shape_mismatch_reaches_shape_guard_before_later_work() {
 
 #[test]
 fn factor_solve_allocates_only_its_result_and_empty_solve_allocates_nothing() {
-    let nonempty = "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[0.0,1.0;2.0,3.0];la.LU<float64>f=la.lu(a);Vector<float64,Column>b=[2.0,8.0];Vector<float64,Column>x=la.solve(f,b);return int(x[1]+x[2]-3.0);}";
-    let empty = "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=la.zeros(0,0);la.LU<float64>f=la.lu(a);Vector<float64,Column>b=la.zeros(0);Vector<float64,Column>x=la.solve(f,b);return int(dimension(x));}";
+    let nonempty = "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[0.0,1.0;2.0,3.0];la.LU<float64>f=la.luInPlace(a);Vector<float64,Column>b=[2.0,8.0];Vector<float64,Column>x=la.solve(f,b);return int(x[1]+x[2]-3.0);}";
+    let empty = "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=la.zeros(0,0);la.LU<float64>f=la.luInPlace(a);Vector<float64,Column>b=la.zeros(0);Vector<float64,Column>x=la.solve(f,b);return int(dimension(x));}";
     for (source, expected) in [(nonempty, 5_i64), (empty, 0_i64)] {
         for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
             let compilation = compile(source, optimization);

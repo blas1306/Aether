@@ -50,12 +50,14 @@ fn diagnostics(source: &str) -> String {
 
 #[test]
 fn lu_has_exactly_one_ieee_float_source_kernel() {
-    let lu_start = LIBRARY.find("LU<T> lu<T: IEEEFloat>(Matrix<T> A)").unwrap();
+    let lu_start = LIBRARY
+        .find("LU<T> luInPlace<T: IEEEFloat>(Matrix<T> A)")
+        .unwrap();
     let lu_end = LIBRARY.find("T det<T: IEEEFloat>(").unwrap();
     let lu_implementation = &LIBRARY[lu_start..lu_end];
     assert_eq!(
         LIBRARY
-            .matches("LU<T> lu<T: IEEEFloat>(Matrix<T> A)")
+            .matches("LU<T> luInPlace<T: IEEEFloat>(Matrix<T> A)")
             .count(),
         1
     );
@@ -73,7 +75,7 @@ fn lu_has_exactly_one_ieee_float_source_kernel() {
 fn lu_lowers_as_ordinary_package_code_in_every_phase() {
     let directory = Directory::new("lowering");
     let entry = directory.entry(
-        "package consumer;import linearAlgebra as la;la.LU<T> forward<T:IEEEFloat>(Matrix<T>a){return la.lu(a);}int main(){Matrix<float64>a=[0.0,2.0;3.0,4.0];var x=la.lu(a);Matrix<float32>b=[float32(1.0)];la.LU<float32>y=la.lu<float32>(b);Matrix<float64>c=[1.0];la.LU<float64>z=forward(c);return x.permutationSign+y.permutationSign+z.permutationSign;}",
+        "package consumer;import linearAlgebra as la;la.LU<T> forward<T:IEEEFloat>(ref Matrix<T>a){return la.lu(a);}int main(){Matrix<float64>a=[0.0,2.0;3.0,4.0];var x=la.lu(a);Matrix<float32>b=[float32(1.0)];la.LU<float32>y=la.lu<float32>(b);Matrix<float64>c=[1.0];la.LU<float64>z=forward(c);return x.permutationSign+y.permutationSign+z.permutationSign;}",
     );
     let compilation = compile_session(
         CompilationSession::discover(&entry).unwrap(),
@@ -144,7 +146,7 @@ fn lu_rejects_non_ieee_elements_through_the_general_constraint() {
 
 #[test]
 fn lu_allocates_only_input_permutation_and_one_additional_factor() {
-    let source = "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[0.0,2.0;3.0,4.0;5.0,6.0];la.LU<float64>f=la.lu(a);return int(rows(f.L)+rows(f.U)+dimension(f.permutation)-8);}";
+    let source = "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[0.0,2.0;3.0,4.0;5.0,6.0];la.LU<float64>f=la.luInPlace(a);return int(rows(f.L)+rows(f.U)+dimension(f.permutation)-8);}";
     for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
         let directory = Directory::new("allocations");
         let entry = directory.entry(source);

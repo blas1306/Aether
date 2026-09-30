@@ -57,7 +57,28 @@ public class SingularMatrixException : Exception {
     public init() {}
 }
 
-LU<T> lu<T: IEEEFloat>(Matrix<T> A) {
+Matrix<T> copyMatrixForFactorization<T: IEEEFloat>(ref Matrix<T> source) {
+    usize m = rows(*source);
+    usize n = columns(*source);
+    Matrix<T> result = matrixFilled<T>(m, n, 0);
+    usize i = 1;
+    while (i <= m) {
+        usize j = 1;
+        while (j <= n) {
+            result[i,j] = (*source)[i,j];
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return result;
+}
+
+LU<T> lu<T: IEEEFloat>(ref Matrix<T> A) {
+    Matrix<T> workspace = copyMatrixForFactorization<T>(A);
+    return luInPlace(workspace);
+}
+
+LU<T> luInPlace<T: IEEEFloat>(Matrix<T> A) {
     T zero = 0;
     T one = 1;
     usize m = rows(A);
@@ -173,9 +194,15 @@ T det<T: IEEEFloat>(ref LU<T> factor) {
     return result;
 }
 
-T det<T: IEEEFloat>(Matrix<T> A) {
-    shapeGuard(rows(A) == columns(A));
+T det<T: IEEEFloat>(ref Matrix<T> A) {
+    shapeGuard(rows(*A) == columns(*A));
     LU<T> factor = lu(A);
+    return det(factor);
+}
+
+T detInPlace<T: IEEEFloat>(Matrix<T> A) {
+    shapeGuard(rows(A) == columns(A));
+    LU<T> factor = luInPlace(A);
     return det(factor);
 }
 
@@ -228,11 +255,20 @@ Vector<T,Column> solve<T: IEEEFloat>(
 }
 
 Vector<T,Column> solve<T: IEEEFloat>(
+    ref Matrix<T> A,
+    ref Vector<T,Column> b) {
+    shapeGuard(rows(*A) == columns(*A));
+    shapeGuard(dimension(*b) == rows(*A));
+    LU<T> factor = lu(A);
+    return solve(factor, b);
+}
+
+Vector<T,Column> solveInPlace<T: IEEEFloat>(
     Matrix<T> A,
     ref Vector<T,Column> b) {
     shapeGuard(rows(A) == columns(A));
     shapeGuard(dimension(*b) == rows(A));
-    LU<T> factor = lu(A);
+    LU<T> factor = luInPlace(A);
     return solve(factor, b);
 }
 
@@ -302,11 +338,20 @@ Matrix<T> solve<T: IEEEFloat>(
 }
 
 Matrix<T> solve<T: IEEEFloat>(
+    ref Matrix<T> A,
+    ref Matrix<T> B) {
+    shapeGuard(rows(*A) == columns(*A));
+    shapeGuard(rows(*B) == rows(*A));
+    LU<T> factor = lu(A);
+    return solve(factor, B);
+}
+
+Matrix<T> solveInPlace<T: IEEEFloat>(
     Matrix<T> A,
     ref Matrix<T> B) {
     shapeGuard(rows(A) == columns(A));
     shapeGuard(rows(*B) == rows(A));
-    LU<T> factor = lu(A);
+    LU<T> factor = luInPlace(A);
     return solve(factor, B);
 }
 
@@ -324,7 +369,13 @@ public class NotPositiveDefiniteException : Exception {
 }
 
 // Checked, in-place Cholesky factorization for the IEEE floating-point types.
-Cholesky<T> cholesky<T: IEEEFloat>(Matrix<T> A) {
+Cholesky<T> cholesky<T: IEEEFloat>(ref Matrix<T> A) {
+    Matrix<T> workspace = copyMatrixForFactorization<T>(A);
+    return choleskyInPlace(workspace);
+}
+
+// Checked, in-place Cholesky factorization for the IEEE floating-point types.
+Cholesky<T> choleskyInPlace<T: IEEEFloat>(Matrix<T> A) {
     shapeGuard(rows(A) == columns(A));
 
     T zero = 0;
@@ -398,7 +449,13 @@ struct QR<T: Storable> {
 }
 
 // Householder QR for the IEEE floating-point element types.
-QR<T> qr<T: IEEEFloat>(Matrix<T> A) {
+QR<T> qr<T: IEEEFloat>(ref Matrix<T> A) {
+    Matrix<T> workspace = copyMatrixForFactorization<T>(A);
+    return qrInPlace(workspace);
+}
+
+// Householder QR for the IEEE floating-point element types.
+QR<T> qrInPlace<T: IEEEFloat>(Matrix<T> A) {
     T zero = 0;
     T one = 1;
     T two = one + one;
@@ -498,5 +555,5 @@ QR<T> qr<T: IEEEFloat>(Matrix<T> A) {
 
 // Deprecated compatibility entry point.  qr is the primary generic API.
 QR<float32> qrFloat32(Matrix<float32> A) {
-    return qr(A);
+    return qrInPlace(A);
 }

@@ -83,14 +83,14 @@ fn run_both(source: &str) {
 #[test]
 fn public_surface_and_kernel_structure_are_exact() {
     let start = LIBRARY
-        .find("Cholesky<T> cholesky<T: IEEEFloat>(Matrix<T> A)")
+        .find("Cholesky<T> choleskyInPlace<T: IEEEFloat>(Matrix<T> A)")
         .unwrap();
     let end = LIBRARY[start..].find("// A materialized QR").unwrap() + start;
     let kernel = &LIBRARY[start..end];
 
     assert_eq!(
         LIBRARY
-            .matches("Cholesky<T> cholesky<T: IEEEFloat>(Matrix<T> A)")
+            .matches("Cholesky<T> choleskyInPlace<T: IEEEFloat>(Matrix<T> A)")
             .count(),
         1
     );
@@ -108,7 +108,7 @@ fn public_surface_and_kernel_structure_are_exact() {
         1
     );
     assert!(kernel.starts_with(
-        "Cholesky<T> cholesky<T: IEEEFloat>(Matrix<T> A) {\n    shapeGuard(rows(A) == columns(A));"
+        "Cholesky<T> choleskyInPlace<T: IEEEFloat>(Matrix<T> A) {\n    shapeGuard(rows(A) == columns(A));"
     ));
     assert!(kernel.contains("value = value - A[i,k] * A[j,k];"));
     assert!(kernel.contains("if (!((value - value) == zero) || !(value > zero))"));
@@ -173,7 +173,7 @@ fn cholesky_reifies_only_ordinary_capability_operations() {
 }
 
 #[test]
-fn non_ieee_elements_are_rejected_and_the_input_is_consumed() {
+fn non_ieee_elements_are_rejected_and_the_in_place_input_is_consumed() {
     for source in [
         "package consumer;import linearAlgebra as la;int main(){Matrix<int>a=[1];var f=la.cholesky(a);return 0;}",
         "package consumer;import linearAlgebra as la;int main(){Matrix<int>a=[1];var f=la.cholesky<int>(a);return 0;}",
@@ -182,7 +182,7 @@ fn non_ieee_elements_are_rejected_and_the_input_is_consumed() {
         assert!(output.contains("IEEEFloat"), "{output}");
     }
     let moved = diagnostics(
-        "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[1.0];var f=la.cholesky(a);return int(a[1,1]);}",
+        "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[1.0];var f=la.choleskyInPlace(a);return int(a[1,1]);}",
     );
     assert!(
         moved.contains("use after move of non-Copy local `a`"),
@@ -286,11 +286,11 @@ fn rectangular_shapes_including_zero_extents_trap_as_shape_mismatch() {
 fn success_reuses_the_input_backing_and_zero_shape_allocates_nothing() {
     let cases = [
         (
-            "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[4.0,2.0;2.0,5.0];var f=la.cholesky(a);return int(f.L[1,1]-2.0);}",
+            "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[4.0,2.0;2.0,5.0];var f=la.choleskyInPlace(a);return int(f.L[1,1]-2.0);}",
             1_i64,
         ),
         (
-            "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=la.zeros(0,0);var f=la.cholesky(a);return int(rows(f.L)+columns(f.L));}",
+            "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=la.zeros(0,0);var f=la.choleskyInPlace(a);return int(rows(f.L)+columns(f.L));}",
             0_i64,
         ),
     ];

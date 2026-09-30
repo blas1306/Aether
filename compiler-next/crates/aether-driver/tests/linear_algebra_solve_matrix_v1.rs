@@ -131,9 +131,9 @@ fn unsupported_precision_element_and_rhs_view_types_are_e0460() {
 }
 
 #[test]
-fn coefficient_matrix_is_consumed_and_factor_and_matrix_rhs_are_borrowed() {
+fn in_place_coefficient_matrix_is_consumed_and_factor_and_matrix_rhs_are_borrowed() {
     let moved = diagnostics(
-        "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[1.0];Matrix<float64>b=[2.0];Matrix<float64>x=la.solve(a,b);return int(a[1,1]);}",
+        "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[1.0];Matrix<float64>b=[2.0];Matrix<float64>x=la.solveInPlace(a,b);return int(a[1,1]);}",
     );
     assert!(
         moved.contains("use after move of non-Copy local `a`"),
@@ -174,15 +174,15 @@ fn all_matrix_and_lu_shape_mismatches_precede_allocation_and_access() {
 fn factor_solve_has_one_result_allocation_and_zero_extent_results_have_none() {
     let cases = [
         (
-            "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[0.0,1.0;2.0,3.0];la.LU<float64>f=la.lu(a);Matrix<float64>b=[2.0,1.0;8.0,5.0];Matrix<float64>x=la.solve(f,b);return int(x[1,1]+x[2,1]-3.0);}",
+            "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[0.0,1.0;2.0,3.0];la.LU<float64>f=la.luInPlace(a);Matrix<float64>b=[2.0,1.0;8.0,5.0];Matrix<float64>x=la.solve(f,b);return int(x[1,1]+x[2,1]-3.0);}",
             5_i64,
         ),
         (
-            "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[2.0,0.0;0.0,3.0];la.LU<float64>f=la.lu(a);Matrix<float64>b=la.zeros(2,0);Matrix<float64>x=la.solve(f,b);return int(rows(x)+columns(x)-2);}",
+            "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[2.0,0.0;0.0,3.0];la.LU<float64>f=la.luInPlace(a);Matrix<float64>b=la.zeros(2,0);Matrix<float64>x=la.solve(f,b);return int(rows(x)+columns(x)-2);}",
             3_i64,
         ),
         (
-            "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=la.zeros(0,0);la.LU<float64>f=la.lu(a);Matrix<float64>b=la.zeros(0,4);Matrix<float64>x=la.solve(f,b);return int(rows(x)+columns(x)-4);}",
+            "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=la.zeros(0,0);la.LU<float64>f=la.luInPlace(a);Matrix<float64>b=la.zeros(0,4);Matrix<float64>x=la.solve(f,b);return int(rows(x)+columns(x)-4);}",
             0_i64,
         ),
     ];

@@ -1,14 +1,14 @@
 import linearAlgebra as la;
 
-la.LU<T> genericLU<T: IEEEFloat>(Matrix<T> A) {
+la.LU<T> genericLU<T: IEEEFloat>(ref Matrix<T> A) {
     return la.lu(A);
 }
 
-la.QR<T> genericQR<T: IEEEFloat>(Matrix<T> A) {
+la.QR<T> genericQR<T: IEEEFloat>(ref Matrix<T> A) {
     return la.qr(A);
 }
 
-la.Cholesky<T> genericCholesky<T: IEEEFloat>(Matrix<T> A) {
+la.Cholesky<T> genericCholesky<T: IEEEFloat>(ref Matrix<T> A) {
     return la.cholesky(A);
 }
 
@@ -989,9 +989,13 @@ int testDet32() {
 int testFormatBorrowLU() {
     Matrix<float64> A = [0.0,1.0;2.0,3.0];
     var factor = la.lu(A);
+    var factorQR = la.qr(A);
 
+    println("A = ${A}");
     println("L = ${factor.L}");
     println("U = ${factor.U}");
+    println("Q = ${factorQR.Q}");
+    println("R = ${factorQR.R}");
 
     Vector<float64,Column> b = [2.0,8.0];
     var x = la.solve<float64>(factor, b);
@@ -1009,9 +1013,14 @@ int testFormatBorrowLU() {
     var cholesky32 = la.cholesky(positive32);
     println("L32 = ${cholesky32.L}");
 
+    Matrix<float64> disposable = [2.0,0.0;0.0,3.0];
+    var inPlace = la.luInPlace(disposable);
+
     if (abs(x[1] - 1.0) > 1e-12 || abs(x[2] - 2.0) > 1e-12) { return 1; }
     if (abs(d + 2.0) > 1e-12) { return 2; }
     if (factor.permutationSign != -1 || factor.U[1,1] != 2.0) { return 3; }
+    if (A[1,1] != 0.0 || A[2,2] != 3.0) { return 4; }
+    if (inPlace.U[1,1] != 2.0 || inPlace.U[2,2] != 3.0) { return 5; }
     return 0;
 }
 

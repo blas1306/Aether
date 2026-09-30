@@ -4349,8 +4349,15 @@ fn infer_generic_arguments(
     actual: TypeId,
     inferred: &mut BTreeMap<GenericParamId, TypeId>,
 ) -> Result<(), Vec<Diagnostic>> {
-    // BORROW-ERGONOMICS-V1 never infers through the later `T -> ref T`
-    // adaptation. Another argument (or explicit application) must determine T.
+    // An exact shared call borrow contributes its pointee shape to inference
+    // without materializing the later `T -> ref T` adaptation.  This lets an
+    // ordinary owner argument select generic borrowed APIs while retaining the
+    // exact-type rule; mutable references and conversions remain excluded.
+    if let Some((pointee, false)) = types.reference_info(pattern)
+        && types.reference_info(actual).is_none()
+    {
+        return infer_generic_arguments(types, pointee, actual, inferred);
+    }
     if types.reference_info(pattern).is_some() && types.reference_info(actual).is_none() {
         return Ok(());
     }
