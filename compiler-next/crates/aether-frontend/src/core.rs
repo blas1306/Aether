@@ -22,6 +22,7 @@ pub enum CoreSymbol {
     Cos = 11,
     Tan = 12,
     Str = 13,
+    Epsilon = 14,
 }
 
 impl CoreSymbol {
@@ -42,6 +43,7 @@ impl CoreSymbol {
             Self::Cos => "cos",
             Self::Tan => "tan",
             Self::Str => "str",
+            Self::Epsilon => "epsilon",
         }
     }
 
@@ -66,6 +68,7 @@ pub const PRELUDE_V1: &[(&str, CoreSymbol)] = &[
     ("cos", CoreSymbol::Cos),
     ("tan", CoreSymbol::Tan),
     ("str", CoreSymbol::Str),
+    ("epsilon", CoreSymbol::Epsilon),
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -99,6 +102,7 @@ impl CoreFunction {
     #[must_use]
     pub const fn arity(&self) -> usize {
         match self.symbol {
+            CoreSymbol::Epsilon => 0,
             CoreSymbol::Min | CoreSymbol::Max => 2,
             CoreSymbol::Clamp => 3,
             _ => 1,
@@ -194,6 +198,9 @@ pub fn verify_core_call<O>(
                     | crate::TypeData::Float(_)
             )
         ),
+        // `epsilon` resolves through this Core identity, but has its own HIR
+        // node and must never be smuggled through the ordinary Core-call path.
+        CoreSymbol::Epsilon => false,
     };
     valid
         .then_some(())
@@ -207,7 +214,7 @@ mod tests {
 
     #[test]
     fn v1_manifest_is_closed_unique_and_canonical() {
-        assert_eq!(PRELUDE_V1.len(), 14);
+        assert_eq!(PRELUDE_V1.len(), 15);
         assert_eq!(
             PRELUDE_V1
                 .iter()

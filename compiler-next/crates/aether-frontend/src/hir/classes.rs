@@ -1187,7 +1187,8 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
         | E::FunctionRef { .. }
         | E::Local(_)
         | E::Move(_)
-        | E::AlgebraicValue { .. } => Vec::new(),
+        | E::AlgebraicValue { .. }
+        | E::IEEEFloatConstant { .. } => Vec::new(),
         E::Load(source)
         | E::NullablePayload { source, .. }
         | E::Borrow { place: source, .. }

@@ -1602,6 +1602,11 @@ pub enum CapabilityMathOp {
     Abs,
     Sqrt,
 }
+/// Closed kinds of constants defined by the IEEE binary floating-point domain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IEEEFloatConstantKind {
+    Epsilon,
+}
 /// Closed semantic products with distinct orientation and result-shape contracts.
 /// Computational loop forms are selected only after scalar concretization.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1651,6 +1656,12 @@ pub enum HirExprKind {
     },
     /// A fully resolved, canonically identified Core function call.
     Core(Box<crate::CoreCall<HirExpr>>),
+    /// Parametric IEEE constant. Monomorphization must materialize exact bits.
+    IEEEFloatConstant {
+        kind: IEEEFloatConstantKind,
+        result_type: TypeId,
+        required_marker: Capability,
+    },
     AlgebraicValue {
         capability: AlgebraicCapability,
     },
@@ -5632,6 +5643,40 @@ impl Monomorphizer<'_> {
             HirExprKind::Core(op) => HirExprKind::Core(Box::new(
                 op.clone().map(|e| self.substitute_expr(&e, substitution))?,
             )),
+            HirExprKind::IEEEFloatConstant {
+                kind,
+                result_type,
+                required_marker,
+            } => {
+                let concrete = self.substitute_type(*result_type, substitution, expression.span)?;
+                if *kind != IEEEFloatConstantKind::Epsilon
+                    || *required_marker != Capability::IEEEFloat
+                    || ty != concrete
+                {
+                    return Err(vec![Diagnostic::new(
+                        "E0348",
+                        Phase::Semantic,
+                        DiagnosticCategory::Verification,
+                        "IEEE float constant did not resolve to its required concrete type",
+                        Some(expression.span),
+                    )]);
+                }
+                match concrete {
+                    TypeId::FLOAT32 => HirExprKind::Float(FloatValue::Float32(0x3400_0000)),
+                    TypeId::FLOAT64 => {
+                        HirExprKind::Float(FloatValue::Float64(0x3cb0_0000_0000_0000))
+                    }
+                    _ => {
+                        return Err(vec![Diagnostic::new(
+                            "E0348",
+                            Phase::Semantic,
+                            DiagnosticCategory::Verification,
+                            "IEEE float constant did not resolve to a sealed IEEEFloat type",
+                            Some(expression.span),
+                        )]);
+                    }
+                }
+            }
             HirExprKind::Int(value) => HirExprKind::Int(*value),
             HirExprKind::Float(value) => HirExprKind::Float(*value),
             HirExprKind::Bool(value) => HirExprKind::Bool(*value),
@@ -7611,6 +7656,7 @@ impl OwnershipAnalysis<'_> {
             | HirExprKind::Int(_)
             | HirExprKind::Float(_)
             | HirExprKind::Bool(_)
+            | HirExprKind::IEEEFloatConstant { .. }
             | HirExprKind::NullableNull { .. }
             | HirExprKind::FunctionRef { .. }
             | HirExprKind::AlgebraicValue { .. } => Ok(()),
@@ -13664,6 +13710,59 @@ impl Analyzer<'_> {
         span: Span,
         expected: Option<TypeId>,
     ) -> Result<Checked, Vec<Diagnostic>> {
+        if symbol == crate::CoreSymbol::Epsilon {
+            if type_arguments.len() != 1 {
+                return Err(vec![generic_call_arity(
+                    symbol.member(),
+                    1,
+                    type_arguments.len(),
+                    span,
+                )]);
+            }
+            if !args.is_empty() {
+                return Err(vec![type_error(
+                    format!(
+                        "Core function `{}` expects 0 arguments, found {}",
+                        symbol.member(),
+                        args.len()
+                    ),
+                    span,
+                )]);
+            }
+            let result_type = self.resolve_source_type(&type_arguments[0])?;
+            if !self
+                .types
+                .guarantees_capability(result_type, Capability::IEEEFloat)
+            {
+                return Err(vec![type_error(
+                    format!(
+                        "type {} does not satisfy capability IEEEFloat",
+                        self.type_name(result_type)
+                    ),
+                    span,
+                )]);
+            }
+            let kind = match result_type {
+                TypeId::FLOAT32 => HirExprKind::Float(FloatValue::Float32(0x3400_0000)),
+                TypeId::FLOAT64 => HirExprKind::Float(FloatValue::Float64(0x3cb0_0000_0000_0000)),
+                _ => HirExprKind::IEEEFloatConstant {
+                    kind: IEEEFloatConstantKind::Epsilon,
+                    result_type,
+                    required_marker: Capability::IEEEFloat,
+                },
+            };
+            return self.coerce(
+                Checked {
+                    expr: HirExpr {
+                        kind,
+                        ty: result_type,
+                        span,
+                    },
+                    constant: None,
+                },
+                expected,
+            );
+        }
         if !type_arguments.is_empty() {
             return Err(vec![type_error(
                 format!(
@@ -13822,7 +13921,8 @@ impl Analyzer<'_> {
             crate::CoreSymbol::Print
             | crate::CoreSymbol::Println
             | crate::CoreSymbol::ByteLength
-            | crate::CoreSymbol::Str => unreachable!(),
+            | crate::CoreSymbol::Str
+            | crate::CoreSymbol::Epsilon => unreachable!(),
         };
         if !signature_valid {
             return Err(vec![type_error(
@@ -17740,6 +17840,27 @@ fn verify_expr(
                 verify_expr(operand, f, sigs, structs, enums, types, fail)?;
             }
             crate::verify_core_call(op, e.ty, types, |operand| Ok(operand.ty)).map_err(fail)?;
+        }
+        HirExprKind::IEEEFloatConstant {
+            kind,
+            result_type,
+            required_marker,
+        } => {
+            if matches!(sigs, VerificationSignatures::Concrete(_)) {
+                return Err(fail(
+                    "unresolved IEEEFloatConstant reached concrete HIR".into(),
+                ));
+            }
+            if *kind != IEEEFloatConstantKind::Epsilon
+                || *result_type != e.ty
+                || *required_marker != Capability::IEEEFloat
+                || types.generic_param(*result_type).is_none()
+                || !types.guarantees_capability(*result_type, Capability::IEEEFloat)
+            {
+                return Err(fail(
+                    "HIR IEEEFloatConstant kind/type/marker guarantee invalid".into(),
+                ));
+            }
         }
         HirExprKind::Int(_) if types.integer_info(e.ty).is_none() && e.ty != TypeId::CHAR => {
             return Err(fail("HIR integer literal mismatch".into()));
@@ -21781,5 +21902,81 @@ mod vertical33_tests {
                 "accepted HIR corruption {corrupt}"
             );
         }
+    }
+
+    #[test]
+    fn ieee_float_constant_hir_contract_fails_closed() {
+        let hir = analyze(
+            parse_source(&SourceFile::new(
+                "ieee-float-constant-corrupt.ae",
+                "T e<T:IEEEFloat,U:RealOps>(){return epsilon<T>();}int main(){float32 x=epsilon<float32>();return 0;}",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        verify_hir(&hir).unwrap();
+
+        let mut wrong_marker = hir.clone();
+        let HirStmtKind::Return { value, .. } =
+            &mut wrong_marker.generic_functions[0].body.statements[0].kind
+        else {
+            panic!("expected generic return")
+        };
+        let HirExprKind::IEEEFloatConstant {
+            required_marker, ..
+        } = &mut value.kind
+        else {
+            panic!("expected IEEE float constant")
+        };
+        *required_marker = Capability::Abs;
+        assert!(verify_hir(&wrong_marker).is_err());
+
+        let mut unproved_type = hir.clone();
+        let real_ops_type = unproved_type.signatures[0].generic_parameters[1].ty;
+        let HirStmtKind::Return { value, .. } =
+            &mut unproved_type.generic_functions[0].body.statements[0].kind
+        else {
+            panic!("expected generic return")
+        };
+        let HirExprKind::IEEEFloatConstant { result_type, .. } = &mut value.kind else {
+            panic!("expected IEEE float constant")
+        };
+        *result_type = real_ops_type;
+        value.ty = real_ops_type;
+        assert!(verify_hir(&unproved_type).is_err());
+
+        let mut residual = hir.clone();
+        let HirStmtKind::Local { initializer, .. } =
+            &mut residual.functions[0].body.statements[0].kind
+        else {
+            panic!("expected concrete local")
+        };
+        initializer.kind = HirExprKind::IEEEFloatConstant {
+            kind: IEEEFloatConstantKind::Epsilon,
+            result_type: TypeId::FLOAT32,
+            required_marker: Capability::IEEEFloat,
+        };
+        assert!(verify_hir(&residual).is_err());
+
+        let mut disguised_call = hir.clone();
+        let HirStmtKind::Local { initializer, .. } =
+            &mut disguised_call.functions[0].body.statements[0].kind
+        else {
+            panic!("expected concrete local")
+        };
+        initializer.kind = HirExprKind::Core(Box::new(crate::CoreCall {
+            function: crate::CoreFunction::resolve(crate::CoreSymbol::Epsilon, TypeId::FLOAT32),
+            arguments: vec![],
+        }));
+        assert!(verify_hir(&disguised_call).is_err());
+
+        let mut payload_mismatch = hir;
+        let HirStmtKind::Local { initializer, .. } =
+            &mut payload_mismatch.functions[0].body.statements[0].kind
+        else {
+            panic!("expected concrete local")
+        };
+        initializer.ty = TypeId::FLOAT64;
+        assert!(verify_hir(&payload_mismatch).is_err());
     }
 }

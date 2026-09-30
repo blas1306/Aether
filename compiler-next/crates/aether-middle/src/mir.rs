@@ -4457,6 +4457,7 @@ impl Builder<'_> {
                 Operand::Local(destination)
             }
             HirExprKind::AlgebraicValue { .. }
+            | HirExprKind::IEEEFloatConstant { .. }
             | HirExprKind::CapabilityBinary { .. }
             | HirExprKind::CapabilityUnary { .. }
             | HirExprKind::CapabilityCompare { .. }
