@@ -380,7 +380,8 @@ Hoy `NUMERIC-CAPABILITIES-V1` ofrece `Zero`, `One`, aritmética, comparación,
 para machine epsilon. Éste es un **gap bloqueante de infraestructura** para la
 implementación genérica y debe cerrarse antes del kernel iterativo.
 
-El milestone `IEEE-FLOAT-CONSTANTS-ARCH-1/V1` deberá proveer una única operación
+El milestone
+[IEEE-FLOAT-CONSTANTS-ARCH-1/V1](IEEE_FLOAT_CONSTANTS_ARCH_1.md) deberá proveer una única operación
 estándar equivalente a:
 
 ```aether
@@ -619,7 +620,8 @@ No se implementan ni diseñan por completo en este milestone:
 
 El cierre se descompone en verticales verificables:
 
-1. **IEEE-FLOAT-CONSTANTS-ARCH-1/V1**: machine epsilon genérico y lowering
+1. **[IEEE-FLOAT-CONSTANTS-ARCH-1/V1](IEEE_FLOAT_CONSTANTS_ARCH_1.md)**:
+   machine epsilon genérico y lowering
    concreto, sin tocar SVD.
 2. **LINEAR-ALGEBRA-STABLE-NORM-V1**: extraer/calificar la norma e hipotenusa
    escaladas compartidas, demostrando no regresión bitwise/contractual de QR.

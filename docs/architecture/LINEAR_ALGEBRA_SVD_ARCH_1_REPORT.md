@@ -55,7 +55,7 @@ tolerancia pública.
 La deflation usa machine epsilon del tipo y escalas bidiagonales locales, no
 exact-zero ni decimales hardcoded. Se identificó un gap bloqueante: Aether aún
 no expone machine epsilon genérico. Un milestone previo diseñará y calificará
-`epsilon<T: IEEEFloat>()` (o su forma estándar equivalente) sin modificar
+[`epsilon<T: IEEEFloat>()`](IEEE_FLOAT_CONSTANTS_ARCH_1.md) sin modificar
 capabilities durante este cierre.
 
 ## Algoritmo y recursos
