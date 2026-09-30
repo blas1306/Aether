@@ -543,6 +543,119 @@ struct QR<T: Storable> {
     Matrix<T> R;
 }
 
+public class RankDeficientMatrixException : Exception {
+    public init() {}
+}
+
+// Solve the square or tall full-column-rank system represented by Q R.
+Vector<T,Column> solve<T: IEEEFloat>(
+    ref QR<T> factor,
+    ref Vector<T,Column> b) {
+    shapeGuard(rows((*factor).Q) == columns((*factor).Q));
+    shapeGuard(rows((*factor).R) == rows((*factor).Q));
+    shapeGuard(rows((*factor).R) >= columns((*factor).R));
+    shapeGuard(dimension(*b) == rows((*factor).Q));
+
+    usize m = rows((*factor).Q);
+    usize n = columns((*factor).R);
+    T zero = 0;
+    usize i = 1;
+    while (i <= n) {
+        if ((*factor).R[i,i] == zero) {
+            throw RankDeficientMatrixException();
+        }
+        i = i + 1;
+    }
+
+    Vector<T,Column> w = vectorFilled<T,Column>(n, zero);
+    i = 1;
+    while (i <= n) {
+        T value = zero;
+        usize k = 1;
+        while (k <= m) {
+            T product = (*factor).Q[k,i] * (*b)[k];
+            value = value + product;
+            k = k + 1;
+        }
+        w[i] = value;
+        i = i + 1;
+    }
+
+    i = n;
+    while (i > 0) {
+        T value = w[i];
+        usize j = i + 1;
+        while (j <= n) {
+            T product = (*factor).R[i,j] * w[j];
+            value = value - product;
+            j = j + 1;
+        }
+        w[i] = value / (*factor).R[i,i];
+        if (i == 1) { break; }
+        i = i - 1;
+    }
+    return w;
+}
+
+// Solve one or more square or tall full-column-rank right-hand sides.
+Matrix<T> solve<T: IEEEFloat>(
+    ref QR<T> factor,
+    ref Matrix<T> B) {
+    shapeGuard(rows((*factor).Q) == columns((*factor).Q));
+    shapeGuard(rows((*factor).R) == rows((*factor).Q));
+    shapeGuard(rows((*factor).R) >= columns((*factor).R));
+    shapeGuard(rows(*B) == rows((*factor).Q));
+
+    usize m = rows((*factor).Q);
+    usize n = columns((*factor).R);
+    usize q = columns(*B);
+    T zero = 0;
+    usize i = 1;
+    while (i <= n) {
+        if ((*factor).R[i,i] == zero) {
+            throw RankDeficientMatrixException();
+        }
+        i = i + 1;
+    }
+
+    Matrix<T> W = matrixFilled<T>(n, q, zero);
+    i = 1;
+    while (i <= n) {
+        usize c = 1;
+        while (c <= q) {
+            T value = zero;
+            usize k = 1;
+            while (k <= m) {
+                T product = (*factor).Q[k,i] * (*B)[k,c];
+                value = value + product;
+                k = k + 1;
+            }
+            W[i,c] = value;
+            c = c + 1;
+        }
+        i = i + 1;
+    }
+
+    i = n;
+    while (i > 0) {
+        usize c = 1;
+        while (c <= q) {
+            T value = W[i,c];
+            usize j = i + 1;
+            while (j <= n) {
+                T product = (*factor).R[i,j] * W[j,c];
+                value = value - product;
+                j = j + 1;
+            }
+            W[i,c] = value / (*factor).R[i,i];
+            c = c + 1;
+        }
+        if (i == 1) { break; }
+        i = i - 1;
+    }
+    return W;
+}
+
 // Householder QR for the IEEE floating-point element types.
 QR<T> qr<T: IEEEFloat>(ref Matrix<T> A) {
     Matrix<T> workspace = copyMatrixForFactorization<T>(A);

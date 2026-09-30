@@ -1224,6 +1224,49 @@ int testCholeskyDetConsumer() {
     return 0;
 }
 
+int testQRSolveConsumer() {
+    Matrix<float64> square = [3.0,1.0;1.0,2.0];
+    la.QR<float64> squareFactor = la.qr(square);
+    Vector<float64,Column> b = [5.0,5.0];
+    Vector<float64,Column> x = la.solve(squareFactor, b);
+    Matrix<float64> B = [5.0,2.0;5.0,4.0];
+    Matrix<float64> X = la.solve(squareFactor, B);
+    if (abs(x[1] - 1.0) > 1e-11 || abs(x[2] - 2.0) > 1e-11) { return 1; }
+    if (abs(X[1,1] - x[1]) > 1e-11 || abs(X[2,1] - x[2]) > 1e-11) { return 2; }
+
+    Matrix<float64> tall = [1.0,0.0;0.0,1.0;1.0,1.0];
+    la.QR<float64> tallFactor = la.qr(tall);
+    Vector<float64,Column> tallB = [1.0,2.0,4.0];
+    Vector<float64,Column> leastSquares = la.solve(tallFactor, tallB);
+    if (abs(leastSquares[1] - 4.0 / 3.0) > 1e-11 || abs(leastSquares[2] - 7.0 / 3.0) > 1e-11) { return 3; }
+
+    Matrix<float32> single = [float32(2.0)];
+    la.QR<float32> singleFactor = la.qr(single);
+    Vector<float32,Column> singleB = [float32(8.0)];
+    Vector<float32,Column> singleX = la.solve<float32>(singleFactor, singleB);
+    if (abs(singleX[1] - float32(4.0)) > float32(2e-5)) { return 4; }
+
+    Matrix<float64> emptyQ = la.zeros(0,0);
+    Matrix<float64> emptyR = la.zeros(0,0);
+    la.QR<float64> emptyFactor = la.QR<float64>(emptyQ, emptyR);
+    Vector<float64,Column> emptyB = la.zeros(0);
+    Vector<float64,Column> emptyX = la.solve(emptyFactor, emptyB);
+    Matrix<float64> emptyMatrixB = la.zeros(0,3);
+    Matrix<float64> emptyMatrixX = la.solve(emptyFactor, emptyMatrixB);
+    if (dimension(emptyX) != 0 || rows(emptyMatrixX) != 0 || columns(emptyMatrixX) != 3) { return 5; }
+
+    Matrix<float64> rankQ = [1.0,0.0;0.0,1.0];
+    Matrix<float64> rankR = [1.0,2.0;0.0,-0.0];
+    la.QR<float64> deficient = la.QR<float64>(rankQ, rankR);
+    Matrix<float64> noColumns = la.zeros(2,0);
+    int caught = 0;
+    try { Matrix<float64> ignored = la.solve(deficient, noColumns); }
+    catch (la.RankDeficientMatrixException error) { caught = 1; }
+    if (caught != 1) { return 6; }
+    if (squareFactor.Q[1,1] == 0.0 || b[1] != 5.0 || B[2,2] != 4.0) { return 7; }
+    return 0;
+}
+
 int main() {
     Matrix<float64> zeroSquare = la.zeros(3);
     Matrix<float64> zeroTall = la.zeros(4,2);
@@ -1423,5 +1466,7 @@ int main() {
     if (choleskySolve32Status != 0) { return 360 + choleskySolve32Status; }
     int choleskyDetStatus = testCholeskyDetConsumer();
     if (choleskyDetStatus != 0) { return 380 + choleskyDetStatus; }
+    int qrSolveStatus = testQRSolveConsumer();
+    if (qrSolveStatus != 0) { return 400 + qrSolveStatus; }
     return 0;
 }

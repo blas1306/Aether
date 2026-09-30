@@ -70,15 +70,15 @@ fn status_llvm(llvm: &str, optimization: OptimizationLevel) -> std::process::Exi
 }
 
 #[test]
-fn solve_has_six_generic_overloads_and_preserves_the_lu_matrix_kernel() {
-    assert_eq!(LIBRARY.matches(" solve<T: IEEEFloat>(").count(), 6);
+fn solve_has_eight_generic_overloads_and_preserves_the_lu_matrix_kernel() {
+    assert_eq!(LIBRARY.matches(" solve<T: IEEEFloat>(").count(), 8);
     assert_eq!(
         LIBRARY
             .matches("Vector<T,Column> solve<T: IEEEFloat>(")
             .count(),
-        3
+        4
     );
-    assert_eq!(LIBRARY.matches("Matrix<T> solve<T: IEEEFloat>(").count(), 3);
+    assert_eq!(LIBRARY.matches("Matrix<T> solve<T: IEEEFloat>(").count(), 4);
     assert!(!LIBRARY.contains("Matrix<float64> solve("));
     assert!(!LIBRARY.contains("Matrix<float32> solve("));
 

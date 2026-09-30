@@ -70,14 +70,14 @@ fn allocation_guard(llvm: &str, expected: i64) -> String {
 
 #[test]
 fn api_guards_workspaces_and_loop_order_are_the_exact_source_contract() {
-    assert_eq!(LIBRARY.matches(" solve<T: IEEEFloat>(").count(), 6);
+    assert_eq!(LIBRARY.matches(" solve<T: IEEEFloat>(").count(), 8);
     assert_eq!(
         LIBRARY
             .matches("Vector<T,Column> solve<T: IEEEFloat>(")
             .count(),
-        3
+        4
     );
-    assert_eq!(LIBRARY.matches("Matrix<T> solve<T: IEEEFloat>(").count(), 3);
+    assert_eq!(LIBRARY.matches("Matrix<T> solve<T: IEEEFloat>(").count(), 4);
 
     let vector_start = LIBRARY
         .find("// Solve L L^T x = b using one owning result")
