@@ -70,7 +70,7 @@ fn status_llvm(llvm: &str, optimization: OptimizationLevel) -> std::process::Exi
 }
 
 #[test]
-fn solve_has_exactly_four_generic_declarations_and_one_vector_kernel() {
+fn solve_has_six_generic_declarations_and_preserves_the_lu_vector_kernel() {
     let solve_start = LIBRARY
         .find("Vector<T,Column> solve<T: IEEEFloat>(")
         .unwrap();
@@ -80,10 +80,10 @@ fn solve_has_exactly_four_generic_declarations_and_one_vector_kernel() {
         LIBRARY
             .matches("Vector<T,Column> solve<T: IEEEFloat>(")
             .count(),
-        2
+        3
     );
-    assert_eq!(LIBRARY.matches("Matrix<T> solve<T: IEEEFloat>(").count(), 2);
-    assert_eq!(LIBRARY.matches(" solve<T: IEEEFloat>(").count(), 4);
+    assert_eq!(LIBRARY.matches("Matrix<T> solve<T: IEEEFloat>(").count(), 3);
+    assert_eq!(LIBRARY.matches(" solve<T: IEEEFloat>(").count(), 6);
     assert!(!LIBRARY.contains("Vector<float64,Column> solve("));
     assert!(!LIBRARY.contains("Vector<float32,Column> solve("));
     assert_eq!(

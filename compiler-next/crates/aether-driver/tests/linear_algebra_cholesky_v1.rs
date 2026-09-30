@@ -85,7 +85,10 @@ fn public_surface_and_kernel_structure_are_exact() {
     let start = LIBRARY
         .find("Cholesky<T> choleskyInPlace<T: IEEEFloat>(Matrix<T> A)")
         .unwrap();
-    let end = LIBRARY[start..].find("// A materialized QR").unwrap() + start;
+    let end = LIBRARY[start..]
+        .find("// Solve L L^T x = b using one owning result")
+        .unwrap()
+        + start;
     let kernel = &LIBRARY[start..end];
 
     assert_eq!(

@@ -1009,6 +1009,16 @@ int testFormatBorrowLU() {
     Matrix<float64> positive64 = [4.0,2.0;2.0,5.0];
     var cholesky64 = la.cholesky(positive64);
     println("L = ${cholesky64.L}");
+    Vector<float64,Column> choleskyB1 = [8.0,12.0];
+    Vector<float64,Column> choleskyB2 = [2.0,13.0];
+    var choleskyX1 = la.solve(cholesky64, choleskyB1);
+    var choleskyX2 = la.solve(cholesky64, choleskyB2);
+    Matrix<float64> choleskyB = [8.0,2.0;12.0,13.0];
+    var choleskyX = la.solve(cholesky64, choleskyB);
+    println("Cholesky factor = ${cholesky64.L}");
+    println("Cholesky x1 = ${choleskyX1}");
+    println("Cholesky x2 = ${choleskyX2}");
+    println("Cholesky X = ${choleskyX}");
     Matrix<float32> positive32 = [float32(4.0),float32(2.0);float32(2.0),float32(5.0)];
     var cholesky32 = la.cholesky(positive32);
     println("L32 = ${cholesky32.L}");
@@ -1021,6 +1031,9 @@ int testFormatBorrowLU() {
     if (factor.permutationSign != -1 || factor.U[1,1] != 2.0) { return 3; }
     if (A[1,1] != 0.0 || A[2,2] != 3.0) { return 4; }
     if (inPlace.U[1,1] != 2.0 || inPlace.U[2,2] != 3.0) { return 5; }
+    if (choleskyX1[1] != 1.0 || choleskyX1[2] != 2.0) { return 6; }
+    if (choleskyX2[1] != -1.0 || choleskyX2[2] != 3.0) { return 7; }
+    if (choleskyX[1,1] != 1.0 || choleskyX[2,2] != 3.0) { return 8; }
     return 0;
 }
 
@@ -1124,6 +1137,66 @@ int testCholesky32() {
     Matrix<float32> conditioned = [float32(1.0),float32(0.99);float32(0.99),float32(1.0)];
     Matrix<float32> conditionedExpected = [float32(1.0),float32(0.99);float32(0.99),float32(1.0)];
     if (validateCholesky32(matrix_view(conditionedExpected), genericCholesky(conditioned), float32(2e-5)) != 0) { return 4; }
+    return 0;
+}
+
+int testCholeskySolve64() {
+    Matrix<float64> A = [4.0,2.0;2.0,5.0];
+    Matrix<float64> original = [4.0,2.0;2.0,5.0];
+    la.Cholesky<float64> factor = la.cholesky(A);
+    Vector<float64,Column> b1 = [8.0,12.0];
+    Vector<float64,Column> b2 = [2.0,13.0];
+    Vector<float64,Column> x1 = la.solve(factor, b1);
+    Vector<float64,Column> x2 = la.solve(factor, b2);
+    if (abs(x1[1] - 1.0) > 1e-12 || abs(x1[2] - 2.0) > 1e-12) { return 1; }
+    if (abs(x2[1] + 1.0) > 1e-12 || abs(x2[2] - 3.0) > 1e-12) { return 2; }
+
+    Matrix<float64> B = [8.0,2.0;12.0,13.0];
+    Matrix<float64> X = la.solve(factor, B);
+    if (abs(X[1,1] - x1[1]) > 1e-12 || abs(X[2,1] - x1[2]) > 1e-12) { return 3; }
+    if (abs(X[1,2] - x2[1]) > 1e-12 || abs(X[2,2] - x2[2]) > 1e-12) { return 4; }
+    Matrix<float64> residual = matrix_view(original) * matrix_view(X);
+    if (abs(residual[1,1] - B[1,1]) > 1e-11 || abs(residual[2,2] - B[2,2]) > 1e-11) { return 5; }
+
+    la.LU<float64> luFactor = la.lu(original);
+    Vector<float64,Column> luX = la.solve(luFactor, b1);
+    Matrix<float64> luMatrixX = la.solve(luFactor, B);
+    if (abs(luX[1] - x1[1]) > 1e-12 || abs(luX[2] - x1[2]) > 1e-12) { return 6; }
+    if (abs(luMatrixX[1,2] - X[1,2]) > 1e-12 || abs(luMatrixX[2,2] - X[2,2]) > 1e-12) { return 7; }
+    if (A[1,2] != 2.0 || b1[1] != 8.0 || b2[2] != 13.0 || B[2,1] != 12.0) { return 8; }
+    if (factor.L[1,1] != 2.0 || factor.L[2,1] != 1.0 || factor.L[2,2] != 2.0) { return 9; }
+
+    Matrix<float64> forgedL = [2.0,999.0;1.0,2.0];
+    la.Cholesky<float64> forged = la.Cholesky<float64>(forgedL);
+    Vector<float64,Column> forgedX = la.solve(forged, b1);
+    if (abs(forgedX[1] - x1[1]) > 1e-12 || abs(forgedX[2] - x1[2]) > 1e-12) { return 10; }
+    X[1,1] = 99.0;
+    x1[1] = 77.0;
+    if (B[1,1] != 8.0 || b1[1] != 8.0 || factor.L[1,1] != 2.0) { return 13; }
+
+    Matrix<float64> emptyL = la.zeros(0,0);
+    la.Cholesky<float64> emptyFactor = la.Cholesky<float64>(emptyL);
+    Vector<float64,Column> emptyB = la.zeros(0);
+    Vector<float64,Column> emptyX = la.solve(emptyFactor, emptyB);
+    Matrix<float64> emptyMatrixB = la.zeros(0,3);
+    Matrix<float64> emptyMatrixX = la.solve(emptyFactor, emptyMatrixB);
+    if (dimension(emptyX) != 0 || rows(emptyMatrixX) != 0 || columns(emptyMatrixX) != 3) { return 11; }
+    Matrix<float64> noColumns = la.zeros(2,0);
+    Matrix<float64> noColumnResult = la.solve(factor, noColumns);
+    if (rows(noColumnResult) != 2 || columns(noColumnResult) != 0) { return 12; }
+    return 0;
+}
+
+int testCholeskySolve32() {
+    Matrix<float32> A = [float32(4.0),float32(2.0);float32(2.0),float32(5.0)];
+    la.Cholesky<float32> factor = la.cholesky(A);
+    Vector<float32,Column> b = [float32(8.0),float32(12.0)];
+    Vector<float32,Column> x = la.solve<float32>(factor, b);
+    Matrix<float32> B = [float32(8.0),float32(2.0);float32(12.0),float32(13.0)];
+    Matrix<float32> X = la.solve<float32>(factor, B);
+    if (abs(x[1] - float32(1.0)) > float32(2e-5) || abs(x[2] - float32(2.0)) > float32(2e-5)) { return 1; }
+    if (abs(X[1,2] - float32(-1.0)) > float32(2e-5) || abs(X[2,2] - float32(3.0)) > float32(2e-5)) { return 2; }
+    if (b[1] != float32(8.0) || B[2,2] != float32(13.0) || factor.L[2,1] != float32(1.0)) { return 3; }
     return 0;
 }
 
@@ -1320,5 +1393,9 @@ int main() {
     if (cholesky64Status != 0) { return 300 + cholesky64Status; }
     int cholesky32Status = testCholesky32();
     if (cholesky32Status != 0) { return 320 + cholesky32Status; }
+    int choleskySolve64Status = testCholeskySolve64();
+    if (choleskySolve64Status != 0) { return 340 + choleskySolve64Status; }
+    int choleskySolve32Status = testCholeskySolve32();
+    if (choleskySolve32Status != 0) { return 360 + choleskySolve32Status; }
     return 0;
 }

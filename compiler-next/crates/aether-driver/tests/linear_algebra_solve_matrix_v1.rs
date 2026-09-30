@@ -70,20 +70,22 @@ fn status_llvm(llvm: &str, optimization: OptimizationLevel) -> std::process::Exi
 }
 
 #[test]
-fn solve_has_exactly_four_generic_overloads_and_one_matrix_kernel() {
-    assert_eq!(LIBRARY.matches(" solve<T: IEEEFloat>(").count(), 4);
+fn solve_has_six_generic_overloads_and_preserves_the_lu_matrix_kernel() {
+    assert_eq!(LIBRARY.matches(" solve<T: IEEEFloat>(").count(), 6);
     assert_eq!(
         LIBRARY
             .matches("Vector<T,Column> solve<T: IEEEFloat>(")
             .count(),
-        2
+        3
     );
-    assert_eq!(LIBRARY.matches("Matrix<T> solve<T: IEEEFloat>(").count(), 2);
+    assert_eq!(LIBRARY.matches("Matrix<T> solve<T: IEEEFloat>(").count(), 3);
     assert!(!LIBRARY.contains("Matrix<float64> solve("));
     assert!(!LIBRARY.contains("Matrix<float32> solve("));
 
     let start = LIBRARY.find("Matrix<T> solve<T: IEEEFloat>(").unwrap();
-    let end = LIBRARY.find("// A materialized QR factorization").unwrap();
+    let end = LIBRARY
+        .find("// A lower-triangular Cholesky factor")
+        .unwrap();
     let implementation = &LIBRARY[start..end];
     assert_eq!(implementation.matches("LU<T> factor = lu(A);").count(), 1);
     assert_eq!(implementation.matches("lu(A)").count(), 1);

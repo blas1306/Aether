@@ -442,6 +442,89 @@ Cholesky<T> choleskyInPlace<T: IEEEFloat>(Matrix<T> A) {
     return Cholesky<T>(A);
 }
 
+// Solve L L^T x = b using one owning result as both forward workspace and x.
+Vector<T,Column> solve<T: IEEEFloat>(
+    ref Cholesky<T> factor,
+    ref Vector<T,Column> b) {
+    shapeGuard(rows((*factor).L) == columns((*factor).L));
+    shapeGuard(dimension(*b) == rows((*factor).L));
+
+    usize n = rows((*factor).L);
+    T zero = 0;
+    Vector<T,Column> w = vectorFilled<T,Column>(n, zero);
+    usize i = 1;
+    while (i <= n) {
+        T value = (*b)[i];
+        usize j = 1;
+        while (j < i) {
+            value = value - (*factor).L[i,j] * w[j];
+            j = j + 1;
+        }
+        w[i] = value / (*factor).L[i,i];
+        i = i + 1;
+    }
+
+    i = n;
+    while (i > 0) {
+        T value = w[i];
+        usize j = i + 1;
+        while (j <= n) {
+            value = value - (*factor).L[j,i] * w[j];
+            j = j + 1;
+        }
+        w[i] = value / (*factor).L[i,i];
+        if (i == 1) { break; }
+        i = i - 1;
+    }
+    return w;
+}
+
+// Solve L L^T X = B directly in one n by q owning result workspace.
+Matrix<T> solve<T: IEEEFloat>(
+    ref Cholesky<T> factor,
+    ref Matrix<T> B) {
+    shapeGuard(rows((*factor).L) == columns((*factor).L));
+    shapeGuard(rows(*B) == rows((*factor).L));
+
+    usize n = rows((*factor).L);
+    usize q = columns(*B);
+    T zero = 0;
+    Matrix<T> W = matrixFilled<T>(n, q, zero);
+    usize i = 1;
+    while (i <= n) {
+        usize c = 1;
+        while (c <= q) {
+            T value = (*B)[i,c];
+            usize j = 1;
+            while (j < i) {
+                value = value - (*factor).L[i,j] * W[j,c];
+                j = j + 1;
+            }
+            W[i,c] = value / (*factor).L[i,i];
+            c = c + 1;
+        }
+        i = i + 1;
+    }
+
+    i = n;
+    while (i > 0) {
+        usize c = 1;
+        while (c <= q) {
+            T value = W[i,c];
+            usize j = i + 1;
+            while (j <= n) {
+                value = value - (*factor).L[j,i] * W[j,c];
+                j = j + 1;
+            }
+            W[i,c] = value / (*factor).L[i,i];
+            c = c + 1;
+        }
+        if (i == 1) { break; }
+        i = i - 1;
+    }
+    return W;
+}
+
 // A materialized QR factorization.  Q is m by m and R is m by n.
 struct QR<T: Storable> {
     Matrix<T> Q;

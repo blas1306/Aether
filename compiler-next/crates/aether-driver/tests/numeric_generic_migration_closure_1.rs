@@ -46,8 +46,8 @@ fn public_source_is_one_generic_kernel_per_family() {
         ("Matrix<T> identity<T: Storable + Copy + Zero + One>(", 1),
         ("LU<T> lu<T: IEEEFloat>(", 1),
         ("T det<T: IEEEFloat>(", 2),
-        ("Vector<T,Column> solve<T: IEEEFloat>(", 2),
-        ("Matrix<T> solve<T: IEEEFloat>(", 2),
+        ("Vector<T,Column> solve<T: IEEEFloat>(", 3),
+        ("Matrix<T> solve<T: IEEEFloat>(", 3),
         ("QR<T> qr<T: IEEEFloat>(", 1),
     ];
     for (signature, count) in signatures {
