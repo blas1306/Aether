@@ -618,6 +618,372 @@ T stableHypot<T: IEEEFloat>(T a, T b) {
     return high * sqrt(one + ratio * ratio);
 }
 
+// Compact first phase of the future thin SVD.  These types and every entry
+// point below remain module-private until the bidiagonal QR phase is closed.
+struct BidiagonalOrientation {
+    bool transposed;
+}
+
+struct CompactBidiagonalReduction<T: Storable> {
+    Matrix<T> workspace;
+    Vector<T,Column> d;
+    Vector<T,Column> e;
+    Vector<T,Column> tauLeft;
+    Vector<T,Column> tauRight;
+    BidiagonalOrientation orientation;
+}
+
+struct BidiagonalSVDSeed<T: Storable> {
+    Vector<T,Column> d;
+    Vector<T,Column> e;
+    Matrix<T> U;
+    Matrix<T> Vt;
+    BidiagonalOrientation orientation;
+}
+
+int reduceTallBidiagonal<T: IEEEFloat>(
+    MatrixViewMut<T> X,
+    usize M,
+    usize N,
+    ref mut Vector<T,Column> d,
+    ref mut Vector<T,Column> e,
+    ref mut Vector<T,Column> tauLeft,
+    ref mut Vector<T,Column> tauRight) {
+    T zero = 0;
+    T one = 1;
+    usize i = 1;
+    while (i <= N) {
+        VectorView<T,Column> leftAxis = column(X,i);
+        T leftNorm = stableNormRange<T>(leftAxis, i, M);
+        T betaLeft = zero;
+        T tauLeftValue = zero;
+        if (leftNorm != zero) {
+            betaLeft = leftNorm;
+            if (X[i,i] >= zero) { betaLeft = -leftNorm; }
+            T pivotRatio = X[i,i] / betaLeft;
+            T denominatorRatio = pivotRatio - one;
+            usize r = i + 1;
+            while (r <= M) {
+                X[r,i] = (X[r,i] / betaLeft) / denominatorRatio;
+                r = r + 1;
+            }
+            tauLeftValue = one - pivotRatio;
+        }
+        (*d)[i] = betaLeft;
+        (*tauLeft)[i] = tauLeftValue;
+        X[i,i] = betaLeft;
+
+        if (tauLeftValue != zero) {
+            usize j = i + 1;
+            while (j <= N) {
+                T dot = X[i,j];
+                usize r = i + 1;
+                while (r <= M) {
+                    dot = dot + X[r,i] * X[r,j];
+                    r = r + 1;
+                }
+                T scale = tauLeftValue * dot;
+                X[i,j] = X[i,j] - scale;
+                r = i + 1;
+                while (r <= M) {
+                    X[r,j] = X[r,j] - scale * X[r,i];
+                    r = r + 1;
+                }
+                j = j + 1;
+            }
+        }
+
+        if (i < N) {
+            VectorView<T,Row> rightRow = row(X,i);
+            VectorView<T,Column> rightAxis = transpose_view(rightRow);
+            T rightNorm = stableNormRange<T>(rightAxis, i + 1, N);
+            T betaRight = zero;
+            T tauRightValue = zero;
+            if (rightNorm != zero) {
+                betaRight = rightNorm;
+                if (X[i,i + 1] >= zero) { betaRight = -rightNorm; }
+                T pivotRatio = X[i,i + 1] / betaRight;
+                T denominatorRatio = pivotRatio - one;
+                usize c = i + 2;
+                while (c <= N) {
+                    X[i,c] = (X[i,c] / betaRight) / denominatorRatio;
+                    c = c + 1;
+                }
+                tauRightValue = one - pivotRatio;
+            }
+            (*e)[i] = betaRight;
+            (*tauRight)[i] = tauRightValue;
+            X[i,i + 1] = betaRight;
+
+            if (tauRightValue != zero) {
+                usize r = i + 1;
+                while (r <= M) {
+                    T dot = X[r,i + 1];
+                    usize c = i + 2;
+                    while (c <= N) {
+                        dot = dot + X[i,c] * X[r,c];
+                        c = c + 1;
+                    }
+                    T scale = tauRightValue * dot;
+                    X[r,i + 1] = X[r,i + 1] - scale;
+                    c = i + 2;
+                    while (c <= N) {
+                        X[r,c] = X[r,c] - scale * X[i,c];
+                        c = c + 1;
+                    }
+                    r = r + 1;
+                }
+            }
+        }
+        i = i + 1;
+    }
+    return 0;
+}
+
+CompactBidiagonalReduction<T> compactBidiagonalReduction<T: IEEEFloat>(
+    Matrix<T> workspace) {
+    T zero = 0;
+    usize m = rows(workspace);
+    usize n = columns(workspace);
+    usize M = m;
+    usize N = n;
+    BidiagonalOrientation orientation = BidiagonalOrientation(false);
+    if (m < n) {
+        M = n;
+        N = m;
+        orientation = BidiagonalOrientation(true);
+    }
+    usize offDiagonal = 0;
+    if (N > 0) { offDiagonal = N - 1; }
+    Vector<T,Column> d = vectorFilled<T,Column>(N, zero);
+    Vector<T,Column> e = vectorFilled<T,Column>(offDiagonal, zero);
+    Vector<T,Column> tauLeft = vectorFilled<T,Column>(N, zero);
+    Vector<T,Column> tauRight =
+        vectorFilled<T,Column>(offDiagonal, zero);
+    if (m < n) {
+        reduceTallBidiagonal<T>(transpose_view_mut(workspace), M, N,
+            &mut d, &mut e, &mut tauLeft, &mut tauRight);
+    }
+    else {
+        reduceTallBidiagonal<T>(matrix_view_mut(workspace), M, N,
+            &mut d, &mut e, &mut tauLeft, &mut tauRight);
+    }
+    return CompactBidiagonalReduction<T>(
+        workspace, d, e, tauLeft, tauRight, orientation);
+}
+
+Matrix<T> materializeBidiagonalUpperU<T: IEEEFloat>(
+    ref Matrix<T> workspace,
+    ref Vector<T,Column> tauLeft) {
+    T zero = 0;
+    T one = 1;
+    usize M = rows(*workspace);
+    usize N = columns(*workspace);
+    Matrix<T> U = matrixFilled<T>(M, N, zero);
+    usize c = 1;
+    while (c <= N) {
+        U[c,c] = one;
+        c = c + 1;
+    }
+
+    usize i = N;
+    while (i > 0) {
+        T tau = (*tauLeft)[i];
+        if (tau != zero) {
+            c = i;
+            while (c <= N) {
+                T dot = U[i,c];
+                usize r = i + 1;
+                while (r <= M) {
+                    dot = dot + (*workspace)[r,i] * U[r,c];
+                    r = r + 1;
+                }
+                T scale = tau * dot;
+                U[i,c] = U[i,c] - scale;
+                r = i + 1;
+                while (r <= M) {
+                    U[r,c] = U[r,c] -
+                        scale * (*workspace)[r,i];
+                    r = r + 1;
+                }
+                c = c + 1;
+            }
+        }
+        if (i == 1) { break; }
+        i = i - 1;
+    }
+    return U;
+}
+
+Matrix<T> materializeBidiagonalUpperVt<T: IEEEFloat>(
+    ref Matrix<T> workspace,
+    ref Vector<T,Column> tauRight) {
+    T zero = 0;
+    T one = 1;
+    usize N = columns(*workspace);
+    Matrix<T> Vt = matrixFilled<T>(N, N, zero);
+    usize c = 1;
+    while (c <= N) {
+        Vt[c,c] = one;
+        c = c + 1;
+    }
+
+    usize i = 1;
+    while (i < N) {
+        T tau = (*tauRight)[i];
+        if (tau != zero) {
+            c = 1;
+            while (c <= N) {
+                T dot = Vt[i + 1,c];
+                usize r = i + 2;
+                while (r <= N) {
+                    dot = dot + (*workspace)[i,r] * Vt[r,c];
+                    r = r + 1;
+                }
+                T scale = tau * dot;
+                Vt[i + 1,c] = Vt[i + 1,c] - scale;
+                r = i + 2;
+                while (r <= N) {
+                    Vt[r,c] = Vt[r,c] -
+                        scale * (*workspace)[i,r];
+                    r = r + 1;
+                }
+                c = c + 1;
+            }
+        }
+        i = i + 1;
+    }
+    return Vt;
+}
+
+Matrix<T> materializeBidiagonalTransposedU<T: IEEEFloat>(
+    ref Matrix<T> workspace,
+    ref Vector<T,Column> tauRight) {
+    T zero = 0;
+    T one = 1;
+    usize N = rows(*workspace);
+    Matrix<T> U = matrixFilled<T>(N, N, zero);
+    usize r = 1;
+    while (r <= N) {
+        U[r,r] = one;
+        r = r + 1;
+    }
+
+    usize i = 1;
+    while (i < N) {
+        T tau = (*tauRight)[i];
+        if (tau != zero) {
+            r = 1;
+            while (r <= N) {
+                T dot = U[r,i + 1];
+                usize c = i + 2;
+                while (c <= N) {
+                    dot = dot + U[r,c] * (*workspace)[c,i];
+                    c = c + 1;
+                }
+                T scale = tau * dot;
+                U[r,i + 1] = U[r,i + 1] - scale;
+                c = i + 2;
+                while (c <= N) {
+                    U[r,c] = U[r,c] -
+                        scale * (*workspace)[c,i];
+                    c = c + 1;
+                }
+                r = r + 1;
+            }
+        }
+        i = i + 1;
+    }
+    return U;
+}
+
+Matrix<T> materializeBidiagonalTransposedVt<T: IEEEFloat>(
+    ref Matrix<T> workspace,
+    ref Vector<T,Column> tauLeft) {
+    T zero = 0;
+    T one = 1;
+    usize N = rows(*workspace);
+    usize M = columns(*workspace);
+    Matrix<T> Vt = matrixFilled<T>(N, M, zero);
+    usize c = 1;
+    while (c <= N) {
+        Vt[c,c] = one;
+        c = c + 1;
+    }
+
+    usize i = N;
+    while (i > 0) {
+        T tau = (*tauLeft)[i];
+        if (tau != zero) {
+            usize r = i;
+            while (r <= N) {
+                T dot = Vt[r,i];
+                c = i + 1;
+                while (c <= M) {
+                    dot = dot + Vt[r,c] * (*workspace)[i,c];
+                    c = c + 1;
+                }
+                T scale = tau * dot;
+                Vt[r,i] = Vt[r,i] - scale;
+                c = i + 1;
+                while (c <= M) {
+                    Vt[r,c] = Vt[r,c] -
+                        scale * (*workspace)[i,c];
+                    c = c + 1;
+                }
+                r = r + 1;
+            }
+        }
+        if (i == 1) { break; }
+        i = i - 1;
+    }
+    return Vt;
+}
+
+BidiagonalSVDSeed<T> bidiagonalSVDSeedInPlace<T: IEEEFloat>(
+    Matrix<T> workspace) {
+    T zero = 0;
+    usize m = rows(workspace);
+    usize n = columns(workspace);
+    usize M = m;
+    usize N = n;
+    if (m < n) {
+        M = n;
+        N = m;
+    }
+    usize offDiagonal = 0;
+    if (N > 0) { offDiagonal = N - 1; }
+    Vector<T,Column> d = vectorFilled<T,Column>(N, zero);
+    Vector<T,Column> e = vectorFilled<T,Column>(offDiagonal, zero);
+    Vector<T,Column> tauLeft = vectorFilled<T,Column>(N, zero);
+    Vector<T,Column> tauRight =
+        vectorFilled<T,Column>(offDiagonal, zero);
+
+    if (m < n) {
+        // The only wide-only object is this O(1) transposed descriptor.
+        reduceTallBidiagonal<T>(transpose_view_mut(workspace), M, N,
+            &mut d, &mut e, &mut tauLeft, &mut tauRight);
+        Matrix<T> U =
+            materializeBidiagonalTransposedU<T>(&workspace, &tauRight);
+        Matrix<T> Vt =
+            materializeBidiagonalTransposedVt<T>(&workspace, &tauLeft);
+        return BidiagonalSVDSeed<T>(
+            d, e, U, Vt, BidiagonalOrientation(true));
+    }
+
+    reduceTallBidiagonal<T>(matrix_view_mut(workspace), M, N,
+        &mut d, &mut e, &mut tauLeft, &mut tauRight);
+    Matrix<T> U = materializeBidiagonalUpperU<T>(&workspace, &tauLeft);
+    Matrix<T> Vt = materializeBidiagonalUpperVt<T>(&workspace, &tauRight);
+    return BidiagonalSVDSeed<T>(
+        d, e, U, Vt, BidiagonalOrientation(false));
+}
+
+BidiagonalSVDSeed<T> bidiagonalSVDSeed<T: IEEEFloat>(ref Matrix<T> A) {
+    Matrix<T> workspace = copyMatrixForFactorization<T>(A);
+    return bidiagonalSVDSeedInPlace<T>(workspace);
+}
+
 public class RankDeficientMatrixException : Exception {
     public init() {}
 }

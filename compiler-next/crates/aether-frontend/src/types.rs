@@ -2071,8 +2071,12 @@ impl TypeArena {
     /// a writable aggregate/container reference. This is not a capability.
     #[must_use]
     pub fn may_contain_list(&self, id: TypeId) -> bool {
-        self.contains_generic(id)
-            || self.contains_capability(id, 3, &HashMap::new(), &mut BTreeSet::new())
+        // List and every aggregate that contains one are non-Copy.  Respecting
+        // a closed Copy guarantee keeps constrained scalar parameters from
+        // spuriously acquiring an untracked nested-List effect.
+        !self.guarantees_copy(id)
+            && (self.contains_generic(id)
+                || self.contains_capability(id, 3, &HashMap::new(), &mut BTreeSet::new()))
     }
 
     #[must_use]
@@ -2754,6 +2758,19 @@ mod tests {
             types.intern_struct_instance(StructId(0), vec![parameter_ty, TypeId::FLOAT64]);
         let substitution = Substitution::new([parameter], [TypeId::INT64]);
         assert_eq!(types.substitute(symbolic, &substitution), Ok(pair));
+    }
+
+    #[test]
+    fn copy_constrained_parameter_cannot_have_a_nested_list_effect() {
+        let mut types = TypeArena::new();
+        let parameter = GenericParamId {
+            owner: GenericOwner::Function(0),
+            index: 0,
+        };
+        types.register_generic_capabilities(parameter, "T".into(), [Capability::IEEEFloat]);
+        let ty = types.intern(TypeData::GenericParam(parameter));
+        assert!(types.guarantees_copy(ty));
+        assert!(!types.may_contain_list(ty));
     }
 }
 
