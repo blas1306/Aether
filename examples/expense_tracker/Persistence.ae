@@ -30,25 +30,25 @@ enum LedgerStatus {
     IoError,
 }
 
-struct LedgerDecodeResult {
+public struct LedgerDecodeResult {
     expense_tracker.model.Ledger ledger;
     LedgerStatus status;
     usize byteOffset;
 }
 
-struct LedgerEncodeResult {
+public struct LedgerEncodeResult {
     string content;
     LedgerStatus status;
 }
 
-struct LineResult {
+public struct LineResult {
     LedgerStatus status;
     usize startOffset;
     usize endOffset;
     usize nextOffset;
 }
 
-struct FieldHeaderResult {
+public struct FieldHeaderResult {
     usize nameStart;
     usize nameEnd;
     usize typeStart;
@@ -64,15 +64,15 @@ enum UnsignedResult {
     Overflow,
 }
 
-LedgerDecodeResult decodeFailure(LedgerStatus status, usize offset) {
+public LedgerDecodeResult decodeFailure(LedgerStatus status, usize offset) {
     return LedgerDecodeResult(expense_tracker.model.Ledger({}), status, offset);
 }
 
-LedgerEncodeResult encodeFailure(LedgerStatus status) {
+public LedgerEncodeResult encodeFailure(LedgerStatus status) {
     return LedgerEncodeResult("", status);
 }
 
-LineResult readControlLine(ref string content, usize offset) {
+public LineResult readControlLine(ref string content, usize offset) {
     usize size = byteLength(*content);
     if (offset >= size) {
         return LineResult(LedgerStatus.UnexpectedEnd, offset, offset, offset);
@@ -87,7 +87,7 @@ LineResult readControlLine(ref string content, usize offset) {
     return LineResult(LedgerStatus.Success, offset, cursor, cursor + 1);
 }
 
-UnsignedResult parseCanonicalUnsigned(ref string token) {
+public UnsignedResult parseCanonicalUnsigned(ref string token) {
     usize size = byteLength(*token);
     if (size == 0 || (size > 1 && std.Text.byteAt(*token, 0) == 48)) {
         return UnsignedResult.Invalid;
@@ -112,7 +112,7 @@ UnsignedResult parseCanonicalUnsigned(ref string token) {
     }
 }
 
-bool rangeEquals(ref string content, usize start, usize end, ref string expected) {
+public bool rangeEquals(ref string content, usize start, usize end, ref string expected) {
     if (end - start != byteLength(*expected)) { return false; }
     match (std.Text.byteSlice(*content, start, end)) {
         std.Text.ByteSliceResult.Slice(value) => { return value == *expected; }
@@ -122,7 +122,7 @@ bool rangeEquals(ref string content, usize start, usize end, ref string expected
     }
 }
 
-bool rangeStartsWith(ref string content, usize start, usize end, ref string prefix) {
+public bool rangeStartsWith(ref string content, usize start, usize end, ref string prefix) {
     usize prefixSize = byteLength(*prefix);
     if (end - start < prefixSize) { return false; }
     usize cursor = 0;
@@ -135,7 +135,7 @@ bool rangeStartsWith(ref string content, usize start, usize end, ref string pref
     return true;
 }
 
-UnsignedResult parseRangeUnsigned(ref string content, usize start, usize end) {
+public UnsignedResult parseRangeUnsigned(ref string content, usize start, usize end) {
     match (std.Text.byteSlice(*content, start, end)) {
         std.Text.ByteSliceResult.Slice(token) => { return parseCanonicalUnsigned(token); }
         std.Text.ByteSliceResult.InvalidBoundary => { return UnsignedResult.Invalid; }
@@ -144,7 +144,7 @@ UnsignedResult parseRangeUnsigned(ref string content, usize start, usize end) {
     }
 }
 
-UnsignedResult parsePrefixedUnsigned(
+public UnsignedResult parsePrefixedUnsigned(
     ref string content,
     usize start,
     usize end,
@@ -165,11 +165,11 @@ UnsignedResult parsePrefixedUnsigned(
     return parseRangeUnsigned(content, start + prefixSize, end);
 }
 
-FieldHeaderResult invalidFieldHeader(LedgerStatus status) {
+public FieldHeaderResult invalidFieldHeader(LedgerStatus status) {
     return FieldHeaderResult(0, 0, 0, 0, 0, 0, status);
 }
 
-bool identifierRange(ref string content, usize start, usize end) {
+public bool identifierRange(ref string content, usize start, usize end) {
     if (start == end) { return false; }
     uint8 first = std.Text.byteAt(*content, start);
     if (first < 97 || first > 122) { return false; }
@@ -184,7 +184,7 @@ bool identifierRange(ref string content, usize start, usize end) {
     return true;
 }
 
-bool rememberFieldName(
+public bool rememberFieldName(
     ref mut List<string> names,
     ref string content,
     usize start,
@@ -204,7 +204,7 @@ bool rememberFieldName(
     }
 }
 
-FieldHeaderResult parseFieldHeader(ref string content, usize start, usize end) {
+public FieldHeaderResult parseFieldHeader(ref string content, usize start, usize end) {
     usize first = start;
     while (first < end && std.Text.byteAt(*content, first) != 32) {
         first = first + 1;
@@ -240,7 +240,7 @@ FieldHeaderResult parseFieldHeader(ref string content, usize start, usize end) {
     );
 }
 
-LedgerDecodeResult decodeLedger(ref string content) {
+public LedgerDecodeResult decodeLedger(ref string content) {
     usize size = byteLength(*content);
     if (size == 0) {
         return decodeFailure(LedgerStatus.EmptyFile, 0);
@@ -450,7 +450,7 @@ LedgerDecodeResult decodeLedger(ref string content) {
     return LedgerDecodeResult(expense_tracker.model.Ledger(staged), LedgerStatus.Success, 0);
 }
 
-string fieldFragment(ref string name, ref string typeName, ref string payload) {
+public string fieldFragment(ref string name, ref string typeName, ref string payload) {
     string fragment = "field " + *name;
     fragment = fragment + " ";
     fragment = fragment + *typeName;
@@ -461,7 +461,7 @@ string fieldFragment(ref string name, ref string typeName, ref string payload) {
     return fragment + "\n";
 }
 
-LedgerEncodeResult encodeLedger(ref expense_tracker.model.Ledger ledger) {
+public LedgerEncodeResult encodeLedger(ref expense_tracker.model.Ledger ledger) {
     usize count = length((*ledger).transactions);
     if (count > 10000) { return encodeFailure(LedgerStatus.ResourceLimitExceeded); }
     string content = "AETHER-PERSISTENCE\nformat-version 1\napplication aether.expense-tracker\nschema expense-ledger\nschema-revision 1\nschema-min-reader 1\nrecord-count ";
@@ -494,7 +494,7 @@ LedgerEncodeResult encodeLedger(ref expense_tracker.model.Ledger ledger) {
     return LedgerEncodeResult(content + "end-file\n", LedgerStatus.Success);
 }
 
-LedgerDecodeResult loadLedger(ref string path) {
+public LedgerDecodeResult loadLedger(ref string path) {
     try {
         string content = std.File.readText(*path);
         LedgerDecodeResult decoded = decodeLedger(content);
@@ -510,7 +510,7 @@ LedgerDecodeResult loadLedger(ref string path) {
     }
 }
 
-LedgerStatus saveLedger(ref string path, ref expense_tracker.model.Ledger ledger) {
+public LedgerStatus saveLedger(ref string path, ref expense_tracker.model.Ledger ledger) {
     LedgerEncodeResult encoded = encodeLedger(ledger);
     if (encoded.status != LedgerStatus.Success) { return encoded.status; }
     try {

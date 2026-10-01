@@ -2,14 +2,14 @@ package expense_tracker.numeric_parsing_fixture;
 
 import std.Text;
 
-struct ParsedFields {
+public struct ParsedFields {
     int id;
     int category;
     double amount;
 }
 
 // Representative persistence-boundary fixture. Policy remains with the caller.
-int parseRecord(ref string rawId, ref string rawCategory, ref string rawAmount) {
+public int parseRecord(ref string rawId, ref string rawCategory, ref string rawAmount) {
     int id = 0;
     int category = 0;
     double amount = 0.0;
@@ -34,6 +34,6 @@ int parseRecord(ref string rawId, ref string rawCategory, ref string rawAmount) 
     return 8;
 }
 
-int main() {
+public int main() {
     return parseRecord("17", "4", "12.75");
 }

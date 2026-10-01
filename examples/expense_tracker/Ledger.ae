@@ -7,7 +7,7 @@ enum AddTransactionStatus {
     NonPositiveAmount,
 }
 
-AddTransactionStatus addTransaction(
+public AddTransactionStatus addTransaction(
     ref mut expense_tracker.model.Ledger ledger,
     int id,
     expense_tracker.model.TransactionType type,

@@ -7,7 +7,7 @@ enum RootStatus {
     ZeroDerivative
 }
 
-struct RootResult {
+public struct RootResult {
     double value;
     int iterations;
     RootStatus status;
@@ -19,31 +19,31 @@ enum IntegrationStatus {
     SimpsonRequiresEvenSubintervals
 }
 
-struct IntegrationResult {
+public struct IntegrationResult {
     double value;
     IntegrationStatus status;
 }
 
-bool isConverged(RootStatus status) {
+public bool isConverged(RootStatus status) {
     return status == RootStatus.Converged;
 }
 
-bool isInvalidInterval(RootStatus status) {
+public bool isInvalidInterval(RootStatus status) {
     return status == RootStatus.InvalidInterval;
 }
 
-bool isZeroDerivative(RootStatus status) {
+public bool isZeroDerivative(RootStatus status) {
     return status == RootStatus.ZeroDerivative;
 }
 
-bool isIntegrationSuccess(IntegrationStatus status) {
+public bool isIntegrationSuccess(IntegrationStatus status) {
     return status == IntegrationStatus.Success;
 }
 
-bool isNonPositiveSubintervalCount(IntegrationStatus status) {
+public bool isNonPositiveSubintervalCount(IntegrationStatus status) {
     return status == IntegrationStatus.NonPositiveSubintervalCount;
 }
 
-bool isSimpsonRequiresEvenSubintervals(IntegrationStatus status) {
+public bool isSimpsonRequiresEvenSubintervals(IntegrationStatus status) {
     return status == IntegrationStatus.SimpsonRequiresEvenSubintervals;
 }

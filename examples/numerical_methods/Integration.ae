@@ -3,7 +3,7 @@ package Integration;
 import Functions;
 import Results;
 
-Results.IntegrationResult trapezoid(
+public Results.IntegrationResult trapezoid(
     Functions.ScalarCallable target,
     double left,
     double right,
@@ -23,7 +23,7 @@ Results.IntegrationResult trapezoid(
     return Results.IntegrationResult(total * step, Results.IntegrationStatus.Success);
 }
 
-Results.IntegrationResult simpson(
+public Results.IntegrationResult simpson(
     Functions.ScalarCallable target,
     double left,
     double right,

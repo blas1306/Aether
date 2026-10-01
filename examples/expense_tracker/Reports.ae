@@ -2,13 +2,13 @@ package expense_tracker.reports;
 
 import expense_tracker.model;
 
-struct Summary {
+public struct Summary {
     double income;
     double expenses;
     double balance;
 }
 
-Summary summarize(ref expense_tracker.model.Ledger ledger) {
+public Summary summarize(ref expense_tracker.model.Ledger ledger) {
     double income = 0.0;
     double expenses = 0.0;
     for (ref expense_tracker.model.Transaction transaction in (*ledger).transactions) {
@@ -21,18 +21,18 @@ Summary summarize(ref expense_tracker.model.Ledger ledger) {
     return Summary(income, expenses, income - expenses);
 }
 
-string transactionLabel(ref expense_tracker.model.Transaction transaction) {
+public string transactionLabel(ref expense_tracker.model.Transaction transaction) {
     string label = "" + (*transaction).category;
     label = label + ": ";
     return label + (*transaction).description;
 }
 
-string transactionTypeLabel(expense_tracker.model.TransactionType type) {
+public string transactionTypeLabel(expense_tracker.model.TransactionType type) {
     if (type == expense_tracker.model.TransactionType.Income) { return "Income"; }
     return "Expense";
 }
 
-void printTransactions(ref expense_tracker.model.Ledger ledger) {
+public void printTransactions(ref expense_tracker.model.Ledger ledger) {
     for (ref expense_tracker.model.Transaction transaction in (*ledger).transactions) {
         string typeLabel = transactionTypeLabel((*transaction).type);
         string line = "#" + str((*transaction).id);

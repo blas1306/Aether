@@ -3,7 +3,7 @@ package Roots;
 import Functions;
 import Results;
 
-Results.RootResult bisection(
+public Results.RootResult bisection(
     Functions.ScalarCallable target,
     double left,
     double right,
@@ -46,7 +46,7 @@ Results.RootResult bisection(
     return Results.RootResult(middle, iterations, Results.RootStatus.MaxIterations);
 }
 
-Results.RootResult newton(
+public Results.RootResult newton(
     Functions.ScalarCallable target,
     Functions.ScalarCallable derivative,
     double initial,
@@ -79,7 +79,7 @@ Results.RootResult newton(
     return Results.RootResult(x, iterations, Results.RootStatus.MaxIterations);
 }
 
-Results.RootResult secant(
+public Results.RootResult secant(
     Functions.ScalarCallable target,
     double previous,
     double current,

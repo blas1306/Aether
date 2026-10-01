@@ -7,11 +7,11 @@ import expense_tracker.reports;
 import std.Process;
 import std.Text;
 
-string copyArgument(ref string value) {
+public string copyArgument(ref string value) {
     return "" + *value;
 }
 
-expense_tracker.persistence.LedgerDecodeResult loadForCommand(ref string path) {
+public expense_tracker.persistence.LedgerDecodeResult loadForCommand(ref string path) {
     expense_tracker.persistence.LedgerDecodeResult loaded =
         expense_tracker.persistence.loadLedger(path);
     if (loaded.status == expense_tracker.persistence.LedgerStatus.FileNotFound) {
@@ -24,12 +24,12 @@ expense_tracker.persistence.LedgerDecodeResult loadForCommand(ref string path) {
     return loaded;
 }
 
-int reportLoadFailure(ref expense_tracker.persistence.LedgerDecodeResult loaded) {
+public int reportLoadFailure(ref expense_tracker.persistence.LedgerDecodeResult loaded) {
     println("ledger load failed at byte " + str((*loaded).byteOffset));
     return 3;
 }
 
-int runList(
+public int runList(
     ref Array<string> arguments,
     ref expense_tracker.persistence.LedgerDecodeResult loaded
 ) {
@@ -41,7 +41,7 @@ int runList(
     return 0;
 }
 
-int runSummary(
+public int runSummary(
     ref Array<string> arguments,
     ref expense_tracker.persistence.LedgerDecodeResult loaded
 ) {
@@ -56,7 +56,7 @@ int runSummary(
     return 0;
 }
 
-int runAdd(
+public int runAdd(
     ref Array<string> arguments,
     ref mut expense_tracker.persistence.LedgerDecodeResult loaded
 ) {
@@ -139,7 +139,7 @@ int runAdd(
     return 0;
 }
 
-int runPersistentCommand(ref Array<string> arguments) {
+public int runPersistentCommand(ref Array<string> arguments) {
     if (length(*arguments) < 2) {
         println("usage: <ledger.alpt> <add|list|summary> ...");
         return 2;
@@ -156,7 +156,7 @@ int runPersistentCommand(ref Array<string> arguments) {
     return 2;
 }
 
-int main() {
+public int main() {
     Array<string> arguments = std.Process.args();
     return runPersistentCommand(arguments);
 }
