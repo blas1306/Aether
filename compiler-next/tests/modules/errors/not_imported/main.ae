@@ -3,6 +3,6 @@ package main;
 import a;
 import common;
 
-int main() {
+public int main() {
     return a.call_common();
 }

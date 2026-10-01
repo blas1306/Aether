@@ -1,5 +1,5 @@
 package storage;
 
-Matrix<T> pair<T:Storable>(T a,T b){return [a,b];}
-T identity<T>(T value){return value;}
-int read(ref Matrix<int> a,usize i,usize j){return (*a)[i,j];}
+public Matrix<T> pair<T:Storable>(T a,T b){return [a,b];}
+public T identity<T>(T value){return value;}
+public int read(ref Matrix<int> a,usize i,usize j){return (*a)[i,j];}

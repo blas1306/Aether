@@ -709,7 +709,7 @@ fn vertical3_alias_signatures_work_across_modules() {
     .unwrap();
     fs::write(
         root.join("math.ae"),
-        "package math; alias Scalar=int16;int answer(Scalar x){return int(x+x);}",
+        "package math; alias Scalar=int16;public int answer(Scalar x){return int(x+x);}",
     )
     .unwrap();
     let compilation = compile_session(

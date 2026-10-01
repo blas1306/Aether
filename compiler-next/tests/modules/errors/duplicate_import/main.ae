@@ -3,6 +3,6 @@ package main;
 import math;
 import math;
 
-int main() {
+public int main() {
     return math.value();
 }

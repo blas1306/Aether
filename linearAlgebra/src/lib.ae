@@ -2,39 +2,39 @@ package linearAlgebra;
 
 // Runtime-shape constructors are ordinary generic overloads.  The expected
 // result type selects the element type and, for vectors, the orientation.
-Matrix<T> zeros<T: Storable + Copy + Zero>(usize size) {
+public Matrix<T> zeros<T: Storable + Copy + Zero>(usize size) {
     return matrixFilled<T>(size, size, 0);
 }
 
-Matrix<T> zeros<T: Storable + Copy + Zero>(usize rowCount, usize columnCount) {
+public Matrix<T> zeros<T: Storable + Copy + Zero>(usize rowCount, usize columnCount) {
     return matrixFilled<T>(rowCount, columnCount, 0);
 }
 
-Vector<T,Row> zeros<T: Storable + Copy + Zero>(usize length) {
+public Vector<T,Row> zeros<T: Storable + Copy + Zero>(usize length) {
     return vectorFilled<T,Row>(length, 0);
 }
 
-Vector<T,Column> zeros<T: Storable + Copy + Zero>(usize length) {
+public Vector<T,Column> zeros<T: Storable + Copy + Zero>(usize length) {
     return vectorFilled<T,Column>(length, 0);
 }
 
-Matrix<T> ones<T: Storable + Copy + One>(usize size) {
+public Matrix<T> ones<T: Storable + Copy + One>(usize size) {
     return matrixFilled<T>(size, size, 1);
 }
 
-Matrix<T> ones<T: Storable + Copy + One>(usize rowCount, usize columnCount) {
+public Matrix<T> ones<T: Storable + Copy + One>(usize rowCount, usize columnCount) {
     return matrixFilled<T>(rowCount, columnCount, 1);
 }
 
-Vector<T,Row> ones<T: Storable + Copy + One>(usize length) {
+public Vector<T,Row> ones<T: Storable + Copy + One>(usize length) {
     return vectorFilled<T,Row>(length, 1);
 }
 
-Vector<T,Column> ones<T: Storable + Copy + One>(usize length) {
+public Vector<T,Column> ones<T: Storable + Copy + One>(usize length) {
     return vectorFilled<T,Column>(length, 1);
 }
 
-Matrix<T> identity<T: Storable + Copy + Zero + One>(usize size) {
+public Matrix<T> identity<T: Storable + Copy + Zero + One>(usize size) {
     Matrix<T> result = zeros<T>(size, size);
     usize index = 1;
     while (index <= size) {
@@ -46,7 +46,7 @@ Matrix<T> identity<T: Storable + Copy + Zero + One>(usize size) {
 
 // An economic LU factorization with a 1-based row permutation.  The
 // permutation represents P directly: (P A)[i,j] = A[permutation[i],j].
-struct LU<T: Storable> {
+public struct LU<T: Storable> {
     Vector<usize,Column> permutation;
     int permutationSign;
     Matrix<T> L;
@@ -73,12 +73,12 @@ Matrix<T> copyMatrixForFactorization<T: IEEEFloat>(ref Matrix<T> source) {
     return result;
 }
 
-LU<T> lu<T: IEEEFloat>(ref Matrix<T> A) {
+public LU<T> lu<T: IEEEFloat>(ref Matrix<T> A) {
     Matrix<T> workspace = copyMatrixForFactorization<T>(A);
     return luInPlace(workspace);
 }
 
-LU<T> luInPlace<T: IEEEFloat>(Matrix<T> A) {
+public LU<T> luInPlace<T: IEEEFloat>(Matrix<T> A) {
     T zero = 0;
     T one = 1;
     usize m = rows(A);
@@ -176,7 +176,7 @@ LU<T> luInPlace<T: IEEEFloat>(Matrix<T> A) {
     return LU<T>(permutation, permutationSign, A, U);
 }
 
-T det<T: IEEEFloat>(ref LU<T> factor) {
+public T det<T: IEEEFloat>(ref LU<T> factor) {
     shapeGuard(rows((*factor).L) == columns((*factor).L));
     shapeGuard(rows((*factor).U) == columns((*factor).U));
     shapeGuard(rows((*factor).L) == rows((*factor).U));
@@ -194,19 +194,19 @@ T det<T: IEEEFloat>(ref LU<T> factor) {
     return result;
 }
 
-T det<T: IEEEFloat>(ref Matrix<T> A) {
+public T det<T: IEEEFloat>(ref Matrix<T> A) {
     shapeGuard(rows(*A) == columns(*A));
     LU<T> factor = lu(A);
     return det(factor);
 }
 
-T detInPlace<T: IEEEFloat>(Matrix<T> A) {
+public T detInPlace<T: IEEEFloat>(Matrix<T> A) {
     shapeGuard(rows(A) == columns(A));
     LU<T> factor = luInPlace(A);
     return det(factor);
 }
 
-Vector<T,Column> solve<T: IEEEFloat>(
+public Vector<T,Column> solve<T: IEEEFloat>(
     ref LU<T> factor,
     ref Vector<T,Column> b) {
     shapeGuard(rows((*factor).L) == columns((*factor).L));
@@ -254,7 +254,7 @@ Vector<T,Column> solve<T: IEEEFloat>(
     return w;
 }
 
-Vector<T,Column> solve<T: IEEEFloat>(
+public Vector<T,Column> solve<T: IEEEFloat>(
     ref Matrix<T> A,
     ref Vector<T,Column> b) {
     shapeGuard(rows(*A) == columns(*A));
@@ -263,7 +263,7 @@ Vector<T,Column> solve<T: IEEEFloat>(
     return solve(factor, b);
 }
 
-Vector<T,Column> solveInPlace<T: IEEEFloat>(
+public Vector<T,Column> solveInPlace<T: IEEEFloat>(
     Matrix<T> A,
     ref Vector<T,Column> b) {
     shapeGuard(rows(A) == columns(A));
@@ -272,7 +272,7 @@ Vector<T,Column> solveInPlace<T: IEEEFloat>(
     return solve(factor, b);
 }
 
-Matrix<T> solve<T: IEEEFloat>(
+public Matrix<T> solve<T: IEEEFloat>(
     ref LU<T> factor,
     ref Matrix<T> B) {
     shapeGuard(rows((*factor).L) == columns((*factor).L));
@@ -337,7 +337,7 @@ Matrix<T> solve<T: IEEEFloat>(
     return W;
 }
 
-Matrix<T> solve<T: IEEEFloat>(
+public Matrix<T> solve<T: IEEEFloat>(
     ref Matrix<T> A,
     ref Matrix<T> B) {
     shapeGuard(rows(*A) == columns(*A));
@@ -346,7 +346,7 @@ Matrix<T> solve<T: IEEEFloat>(
     return solve(factor, B);
 }
 
-Matrix<T> solveInPlace<T: IEEEFloat>(
+public Matrix<T> solveInPlace<T: IEEEFloat>(
     Matrix<T> A,
     ref Matrix<T> B) {
     shapeGuard(rows(A) == columns(A));
@@ -356,11 +356,11 @@ Matrix<T> solveInPlace<T: IEEEFloat>(
 }
 
 // A lower-triangular Cholesky factor with A = L L^T.
-struct Cholesky<T: Storable> {
+public struct Cholesky<T: Storable> {
     Matrix<T> L;
 }
 
-T det<T: IEEEFloat>(ref Cholesky<T> factor) {
+public T det<T: IEEEFloat>(ref Cholesky<T> factor) {
     shapeGuard(rows((*factor).L) == columns((*factor).L));
     usize n = rows((*factor).L);
     T p = 1;
@@ -381,13 +381,13 @@ public class NotPositiveDefiniteException : Exception {
 }
 
 // Checked, in-place Cholesky factorization for the IEEE floating-point types.
-Cholesky<T> cholesky<T: IEEEFloat>(ref Matrix<T> A) {
+public Cholesky<T> cholesky<T: IEEEFloat>(ref Matrix<T> A) {
     Matrix<T> workspace = copyMatrixForFactorization<T>(A);
     return choleskyInPlace(workspace);
 }
 
 // Checked, in-place Cholesky factorization for the IEEE floating-point types.
-Cholesky<T> choleskyInPlace<T: IEEEFloat>(Matrix<T> A) {
+public Cholesky<T> choleskyInPlace<T: IEEEFloat>(Matrix<T> A) {
     shapeGuard(rows(A) == columns(A));
 
     T zero = 0;
@@ -455,7 +455,7 @@ Cholesky<T> choleskyInPlace<T: IEEEFloat>(Matrix<T> A) {
 }
 
 // Solve L L^T x = b using one owning result as both forward workspace and x.
-Vector<T,Column> solve<T: IEEEFloat>(
+public Vector<T,Column> solve<T: IEEEFloat>(
     ref Cholesky<T> factor,
     ref Vector<T,Column> b) {
     shapeGuard(rows((*factor).L) == columns((*factor).L));
@@ -492,7 +492,7 @@ Vector<T,Column> solve<T: IEEEFloat>(
 }
 
 // Solve L L^T X = B directly in one n by q owning result workspace.
-Matrix<T> solve<T: IEEEFloat>(
+public Matrix<T> solve<T: IEEEFloat>(
     ref Cholesky<T> factor,
     ref Matrix<T> B) {
     shapeGuard(rows((*factor).L) == columns((*factor).L));
@@ -538,9 +538,84 @@ Matrix<T> solve<T: IEEEFloat>(
 }
 
 // A materialized QR factorization.  Q is m by m and R is m by n.
-struct QR<T: Storable> {
+public struct QR<T: Storable> {
     Matrix<T> Q;
     Matrix<T> R;
+}
+
+// Private scaled sum-of-squares state shared by norm consumers.
+struct StableScaledSquares<T: Storable> {
+    T scale;
+    T scaledSquares;
+}
+
+StableScaledSquares<T> stableScaledSquaresRange<T: IEEEFloat>(
+    VectorView<T,Column> values,
+    usize first,
+    usize last) {
+    T zero = 0;
+    T one = 1;
+    T scale = zero;
+    T scaledSquares = one;
+
+    usize i = first;
+    while (i <= last) {
+        T magnitude = abs(values[i]);
+
+        if (magnitude != zero) {
+            if (scale < magnitude) {
+                T ratio = scale / magnitude;
+                scaledSquares = one + scaledSquares * ratio * ratio;
+                scale = magnitude;
+            }
+            else {
+                T ratio = magnitude / scale;
+                scaledSquares = scaledSquares + ratio * ratio;
+            }
+        }
+
+        i = i + 1;
+    }
+
+    return StableScaledSquares<T>(scale, scaledSquares);
+}
+
+T finishStableNormNonzero<T: IEEEFloat>(StableScaledSquares<T> state) {
+    return state.scale * sqrt(state.scaledSquares);
+}
+
+T stableNormRange<T: IEEEFloat>(
+    VectorView<T,Column> values,
+    usize first,
+    usize last) {
+    T zero = 0;
+    StableScaledSquares<T> state =
+        stableScaledSquaresRange<T>(values, first, last);
+    if (state.scale == zero) {
+        return zero;
+    }
+    return finishStableNormNonzero<T>(state);
+}
+
+T stableHypot<T: IEEEFloat>(T a, T b) {
+    T zero = 0;
+    T one = 1;
+
+    T high = abs(a);
+    T low = abs(b);
+
+    if (high < low) {
+        T temporary = high;
+        high = low;
+        low = temporary;
+    }
+
+    if (high == zero) {
+        return zero;
+    }
+
+    T ratio = low / high;
+    return high * sqrt(one + ratio * ratio);
 }
 
 public class RankDeficientMatrixException : Exception {
@@ -548,7 +623,7 @@ public class RankDeficientMatrixException : Exception {
 }
 
 // Solve the square or tall full-column-rank system represented by Q R.
-Vector<T,Column> solve<T: IEEEFloat>(
+public Vector<T,Column> solve<T: IEEEFloat>(
     ref QR<T> factor,
     ref Vector<T,Column> b) {
     shapeGuard(rows((*factor).Q) == columns((*factor).Q));
@@ -598,7 +673,7 @@ Vector<T,Column> solve<T: IEEEFloat>(
 }
 
 // Solve one or more square or tall full-column-rank right-hand sides.
-Matrix<T> solve<T: IEEEFloat>(
+public Matrix<T> solve<T: IEEEFloat>(
     ref QR<T> factor,
     ref Matrix<T> B) {
     shapeGuard(rows((*factor).Q) == columns((*factor).Q));
@@ -657,13 +732,13 @@ Matrix<T> solve<T: IEEEFloat>(
 }
 
 // Householder QR for the IEEE floating-point element types.
-QR<T> qr<T: IEEEFloat>(ref Matrix<T> A) {
+public QR<T> qr<T: IEEEFloat>(ref Matrix<T> A) {
     Matrix<T> workspace = copyMatrixForFactorization<T>(A);
     return qrInPlace(workspace);
 }
 
 // Householder QR for the IEEE floating-point element types.
-QR<T> qrInPlace<T: IEEEFloat>(Matrix<T> A) {
+public QR<T> qrInPlace<T: IEEEFloat>(Matrix<T> A) {
     T zero = 0;
     T one = 1;
     T two = one + one;
@@ -679,28 +754,11 @@ QR<T> qrInPlace<T: IEEEFloat>(Matrix<T> A) {
     Matrix<T> R = A;
     usize k = 1;
     while (k <= p) {
-        // Scaled sum of squares avoids avoidable overflow/underflow in ||x||.
-        T normScale = zero;
-        T scaledSquares = one;
-        i = k;
-        while (i <= m) {
-            T magnitude = abs(R[i,k]);
-            if (magnitude != zero) {
-                if (normScale < magnitude) {
-                    T ratio = normScale / magnitude;
-                    scaledSquares = one + scaledSquares * ratio * ratio;
-                    normScale = magnitude;
-                }
-                else {
-                    T ratio = magnitude / normScale;
-                    scaledSquares = scaledSquares + ratio * ratio;
-                }
-            }
-            i = i + 1;
-        }
+        StableScaledSquares<T> state =
+            stableScaledSquaresRange<T>(column(R,k), k, m);
 
-        if (normScale != zero) {
-            T norm = normScale * sqrt(scaledSquares);
+        if (state.scale != zero) {
+            T norm = finishStableNormNonzero<T>(state);
             T alpha = norm;
             if (R[k,k] >= zero) { alpha = -norm; }
             T first = R[k,k] - alpha;
@@ -762,6 +820,6 @@ QR<T> qrInPlace<T: IEEEFloat>(Matrix<T> A) {
 }
 
 // Deprecated compatibility entry point.  qr is the primary generic API.
-QR<float32> qrFloat32(Matrix<float32> A) {
+public QR<float32> qrFloat32(Matrix<float32> A) {
     return qrInPlace(A);
 }

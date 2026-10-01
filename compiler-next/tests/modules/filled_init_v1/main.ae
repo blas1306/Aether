@@ -2,13 +2,13 @@ package main;
 
 import helper;
 
-struct Owners { Matrix<int> matrix; Vector<int,Row> row; }
+public struct Owners { Matrix<int> matrix; Vector<int,Row> row; }
 
-Owners make(usize rows,usize columns) {
+public Owners make(usize rows,usize columns) {
     return Owners(helper.matrix<int>(rows,columns,7),helper.row<int>(columns,9));
 }
 
-int main() {
+public int main() {
     Owners owners=make(2,3);
     if(rows(owners.matrix)!=2){return 1;}
     if(columns(owners.matrix)!=3){return 2;}

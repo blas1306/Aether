@@ -2,11 +2,11 @@ package main;
 
 import helper;
 
-int invoke(Function<(), int> function) {
+public int invoke(Function<(), int> function) {
     return function();
 }
 
-int main() {
+public int main() {
     Function<(), int> imported = helper.answer;
     return invoke(imported);
 }

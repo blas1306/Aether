@@ -1,5 +1,5 @@
 package broken;
 
-int value() {
+public int value() {
     return unknown;
 }

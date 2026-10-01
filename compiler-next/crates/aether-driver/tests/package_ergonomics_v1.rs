@@ -115,7 +115,10 @@ fn anonymous_imports_std_and_named_project_packages() {
         "main.ae",
         "import std.File; import std.Text; import Project.Tools; int main(){return Project.Tools.answer();}",
     );
-    directory.write("tools.ae", "package Project.Tools; int answer(){return 0;}");
+    directory.write(
+        "tools.ae",
+        "package Project.Tools; public int answer(){return 0;}",
+    );
     let session = CompilationSession::discover(&entry).unwrap();
     assert_eq!(
         session.modules()[0].info().key.package,
@@ -171,7 +174,7 @@ fn named_anonymous_does_not_collide_and_cannot_select_entry_main() {
     );
     directory.write(
         "named.ae",
-        "package anonymous; int answer(){return 0;} int main(){return 17;}",
+        "package anonymous; public int answer(){return 0;} int main(){return 17;}",
     );
     let session = CompilationSession::discover(&entry).unwrap();
     assert!(session.modules().iter().any(|module| {

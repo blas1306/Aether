@@ -1,5 +1,5 @@
 package broken;
 
-string value() {
+public string value() {
     return "no";
 }

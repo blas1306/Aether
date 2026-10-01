@@ -115,7 +115,10 @@ fn public_surface_has_preserving_defaults_and_single_in_place_kernels() {
     let helper_start = LIBRARY
         .find("Matrix<T> copyMatrixForFactorization<T: IEEEFloat>")
         .unwrap();
-    let helper_end = LIBRARY[helper_start..].find("\n}\n\nLU<T> lu").unwrap() + helper_start;
+    let helper_end = LIBRARY[helper_start..]
+        .find("\n}\n\npublic LU<T> lu")
+        .unwrap()
+        + helper_start;
     let helper = &LIBRARY[helper_start..helper_end];
     assert_eq!(helper.matches("matrixFilled<T>(m, n, 0)").count(), 1);
     assert_eq!(helper.matches("result[i,j] = (*source)[i,j]").count(), 1);

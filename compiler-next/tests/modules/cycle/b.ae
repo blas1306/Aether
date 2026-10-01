@@ -2,7 +2,7 @@ package b;
 
 import a;
 
-int odd(int n) {
+public int odd(int n) {
     if (n == 0) {
         return 0;
     }

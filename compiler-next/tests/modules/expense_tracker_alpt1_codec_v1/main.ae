@@ -4,27 +4,27 @@ import expense_tracker.codec;
 import expense_tracker.model;
 import std.Text;
 
-bool failed(expense_tracker.codec.LedgerDecodeResult result) {
+public bool failed(expense_tracker.codec.LedgerDecodeResult result) {
     return result.status != expense_tracker.codec.LedgerStatus.Success &&
         length(result.ledger.transactions) == 0;
 }
 
-bool sameString(ref string left, ref string right) {
+public bool sameString(ref string left, ref string right) {
     return byteLength(*left) == byteLength(*right) && std.Text.startsWith(*left, *right);
 }
 
-int requireMalformed(ref string content, int code) {
+public int requireMalformed(ref string content, int code) {
     expense_tracker.codec.LedgerDecodeResult decoded = expense_tracker.codec.decodeLedger(*content);
     if (!failed(decoded)) { return code; }
     return 0;
 }
 
-string surround(ref string prefix, string middle, ref string suffix) {
+public string surround(ref string prefix, string middle, ref string suffix) {
     string result = *prefix + middle;
     return result + *suffix;
 }
 
-int main() {
+public int main() {
     List<expense_tracker.model.Transaction> transactions = {
         expense_tracker.model.Transaction(
             -9223372036854775808,

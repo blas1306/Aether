@@ -2,7 +2,7 @@ package main;
 
 import storage;
 
-int main() {
+public int main() {
     List<int> values = storage.make();
     storage.Packet packet = storage.wrap(values);
     return storage.consume(packet);

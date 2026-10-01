@@ -68,7 +68,7 @@ fn publication(name: &str, version: &str, value: i32) -> (Directory, aether_pack
     );
     source.write(
         "src/lib.ae",
-        &format!("package {name}; int value(){{return {value};}}"),
+        &format!("package {name}; public int value(){{return {value};}}"),
     );
     let built = build_publication(&source.0).unwrap();
     (source, built)

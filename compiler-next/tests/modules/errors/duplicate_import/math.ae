@@ -1,5 +1,5 @@
 package math;
 
-int value() {
+public int value() {
     return 42;
 }

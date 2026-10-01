@@ -210,7 +210,7 @@ fn imported_nominal_identity_is_resolved_before_rhs_matching() {
     let directory = Temporary::directory("imports");
     fs::write(
         directory.0.join("storage.ae"),
-        "package storage;struct Box<T>{T value;}Box<int> make(){return Box<int>(42);}",
+        "package storage;public struct Box<T>{T value;}public Box<int> make(){return Box<int>(42);}",
     )
     .unwrap();
     let entry = directory.0.join("main.ae");

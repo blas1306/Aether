@@ -119,6 +119,8 @@ pub struct AstVariant {
 /// Nominal value-aggregate declaration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AstStruct {
+    /// Whether the declaration is available through a package import.
+    pub public: bool,
     /// Declared nominal name.
     pub name: String,
     /// Unconstrained type parameters in declaration order.
@@ -165,6 +167,8 @@ pub struct AstImport {
 /// Source-level function.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AstFunction {
+    /// Whether the declaration is available through a package import.
+    pub public: bool,
     /// Written return type.
     pub return_type: AstType,
     /// Written function name.

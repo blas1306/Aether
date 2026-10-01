@@ -216,6 +216,7 @@ pub struct FunctionSignature {
     pub id: FunctionId,
     pub module: ModuleId,
     pub name: String,
+    pub public: bool,
     pub generic_parameters: Vec<GenericParamInfo>,
     pub parameters: Vec<ParameterSignature>,
     pub return_type: TypeId,
@@ -544,6 +545,7 @@ pub struct StructInfo {
     pub id: StructId,
     pub module: ModuleId,
     pub name: String,
+    pub public: bool,
     pub generic_parameters: Vec<GenericParamInfo>,
     pub fields: Vec<FieldInfo>,
     pub layout: TypeLayout,
@@ -2606,6 +2608,7 @@ fn collect_program_signatures_for_kind(
             id,
             module: module_id,
             name: declaration.name.clone(),
+            public: declaration.public,
             generic_parameters,
             fields,
             layout: TypeLayout { size: 0, align: 1 },
@@ -3013,6 +3016,16 @@ fn collect_program_signatures_for_kind(
                         &struct_arities,
                         &enum_arities,
                     )
+                    .and_then(|ty| {
+                        ensure_imported_struct_is_public(
+                            &types,
+                            &structs,
+                            module.info.id,
+                            ty,
+                            p.ty.span,
+                        )?;
+                        Ok(ty)
+                    })
                     .map(|ty| ParameterSignature {
                         name: p.name.clone(),
                         ty,
@@ -3048,6 +3061,16 @@ fn collect_program_signatures_for_kind(
                 &struct_arities,
                 &enum_arities,
             )
+            .and_then(|ty| {
+                ensure_imported_struct_is_public(
+                    &types,
+                    &structs,
+                    module.info.id,
+                    ty,
+                    f.return_type.span,
+                )?;
+                Ok(ty)
+            })
             .map_err(|d| vec![src(d, module)])?;
             if types.contains_function(return_type) {
                 return Err(vec![src(
@@ -3099,6 +3122,7 @@ fn collect_program_signatures_for_kind(
                 id,
                 module: module.info.id,
                 name: f.name.clone(),
+                public: f.public,
                 generic_parameters,
                 parameters,
                 return_type,
@@ -3981,6 +4005,28 @@ fn resolve_type_in_module(
         return Ok(builtin);
     }
     Err(unknown_type(ty))
+}
+
+fn ensure_imported_struct_is_public(
+    types: &TypeArena,
+    structs: &[StructInfo],
+    current: ModuleId,
+    ty: TypeId,
+    span: Span,
+) -> Result<(), Diagnostic> {
+    if let Some(id) = types.struct_id(ty) {
+        let info = &structs[id.0 as usize];
+        if info.module != current && !info.public {
+            return Err(Diagnostic::new(
+                "E0243",
+                Phase::Semantic,
+                DiagnosticCategory::Name,
+                format!("struct `{}` is internal to its module", info.name),
+                Some(span),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn generic_arity(ty: &AstType, expected: usize) -> Diagnostic {
@@ -9244,6 +9290,8 @@ impl Analyzer<'_> {
             self.enum_arities,
         )
         .map_err(|diagnostic| vec![diagnostic])?;
+        ensure_imported_struct_is_public(self.types, self.structs, self.module, resolved, ty.span)
+            .map_err(|diagnostic| vec![diagnostic])?;
         if let Some((Some(namespace), _, _)) = ty.named()
             && let Some(module) = self.imports[self.module.0 as usize].get(namespace)
         {
@@ -14019,6 +14067,19 @@ impl Analyzer<'_> {
             return self.text_apply(mid, f, type_arguments, args, span);
         }
         if let Some(candidates) = self.names[mid.0 as usize].get(f).cloned() {
+            let candidates = candidates
+                .into_iter()
+                .filter(|id| self.signatures[id.0 as usize].public)
+                .collect::<Vec<_>>();
+            if candidates.is_empty() {
+                return Err(vec![Diagnostic::new(
+                    "E0222",
+                    Phase::Semantic,
+                    DiagnosticCategory::Name,
+                    format!("unknown function or struct `{f}` in module `{m}`"),
+                    Some(span),
+                )]);
+            }
             return self.resolve_overload(
                 &candidates,
                 &format!("{m}.{f}"),
@@ -14029,6 +14090,15 @@ impl Analyzer<'_> {
             );
         }
         if let Some(id) = self.struct_names[mid.0 as usize].get(f).copied() {
+            if !self.structs[id.0 as usize].public {
+                return Err(vec![Diagnostic::new(
+                    "E0222",
+                    Phase::Semantic,
+                    DiagnosticCategory::Name,
+                    format!("unknown function or struct `{f}` in module `{m}`"),
+                    Some(span),
+                )]);
+            }
             let resolved = self.resolve_type_arguments(type_arguments)?;
             let ty = self.nominal_struct_type(id, resolved, span)?;
             return self.struct_init(ty, &format!("{m}.{f}"), args, span);

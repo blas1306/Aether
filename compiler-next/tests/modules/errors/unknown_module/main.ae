@@ -1,5 +1,5 @@
 package main;
 
-int main() {
+public int main() {
     return nowhere.value();
 }

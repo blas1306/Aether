@@ -2,6 +2,6 @@ package main;
 
 import absent;
 
-int main() {
+public int main() {
     return 0;
 }

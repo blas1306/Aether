@@ -78,10 +78,13 @@ fn hierarchical_grants_support_descendants_and_aliases() {
         "main.ae",
         "package Main; import Library.Math as math; int main(){return math.base()+math.LinearAlgebra.leaf();}",
     );
-    directory.write("math.ae", "package Library.Math; int base(){return 20;}");
+    directory.write(
+        "math.ae",
+        "package Library.Math; public int base(){return 20;}",
+    );
     directory.write(
         "linear.ae",
-        "package Library.Math.LinearAlgebra; int leaf(){return 22;}",
+        "package Library.Math.LinearAlgebra; public int leaf(){return 22;}",
     );
     let compilation = compile_session(
         CompilationSession::discover(&entry).unwrap(),
@@ -98,7 +101,7 @@ fn hierarchical_grants_support_descendants_and_aliases() {
     );
     leaf_alias.write(
         "linear.ae",
-        "package Library.Math.LinearAlgebra; int leaf(){return 0;}",
+        "package Library.Math.LinearAlgebra; public int leaf(){return 0;}",
     );
     compile_session(CompilationSession::discover(&entry).unwrap(), &[]).unwrap();
 }
@@ -232,7 +235,7 @@ fn logical_identity_is_independent_of_absolute_checkout_path() {
         );
         directory.write(
             "nested/answer.ae",
-            "package Shared.Code; int answer(){return 42;}",
+            "package Shared.Code; public int answer(){return 42;}",
         );
         compile_session(
             CompilationSession::discover(&entry).unwrap(),

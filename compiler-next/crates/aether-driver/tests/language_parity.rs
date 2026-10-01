@@ -274,7 +274,7 @@ fn native_main_exit_codes_and_comment_integration() {
     }
     fs::write(
         dir.0.join("helper.ae"),
-        "package helper; int main(){return 7;}",
+        "package helper; public int main(){return 7;}",
     )
     .unwrap();
     fs::write(

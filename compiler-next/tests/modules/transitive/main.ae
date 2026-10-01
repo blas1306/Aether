@@ -2,6 +2,6 @@ package main;
 
 import a;
 
-int main() {
+public int main() {
     return a.from_a(41);
 }

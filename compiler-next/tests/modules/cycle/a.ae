@@ -2,7 +2,7 @@ package a;
 
 import b;
 
-int even(int n) {
+public int even(int n) {
     if (n == 0) {
         return 42;
     }

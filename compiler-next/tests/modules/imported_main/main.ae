@@ -2,6 +2,6 @@ package main;
 
 import helper;
 
-int main() {
+public int main() {
     return helper.main();
 }

@@ -98,7 +98,7 @@ fn public_source_is_one_generic_kernel_per_family() {
         .collect::<Vec<_>>();
     assert_eq!(
         precision_specific_functions,
-        ["QR<float32> qrFloat32(Matrix<float32> A) {"]
+        ["public QR<float32> qrFloat32(Matrix<float32> A) {"]
     );
 }
 

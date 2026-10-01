@@ -489,23 +489,23 @@ fn discover_catalog_with_plan(
         ),
         (
             vec!["std", "Text"],
-            "package std.Text; struct ScalarOffset { usize value; } enum FindResult { Found(ScalarOffset), NotFound, } enum ByteSliceResult { Slice(string), InvalidRange, OutOfBounds, InvalidBoundary, } enum IntParseResult { Value(int), Invalid, Overflow, } enum DoubleParseResult { Value(double), Invalid, Overflow, Underflow, }",
+            "package std.Text; public struct ScalarOffset { usize value; } enum FindResult { Found(ScalarOffset), NotFound, } enum ByteSliceResult { Slice(string), InvalidRange, OutOfBounds, InvalidBoundary, } enum IntParseResult { Value(int), Invalid, Overflow, } enum DoubleParseResult { Value(double), Invalid, Overflow, Underflow, }",
         ),
         (
             vec!["std", "IO"],
             if io_public {
-                "package std.IO; public open class IOException:Exception{public init(){}} public class InvalidTextEncodingException:IOException{public init():base(){}} enum ReadLineResult{Line(string),End,} ReadLineResult readLine(){ReadLineResult result=ReadLineResult.End;return result;} void eprint(ref string value){return;} void eprintln(ref string value){return;}"
+                "package std.IO; public open class IOException:Exception{public init(){}} public class InvalidTextEncodingException:IOException{public init():base(){}} enum ReadLineResult{Line(string),End,} public ReadLineResult readLine(){ReadLineResult result=ReadLineResult.End;return result;} public void eprint(ref string value){return;} public void eprintln(ref string value){return;}"
             } else {
                 "package std.IO; public open class IOException:Exception{public init(){}}"
             },
         ),
         (
             vec!["std", "File"],
-            "package std.File; import std.IO; public class FileNotFoundException:std.IO.IOException{public init():base(){}} public class PermissionDeniedException:std.IO.IOException{public init():base(){}} string readText(ref string path){return \"\";} void writeText(ref string path,ref string value){return;} void writeTextAtomic(ref string path,ref string value){return;}",
+            "package std.File; import std.IO; public class FileNotFoundException:std.IO.IOException{public init():base(){}} public class PermissionDeniedException:std.IO.IOException{public init():base(){}} public string readText(ref string path){return \"\";} public void writeText(ref string path,ref string value){return;} public void writeTextAtomic(ref string path,ref string value){return;}",
         ),
         (
             vec!["std", "Process"],
-            "package std.Process; public class InvalidArgumentEncodingException:Exception{public init(){}} Array<string> args(){Array<string> values={};return values;}",
+            "package std.Process; public class InvalidArgumentEncodingException:Exception{public init(){}} public Array<string> args(){Array<string> values={};return values;}",
         ),
     ];
     for (segments, text) in toolchain_packages {

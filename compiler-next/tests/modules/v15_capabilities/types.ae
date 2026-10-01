@@ -1,6 +1,6 @@
 package types;
 
-struct CopyBox<T: Copy> {
+public struct CopyBox<T: Copy> {
     T value;
 }
 
@@ -9,11 +9,11 @@ enum CopyMaybe<T: Copy> {
     Some(T),
 }
 
-T duplicate<T: Copy>(T value) {
+public T duplicate<T: Copy>(T value) {
     T other = value;
     return value;
 }
 
-T relocate<T: Relocatable>(T value) {
+public T relocate<T: Relocatable>(T value) {
     return value;
 }

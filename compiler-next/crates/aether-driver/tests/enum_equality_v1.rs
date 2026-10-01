@@ -202,7 +202,7 @@ fn imported_enum_identity_and_qualified_variants_work_o0_o2() {
     let directory = Temporary::directory("packages");
     fs::write(
         directory.0.join("states.ae"),
-        "package states;enum Status{Ok,Error}bool ok(Status value){return value==Status.Ok;}",
+        "package states;enum Status{Ok,Error}public bool ok(Status value){return value==Status.Ok;}",
     )
     .unwrap();
     let entry = directory.0.join("main.ae");

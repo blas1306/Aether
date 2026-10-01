@@ -1,5 +1,5 @@
 package b;
 
-int foo() {
+public int foo() {
     return 23;
 }

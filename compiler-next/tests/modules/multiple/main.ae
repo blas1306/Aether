@@ -3,6 +3,6 @@ package main;
 import a;
 import b;
 
-int main() {
+public int main() {
     return a.foo() + b.foo();
 }

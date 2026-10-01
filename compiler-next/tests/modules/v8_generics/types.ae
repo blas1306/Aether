@@ -1,10 +1,10 @@
 package types;
 
-T identity<T>(T value) {
+public T identity<T>(T value) {
     return value;
 }
 
-struct Pair<T, U> {
+public struct Pair<T, U> {
     T first;
     U second;
 }
@@ -16,11 +16,11 @@ enum Option<T> {
     Some(T),
 }
 
-T first<T: Copy, U>(Pair<T, U> value) {
+public T first<T: Copy, U>(Pair<T, U> value) {
     return value.first;
 }
 
-T unwrapOr<T>(Option<T> value, T fallback) {
+public T unwrapOr<T>(Option<T> value, T fallback) {
     match (value) {
         Option<T>.None => { return fallback; }
         Option<T>.Some(found) => { return found; }

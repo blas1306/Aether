@@ -148,7 +148,7 @@ int main(){int selected=classify(true);return selected-2;}
     .unwrap();
     fs::write(
         library,
-        "package Library.Values; int pick(bool value){if(value){return 7;}return 8;} bool pick(int value){return value!=0;}",
+        "package Library.Values; public int pick(bool value){if(value){return 7;}return 8;} public bool pick(int value){return value!=0;}",
     )
     .unwrap();
     let compilation = compile_session(

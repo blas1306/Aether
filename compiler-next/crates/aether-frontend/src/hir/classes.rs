@@ -137,6 +137,7 @@ pub(super) fn inject_exception_core(program: &mut ParsedProgram) -> Result<(), V
                 public: true,
                 mutable: true,
                 function: AstFunction {
+                    public: false,
                     return_type: ast_type("int", span),
                     name: "init".into(),
                     generic_parameters: Vec::new(),
@@ -173,6 +174,7 @@ pub(super) fn expand_methods(program: &mut ParsedProgram) -> Result<(), Vec<Diag
                     public: true,
                     mutable: true,
                     function: AstFunction {
+                        public: false,
                         name: "init".into(),
                         generic_parameters: Vec::new(),
                         return_type: ast_type("int", class.span),

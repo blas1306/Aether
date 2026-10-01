@@ -1,5 +1,5 @@
 package helper;
 
-int main() {
+public int main() {
     return 42;
 }

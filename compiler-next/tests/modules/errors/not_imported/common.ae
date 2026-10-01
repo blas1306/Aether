@@ -1,5 +1,5 @@
 package common;
 
-int value() {
+public int value() {
     return 42;
 }

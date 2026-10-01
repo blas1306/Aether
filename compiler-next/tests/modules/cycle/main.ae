@@ -2,6 +2,6 @@ package main;
 
 import a;
 
-int main() {
+public int main() {
     return a.even(6);
 }

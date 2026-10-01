@@ -2,6 +2,6 @@ package a;
 
 import common;
 
-int from_a(int x) {
+public int from_a(int x) {
     return common.increment(x);
 }

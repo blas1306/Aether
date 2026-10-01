@@ -10,6 +10,7 @@ use crate::{
 };
 
 /// Parses an already tokenized source file.
+#[allow(clippy::too_many_lines)]
 pub fn parse(source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<Diagnostic>> {
     let mut parser = Parser {
         source,
@@ -57,7 +58,11 @@ pub fn parse(source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<D
                 Err(e) => return Err(vec![e]),
             }
         } else if parser.current().lexeme == "class"
-            || parser.current().lexeme == "public"
+            || (parser.current().lexeme == "public"
+                && parser
+                    .tokens
+                    .get(parser.cursor + 1)
+                    .is_some_and(|t| matches!(t.lexeme.as_str(), "class" | "open")))
             || parser.current().lexeme == "open"
         {
             match parser.class_decl() {
@@ -69,7 +74,13 @@ pub fn parse(source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<D
                 Ok(alias) => aliases.push(alias),
                 Err(error) => return Err(vec![error]),
             }
-        } else if parser.at(TokenKind::KwStruct) {
+        } else if parser.at(TokenKind::KwStruct)
+            || (parser.current().lexeme == "public"
+                && parser
+                    .tokens
+                    .get(parser.cursor + 1)
+                    .is_some_and(|t| t.kind == TokenKind::KwStruct))
+        {
             match parser.struct_decl() {
                 Ok(struct_decl) => structs.push(struct_decl),
                 Err(error) => return Err(vec![error]),
@@ -441,7 +452,14 @@ impl Parser<'_> {
     }
 
     fn struct_decl(&mut self) -> Result<AstStruct, Diagnostic> {
-        let start = self.expect(TokenKind::KwStruct, "expected `struct`")?.span;
+        let start = self.current().span;
+        let public = if self.current().lexeme == "public" {
+            self.advance();
+            true
+        } else {
+            false
+        };
+        self.expect(TokenKind::KwStruct, "expected `struct`")?;
         let name = self
             .expect(TokenKind::Identifier, "expected struct name")?
             .lexeme;
@@ -464,6 +482,7 @@ impl Parser<'_> {
         }
         let end = self.expect(TokenKind::RightBrace, "expected `}` to close struct")?;
         Ok(AstStruct {
+            public,
             name,
             generic_parameters,
             fields,
@@ -511,11 +530,19 @@ impl Parser<'_> {
 
     fn function(&mut self) -> Result<AstFunction, Diagnostic> {
         let start = self.current().span;
+        let public = if self.current().lexeme == "public" {
+            self.advance();
+            true
+        } else {
+            false
+        };
         let return_type = self.ty()?;
         let name = self
             .expect(TokenKind::Identifier, "expected function name")?
             .lexeme;
-        self.function_tail(return_type, name, start)
+        let mut function = self.function_tail(return_type, name, start)?;
+        function.public = public;
+        Ok(function)
     }
 
     fn function_tail(
@@ -590,6 +617,7 @@ impl Parser<'_> {
             body.statements.insert(0, base);
         }
         Ok(AstFunction {
+            public: false,
             return_type,
             name,
             generic_parameters,

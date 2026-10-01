@@ -1,5 +1,5 @@
 package math;
 
-int add() {
+public int add() {
     return 42;
 }

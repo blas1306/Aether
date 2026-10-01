@@ -2,6 +2,6 @@ package main;
 
 import math;
 
-int main() {
+public int main() {
     return math.add(20, 22);
 }

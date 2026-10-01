@@ -1,10 +1,10 @@
 package refs;
 
-int read(ref int value) {
+public int read(ref int value) {
     return *value;
 }
 
-int write(ref mut int value, int replacement) {
+public int write(ref mut int value, int replacement) {
     *value = replacement;
     return 0;
 }

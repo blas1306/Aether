@@ -100,7 +100,10 @@ fn cas_materialized_registry_package_compiles_at_o0_and_o2() {
             "aether.toml",
             b"[package]\nname = \"math\"\nversion = \"1.0.0\"\n",
         ),
-        ("src/lib.ae", b"package math; int answer(){return 0;}"),
+        (
+            "src/lib.ae",
+            b"package math; public int answer(){return 0;}",
+        ),
     ]);
     let client = Client {
         metadata: RegistryProtocolMetadata {

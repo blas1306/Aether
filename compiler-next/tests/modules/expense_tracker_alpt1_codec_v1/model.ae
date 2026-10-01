@@ -5,7 +5,7 @@ enum TransactionType {
     Income,
 }
 
-struct Transaction {
+public struct Transaction {
     int id;
     TransactionType type;
     double amount;
@@ -14,6 +14,6 @@ struct Transaction {
     string date;
 }
 
-struct Ledger {
+public struct Ledger {
     List<Transaction> transactions;
 }

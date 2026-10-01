@@ -3,7 +3,7 @@ package expense.cli;
 import std.Process;
 import std.Text;
 
-int main() {
+public int main() {
     Array<string> arguments = std.Process.args();
     if (length(arguments) < 2 || arguments[0] != "ledger.alpt") {
         return 64;

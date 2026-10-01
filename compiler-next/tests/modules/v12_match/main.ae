@@ -2,11 +2,11 @@ package main;
 
 import types;
 
-int consume(Buffer<int> value) {
+public int consume(Buffer<int> value) {
     return value[0];
 }
 
-int main() {
+public int main() {
     types.Storage value = types.Storage.Owned(Buffer<int>(1, 40));
     match (ref mut value) {
         types.Storage.Empty => { int ignored = 0; }

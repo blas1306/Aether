@@ -4,7 +4,7 @@ import types;
 
 alias IntPair = types.Pair<int, int>;
 
-int main() {
+public int main() {
     types.Pair<int, float64> pair = types.Pair<int, float64>(40, 2.0);
     IntPair integers = IntPair(1, 2);
     types.IntPair qualified = types.IntPair(3, 4);

@@ -4,7 +4,7 @@ import expense_tracker.codec;
 import expense_tracker.model;
 import std.File;
 
-int main() {
+public int main() {
     expense_tracker.model.Ledger ledger = expense_tracker.model.Ledger({
         expense_tracker.model.Transaction(
             42,

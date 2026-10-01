@@ -140,7 +140,7 @@ fn ordinary_linear_algebra_package_can_forward_epsilon_without_imports() {
     fs::create_dir(&directory).unwrap();
     fs::write(
         directory.join("linearAlgebra.ae"),
-        "package linearAlgebra;T e<T:IEEEFloat>(){T value=epsilon<T>();return value;}",
+        "package linearAlgebra;public T e<T:IEEEFloat>(){T value=epsilon<T>();return value;}",
     )
     .unwrap();
     let entry = directory.join("main.ae");

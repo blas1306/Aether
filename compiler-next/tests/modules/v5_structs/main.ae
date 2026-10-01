@@ -2,15 +2,15 @@ package main;
 
 import geometry;
 
-struct Point {
+public struct Point {
     int x;
 }
 
-geometry.Point identity(geometry.Point value) {
+public geometry.Point identity(geometry.Point value) {
     return value;
 }
 
-int main() {
+public int main() {
     geometry.Position imported = geometry.Position(20, 22);
     geometry.Point copy = identity(imported);
     Point local = Point(7);

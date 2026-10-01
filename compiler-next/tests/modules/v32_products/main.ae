@@ -1,9 +1,9 @@
 package main;
 
 import helper;
-Vector<T,Column> forward<T:Storable+Copy+Add+Mul+Zero>(MatrixView<T>a,VectorView<T,Column>x){return helper.mc(a,x);}
-Vector<T,Row> forward_row<T:Storable+Copy+Add+Mul+Zero>(VectorView<T,Row>x,MatrixView<T>a){return helper.rm(x,a);}
-int main(){
+public Vector<T,Column> forward<T:Storable+Copy+Add+Mul+Zero>(MatrixView<T>a,VectorView<T,Column>x){return helper.mc(a,x);}
+public Vector<T,Row> forward_row<T:Storable+Copy+Add+Mul+Zero>(VectorView<T,Row>x,MatrixView<T>a){return helper.rm(x,a);}
+public int main(){
     Matrix<int>a=[1,2;3,4];MatrixView<int>t=transpose_view(a);
     VectorView<int,Column>c=column(a,2);VectorView<int,Row>r=transpose_view(c);
     Vector<int,Column>x=forward(t,c);Vector<int,Row>y=forward_row(r,t);

@@ -480,12 +480,12 @@ fn path_dependencies_are_recursive_owner_scoped_and_canonical() {
     );
     directory.write(
         "a/src/lib.ae",
-        "package a; import math; int answer(){math.Record v=math.make(20);return v.value;}",
+        "package a; import math; public int answer(){math.Record v=math.make(20);return v.value;}",
     );
     directory.write("b/aether.toml", "[package]\nname='b'\nversion='1.0.0'\n[dependencies]\nmath={path='../math-v2/../math-v2'}\n");
     directory.write(
         "b/src/lib.ae",
-        "package b; import math; int answer(){math.Record v=math.make(22);return v.value;}",
+        "package b; import math; public int answer(){math.Record v=math.make(22);return v.value;}",
     );
     directory.write(
         "math-v1/aether.toml",
@@ -493,7 +493,7 @@ fn path_dependencies_are_recursive_owner_scoped_and_canonical() {
     );
     directory.write(
         "math-v1/src/lib.ae",
-        "package math; struct Record{int value;} Record make(int x){return Record(x);}",
+        "package math; public struct Record{int value;} public Record make(int x){return Record(x);}",
     );
     directory.write(
         "math-v2/aether.toml",
@@ -501,7 +501,7 @@ fn path_dependencies_are_recursive_owner_scoped_and_canonical() {
     );
     directory.write(
         "math-v2/src/lib.ae",
-        "package math; struct Record{int value;} Record make(int x){return Record(x);}",
+        "package math; public struct Record{int value;} public Record make(int x){return Record(x);}",
     );
 
     for optimization in ["-O0", "-O2"] {
@@ -535,7 +535,7 @@ fn cross_version_nominal_types_do_not_mix() {
     );
     directory.write(
         "a/src/lib.ae",
-        "package a; import math; math.Record make(){return math.Record(1);}",
+        "package a; import math; public math.Record make(){return math.Record(1);}",
     );
     directory.write(
         "b/aether.toml",
@@ -543,18 +543,24 @@ fn cross_version_nominal_types_do_not_mix() {
     );
     directory.write(
         "b/src/lib.ae",
-        "package b; import math; int consume(math.Record value){return value.x;}",
+        "package b; import math; public int consume(math.Record value){return value.x;}",
     );
     directory.write(
         "math1/aether.toml",
         "[package]\nname='math'\nversion='1.0.0'\n",
     );
-    directory.write("math1/src/lib.ae", "package math; struct Record{int x;}");
+    directory.write(
+        "math1/src/lib.ae",
+        "package math; public struct Record{int x;}",
+    );
     directory.write(
         "math2/aether.toml",
         "[package]\nname='math'\nversion='2.0.0'\n",
     );
-    directory.write("math2/src/lib.ae", "package math; struct Record{int x;}");
+    directory.write(
+        "math2/src/lib.ae",
+        "package math; public struct Record{int x;}",
+    );
 
     let rejected = cli(&directory, &["check", "app"]);
     assert_eq!(rejected.status.code(), Some(1));
@@ -621,7 +627,7 @@ fn transitive_dependency_is_not_visible_without_a_direct_edge() {
     );
     directory.write(
         "a/src/lib.ae",
-        "package a; import hidden; int value(){return hidden.value();}",
+        "package a; import hidden; public int value(){return hidden.value();}",
     );
     directory.write(
         "hidden/aether.toml",
@@ -629,7 +635,7 @@ fn transitive_dependency_is_not_visible_without_a_direct_edge() {
     );
     directory.write(
         "hidden/src/lib.ae",
-        "package hidden; int value(){return 1;}",
+        "package hidden; public int value(){return 1;}",
     );
     let rejected = cli(&directory, &["check", "app"]);
     assert_eq!(rejected.status.code(), Some(1));
@@ -656,7 +662,7 @@ fn diamond_and_symlink_spellings_share_one_canonical_package_instance() {
     );
     directory.write(
         "a/src/lib.ae",
-        "package a; import common; int value(){return common.value();}",
+        "package a; import common; public int value(){return common.value();}",
     );
     directory.write(
         "b/aether.toml",
@@ -664,7 +670,7 @@ fn diamond_and_symlink_spellings_share_one_canonical_package_instance() {
     );
     directory.write(
         "b/src/lib.ae",
-        "package b; import common; int value(){return common.value();}",
+        "package b; import common; public int value(){return common.value();}",
     );
     directory.write(
         "common/aether.toml",
@@ -672,7 +678,7 @@ fn diamond_and_symlink_spellings_share_one_canonical_package_instance() {
     );
     directory.write(
         "common/src/lib.ae",
-        "package common; int value(){return 1;}",
+        "package common; public int value(){return 1;}",
     );
     symlink(directory.0.join("common"), directory.0.join("common-link")).unwrap();
 

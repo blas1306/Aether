@@ -177,7 +177,7 @@ fn ordinary_package_guard_is_preserved_for_a_separate_consumer() {
     let entry = directory.0.join("main.ae");
     fs::write(
         &library,
-        "package guardlib;bool admitted(int rows,int columns){shapeGuard(rows==columns);return true;}",
+        "package guardlib;public bool admitted(int rows,int columns){shapeGuard(rows==columns);return true;}",
     )
     .unwrap();
     fs::write(

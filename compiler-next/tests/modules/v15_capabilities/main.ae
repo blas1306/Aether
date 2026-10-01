@@ -2,7 +2,7 @@ package main;
 
 import types;
 
-int main() {
+public int main() {
     types.CopyBox<int> box = types.CopyBox<int>(20);
     types.CopyMaybe<int> maybe = types.CopyMaybe<int>.Some(types.duplicate(box.value));
     Buffer<int> buffer = Buffer<int>(1, 22);
