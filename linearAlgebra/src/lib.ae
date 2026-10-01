@@ -641,6 +641,333 @@ struct BidiagonalSVDSeed<T: Storable> {
     BidiagonalOrientation orientation;
 }
 
+// Private scalar state for the implicit bidiagonal QR phase.  The converged
+// aggregate is the ownership boundary used by the future public SVD assembly.
+struct BidiagonalSVDConverged<T: Storable> {
+    Vector<T,Column> d;
+    Matrix<T> U;
+    Matrix<T> Vt;
+}
+
+struct BidiagonalGivens<T: Storable> {
+    T c;
+    T s;
+    T r;
+}
+
+struct BidiagonalShift<T: Storable> {
+    T sigma;
+    T lambda;
+}
+
+struct BidiagonalActiveBlock {
+    bool active;
+    usize lo;
+    usize hi;
+}
+
+class NumericalConvergenceException : Exception {
+    public init() {}
+}
+
+bool isFiniteInternal<T: IEEEFloat>(T value) {
+    T zero = 0;
+    return (value - value) == zero;
+}
+
+void requireFiniteInternal<T: IEEEFloat>(T value) {
+    if (!isFiniteInternal<T>(value)) {
+        throw NumericalConvergenceException();
+    }
+}
+
+BidiagonalGivens<T> bidiagonalGivens<T: IEEEFloat>(T f, T g) {
+    T zero = 0;
+    T one = 1;
+    T r = stableHypot<T>(f, g);
+    requireFiniteInternal<T>(r);
+    if (r == zero) {
+        return BidiagonalGivens<T>(one, zero, r);
+    }
+    T c = f / r;
+    T s = g / r;
+    requireFiniteInternal<T>(c);
+    requireFiniteInternal<T>(s);
+    return BidiagonalGivens<T>(c, s, r);
+}
+
+void deflateBidiagonal<T: IEEEFloat>(
+    ref Vector<T,Column> d,
+    ref mut Vector<T,Column> e,
+    T eps) {
+    T zero = 0;
+    usize i = 1;
+    while (i <= dimension(*e)) {
+        T a = abs((*d)[i]);
+        T b = abs((*d)[i + 1]);
+        T scale = a;
+        if (scale < b) { scale = b; }
+
+        T threshold = zero;
+        if (scale != zero) {
+            T normalizedSum = (a / scale) + (b / scale);
+            threshold = (eps * scale) * normalizedSum;
+        }
+        if (abs((*e)[i]) <= threshold) {
+            (*e)[i] = zero;
+        }
+        i = i + 1;
+    }
+}
+
+BidiagonalActiveBlock selectBidiagonalBlock<T: IEEEFloat>(
+    ref Vector<T,Column> d,
+    ref Vector<T,Column> e) {
+    T zero = 0;
+    usize hi = dimension(*d);
+    while (hi > 1 && (*e)[hi - 1] == zero) {
+        hi = hi - 1;
+    }
+    if (hi == 1) {
+        return BidiagonalActiveBlock(false, 1, 1);
+    }
+    usize lo = hi;
+    while (lo > 1 && (*e)[lo - 1] != zero) {
+        lo = lo - 1;
+    }
+    return BidiagonalActiveBlock(true, lo, hi);
+}
+
+BidiagonalShift<T> bidiagonalWilkinsonShift<T: IEEEFloat>(
+    ref Vector<T,Column> d,
+    ref Vector<T,Column> e,
+    usize lo,
+    usize hi) {
+    T zero = 0;
+    T one = 1;
+    if ((*d)[hi] == zero) {
+        return BidiagonalShift<T>(zero, zero);
+    }
+
+    T x = (*d)[hi - 1];
+    T y = (*e)[hi - 1];
+    T z = (*d)[hi];
+    T w = zero;
+    if (hi - 2 >= lo) { w = (*e)[hi - 2]; }
+    T sigma = abs(x);
+    if (sigma < abs(y)) { sigma = abs(y); }
+    if (sigma < abs(z)) { sigma = abs(z); }
+    if (sigma < abs(w)) { sigma = abs(w); }
+    requireFiniteInternal<T>(sigma);
+
+    T xn = x / sigma;
+    T yn = y / sigma;
+    T zn = z / sigma;
+    T wn = w / sigma;
+    requireFiniteInternal<T>(xn);
+    requireFiniteInternal<T>(yn);
+    requireFiniteInternal<T>(zn);
+    requireFiniteInternal<T>(wn);
+
+    T A = (xn * xn) + (wn * wn);
+    T C = (zn * zn) + (yn * yn);
+    T R = xn * yn;
+    T delta = (A - C) / (one + one);
+    T h = stableHypot<T>(delta, R);
+    T denominator = abs(delta) + h;
+    requireFiniteInternal<T>(A);
+    requireFiniteInternal<T>(C);
+    requireFiniteInternal<T>(R);
+    requireFiniteInternal<T>(delta);
+    requireFiniteInternal<T>(h);
+    requireFiniteInternal<T>(denominator);
+
+    T correction = zero;
+    if (denominator != zero) {
+        T magnitudeR = abs(R);
+        correction = magnitudeR * (magnitudeR / denominator);
+    }
+    requireFiniteInternal<T>(correction);
+    T lambda = C - correction;
+    if (delta < zero) { lambda = C + correction; }
+    if (lambda < zero) { lambda = zero; }
+    requireFiniteInternal<T>(lambda);
+    return BidiagonalShift<T>(sigma, lambda);
+}
+
+void rotateBidiagonalColumns<T: IEEEFloat>(
+    ref mut Matrix<T> M,
+    usize p,
+    usize q,
+    T c,
+    T s) {
+    usize r = 1;
+    while (r <= rows(*M)) {
+        T x = (*M)[r,p];
+        T y = (*M)[r,q];
+        T nextP = (c * x) + (s * y);
+        T nextQ = (-s * x) + (c * y);
+        requireFiniteInternal<T>(nextP);
+        requireFiniteInternal<T>(nextQ);
+        (*M)[r,p] = nextP;
+        (*M)[r,q] = nextQ;
+        r = r + 1;
+    }
+}
+
+void rotateBidiagonalRows<T: IEEEFloat>(
+    ref mut Matrix<T> M,
+    usize p,
+    usize q,
+    T c,
+    T s) {
+    usize r = 1;
+    while (r <= columns(*M)) {
+        T x = (*M)[p,r];
+        T y = (*M)[q,r];
+        T nextP = (c * x) + (s * y);
+        T nextQ = (-s * x) + (c * y);
+        requireFiniteInternal<T>(nextP);
+        requireFiniteInternal<T>(nextQ);
+        (*M)[p,r] = nextP;
+        (*M)[q,r] = nextQ;
+        r = r + 1;
+    }
+}
+
+void accumulateBidiagonalQ<T: IEEEFloat>(
+    ref mut Matrix<T> U,
+    ref mut Matrix<T> Vt,
+    BidiagonalOrientation orientation,
+    usize p,
+    usize q,
+    T c,
+    T s) {
+    if (orientation.transposed) {
+        rotateBidiagonalColumns<T>(U, p, q, c, s);
+    }
+    else {
+        rotateBidiagonalRows<T>(Vt, p, q, c, s);
+    }
+}
+
+void accumulateBidiagonalP<T: IEEEFloat>(
+    ref mut Matrix<T> U,
+    ref mut Matrix<T> Vt,
+    BidiagonalOrientation orientation,
+    usize p,
+    usize q,
+    T c,
+    T s) {
+    if (orientation.transposed) {
+        rotateBidiagonalRows<T>(Vt, p, q, c, s);
+    }
+    else {
+        rotateBidiagonalColumns<T>(U, p, q, c, s);
+    }
+}
+
+void chaseBidiagonalBulge<T: IEEEFloat>(
+    ref mut Vector<T,Column> d,
+    ref mut Vector<T,Column> e,
+    ref mut Matrix<T> U,
+    ref mut Matrix<T> Vt,
+    BidiagonalOrientation orientation,
+    usize start,
+    usize hi,
+    T firstC,
+    T firstS) {
+    T cRight = firstC;
+    T sRight = firstS;
+    T upperBulge = 0;
+    usize p = start;
+    while (p < hi) {
+        if (p > start) {
+            BidiagonalGivens<T> right =
+                bidiagonalGivens<T>((*e)[p - 1], upperBulge);
+            cRight = right.c;
+            sRight = right.s;
+            (*e)[p - 1] = right.r;
+        }
+
+        T oldD0 = (*d)[p];
+        T oldE0 = (*e)[p];
+        T oldD1 = (*d)[p + 1];
+        T nextD0 = (cRight * oldD0) + (sRight * oldE0);
+        T nextE0 = (-sRight * oldD0) + (cRight * oldE0);
+        T lowerBulge = sRight * oldD1;
+        T nextD1 = cRight * oldD1;
+        requireFiniteInternal<T>(nextD0);
+        requireFiniteInternal<T>(nextE0);
+        requireFiniteInternal<T>(lowerBulge);
+        requireFiniteInternal<T>(nextD1);
+        (*d)[p] = nextD0;
+        (*e)[p] = nextE0;
+        (*d)[p + 1] = nextD1;
+        accumulateBidiagonalQ<T>(U, Vt, orientation,
+            p, p + 1, cRight, sRight);
+
+        BidiagonalGivens<T> left =
+            bidiagonalGivens<T>((*d)[p], lowerBulge);
+        oldE0 = (*e)[p];
+        oldD1 = (*d)[p + 1];
+        nextE0 = (left.c * oldE0) + (left.s * oldD1);
+        nextD1 = (-left.s * oldE0) + (left.c * oldD1);
+        requireFiniteInternal<T>(nextE0);
+        requireFiniteInternal<T>(nextD1);
+        (*d)[p] = left.r;
+        (*e)[p] = nextE0;
+        (*d)[p + 1] = nextD1;
+
+        if (p < hi - 1) {
+            T oldE1 = (*e)[p + 1];
+            upperBulge = left.s * oldE1;
+            T nextE1 = left.c * oldE1;
+            requireFiniteInternal<T>(upperBulge);
+            requireFiniteInternal<T>(nextE1);
+            (*e)[p + 1] = nextE1;
+        }
+        accumulateBidiagonalP<T>(U, Vt, orientation,
+            p, p + 1, left.c, left.s);
+        p = p + 1;
+    }
+}
+
+void validateBidiagonalState<T: IEEEFloat>(
+    ref Vector<T,Column> d,
+    ref Vector<T,Column> e,
+    ref Matrix<T> U,
+    ref Matrix<T> Vt) {
+    usize i = 1;
+    while (i <= dimension(*d)) {
+        requireFiniteInternal<T>((*d)[i]);
+        i = i + 1;
+    }
+    i = 1;
+    while (i <= dimension(*e)) {
+        requireFiniteInternal<T>((*e)[i]);
+        i = i + 1;
+    }
+    i = 1;
+    while (i <= rows(*U)) {
+        usize j = 1;
+        while (j <= columns(*U)) {
+            requireFiniteInternal<T>((*U)[i,j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    i = 1;
+    while (i <= rows(*Vt)) {
+        usize j = 1;
+        while (j <= columns(*Vt)) {
+            requireFiniteInternal<T>((*Vt)[i,j]);
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
 int reduceTallBidiagonal<T: IEEEFloat>(
     MatrixViewMut<T> X,
     usize M,
@@ -982,6 +1309,131 @@ BidiagonalSVDSeed<T> bidiagonalSVDSeedInPlace<T: IEEEFloat>(
 BidiagonalSVDSeed<T> bidiagonalSVDSeed<T: IEEEFloat>(ref Matrix<T> A) {
     Matrix<T> workspace = copyMatrixForFactorization<T>(A);
     return bidiagonalSVDSeedInPlace<T>(workspace);
+}
+
+void convergeBidiagonalSVDState<T: IEEEFloat>(
+    ref mut Vector<T,Column> d,
+    ref mut Vector<T,Column> e,
+    ref mut Matrix<T> U,
+    ref mut Matrix<T> Vt,
+    BidiagonalOrientation orientation,
+    usize maxSteps) {
+    T zero = 0;
+    usize k = dimension(*d);
+    if (k == 0 || k == 1) { return; }
+
+    T eps = epsilon<T>();
+    usize usedSteps = 0;
+    while (true) {
+        deflateBidiagonal<T>(&*d, e, eps);
+        BidiagonalActiveBlock block =
+            selectBidiagonalBlock<T>(&*d, &*e);
+        if (!block.active) {
+            usize finished = 1;
+            while (finished <= dimension(*e)) {
+                if ((*e)[finished] != zero) {
+                    throw NumericalConvergenceException();
+                }
+                (*e)[finished] = zero;
+                finished = finished + 1;
+            }
+            return;
+        }
+        if (usedSteps == maxSteps) {
+            throw NumericalConvergenceException();
+        }
+
+        usize j = block.hi - 1;
+        bool foundZero = false;
+        while (true) {
+            if ((*d)[j] == zero) {
+                foundZero = true;
+                break;
+            }
+            if (j == block.lo) { break; }
+            j = j - 1;
+        }
+
+        if (foundZero) {
+            BidiagonalGivens<T> initial =
+                bidiagonalGivens<T>((*d)[j], (*e)[j]);
+            chaseBidiagonalBulge<T>(
+                d, e, U, Vt, orientation, j, block.hi,
+                initial.c, initial.s);
+            (*e)[block.hi - 1] = zero;
+        }
+        else {
+            BidiagonalShift<T> shift = bidiagonalWilkinsonShift<T>(
+                &*d, &*e, block.lo, block.hi);
+            T t = abs((*d)[block.lo]);
+            if (t < abs((*e)[block.lo])) {
+                t = abs((*e)[block.lo]);
+            }
+            if (t < shift.sigma) { t = shift.sigma; }
+            requireFiniteInternal<T>(t);
+            T dn = (*d)[block.lo] / t;
+            T en = (*e)[block.lo] / t;
+            T sn = shift.sigma / t;
+            T f = (dn * dn) - ((sn * sn) * shift.lambda);
+            T g = dn * en;
+            requireFiniteInternal<T>(dn);
+            requireFiniteInternal<T>(en);
+            requireFiniteInternal<T>(sn);
+            requireFiniteInternal<T>(f);
+            requireFiniteInternal<T>(g);
+            BidiagonalGivens<T> initial = bidiagonalGivens<T>(f, g);
+            chaseBidiagonalBulge<T>(
+                d, e, U, Vt, orientation, block.lo, block.hi,
+                initial.c, initial.s);
+        }
+
+        usedSteps = usedSteps + 1;
+        validateBidiagonalState<T>(&*d, &*e, &*U, &*Vt);
+        deflateBidiagonal<T>(&*d, e, eps);
+    }
+}
+
+void convergeBidiagonalSVDSeed<T: IEEEFloat>(
+    ref mut BidiagonalSVDSeed<T> seed,
+    usize maxSteps) {
+    convergeBidiagonalSVDState<T>(
+        &mut (*seed).d, &mut (*seed).e,
+        &mut (*seed).U, &mut (*seed).Vt,
+        (*seed).orientation, maxSteps);
+}
+
+BidiagonalSVDSeed<T> bidiagonalSVDQRWithMaxSteps<T: IEEEFloat>(
+    BidiagonalSVDSeed<T> seed,
+    usize maxSteps) {
+    convergeBidiagonalSVDSeed<T>(&mut seed, maxSteps);
+    return seed;
+}
+
+BidiagonalSVDSeed<T> bidiagonalSVDQR<T: IEEEFloat>(
+    BidiagonalSVDSeed<T> seed) {
+    usize k = dimension(seed.d);
+    if (k == 0 || k == 1) { return seed; }
+    usize maxSteps = 64 * (k * k);
+    convergeBidiagonalSVDSeed<T>(&mut seed, maxSteps);
+    return seed;
+}
+
+// Exact ownership boundary used once a caller already owns the seed parts.
+// The local e owner is destroyed on return; d/U/Vt move into the result.
+BidiagonalSVDConverged<T> bidiagonalSVDQR<T: IEEEFloat>(
+    Vector<T,Column> d,
+    Vector<T,Column> e,
+    Matrix<T> U,
+    Matrix<T> Vt,
+    BidiagonalOrientation orientation) {
+    usize k = dimension(d);
+    if (k > 1) {
+        usize maxSteps = 64 * (k * k);
+        convergeBidiagonalSVDState<T>(
+            &mut d, &mut e, &mut U, &mut Vt,
+            orientation, maxSteps);
+    }
+    return BidiagonalSVDConverged<T>(d, U, Vt);
 }
 
 public class RankDeficientMatrixException : Exception {

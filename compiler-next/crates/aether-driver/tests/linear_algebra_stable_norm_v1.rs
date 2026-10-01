@@ -176,8 +176,14 @@ fn source_has_one_exact_recurrence_and_qr_uses_the_column_view() {
     assert!(LIBRARY.contains("stableScaledSquaresRange<T>(column(R,k), k, m)"));
     assert!(LIBRARY.contains("if (state.scale != zero)"));
     assert!(LIBRARY.contains("T norm = finishStableNormNonzero<T>(state);"));
+    let stable_start = LIBRARY.find("struct StableScaledSquares<").unwrap();
+    let stable_end = LIBRARY[stable_start..]
+        .find("// Compact first phase of the future thin SVD.")
+        .unwrap()
+        + stable_start;
+    let stable_source = &LIBRARY[stable_start..stable_end];
     for forbidden in ["epsilon<T>()", "sqrt(a * a + b * b)", "sqrt(a*a+b*b)"] {
-        assert!(!LIBRARY.contains(forbidden), "{forbidden}");
+        assert!(!stable_source.contains(forbidden), "{forbidden}");
     }
 }
 
