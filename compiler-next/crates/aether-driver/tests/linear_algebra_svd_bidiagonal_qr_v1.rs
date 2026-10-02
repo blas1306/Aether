@@ -64,10 +64,9 @@ fn run(source: &str, optimization: OptimizationLevel) {
 }
 
 #[test]
-fn qr_surface_and_exception_remain_module_private() {
+fn qr_surface_remains_module_private_after_exception_promotion() {
     for expression in [
         "int probe(la.BidiagonalSVDConverged<float64> x){return 0;}",
-        "int probe(la.NumericalConvergenceException x){return 0;}",
         "int probe(la.BidiagonalSVDSeed<float64> x){var y=la.bidiagonalSVDQR(x);return 0;}",
     ] {
         let directory = Directory::new("visibility");

@@ -618,8 +618,25 @@ T stableHypot<T: IEEEFloat>(T a, T b) {
     return high * sqrt(one + ratio * ratio);
 }
 
-// Compact first phase of the future thin SVD.  These types and every entry
-// point below remain module-private until the bidiagonal QR phase is closed.
+// The public, preserving thin singular-value decomposition.
+public struct SVD<T: Storable> {
+    Matrix<T> U;
+    Vector<T,Column> S;
+    Matrix<T> Vt;
+}
+
+public class NonFiniteMatrixException : Exception {
+    public init() {}
+}
+
+// This is the same nominal declaration introduced with bidiagonal QR.  SVD
+// assembly promotes it instead of translating failures to another type.
+public class NumericalConvergenceException : Exception {
+    public init() {}
+}
+
+// Compact first phase of the future thin SVD.
+// These implementation types and every kernel entry point remain private.
 struct BidiagonalOrientation {
     bool transposed;
 }
@@ -664,10 +681,6 @@ struct BidiagonalActiveBlock {
     bool active;
     usize lo;
     usize hi;
-}
-
-class NumericalConvergenceException : Exception {
-    public init() {}
 }
 
 bool isFiniteInternal<T: IEEEFloat>(T value) {
@@ -1434,6 +1447,180 @@ BidiagonalSVDConverged<T> bidiagonalSVDQR<T: IEEEFloat>(
             orientation, maxSteps);
     }
     return BidiagonalSVDConverged<T>(d, U, Vt);
+}
+
+void validateFiniteSVDInput<T: IEEEFloat>(ref Matrix<T> A) {
+    usize i = 1;
+    while (i <= rows(*A)) {
+        usize j = 1;
+        while (j <= columns(*A)) {
+            if (!isFiniteInternal<T>((*A)[i,j])) {
+                throw NonFiniteMatrixException();
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+void normalizeAndSortSVD<T: IEEEFloat>(
+    ref mut Vector<T,Column> S,
+    ref mut Matrix<T> U,
+    ref mut Matrix<T> Vt) {
+    T zero = 0;
+    usize k = dimension(*S);
+
+    // A negative diagonal changes sign together with its right singular
+    // vector.  Equality also catches -0 and writes the canonical +0.
+    usize i = 1;
+    while (i <= k) {
+        if ((*S)[i] < zero) {
+            (*S)[i] = -(*S)[i];
+            usize column = 1;
+            while (column <= columns(*Vt)) {
+                (*Vt)[i,column] = -(*Vt)[i,column];
+                column = column + 1;
+            }
+        }
+        if ((*S)[i] == zero) {
+            (*S)[i] = zero;
+        }
+        i = i + 1;
+    }
+
+    // Stable descending bubble sort.  Strict comparison leaves equal
+    // triplets in the exact order produced by bidiagonal QR.
+    usize unsorted = k;
+    while (unsorted > 1) {
+        usize p = 1;
+        while (unsorted > p) {
+            if ((*S)[p + 1] > (*S)[p]) {
+                T temporaryS = (*S)[p];
+                (*S)[p] = (*S)[p + 1];
+                (*S)[p + 1] = temporaryS;
+
+                usize row = 1;
+                while (row <= rows(*U)) {
+                    T temporaryU = (*U)[row,p];
+                    (*U)[row,p] = (*U)[row,p + 1];
+                    (*U)[row,p + 1] = temporaryU;
+                    row = row + 1;
+                }
+
+                usize column = 1;
+                while (column <= columns(*Vt)) {
+                    T temporaryVt = (*Vt)[p,column];
+                    (*Vt)[p,column] = (*Vt)[p + 1,column];
+                    (*Vt)[p + 1,column] = temporaryVt;
+                    column = column + 1;
+                }
+            }
+            p = p + 1;
+        }
+        unsorted = unsorted - 1;
+    }
+}
+
+void validateFiniteSVDResult<T: IEEEFloat>(
+    ref Vector<T,Column> S,
+    ref Matrix<T> U,
+    ref Matrix<T> Vt) {
+    usize i = 1;
+    while (i <= dimension(*S)) {
+        if (!isFiniteInternal<T>((*S)[i])) {
+            throw NumericalConvergenceException();
+        }
+        i = i + 1;
+    }
+    i = 1;
+    while (i <= rows(*U)) {
+        usize j = 1;
+        while (j <= columns(*U)) {
+            if (!isFiniteInternal<T>((*U)[i,j])) {
+                throw NumericalConvergenceException();
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    i = 1;
+    while (i <= rows(*Vt)) {
+        usize j = 1;
+        while (j <= columns(*Vt)) {
+            if (!isFiniteInternal<T>((*Vt)[i,j])) {
+                throw NumericalConvergenceException();
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+SVD<T> assembleBidiagonalSVD<T: IEEEFloat>(
+    Vector<T,Column> d,
+    Vector<T,Column> e,
+    Matrix<T> U,
+    Matrix<T> Vt,
+    BidiagonalOrientation orientation) {
+    usize k = dimension(d);
+    if (k > 1) {
+        usize maxSteps = 64 * (k * k);
+        convergeBidiagonalSVDState<T>(
+            &mut d, &mut e, &mut U, &mut Vt,
+            orientation, maxSteps);
+    }
+    normalizeAndSortSVD<T>(&mut d, &mut U, &mut Vt);
+    validateFiniteSVDResult<T>(&d, &U, &Vt);
+    return SVD<T>(U, d, Vt);
+}
+
+SVD<T> assembleSVDWorkspace<T: IEEEFloat>(Matrix<T> workspace) {
+    // Keep the seed parts as separate owners.  Aether deliberately rejects
+    // partial moves out of structs, so this route feeds those exact owners to
+    // the already-qualified reduction and convergence kernels and can finally
+    // move d directly into the public S field.
+    T zero = 0;
+    usize m = rows(workspace);
+    usize n = columns(workspace);
+    usize M = m;
+    usize N = n;
+    BidiagonalOrientation orientation = BidiagonalOrientation(false);
+    if (m < n) {
+        M = n;
+        N = m;
+        orientation = BidiagonalOrientation(true);
+    }
+    usize offDiagonal = 0;
+    if (N > 0) { offDiagonal = N - 1; }
+    Vector<T,Column> d = vectorFilled<T,Column>(N, zero);
+    Vector<T,Column> e = vectorFilled<T,Column>(offDiagonal, zero);
+    Vector<T,Column> tauLeft = vectorFilled<T,Column>(N, zero);
+    Vector<T,Column> tauRight =
+        vectorFilled<T,Column>(offDiagonal, zero);
+
+    if (orientation.transposed) {
+        reduceTallBidiagonal<T>(transpose_view_mut(workspace), M, N,
+            &mut d, &mut e, &mut tauLeft, &mut tauRight);
+        Matrix<T> U =
+            materializeBidiagonalTransposedU<T>(&workspace, &tauRight);
+        Matrix<T> Vt =
+            materializeBidiagonalTransposedVt<T>(&workspace, &tauLeft);
+        return assembleBidiagonalSVD<T>(d, e, U, Vt, orientation);
+    }
+
+    reduceTallBidiagonal<T>(matrix_view_mut(workspace), M, N,
+        &mut d, &mut e, &mut tauLeft, &mut tauRight);
+    Matrix<T> U = materializeBidiagonalUpperU<T>(&workspace, &tauLeft);
+    Matrix<T> Vt = materializeBidiagonalUpperVt<T>(&workspace, &tauRight);
+    return assembleBidiagonalSVD<T>(d, e, U, Vt, orientation);
+}
+
+public SVD<T> svd<T: IEEEFloat>(ref Matrix<T> A) {
+    // This is the sole preserving copy.  It copies logical elements into the
+    // normalized owning Matrix layout shared by the other factorizations.
+    Matrix<T> workspace = copyMatrixForFactorization<T>(A);
+    validateFiniteSVDInput<T>(&workspace);
+    return assembleSVDWorkspace<T>(workspace);
 }
 
 public class RankDeficientMatrixException : Exception {
