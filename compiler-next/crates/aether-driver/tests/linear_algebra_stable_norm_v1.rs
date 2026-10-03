@@ -178,7 +178,7 @@ fn source_has_one_exact_recurrence_and_qr_uses_the_column_view() {
     assert!(LIBRARY.contains("T norm = finishStableNormNonzero<T>(state);"));
     let stable_start = LIBRARY.find("struct StableScaledSquares<").unwrap();
     let stable_end = LIBRARY[stable_start..]
-        .find("// Compact first phase of the future thin SVD.")
+        .find("// The public, preserving thin singular-value decomposition.")
         .unwrap()
         + stable_start;
     let stable_source = &LIBRARY[stable_start..stable_end];

@@ -635,6 +635,104 @@ public class NumericalConvergenceException : Exception {
     public init() {}
 }
 
+public class InvalidSingularValueCutoffException : Exception {
+    public init() {}
+}
+
+// Shared private authority for every operation derived from an SVD factor.
+// Manual factors need only be structurally usable; they need not be canonical
+// thin factors returned by svd.
+void guardSVDFactorShapes<T: IEEEFloat>(ref SVD<T> factor) {
+    shapeGuard(columns((*factor).U) == dimension((*factor).S));
+    shapeGuard(rows((*factor).Vt) == dimension((*factor).S));
+}
+
+void validateSingularValueCutoff<T: IEEEFloat>(T cutoff) {
+    T zero = 0;
+    if (!((cutoff - cutoff) == zero && cutoff >= zero)) {
+        throw InvalidSingularValueCutoffException();
+    }
+}
+
+// Convert an extent using its binary decomposition.  Building powers by
+// doubling avoids both a generic cast and the loss of progress of repeated
+// unit addition once value exceeds the exact integer precision of T.
+T dimensionAsT<T: IEEEFloat>(usize value) {
+    T result = 0;
+    T place = 1;
+    usize remaining = value;
+    while (remaining > 0) {
+        if (remaining % 2 == 1) {
+            result = result + place;
+        }
+        remaining = remaining / 2;
+        if (remaining > 0) {
+            place = place + place;
+        }
+    }
+    return result;
+}
+
+// Since a legitimate spectrum is nonnegative and descending, every retained
+// set is a prefix.  Future dense consumers use this count rather than copying
+// either cutoff formula into their own loops.
+usize retainedSingularValueCount<T: IEEEFloat>(ref SVD<T> factor) {
+    guardSVDFactorShapes<T>(factor);
+    usize p = dimension((*factor).S);
+    if (p == 0) {
+        return 0;
+    }
+
+    T zero = 0;
+    T sigmaMax = (*factor).S[1];
+    if (sigmaMax == zero) {
+        return 0;
+    }
+
+    usize extent = rows((*factor).U);
+    if (columns((*factor).Vt) > extent) {
+        extent = columns((*factor).Vt);
+    }
+    T relativeCutoff = dimensionAsT<T>(extent) * epsilon<T>();
+    usize retained = 0;
+    usize i = 1;
+    while (i <= p && (*factor).S[i] > zero &&
+           (*factor).S[i] / sigmaMax > relativeCutoff) {
+        retained = retained + 1;
+        i = i + 1;
+    }
+    return retained;
+}
+
+usize retainedSingularValueCount<T: IEEEFloat>(
+    ref SVD<T> factor,
+    T cutoff) {
+    guardSVDFactorShapes<T>(factor);
+    validateSingularValueCutoff<T>(cutoff);
+    usize p = dimension((*factor).S);
+    usize retained = 0;
+    usize i = 1;
+    while (i <= p && (*factor).S[i] > cutoff) {
+        retained = retained + 1;
+        i = i + 1;
+    }
+    return retained;
+}
+
+public usize nonzeroSingularValueCount<T: IEEEFloat>(ref SVD<T> factor) {
+    guardSVDFactorShapes<T>(factor);
+    T zero = 0;
+    usize count = 0;
+    usize i = 1;
+    while (i <= dimension((*factor).S)) {
+        if ((*factor).S[i] != zero) {
+            count = count + 1;
+        }
+        i = i + 1;
+    }
+    return count;
+}
+
 // Compact first phase of the future thin SVD.
 // These implementation types and every kernel entry point remain private.
 struct BidiagonalOrientation {
