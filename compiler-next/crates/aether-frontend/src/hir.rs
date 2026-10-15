@@ -8723,6 +8723,13 @@ struct Checked {
     expr: HirExpr,
     constant: Option<ConstantValue>,
 }
+
+#[derive(Clone)]
+enum PrecheckedCallArgument {
+    Value(Checked),
+    SharedBorrowPlace(HirPlace),
+}
+
 type FormatProjectedTemporary = (HirExpr, Vec<HirPlaceProjection>, TypeId);
 #[derive(Clone, Copy)]
 enum ConstantValue {
@@ -14714,6 +14721,23 @@ impl Analyzer<'_> {
                     checked.push(None);
                     continue;
                 }
+                // A shared-reference parameter may borrow an addressable owner
+                // directly.  Acquire that Place's type for inference without
+                // first lowering the argument as a value: doing so would turn
+                // a non-Copy field projection into a partial move before the
+                // call-borrow adaptation gets a chance to run.
+                if self
+                    .types
+                    .reference_info(parameter.ty)
+                    .is_some_and(|(_, mutable)| !mutable)
+                    && let Ok(place) = self.resolve_expr_place(argument, false)
+                    && self.types.reference_info(place.ty).is_none()
+                    && self.types.nullable_payload(place.ty).is_none()
+                {
+                    infer_generic_arguments(self.types, parameter.ty, place.ty, &mut inferred)?;
+                    checked.push(Some(PrecheckedCallArgument::SharedBorrowPlace(place)));
+                    continue;
+                }
                 let partial =
                     Substitution::new(inferred.keys().copied(), inferred.values().copied());
                 let expected = self
@@ -14726,7 +14750,7 @@ impl Analyzer<'_> {
                     .filter(|_| self.types.reference_info(parameter.ty).is_none());
                 let argument = self.expression(argument, expected)?;
                 infer_generic_arguments(self.types, parameter.ty, argument.expr.ty, &mut inferred)?;
-                checked.push(Some(argument));
+                checked.push(Some(PrecheckedCallArgument::Value(argument)));
             }
             for parameter in &s.generic_parameters {
                 let Some(argument) = inferred.get(&parameter.id).copied() else {
@@ -14952,9 +14976,37 @@ impl Analyzer<'_> {
         parameter_type: TypeId,
         call_site: CallSiteId,
         argument_index: u32,
-        prechecked: Option<Checked>,
+        prechecked: Option<PrecheckedCallArgument>,
     ) -> Result<HirExpr, Vec<Diagnostic>> {
         let reference = self.types.reference_info(parameter_type);
+        if let Some(PrecheckedCallArgument::SharedBorrowPlace(place)) = &prechecked {
+            let Some((pointee, false)) = reference else {
+                unreachable!("only shared-reference inference prechecks a borrow Place")
+            };
+            if place.ty != pointee {
+                return Err(vec![type_error(
+                    format!(
+                        "implicit shared argument borrow requires exact {}; found {}",
+                        self.type_name(pointee),
+                        self.type_name(place.ty)
+                    ),
+                    source.span,
+                )]);
+            }
+            self.mark_place_address_taken(place);
+            return Ok(HirExpr {
+                kind: HirExprKind::CallScopedSharedBorrow {
+                    call_site,
+                    argument_index,
+                    pointee_type: pointee,
+                    reference_type: parameter_type,
+                    source: CallBorrowSource::Place(place.clone()),
+                    origin: CallBorrowOrigin::Implicit,
+                },
+                ty: parameter_type,
+                span: source.span,
+            });
+        }
         if let Some((pointee, false)) = reference
             && let AstExprKind::Name(name) = &source.kind
             && let Some(local) = self.lookup(name)
@@ -15009,7 +15061,7 @@ impl Analyzer<'_> {
                 span: source.span,
             });
         }
-        let checked = if let Some(checked) = prechecked {
+        let checked = if let Some(PrecheckedCallArgument::Value(checked)) = prechecked {
             checked
         } else if let Some((pointee, false)) = reference {
             if matches!(

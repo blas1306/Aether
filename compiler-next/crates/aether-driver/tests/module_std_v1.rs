@@ -226,6 +226,22 @@ fn standard_math_namespace_nodes_exist_without_adding_an_api() {
 }
 
 #[test]
+fn standard_linear_algebra_exposes_source_materialization_functions() {
+    let directory = Directory::new("std-linear-algebra-source");
+    let entry = directory.write(
+        "main.ae",
+        "package Main; import std.Math.LinearAlgebra as la; int main(){Matrix<int> source=[1,2,3;4,5,6];Matrix<int> transposed=la.transposeCopy(source);Vector<int,Column> column=[7,8];Matrix<int> diagonalColumn=la.diagonalMatrix(column);Vector<int,Row> row=[9,10,11];Matrix<int> diagonalRow=la.diagonalMatrix(row);return transposed[1,2]+transposed[2,1]+diagonalColumn[2,2]+diagonalRow[3,3]-28;}",
+    );
+    let compilation = compile_session(
+        CompilationSession::discover(&entry).unwrap(),
+        &[Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
+    )
+    .unwrap();
+    assert!(compilation.dumps[&Emit::Hir].contains("transposeCopy"));
+    assert!(compilation.dumps[&Emit::Hir].contains("diagonalMatrix"));
+}
+
+#[test]
 fn logical_identity_is_independent_of_absolute_checkout_path() {
     fn compile_tree(label: &str) -> String {
         let directory = Directory::new(label);

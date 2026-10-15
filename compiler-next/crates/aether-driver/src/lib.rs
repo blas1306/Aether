@@ -485,7 +485,7 @@ fn discover_catalog_with_plan(
         (vec!["std", "Math"], "package std.Math;"),
         (
             vec!["std", "Math", "LinearAlgebra"],
-            "package std.Math.LinearAlgebra;",
+            "package std.Math.LinearAlgebra; public Matrix<T> transposeCopy<T: Storable + Copy + Zero>(ref Matrix<T> source){usize m=rows(*source);usize n=columns(*source);Matrix<T> result=matrixFilled<T>(n,m,0);usize i=1;while(i<=m){usize j=1;while(j<=n){result[j,i]=(*source)[i,j];j=j+1;}i=i+1;}return result;} public Matrix<T> diagonalMatrix<T: Storable + Copy + Zero>(ref Vector<T,Column> values){usize k=dimension(*values);Matrix<T> result=matrixFilled<T>(k,k,0);usize i=1;while(i<=k){result[i,i]=(*values)[i];i=i+1;}return result;} public Matrix<T> diagonalMatrix<T: Storable + Copy + Zero>(ref Vector<T,Row> values){usize k=dimension(*values);Matrix<T> result=matrixFilled<T>(k,k,0);usize i=1;while(i<=k){result[i,i]=(*values)[i];i=i+1;}return result;}",
         ),
         (
             vec!["std", "Text"],
