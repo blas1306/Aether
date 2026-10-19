@@ -625,6 +625,13 @@ public struct SVD<T: Storable> {
     Matrix<T> Vt;
 }
 
+// The public, preserving real symmetric eigendecomposition.  Eigenvectors
+// are columns and correspond positionally to the ascending eigenvalues.
+public struct SymmetricEigen<T: Storable> {
+    Vector<T,Column> values;
+    Matrix<T> vectors;
+}
+
 public class NonFiniteMatrixException : Exception {
     public init() {}
 }
@@ -1358,6 +1365,215 @@ symmetricTridiagonalQR<T: IEEEFloat>(SymmetricTridiagonalSeed<T> seed) {
     usize n = dimension(seed.d);
     usize maxSweeps = 64 * n;
     return symmetricTridiagonalQRWithMaxSweeps<T>(seed, maxSweeps);
+}
+
+// End of the allocation-free symmetric tridiagonal QR phase.  The separate
+// BidiagonalShift<T> bidiagonalWilkinsonShift phase remains below assembly.
+T scanFiniteSymmetricEigenInput<T: IEEEFloat>(ref Matrix<T> A) {
+    T zero = 0;
+    T matrixScale = zero;
+    usize i = 1;
+    while (i <= rows(*A)) {
+        usize j = 1;
+        while (j <= columns(*A)) {
+            T value = (*A)[i,j];
+            if (!isFiniteInternal<T>(value)) {
+                throw NonFiniteMatrixException();
+            }
+            T magnitude = abs(value);
+            if (matrixScale < magnitude) { matrixScale = magnitude; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return matrixScale;
+}
+
+void validateExactSymmetry<T: IEEEFloat>(ref Matrix<T> A) {
+    usize i = 2;
+    while (i <= rows(*A)) {
+        usize j = 1;
+        while (j < i) {
+            if ((*A)[i,j] != (*A)[j,i]) {
+                throw NotSymmetricMatrixException();
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+bool isExactlyDiagonal<T: IEEEFloat>(ref Matrix<T> A) {
+    T zero = 0;
+    usize i = 2;
+    while (i <= rows(*A)) {
+        usize j = 1;
+        while (j < i) {
+            if ((*A)[i,j] != zero) { return false; }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return true;
+}
+
+Matrix<T> copyNormalizedSymmetricLower<T: IEEEFloat>(
+    ref Matrix<T> A,
+    T matrixScale) {
+    T zero = 0;
+    usize n = rows(*A);
+    Matrix<T> workspace = matrixFilled<T>(n, n, zero);
+    usize i = 1;
+    while (i <= n) {
+        usize j = 1;
+        while (j <= i) {
+            workspace[i,j] = (*A)[i,j] / matrixScale;
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+    return workspace;
+}
+
+void swapSymmetricEigenColumns<T: IEEEFloat>(
+    ref mut Matrix<T> vectors,
+    usize first,
+    usize second) {
+    shapeGuard(first >= 1 && first <= columns(*vectors));
+    shapeGuard(second >= 1 && second <= columns(*vectors));
+    if (first == second) { return; }
+    usize row = 1;
+    while (row <= rows(*vectors)) {
+        T temporary = (*vectors)[row,first];
+        (*vectors)[row,first] = (*vectors)[row,second];
+        (*vectors)[row,second] = temporary;
+        row = row + 1;
+    }
+}
+
+void sortSymmetricEigenpairs<T: IEEEFloat>(
+    ref mut Vector<T,Column> values,
+    ref mut Matrix<T> vectors) {
+    usize n = dimension(*values);
+    shapeGuard(rows(*vectors) == n);
+    shapeGuard(columns(*vectors) == n);
+    usize i = 1;
+    while (i <= n) {
+        usize least = i;
+        usize j = i + 1;
+        while (j <= n) {
+            if ((*values)[j] < (*values)[least]) { least = j; }
+            j = j + 1;
+        }
+        if (least != i) {
+            T temporary = (*values)[i];
+            (*values)[i] = (*values)[least];
+            (*values)[least] = temporary;
+            swapSymmetricEigenColumns<T>(vectors, i, least);
+        }
+        i = i + 1;
+    }
+}
+
+void validateSymmetricEigenResult<T: IEEEFloat>(
+    ref Vector<T,Column> values,
+    ref Matrix<T> vectors) {
+    usize n = dimension(*values);
+    shapeGuard(rows(*vectors) == n);
+    shapeGuard(columns(*vectors) == n);
+    usize i = 1;
+    while (i <= n) {
+        if (!isFiniteInternal<T>((*values)[i])) {
+            throw NumericalConvergenceException();
+        }
+        if (i > 1 && (*values)[i] < (*values)[i - 1]) {
+            throw NumericalConvergenceException();
+        }
+        usize j = 1;
+        while (j <= n) {
+            if (!isFiniteInternal<T>((*vectors)[i,j])) {
+                throw NumericalConvergenceException();
+            }
+            j = j + 1;
+        }
+        i = i + 1;
+    }
+}
+
+SymmetricEigen<T> finishSymmetricEigen<T: IEEEFloat>(
+    Vector<T,Column> values,
+    Vector<T,Column> e,
+    Matrix<T> vectors,
+    T matrixScale) {
+    T zero = 0;
+    usize i = 1;
+    while (i <= dimension(e)) {
+        if (e[i] != zero) {
+            throw NumericalConvergenceException();
+        }
+        e[i] = zero;
+        i = i + 1;
+    }
+    i = 1;
+    while (i <= dimension(values)) {
+        T value = matrixScale * values[i];
+        if (!isFiniteInternal<T>(value)) {
+            throw NumericalConvergenceException();
+        }
+        if (value == zero) { value = zero; }
+        values[i] = value;
+        i = i + 1;
+    }
+    sortSymmetricEigenpairs<T>(&mut values, &mut vectors);
+    validateSymmetricEigenResult<T>(&values, &vectors);
+    return SymmetricEigen<T>(values, vectors);
+}
+
+public SymmetricEigen<T> symmetricEigen<T: IEEEFloat>(ref Matrix<T> A) {
+    T zero = 0;
+    shapeGuard(rows(*A) == columns(*A));
+    usize n = rows(*A);
+    T matrixScale = scanFiniteSymmetricEigenInput<T>(A);
+    validateExactSymmetry<T>(A);
+
+    if (n == 0) {
+        Vector<T,Column> values = vectorFilled<T,Column>(n, zero);
+        Matrix<T> vectors = matrixFilled<T>(n, n, zero);
+        return SymmetricEigen<T>(values, vectors);
+    }
+
+    if (n == 1 || isExactlyDiagonal<T>(A)) {
+        Vector<T,Column> values = vectorFilled<T,Column>(n, zero);
+        Matrix<T> vectors = identity<T>(n);
+        usize i = 1;
+        while (i <= n) {
+            T value = (*A)[i,i];
+            if (value == zero) { value = zero; }
+            values[i] = value;
+            i = i + 1;
+        }
+        sortSymmetricEigenpairs<T>(&mut values, &mut vectors);
+        validateSymmetricEigenResult<T>(&values, &vectors);
+        return SymmetricEigen<T>(values, vectors);
+    }
+
+    Matrix<T> workspace =
+        copyNormalizedSymmetricLower<T>(A, matrixScale);
+    usize offDiagonal = n - 1;
+    usize reflectors = 0;
+    if (n > 2) { reflectors = n - 2; }
+    Vector<T,Column> values = vectorFilled<T,Column>(n, zero);
+    Vector<T,Column> e = vectorFilled<T,Column>(offDiagonal, zero);
+    Vector<T,Column> tau = vectorFilled<T,Column>(reflectors, zero);
+    Vector<T,Column> work = vectorFilled<T,Column>(n, zero);
+    reduceSymmetricTridiagonal<T>(matrix_view_mut(workspace), n,
+        &mut values, &mut e, &mut tau, &mut work);
+    Matrix<T> vectors =
+        materializeSymmetricTridiagonalQ<T>(&workspace, &tau);
+    usize maxSweeps = 64 * n;
+    convergeSymmetricTridiagonalState<T>(
+        &mut values, &mut e, &mut vectors, maxSweeps);
+    return finishSymmetricEigen<T>(values, e, vectors, matrixScale);
 }
 
 BidiagonalShift<T> bidiagonalWilkinsonShift<T: IEEEFloat>(
