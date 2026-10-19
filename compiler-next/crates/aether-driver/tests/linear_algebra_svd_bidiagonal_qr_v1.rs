@@ -107,9 +107,9 @@ int nonfiniteFailure(){
 }
 int main(){
     float64 z=0.0;
-    BidiagonalGivens<float64> g=bidiagonalGivens<float64>(3.0,4.0);
+    GivensRotation<float64> g=givensRotation<float64>(3.0,4.0);
     if(g.r!=5.0||abs(g.c*g.c+g.s*g.s-1.0)>1.0e-15||abs(-g.s*3.0+g.c*4.0)>1.0e-15){return 1;}
-    g=bidiagonalGivens<float64>(z,-z);
+    g=givensRotation<float64>(z,-z);
     if(g.c!=1.0||g.s!=z||1.0/g.s!=1.0/z){return 2;}
 
     Vector<float64,Column>shiftD=[3.0,2.0];Vector<float64,Column>shiftE=[4.0];
@@ -123,13 +123,13 @@ int main(){
     Vector<float64,Column>d=[4.0,2.0];
     float64 threshold=(epsilon<float64>()*4.0)*(1.0+0.5);
     Vector<float64,Column>e=[threshold];
-    deflateBidiagonal<float64>(&d,&mut e,epsilon<float64>());
+    deflateAdjacentOffDiagonal<float64>(&d,&mut e,epsilon<float64>());
     if(e[1]!=z||1.0/e[1]!=1.0/z){return 3;}
     e=[threshold+threshold];
-    deflateBidiagonal<float64>(&d,&mut e,epsilon<float64>());
+    deflateAdjacentOffDiagonal<float64>(&d,&mut e,epsilon<float64>());
     if(e[1]==z){return 4;}
     d=[z,-z];e=[-z];
-    deflateBidiagonal<float64>(&d,&mut e,epsilon<float64>());
+    deflateAdjacentOffDiagonal<float64>(&d,&mut e,epsilon<float64>());
     if(1.0/e[1]!=1.0/z){return 5;}
 
     if(budgetFailure()!=0){return 6;}
