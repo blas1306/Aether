@@ -756,6 +756,23 @@ struct BidiagonalSVDSeed<T: Storable> {
     BidiagonalOrientation orientation;
 }
 
+// Compact symmetric Householder reduction used by the future symmetric
+// eigensolver.  The lower triangle of workspace is authoritative: its
+// diagonal and first subdiagonal duplicate d/e, while the remaining slots
+// hold reflector tails with an implicit leading one.
+struct CompactSymmetricTridiagonalReduction<T: Storable> {
+    Matrix<T> workspace;
+    Vector<T,Column> d;
+    Vector<T,Column> e;
+    Vector<T,Column> tau;
+}
+
+struct SymmetricTridiagonalSeed<T: Storable> {
+    Vector<T,Column> d;
+    Vector<T,Column> e;
+    Matrix<T> vectors;
+}
+
 // Private scalar state for the implicit bidiagonal QR phase.  The converged
 // aggregate is the ownership boundary used by the future public SVD assembly.
 struct BidiagonalSVDConverged<T: Storable> {
@@ -790,6 +807,232 @@ void requireFiniteInternal<T: IEEEFloat>(T value) {
     if (!isFiniteInternal<T>(value)) {
         throw NumericalConvergenceException();
     }
+}
+
+int reduceSymmetricTridiagonal<T: IEEEFloat>(
+    MatrixViewMut<T> W,
+    usize n,
+    ref mut Vector<T,Column> d,
+    ref mut Vector<T,Column> e,
+    ref mut Vector<T,Column> tau,
+    ref mut Vector<T,Column> work) {
+    T zero = 0;
+    T one = 1;
+    usize reflectors = 0;
+    if (n > 2) { reflectors = n - 2; }
+
+    usize k = 1;
+    while (k <= reflectors) {
+        T diagonal = W[k,k];
+        requireFiniteInternal<T>(diagonal);
+        (*d)[k] = diagonal;
+
+        usize p = k + 1;
+        VectorView<T,Column> axis = column(W,k);
+        T norm = stableNormRange<T>(axis, p, n);
+        requireFiniteInternal<T>(norm);
+        T beta = zero;
+        T tauValue = zero;
+        if (norm != zero) {
+            beta = norm;
+            if (W[p,k] >= zero) { beta = -norm; }
+            requireFiniteInternal<T>(beta);
+            T pivotRatio = W[p,k] / beta;
+            requireFiniteInternal<T>(pivotRatio);
+            T denominatorRatio = pivotRatio - one;
+            requireFiniteInternal<T>(denominatorRatio);
+            usize i = p + 1;
+            while (i <= n) {
+                T tail = (W[i,k] / beta) / denominatorRatio;
+                requireFiniteInternal<T>(tail);
+                W[i,k] = tail;
+                i = i + 1;
+            }
+            tauValue = one - pivotRatio;
+            requireFiniteInternal<T>(tauValue);
+        }
+        requireFiniteInternal<T>(beta);
+        requireFiniteInternal<T>(tauValue);
+        W[p,k] = beta;
+        (*e)[k] = beta;
+        (*tau)[k] = tauValue;
+
+        if (tauValue != zero) {
+            usize i = p;
+            while (i <= n) {
+                T dot = W[i,p];
+                requireFiniteInternal<T>(dot);
+                usize j = p + 1;
+                while (j <= n) {
+                    T aij = zero;
+                    if (i >= j) { aij = W[i,j]; }
+                    else { aij = W[j,i]; }
+                    requireFiniteInternal<T>(aij);
+                    dot = dot + aij * W[j,k];
+                    requireFiniteInternal<T>(dot);
+                    j = j + 1;
+                }
+                T workValue = tauValue * dot;
+                requireFiniteInternal<T>(workValue);
+                (*work)[i] = workValue;
+                i = i + 1;
+            }
+
+            T dot = (*work)[p];
+            requireFiniteInternal<T>(dot);
+            usize j = p + 1;
+            while (j <= n) {
+                dot = dot + W[j,k] * (*work)[j];
+                requireFiniteInternal<T>(dot);
+                j = j + 1;
+            }
+            T two = one + one;
+            T alpha = -(tauValue / two) * dot;
+            requireFiniteInternal<T>(alpha);
+
+            T firstWork = (*work)[p] + alpha;
+            requireFiniteInternal<T>(firstWork);
+            (*work)[p] = firstWork;
+            i = p + 1;
+            while (i <= n) {
+                T nextWork = (*work)[i] + alpha * W[i,k];
+                requireFiniteInternal<T>(nextWork);
+                (*work)[i] = nextWork;
+                i = i + 1;
+            }
+
+            i = p;
+            while (i <= n) {
+                T vi = one;
+                if (i != p) { vi = W[i,k]; }
+                j = p;
+                while (j <= i) {
+                    T vj = one;
+                    if (j != p) { vj = W[j,k]; }
+                    T first = W[i,j] - vi * (*work)[j];
+                    requireFiniteInternal<T>(first);
+                    T next = first - (*work)[i] * vj;
+                    requireFiniteInternal<T>(next);
+                    W[i,j] = next;
+                    j = j + 1;
+                }
+                i = i + 1;
+            }
+        }
+        k = k + 1;
+    }
+
+    if (n == 1) {
+        T diagonal = W[1,1];
+        requireFiniteInternal<T>(diagonal);
+        (*d)[1] = diagonal;
+    }
+    if (n >= 2) {
+        T penultimate = W[n - 1,n - 1];
+        T last = W[n,n];
+        T lastOffDiagonal = W[n,n - 1];
+        requireFiniteInternal<T>(penultimate);
+        requireFiniteInternal<T>(last);
+        requireFiniteInternal<T>(lastOffDiagonal);
+        (*d)[n - 1] = penultimate;
+        (*d)[n] = last;
+        (*e)[n - 1] = lastOffDiagonal;
+    }
+    return 0;
+}
+
+CompactSymmetricTridiagonalReduction<T>
+compactSymmetricTridiagonalReduction<T: IEEEFloat>(Matrix<T> workspace) {
+    T zero = 0;
+    usize n = rows(workspace);
+    usize offDiagonal = 0;
+    if (n > 0) { offDiagonal = n - 1; }
+    usize reflectors = 0;
+    if (n > 2) { reflectors = n - 2; }
+    Vector<T,Column> d = vectorFilled<T,Column>(n, zero);
+    Vector<T,Column> e = vectorFilled<T,Column>(offDiagonal, zero);
+    Vector<T,Column> tau = vectorFilled<T,Column>(reflectors, zero);
+    Vector<T,Column> work = vectorFilled<T,Column>(n, zero);
+    reduceSymmetricTridiagonal<T>(matrix_view_mut(workspace), n,
+        &mut d, &mut e, &mut tau, &mut work);
+
+    usize i = 1;
+    while (i <= dimension(d)) {
+        requireFiniteInternal<T>(d[i]);
+        i = i + 1;
+    }
+    i = 1;
+    while (i <= dimension(e)) {
+        requireFiniteInternal<T>(e[i]);
+        i = i + 1;
+    }
+    i = 1;
+    while (i <= dimension(tau)) {
+        requireFiniteInternal<T>(tau[i]);
+        i = i + 1;
+    }
+    return CompactSymmetricTridiagonalReduction<T>(workspace, d, e, tau);
+}
+
+Matrix<T> materializeSymmetricTridiagonalQ<T: IEEEFloat>(
+    ref Matrix<T> workspace,
+    ref Vector<T,Column> tau) {
+    T zero = 0;
+    usize n = rows(*workspace);
+    Matrix<T> vectors = identity<T>(n);
+    usize k = 1;
+    while (k <= dimension(*tau)) {
+        T tauValue = (*tau)[k];
+        requireFiniteInternal<T>(tauValue);
+        if (tauValue != zero) {
+            usize p = k + 1;
+            usize r = 1;
+            while (r <= n) {
+                T dot = vectors[r,p];
+                requireFiniteInternal<T>(dot);
+                usize j = p + 1;
+                while (j <= n) {
+                    dot = dot + vectors[r,j] * (*workspace)[j,k];
+                    requireFiniteInternal<T>(dot);
+                    j = j + 1;
+                }
+                T scale = tauValue * dot;
+                requireFiniteInternal<T>(scale);
+                T nextPivot = vectors[r,p] - scale;
+                requireFiniteInternal<T>(nextPivot);
+                vectors[r,p] = nextPivot;
+                j = p + 1;
+                while (j <= n) {
+                    T next = vectors[r,j] - scale * (*workspace)[j,k];
+                    requireFiniteInternal<T>(next);
+                    vectors[r,j] = next;
+                    j = j + 1;
+                }
+                r = r + 1;
+            }
+        }
+        k = k + 1;
+    }
+    return vectors;
+}
+
+SymmetricTridiagonalSeed<T> symmetricTridiagonalSeedInPlace<T: IEEEFloat>(
+    Matrix<T> normalizedWorkspace) {
+    T zero = 0;
+    usize n = rows(normalizedWorkspace);
+    usize offDiagonal = 0;
+    if (n > 0) { offDiagonal = n - 1; }
+    usize reflectors = 0;
+    if (n > 2) { reflectors = n - 2; }
+    Vector<T,Column> d = vectorFilled<T,Column>(n, zero);
+    Vector<T,Column> e = vectorFilled<T,Column>(offDiagonal, zero);
+    Vector<T,Column> tau = vectorFilled<T,Column>(reflectors, zero);
+    Vector<T,Column> work = vectorFilled<T,Column>(n, zero);
+    reduceSymmetricTridiagonal<T>(matrix_view_mut(normalizedWorkspace), n,
+        &mut d, &mut e, &mut tau, &mut work);
+    Matrix<T> vectors = materializeSymmetricTridiagonalQ<T>(
+        &normalizedWorkspace, &tau);
+    return SymmetricTridiagonalSeed<T>(d, e, vectors);
 }
 
 BidiagonalGivens<T> bidiagonalGivens<T: IEEEFloat>(T f, T g) {
