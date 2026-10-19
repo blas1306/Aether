@@ -51,6 +51,28 @@ int testSVDConsumer() {
     return 0;
 }
 
+int testPseudoInverseConsumer() {
+    Matrix<float64> A = [1.0,0.0;0.0,2.0;0.0,0.0];
+    var factor = la.svd(A);
+    Matrix<float64> P = la.pseudoInverse(factor);
+    Matrix<float64> P2 = la.pseudoInverse(A);
+    if (rows(P) != 2 || columns(P) != 3 ||
+        rows(P2) != 2 || columns(P2) != 3) { return 1; }
+    if (abs(P[1,1] - 1.0) > 1.0e-12 ||
+        abs(P[2,2] - 0.5) > 1.0e-12) { return 2; }
+    if (abs(P2[1,1] - 1.0) > 1.0e-12 ||
+        abs(P2[2,2] - 0.5) > 1.0e-12) { return 3; }
+    // Both shared inputs remain usable and the factor can be reused with a
+    // different cutoff without another factorization.
+    Matrix<float64> truncated = la.pseudoInverse(factor, 1.5);
+    if (A[1,1] != 1.0 || A[2,2] != 2.0 || factor.S[1] < factor.S[2]) {
+        return 4;
+    }
+    if (abs(truncated[1,1]) > 1.0e-12 ||
+        abs(truncated[2,2] - 0.5) > 1.0e-12) { return 5; }
+    return 0;
+}
+
 int filled64(MatrixView<float64> value, float64 expected) {
     usize i = 1;
     while (i <= rows(value)) {
@@ -1509,5 +1531,7 @@ int main() {
     if (qrSolveStatus != 0) { return 400 + qrSolveStatus; }
     int svdStatus = testSVDConsumer();
     if (svdStatus != 0) { return 420 + svdStatus; }
+    int pseudoInverseStatus = testPseudoInverseConsumer();
+    if (pseudoInverseStatus != 0) { return 440 + pseudoInverseStatus; }
     return 0;
 }

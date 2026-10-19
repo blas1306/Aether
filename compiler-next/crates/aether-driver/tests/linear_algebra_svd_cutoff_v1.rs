@@ -208,7 +208,10 @@ fn public_surface_and_private_authorities_are_closed() {
         1
     );
     assert!(!LIBRARY.contains("public usize numericalRank<"));
-    assert!(!LIBRARY.contains("public Matrix<T> pseudoInverse<"));
+    assert_eq!(
+        LIBRARY.matches("public Matrix<T> pseudoInverse<").count(),
+        4
+    );
     assert!(!LIBRARY.contains("condition2<T:"));
     assert!(LIBRARY.contains("(*factor).S[i] / sigmaMax > relativeCutoff"));
     assert!(!LIBRARY.contains("relativeCutoff * sigmaMax"));

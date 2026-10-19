@@ -1721,6 +1721,63 @@ public SVD<T> svd<T: IEEEFloat>(ref Matrix<T> A) {
     return assembleSVDWorkspace<T>(workspace);
 }
 
+// Assemble the numerical Moore--Penrose pseudoinverse directly from the
+// retained thin-SVD prefix.  The fixed r/j/i traversal divides Vt[r,j] by the
+// singular value once and then accumulates that scaled scalar across U.  This
+// avoids first materializing the potentially larger reciprocal 1 / S[r] and
+// creates no transpose, diagonal, vector, or other numeric owner.
+Matrix<T> pseudoInverseRetained<T: IEEEFloat>(
+    ref SVD<T> factor,
+    usize retained) {
+    T zero = 0;
+    usize m = rows((*factor).U);
+    usize n = columns((*factor).Vt);
+    Matrix<T> result = matrixFilled<T>(n, m, zero);
+
+    usize r = 1;
+    while (r <= retained) {
+        T sigma = (*factor).S[r];
+        usize j = 1;
+        while (j <= n) {
+            T scaledV = (*factor).Vt[r,j] / sigma;
+            usize i = 1;
+            while (i <= m) {
+                T contribution = scaledV * (*factor).U[i,r];
+                result[j,i] = result[j,i] + contribution;
+                i = i + 1;
+            }
+            j = j + 1;
+        }
+        r = r + 1;
+    }
+    return result;
+}
+
+public Matrix<T> pseudoInverse<T: IEEEFloat>(ref SVD<T> factor) {
+    usize retained = retainedSingularValueCount<T>(factor);
+    return pseudoInverseRetained<T>(factor, retained);
+}
+
+public Matrix<T> pseudoInverse<T: IEEEFloat>(
+    ref SVD<T> factor,
+    T cutoff) {
+    usize retained = retainedSingularValueCount<T>(factor, cutoff);
+    return pseudoInverseRetained<T>(factor, retained);
+}
+
+public Matrix<T> pseudoInverse<T: IEEEFloat>(ref Matrix<T> A) {
+    SVD<T> factor = svd<T>(A);
+    return pseudoInverse<T>(&factor);
+}
+
+public Matrix<T> pseudoInverse<T: IEEEFloat>(ref Matrix<T> A, T cutoff) {
+    // Matrix routes have no structural guard before cutoff validation.  Keep
+    // invalid cutoffs ahead of the SVD input scan and factorization.
+    validateSingularValueCutoff<T>(cutoff);
+    SVD<T> factor = svd<T>(A);
+    return pseudoInverse<T>(&factor, cutoff);
+}
+
 public class RankDeficientMatrixException : Exception {
     public init() {}
 }
