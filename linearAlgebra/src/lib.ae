@@ -1778,6 +1778,148 @@ public Matrix<T> pseudoInverse<T: IEEEFloat>(ref Matrix<T> A, T cutoff) {
     return pseudoInverse<T>(&factor, cutoff);
 }
 
+// Apply the retained thin-SVD prefix directly to one right-hand side.  The
+// r/i/j traversal fixes the source arithmetic tree without materializing a
+// pseudoinverse, U transpose, projections vector, or per-triplet owner.
+Vector<T,Column> leastSquaresVectorRetained<T: IEEEFloat>(
+    ref SVD<T> factor,
+    ref Vector<T,Column> b,
+    usize retained) {
+    T zero = 0;
+    usize m = rows((*factor).U);
+    usize n = columns((*factor).Vt);
+    Vector<T,Column> result = vectorFilled<T,Column>(n, zero);
+
+    usize r = 1;
+    while (r <= retained) {
+        T projection = zero;
+        usize i = 1;
+        while (i <= m) {
+            projection = projection + (*factor).U[i,r] * (*b)[i];
+            i = i + 1;
+        }
+        T coefficient = projection / (*factor).S[r];
+        usize j = 1;
+        while (j <= n) {
+            result[j] = result[j] + (*factor).Vt[r,j] * coefficient;
+            j = j + 1;
+        }
+        r = r + 1;
+    }
+    return result;
+}
+
+// Apply the same retained prefix directly to every RHS column.  Keeping the
+// c/r/i/j traversal here avoids both an owning U^T B and temporary Vector
+// outputs from dispatching through the public single-RHS overload.
+Matrix<T> leastSquaresMatrixRetained<T: IEEEFloat>(
+    ref SVD<T> factor,
+    ref Matrix<T> B,
+    usize retained) {
+    T zero = 0;
+    usize m = rows((*factor).U);
+    usize n = columns((*factor).Vt);
+    usize q = columns(*B);
+    Matrix<T> result = matrixFilled<T>(n, q, zero);
+
+    usize c = 1;
+    while (c <= q) {
+        usize r = 1;
+        while (r <= retained) {
+            T projection = zero;
+            usize i = 1;
+            while (i <= m) {
+                projection = projection + (*factor).U[i,r] * (*B)[i,c];
+                i = i + 1;
+            }
+            T coefficient = projection / (*factor).S[r];
+            usize j = 1;
+            while (j <= n) {
+                result[j,c] =
+                    result[j,c] + (*factor).Vt[r,j] * coefficient;
+                j = j + 1;
+            }
+            r = r + 1;
+        }
+        c = c + 1;
+    }
+    return result;
+}
+
+public Vector<T,Column> leastSquares<T: IEEEFloat>(
+    ref SVD<T> factor,
+    ref Vector<T,Column> b) {
+    guardSVDFactorShapes<T>(factor);
+    shapeGuard(dimension(*b) == rows((*factor).U));
+    usize retained = retainedSingularValueCount<T>(factor);
+    return leastSquaresVectorRetained<T>(factor, b, retained);
+}
+
+public Vector<T,Column> leastSquares<T: IEEEFloat>(
+    ref SVD<T> factor,
+    ref Vector<T,Column> b,
+    T cutoff) {
+    guardSVDFactorShapes<T>(factor);
+    shapeGuard(dimension(*b) == rows((*factor).U));
+    usize retained = retainedSingularValueCount<T>(factor, cutoff);
+    return leastSquaresVectorRetained<T>(factor, b, retained);
+}
+
+public Vector<T,Column> leastSquares<T: IEEEFloat>(
+    ref Matrix<T> A,
+    ref Vector<T,Column> b) {
+    shapeGuard(dimension(*b) == rows(*A));
+    SVD<T> factor = svd<T>(A);
+    return leastSquares<T>(&factor, b);
+}
+
+public Vector<T,Column> leastSquares<T: IEEEFloat>(
+    ref Matrix<T> A,
+    ref Vector<T,Column> b,
+    T cutoff) {
+    shapeGuard(dimension(*b) == rows(*A));
+    validateSingularValueCutoff<T>(cutoff);
+    SVD<T> factor = svd<T>(A);
+    return leastSquares<T>(&factor, b, cutoff);
+}
+
+public Matrix<T> leastSquares<T: IEEEFloat>(
+    ref SVD<T> factor,
+    ref Matrix<T> B) {
+    guardSVDFactorShapes<T>(factor);
+    shapeGuard(rows(*B) == rows((*factor).U));
+    usize retained = retainedSingularValueCount<T>(factor);
+    return leastSquaresMatrixRetained<T>(factor, B, retained);
+}
+
+public Matrix<T> leastSquares<T: IEEEFloat>(
+    ref SVD<T> factor,
+    ref Matrix<T> B,
+    T cutoff) {
+    guardSVDFactorShapes<T>(factor);
+    shapeGuard(rows(*B) == rows((*factor).U));
+    usize retained = retainedSingularValueCount<T>(factor, cutoff);
+    return leastSquaresMatrixRetained<T>(factor, B, retained);
+}
+
+public Matrix<T> leastSquares<T: IEEEFloat>(
+    ref Matrix<T> A,
+    ref Matrix<T> B) {
+    shapeGuard(rows(*B) == rows(*A));
+    SVD<T> factor = svd<T>(A);
+    return leastSquares<T>(&factor, B);
+}
+
+public Matrix<T> leastSquares<T: IEEEFloat>(
+    ref Matrix<T> A,
+    ref Matrix<T> B,
+    T cutoff) {
+    shapeGuard(rows(*B) == rows(*A));
+    validateSingularValueCutoff<T>(cutoff);
+    SVD<T> factor = svd<T>(A);
+    return leastSquares<T>(&factor, B, cutoff);
+}
+
 public class RankDeficientMatrixException : Exception {
     public init() {}
 }

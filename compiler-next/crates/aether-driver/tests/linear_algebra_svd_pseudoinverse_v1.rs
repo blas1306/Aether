@@ -374,7 +374,19 @@ fn public_surface_kernel_shape_and_lowering_are_closed() {
     }
     assert!(LIBRARY.contains("T scaledV = (*factor).Vt[r,j] / sigma;"));
     assert!(LIBRARY.contains("T contribution = scaledV * (*factor).U[i,r];"));
-    assert_eq!(LIBRARY.matches("SVD<T> factor = svd<T>(A);").count(), 2);
+    let pseudoinverse_routes = LIBRARY
+        .split("public Matrix<T> pseudoInverse<T: IEEEFloat>(ref SVD<T> factor)")
+        .nth(1)
+        .unwrap()
+        .split("// Apply the retained thin-SVD prefix directly to one right-hand side.")
+        .next()
+        .unwrap();
+    assert_eq!(
+        pseudoinverse_routes
+            .matches("SVD<T> factor = svd<T>(A);")
+            .count(),
+        2
+    );
 
     let source = "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[2.0,0.0;0.0,1.0];la.SVD<float64>f=la.svd(a);Matrix<float64>p1=la.pseudoInverse(f);Matrix<float64>p2=la.pseudoInverse(f,0.0);Matrix<float64>p3=la.pseudoInverse(a);Matrix<float64>p4=la.pseudoInverse(a,0.0);Matrix<float32>b=[float32(1.0)];la.SVD<float32>g=la.svd(b);Matrix<float32>q=la.pseudoInverse(g);return int(p1[1,1]+p2[1,1]+p3[1,1]+p4[1,1]+q[1,1]-3.0);}";
     for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
