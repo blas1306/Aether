@@ -103,6 +103,30 @@ int testLeastSquaresConsumer() {
     return 0;
 }
 
+int testSVDRankConditionConsumer() {
+    Matrix<float64> A = [10.0,0.0;0.0,2.0;0.0,0.0];
+    var factor = la.svd(A);
+
+    usize r = la.numericalRank(factor);
+    float64 c = la.condition2(factor);
+    println(r);
+    println(c);
+
+    usize directRank = la.numericalRank(A);
+    usize explicitRank = la.numericalRank(A, 2.0);
+    float64 directCondition = la.condition2(A);
+    if (r != 2 || directRank != 2 || explicitRank != 1) { return 1; }
+    if (abs(c - 5.0) > 1.0e-12 || abs(directCondition - 5.0) > 1.0e-12) {
+        return 2;
+    }
+
+    // Both shared inputs remain reusable after factor and Matrix queries.
+    if (A[1,1] != 10.0 || A[2,2] != 2.0 || factor.S[1] != 10.0) {
+        return 3;
+    }
+    return 0;
+}
+
 int filled64(MatrixView<float64> value, float64 expected) {
     usize i = 1;
     while (i <= rows(value)) {
@@ -1565,5 +1589,7 @@ int main() {
     if (pseudoInverseStatus != 0) { return 440 + pseudoInverseStatus; }
     int leastSquaresStatus = testLeastSquaresConsumer();
     if (leastSquaresStatus != 0) { return 460 + leastSquaresStatus; }
+    int rankConditionStatus = testSVDRankConditionConsumer();
+    if (rankConditionStatus != 0) { return 480 + rankConditionStatus; }
     return 0;
 }

@@ -1920,6 +1920,53 @@ public Matrix<T> leastSquares<T: IEEEFloat>(
     return leastSquares<T>(&factor, B, cutoff);
 }
 
+// Effective rank under the same shared policy used by pseudoinverse and
+// least-squares.  Factor routes introduce no owners and do not refactorize.
+public usize numericalRank<T: IEEEFloat>(ref SVD<T> factor) {
+    return retainedSingularValueCount<T>(factor);
+}
+
+public usize numericalRank<T: IEEEFloat>(ref SVD<T> factor, T cutoff) {
+    return retainedSingularValueCount<T>(factor, cutoff);
+}
+
+public usize numericalRank<T: IEEEFloat>(ref Matrix<T> A) {
+    SVD<T> factor = svd<T>(A);
+    return numericalRank<T>(&factor);
+}
+
+public usize numericalRank<T: IEEEFloat>(ref Matrix<T> A, T cutoff) {
+    // Keep an invalid cutoff ahead of the SVD input scan, as in the other
+    // Matrix-derived operations, then delegate the result to the factor API.
+    validateSingularValueCutoff<T>(cutoff);
+    SVD<T> factor = svd<T>(A);
+    return numericalRank<T>(&factor, cutoff);
+}
+
+// Spectral 2-condition over the complete thin spectrum.  This deliberately
+// does not apply the numerical-rank cutoff: only an empty spectrum or an
+// exactly zero stored minimum singular value maps to IEEE infinity here.
+public T condition2<T: IEEEFloat>(ref SVD<T> factor) {
+    guardSVDFactorShapes<T>(factor);
+    T zero = 0;
+    T one = 1;
+    usize p = dimension((*factor).S);
+    if (p == 0) {
+        return one / zero;
+    }
+    T sigmaMax = (*factor).S[1];
+    T sigmaMin = (*factor).S[p];
+    if (sigmaMin == zero) {
+        return one / zero;
+    }
+    return sigmaMax / sigmaMin;
+}
+
+public T condition2<T: IEEEFloat>(ref Matrix<T> A) {
+    SVD<T> factor = svd<T>(A);
+    return condition2<T>(&factor);
+}
+
 public class RankDeficientMatrixException : Exception {
     public init() {}
 }
