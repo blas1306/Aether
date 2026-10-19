@@ -127,6 +127,30 @@ int testSVDRankConditionConsumer() {
     return 0;
 }
 
+int testSVDLowRankConsumer() {
+    Matrix<float64> A = [4.0,0.0,0.0;0.0,2.0,0.0;0.0,0.0,1.0];
+    var factor = la.svd(A);
+
+    Matrix<float64> A2 = la.lowRankApproximation(factor, 2);
+    double e2 = la.lowRankSpectralError(factor, 2);
+    double ef = la.lowRankFrobeniusError(factor, 2);
+
+    if (rows(A2) != 3 || columns(A2) != 3) { return 1; }
+    if (abs(A2[1,1] - 4.0) > 1.0e-12 ||
+        abs(A2[2,2] - 2.0) > 1.0e-12 ||
+        abs(A2[3,3]) > 1.0e-12) { return 2; }
+    if (abs(e2 - 1.0) > 1.0e-12 || abs(ef - 1.0) > 1.0e-12) {
+        return 3;
+    }
+
+    // The factor remains reusable by all three operations.
+    Matrix<float64> A0 = la.lowRankApproximation(factor, 0);
+    if (A0[1,1] != 0.0 || factor.S[1] != 4.0 || A[3,3] != 1.0) {
+        return 4;
+    }
+    return 0;
+}
+
 int filled64(MatrixView<float64> value, float64 expected) {
     usize i = 1;
     while (i <= rows(value)) {
@@ -1591,5 +1615,7 @@ int main() {
     if (leastSquaresStatus != 0) { return 460 + leastSquaresStatus; }
     int rankConditionStatus = testSVDRankConditionConsumer();
     if (rankConditionStatus != 0) { return 480 + rankConditionStatus; }
+    int lowRankStatus = testSVDLowRankConsumer();
+    if (lowRankStatus != 0) { return 500 + lowRankStatus; }
     return 0;
 }

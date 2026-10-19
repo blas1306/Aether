@@ -445,7 +445,7 @@ fn public_surface_direct_kernels_and_lowering_are_closed() {
     assert!(LIBRARY.contains("result[j] = result[j] + (*factor).Vt[r,j] * coefficient;"));
     assert!(LIBRARY.contains("projection = projection + (*factor).U[i,r] * (*B)[i,c];"));
     assert!(LIBRARY.contains("result[j,c] + (*factor).Vt[r,j] * coefficient;"));
-    assert_eq!(LIBRARY.matches("SVD<T> factor = svd<T>(A);").count(), 6);
+    assert_eq!(LIBRARY.matches("SVD<T> factor = svd<T>(A);").count(), 12);
 
     let vector_kernel = LIBRARY
         .split("Vector<T,Column> leastSquaresVectorRetained")

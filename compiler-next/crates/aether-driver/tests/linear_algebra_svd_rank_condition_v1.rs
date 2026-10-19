@@ -374,7 +374,7 @@ fn public_surface_delegation_and_constant_time_condition_are_closed() {
         .unwrap();
     assert_eq!(
         matrix_routes.matches("SVD<T> factor = svd<T>(A);").count(),
-        3
+        6
     );
 
     let source = "package consumer;import linearAlgebra as la;int main(){Matrix<float64>a=[2.0,0.0;0.0,1.0];usize r1=la.numericalRank(a);usize r2=la.numericalRank(a,0.0);float64 c=la.condition2(a);Matrix<float32>b=[float32(3.0)];la.SVD<float32>f=la.svd(b);usize r3=la.numericalRank(f);float32 d=la.condition2(f);if(r1!=2||r2!=2||r3!=1||c!=2.0||d!=float32(1.0)){return 1;}return 0;}";
