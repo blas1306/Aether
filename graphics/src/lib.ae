@@ -1,0 +1,811 @@
+package graphics;
+
+import std.Text;
+
+public struct Viewport {
+    float64 width;
+    float64 height;
+}
+
+public struct Point {
+    float64 x;
+    float64 y;
+}
+
+public struct Line {
+    Point from;
+    Point to;
+}
+
+public struct Rect {
+    float64 x;
+    float64 y;
+    float64 width;
+    float64 height;
+}
+
+public struct Transform2D {
+    float64 m11;
+    float64 m12;
+    float64 m21;
+    float64 m22;
+    float64 tx;
+    float64 ty;
+}
+
+public struct Color {
+    uint8 red;
+    uint8 green;
+    uint8 blue;
+    uint8 alpha;
+}
+
+enum FillRule {
+    NonZero,
+    EvenOdd,
+}
+
+public struct Fill {
+    Color color;
+    FillRule rule;
+}
+
+enum LineCap {
+    Butt,
+    Round,
+    Square,
+}
+
+enum LineJoin {
+    Miter,
+    Round,
+    Bevel,
+}
+
+public struct Stroke {
+    Color color;
+    float64 width;
+    LineCap cap;
+    LineJoin join;
+    float64 miterLimit;
+}
+
+enum Paint {
+    FillOnly(Fill),
+    StrokeOnly(Stroke),
+    FillAndStroke(Fill, Stroke),
+}
+
+public struct PointSpan {
+    usize start;
+    usize length;
+}
+
+public struct PathSpan {
+    usize start;
+    usize length;
+}
+
+public struct ByteSpan {
+    usize start;
+    usize length;
+}
+
+enum PathVerb {
+    MoveTo(Point),
+    LineTo(Point),
+    CubicTo(Point, Point, Point),
+    Close,
+}
+
+enum FontFamily {
+    BackendDefault,
+    Serif,
+    SansSerif,
+    Monospace,
+    Named(string),
+}
+
+enum FontWeight {
+    Normal,
+    Bold,
+}
+
+enum FontSlant {
+    Normal,
+    Italic,
+}
+
+enum TextAlign {
+    Left,
+    Center,
+    Right,
+}
+
+enum TextBaseline {
+    Alphabetic,
+    Top,
+    Middle,
+    Bottom,
+}
+
+public struct FontRequest {
+    FontFamily family;
+    FontWeight weight;
+    FontSlant slant;
+}
+
+public struct TextStyle {
+    float64 size;
+    Color color;
+    FontRequest font;
+    TextAlign align;
+    TextBaseline baseline;
+}
+
+enum StoredFontFamily {
+    BackendDefault,
+    Serif,
+    SansSerif,
+    Monospace,
+    Named(ByteSpan),
+}
+
+public struct StoredFontRequest {
+    StoredFontFamily family;
+    FontWeight weight;
+    FontSlant slant;
+}
+
+public struct TextRecord {
+    ByteSpan content;
+    Point position;
+    float64 size;
+    Color color;
+    StoredFontRequest font;
+    TextAlign align;
+    TextBaseline baseline;
+}
+
+enum Command {
+    PushState,
+    PopState,
+    ConcatTransform(Transform2D),
+    IntersectClipRect(Rect),
+    DrawPoint(Point, float64, Color),
+    DrawLine(Line, Stroke),
+    DrawPolyline(PointSpan, Stroke),
+    DrawRect(Rect, Paint),
+    DrawPath(PathSpan, Paint),
+    DrawText(usize),
+}
+
+public class InvalidGeometryException : Exception {
+    public init() {}
+}
+
+public class InvalidSceneStateException : Exception {
+    public init() {}
+}
+
+public open class GraphicsBackendException : Exception {
+    public init() {}
+}
+
+public class UnsupportedGraphicsFeatureException : GraphicsBackendException {
+    public init() : base() {}
+}
+
+public class GraphicsTextException : GraphicsBackendException {
+    public init() : base() {}
+}
+
+public class GraphicsIoException : GraphicsBackendException {
+    public init() : base() {}
+}
+
+bool finite(float64 value) {
+    return value - value == 0.0;
+}
+
+void validatePoint(Point point) {
+    if (!finite(point.x) || !finite(point.y)) {
+        throw InvalidGeometryException();
+    }
+}
+
+void validateViewport(Viewport viewport) {
+    if (!finite(viewport.width) || !finite(viewport.height) ||
+        0.0 > viewport.width || 0.0 > viewport.height) {
+        throw InvalidGeometryException();
+    }
+}
+
+void validateRect(Rect rectangle) {
+    if (!finite(rectangle.x) || !finite(rectangle.y) ||
+        !finite(rectangle.width) || !finite(rectangle.height) ||
+        0.0 > rectangle.width || 0.0 > rectangle.height ||
+        !finite(rectangle.x + rectangle.width) ||
+        !finite(rectangle.y + rectangle.height)) {
+        throw InvalidGeometryException();
+    }
+}
+
+void validateStroke(Stroke stroke) {
+    if (!finite(stroke.width) || 0.0 >= stroke.width ||
+        !finite(stroke.miterLimit) || 1.0 > stroke.miterLimit) {
+        throw InvalidGeometryException();
+    }
+}
+
+void validatePaint(Paint paint) {
+    match (paint) {
+        Paint.FillOnly(fill) => { }
+        Paint.StrokeOnly(stroke) => { validateStroke(stroke); }
+        Paint.FillAndStroke(fill, stroke) => { validateStroke(stroke); }
+    }
+}
+
+void validateTransform(Transform2D transform) {
+    if (!finite(transform.m11) || !finite(transform.m12) ||
+        !finite(transform.m21) || !finite(transform.m22) ||
+        !finite(transform.tx) || !finite(transform.ty)) {
+        throw InvalidGeometryException();
+    }
+}
+
+Transform2D identityTransform() {
+    return Transform2D(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+}
+
+Transform2D compose(Transform2D current, Transform2D local) {
+    Transform2D result = Transform2D(
+        current.m11 * local.m11 + current.m21 * local.m12,
+        current.m12 * local.m11 + current.m22 * local.m12,
+        current.m11 * local.m21 + current.m21 * local.m22,
+        current.m12 * local.m21 + current.m22 * local.m22,
+        current.m11 * local.tx + current.m21 * local.ty + current.tx,
+        current.m12 * local.tx + current.m22 * local.ty + current.ty
+    );
+    validateTransform(result);
+    return result;
+}
+
+Rect intersectRects(Rect left, Rect right) {
+    float64 leftX2 = left.x + left.width;
+    float64 leftY2 = left.y + left.height;
+    float64 rightX2 = right.x + right.width;
+    float64 rightY2 = right.y + right.height;
+    float64 x1 = left.x;
+    float64 y1 = left.y;
+    float64 x2 = leftX2;
+    float64 y2 = leftY2;
+    if (right.x > x1) { x1 = right.x; }
+    if (right.y > y1) { y1 = right.y; }
+    if (rightX2 < x2) { x2 = rightX2; }
+    if (rightY2 < y2) { y2 = rightY2; }
+    if (x2 < x1) { x2 = x1; }
+    if (y2 < y1) { y2 = y1; }
+    return Rect(x1, y1, x2 - x1, y2 - y1);
+}
+
+struct StateSnapshot {
+    Transform2D transform;
+    Rect clip;
+}
+
+// This unexported capability keeps Scene construction inside this package. It
+// compensates for V1's class-private (rather than module-private) initializers.
+struct SceneConstruction {
+    int marker;
+}
+
+public class Scene {
+    Viewport sceneViewport;
+    Buffer<Command> commands;
+    Buffer<Point> polylinePoints;
+    Buffer<PathVerb> pathVerbs;
+    Buffer<TextRecord> textRecords;
+    Buffer<uint8> utf8Bytes;
+    usize commandLength;
+    usize pointLength;
+    usize pathVerbLength;
+    usize textRecordLength;
+    usize byteLengthValue;
+
+    public init(
+        SceneConstruction construction,
+        Viewport viewport,
+        Buffer<Command> commandValues,
+        usize commandCount,
+        Buffer<Point> pointValues,
+        usize pointCount,
+        Buffer<PathVerb> verbValues,
+        usize verbCount,
+        Buffer<TextRecord> recordValues,
+        usize recordCount,
+        Buffer<uint8> byteValues,
+        usize byteCount) {
+        sceneViewport = viewport;
+        commands = commandValues;
+        polylinePoints = pointValues;
+        pathVerbs = verbValues;
+        textRecords = recordValues;
+        utf8Bytes = byteValues;
+        commandLength = commandCount;
+        pointLength = pointCount;
+        pathVerbLength = verbCount;
+        textRecordLength = recordCount;
+        byteLengthValue = byteCount;
+    }
+
+    public Viewport viewport() { return sceneViewport; }
+    public usize commandCount() { return commandLength; }
+    public Command commandAt(usize index) { return commands[index]; }
+    public Point pointAt(PointSpan span, usize index) {
+        if (index >= span.length || span.start + span.length > pointLength) {
+            return polylinePoints[pointLength];
+        }
+        return polylinePoints[span.start + index];
+    }
+    public PathVerb pathVerbAt(PathSpan span, usize index) {
+        if (index >= span.length || span.start + span.length > pathVerbLength) {
+            return pathVerbs[pathVerbLength];
+        }
+        return pathVerbs[span.start + index];
+    }
+    public TextRecord textRecordAt(usize index) { return textRecords[index]; }
+    public uint8 utf8ByteAt(ByteSpan span, usize index) {
+        if (index >= span.length || span.start + span.length > byteLengthValue) {
+            return utf8Bytes[byteLengthValue];
+        }
+        return utf8Bytes[span.start + index];
+    }
+}
+
+public class SceneBuilder {
+    Viewport sceneViewport;
+    Buffer<Command> commands;
+    Buffer<Point> polylinePoints;
+    Buffer<PathVerb> pathVerbs;
+    Buffer<TextRecord> textRecords;
+    Buffer<uint8> utf8Bytes;
+    Buffer<StateSnapshot> stateStack;
+    usize commandLength;
+    usize commandCapacity;
+    usize pointLength;
+    usize pointCapacity;
+    usize pathVerbLength;
+    usize pathVerbCapacity;
+    usize textRecordLength;
+    usize textRecordCapacity;
+    usize byteLengthValue;
+    usize byteCapacity;
+    usize stateDepth;
+    usize stateCapacity;
+    bool sealed;
+    bool polylineOpen;
+    usize openPolylineStart;
+    bool pathOpen;
+    bool pathSubpathActive;
+    usize openPathStart;
+    Transform2D currentTransform;
+    Rect currentClip;
+
+    public init(Viewport viewport) {
+        validateViewport(viewport);
+        sceneViewport = viewport;
+        commands = Buffer<Command>(0, Command.PushState);
+        polylinePoints = Buffer<Point>(0, Point(0.0, 0.0));
+        pathVerbs = Buffer<PathVerb>(0, PathVerb.Close);
+        textRecords = Buffer<TextRecord>(0, TextRecord(
+            ByteSpan(0, 0), Point(0.0, 0.0), 1.0,
+            Color(uint8(0), uint8(0), uint8(0), uint8(0)),
+            StoredFontRequest(StoredFontFamily.BackendDefault,
+                FontWeight.Normal, FontSlant.Normal),
+            TextAlign.Left, TextBaseline.Alphabetic));
+        utf8Bytes = Buffer<uint8>(0, uint8(0));
+        stateStack = Buffer<StateSnapshot>(0, StateSnapshot(
+            identityTransform(), Rect(0.0, 0.0, viewport.width, viewport.height)));
+        commandLength = 0;
+        commandCapacity = 0;
+        pointLength = 0;
+        pointCapacity = 0;
+        pathVerbLength = 0;
+        pathVerbCapacity = 0;
+        textRecordLength = 0;
+        textRecordCapacity = 0;
+        byteLengthValue = 0;
+        byteCapacity = 0;
+        stateDepth = 0;
+        stateCapacity = 0;
+        sealed = false;
+        polylineOpen = false;
+        openPolylineStart = 0;
+        pathOpen = false;
+        pathSubpathActive = false;
+        openPathStart = 0;
+        currentTransform = identityTransform();
+        currentClip = Rect(0.0, 0.0, viewport.width, viewport.height);
+    }
+
+    mut void requireMutable() {
+        if (sealed) { throw InvalidSceneStateException(); }
+    }
+
+    mut void requireNoIncrementalPrimitive() {
+        if (polylineOpen || pathOpen) { throw InvalidSceneStateException(); }
+    }
+
+    mut void appendCommand(Command command) {
+        if (commandLength == commandCapacity) {
+            usize nextCapacity = 4;
+            if (commandCapacity != 0) { nextCapacity = commandCapacity * 2; }
+            Buffer<Command> next = Buffer<Command>(nextCapacity, Command.PushState);
+            usize index = 0;
+            while (index < commandLength) {
+                next[index] = commands[index];
+                index = index + 1;
+            }
+            commands = next;
+            commandCapacity = nextCapacity;
+        }
+        commands[commandLength] = command;
+        commandLength = commandLength + 1;
+    }
+
+    mut void appendPoint(Point point) {
+        if (pointLength == pointCapacity) {
+            usize nextCapacity = 4;
+            if (pointCapacity != 0) { nextCapacity = pointCapacity * 2; }
+            Buffer<Point> next = Buffer<Point>(nextCapacity, Point(0.0, 0.0));
+            usize index = 0;
+            while (index < pointLength) {
+                next[index] = polylinePoints[index];
+                index = index + 1;
+            }
+            polylinePoints = next;
+            pointCapacity = nextCapacity;
+        }
+        polylinePoints[pointLength] = point;
+        pointLength = pointLength + 1;
+    }
+
+    mut void appendPathVerb(PathVerb verb) {
+        if (pathVerbLength == pathVerbCapacity) {
+            usize nextCapacity = 4;
+            if (pathVerbCapacity != 0) { nextCapacity = pathVerbCapacity * 2; }
+            Buffer<PathVerb> next = Buffer<PathVerb>(nextCapacity, PathVerb.Close);
+            usize index = 0;
+            while (index < pathVerbLength) {
+                next[index] = pathVerbs[index];
+                index = index + 1;
+            }
+            pathVerbs = next;
+            pathVerbCapacity = nextCapacity;
+        }
+        pathVerbs[pathVerbLength] = verb;
+        pathVerbLength = pathVerbLength + 1;
+    }
+
+    mut usize appendBytes(ref string value) {
+        usize count = byteLength(*value);
+        usize required = byteLengthValue + count;
+        if (required > byteCapacity) {
+            usize nextCapacity = 8;
+            if (byteCapacity != 0) { nextCapacity = byteCapacity; }
+            while (nextCapacity < required) { nextCapacity = nextCapacity * 2; }
+            Buffer<uint8> next = Buffer<uint8>(nextCapacity, uint8(0));
+            usize index = 0;
+            while (index < byteLengthValue) {
+                next[index] = utf8Bytes[index];
+                index = index + 1;
+            }
+            utf8Bytes = next;
+            byteCapacity = nextCapacity;
+        }
+        usize start = byteLengthValue;
+        usize index = 0;
+        while (index < count) {
+            utf8Bytes[byteLengthValue] = std.Text.byteAt(*value, index);
+            byteLengthValue = byteLengthValue + 1;
+            index = index + 1;
+        }
+        return start;
+    }
+
+    mut void appendTextRecord(TextRecord record) {
+        if (textRecordLength == textRecordCapacity) {
+            usize nextCapacity = 4;
+            if (textRecordCapacity != 0) { nextCapacity = textRecordCapacity * 2; }
+            Buffer<TextRecord> next = Buffer<TextRecord>(nextCapacity, record);
+            usize index = 0;
+            while (index < textRecordLength) {
+                next[index] = textRecords[index];
+                index = index + 1;
+            }
+            textRecords = next;
+            textRecordCapacity = nextCapacity;
+        }
+        textRecords[textRecordLength] = record;
+        textRecordLength = textRecordLength + 1;
+    }
+
+    public mut void pushState() {
+        requireMutable();
+        requireNoIncrementalPrimitive();
+        if (stateDepth == stateCapacity) {
+            usize nextCapacity = 4;
+            if (stateCapacity != 0) { nextCapacity = stateCapacity * 2; }
+            StateSnapshot fill = StateSnapshot(currentTransform, currentClip);
+            Buffer<StateSnapshot> next = Buffer<StateSnapshot>(nextCapacity, fill);
+            usize index = 0;
+            while (index < stateDepth) {
+                next[index] = stateStack[index];
+                index = index + 1;
+            }
+            stateStack = next;
+            stateCapacity = nextCapacity;
+        }
+        stateStack[stateDepth] = StateSnapshot(currentTransform, currentClip);
+        stateDepth = stateDepth + 1;
+        appendCommand(Command.PushState);
+    }
+
+    public mut void popState() {
+        requireMutable();
+        requireNoIncrementalPrimitive();
+        if (stateDepth == 0) { throw InvalidSceneStateException(); }
+        StateSnapshot state = stateStack[stateDepth - 1];
+        currentTransform = state.transform;
+        currentClip = state.clip;
+        stateDepth = stateDepth - 1;
+        appendCommand(Command.PopState);
+    }
+
+    public mut void concatTransform(Transform2D transform) {
+        requireMutable();
+        requireNoIncrementalPrimitive();
+        validateTransform(transform);
+        Transform2D combined = compose(currentTransform, transform);
+        appendCommand(Command.ConcatTransform(transform));
+        currentTransform = combined;
+    }
+
+    public mut void intersectClipRect(Rect rectangle) {
+        requireMutable();
+        requireNoIncrementalPrimitive();
+        validateRect(rectangle);
+        Rect combined = intersectRects(currentClip, rectangle);
+        appendCommand(Command.IntersectClipRect(rectangle));
+        currentClip = combined;
+    }
+
+    public mut void drawPoint(Point position, float64 diameter, Color color) {
+        requireMutable();
+        requireNoIncrementalPrimitive();
+        validatePoint(position);
+        if (!finite(diameter) || diameter <= 0.0) {
+            throw InvalidGeometryException();
+        }
+        appendCommand(Command.DrawPoint(position, diameter, color));
+    }
+
+    public mut void drawLine(Line line, Stroke stroke) {
+        requireMutable();
+        requireNoIncrementalPrimitive();
+        validatePoint(line.from);
+        validatePoint(line.to);
+        validateStroke(stroke);
+        appendCommand(Command.DrawLine(line, stroke));
+    }
+
+    public mut void drawRect(Rect rectangle, Paint paint) {
+        requireMutable();
+        requireNoIncrementalPrimitive();
+        validateRect(rectangle);
+        validatePaint(paint);
+        appendCommand(Command.DrawRect(rectangle, paint));
+    }
+
+    public mut void drawPolyline(ref Array<Point> points, Stroke stroke) {
+        requireMutable();
+        requireNoIncrementalPrimitive();
+        validateStroke(stroke);
+        usize count = length(*points);
+        if (count < 2) { throw InvalidGeometryException(); }
+        usize index = 0;
+        while (index < count) {
+            validatePoint((*points)[index]);
+            index = index + 1;
+        }
+        usize start = pointLength;
+        index = 0;
+        while (index < count) {
+            appendPoint((*points)[index]);
+            index = index + 1;
+        }
+        appendCommand(Command.DrawPolyline(PointSpan(start, count), stroke));
+    }
+
+    public mut void beginPolyline() {
+        requireMutable();
+        requireNoIncrementalPrimitive();
+        polylineOpen = true;
+        openPolylineStart = pointLength;
+    }
+
+    public mut void addPolylinePoint(Point point) {
+        requireMutable();
+        if (!polylineOpen || pathOpen) { throw InvalidSceneStateException(); }
+        validatePoint(point);
+        appendPoint(point);
+    }
+
+    public mut void endPolyline(Stroke stroke) {
+        requireMutable();
+        if (!polylineOpen || pathOpen) { throw InvalidSceneStateException(); }
+        validateStroke(stroke);
+        usize count = pointLength - openPolylineStart;
+        if (count < 2) { throw InvalidGeometryException(); }
+        appendCommand(Command.DrawPolyline(PointSpan(openPolylineStart, count), stroke));
+        polylineOpen = false;
+    }
+
+    public mut void beginPath() {
+        requireMutable();
+        requireNoIncrementalPrimitive();
+        pathOpen = true;
+        pathSubpathActive = false;
+        openPathStart = pathVerbLength;
+    }
+
+    public mut void moveTo(Point point) {
+        requireMutable();
+        if (!pathOpen || polylineOpen) { throw InvalidSceneStateException(); }
+        validatePoint(point);
+        appendPathVerb(PathVerb.MoveTo(point));
+        pathSubpathActive = true;
+    }
+
+    public mut void lineTo(Point point) {
+        requireMutable();
+        if (!pathOpen || !pathSubpathActive || polylineOpen) {
+            throw InvalidSceneStateException();
+        }
+        validatePoint(point);
+        appendPathVerb(PathVerb.LineTo(point));
+    }
+
+    public mut void cubicTo(Point control1, Point control2, Point end) {
+        requireMutable();
+        if (!pathOpen || !pathSubpathActive || polylineOpen) {
+            throw InvalidSceneStateException();
+        }
+        validatePoint(control1);
+        validatePoint(control2);
+        validatePoint(end);
+        appendPathVerb(PathVerb.CubicTo(control1, control2, end));
+    }
+
+    public mut void closePath() {
+        requireMutable();
+        if (!pathOpen || !pathSubpathActive || polylineOpen) {
+            throw InvalidSceneStateException();
+        }
+        appendPathVerb(PathVerb.Close);
+    }
+
+    public mut void endPath(Paint paint) {
+        requireMutable();
+        if (!pathOpen || polylineOpen || pathVerbLength == openPathStart) {
+            throw InvalidSceneStateException();
+        }
+        validatePaint(paint);
+        appendCommand(Command.DrawPath(
+            PathSpan(openPathStart, pathVerbLength - openPathStart), paint));
+        pathOpen = false;
+        pathSubpathActive = false;
+    }
+
+    public mut void drawText(ref string text, Point position, ref TextStyle style) {
+        requireMutable();
+        requireNoIncrementalPrimitive();
+        validatePoint(position);
+        if (!finite((*style).size) || (*style).size <= 0.0) {
+            throw InvalidGeometryException();
+        }
+        usize contentCount = byteLength(*text);
+        usize contentStart = appendBytes(text);
+        StoredFontFamily family = StoredFontFamily.BackendDefault;
+        match (ref (*style).font.family) {
+            FontFamily.BackendDefault => { family = StoredFontFamily.BackendDefault; }
+            FontFamily.Serif => { family = StoredFontFamily.Serif; }
+            FontFamily.SansSerif => { family = StoredFontFamily.SansSerif; }
+            FontFamily.Monospace => { family = StoredFontFamily.Monospace; }
+            FontFamily.Named(name) => {
+                usize familyCount = byteLength(*name);
+                usize familyStart = appendBytes(name);
+                family = StoredFontFamily.Named(ByteSpan(familyStart, familyCount));
+            }
+        }
+        TextRecord record = TextRecord(
+            ByteSpan(contentStart, contentCount), position, (*style).size,
+            (*style).color,
+            StoredFontRequest(family, (*style).font.weight, (*style).font.slant),
+            (*style).align, (*style).baseline);
+        usize recordIndex = textRecordLength;
+        appendTextRecord(record);
+        appendCommand(Command.DrawText(recordIndex));
+    }
+
+    public mut Scene finish() {
+        requireMutable();
+        if (stateDepth != 0 || polylineOpen || pathOpen) {
+            throw InvalidSceneStateException();
+        }
+        Buffer<Command> exactCommands = Buffer<Command>(commandLength, Command.PushState);
+        usize index = 0;
+        while (index < commandLength) {
+            exactCommands[index] = commands[index];
+            index = index + 1;
+        }
+        Buffer<Point> exactPoints = Buffer<Point>(pointLength, Point(0.0, 0.0));
+        index = 0;
+        while (index < pointLength) {
+            exactPoints[index] = polylinePoints[index];
+            index = index + 1;
+        }
+        Buffer<PathVerb> exactVerbs = Buffer<PathVerb>(pathVerbLength, PathVerb.Close);
+        index = 0;
+        while (index < pathVerbLength) {
+            exactVerbs[index] = pathVerbs[index];
+            index = index + 1;
+        }
+        TextRecord emptyRecord = TextRecord(
+            ByteSpan(0, 0), Point(0.0, 0.0), 1.0,
+            Color(uint8(0), uint8(0), uint8(0), uint8(0)),
+            StoredFontRequest(StoredFontFamily.BackendDefault,
+                FontWeight.Normal, FontSlant.Normal),
+            TextAlign.Left, TextBaseline.Alphabetic);
+        Buffer<TextRecord> exactRecords = Buffer<TextRecord>(textRecordLength, emptyRecord);
+        index = 0;
+        while (index < textRecordLength) {
+            exactRecords[index] = textRecords[index];
+            index = index + 1;
+        }
+        Buffer<uint8> exactBytes = Buffer<uint8>(byteLengthValue, uint8(0));
+        index = 0;
+        while (index < byteLengthValue) {
+            exactBytes[index] = utf8Bytes[index];
+            index = index + 1;
+        }
+        Scene scene = Scene(
+            SceneConstruction(0), sceneViewport,
+            exactCommands, commandLength,
+            exactPoints, pointLength,
+            exactVerbs, pathVerbLength,
+            exactRecords, textRecordLength,
+            exactBytes, byteLengthValue);
+        sealed = true;
+        commands = Buffer<Command>(0, Command.PushState);
+        polylinePoints = Buffer<Point>(0, Point(0.0, 0.0));
+        pathVerbs = Buffer<PathVerb>(0, PathVerb.Close);
+        textRecords = Buffer<TextRecord>(0, emptyRecord);
+        utf8Bytes = Buffer<uint8>(0, uint8(0));
+        stateStack = Buffer<StateSnapshot>(0, StateSnapshot(currentTransform, currentClip));
+        commandLength = 0;
+        commandCapacity = 0;
+        pointLength = 0;
+        pointCapacity = 0;
+        pathVerbLength = 0;
+        pathVerbCapacity = 0;
+        textRecordLength = 0;
+        textRecordCapacity = 0;
+        byteLengthValue = 0;
+        byteCapacity = 0;
+        stateDepth = 0;
+        stateCapacity = 0;
+        return scene;
+    }
+}

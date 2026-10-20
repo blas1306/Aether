@@ -1,0 +1,324 @@
+package graphicsFoundationConsumer;
+
+import graphics as g;
+
+g.Color black() { return g.Color(uint8(0), uint8(0), uint8(0), uint8(255)); }
+
+g.Stroke stroke() {
+    return g.Stroke(black(), 2.0, g.LineCap.Round, g.LineJoin.Bevel, 4.0);
+}
+
+g.Paint paint() {
+    return g.Paint.FillAndStroke(g.Fill(black(), g.FillRule.EvenOdd), stroke());
+}
+
+int main() {
+    g.SceneBuilder builder = g.SceneBuilder(g.Viewport(640.0, 480.0));
+    g.SceneBuilder builderAlias = builder;
+    builder.pushState();
+    builder.concatTransform(g.Transform2D(2.0, 0.0, 0.0, 3.0, 10.0, 20.0));
+    builder.intersectClipRect(g.Rect(10.0, 20.0, 100.0, 80.0));
+    builder.drawPoint(g.Point(-1.0, 2.0), 3.0, black());
+    builder.drawLine(g.Line(g.Point(1.0, 1.0), g.Point(1.0, 1.0)), stroke());
+    builder.drawRect(g.Rect(3.0, 4.0, 0.0, 5.0), paint());
+
+    Array<g.Point> points = {g.Point(1.0, 2.0), g.Point(3.0, 4.0), g.Point(5.0, 6.0)};
+    builder.drawPolyline(&points, stroke());
+    points[0] = g.Point(99.0, 99.0);
+    builder.beginPolyline();
+    builder.addPolylinePoint(g.Point(7.0, 8.0));
+    builder.addPolylinePoint(g.Point(9.0, 10.0));
+    builder.endPolyline(stroke());
+
+    builder.beginPath();
+    builder.moveTo(g.Point(0.0, 0.0));
+    builder.lineTo(g.Point(1.0, 1.0));
+    builder.cubicTo(g.Point(2.0, 2.0), g.Point(3.0, 3.0), g.Point(4.0, 4.0));
+    builder.closePath();
+    builder.moveTo(g.Point(5.0, 5.0));
+    builder.lineTo(g.Point(6.0, 6.0));
+    builder.endPath(paint());
+
+    string content = "  hé́\0\n\r ";
+    string family = "Fønt";
+    g.TextStyle textStyle = g.TextStyle(
+        12.5, black(),
+        g.FontRequest(g.FontFamily.Named(family), g.FontWeight.Bold, g.FontSlant.Italic),
+        g.TextAlign.Center, g.TextBaseline.Middle);
+    builder.drawText(&content, g.Point(11.0, 12.0), &textStyle);
+    content = "changed";
+    family = "changed";
+    builder.pushState();
+    builder.concatTransform(g.Transform2D(1.0, 0.0, 0.0, 1.0, 5.0, 7.0));
+    builder.concatTransform(g.Transform2D(0.0, 1.0, -1.0, 0.0, 0.0, 0.0));
+    builder.intersectClipRect(g.Rect(50.0, 0.0, 100.0, 100.0));
+    builder.intersectClipRect(g.Rect(300.0, 300.0, 0.0, 0.0));
+    builder.popState();
+    builder.popState();
+
+    g.Scene scene = builder.finish();
+    g.Scene sameScene = scene;
+    g.Viewport viewport = scene.viewport();
+    if (scene != sameScene || viewport.width != 640.0 || scene.commandCount() != 17) {
+        return 1;
+    }
+
+    match (scene.commandAt(0)) {
+        g.Command.PushState => { }
+        g.Command.PopState => { return 2; }
+        g.Command.ConcatTransform(value) => { return 2; }
+        g.Command.IntersectClipRect(value) => { return 2; }
+        g.Command.DrawPoint(point, diameter, color) => { return 2; }
+        g.Command.DrawLine(line, value) => { return 2; }
+        g.Command.DrawPolyline(span, value) => { return 2; }
+        g.Command.DrawRect(rectangle, value) => { return 2; }
+        g.Command.DrawPath(span, value) => { return 2; }
+        g.Command.DrawText(record) => { return 2; }
+    }
+    match (scene.commandAt(6)) {
+        g.Command.DrawPolyline(span, value) => {
+            g.Point first = scene.pointAt(span, 0);
+            g.Point last = scene.pointAt(span, 2);
+            if (span.start != 0 || span.length != 3 || first.x != 1.0 || last.y != 6.0) {
+                return 3;
+            }
+        }
+        g.Command.PushState => { return 3; }
+        g.Command.PopState => { return 3; }
+        g.Command.ConcatTransform(value) => { return 3; }
+        g.Command.IntersectClipRect(value) => { return 3; }
+        g.Command.DrawPoint(point, diameter, color) => { return 3; }
+        g.Command.DrawLine(line, value) => { return 3; }
+        g.Command.DrawRect(rectangle, value) => { return 3; }
+        g.Command.DrawPath(span, value) => { return 3; }
+        g.Command.DrawText(record) => { return 3; }
+    }
+    match (scene.commandAt(8)) {
+        g.Command.DrawPath(span, value) => {
+            if (span.start != 0 || span.length != 6) { return 4; }
+            match (scene.pathVerbAt(span, 2)) {
+                g.PathVerb.CubicTo(a, b, end) => {
+                    if (a.x != 2.0 || b.y != 3.0 || end.x != 4.0) { return 4; }
+                }
+                g.PathVerb.MoveTo(point) => { return 4; }
+                g.PathVerb.LineTo(point) => { return 4; }
+                g.PathVerb.Close => { return 4; }
+            }
+        }
+        g.Command.PushState => { return 4; }
+        g.Command.PopState => { return 4; }
+        g.Command.ConcatTransform(value) => { return 4; }
+        g.Command.IntersectClipRect(value) => { return 4; }
+        g.Command.DrawPoint(point, diameter, color) => { return 4; }
+        g.Command.DrawLine(line, value) => { return 4; }
+        g.Command.DrawPolyline(span, value) => { return 4; }
+        g.Command.DrawRect(rectangle, value) => { return 4; }
+        g.Command.DrawText(record) => { return 4; }
+    }
+    match (scene.commandAt(9)) {
+        g.Command.DrawText(index) => {
+            g.TextRecord record = scene.textRecordAt(index);
+            if (record.size != 12.5 || record.align != g.TextAlign.Center ||
+                record.baseline != g.TextBaseline.Middle ||
+                record.font.weight != g.FontWeight.Bold ||
+                record.font.slant != g.FontSlant.Italic ||
+                record.color.alpha != uint8(255) || record.content.length != 11) {
+                return 5;
+            }
+            Array<uint8> expected = {
+                uint8(32), uint8(32), uint8(104), uint8(195), uint8(169), uint8(204),
+                uint8(129), uint8(0), uint8(10), uint8(13), uint8(32)
+            };
+            if (record.content.length != length(expected)) { return 6; }
+            usize i = 0;
+            while (i < length(expected)) {
+                if (scene.utf8ByteAt(record.content, i) != expected[i]) { return 7; }
+                i = i + 1;
+            }
+            match (record.font.family) {
+                g.StoredFontFamily.Named(span) => {
+                    Array<uint8> wanted = {uint8(70), uint8(195), uint8(184), uint8(110), uint8(116)};
+                    if (span.length != length(wanted)) { return 8; }
+                    i = 0;
+                    while (i < length(wanted)) {
+                        if (scene.utf8ByteAt(span, i) != wanted[i]) { return 8; }
+                        i = i + 1;
+                    }
+                }
+                g.StoredFontFamily.BackendDefault => { return 8; }
+                g.StoredFontFamily.Serif => { return 8; }
+                g.StoredFontFamily.SansSerif => { return 8; }
+                g.StoredFontFamily.Monospace => { return 8; }
+            }
+        }
+        g.Command.PushState => { return 5; }
+        g.Command.PopState => { return 5; }
+        g.Command.ConcatTransform(value) => { return 5; }
+        g.Command.IntersectClipRect(value) => { return 5; }
+        g.Command.DrawPoint(point, diameter, color) => { return 5; }
+        g.Command.DrawLine(line, value) => { return 5; }
+        g.Command.DrawPolyline(span, value) => { return 5; }
+        g.Command.DrawRect(rectangle, value) => { return 5; }
+        g.Command.DrawPath(span, value) => { return 5; }
+    }
+
+    match (scene.commandAt(10)) {
+        g.Command.PushState => { }
+        g.Command.PopState => { return 9; }
+        g.Command.ConcatTransform(value) => { return 9; }
+        g.Command.IntersectClipRect(value) => { return 9; }
+        g.Command.DrawPoint(point, diameter, color) => { return 9; }
+        g.Command.DrawLine(line, value) => { return 9; }
+        g.Command.DrawPolyline(span, value) => { return 9; }
+        g.Command.DrawRect(rectangle, value) => { return 9; }
+        g.Command.DrawPath(span, value) => { return 9; }
+        g.Command.DrawText(record) => { return 9; }
+    }
+    match (scene.commandAt(11)) {
+        g.Command.ConcatTransform(value) => {
+            if (value.tx != 5.0 || value.ty != 7.0 || value.m11 != 1.0) { return 9; }
+        }
+        g.Command.PushState => { return 9; }
+        g.Command.PopState => { return 9; }
+        g.Command.IntersectClipRect(value) => { return 9; }
+        g.Command.DrawPoint(point, diameter, color) => { return 9; }
+        g.Command.DrawLine(line, value) => { return 9; }
+        g.Command.DrawPolyline(span, value) => { return 9; }
+        g.Command.DrawRect(rectangle, value) => { return 9; }
+        g.Command.DrawPath(span, value) => { return 9; }
+        g.Command.DrawText(record) => { return 9; }
+    }
+    match (scene.commandAt(12)) {
+        g.Command.ConcatTransform(value) => {
+            if (value.m11 != 0.0 || value.m12 != 1.0 || value.m21 != -1.0) { return 9; }
+        }
+        g.Command.PushState => { return 9; }
+        g.Command.PopState => { return 9; }
+        g.Command.IntersectClipRect(value) => { return 9; }
+        g.Command.DrawPoint(point, diameter, color) => { return 9; }
+        g.Command.DrawLine(line, value) => { return 9; }
+        g.Command.DrawPolyline(span, value) => { return 9; }
+        g.Command.DrawRect(rectangle, value) => { return 9; }
+        g.Command.DrawPath(span, value) => { return 9; }
+        g.Command.DrawText(record) => { return 9; }
+    }
+    match (scene.commandAt(13)) {
+        g.Command.IntersectClipRect(value) => {
+            if (value.x != 50.0 || value.width != 100.0) { return 9; }
+        }
+        g.Command.PushState => { return 9; }
+        g.Command.PopState => { return 9; }
+        g.Command.ConcatTransform(value) => { return 9; }
+        g.Command.DrawPoint(point, diameter, color) => { return 9; }
+        g.Command.DrawLine(line, value) => { return 9; }
+        g.Command.DrawPolyline(span, value) => { return 9; }
+        g.Command.DrawRect(rectangle, value) => { return 9; }
+        g.Command.DrawPath(span, value) => { return 9; }
+        g.Command.DrawText(record) => { return 9; }
+    }
+    match (scene.commandAt(14)) {
+        g.Command.IntersectClipRect(value) => {
+            if (value.x != 300.0 || value.width != 0.0 || value.height != 0.0) { return 9; }
+        }
+        g.Command.PushState => { return 9; }
+        g.Command.PopState => { return 9; }
+        g.Command.ConcatTransform(value) => { return 9; }
+        g.Command.DrawPoint(point, diameter, color) => { return 9; }
+        g.Command.DrawLine(line, value) => { return 9; }
+        g.Command.DrawPolyline(span, value) => { return 9; }
+        g.Command.DrawRect(rectangle, value) => { return 9; }
+        g.Command.DrawPath(span, value) => { return 9; }
+        g.Command.DrawText(record) => { return 9; }
+    }
+    match (scene.commandAt(15)) {
+        g.Command.PopState => { }
+        g.Command.PushState => { return 9; }
+        g.Command.ConcatTransform(value) => { return 9; }
+        g.Command.IntersectClipRect(value) => { return 9; }
+        g.Command.DrawPoint(point, diameter, color) => { return 9; }
+        g.Command.DrawLine(line, value) => { return 9; }
+        g.Command.DrawPolyline(span, value) => { return 9; }
+        g.Command.DrawRect(rectangle, value) => { return 9; }
+        g.Command.DrawPath(span, value) => { return 9; }
+        g.Command.DrawText(record) => { return 9; }
+    }
+    match (scene.commandAt(16)) {
+        g.Command.PopState => { }
+        g.Command.PushState => { return 9; }
+        g.Command.ConcatTransform(value) => { return 9; }
+        g.Command.IntersectClipRect(value) => { return 9; }
+        g.Command.DrawPoint(point, diameter, color) => { return 9; }
+        g.Command.DrawLine(line, value) => { return 9; }
+        g.Command.DrawPolyline(span, value) => { return 9; }
+        g.Command.DrawRect(rectangle, value) => { return 9; }
+        g.Command.DrawPath(span, value) => { return 9; }
+        g.Command.DrawText(record) => { return 9; }
+    }
+
+    usize commandIndex = 0;
+    usize visited = 0;
+    while (commandIndex < scene.commandCount()) {
+        match (scene.commandAt(commandIndex)) {
+            g.Command.PushState => { visited = visited + 1; }
+            g.Command.PopState => { visited = visited + 1; }
+            g.Command.ConcatTransform(value) => { visited = visited + 1; }
+            g.Command.IntersectClipRect(value) => { visited = visited + 1; }
+            g.Command.DrawPoint(point, diameter, color) => { visited = visited + 1; }
+            g.Command.DrawLine(line, value) => { visited = visited + 1; }
+            g.Command.DrawPolyline(span, value) => {
+                visited = visited + 1;
+                usize pointIndex = 0;
+                while (pointIndex < span.length) {
+                    g.Point point = scene.pointAt(span, pointIndex);
+                    if (point.x - point.x != 0.0) { return 10; }
+                    visited = visited + 1;
+                    pointIndex = pointIndex + 1;
+                }
+            }
+            g.Command.DrawRect(rectangle, value) => { visited = visited + 1; }
+            g.Command.DrawPath(span, value) => {
+                visited = visited + 1;
+                usize verbIndex = 0;
+                while (verbIndex < span.length) {
+                    match (scene.pathVerbAt(span, verbIndex)) {
+                        g.PathVerb.MoveTo(point) => { visited = visited + 1; }
+                        g.PathVerb.LineTo(point) => { visited = visited + 1; }
+                        g.PathVerb.CubicTo(a, b, end) => { visited = visited + 1; }
+                        g.PathVerb.Close => { visited = visited + 1; }
+                    }
+                    verbIndex = verbIndex + 1;
+                }
+            }
+            g.Command.DrawText(index) => {
+                visited = visited + 1;
+                g.TextRecord record = scene.textRecordAt(index);
+                usize byteIndex = 0;
+                while (byteIndex < record.content.length) {
+                    uint8 byte = scene.utf8ByteAt(record.content, byteIndex);
+                    if (byte > uint8(255)) { return 10; }
+                    visited = visited + 1;
+                    byteIndex = byteIndex + 1;
+                }
+                match (record.font.family) {
+                    g.StoredFontFamily.Named(span) => {
+                        byteIndex = 0;
+                        while (byteIndex < span.length) {
+                            uint8 byte = scene.utf8ByteAt(span, byteIndex);
+                            if (byte > uint8(255)) { return 10; }
+                            visited = visited + 1;
+                            byteIndex = byteIndex + 1;
+                        }
+                    }
+                    g.StoredFontFamily.BackendDefault => { }
+                    g.StoredFontFamily.Serif => { }
+                    g.StoredFontFamily.SansSerif => { }
+                    g.StoredFontFamily.Monospace => { }
+                }
+            }
+        }
+        commandIndex = commandIndex + 1;
+    }
+    if (visited != 44) { return 10; }
+
+    return 0;
+}
