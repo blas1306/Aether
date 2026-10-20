@@ -115,8 +115,9 @@ impl Builder<'_> {
                 }
                 args.push(lowered);
             }
-            let receiver_drop =
-                (!matches!(op, ClassOp::BaseMethodCall { .. })).then(|| receiver.clone());
+            let receiver_drop = (!matches!(op, ClassOp::BaseMethodCall { .. })
+                && self.types.needs_drop(value_type(&self.function, &receiver)))
+            .then(|| receiver.clone());
             let mapped = match op {
                 ClassOp::VirtualCall {
                     class,
@@ -201,10 +202,10 @@ impl Builder<'_> {
             },
         ) = (op, &mapped)
         {
-            if !matches!(left.kind, HirExprKind::Local(_)) {
+            if !matches!(left.kind, HirExprKind::Local(_)) && self.types.needs_drop(left.ty) {
                 drops.push(l.clone());
             }
-            if !matches!(right.kind, HirExprKind::Local(_)) {
+            if !matches!(right.kind, HirExprKind::Local(_)) && self.types.needs_drop(right.ty) {
                 drops.push(r.clone());
             }
         }

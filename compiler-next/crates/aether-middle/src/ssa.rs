@@ -3138,7 +3138,7 @@ fn verify_ssa_function(
     verify_vector_transpose_ownership(function, fail)?;
     verify_matrix_literal_ownership(function, types, fail)?;
     verify_take_protocol(function, types, fail)?;
-    verify_call_borrow_regions(function, fail)?;
+    verify_call_borrow_regions(function, types, fail)?;
     verify_format_borrow_regions(function, fail)?;
     Ok(())
 }
@@ -3271,16 +3271,20 @@ fn verify_ssa_const_bindings(
 #[allow(clippy::too_many_lines)]
 fn verify_call_borrow_regions(
     function: &SsaFunction,
+    types: &TypeArena,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
     let mut borrows = BTreeMap::new();
     for block in &function.blocks {
         for instruction in &block.instructions {
             if let SsaOp::Borrow {
+                place,
                 call: Some(metadata),
                 ..
             } = &instruction.op
-                && borrows.insert(instruction.result, *metadata).is_some()
+                && borrows
+                    .insert(instruction.result, (*metadata, place.clone()))
+                    .is_some()
             {
                 return Err(fail(
                     "SSA call borrow value has duplicate definitions".into(),
@@ -3288,7 +3292,7 @@ fn verify_call_borrow_regions(
             }
         }
     }
-    for (reference, metadata) in &borrows {
+    for (reference, (metadata, _)) in &borrows {
         let mut call_uses = 0;
         let mut end_uses = 0;
         for block in &function.blocks {
@@ -3389,6 +3393,49 @@ fn verify_call_borrow_regions(
             .clone()
             .expect("queued borrow state");
         for instruction in &block.instructions {
+            let protected_anchor = |place: &SsaPlace| {
+                borrows.iter().any(|(reference, (metadata, anchor))| {
+                    active.contains(reference)
+                        && types
+                            .class_handle_reference_pointee(metadata.pointee_type)
+                            .is_some()
+                        && anchor.base == place.base
+                        && anchor.projections == place.projections
+                })
+            };
+            let consumes_protected_anchor = match &instruction.op {
+                SsaOp::Move { source } | SsaOp::Drop { owner: source } => protected_anchor(source),
+                SsaOp::Store { place, .. } => protected_anchor(place),
+                SsaOp::Class(operation) => match operation.as_ref() {
+                    ClassOp::HandleTransfer { source }
+                    | ClassOp::ClassUpcast {
+                        source,
+                        transfer: true,
+                        ..
+                    }
+                    | ClassOp::InterfaceAdapt {
+                        source,
+                        transfer: true,
+                        ..
+                    }
+                    | ClassOp::ReceiverKeepalive {
+                        source,
+                        transfer: true,
+                        ..
+                    } => protected_anchor(&SsaPlace {
+                        base: SsaPlaceBase::Value(source.clone()),
+                        projections: Vec::new(),
+                    }),
+                    _ => false,
+                },
+                _ => false,
+            };
+            if consumes_protected_anchor {
+                return Err(fail(
+                    "SSA class-handle borrow anchor is consumed or replaced before EndBorrow"
+                        .into(),
+                ));
+            }
             match &instruction.op {
                 SsaOp::Borrow {
                     call: Some(_), ..
@@ -3401,12 +3448,14 @@ fn verify_call_borrow_regions(
                     call,
                     reference: SsaOperand::Value(reference),
                 } => {
-                    if borrows.get(reference) != Some(call) || !active.remove(reference) {
+                    if borrows.get(reference).map(|(metadata, _)| metadata) != Some(call)
+                        || !active.remove(reference)
+                    {
                         return Err(fail("SSA EndBorrow does not close a live region".into()));
                     }
                 }
                 SsaOp::Drop { owner }
-                    if borrows.iter().any(|(reference, metadata)| {
+                    if borrows.iter().any(|(reference, (metadata, _))| {
                         active.contains(reference)
                             && matches!(metadata.source, CallBorrowSourceKind::Temporary(local)
                                 if matches!(owner.base, SsaPlaceBase::MemoryLocal(root) if root == local))
@@ -4711,8 +4760,15 @@ fn verify_op(
             {
                 return Err("SSA class-field load lacks immediate index".into());
             }
+            let borrowed_nullable_class_read =
+                matches!(place.base, SsaPlaceBase::Dereference { mutable: false, .. })
+                    && types
+                        .class_handle_reference_pointee(result)
+                        .is_some_and(|(_, nullable)| nullable);
             if ssa_place_type(place, memory_locals, structs, types, operand_ty)? != result
-                || (!types.guarantees_copy(result) && result != TypeId::STRING)
+                || (!types.guarantees_copy(result)
+                    && result != TypeId::STRING
+                    && !borrowed_nullable_class_read)
             {
                 return Err("SSA memory load type mismatch".into());
             }

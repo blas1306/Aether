@@ -282,6 +282,8 @@ pub(super) fn token_suffix(kind: ClassTokenKind) -> &'static str {
         ClassTokenKind::Receiver { mutable: false, .. } => "read_receiver",
         ClassTokenKind::Keepalive { mutable: true } => "mut_keepalive",
         ClassTokenKind::Keepalive { mutable: false } => "read_keepalive",
+        ClassTokenKind::BorrowedHandleView => "borrowed_handle_view",
+        ClassTokenKind::BorrowedReceiver => "borrowed_receiver",
     }
 }
 
@@ -422,6 +424,18 @@ pub(super) fn emit_op(
         }
     }
     match op {
+        ClassOp::BorrowedHandleView {
+            reference: source, ..
+        }
+        | ClassOp::BorrowedReceiver { view: source, .. }
+        | ClassOp::BorrowedClassUpcast { source, .. } => {
+            writeln!(
+                output,
+                "  %v{result} = getelementptr i8, ptr {}, i64 0 ; borrowed class handle, zero ARC",
+                llvm_operand(source)
+            )
+            .unwrap();
+        }
         ClassOp::ClassUpcast {
             source, transfer, ..
         } => {

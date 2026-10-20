@@ -1937,20 +1937,54 @@ fn emit_function(
                     .unwrap();
                 }
                 SsaOp::Borrow { place, .. } => {
-                    let pointer = emit_place_pointer(
-                        output,
-                        function,
-                        place,
-                        instruction.result.0,
-                        types,
-                        structs,
-                    );
-                    writeln!(
-                        output,
-                        "  %v{} = getelementptr inbounds i8, ptr {pointer}, i64 0",
-                        instruction.result.0
-                    )
-                    .unwrap();
+                    let direct_class_handle =
+                        types
+                            .reference_info(instruction.ty)
+                            .is_some_and(|(pointee, mutable)| {
+                                !mutable && types.class_id(pointee).is_some()
+                            });
+                    if direct_class_handle {
+                        if let SsaPlaceBase::Value(value) = &place.base {
+                            debug_assert!(place.projections.is_empty());
+                            writeln!(
+                                output,
+                                "  %v{} = getelementptr i8, ptr {}, i64 0 ; BeginBorrow shared class handle, zero ARC",
+                                instruction.result.0,
+                                llvm_operand(value)
+                            )
+                            .unwrap();
+                        } else {
+                            let pointer = emit_place_pointer(
+                                output,
+                                function,
+                                place,
+                                instruction.result.0,
+                                types,
+                                structs,
+                            );
+                            writeln!(
+                                output,
+                                "  %v{} = load ptr, ptr {pointer} ; BeginBorrow shared class handle, zero ARC",
+                                instruction.result.0
+                            )
+                            .unwrap();
+                        }
+                    } else {
+                        let pointer = emit_place_pointer(
+                            output,
+                            function,
+                            place,
+                            instruction.result.0,
+                            types,
+                            structs,
+                        );
+                        writeln!(
+                            output,
+                            "  %v{} = getelementptr inbounds i8, ptr {pointer}, i64 0",
+                            instruction.result.0
+                        )
+                        .unwrap();
+                    }
                 }
                 SsaOp::EndBorrow { .. } => {
                     writeln!(

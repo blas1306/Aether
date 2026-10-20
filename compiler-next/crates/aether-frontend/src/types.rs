@@ -1332,6 +1332,18 @@ impl TypeArena {
         }
     }
 
+    /// Closed CLASS-HANDLE-REFERENCES-V1 pointee classification.  `bool` is
+    /// true only for the direct nullable slot form `C?`; aggregates that merely
+    /// contain a class deliberately do not classify.
+    #[must_use]
+    pub fn class_handle_reference_pointee(&self, id: TypeId) -> Option<(crate::ClassId, bool)> {
+        if let Some(class) = self.class_id(id) {
+            return Some((class, false));
+        }
+        let payload = self.nullable_payload(id)?;
+        self.class_id(payload).map(|class| (class, true))
+    }
+
     #[must_use]
     pub fn buffer_element(&self, id: TypeId) -> Option<TypeId> {
         match self.get(id) {

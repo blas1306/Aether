@@ -14,8 +14,17 @@ pub struct VirtualSlotId(pub FunctionId);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ClassTokenKind {
     Unpublished,
-    Receiver { mutable: bool, initializing: bool },
-    Keepalive { mutable: bool },
+    Receiver {
+        mutable: bool,
+        initializing: bool,
+    },
+    Keepalive {
+        mutable: bool,
+    },
+    /// Non-owning observation of a concrete class handle through `ref C`.
+    BorrowedHandleView,
+    /// Read-only method receiver backed by the view's borrow anchor.
+    BorrowedReceiver,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,6 +104,20 @@ pub struct ConstructorUnwindPlan {
 /// HIR alone uses `Construct`; its lowering materializes `ObjectAlloc`, `InitCall`, `PublishObject`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ClassOp<O, F = HirCallTarget> {
+    BorrowedHandleView {
+        class: ClassId,
+        reference: O,
+    },
+    BorrowedReceiver {
+        class: ClassId,
+        view: O,
+    },
+    BorrowedClassUpcast {
+        source_class: ClassId,
+        target_base: ClassId,
+        path: Vec<ClassId>,
+        source: O,
+    },
     ClassUpcast {
         source_class: ClassId,
         target_base: ClassId,
@@ -218,7 +241,12 @@ impl<O, F> ClassOp<O, F> {
             Self::PublishObject { object, .. } | Self::ConstructionCleanup { object, .. } => {
                 vec![object]
             }
-            Self::ClassUpcast { source, .. }
+            Self::BorrowedHandleView {
+                reference: source, ..
+            }
+            | Self::BorrowedReceiver { view: source, .. }
+            | Self::BorrowedClassUpcast { source, .. }
+            | Self::ClassUpcast { source, .. }
             | Self::InterfaceAdapt { source, .. }
             | Self::HandleAlias { source }
             | Self::HandleTransfer { source }
@@ -237,6 +265,25 @@ impl<O, F> ClassOp<O, F> {
         mut function: impl FnMut(&F) -> Result<G, E>,
     ) -> Result<ClassOp<P, G>, E> {
         Ok(match self {
+            Self::BorrowedHandleView { class, reference } => ClassOp::BorrowedHandleView {
+                class: *class,
+                reference: operand(reference)?,
+            },
+            Self::BorrowedReceiver { class, view } => ClassOp::BorrowedReceiver {
+                class: *class,
+                view: operand(view)?,
+            },
+            Self::BorrowedClassUpcast {
+                source_class,
+                target_base,
+                path,
+                source,
+            } => ClassOp::BorrowedClassUpcast {
+                source_class: *source_class,
+                target_base: *target_base,
+                path: path.clone(),
+                source: operand(source)?,
+            },
             Self::ClassUpcast {
                 source_class,
                 target_base,
@@ -465,6 +512,54 @@ pub fn verify_class_op<O, F>(
             Ok((class, method.mutable))
         };
     match op {
+        ClassOp::BorrowedHandleView { class, reference } => {
+            let reference = operand_ty(reference)?;
+            let (pointee, mutable) = types
+                .reference_info(reference)
+                .ok_or("borrowed handle view requires a reference operand")?;
+            require(
+                !mutable
+                    && types.class_id(pointee) == Some(*class)
+                    && result == token_ty(*class, ClassTokenKind::BorrowedHandleView)?,
+                "borrowed handle view class/reference contract mismatch",
+            )?;
+        }
+        ClassOp::BorrowedReceiver { class, view } => require(
+            operand_ty(view)? == token_ty(*class, ClassTokenKind::BorrowedHandleView)?
+                && result == token_ty(*class, ClassTokenKind::BorrowedReceiver)?,
+            "borrowed receiver requires an exact anchored handle view",
+        )?,
+        ClassOp::BorrowedClassUpcast {
+            source_class,
+            target_base,
+            path,
+            source,
+        } => {
+            let chain = types.class_chain(*source_class)?;
+            let end = chain
+                .iter()
+                .position(|class| class == target_base)
+                .ok_or("invalid borrowed upcast path")?;
+            let source_reference = types
+                .id_of(TypeData::Reference {
+                    pointee: class_ty(*source_class)?,
+                    mutable: false,
+                })
+                .ok_or("missing borrowed source reference type")?;
+            let target_reference = types
+                .id_of(TypeData::Reference {
+                    pointee: class_ty(*target_base)?,
+                    mutable: false,
+                })
+                .ok_or("missing borrowed target reference type")?;
+            require(
+                end > 0
+                    && *path == chain[..=end]
+                    && operand_ty(source)? == source_reference
+                    && result == target_reference,
+                "borrowed class upcast identity/path mismatch",
+            )?;
+        }
         ClassOp::ClassUpcast {
             source_class,
             target_base,
@@ -520,13 +615,28 @@ pub fn verify_class_op<O, F>(
             let (owner, mutable) = call(method, args, false)?;
             let (id, _, _) = signature(method)?;
             let (_, m) = types.class_method(id).ok_or("invalid virtual target")?;
+            let receiver_type = operand_ty(receiver)?;
+            let receiver_valid = match types.get(receiver_type) {
+                Some(TypeData::ClassToken {
+                    class: receiver_class,
+                    kind:
+                        ClassTokenKind::Keepalive {
+                            mutable: capability,
+                        },
+                }) => receiver_class == class && (!mutable || *capability),
+                Some(TypeData::ClassToken {
+                    class: receiver_class,
+                    kind: ClassTokenKind::BorrowedReceiver,
+                }) => receiver_class == class && !mutable,
+                _ => false,
+            };
             require(
                 types.is_subclass(*class, owner)
                     && m.virtual_slot == Some(*slot)
                     && types
                         .effective_method(*class, &m.name)
                         .is_some_and(|(_, effective)| effective.function == id)
-                    && matches!(types.get(operand_ty(receiver)?), Some(TypeData::ClassToken { class: c, kind: ClassTokenKind::Keepalive { mutable: cap } }) if c == class && (!mutable || *cap)),
+                    && receiver_valid,
                 "virtual slot/receiver/target contract mismatch",
             )?;
         }
@@ -751,7 +861,11 @@ pub fn verify_class_op<O, F>(
                 Some(
                     TypeData::Class(_)
                     | TypeData::ClassToken {
-                        kind: ClassTokenKind::Receiver { .. } | ClassTokenKind::Keepalive { .. },
+                        kind:
+                            ClassTokenKind::Receiver { .. }
+                            | ClassTokenKind::Keepalive { .. }
+                            | ClassTokenKind::BorrowedHandleView
+                            | ClassTokenKind::BorrowedReceiver,
                         ..
                     },
                 ) => (),
@@ -766,7 +880,9 @@ pub fn verify_class_op<O, F>(
                         types.get(receiver_ty),
                         Some(TypeData::ClassToken {
                             kind: ClassTokenKind::Receiver { mutable: false, .. }
-                                | ClassTokenKind::Keepalive { mutable: false },
+                                | ClassTokenKind::Keepalive { mutable: false }
+                                | ClassTokenKind::BorrowedHandleView
+                                | ClassTokenKind::BorrowedReceiver,
                             ..
                         })
                     ),
@@ -804,6 +920,21 @@ pub fn verify_class_op<O, F>(
         } => {
             let (class, mutable) = call(method, args, false)?;
             let (id, _, _) = signature(method)?;
+            let receiver_type = operand_ty(receiver)?;
+            let receiver_valid = match types.get(receiver_type) {
+                Some(TypeData::ClassToken {
+                    class: receiver_class,
+                    kind:
+                        ClassTokenKind::Keepalive {
+                            mutable: capability,
+                        },
+                }) => types.is_subclass(*receiver_class, class) && (!mutable || *capability),
+                Some(TypeData::ClassToken {
+                    class: receiver_class,
+                    kind: ClassTokenKind::BorrowedReceiver,
+                }) => types.is_subclass(*receiver_class, class) && !mutable,
+                _ => false,
+            };
             require(
                 types
                     .class_method(id)
@@ -811,7 +942,7 @@ pub fn verify_class_op<O, F>(
                 "virtual method cannot become a hard-coded direct call",
             )?;
             require(
-                matches!(types.get(operand_ty(receiver)?),Some(TypeData::ClassToken { class:c, kind:ClassTokenKind::Keepalive { mutable:m } }) if types.is_subclass(*c, class) && (!mutable || *m)),
+                receiver_valid,
                 "direct method requires a keepalive of the exact class and capability",
             )?;
         }
@@ -819,8 +950,8 @@ pub fn verify_class_op<O, F>(
             let l = operand_ty(left)?;
             require(
                 types
-                    .class_id(l)
-                    .zip(types.class_id(operand_ty(right)?))
+                    .object_class(l)
+                    .zip(types.object_class(operand_ty(right)?))
                     .is_some_and(|(l, r)| types.is_subclass(l, r) || types.is_subclass(r, l))
                     && result == TypeId::BOOL,
                 "identity equality class mismatch",
@@ -1066,7 +1197,15 @@ pub fn verify_class_metadata(
         let nullable_class_owner = types
             .nullable_payload(id)
             .is_some_and(|payload| types.is_object_owner(payload));
-        if types.contains_class(id) && !types.is_object_owner(id) && !nullable_class_owner {
+        let admitted_class_reference =
+            types.reference_info(id).is_some_and(|(pointee, mutable)| {
+                !mutable && types.class_handle_reference_pointee(pointee).is_some()
+            });
+        if types.contains_class(id)
+            && !types.is_object_owner(id)
+            && !nullable_class_owner
+            && !admitted_class_reference
+        {
             return Err(
                 "class-containing storage/reference type requires separate admission".into(),
             );
@@ -1150,7 +1289,15 @@ pub fn verify_class_signature(
         let nullable_class_owner = types
             .nullable_payload(ty)
             .is_some_and(|payload| types.is_object_owner(payload));
-        if types.contains_class(ty) && !types.is_object_owner(ty) && !nullable_class_owner {
+        let admitted_class_reference =
+            types.reference_info(ty).is_some_and(|(pointee, mutable)| {
+                !mutable && types.class_handle_reference_pointee(pointee).is_some()
+            });
+        if types.contains_class(ty)
+            && !types.is_object_owner(ty)
+            && !nullable_class_owner
+            && !admitted_class_reference
+        {
             return Err("class-containing references and aggregates are unavailable".into());
         }
     }

@@ -3623,10 +3623,31 @@ fn resolve_type_in_module(
             struct_arities,
             enum_arities,
         )?;
+        if types.class_handle_reference_pointee(pointee).is_some() {
+            if reference.mutable {
+                return Err(classes::error(
+                    "E0406",
+                    "mutable class-handle references are not admitted in CLASS-HANDLE-REFERENCES-V1; only shared `ref C`/`ref C?` are supported",
+                    ty.span,
+                ));
+            }
+            return Ok(types.intern_reference(pointee, false));
+        }
+        if types.interface_id(pointee).is_some()
+            || types
+                .nullable_payload(pointee)
+                .is_some_and(|payload| types.interface_id(payload).is_some())
+        {
+            return Err(classes::error(
+                "E0406",
+                "interface-handle references require separate qualification",
+                ty.span,
+            ));
+        }
         if types.contains_class(pointee) {
             return Err(classes::error(
                 "E0406",
-                "class handle slot references require separate qualification",
+                "reference pointee is not a direct class-handle slot admitted by CLASS-HANDLE-REFERENCES-V1",
                 ty.span,
             ));
         }
@@ -5832,7 +5853,16 @@ impl Monomorphizer<'_> {
             }
             HirExprKind::Load(place) => {
                 let place = self.substitute_place(place, substitution)?;
-                if !self.types.guarantees_copy(place.ty) && place.ty != TypeId::STRING {
+                let borrowed_nullable_class_read =
+                    matches!(place.base, HirPlaceBase::Dereference { mutable: false, .. })
+                        && self
+                            .types
+                            .class_handle_reference_pointee(place.ty)
+                            .is_some_and(|(_, nullable)| nullable);
+                if !self.types.guarantees_copy(place.ty)
+                    && place.ty != TypeId::STRING
+                    && !borrowed_nullable_class_read
+                {
                     return Err(vec![Diagnostic::new(
                         "E0293",
                         Phase::Semantic,
@@ -12297,7 +12327,13 @@ impl Analyzer<'_> {
                         .iter()
                         .any(|projection| matches!(projection, HirPlaceProjection::Index { .. }))
                 {
-                    self.locals[local.0 as usize].address_taken = true;
+                    let direct_class_handle = self
+                        .types
+                        .class_handle_reference_pointee(place.ty)
+                        .is_some_and(|(_, nullable)| !nullable);
+                    if !direct_class_handle {
+                        self.locals[local.0 as usize].address_taken = true;
+                    }
                     if mutable
                         && self
                             .types
@@ -12307,12 +12343,27 @@ impl Analyzer<'_> {
                         self.null_states.insert(*local, NullState::Unknown);
                     }
                 }
-                if self.types.object_class(place.ty).is_some() {
-                    return Err(vec![classes::error(
-                        "E0406",
-                        "class handle/receiver references are unavailable in OOP-V1",
-                        e.span,
-                    )]);
+                if self
+                    .types
+                    .class_handle_reference_pointee(place.ty)
+                    .is_some()
+                {
+                    if mutable {
+                        return Err(vec![classes::error(
+                            "E0406",
+                            "mutable class-handle references are not admitted in CLASS-HANDLE-REFERENCES-V1; only shared references are supported",
+                            e.span,
+                        )]);
+                    }
+                    if !place.projections.is_empty()
+                        || matches!(place.base, HirPlaceBase::ClassField { .. })
+                    {
+                        return Err(vec![classes::error(
+                            "E0406",
+                            "interior class storage cannot be borrowed; borrow a direct owning class-handle Place",
+                            e.span,
+                        )]);
+                    }
                 }
                 let ty = self.types.intern_reference(place.ty, mutable);
                 Checked {
@@ -15170,10 +15221,16 @@ impl Analyzer<'_> {
                     op: AstUnaryOp::BorrowShared,
                     ..
                 }
-            ) || self
-                .resolve_expr_place(source, false)
-                .is_ok_and(|place| place.ty == parameter_type)
-            {
+            ) || self.resolve_expr_place(source, false).is_ok_and(|place| {
+                place.ty == parameter_type
+                    || self.types.reference_info(place.ty).is_some_and(
+                        |(source_pointee, source_mutable)| {
+                            !source_mutable
+                                && self.types.class_id(source_pointee).is_some()
+                                && self.types.class_id(pointee).is_some()
+                        },
+                    )
+            }) {
                 self.expression(source, Some(parameter_type))?
             } else {
                 self.expression(source, Some(pointee))?
@@ -15218,8 +15275,13 @@ impl Analyzer<'_> {
         }
 
         if let Some((pointee, false)) = reference {
+            let owning_class_upcast = matches!(
+                &checked.expr.kind,
+                HirExprKind::Class(op) if matches!(op.as_ref(), ClassOp::ClassUpcast { .. })
+            );
             if checked.expr.ty == pointee
                 && !matches!(checked.expr.kind, HirExprKind::Coerce { .. })
+                && !owning_class_upcast
             {
                 return Ok(HirExpr {
                     kind: HirExprKind::CallScopedSharedBorrow {
@@ -15260,7 +15322,13 @@ impl Analyzer<'_> {
                 .iter()
                 .any(|projection| matches!(projection, HirPlaceProjection::Index { .. }))
         {
-            self.locals[local.0 as usize].address_taken = true;
+            let direct_class_handle = self
+                .types
+                .class_handle_reference_pointee(place.ty)
+                .is_some_and(|(_, nullable)| !nullable);
+            if !direct_class_handle {
+                self.locals[local.0 as usize].address_taken = true;
+            }
         }
     }
     // Operand places are borrowed before ordinary value resolution can insert Move.
@@ -15408,6 +15476,18 @@ impl Analyzer<'_> {
                 HirExpr {
                     kind: HirExprKind::Local(local),
                     ty,
+                    span: other.span,
+                }
+            } else if let Ok(place) = self.resolve_expr_place(other, false)
+                && matches!(place.base, HirPlaceBase::Dereference { mutable: false, .. })
+                && self
+                    .types
+                    .class_handle_reference_pointee(place.ty)
+                    .is_some_and(|(_, nullable)| nullable)
+            {
+                HirExpr {
+                    ty: place.ty,
+                    kind: HirExprKind::Load(place),
                     span: other.span,
                 }
             } else {
@@ -15979,6 +16059,31 @@ impl Analyzer<'_> {
                 ),
                 Some(c.expr.span),
             )]);
+        }
+        if let (Some((source_pointee, false)), Some((target_pointee, false))) = (
+            self.types.reference_info(c.expr.ty),
+            self.types.reference_info(to),
+        ) && let (Some(source_class), Some(target_base)) = (
+            self.types.class_id(source_pointee),
+            self.types.class_id(target_pointee),
+        ) && let Ok(chain) = self.types.class_chain(source_class)
+            && let Some(end) = chain.iter().position(|class| *class == target_base)
+            && end > 0
+        {
+            let span = c.expr.span;
+            return Ok(Checked {
+                expr: HirExpr {
+                    kind: HirExprKind::Class(Box::new(ClassOp::BorrowedClassUpcast {
+                        source_class,
+                        target_base,
+                        path: chain[..=end].to_vec(),
+                        source: c.expr,
+                    })),
+                    ty: to,
+                    span,
+                },
+                constant: None,
+            });
         }
         if let (Some(source_class), Some(target_base)) =
             (self.types.class_id(c.expr.ty), self.types.class_id(to))
@@ -18111,7 +18216,16 @@ fn verify_expr(
         }
         HirExprKind::Load(place) => {
             verify_place(place, f, sigs, structs, enums, types, fail)?;
-            if place.ty != e.ty || (!types.guarantees_copy(e.ty) && e.ty != TypeId::STRING) {
+            let borrowed_nullable_class_read =
+                matches!(place.base, HirPlaceBase::Dereference { mutable: false, .. })
+                    && types
+                        .class_handle_reference_pointee(e.ty)
+                        .is_some_and(|(_, nullable)| nullable);
+            if place.ty != e.ty
+                || (!types.guarantees_copy(e.ty)
+                    && e.ty != TypeId::STRING
+                    && !borrowed_nullable_class_read)
+            {
                 return Err(fail("HIR load/place type mismatch".into()));
             }
         }
@@ -18132,6 +18246,9 @@ fn verify_expr(
                     .iter()
                     .any(|projection| matches!(projection, HirPlaceProjection::Index { .. }))
                 && !f.locals[local.0 as usize].address_taken
+                && types
+                    .class_handle_reference_pointee(place.ty)
+                    .is_none_or(|(_, nullable)| nullable)
             {
                 return Err(fail(
                     "HIR borrowed local is not marked address-taken".into(),
@@ -19337,6 +19454,9 @@ fn verify_call_borrow(
                     .iter()
                     .any(|projection| matches!(projection, HirPlaceProjection::Index { .. }))
                 && !function.locals[local.0 as usize].address_taken
+                && types
+                    .class_handle_reference_pointee(place.ty)
+                    .is_none_or(|(_, nullable)| nullable)
             {
                 return Err(fail(
                     "HIR call-borrowed local is not marked address-taken".into(),

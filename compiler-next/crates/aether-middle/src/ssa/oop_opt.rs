@@ -232,6 +232,9 @@ fn borrows(op: &SsaOp, id: ValueId) -> bool {
     match op {
         SsaOp::Class(op) => match op.as_ref() {
             ClassOp::HandleAlias { .. }
+            | ClassOp::BorrowedHandleView { .. }
+            | ClassOp::BorrowedReceiver { .. }
+            | ClassOp::BorrowedClassUpcast { .. }
             | ClassOp::IdentityEq { .. }
             | ClassOp::FieldRead { .. }
             | ClassOp::ObjectAlloc { .. } => true,

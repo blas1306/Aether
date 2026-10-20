@@ -307,6 +307,8 @@ pub(super) fn register_identities(program: &ParsedProgram, types: &mut TypeArena
                     mutable: true,
                     initializing: true,
                 },
+                ClassTokenKind::BorrowedHandleView,
+                ClassTokenKind::BorrowedReceiver,
             ] {
                 types.intern(TypeData::ClassToken { class: id, kind });
             }
@@ -512,10 +514,44 @@ impl Analyzer<'_> {
             } => self.imports[self.module.0 as usize]
                 .get(module)
                 .and_then(|m| self.class_named(*m, function)),
+            AstExprKind::Unary {
+                op: crate::AstUnaryOp::Dereference,
+                operand,
+            } => {
+                let AstExprKind::Name(name) = &operand.kind else {
+                    return None;
+                };
+                let reference = self.lookup(name)?;
+                let (pointee, mutable) = self
+                    .types
+                    .reference_info(self.locals[reference.0 as usize].ty)?;
+                (!mutable).then(|| self.types.class_id(pointee)).flatten()
+            }
             _ => None,
         }
     }
     pub(super) fn raw_receiver(&mut self, e: &AstExpr) -> Result<HirExpr, Vec<Diagnostic>> {
+        if let AstExprKind::Unary {
+            op: crate::AstUnaryOp::Dereference,
+            operand,
+        } = &e.kind
+        {
+            let reference = self.expression(operand, None)?.expr;
+            if let Some((pointee, false)) = self.types.reference_info(reference.ty)
+                && let Some(class) = self.types.class_id(pointee)
+            {
+                let ty = self
+                    .types
+                    .id_of(TypeData::ClassToken {
+                        class,
+                        kind: ClassTokenKind::BorrowedHandleView,
+                    })
+                    .expect("borrowed handle token was interned with its class");
+                return Ok(self
+                    .class_checked(ClassOp::BorrowedHandleView { class, reference }, ty, e.span)
+                    .expr);
+            }
+        }
         if let AstExprKind::Name(n) = &e.kind
             && let Some(l) = self.lookup(n)
             && (self.types.is_object_owner(self.locals[l.0 as usize].ty)
@@ -603,7 +639,9 @@ impl Analyzer<'_> {
             if matches!(
                 self.types.get(receiver.ty),
                 Some(TypeData::ClassToken {
-                    kind: ClassTokenKind::Receiver { mutable: false, .. },
+                    kind: ClassTokenKind::Receiver { mutable: false, .. }
+                        | ClassTokenKind::BorrowedHandleView
+                        | ClassTokenKind::BorrowedReceiver,
                     ..
                 })
             ) {
@@ -706,7 +744,14 @@ impl Analyzer<'_> {
         }
         if let Some((base, field)) = self.class_field_source(e) {
             return Some((|| {
-                if !matches!(base.kind, AstExprKind::Name(_)) {
+                let borrowed_handle = matches!(
+                    base.kind,
+                    AstExprKind::Unary {
+                        op: crate::AstUnaryOp::Dereference,
+                        ..
+                    }
+                );
+                if !matches!(base.kind, AstExprKind::Name(_)) && !borrowed_handle {
                     return Err(vec![error(
                         "E0406",
                         "temporary field receivers are unavailable; bind the object or use a read method",
@@ -957,8 +1002,8 @@ impl Analyzer<'_> {
                 let right = self.raw_receiver(right)?;
                 if !self
                     .types
-                    .class_id(left.ty)
-                    .zip(self.types.class_id(right.ty))
+                    .object_class(left.ty)
+                    .zip(self.types.object_class(right.ty))
                     .is_some_and(|(l, r)| {
                         self.types.is_subclass(l, r) || self.types.is_subclass(r, l)
                     })
@@ -1105,18 +1150,42 @@ impl Analyzer<'_> {
                 span,
             )]);
         }
-        let transfer = !matches!(source.kind, HirExprKind::Local(_));
-        let ty = self
-            .types
-            .id_of(TypeData::ClassToken {
-                class,
-                kind: ClassTokenKind::Keepalive {
-                    mutable: path_mutable,
-                },
+        let borrowed = matches!(
+            self.types.get(source.ty),
+            Some(TypeData::ClassToken {
+                kind: ClassTokenKind::BorrowedHandleView,
+                ..
             })
-            .unwrap();
-        let receiver = self
-            .class_checked(
+        );
+        let receiver = if borrowed {
+            let ty = self
+                .types
+                .id_of(TypeData::ClassToken {
+                    class,
+                    kind: ClassTokenKind::BorrowedReceiver,
+                })
+                .unwrap();
+            self.class_checked(
+                ClassOp::BorrowedReceiver {
+                    class,
+                    view: source,
+                },
+                ty,
+                span,
+            )
+            .expr
+        } else {
+            let transfer = !matches!(source.kind, HirExprKind::Local(_));
+            let ty = self
+                .types
+                .id_of(TypeData::ClassToken {
+                    class,
+                    kind: ClassTokenKind::Keepalive {
+                        mutable: path_mutable,
+                    },
+                })
+                .unwrap();
+            self.class_checked(
                 ClassOp::ReceiverKeepalive {
                     source,
                     mutable: path_mutable,
@@ -1125,7 +1194,8 @@ impl Analyzer<'_> {
                 ty,
                 span,
             )
-            .expr;
+            .expr
+        };
         let args = self.class_arguments(method.function, args, span)?;
         let result = self.signatures[method.function.0 as usize].return_type;
         Ok(self.class_checked(

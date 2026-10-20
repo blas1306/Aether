@@ -6109,7 +6109,7 @@ fn verify_mir_function(
         }
     }
     verify_take_protocol(function, fail)?;
-    verify_call_borrow_regions(function, fail)?;
+    verify_call_borrow_regions(function, types, fail)?;
     verify_format_borrow_regions(function, fail)?;
     Ok(())
 }
@@ -6278,12 +6278,14 @@ fn verify_const_bindings(
 #[allow(clippy::too_many_lines)]
 fn verify_call_borrow_regions(
     function: &MirFunction,
+    types: &TypeArena,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
     let mut borrows = BTreeMap::new();
     for block in &function.blocks {
         for instruction in &block.instructions {
             if let Rvalue::Borrow {
+                place,
                 call: Some(metadata),
                 ..
             } = &instruction.value
@@ -6291,7 +6293,10 @@ fn verify_call_borrow_regions(
                 let Some(reference) = place_root_local(&instruction.destination) else {
                     return Err(fail("MIR call borrow result is not a local".into()));
                 };
-                if borrows.insert(reference, *metadata).is_some() {
+                if borrows
+                    .insert(reference, (*metadata, place.clone()))
+                    .is_some()
+                {
                     return Err(fail(
                         "MIR call borrow local has duplicate definitions".into(),
                     ));
@@ -6299,7 +6304,7 @@ fn verify_call_borrow_regions(
             }
         }
     }
-    for (reference, metadata) in &borrows {
+    for (reference, (metadata, _)) in &borrows {
         let mut call_uses = 0;
         let mut end_uses = 0;
         for block in &function.blocks {
@@ -6394,6 +6399,53 @@ fn verify_call_borrow_regions(
             .clone()
             .expect("queued borrow state");
         for instruction in &block.instructions {
+            let protected_anchor = |place: &Place| {
+                borrows.iter().any(|(reference, (metadata, anchor))| {
+                    active.contains(reference)
+                        && types
+                            .class_handle_reference_pointee(metadata.pointee_type)
+                            .is_some()
+                        && place_root_local(anchor) == place_root_local(place)
+                })
+            };
+            let consumes_protected_anchor = match &instruction.value {
+                Rvalue::Move { source } | Rvalue::Drop { owner: source } => {
+                    protected_anchor(source)
+                }
+                Rvalue::Class(operation) => match operation.as_ref() {
+                    ClassOp::HandleTransfer { source }
+                    | ClassOp::ClassUpcast {
+                        source,
+                        transfer: true,
+                        ..
+                    }
+                    | ClassOp::InterfaceAdapt {
+                        source,
+                        transfer: true,
+                        ..
+                    }
+                    | ClassOp::ReceiverKeepalive {
+                        source,
+                        transfer: true,
+                        ..
+                    } => operand_local_id(source).is_some_and(|local| {
+                        protected_anchor(&Place {
+                            base: PlaceBase::Local(local),
+                            projections: Vec::new(),
+                        })
+                    }),
+                    _ => false,
+                },
+                _ => false,
+            };
+            let replaces_protected_anchor = !matches!(instruction.value, Rvalue::EndBorrow { .. })
+                && protected_anchor(&instruction.destination);
+            if consumes_protected_anchor || replaces_protected_anchor {
+                return Err(fail(
+                    "MIR class-handle borrow anchor is consumed or replaced before EndBorrow"
+                        .into(),
+                ));
+            }
             match &instruction.value {
                 Rvalue::Borrow { call: Some(_), .. } => {
                     let reference = place_root_local(&instruction.destination)
@@ -6406,12 +6458,14 @@ fn verify_call_borrow_regions(
                     call,
                     reference: Operand::Local(reference),
                 } => {
-                    if borrows.get(reference) != Some(call) || !active.remove(reference) {
+                    if borrows.get(reference).map(|(metadata, _)| metadata) != Some(call)
+                        || !active.remove(reference)
+                    {
                         return Err(fail("MIR EndBorrow does not close a live region".into()));
                     }
                 }
                 Rvalue::Drop { owner }
-                    if borrows.iter().any(|(reference, metadata)| {
+                    if borrows.iter().any(|(reference, (metadata, _))| {
                         active.contains(reference)
                             && matches!(metadata.source, CallBorrowSourceKind::Temporary(local)
                                 if place_root_local(owner) == Some(local))
@@ -7226,15 +7280,27 @@ fn verify_ownership(
         }
     }
     let mut incoming: Vec<Option<Vec<MirOwnerState>>> = vec![None; function.blocks.len()];
-    let borrowed_string_loads = function
+    let borrowed_nonowning_loads = function
         .blocks
         .iter()
         .flat_map(|block| &block.instructions)
         .filter_map(|instruction| {
             let local = place_root_local(&instruction.destination)?;
-            (matches!(instruction.value, Rvalue::Load(_))
-                && function.locals[local.0 as usize].ty == TypeId::STRING)
-                .then_some(local)
+            let ty = function.locals[local.0 as usize].ty;
+            match &instruction.value {
+                Rvalue::Load(place)
+                    if ty == TypeId::STRING
+                        || (matches!(
+                            place.base,
+                            PlaceBase::Dereference { mutable: false, .. }
+                        ) && types
+                            .class_handle_reference_pointee(ty)
+                            .is_some_and(|(_, nullable)| nullable)) =>
+                {
+                    Some(local)
+                }
+                _ => None,
+            }
         })
         .collect::<BTreeSet<_>>();
     incoming[function.entry.0 as usize] = Some(entry);
@@ -7252,7 +7318,7 @@ fn verify_ownership(
                         if let Operand::Local(local) = operand
                             && !types.is_copy(function.locals[local.0 as usize].ty)
                             && state[local.0 as usize] != MirOwnerState::Owned
-                            && !borrowed_string_loads.contains(local)
+                            && !borrowed_nonowning_loads.contains(local)
                         {
                             return Err(fail("string operation uses a moved/dropped owner".into()));
                         }
@@ -7266,7 +7332,7 @@ fn verify_ownership(
                         if let Operand::Local(local) = operand
                             && !types.is_copy(function.locals[local.0 as usize].ty)
                             && state[local.0 as usize] != MirOwnerState::Owned
-                            && !borrowed_string_loads.contains(local)
+                            && !borrowed_nonowning_loads.contains(local)
                         {
                             return Err(fail("Text operation uses a moved/dropped owner".into()));
                         }
@@ -7487,6 +7553,7 @@ fn verify_ownership(
                 Rvalue::NullableIsNull { operand } => {
                     if let Some(local) = operand_local_id(operand)
                         && !types.is_copy(function.locals[local.0 as usize].ty)
+                        && !borrowed_nonowning_loads.contains(&local)
                     {
                         require_place_owner(
                             function,
@@ -8052,8 +8119,15 @@ fn validate_rvalue(
         }
         Rvalue::Load(place) => {
             validate_place_read(function, place, structs, types, initialized)?;
+            let borrowed_nullable_class_read =
+                matches!(place.base, PlaceBase::Dereference { mutable: false, .. })
+                    && types
+                        .class_handle_reference_pointee(destination)
+                        .is_some_and(|(_, nullable)| nullable);
             if place_type(function, place, structs, types)? != destination
-                || (!types.guarantees_copy(destination) && destination != TypeId::STRING)
+                || (!types.guarantees_copy(destination)
+                    && destination != TypeId::STRING
+                    && !borrowed_nullable_class_read)
             {
                 return Err("MIR place load type mismatch".into());
             }
@@ -8075,6 +8149,9 @@ fn validate_rvalue(
             if let PlaceBase::Local(local) = &place.base
                 && !place_has_index(place)
                 && !function.locals[local.0 as usize].address_taken
+                && types
+                    .class_handle_reference_pointee(pointee)
+                    .is_none_or(|(_, nullable)| nullable)
             {
                 return Err("MIR borrowed local is not address-taken".into());
             }

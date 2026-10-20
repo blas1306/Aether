@@ -43,12 +43,13 @@ pub(super) fn verify(
     {
         return Ok(());
     }
-    if function
-        .memory_locals
-        .iter()
-        .any(|l| types.object_class(l.ty).is_some() || types.interface_identity(l.ty).is_some())
-    {
-        return Err("SSA class handle slot borrowing is unavailable in OOP-V1".into());
+    if function.memory_locals.iter().any(|local| {
+        (types.object_class(local.ty).is_some() || types.interface_identity(local.ty).is_some())
+            && types.class_handle_reference_pointee(local.ty).is_none()
+    }) {
+        return Err(
+            "SSA memory class storage is not a direct CLASS-HANDLE-REFERENCES-V1 anchor".into(),
+        );
     }
     let init = types
         .class_method(function.function_id)
