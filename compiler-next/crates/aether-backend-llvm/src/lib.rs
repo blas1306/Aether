@@ -9,6 +9,7 @@ mod mathematical;
 mod process;
 mod strings;
 mod text;
+mod utf8;
 
 use std::collections::BTreeSet;
 use std::fmt::Write;
@@ -97,6 +98,20 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
                 types,
             )
         });
+    let reachable_text_from_utf8 = program
+        .functions
+        .iter()
+        .filter(|function| core_reachable.contains(&function.id))
+        .any(|function| {
+            text::is_from_utf8(
+                &program.signatures[function.id.0 as usize],
+                &program.modules,
+                types,
+            )
+        });
+    let suppressed_text_exception = (!reachable_text_from_utf8)
+        .then(|| text::invalid_utf8_exception(types, &program.modules))
+        .flatten();
     let has_class_runtime = reachable.as_ref().is_some_and(|reachable| {
         program
             .functions
@@ -281,7 +296,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     if has_owners {
         emit_runtime_boundary(&mut output);
         if has_class_runtime {
-            classes::runtime(&mut output, program);
+            classes::runtime(&mut output, program, suppressed_text_exception);
             classes::witnesses(&mut output, program);
         }
     }
@@ -289,8 +304,22 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         strings::emit_literals(&mut output, program);
         strings::runtime(&mut output, has_format_runtime);
     }
-    if has_text_runtime {
-        text::runtime(&mut output, has_parse_int, has_parse_double);
+    let io_validates_utf8 = reachable_io.iter().any(|kind| {
+        matches!(
+            kind,
+            io::IoFunction::ReadLine | io::IoFunction::ReadText | io::IoFunction::WriteText
+        )
+    });
+    if reachable_text_from_utf8 || reachable_process || io_validates_utf8 {
+        utf8::runtime(&mut output);
+    }
+    if has_text_runtime || reachable_text_from_utf8 {
+        text::runtime(
+            &mut output,
+            has_parse_int,
+            has_parse_double,
+            reachable_text_from_utf8,
+        );
     }
     if has_io_runtime {
         io::runtime(
@@ -308,7 +337,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     }
     core::declarations(&mut output, &core_calls, types);
     if has_exception_routes {
-        emit_exception_runtime(&mut output, types);
+        emit_exception_runtime(&mut output, types, suppressed_text_exception);
     }
 
     for (ty, data) in types.entries() {
@@ -469,6 +498,13 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             continue;
         }
         let signature = &program.signatures[function.id.0 as usize];
+        if suppressed_text_exception.is_some_and(|suppressed| {
+            types
+                .class_method(signature.function_id)
+                .is_some_and(|(class, _)| class == suppressed)
+        }) {
+            continue;
+        }
         if let Some(kind) = io::function_kind(signature, &program.modules) {
             io::emit_function(
                 &mut output,
@@ -484,6 +520,18 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         }
         if process::is_args(signature, &program.modules, types) {
             process::emit_function(
+                &mut output,
+                function,
+                signature,
+                &program.modules,
+                &program.structs,
+                &program.enums,
+                types,
+            );
+            continue;
+        }
+        if text::is_from_utf8(signature, &program.modules, types) {
+            text::emit_from_utf8_function(
                 &mut output,
                 function,
                 signature,
@@ -609,7 +657,11 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
 }
 
 #[allow(clippy::too_many_lines)]
-fn emit_exception_runtime(output: &mut String, types: &TypeArena) {
+fn emit_exception_runtime(
+    output: &mut String,
+    types: &TypeArena,
+    suppressed_class: Option<aether_frontend::ClassId>,
+) {
     writeln!(
         output,
         "@aether_unhandled_prefix = private constant [10 x i8] c\"Unhandled \"\n@aether_unhandled_newline = private constant [1 x i8] c\"\\0A\""
@@ -671,7 +723,11 @@ fn emit_exception_runtime(output: &mut String, types: &TypeArena) {
     );
     writeln!(output, "define internal void @aether_report_unhandled(ptr %payload) nounwind {{\nentry:\n  %descriptor_address = getelementptr i8, ptr %payload, i64 {}\n  %dynamic_descriptor = load ptr, ptr %descriptor_address\n  %diagnostic_slot = getelementptr ptr, ptr %dynamic_descriptor, i64 {}\n  %diagnostic = load ptr, ptr %diagnostic_slot\n  %name_address = getelementptr {{ ptr, i64 }}, ptr %diagnostic, i32 0, i32 0\n  %name = load ptr, ptr %name_address\n  %length_address = getelementptr {{ ptr, i64 }}, ptr %diagnostic, i32 0, i32 1\n  %length = load i64, ptr %length_address\n  %prefix_ok = call i1 @aether_diagnostic_write_all(ptr @aether_unhandled_prefix, i64 10)\n  br i1 %prefix_ok, label %write_name, label %return\nwrite_name:\n  %name_ok = call i1 @aether_diagnostic_write_all(ptr %name, i64 %length)\n  br i1 %name_ok, label %write_newline, label %return\nwrite_newline:\n  %newline_ok = call i1 @aether_diagnostic_write_all(ptr @aether_unhandled_newline, i64 1)\n  br label %return\nreturn:\n  ret void\n}}\n", classes::OBJECT_DESCRIPTOR_BYTE_OFFSET, classes::CLASS_DESCRIPTOR_DIAGNOSTIC_SLOT).unwrap();
     writeln!(output, "define internal i1 @aether_exception_matches(ptr %payload, ptr %catch_descriptor) nounwind {{\nentry:\n  %descriptor_address = getelementptr i8, ptr %payload, i64 {}\n  %dynamic_descriptor = load ptr, ptr %descriptor_address", classes::OBJECT_DESCRIPTOR_BYTE_OFFSET).unwrap();
-    for class in types.classes() {
+    for class in types
+        .classes()
+        .iter()
+        .filter(|class| Some(class.id) != suppressed_class)
+    {
         writeln!(
             output,
             "  %dynamic_is_{} = icmp eq ptr %dynamic_descriptor, @aether_descriptor_{}\n  br i1 %dynamic_is_{}, label %dynamic_{}, label %dynamic_next_{}\ndynamic_{}:",

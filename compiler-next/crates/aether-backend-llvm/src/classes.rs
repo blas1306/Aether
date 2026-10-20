@@ -149,7 +149,11 @@ fn used_interfaces(program: &aether_middle::SsaIr) -> BTreeSet<aether_frontend::
         .collect()
 }
 
-pub(super) fn runtime(output: &mut String, program: &aether_middle::SsaIr) {
+pub(super) fn runtime(
+    output: &mut String,
+    program: &aether_middle::SsaIr,
+    suppressed_class: Option<ClassId>,
+) {
     let types = &program.types;
     let used = used_interfaces(program);
     for counter in ["alloc", "retain", "release", "destroy", "buffer_drop"] {
@@ -161,7 +165,11 @@ pub(super) fn runtime(output: &mut String, program: &aether_middle::SsaIr) {
     }
     output.push_str("define internal void @aether_object_retain(ptr %object) {\nentry:\n  %count = load i64, ptr %object\n  %zero = icmp eq i64 %count, 0\n  %full = icmp eq i64 %count, -1\n  %bad = or i1 %zero, %full\n  br i1 %bad, label %invalid, label %live\nlive:\n  %next = add i64 %count, 1\n  store i64 %next, ptr %object\n  %events = load i64, ptr @aether_object_retain_count\n  %events_next = add i64 %events, 1\n  store i64 %events_next, ptr @aether_object_retain_count\n  ret void\ninvalid:\n  call void @llvm.trap()\n  unreachable\n}\n");
     writeln!(output, "define internal void @aether_object_release(ptr %value) {{\nentry:\n  %count = load i64, ptr %value\n  %zero = icmp eq i64 %count, 0\n  br i1 %zero, label %invalid, label %live\ninvalid:\n  call void @llvm.trap()\n  unreachable\nlive:\n  %next = sub i64 %count, 1\n  store i64 %next, ptr %value\n  %events = load i64, ptr @aether_object_release_count\n  %events_next = add i64 %events, 1\n  store i64 %events_next, ptr @aether_object_release_count\n  %last = icmp eq i64 %next, 0\n  br i1 %last, label %destroy, label %done\ndestroy:\n  %descriptor_addr = getelementptr i8, ptr %value, i64 {OBJECT_DESCRIPTOR_BYTE_OFFSET}\n  %descriptor = load ptr, ptr %descriptor_addr\n  %destroy_slot = getelementptr ptr, ptr %descriptor, i64 {CLASS_DESCRIPTOR_DESTROY_SLOT}\n  %destroy_target = load ptr, ptr %destroy_slot\n  call void %destroy_target(ptr %value)\n  br label %done\ndone:\n  ret void\n}}").unwrap();
-    for class in types.classes() {
+    for class in types
+        .classes()
+        .iter()
+        .filter(|class| Some(class.id) != suppressed_class)
+    {
         let display = diagnostic_display(program, class);
         writeln!(
             output,

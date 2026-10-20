@@ -1,0 +1,70 @@
+package main;
+import std.Text;
+
+int exact(ref Buffer<uint8> bytes, usize used, ref string expected) {
+    string value = std.Text.fromUtf8(bytes, used);
+    if (byteLength(value) != byteLength(*expected)) { return 1; }
+    usize i = 0;
+    while (i < byteLength(value)) {
+        if (std.Text.byteAt(value, i) != std.Text.byteAt(*expected, i)) { return 2; }
+        i = i + 1;
+    }
+    return 0;
+}
+
+string detached() {
+    Buffer<uint8> bytes = Buffer<uint8>(4, uint8(0));
+    bytes[0] = uint8(240);
+    bytes[1] = uint8(159);
+    bytes[2] = uint8(152);
+    bytes[3] = uint8(128);
+    return std.Text.fromUtf8(&bytes, 4);
+}
+
+int main() {
+    Buffer<uint8> empty = Buffer<uint8>(0, uint8(0));
+    string zero = std.Text.fromUtf8(&empty, 0);
+    if (zero != "") { return 1; }
+
+    Buffer<uint8> bytes = Buffer<uint8>(28, uint8(255));
+    bytes[0] = uint8(0);
+    bytes[1] = uint8(127);
+    bytes[2] = uint8(194); bytes[3] = uint8(128);
+    bytes[4] = uint8(223); bytes[5] = uint8(191);
+    bytes[6] = uint8(224); bytes[7] = uint8(160); bytes[8] = uint8(128);
+    bytes[9] = uint8(239); bytes[10] = uint8(191); bytes[11] = uint8(191);
+    bytes[12] = uint8(240); bytes[13] = uint8(144); bytes[14] = uint8(128); bytes[15] = uint8(128);
+    bytes[16] = uint8(244); bytes[17] = uint8(143); bytes[18] = uint8(191); bytes[19] = uint8(191);
+    bytes[20] = uint8(239); bytes[21] = uint8(187); bytes[22] = uint8(191);
+    bytes[23] = uint8(9); bytes[24] = uint8(13); bytes[25] = uint8(10);
+    bytes[26] = uint8(255); bytes[27] = uint8(128);
+    string expected = "\0߿ࠀ￿𐀀􏿿﻿\t\r\n";
+    if (exact(&bytes, 26, &expected) != 0) { return 2; }
+
+    string independent = std.Text.fromUtf8(&bytes, 26);
+    bytes[1] = uint8(65);
+    if (std.Text.byteAt(independent, 1) != uint8(127)) { return 3; }
+    if (detached() != "😀") { return 4; }
+
+    Buffer<uint8> combining = Buffer<uint8>(3, uint8(0));
+    combining[0] = uint8(101); combining[1] = uint8(204); combining[2] = uint8(129);
+    string decomposed = std.Text.fromUtf8(&combining, 3);
+    if (decomposed != "é") { return 5; }
+
+    usize largeLength = 8192 + 8192;
+    Buffer<uint8> large = Buffer<uint8>(largeLength, uint8(120));
+    string payload = std.Text.fromUtf8(&large, largeLength);
+    if (byteLength(payload) != largeLength) { return 6; }
+    if (std.Text.byteAt(payload, 0) != uint8(120)) { return 7; }
+    if (std.Text.byteAt(payload, largeLength - 1) != uint8(120)) { return 8; }
+
+    Buffer<uint8> invalid = Buffer<uint8>(2, uint8(128));
+    invalid[0] = uint8(65);
+    try {
+        string impossible = std.Text.fromUtf8(&invalid, 2);
+        return int(byteLength(impossible)) + 9;
+    } catch (std.Text.InvalidUtf8Exception error) {
+        if (invalid[0] != uint8(65) || invalid[1] != uint8(128)) { return 10; }
+    }
+    return 0;
+}

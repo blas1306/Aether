@@ -2218,6 +2218,15 @@ impl Builder<'_> {
                 if finally.is_some() {
                     self.route_through_finally(PendingAction::Resume(event), span);
                 } else {
+                    let owners = self.active_owners.clone();
+                    for owner in owners.into_iter().rev() {
+                        if self
+                            .types
+                            .needs_drop(self.function.locals[owner.0 as usize].ty)
+                        {
+                            self.emit_hir_drop(HirDrop::Conditional(owner), span);
+                        }
+                    }
                     self.terminate(Terminator::ResumeUnwind { event });
                 }
             } else {
@@ -2248,6 +2257,15 @@ impl Builder<'_> {
                     target,
                 } = action
                 {
+                    let owners = self.active_owners[outer.cleanup_boundary..].to_vec();
+                    for owner in owners.into_iter().rev() {
+                        if self
+                            .types
+                            .needs_drop(self.function.locals[owner.0 as usize].ty)
+                        {
+                            self.emit_hir_drop(HirDrop::Conditional(owner), span);
+                        }
+                    }
                     self.terminate(Terminator::ForwardUnwind {
                         event,
                         target_event,

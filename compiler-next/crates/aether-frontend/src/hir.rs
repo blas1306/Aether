@@ -14154,7 +14154,7 @@ impl Analyzer<'_> {
         };
         self.used_modules.insert(mid);
         if self.module_names.get("std.Text") == Some(&mid) {
-            return self.text_apply(mid, f, type_arguments, args, span);
+            return self.text_apply(mid, f, type_arguments, args, span, expected);
         }
         if let Some(candidates) = self.names[mid.0 as usize].get(f).cloned() {
             let candidates = candidates
@@ -14217,7 +14217,24 @@ impl Analyzer<'_> {
         type_arguments: &[AstType],
         args: &[AstExpr],
         span: Span,
+        expected: Option<TypeId>,
     ) -> Result<Checked, Vec<Diagnostic>> {
+        if function == "fromUtf8"
+            && let Some(candidates) = self.names[module.0 as usize].get(function).cloned()
+        {
+            let candidates = candidates
+                .into_iter()
+                .filter(|id| self.signatures[id.0 as usize].public)
+                .collect::<Vec<_>>();
+            return self.resolve_overload(
+                &candidates,
+                "Text.fromUtf8",
+                type_arguments,
+                args,
+                span,
+                expected,
+            );
+        }
         if !type_arguments.is_empty() {
             return Err(vec![type_error(
                 "Text functions do not accept type arguments",

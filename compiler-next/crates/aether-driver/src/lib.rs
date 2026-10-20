@@ -489,7 +489,7 @@ fn discover_catalog_with_plan(
         ),
         (
             vec!["std", "Text"],
-            "package std.Text; public struct ScalarOffset { usize value; } enum FindResult { Found(ScalarOffset), NotFound, } enum ByteSliceResult { Slice(string), InvalidRange, OutOfBounds, InvalidBoundary, } enum IntParseResult { Value(int), Invalid, Overflow, } enum DoubleParseResult { Value(double), Invalid, Overflow, Underflow, }",
+            "package std.Text; public class InvalidUtf8Exception:Exception{public init(){}} public string fromUtf8(ref Buffer<uint8> bytes,usize length){return \"\";} public struct ScalarOffset { usize value; } enum FindResult { Found(ScalarOffset), NotFound, } enum ByteSliceResult { Slice(string), InvalidRange, OutOfBounds, InvalidBoundary, } enum IntParseResult { Value(int), Invalid, Overflow, } enum DoubleParseResult { Value(double), Invalid, Overflow, Underflow, }",
         ),
         (
             vec!["std", "IO"],

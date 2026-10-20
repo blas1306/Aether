@@ -2,11 +2,113 @@
 
 use std::fmt::Write;
 
-use aether_frontend::TextOp;
-use aether_middle::SsaOperand;
+use aether_frontend::{
+    EnumInfo, FunctionInstanceInfo, ModuleInfo, OriginKey, PackageKey, StructInfo, TextOp,
+    TypeArena, TypeId,
+};
+use aether_middle::{SsaFunction, SsaOperand};
+
+use crate::bootstrap_symbol;
+
+pub(super) fn invalid_utf8_exception(
+    types: &TypeArena,
+    modules: &[ModuleInfo],
+) -> Option<aether_frontend::ClassId> {
+    types
+        .classes()
+        .iter()
+        .find(|class| {
+            class.name == "InvalidUtf8Exception"
+                && matches!(
+                    &modules[class.module.0 as usize].key.package,
+                    PackageKey::Named { origin: OriginKey::Toolchain, path }
+                        if path.0.as_slice() == ["std", "Text"]
+                )
+        })
+        .map(|class| class.id)
+}
+
+pub(super) fn is_from_utf8(
+    signature: &FunctionInstanceInfo,
+    modules: &[ModuleInfo],
+    types: &TypeArena,
+) -> bool {
+    let package = &modules[signature.module.0 as usize].key.package;
+    let Some(first) = signature.parameters.first() else {
+        return false;
+    };
+    let buffer_ref = types
+        .reference_info(first.ty)
+        .filter(|(_, mutable)| !mutable)
+        .map(|(pointee, _)| pointee);
+    matches!(
+        package,
+        PackageKey::Named { origin: OriginKey::Toolchain, path }
+            if path.0.as_slice() == ["std", "Text"]
+                && signature.name == "fromUtf8"
+                && signature.parameters.len() == 2
+                && buffer_ref.is_some_and(|ty| types.buffer_element(ty) == Some(TypeId::UINT8))
+                && signature.parameters[1].ty == TypeId::USIZE
+                && signature.return_type == TypeId::STRING
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn emit_from_utf8_function(
+    output: &mut String,
+    function: &SsaFunction,
+    signature: &FunctionInstanceInfo,
+    modules: &[ModuleInfo],
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+    types: &TypeArena,
+) {
+    let symbol = bootstrap_symbol(signature, modules, structs, enums, types);
+    let exception =
+        invalid_utf8_exception(types, modules).expect("TEXT-UTF8-BUILDER-V1 exception is present");
+    let bytes = function.parameters[0].value.0;
+    let length = function.parameters[1].value.0;
+    writeln!(
+        output,
+        "define ptr @{symbol}(ptr %v{bytes}, i64 %v{length}) {{\nentry:\n  %descriptor = load {{ ptr, i64 }}, ptr %v{bytes}\n  %data = extractvalue {{ ptr, i64 }} %descriptor, 0\n  %buffer_length = extractvalue {{ ptr, i64 }} %descriptor, 1\n  %raw = call {{ i1, ptr }} @aether_text_from_utf8_prefix(ptr %data, i64 %buffer_length, i64 %v{length})\n  %invalid = extractvalue {{ i1, ptr }} %raw, 0\n  br i1 %invalid, label %encoding, label %return\nreturn:\n  %value = extractvalue {{ i1, ptr }} %raw, 1\n  ret ptr %value\nencoding:\n  %exception = call ptr @aether_object_alloc_{}()\n  call void @aether_throw(ptr %exception)\n  unreachable\n}}\n",
+        exception.0
+    )
+    .unwrap();
+}
 
 #[allow(clippy::too_many_lines)]
-pub(super) fn runtime(output: &mut String, parse_int: bool, parse_double: bool) {
+pub(super) fn runtime(output: &mut String, parse_int: bool, parse_double: bool, from_utf8: bool) {
+    if from_utf8 {
+        output.push_str(
+            r"
+; General checked Buffer prefix -> owned string boundary.
+; Result tag true means invalid UTF-8; bounds violations trap before any read.
+define internal { i1, ptr } @aether_text_from_utf8_prefix(ptr %data, i64 %buffer_length, i64 %length) {
+entry:
+  %bounded = icmp ule i64 %length, %buffer_length
+  br i1 %bounded, label %empty_test, label %bounds_trap
+empty_test:
+  %empty = icmp eq i64 %length, 0
+  br i1 %empty, label %publish, label %validate
+validate:
+  %valid = call i1 @aether_utf8_validate(ptr %data, i64 %length)
+  br i1 %valid, label %publish, label %invalid
+publish:
+  %value = call ptr @aether_string_from_buffer(ptr %data, i64 %length)
+  %ok0 = insertvalue { i1, ptr } zeroinitializer, i1 false, 0
+  %ok = insertvalue { i1, ptr } %ok0, ptr %value, 1
+  ret { i1, ptr } %ok
+invalid:
+  %bad = insertvalue { i1, ptr } zeroinitializer, i1 true, 0
+  ret { i1, ptr } %bad
+bounds_trap:
+  ; structured Aether trap: IndexOutOfBounds
+  call void @llvm.trap()
+  unreachable
+}
+",
+        );
+    }
     output.push_str(r"
 declare ptr @memmem(ptr, i64, ptr, i64) nounwind readonly
 
