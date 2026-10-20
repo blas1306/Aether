@@ -515,7 +515,7 @@ impl Analyzer<'_> {
             _ => None,
         }
     }
-    fn raw_receiver(&mut self, e: &AstExpr) -> Result<HirExpr, Vec<Diagnostic>> {
+    pub(super) fn raw_receiver(&mut self, e: &AstExpr) -> Result<HirExpr, Vec<Diagnostic>> {
         if let AstExprKind::Name(n) = &e.kind
             && let Some(l) = self.lookup(n)
             && (self.types.is_object_owner(self.locals[l.0 as usize].ty)
@@ -538,7 +538,7 @@ impl Analyzer<'_> {
             span,
         }
     }
-    fn class_field_source(&self, e: &AstExpr) -> Option<(AstExpr, ClassFieldInfo)> {
+    pub(super) fn class_field_source(&self, e: &AstExpr) -> Option<(AstExpr, ClassFieldInfo)> {
         let (base, name) = match &e.kind {
             AstExprKind::Name(n) if self.lookup(n).is_none() && self.class_method.is_some() => {
                 (self.this_expr(e.span), n)
@@ -552,7 +552,7 @@ impl Analyzer<'_> {
             .cloned()
             .map(|f| (base, f))
     }
-    fn check_member_access(
+    pub(super) fn check_member_access(
         &self,
         class: ClassId,
         public: bool,

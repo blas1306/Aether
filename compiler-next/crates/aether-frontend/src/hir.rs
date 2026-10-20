@@ -1348,6 +1348,15 @@ pub enum HirPlaceBase {
         reference: Box<HirExpr>,
         mutable: bool,
     },
+    /// Ephemeral access to inline class-field storage. This is a place, never
+    /// an owning read of the field descriptor.
+    ClassField {
+        receiver: Box<HirExpr>,
+        field: FieldId,
+        field_type: TypeId,
+        mutable: bool,
+        initialized: bool,
+    },
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HirExpr {
@@ -3375,10 +3384,10 @@ fn collect_program_signatures_for_kind(
                         field.span,
                     )]);
                 }
-                let narrow_buffer = types.buffer_element(ty) == Some(TypeId::INT64) && !public;
+                let admitted_buffer = types.is_admitted_class_buffer_field(ty, *public);
                 let narrow_class_owner =
                     types.class_id(ty).is_some_and(|owner| owner != cid) && !public;
-                if !narrow_buffer
+                if !admitted_buffer
                     && !narrow_class_owner
                     && (!types.guarantees_copy(ty)
                         || types.contains_owning(ty)
@@ -3388,7 +3397,7 @@ fn collect_program_signatures_for_kind(
                 {
                     return Err(vec![classes::error(
                         "E0401",
-                        "class field requires a scalar/Copy value, private Buffer<int>, or a private non-self concrete class owner",
+                        "class field requires a scalar/Copy value, an admitted private Buffer<E>, or a private non-self concrete class owner",
                         field.span,
                     )]);
                 }
@@ -4904,6 +4913,10 @@ pub fn analyze_bodies_for_target(
     let mut functions = vec![];
     let mut semantic_dependencies = vec![BTreeSet::new(); d.program.modules.len()];
     let mut types = std::mem::take(&mut d.types);
+    // Concrete aggregate instances used by class Buffer fields already exist
+    // after declaration resolution. Cache their backing layout before method
+    // bodies type-check Buffer constructors for those exact field types.
+    compute_concrete_layouts(&mut types, &d.structs, &d.enums, target)?;
     classes::compute_layouts(&mut types, &d.structs, &d.enums, target)?;
     for m in &d.program.modules {
         for f in m.ast.functions() {
@@ -5517,6 +5530,19 @@ impl Monomorphizer<'_> {
                 HirPlaceBase::Dereference { reference, mutable } => HirPlaceBase::Dereference {
                     reference: Box::new(self.substitute_expr(reference, substitution)?),
                     mutable: *mutable,
+                },
+                HirPlaceBase::ClassField {
+                    receiver,
+                    field,
+                    field_type,
+                    mutable,
+                    initialized,
+                } => HirPlaceBase::ClassField {
+                    receiver: Box::new(self.substitute_expr(receiver, substitution)?),
+                    field: *field,
+                    field_type: self.substitute_type(*field_type, substitution, receiver.span)?,
+                    mutable: *mutable,
+                    initialized: *initialized,
                 },
             },
             projections: place
@@ -8298,6 +8324,7 @@ impl OwnershipAnalysis<'_> {
                     None
                 }
             }),
+            HirPlaceBase::ClassField { .. } => None,
         }
     }
 
@@ -8599,7 +8626,7 @@ impl OwnershipAnalysis<'_> {
             }
             HirExprKind::View { source, .. } => match source.base {
                 HirPlaceBase::Local(local) => self.buffer_lengths[local.0 as usize],
-                HirPlaceBase::Dereference { .. } => None,
+                HirPlaceBase::Dereference { .. } | HirPlaceBase::ClassField { .. } => None,
             },
             _ => None,
         }
@@ -10825,6 +10852,55 @@ impl Analyzer<'_> {
         expression: &AstExpr,
         writable: bool,
     ) -> Result<HirPlace, Vec<Diagnostic>> {
+        if let Some((base, field)) = self.class_field_source(expression)
+            && self.types.buffer_element(field.ty).is_some()
+        {
+            self.check_member_access(field.class, field.public, expression.span)?;
+            let receiver = self.raw_receiver(&base)?;
+            let receiver_mutable = !matches!(
+                self.types.get(receiver.ty),
+                Some(TypeData::ClassToken {
+                    kind: ClassTokenKind::Receiver { mutable: false, .. },
+                    ..
+                })
+            );
+            if writable && !receiver_mutable {
+                return Err(vec![classes::error(
+                    "E0405",
+                    "indexed field mutation requires a declared mut receiver",
+                    expression.span,
+                )]);
+            }
+            let initializing = matches!(
+                self.types.get(receiver.ty),
+                Some(TypeData::ClassToken {
+                    kind: ClassTokenKind::Receiver {
+                        initializing: true,
+                        ..
+                    },
+                    ..
+                })
+            );
+            let initialized = !initializing || self.initialized_fields.contains(&field.id);
+            if !initialized {
+                return Err(vec![classes::error(
+                    "E0403",
+                    "field access before initialization",
+                    expression.span,
+                )]);
+            }
+            return Ok(HirPlace {
+                base: HirPlaceBase::ClassField {
+                    receiver: Box::new(receiver),
+                    field: field.id,
+                    field_type: field.ty,
+                    mutable: receiver_mutable,
+                    initialized,
+                },
+                projections: Vec::new(),
+                ty: field.ty,
+            });
+        }
         match &expression.kind {
             AstExprKind::Name(name) => {
                 if let Some(diagnostic) = self.invalid_default_reference(name, expression.span) {
@@ -12196,6 +12272,13 @@ impl Analyzer<'_> {
                     }
                 );
                 let place = self.resolve_expr_place(operand, mutable)?;
+                if matches!(place.base, HirPlaceBase::ClassField { .. }) {
+                    return Err(vec![classes::error(
+                        "E0406",
+                        "class field storage cannot be borrowed",
+                        e.span,
+                    )]);
+                }
                 if mutable && let Some(local) = self.const_inline_root(&place) {
                     return Err(vec![Diagnostic::new(
                         "E0373",
@@ -16700,7 +16783,10 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
         verify_finally_identities(&f.body, &fail)?;
         verify_block(
             &f.body,
-            &VerificationFunction { locals: &f.locals },
+            &VerificationFunction {
+                locals: &f.locals,
+                function_id: f.function_id,
+            },
             s.return_type,
             VerificationSignatures::Concrete(&h.instances),
             &h.structs,
@@ -16787,6 +16873,7 @@ fn hir_value_type_is_complete(
 /// Shared borrowed body context; generic verification creates no `InstanceId`.
 struct VerificationFunction<'a> {
     locals: &'a [HirLocal],
+    function_id: FunctionId,
 }
 
 #[derive(Clone, Copy)]
@@ -16850,6 +16937,7 @@ fn verify_parametric_hir(
         .map_err(&fail)?;
         let function = VerificationFunction {
             locals: &declaration.locals,
+            function_id: declaration.id,
         };
         for (parameter, signature_parameter) in
             declaration.parameters.iter().zip(&signature.parameters)
@@ -19405,6 +19493,17 @@ fn hir_place_writable(
             };
             pointee
         }
+        HirPlaceBase::ClassField {
+            field_type,
+            mutable,
+            initialized,
+            ..
+        } => {
+            if !mutable || !initialized {
+                return false;
+            }
+            *field_type
+        }
     };
     for projection in &place.projections {
         match projection {
@@ -19458,6 +19557,48 @@ fn verify_place(
                 return Err(fail("HIR dereference capability cache is invalid".into()));
             }
             pointee
+        }
+        HirPlaceBase::ClassField {
+            receiver,
+            field,
+            field_type,
+            mutable,
+            initialized,
+        } => {
+            verify_expr(receiver, function, sigs, structs, enums, types, fail)?;
+            let receiver_class = types
+                .object_class(receiver.ty)
+                .ok_or_else(|| fail("HIR class-field place receiver is not an object".into()))?;
+            let info = types
+                .class_field(*field)
+                .ok_or_else(|| fail("HIR class-field place has unknown FieldId".into()))?;
+            let expected_mutable = !matches!(
+                types.get(receiver.ty),
+                Some(TypeData::ClassToken {
+                    kind: ClassTokenKind::Receiver { mutable: false, .. },
+                    ..
+                })
+            );
+            if info.ty != *field_type
+                || info.public
+                || !types.is_admitted_class_buffer_field(info.ty, info.public)
+                || types
+                    .class_method(function.function_id)
+                    .map(|(class, _)| class)
+                    != Some(info.class)
+                || (receiver_class != info.class && !types.is_subclass(receiver_class, info.class))
+                || *mutable != expected_mutable
+                || !*initialized
+                || !matches!(
+                    place.projections.first(),
+                    Some(HirPlaceProjection::Index { .. })
+                )
+            {
+                return Err(fail(
+                    "HIR class-field storage place contract is invalid".into(),
+                ));
+            }
+            *field_type
         }
     };
     if !types.is_valid(place.ty) || !types.is_valid(ty) {
@@ -19869,6 +20010,73 @@ mod tests {
     use crate::{SourceFile, parse_source};
     fn check(s: &str) -> Result<TypedHir, Vec<Diagnostic>> {
         analyze(parse_source(&SourceFile::new("test.ae", s)).unwrap())
+    }
+    #[test]
+    fn class_buffer_field_storage_place_hir_corruptions_fail_closed() {
+        let hir = check("class C{Buffer<float64> v;public init(){v=Buffer<float64>(1,2.0);}public float64 get(){return v[0];}}int main(){return 0;}").unwrap();
+        verify_hir(&hir).unwrap();
+        for mutation in 0..6 {
+            let mut bad = hir.clone();
+            let (instances, functions) = (&bad.instances, &mut bad.functions);
+            let function = functions
+                .iter_mut()
+                .find(|function| {
+                    instances[function.id.0 as usize].name.rsplit('.').next() == Some("get")
+                })
+                .unwrap();
+            let place = function
+                .body
+                .statements
+                .iter_mut()
+                .find_map(|statement| match &mut statement.kind {
+                    HirStmtKind::Return { value, .. } => match &mut value.kind {
+                        HirExprKind::Load(place)
+                            if matches!(place.base, HirPlaceBase::ClassField { .. }) =>
+                        {
+                            Some(place)
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .unwrap();
+            match mutation {
+                0 => {
+                    let HirPlaceBase::ClassField { receiver, .. } = &mut place.base else {
+                        unreachable!()
+                    };
+                    receiver.kind = HirExprKind::Bool(true);
+                    receiver.ty = TypeId::BOOL;
+                }
+                1 => {
+                    let HirPlaceBase::ClassField { field, .. } = &mut place.base else {
+                        unreachable!()
+                    };
+                    *field = FieldId(u32::MAX);
+                }
+                2 => {
+                    let HirPlaceBase::ClassField { field_type, .. } = &mut place.base else {
+                        unreachable!()
+                    };
+                    *field_type = TypeId::BOOL;
+                }
+                3 => {
+                    let HirPlaceBase::ClassField { mutable, .. } = &mut place.base else {
+                        unreachable!()
+                    };
+                    *mutable = !*mutable;
+                }
+                4 => {
+                    let HirPlaceBase::ClassField { initialized, .. } = &mut place.base else {
+                        unreachable!()
+                    };
+                    *initialized = false;
+                }
+                5 => place.projections.clear(),
+                _ => unreachable!(),
+            }
+            assert!(verify_hir(&bad).is_err(), "HIR mutation {mutation}");
+        }
     }
     #[test]
     fn filled_init_v1_hir_corruptions_fail_closed() {

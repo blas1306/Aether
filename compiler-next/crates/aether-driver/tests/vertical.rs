@@ -3608,7 +3608,8 @@ fn vertical19_mir_rejects_corrupt_slot_transactions() {
                 let operand =
                     Operand::Local(match blocks[transaction].instructions[1].destination.base {
                         aether_middle::PlaceBase::Local(l) => l,
-                        aether_middle::PlaceBase::Dereference { .. } => panic!(),
+                        aether_middle::PlaceBase::Dereference { .. }
+                        | aether_middle::PlaceBase::ClassField { .. } => panic!(),
                     });
                 let i = blocks[commit]
                     .instructions

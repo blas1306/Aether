@@ -194,7 +194,17 @@ pub enum PlaceProjection {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PlaceBase {
     Local(LocalId),
-    Dereference { reference: Operand, mutable: bool },
+    Dereference {
+        reference: Operand,
+        mutable: bool,
+    },
+    ClassField {
+        receiver: Operand,
+        field: FieldId,
+        field_type: TypeId,
+        mutable: bool,
+        initialized: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2772,6 +2782,9 @@ impl Builder<'_> {
             PlaceBase::Local(local) => *local,
             PlaceBase::Dereference { reference, .. } => {
                 operand_local_id(reference).expect("verified collection provenance is materialized")
+            }
+            PlaceBase::ClassField { .. } => {
+                unreachable!("class Buffer fields are not collection iteration owners")
             }
         };
         let kind = if self.types.array_element(iterable_type).is_some() {
@@ -5354,6 +5367,19 @@ impl Builder<'_> {
                 HirPlaceBase::Dereference { reference, mutable } => PlaceBase::Dereference {
                     reference: self.lower_expr(reference),
                     mutable: *mutable,
+                },
+                HirPlaceBase::ClassField {
+                    receiver,
+                    field,
+                    field_type,
+                    mutable,
+                    initialized,
+                } => PlaceBase::ClassField {
+                    receiver: self.lower_expr(receiver),
+                    field: *field,
+                    field_type: *field_type,
+                    mutable: *mutable,
+                    initialized: *initialized,
                 },
             },
             projections: place
@@ -8468,6 +8494,7 @@ fn validate_rvalue(
                         .ok_or_else(|| "invalid Take reference root".to_string())?
                         .0
                 }
+                PlaceBase::ClassField { field_type, .. } => *field_type,
             };
             if types
                 .borrowed_view_info(root_ty)
@@ -9302,6 +9329,14 @@ fn validate_place_read(
     types: &TypeArena,
     initialized: &[bool],
 ) -> Result<(), String> {
+    if matches!(place.base, PlaceBase::ClassField { .. })
+        && !matches!(
+            place.projections.first(),
+            Some(PlaceProjection::Index { .. })
+        )
+    {
+        return Err("MIR class-field storage place lacks immediate index".into());
+    }
     place_type(function, place, structs, types)?;
     match &place.base {
         PlaceBase::Local(local) => {
@@ -9311,6 +9346,16 @@ fn validate_place_read(
         }
         PlaceBase::Dereference { reference, .. } => {
             validate_operand(function, reference, initialized)?;
+        }
+        PlaceBase::ClassField {
+            receiver,
+            initialized: field_initialized,
+            ..
+        } => {
+            validate_operand(function, receiver, initialized)?;
+            if !field_initialized {
+                return Err("MIR class field read before initialization".into());
+            }
         }
     }
     for projection in &place.projections {
@@ -9331,6 +9376,7 @@ fn place_has_index(place: &Place) -> bool {
         .any(|projection| matches!(projection, PlaceProjection::Index { .. }))
 }
 
+#[allow(clippy::too_many_lines)]
 pub(crate) fn place_type(
     function: &MirFunction,
     place: &Place,
@@ -9352,6 +9398,51 @@ pub(crate) fn place_type(
                 return Err("MIR dereference capability cache mismatch".into());
             }
             pointee
+        }
+        PlaceBase::ClassField {
+            receiver,
+            field,
+            field_type,
+            mutable,
+            initialized,
+        } => {
+            let receiver_ty = operand_type(function, receiver)?;
+            let receiver_class = types
+                .object_class(receiver_ty)
+                .ok_or("MIR class-field place receiver is not an object")?;
+            let info = types
+                .class_field(*field)
+                .ok_or("MIR class-field place has unknown FieldId")?;
+            let expected_mutable = !matches!(
+                types.get(receiver_ty),
+                Some(TypeData::ClassToken {
+                    kind: aether_frontend::ClassTokenKind::Receiver { mutable: false, .. },
+                    ..
+                })
+            );
+            if info.ty != *field_type {
+                return Err("MIR class-field storage place type mismatch".into());
+            }
+            if info.public || !types.is_admitted_class_buffer_field(info.ty, info.public) {
+                return Err("MIR class-field storage place visibility/admission invalid".into());
+            }
+            if types
+                .class_method(function.function_id)
+                .map(|(class, _)| class)
+                != Some(info.class)
+            {
+                return Err("MIR class-field storage place is outside its declaring class".into());
+            }
+            if receiver_class != info.class && !types.is_subclass(receiver_class, info.class) {
+                return Err("MIR class-field storage place receiver mismatch".into());
+            }
+            if *mutable != expected_mutable {
+                return Err("MIR class-field storage place mutability mismatch".into());
+            }
+            if !*initialized {
+                return Err("MIR class-field storage place is uninitialized".into());
+            }
+            *field_type
         }
     };
     for projection in &place.projections {
@@ -9405,7 +9496,19 @@ fn mir_place_writable(
     structs: &[StructInfo],
     types: &TypeArena,
 ) -> Result<bool, String> {
-    if matches!(place.base, PlaceBase::Dereference { mutable: false, .. }) {
+    if matches!(place.base, PlaceBase::ClassField { .. })
+        && !matches!(
+            place.projections.first(),
+            Some(PlaceProjection::Index { .. })
+        )
+    {
+        return Err("MIR class-field storage place lacks immediate index".into());
+    }
+    if matches!(
+        place.base,
+        PlaceBase::Dereference { mutable: false, .. }
+            | PlaceBase::ClassField { mutable: false, .. }
+    ) {
         return Ok(false);
     }
     for (position, projection) in place.projections.iter().enumerate() {
@@ -9428,7 +9531,7 @@ fn mir_place_writable(
 fn place_root_local(place: &Place) -> Option<LocalId> {
     match &place.base {
         PlaceBase::Local(local) => Some(*local),
-        PlaceBase::Dereference { .. } => None,
+        PlaceBase::Dereference { .. } | PlaceBase::ClassField { .. } => None,
     }
 }
 
@@ -10802,7 +10905,7 @@ mod tests {
             .find(|instruction| matches!(instruction.value, Rvalue::Binary { .. }))
             .and_then(|instruction| match instruction.destination.base {
                 PlaceBase::Local(local) => Some(local),
-                PlaceBase::Dereference { .. } => None,
+                PlaceBase::Dereference { .. } | PlaceBase::ClassField { .. } => None,
             })
             .unwrap();
         wrong_destination.functions[0].locals[destination.0 as usize].ty = enum_ty;

@@ -286,8 +286,8 @@ fn negative_source_boundaries() {
             "class C{public Buffer<int> n;public init(Buffer<int> x){n=x;}}int main(){}",
         ),
         (
-            "wrong_buffer",
-            "class C{Buffer<double> n;public init(Buffer<double> x){n=x;}}int main(){}",
+            "inadmissible_buffer_element",
+            "class C{Buffer<string> n;public init(Buffer<string> x){n=x;}}int main(){}",
         ),
         (
             "buffer_extract",

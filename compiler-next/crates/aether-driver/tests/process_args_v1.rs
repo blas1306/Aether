@@ -358,7 +358,8 @@ int main(){try{Array<string> values=capture();fail();return int(length(values));
             matches!(instruction.value, Rvalue::Call { callee, .. } if callee == capture).then(
                 || match instruction.destination.base {
                     aether_middle::PlaceBase::Local(local) => local,
-                    aether_middle::PlaceBase::Dereference { .. } => {
+                    aether_middle::PlaceBase::Dereference { .. }
+                    | aether_middle::PlaceBase::ClassField { .. } => {
                         panic!("call result is a local")
                     }
                 },

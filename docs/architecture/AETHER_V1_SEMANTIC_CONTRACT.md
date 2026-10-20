@@ -2327,7 +2327,10 @@ final: no inheritance syntax exists. Top-level visibility is internal by default
 `public class` exports the type. Members default to private and may use `public`
 or `private`. Fields admit supported primitive scalars, transparent aliases,
 finite concrete Copy/no-drop structs/enums with available layout, and private
-`Buffer<int>`. Owning class edges, class-containing aggregates/containers,
+`Buffer<E>` when `E` satisfies the central ordinary Buffer-element admission
+rule. Such fields remain private. Admitted `E` is concrete, finite-layout,
+Copy/no-drop and contains no reference, view or owning substructure; no nominal
+type or package allowlist participates. Owning class edges, class-containing aggregates/containers,
 refs/views, generic class applications and other owning fields are rejected.
 Transparent aliases preserve ClassId. Public class APIs cannot expose internal
 class types.
@@ -2365,6 +2368,16 @@ of retaining. Read calls on temporary objects are admitted; mut calls require
 an addressable writable receiver. Field reads/writes on local handles obey
 visibility; temporary field access, owning-field extraction and all interior
 references/views are rejected.
+
+A method may immediately index an initialized private `Buffer<E>` field and
+read or write Copy elements (including nested Copy field projections). The
+operation is an ephemeral class-field storage place rooted in receiver +
+FieldId; it never performs an owning field read or creates a Buffer owner token.
+Element writes require a `mut` receiver. Borrowing the field or an element,
+forming View/ViewMut, moving/returning the descriptor, field-to-field transfer
+and partial moves remain rejected. The descriptor stays inline as
+`{ pointer, usize }`; indexing loads its data only for the ordinary bounds check
+and element-address calculation.
 
 An owning class lvalue used by value performs **Alias**: evaluate once and retain
 once while preserving the source obligation. This applies to local bindings,

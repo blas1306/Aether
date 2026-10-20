@@ -4938,6 +4938,24 @@ fn emit_place_pointer(
             (llvm_operand(reference), pointee)
         }
         SsaPlaceBase::Value(_) => unreachable!("descriptor value place requires index projection"),
+        SsaPlaceBase::ClassField {
+            receiver,
+            field,
+            field_type,
+            ..
+        } => {
+            let info = types.class_field(*field).expect("verified class field");
+            debug_assert_eq!(info.ty, *field_type);
+            let pointer = format!("%place{result}_class_field");
+            writeln!(
+                output,
+                "  {pointer} = getelementptr i8, ptr {}, i64 {}",
+                llvm_operand(receiver),
+                info.offset
+            )
+            .unwrap();
+            return pointer;
+        }
     };
     if place.projections.is_empty() {
         return base;
@@ -4965,6 +4983,7 @@ fn emit_place_pointer(
     pointer
 }
 
+#[allow(clippy::too_many_lines)]
 fn emit_place_value(
     output: &mut String,
     function: &SsaFunction,
@@ -4973,6 +4992,33 @@ fn emit_place_value(
     types: &TypeArena,
     structs: &[StructInfo],
 ) -> (String, TypeId) {
+    if let SsaPlaceBase::ClassField {
+        receiver,
+        field,
+        field_type,
+        ..
+    } = &place.base
+    {
+        debug_assert!(place.projections.is_empty());
+        let info = types.class_field(*field).expect("verified class field");
+        debug_assert_eq!(info.ty, *field_type);
+        let pointer = format!("%place_value{result}_class_field");
+        let value = format!("%place_value{result}");
+        writeln!(
+            output,
+            "  {pointer} = getelementptr i8, ptr {}, i64 {}",
+            llvm_operand(receiver),
+            info.offset
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "  {value} = load {}, ptr {pointer}",
+            llvm_type(types, *field_type)
+        )
+        .unwrap();
+        return (value, *field_type);
+    }
     // A promoted descriptor can itself contain another descriptor. Resolve its
     // indexed address before reading metadata, preserving each level's index base.
     if matches!(place.base, SsaPlaceBase::Value(_))
@@ -5053,6 +5099,9 @@ fn emit_place_value(
             .unwrap();
             return (value, ty);
         }
+        SsaPlaceBase::ClassField { .. } => {
+            unreachable!("class-field value place handled before projection lowering")
+        }
     };
     for (index, projection) in place.projections.iter().enumerate() {
         let SsaPlaceProjection::Field(field_id) = projection else {
@@ -5120,6 +5169,7 @@ fn ssa_backend_place_type(
                 .expect("verified place reference")
                 .0
         }
+        SsaPlaceBase::ClassField { field_type, .. } => *field_type,
     };
     for projection in &place.projections {
         match projection {

@@ -2002,6 +2002,16 @@ impl TypeArena {
             && !self.contains_owning(id)
     }
 
+    /// The single class-storage gate for a Buffer owner. Buffer fields remain
+    /// private; their element admission is exactly the ordinary Buffer rule.
+    #[must_use]
+    pub fn is_admitted_class_buffer_field(&self, id: TypeId, public: bool) -> bool {
+        !public
+            && self
+                .buffer_element(id)
+                .is_some_and(|element| self.is_admitted_buffer_element(element))
+    }
+
     /// Positive storage proof using concrete facts or declaration-owned
     /// symbolic guarantees. Array initialization does not relocate existing
     /// elements; List growth does, and therefore needs an additional proof.

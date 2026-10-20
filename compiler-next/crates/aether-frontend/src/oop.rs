@@ -963,10 +963,10 @@ pub fn verify_class_metadata(
             {
                 return Err("invalid class field identity".into());
             }
-            let narrow_buffer = types.buffer_element(f.ty) == Some(TypeId::INT64) && !f.public;
+            let admitted_buffer = types.is_admitted_class_buffer_field(f.ty, f.public);
             let narrow_class_owner =
                 types.class_id(f.ty).is_some_and(|owner| owner != c.id) && !f.public;
-            if !narrow_buffer
+            if !admitted_buffer
                 && !narrow_class_owner
                 && (!types.guarantees_copy(f.ty)
                     || types.contains_owning(f.ty)

@@ -113,6 +113,14 @@ pub enum SsaPlaceBase {
     /// Descriptor held directly in SSA; index projection turns it into an
     /// address into contiguous storage.
     Value(SsaOperand),
+    /// Inline class-field slot rooted at a non-owning receiver value.
+    ClassField {
+        receiver: SsaOperand,
+        field: FieldId,
+        field_type: TypeId,
+        mutable: bool,
+        initialized: bool,
+    },
     Dereference {
         reference: SsaOperand,
         mutable: bool,
@@ -931,7 +939,7 @@ fn rename_block(
                         .iter()
                         .any(|projection| matches!(projection, PlaceProjection::Index { .. }))
             }
-            PlaceBase::Dereference { .. } => true,
+            PlaceBase::Dereference { .. } | PlaceBase::ClassField { .. } => true,
         };
         if memory_destination {
             let value_ty = rvalue_result_type(
@@ -969,7 +977,7 @@ fn rename_block(
                 unwind: None,
                 binding: match instruction.destination.base {
                     PlaceBase::Local(local) => Some(local),
-                    PlaceBase::Dereference { .. } => None,
+                    PlaceBase::Dereference { .. } | PlaceBase::ClassField { .. } => None,
                 },
             });
             continue;
@@ -1769,6 +1777,19 @@ fn rename_place(place: &Place, stacks: &[Vec<ValueId>], mir: &MirFunction) -> Ss
                 reference: rename_operand(reference, stacks),
                 mutable: *mutable,
             },
+            PlaceBase::ClassField {
+                receiver,
+                field,
+                field_type,
+                mutable,
+                initialized,
+            } => SsaPlaceBase::ClassField {
+                receiver: rename_operand(receiver, stacks),
+                field: *field,
+                field_type: *field_type,
+                mutable: *mutable,
+                initialized: *initialized,
+            },
         },
         projections: place
             .projections
@@ -2342,6 +2363,7 @@ fn place_locals(function: &MirFunction, place: &Place) -> Vec<LocalId> {
         PlaceBase::Local(local) if !function.locals[local.0 as usize].address_taken => vec![*local],
         PlaceBase::Local(_) => Vec::new(),
         PlaceBase::Dereference { reference, .. } => operand_local(reference).into_iter().collect(),
+        PlaceBase::ClassField { receiver, .. } => operand_local(receiver).into_iter().collect(),
     };
     locals.extend(place.projections.iter().flat_map(|projection| {
         match projection {
@@ -2958,6 +2980,7 @@ fn verify_ssa_function(
             verify_op(
                 &instruction.op,
                 instruction.ty,
+                function.function_id,
                 signatures,
                 structs,
                 enums,
@@ -4466,6 +4489,7 @@ fn verify_ssa_finally_regions(
 fn verify_op(
     op: &SsaOp,
     result: TypeId,
+    function_id: aether_frontend::FunctionId,
     signatures: &[FunctionInstanceInfo],
     structs: &[StructInfo],
     enums: &[EnumInfo],
@@ -4473,8 +4497,31 @@ fn verify_op(
     memory_locals: &[SsaMemoryLocal],
     operand_ty: &impl Fn(&SsaOperand) -> Result<TypeId, String>,
 ) -> Result<(), String> {
+    let verify_class_access = |place: &SsaPlace| -> Result<(), String> {
+        if let SsaPlaceBase::ClassField { field, .. } = place.base {
+            let info = types
+                .class_field(field)
+                .ok_or("SSA class-field place has unknown FieldId")?;
+            if types.class_method(function_id).map(|(class, _)| class) != Some(info.class) {
+                return Err("SSA class-field storage place is outside its declaring class".into());
+            }
+        }
+        Ok(())
+    };
     let writable = |place: &SsaPlace| -> Result<bool, String> {
-        if matches!(place.base, SsaPlaceBase::Dereference { mutable: false, .. }) {
+        if matches!(place.base, SsaPlaceBase::ClassField { .. })
+            && !matches!(
+                place.projections.first(),
+                Some(SsaPlaceProjection::Index { .. })
+            )
+        {
+            return Err("SSA class-field storage place lacks immediate index".into());
+        }
+        if matches!(
+            place.base,
+            SsaPlaceBase::Dereference { mutable: false, .. }
+                | SsaPlaceBase::ClassField { mutable: false, .. }
+        ) {
             return Ok(false);
         }
         for (position, projection) in place.projections.iter().enumerate() {
@@ -4655,6 +4702,15 @@ fn verify_op(
             }
         }
         SsaOp::Load { place } => {
+            verify_class_access(place)?;
+            if matches!(place.base, SsaPlaceBase::ClassField { .. })
+                && !matches!(
+                    place.projections.first(),
+                    Some(SsaPlaceProjection::Index { .. })
+                )
+            {
+                return Err("SSA class-field load lacks immediate index".into());
+            }
             if ssa_place_type(place, memory_locals, structs, types, operand_ty)? != result
                 || (!types.guarantees_copy(result) && result != TypeId::STRING)
             {
@@ -4662,6 +4718,7 @@ fn verify_op(
             }
         }
         SsaOp::Store { place, value } => {
+            verify_class_access(place)?;
             if !writable(place)? {
                 return Err("SSA store through shared view/reference".into());
             }
@@ -4685,6 +4742,7 @@ fn verify_op(
                     .find(|memory| memory.local == *local)
                     .map(|memory| memory.ty),
                 SsaPlaceBase::Dereference { .. } => None,
+                SsaPlaceBase::ClassField { field_type, .. } => Some(*field_type),
             };
             if base_ty
                 .and_then(|ty| types.borrowed_view_info(ty))
@@ -4703,6 +4761,10 @@ fn verify_op(
             call,
             format,
         } => {
+            verify_class_access(place)?;
+            if matches!(place.base, SsaPlaceBase::ClassField { .. }) {
+                return Err("SSA class-field storage cannot be borrowed".into());
+            }
             let pointee = ssa_place_type(place, memory_locals, structs, types, operand_ty)?;
             if types.reference_info(result) != Some((pointee, *mutable)) {
                 return Err("SSA borrow result type mismatch".into());
@@ -5877,6 +5939,38 @@ fn ssa_place_type(
             pointee
         }
         SsaPlaceBase::Value(value) => operand_ty(value)?,
+        SsaPlaceBase::ClassField {
+            receiver,
+            field,
+            field_type,
+            mutable,
+            initialized,
+        } => {
+            let receiver_ty = operand_ty(receiver)?;
+            let receiver_class = types
+                .object_class(receiver_ty)
+                .ok_or("SSA class-field place receiver is not an object")?;
+            let info = types
+                .class_field(*field)
+                .ok_or("SSA class-field place has unknown FieldId")?;
+            let expected_mutable = !matches!(
+                types.get(receiver_ty),
+                Some(TypeData::ClassToken {
+                    kind: aether_frontend::ClassTokenKind::Receiver { mutable: false, .. },
+                    ..
+                })
+            );
+            if info.ty != *field_type
+                || info.public
+                || !types.is_admitted_class_buffer_field(info.ty, info.public)
+                || (receiver_class != info.class && !types.is_subclass(receiver_class, info.class))
+                || *mutable != expected_mutable
+                || !*initialized
+            {
+                return Err("SSA class-field storage place contract invalid".into());
+            }
+            *field_type
+        }
     };
     for projection in &place.projections {
         match projection {
@@ -6166,6 +6260,7 @@ fn place_operands(place: &SsaPlace) -> Vec<&SsaOperand> {
         SsaPlaceBase::Dereference { reference, .. } | SsaPlaceBase::Value(reference) => {
             vec![reference]
         }
+        SsaPlaceBase::ClassField { receiver, .. } => vec![receiver],
     };
     operands.extend(place.projections.iter().flat_map(|projection| {
         match projection {
