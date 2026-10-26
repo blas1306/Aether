@@ -10,6 +10,8 @@ use aether_middle::{SsaFunction, SsaOperand};
 
 use crate::bootstrap_symbol;
 
+const NUMERIC_PARSE_RUNTIME: &str = include_str!("numeric_parse_runtime.inc");
+
 pub(super) fn invalid_utf8_exception(
     types: &TypeArena,
     modules: &[ModuleInfo],
@@ -686,7 +688,7 @@ overflow:
         );
     }
     if parse_double {
-        output.push_str(include_str!("numeric_parse_runtime.inc"));
+        output.push_str(NUMERIC_PARSE_RUNTIME);
         output.push_str(
             r"
 define internal { i32, double } @aether_text_parse_double(ptr %value) nounwind {
@@ -873,5 +875,25 @@ pub(super) fn emit_op(
             writeln!(output, "  %text_parse_double_enum_{result} = insertvalue {result_ty} zeroinitializer, i32 %text_parse_double_tag_{result}, 0").unwrap();
             writeln!(output, "  %v{result} = insertvalue {result_ty} %text_parse_double_enum_{result}, double %text_parse_double_payload_{result}, 1, 0").unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::NUMERIC_PARSE_RUNTIME;
+
+    #[test]
+    fn numeric_runtime_uses_the_clang_21_intrinsic_abi() {
+        assert!(!NUMERIC_PARSE_RUNTIME.contains("nocreateundeforpoison"));
+        assert!(
+            NUMERIC_PARSE_RUNTIME
+                .contains("declare void @llvm.lifetime.start.p0(i64 immarg, ptr captures(none))")
+        );
+        assert!(
+            NUMERIC_PARSE_RUNTIME
+                .contains("declare void @llvm.lifetime.end.p0(i64 immarg, ptr captures(none))")
+        );
+        assert!(!NUMERIC_PARSE_RUNTIME.contains("@llvm.lifetime.start.p0(ptr"));
+        assert!(!NUMERIC_PARSE_RUNTIME.contains("@llvm.lifetime.end.p0(ptr"));
     }
 }

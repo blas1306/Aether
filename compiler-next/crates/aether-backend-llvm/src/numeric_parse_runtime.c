@@ -2,10 +2,11 @@
  * Aether NUMERIC-PARSING-V1 private runtime.
  *
  * This source is the auditable authority for numeric_parse_runtime.inc.  It is
- * compiled with clang -O1 -S -emit-llvm -fno-math-errno and stripped of module
- * headers, duplicate memcpy declarations and metadata before embedding.  The implementation
- * uses only integer arithmetic, so decimal conversion is independent of the
- * host locale and floating-point rounding mode.
+ * generated reproducibly with scripts/generate_numeric_parse_runtime.py using
+ * Clang 21.x. The generator targets x86_64-pc-linux-gnu and strips module
+ * headers, the shared memcpy declaration and metadata before embedding. The
+ * implementation uses only integer arithmetic, so decimal conversion is
+ * independent of the host locale and floating-point rounding mode.
  */
 typedef unsigned char u8;
 typedef unsigned int u32;
