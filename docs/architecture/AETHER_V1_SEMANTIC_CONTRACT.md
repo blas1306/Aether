@@ -2675,6 +2675,34 @@ are admitted. Regex, views, syntactic slicing/indexing, public iteration/Bytes,
 formatting, normalization/graphemes, case/locale operations, parsing, hashing
 and public builders remain outside the contract.
 
+## OWNING-STRUCT-FIELD-REPLACEMENT-V1 — owning slot replacement
+
+Status: **IMPLEMENTED, QUALIFICATION PARTIAL** in `compiler-next`; normative
+scope remains [OWNING-STRUCT-FIELD-REPLACEMENT-ARCH-1](OWNING_STRUCT_FIELD_REPLACEMENT_ARCH_1.md).
+
+Assignment to an initialized direct or nested `Field` slot of concrete,
+source-storable, Relocatable, non-Copy, drop-needing type is a total slot
+replacement. The same operation is admitted through `ref mut`, including its
+complete pointee. It evaluates and owns the RHS first, then atomically captures
+the old value, publishes the new value and drops the old value exactly once.
+The root aggregate remains initialized and retains its root drop flag; sibling
+owners are untouched. RHS unwind occurs before this commit and therefore leaves
+the old slot intact.
+
+HIR, MIR and SSA retain an explicit `ReplaceOwned` operation. Ordinary owning
+Store, projected Move/Drop, Index and enum-payload replacement remain invalid.
+LLVM lowers only verified operations with the existing concrete layout and
+typed drop glue in strict load-old, store-new, drop-old order. This operation
+does not imply concurrency atomics, boxing, allocation, runtime alias checks or
+`noalias` for `ref mut`.
+
+The current implementation rejects live derived borrows of known local roots
+and conservatively rejects a dereference replacement when another owning
+reference parameter may alias it. Full non-lexical proof that an arbitrary
+unknown-provenance reference ceased to be live before commit remains an open
+qualification item; until it and the full architecture matrix are complete,
+the capability is not declared CLOSED.
+
 ## CORE-V1 — closed prelude functions
 
 The admitted Core profile-v1 manifest contains only `print`, `println`,

@@ -224,6 +224,11 @@ pub enum SsaOp {
         destination: SsaPlace,
         value: SsaOperand,
     },
+    ReplaceOwned {
+        destination: SsaPlace,
+        value: SsaOperand,
+        value_type: TypeId,
+    },
     Drop {
         owner: SsaPlace,
     },
@@ -1226,6 +1231,15 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
         Rvalue::ReplaceString { destination, value } => SsaOp::ReplaceString {
             destination: rename_place(destination, stacks, mir),
             value: rename_operand(value, stacks),
+        },
+        Rvalue::ReplaceOwned {
+            destination,
+            value,
+            value_type,
+        } => SsaOp::ReplaceOwned {
+            destination: rename_place(destination, stacks, mir),
+            value: rename_operand(value, stacks),
+            value_type: *value_type,
         },
         Rvalue::Drop { owner } => SsaOp::Drop {
             owner: rename_place(owner, stacks, mir),
@@ -2246,6 +2260,12 @@ pub(crate) fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<Local
             .into_iter()
             .chain(operand_local(value))
             .collect(),
+        Rvalue::ReplaceOwned {
+            destination, value, ..
+        } => place_locals(function, destination)
+            .into_iter()
+            .chain(operand_local(value))
+            .collect(),
         Rvalue::BufferAlloc {
             length, initial, ..
         }
@@ -2986,6 +3006,7 @@ fn verify_ssa_function(
                 enums,
                 types,
                 &function.memory_locals,
+                &function.parameters,
                 &operand_ty,
             )
             .map_err(&fail)?;
@@ -3250,6 +3271,11 @@ fn verify_ssa_const_bindings(
                     if ssa_const_memory_root(function, destination).is_some() =>
                 {
                     return Err(fail("SSA replaces const inline string storage".into()));
+                }
+                SsaOp::ReplaceOwned { destination, .. }
+                    if ssa_const_memory_root(function, destination).is_some() =>
+                {
+                    return Err(fail("SSA replaces const inline owning storage".into()));
                 }
                 _ => {}
             }
@@ -3933,6 +3959,9 @@ fn verify_ssa_collection_loops(
                         | SsaOp::ReplaceString {
                             destination: place, ..
                         }
+                        | SsaOp::ReplaceOwned {
+                            destination: place, ..
+                        }
                         | SsaOp::Move { source: place }
                         | SsaOp::ListSetLength { source: place, .. }
                         | SsaOp::ListPush { source: place, .. }
@@ -4074,6 +4103,7 @@ fn owner_consumptions(function: &SsaFunction, owner: ValueId, op: &SsaOp) -> usi
         | SsaOp::NullableInject { payload: value, .. }
         | SsaOp::CollectionOwnerCapture { value, .. }
         | SsaOp::ReplaceString { value, .. }
+        | SsaOp::ReplaceOwned { value, .. }
         | SsaOp::Store { value, .. }
         | SsaOp::InsertField {
             aggregate: value, ..
@@ -4544,6 +4574,7 @@ fn verify_op(
     enums: &[EnumInfo],
     types: &TypeArena,
     memory_locals: &[SsaMemoryLocal],
+    parameters: &[SsaParameter],
     operand_ty: &impl Fn(&SsaOperand) -> Result<TypeId, String>,
 ) -> Result<(), String> {
     let verify_class_access = |place: &SsaPlace| -> Result<(), String> {
@@ -4782,8 +4813,20 @@ fn verify_op(
             let value_ty = operand_ty(value)?;
             if place_ty != value_ty
                 || (result != value_ty && !(types.needs_drop(value_ty) && result == TypeId::BOOL))
+                || (types.needs_drop(value_ty)
+                    && matches!(
+                        place.base,
+                        SsaPlaceBase::MemoryLocal(_) | SsaPlaceBase::Value(_)
+                    )
+                    && !place.projections.is_empty()
+                    && place
+                        .projections
+                        .iter()
+                        .all(|projection| matches!(projection, SsaPlaceProjection::Field(_))))
             {
-                return Err("SSA memory store type mismatch".into());
+                return Err(format!(
+                    "SSA memory store type/ownership contract invalid: {place:?}, value type {value_ty:?}"
+                ));
             }
             if matches!(
                 &place.base,
@@ -4913,6 +4956,47 @@ fn verify_op(
                 || !writable(destination)?
             {
                 return Err("SSA string replacement contract invalid".into());
+            }
+        }
+        SsaOp::ReplaceOwned {
+            destination,
+            value,
+            value_type,
+        } => {
+            let destination_ty =
+                ssa_place_type(destination, memory_locals, structs, types, operand_ty)?;
+            let admitted_base = matches!(
+                destination.base,
+                SsaPlaceBase::Dereference { mutable: true, .. }
+            ) || matches!(destination.base, SsaPlaceBase::MemoryLocal(_))
+                && !destination.projections.is_empty();
+            let aliases_unknown_parameter = match &destination.base {
+                SsaPlaceBase::Dereference { reference, .. } => parameters.iter().any(|parameter| {
+                    !matches!(reference, SsaOperand::Value(value) if *value == parameter.value)
+                        && types
+                            .reference_info(parameter.ty)
+                            .is_some_and(|(pointee, _)| {
+                                pointee == *value_type || types.contains_owning(pointee)
+                            })
+                }),
+                _ => false,
+            };
+            if result != TypeId::BOOL
+                || destination_ty != *value_type
+                || operand_ty(value)? != *value_type
+                || types.is_copy(*value_type)
+                || !types.is_storable(*value_type)
+                || !types.is_relocatable(*value_type)
+                || !types.needs_drop(*value_type)
+                || !admitted_base
+                || aliases_unknown_parameter
+                || destination
+                    .projections
+                    .iter()
+                    .any(|projection| matches!(projection, SsaPlaceProjection::Index { .. }))
+                || !writable(destination)?
+            {
+                return Err("SSA owning replacement contract invalid".into());
             }
         }
         SsaOp::Drop { owner } => {
@@ -6218,6 +6302,12 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         | SsaOp::ListLength { source: place }
         | SsaOp::ListCapacity { source: place } => place_operands(place),
         SsaOp::ReplaceString { destination, value } => place_operands(destination)
+            .into_iter()
+            .chain(std::iter::once(value))
+            .collect(),
+        SsaOp::ReplaceOwned {
+            destination, value, ..
+        } => place_operands(destination)
             .into_iter()
             .chain(std::iter::once(value))
             .collect(),

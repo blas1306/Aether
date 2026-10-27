@@ -1936,6 +1936,53 @@ fn emit_function(
                     )
                     .unwrap();
                 }
+                SsaOp::ReplaceOwned {
+                    destination,
+                    value,
+                    value_type,
+                } => {
+                    writeln!(
+                        output,
+                        "  ; owning slot replacement: capture, publish, drop"
+                    )
+                    .unwrap();
+                    let pointer = emit_place_pointer(
+                        output,
+                        function,
+                        destination,
+                        instruction.result.0,
+                        types,
+                        structs,
+                    );
+                    let llvm_ty = llvm_type(types, *value_type);
+                    writeln!(
+                        output,
+                        "  %owned_old{} = load {llvm_ty}, ptr {pointer}",
+                        instruction.result.0
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  store {llvm_ty} {}, ptr {pointer}",
+                        llvm_operand(value)
+                    )
+                    .unwrap();
+                    emit_drop_value(
+                        output,
+                        &format!("%owned_old{}", instruction.result.0),
+                        *value_type,
+                        "replace_owned",
+                        types,
+                        structs,
+                        enums,
+                    );
+                    writeln!(
+                        output,
+                        "  %v{} = select i1 true, i1 true, i1 true",
+                        instruction.result.0
+                    )
+                    .unwrap();
+                }
                 SsaOp::Borrow { place, .. } => {
                     let direct_class_handle =
                         types

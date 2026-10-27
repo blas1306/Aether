@@ -941,6 +941,12 @@ pub enum HirStmtKind {
         place: HirPlace,
         value: HirExpr,
     },
+    /// Total replacement of one initialized owning struct slot.
+    ReplaceOwned {
+        destination: HirPlace,
+        value: HirExpr,
+        value_type: TypeId,
+    },
     SliceAssign {
         target: HirPlace,
         subscript: HirSubscript,
@@ -5271,6 +5277,19 @@ impl Monomorphizer<'_> {
                             place: self.substitute_place(place, substitution)?,
                             value: self.substitute_expr(value, substitution)?,
                         },
+                        HirStmtKind::ReplaceOwned {
+                            destination,
+                            value,
+                            value_type,
+                        } => HirStmtKind::ReplaceOwned {
+                            destination: self.substitute_place(destination, substitution)?,
+                            value: self.substitute_expr(value, substitution)?,
+                            value_type: self.substitute_type(
+                                *value_type,
+                                substitution,
+                                statement.span,
+                            )?,
+                        },
                         HirStmtKind::SliceAssign {
                             target,
                             subscript,
@@ -7208,6 +7227,40 @@ impl OwnershipAnalysis<'_> {
                         self.matrix_shapes[local.0 as usize] = self.known_matrix_shape(value);
                     }
                 }
+                HirStmtKind::ReplaceOwned {
+                    destination, value, ..
+                } => {
+                    self.expr(value)?;
+                    self.place(destination, statement.span)?;
+                    if let Some(owner) = self.owner_of_place(destination)
+                        && self.is_borrowed(owner)
+                    {
+                        return Err(self.error(
+                            "E0292",
+                            "cannot replace an owning field while a derived reference/view remains live",
+                            statement.span,
+                        ));
+                    }
+                    if let HirPlaceBase::Dereference { reference, .. } = &destination.base
+                        && let HirExprKind::Local(destination_reference) = reference.kind
+                        && self.locals.iter().any(|local| {
+                            local.parameter
+                                && local.id != destination_reference
+                                && self.types.reference_info(local.ty).is_some_and(
+                                    |(pointee, _)| {
+                                        pointee == destination.ty
+                                            || self.types.contains_owning(pointee)
+                                    },
+                                )
+                        })
+                    {
+                        return Err(self.error(
+                            "E0292",
+                            "owning replacement through ref mut may alias another live reference parameter",
+                            statement.span,
+                        ));
+                    }
+                }
                 HirStmtKind::SliceAssign { target, value, .. } => {
                     // RHS aliases are legal: the operation owns a full snapshot
                     // transaction. Existing incompatible mutable/shared borrows of
@@ -8014,6 +8067,7 @@ impl OwnershipAnalysis<'_> {
                     .iter()
                     .map(|argument| (&argument.initializer, Some(argument.binding)))
                     .collect::<Vec<_>>(),
+                self.types.contains_owning(expr.ty),
             ),
             HirExprKind::IndirectCall { callee, args, .. } => {
                 self.expr(callee)?;
@@ -8022,6 +8076,7 @@ impl OwnershipAnalysis<'_> {
                         .iter()
                         .map(|argument| (argument, None))
                         .collect::<Vec<_>>(),
+                    self.types.contains_owning(expr.ty),
                 )
             }
             HirExprKind::StructInit { fields, .. } => {
@@ -8229,6 +8284,7 @@ impl OwnershipAnalysis<'_> {
     fn call_arguments(
         &mut self,
         args: &[(&HirExpr, Option<LocalId>)],
+        may_replace_owning_storage: bool,
     ) -> Result<(), Vec<Diagnostic>> {
         if let Some(argument) = args
             .iter()
@@ -8259,6 +8315,26 @@ impl OwnershipAnalysis<'_> {
                     self.state[binding.0 as usize] = OwnerState::Owned;
                     self.active.push(*binding);
                 }
+            }
+            if self
+                .types
+                .reference_info(argument.ty)
+                .is_some_and(|(_, mutable)| mutable)
+                && let Some(owner) = self.derived_owner(argument)
+                && self
+                    .types
+                    .reference_info(argument.ty)
+                    .is_some_and(|(pointee, _)| {
+                        self.types.contains_owning(pointee) && !self.types.may_contain_list(pointee)
+                    })
+                && may_replace_owning_storage
+                && self.is_borrowed(owner)
+            {
+                return Err(self.error(
+                    "E0292",
+                    "writable owning reference argument may replace storage used by an earlier operand",
+                    argument.span,
+                ));
             }
             if self
                 .types
@@ -9675,11 +9751,22 @@ impl Analyzer<'_> {
                         {
                             self.locals[local.0 as usize].address_taken = true;
                         }
-                        if !self.types.guarantees_copy(place.ty)
+                        let owning_projection = !self.types.guarantees_copy(place.ty)
                             && place.ty != TypeId::STRING
                             && (!place.projections.is_empty()
-                                || matches!(place.base, HirPlaceBase::Dereference { .. }))
-                        {
+                                || matches!(place.base, HirPlaceBase::Dereference { .. }));
+                        let replace_owned = owning_projection
+                            && self.types.guarantees_storable(place.ty)
+                            && self.types.guarantees_relocatable(place.ty)
+                            && self.types.needs_drop(place.ty)
+                            && place.projections.iter().all(|projection| {
+                                matches!(projection, HirPlaceProjection::Field(_))
+                            })
+                            && !matches!(place.base, HirPlaceBase::ClassField { .. });
+                        if replace_owned && let HirPlaceBase::Local(local) = place.base {
+                            self.locals[local.0 as usize].address_taken = true;
+                        }
+                        if owning_projection && !replace_owned {
                             return Err(vec![Diagnostic::new(
                                 "E0297",
                                 Phase::Semantic,
@@ -9734,7 +9821,15 @@ impl Analyzer<'_> {
                             };
                             self.null_states.insert(*local, state);
                         }
-                        HirStmtKind::Assign { place, value }
+                        if replace_owned {
+                            HirStmtKind::ReplaceOwned {
+                                value_type: place.ty,
+                                destination: place,
+                                value,
+                            }
+                        } else {
+                            HirStmtKind::Assign { place, value }
+                        }
                     }
                 }
                 AstStmtKind::Expr(expression) => self.effect_statement(expression)?,
@@ -17263,6 +17358,35 @@ fn verify_block(
                     ));
                 }
             }
+            HirStmtKind::ReplaceOwned {
+                destination,
+                value,
+                value_type,
+            } => {
+                verify_expr(value, f, sigs, structs, enums, types, fail)?;
+                verify_place(destination, f, sigs, structs, enums, types, fail)?;
+                let admitted_base = matches!(
+                    destination.base,
+                    HirPlaceBase::Dereference { mutable: true, .. }
+                ) || matches!(destination.base, HirPlaceBase::Local(_))
+                    && !destination.projections.is_empty();
+                if destination.ty != *value_type
+                    || value.ty != *value_type
+                    || types.guarantees_copy(*value_type)
+                    || !types.guarantees_storable(*value_type)
+                    || !types.guarantees_relocatable(*value_type)
+                    || !types.needs_drop(*value_type)
+                    || !admitted_base
+                    || !destination
+                        .projections
+                        .iter()
+                        .all(|projection| matches!(projection, HirPlaceProjection::Field(_)))
+                    || !hir_place_writable(destination, f, types, structs, enums)
+                    || hir_const_inline_root(destination, f).is_some()
+                {
+                    return Err(fail("HIR owning slot replacement contract invalid".into()));
+                }
+            }
             HirStmtKind::SliceAssign {
                 target,
                 subscript,
@@ -22445,5 +22569,50 @@ mod vertical33_tests {
         };
         initializer.ty = TypeId::FLOAT64;
         assert!(verify_hir(&payload_mismatch).is_err());
+    }
+
+    #[test]
+    fn owning_struct_field_replacement_hir_corruption_fails_closed() {
+        let hir = analyze(
+            parse_source(&SourceFile::new(
+                "replace-owned-corrupt.ae",
+                "struct S{Buffer<int> a;}int main(){S s=S(Buffer<int>(1,1));Buffer<int> n=Buffer<int>(1,2);s.a=n;return 0;}",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        verify_hir(&hir).unwrap();
+
+        let mut wrong_type = hir.clone();
+        let replacement = wrong_type
+            .functions
+            .iter_mut()
+            .flat_map(|function| &mut function.body.statements)
+            .find(|statement| matches!(statement.kind, HirStmtKind::ReplaceOwned { .. }))
+            .expect("replacement statement");
+        let HirStmtKind::ReplaceOwned { value_type, .. } = &mut replacement.kind else {
+            unreachable!()
+        };
+        *value_type = TypeId::BOOL;
+        assert!(verify_hir(&wrong_type).is_err());
+
+        let mut ordinary_assign = hir;
+        let replacement = ordinary_assign
+            .functions
+            .iter_mut()
+            .flat_map(|function| &mut function.body.statements)
+            .find(|statement| matches!(statement.kind, HirStmtKind::ReplaceOwned { .. }))
+            .expect("replacement statement");
+        let HirStmtKind::ReplaceOwned {
+            destination, value, ..
+        } = replacement.kind.clone()
+        else {
+            unreachable!()
+        };
+        replacement.kind = HirStmtKind::Assign {
+            place: destination,
+            value,
+        };
+        assert!(verify_hir(&ordinary_assign).is_err());
     }
 }

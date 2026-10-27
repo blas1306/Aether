@@ -446,6 +446,12 @@ pub enum Rvalue {
         destination: Place,
         value: Operand,
     },
+    /// Atomic semantic replacement: capture old, publish new, drop old.
+    ReplaceOwned {
+        destination: Place,
+        value: Operand,
+        value_type: TypeId,
+    },
     /// Destroy one currently owned value. The boolean result is an internal
     /// sequencing token used by the assignment-shaped bootstrap MIR.
     Drop {
@@ -1089,6 +1095,7 @@ fn conditional_drop_roots(block: &HirBlock) -> BTreeSet<LocalId> {
                 | HirStmtKind::Nop
                 | HirStmtKind::Local { .. }
                 | HirStmtKind::Assign { .. }
+                | HirStmtKind::ReplaceOwned { .. }
                 | HirStmtKind::ListPush { .. }
                 | HirStmtKind::ListReserve { .. }
                 | HirStmtKind::MatrixAdd { .. }
@@ -1666,6 +1673,27 @@ impl Builder<'_> {
                             self.set_drop_flag(local, true, statement.span);
                         }
                     }
+                }
+                HirStmtKind::ReplaceOwned {
+                    destination,
+                    value,
+                    value_type,
+                } => {
+                    let value = self.lower_expr(value);
+                    let destination = self.lower_place(destination);
+                    let token = self.temporary(TypeId::BOOL);
+                    self.assign(
+                        Place {
+                            base: PlaceBase::Local(token),
+                            projections: vec![],
+                        },
+                        Rvalue::ReplaceOwned {
+                            destination,
+                            value,
+                            value_type: *value_type,
+                        },
+                        statement.span,
+                    );
                 }
                 HirStmtKind::SliceAssign {
                     target,
@@ -5929,6 +5957,15 @@ fn verify_mir_function(
             }
             let destination_ty =
                 place_type(function, &instruction.destination, structs, types).map_err(&fail)?;
+            if types.needs_drop(destination_ty)
+                && matches!(instruction.destination.base, PlaceBase::Dereference { .. })
+                && matches!(instruction.value, Rvalue::Move { .. })
+            {
+                return Err(fail(
+                    "MIR owning dereference store must use a verified replacement transaction"
+                        .into(),
+                ));
+            }
             validate_rvalue(
                 function,
                 signatures,
@@ -6256,6 +6293,11 @@ fn verify_const_bindings(
                     if mir_const_inline_root(function, destination).is_some() =>
                 {
                     return Err(fail("MIR replaces const inline string storage".into()));
+                }
+                Rvalue::ReplaceOwned { destination, .. }
+                    if mir_const_inline_root(function, destination).is_some() =>
+                {
+                    return Err(fail("MIR replaces const inline owning storage".into()));
                 }
                 _ => {}
             }
@@ -7430,6 +7472,22 @@ fn verify_ownership(
                         fail,
                     )?;
                 }
+                Rvalue::ReplaceOwned {
+                    destination, value, ..
+                } => {
+                    require_place_owner(function, types, &state, destination, fail)?;
+                    let local = operand_local_id(value).ok_or_else(|| {
+                        fail("MIR owning replacement value is not materialized".into())
+                    })?;
+                    consume_owner(
+                        function,
+                        types,
+                        &mut state,
+                        local,
+                        "owning replacement",
+                        fail,
+                    )?;
+                }
                 Rvalue::Drop { owner } => {
                     let owner = place_root_local(owner)
                         .ok_or_else(|| fail("MIR Drop owner has no local".into()))?;
@@ -8267,6 +8325,45 @@ fn validate_rvalue(
                 || !mir_place_writable(function, place, structs, types)?
             {
                 return Err("MIR string replacement contract invalid".into());
+            }
+        }
+        Rvalue::ReplaceOwned {
+            destination: place,
+            value,
+            value_type,
+        } => {
+            validate_place_read(function, place, structs, types, initialized)?;
+            validate_operand(function, value, initialized)?;
+            let place_ty = place_type(function, place, structs, types)?;
+            let admitted_base = matches!(place.base, PlaceBase::Dereference { mutable: true, .. })
+                || matches!(place.base, PlaceBase::Local(_)) && !place.projections.is_empty();
+            let aliases_unknown_parameter = match &place.base {
+                PlaceBase::Dereference {
+                    reference: Operand::Local(reference),
+                    ..
+                } => function.parameters.iter().any(|parameter| {
+                    parameter.local != *reference
+                        && types
+                            .reference_info(parameter.ty)
+                            .is_some_and(|(pointee, _)| {
+                                pointee == *value_type || types.contains_owning(pointee)
+                            })
+                }),
+                _ => false,
+            };
+            if destination != TypeId::BOOL
+                || place_ty != *value_type
+                || operand_type(function, value)? != *value_type
+                || types.is_copy(*value_type)
+                || !types.is_storable(*value_type)
+                || !types.is_relocatable(*value_type)
+                || !types.needs_drop(*value_type)
+                || !admitted_base
+                || aliases_unknown_parameter
+                || place_has_index(place)
+                || !mir_place_writable(function, place, structs, types)?
+            {
+                return Err("MIR owning replacement contract invalid".into());
             }
         }
         Rvalue::Drop { owner } => {

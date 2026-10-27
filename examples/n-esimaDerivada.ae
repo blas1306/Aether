@@ -1,0 +1,46 @@
+double nchoosek(int n, int k) {
+    if (k < 0 || k > n) {
+        return 0;
+    }
+
+    if (k > n - k) {
+        k = n - k;
+    }
+
+    double resultado = 1.0;
+
+    for (int i in 1:(k + 1)) {
+        resultado = resultado * (n - k + i) / i;
+    }
+
+    return resultado;
+}
+
+double n_esima_derivada(Function<(double), double> f, double x, int n) {
+    double derivada = 0.0;
+    double h = 0.000000001;
+    double denominador = 1.0;
+
+    for (int i in 0:n) {
+        denominador = denominador * (2.0 * h);
+    }
+
+    double sign = 1.0;
+    for (int k in 0:n) {
+        derivada = derivada + sign * nchoosek(n, k) * f(x + (n - 2 * k) * h);
+        sign = -1.0 * sign;
+    }
+
+    return derivada / denominador;
+}
+
+double f(double x) {
+    return x * x * x;
+}
+
+int main() {
+    double derivadaSegunda = n_esima_derivada(f, 2.0, 2);
+    println("f''(3) = ", derivadaSegunda);
+
+    return 0;
+}

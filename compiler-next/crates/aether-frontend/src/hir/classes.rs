@@ -1522,6 +1522,9 @@ pub(super) fn verify_body(
     ) -> Result<(), String> {
         for s in &b.statements {
             if let HirStmtKind::Assign { place, .. }
+            | HirStmtKind::ReplaceOwned {
+                destination: place, ..
+            }
             | HirStmtKind::SliceAssign { target: place, .. } = &s.kind
             {
                 for e in place_children(place) {
@@ -1533,6 +1536,7 @@ pub(super) fn verify_body(
                     initializer: value, ..
                 }
                 | HirStmtKind::Assign { value, .. }
+                | HirStmtKind::ReplaceOwned { value, .. }
                 | HirStmtKind::SliceAssign { value, .. }
                 | HirStmtKind::Return { value, .. }
                 | HirStmtKind::Throw { value, .. } => {

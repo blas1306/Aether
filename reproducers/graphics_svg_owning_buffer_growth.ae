@@ -1,0 +1,23 @@
+package graphicsSvgOwningBufferGrowth;
+
+struct Serializer {
+    Buffer<uint8> output;
+    usize length;
+    usize capacity;
+}
+
+void grow(ref mut Buffer<uint8> output, usize length) {
+    Buffer<uint8> next = Buffer<uint8>(2, uint8(0));
+    usize index = 0;
+    while (index < length) {
+        next[index] = (*output)[index];
+        index = index + 1;
+    }
+    *output = next;
+}
+
+int main() {
+    Serializer serializer = Serializer(Buffer<uint8>(1, uint8(65)), 1, 1);
+    grow(&mut serializer.output, serializer.length);
+    return int(serializer.output[0]) - 65;
+}

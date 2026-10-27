@@ -1,55 +1,54 @@
-import Math.LinearAlgebra
-import Plots
+import linearAlgebra as la;
 
-Vector<double, Column> t = [2; 3; 4; 5; 6];
-Vector<double, Column> y = [3; 5; 7; 11; 13];
-Vector<double> base(double x) {
-    yt = [1, x*ln(x)];
-    return yt;
+struct MinCuad {
+    Vector<double, Column> a;
+    double E;
 }
 
-st = size(t);
-sy = size(y);
-sbase = size(base(1));
-
-mt = st[1];
-my = sy[1];
-mbase = sbase[1];
-
-Matrix<double> A = Math.LinearAlgebra.zeros(mt, mbase);
-
-for (i in 1:mt) {
-    for (j in 1:mbase) {
-        A[i, j] = base(t[i])[j];
+double modelo(int j, double t) {
+    if (j == 1) {
+        return t * t;
+    } else if (j == 2) {
+        return t;
+    } else {
+        return 1.0;
     }
 }
 
-Vector<double, Column> z = A \ y;
+MinCuad MinimosCuadrados(Vector<double, Column> t, Vector<double, Column> y, int n, Function<(int, double), double> phi) {
+    int m = t.length;
 
-double modelo(double x) {
-    double acc = 0;
+    Matrix<double> A = la.zeros(m, n);
 
-    for (j in 1:mbase) {
-        acc = acc + z[j]*base(x)[j];
+    for (int i in 1:n) {
+        for (int j in 1:n) {
+            A[i, j] = phi(j, t[i]);
+        }
     }
 
-    return acc;
+    Vector<double, Column> a = la.leastSquares(A, y);
+
+    Vector<double, Column> r = A*a - y;
+    double E = la.dot(r, r);
+
+    return MinCuad(a, E);
 }
 
-println("z = ", z);
+double evualuarModelo(double x. Vector<double, Column> a, Function<(int, double), double> phi) {
+    double resultado = 0.0;
 
-double err2 = 0.0;
-for (i in 1:mt) {
-    double residual = y[i] - modelo(t[i]);
-    err2 = err2 + residual^2;
+    for (int j in 1:a.length) {
+        resultado = resultado + a[j]*phi(j, x);
+    }
+
+    return resultado;
 }
-println("err2 = ", err2);
 
-Plots.grid(true);
-Plots.title("Minimos Cuadrados");
-Plots.xlabel("t");
-Plots.ylabel("y");
-Plots.plot(t, y, ".", label="Datos", color="red");
-Plots.plot!(modelo, t[1]-1, t[mt]+1, label="Ajuste", n=50);
+int main() {
+    var t = [-2; -1; 0; 1; 2];
+    var y = [5; 2; 1; 2; 5];
 
-println(modelo(8));
+    
+
+    return 0;
+}

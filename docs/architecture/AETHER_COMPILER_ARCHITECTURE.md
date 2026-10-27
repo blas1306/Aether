@@ -2642,6 +2642,31 @@ returns, including conditional fallthrough and Buffer cleanup. Comment insertion
 compares HIR/MIR/SSA after excluding only physical Span fields, and compares
 complete LLVM unchanged. See [LANGUAGE_PARITY_1_REPORT.md](LANGUAGE_PARITY_1_REPORT.md).
 
+## OWNING-STRUCT-FIELD-REPLACEMENT-V1 implementation boundary
+
+HIR classifies admitted existing assignments as `ReplaceOwned` only for a
+concrete storable, Relocatable, non-Copy, drop-needing destination reached by a
+local Field-only path or writable dereference. It preserves E0297 for excluded
+places and E0293 for owning field reads. Address-taken local roots remain memory
+roots through SSA; their single root-level ownership/drop state is unchanged.
+
+MIR and SSA each carry `ReplaceOwned { destination, value, value_type }`, require
+the exact concrete type and writable initialized Field-only place, and consume
+one materialized RHS owner. The operation has no exceptional successor.
+Field-only owning Store on a promoted local root and projected Move/Drop remain
+verifier errors. Existing independently verified internal dereference
+transactions retain their Store representation; closing corruption that
+impersonates `ReplaceOwned` through that shared representation remains part of
+the capability's final qualification. The class/interface ownership ledger also
+treats the RHS as consumed, including when a potentially-throwing RHS call
+precedes the replacement.
+
+LLVM computes the verified place address, loads the old value, stores the new
+value, and invokes existing typed drop glue on the captured old value. There is
+no field flag, new allocation, runtime type branch, alias guard or `noalias`.
+The implementation and remaining qualification limits are recorded in
+[OWNING-STRUCT-FIELD-REPLACEMENT-V1](OWNING_STRUCT_FIELD_REPLACEMENT_V1_REPORT.md).
+
 ## CORE-V1 — resolved Core identity and selective lowering
 
 The frontend owns a closed `PRELUDE_V1` manifest and applies lexical → current

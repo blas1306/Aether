@@ -1,0 +1,11 @@
+void replace(ref mut Buffer<int> slot, ref int elementRef) {
+    Buffer<int> next = Buffer<int>(1, 9);
+    *slot = next;
+    int observed = *elementRef;
+}
+
+int main() {
+    Buffer<int> owner = Buffer<int>(1, 7);
+    replace(&mut owner, &owner[0]);
+    return 0;
+}
