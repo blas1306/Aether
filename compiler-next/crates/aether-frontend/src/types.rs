@@ -2111,6 +2111,140 @@ impl TypeArena {
         self.contains_capability(id, 2, &HashMap::new(), &mut BTreeSet::new())
     }
 
+    /// Whether a reference or borrowed view can denote storage whose lifetime
+    /// is owned by `owner`.  This is deliberately a may-overlap query: it is
+    /// used when value provenance is unavailable (notably at function
+    /// boundaries), so an aggregate/member or collection/element type match
+    /// must fail closed.
+    #[must_use]
+    pub fn may_borrow_storage_of(&self, borrowed: TypeId, owner: TypeId) -> bool {
+        let Some(target) = self
+            .reference_info(borrowed)
+            .map(|(pointee, _)| pointee)
+            .or_else(|| {
+                self.borrowed_view_info(borrowed)
+                    .map(|(element, _)| element)
+            })
+        else {
+            return false;
+        };
+        self.storage_may_expose_type(owner, target, &HashMap::new(), &mut BTreeSet::new())
+    }
+
+    fn storage_may_expose_type(
+        &self,
+        owner: TypeId,
+        target: TypeId,
+        substitution: &HashMap<GenericParamId, TypeId>,
+        visiting: &mut BTreeSet<TypeId>,
+    ) -> bool {
+        let owner = match self.get(owner) {
+            Some(TypeData::GenericParam(parameter)) => {
+                substitution.get(parameter).copied().unwrap_or(owner)
+            }
+            _ => owner,
+        };
+        if owner == target {
+            return true;
+        }
+        if !visiting.insert(owner) {
+            return false;
+        }
+        let result = match self.get(owner).copied() {
+            Some(TypeData::Nullable(payload)) => {
+                self.storage_may_expose_type(payload, target, substitution, visiting)
+            }
+            Some(
+                TypeData::Buffer { element }
+                | TypeData::Matrix { element }
+                | TypeData::Vector { element, .. }
+                | TypeData::Array { element }
+                | TypeData::List { element },
+            ) => self.storage_may_expose_type(element, target, substitution, visiting),
+            Some(TypeData::Struct(id)) => self.aggregate_storage_may_expose_type(
+                false,
+                id.0,
+                None,
+                target,
+                substitution,
+                visiting,
+            ),
+            Some(TypeData::Enum(id)) => self.aggregate_storage_may_expose_type(
+                true,
+                id.0,
+                None,
+                target,
+                substitution,
+                visiting,
+            ),
+            Some(TypeData::StructInstance(id, arguments)) => self
+                .aggregate_storage_may_expose_type(
+                    false,
+                    id.0,
+                    Some(arguments),
+                    target,
+                    substitution,
+                    visiting,
+                ),
+            Some(TypeData::EnumInstance(id, arguments)) => self.aggregate_storage_may_expose_type(
+                true,
+                id.0,
+                Some(arguments),
+                target,
+                substitution,
+                visiting,
+            ),
+            Some(TypeData::GenericParam(parameter)) => {
+                substitution.get(&parameter).is_none_or(|resolved| {
+                    *resolved == owner
+                        || self.storage_may_expose_type(*resolved, target, substitution, visiting)
+                })
+            }
+            _ => false,
+        };
+        visiting.remove(&owner);
+        result
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn aggregate_storage_may_expose_type(
+        &self,
+        is_enum: bool,
+        raw_id: u32,
+        arguments: Option<TypeArgsId>,
+        target: TypeId,
+        outer: &HashMap<GenericParamId, TypeId>,
+        visiting: &mut BTreeSet<TypeId>,
+    ) -> bool {
+        let definition = if is_enum {
+            self.enum_properties.get(&EnumId(raw_id))
+        } else {
+            self.struct_properties.get(&StructId(raw_id))
+        };
+        let Some(definition) = definition else {
+            return true;
+        };
+        let mut substitution = outer.clone();
+        if let Some(arguments) = arguments {
+            let Some(arguments) = self.arguments(arguments) else {
+                return true;
+            };
+            if arguments.len() != definition.parameters.len() {
+                return true;
+            }
+            for (parameter, argument) in definition.parameters.iter().zip(arguments) {
+                substitution.insert(*parameter, *argument);
+            }
+        } else if !definition.parameters.is_empty() {
+            return true;
+        }
+        definition
+            .members
+            .iter()
+            .flatten()
+            .any(|member| self.storage_may_expose_type(*member, target, &substitution, visiting))
+    }
+
     #[must_use]
     pub fn contains_view(&self, id: TypeId) -> bool {
         self.contains_capability(id, 1, &HashMap::new(), &mut BTreeSet::new())

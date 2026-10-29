@@ -7246,12 +7246,7 @@ impl OwnershipAnalysis<'_> {
                         && self.locals.iter().any(|local| {
                             local.parameter
                                 && local.id != destination_reference
-                                && self.types.reference_info(local.ty).is_some_and(
-                                    |(pointee, _)| {
-                                        pointee == destination.ty
-                                            || self.types.contains_owning(pointee)
-                                    },
-                                )
+                                && self.types.may_borrow_storage_of(local.ty, destination.ty)
                         })
                     {
                         return Err(self.error(
@@ -17370,6 +17365,20 @@ fn verify_block(
                     HirPlaceBase::Dereference { mutable: true, .. }
                 ) || matches!(destination.base, HirPlaceBase::Local(_))
                     && !destination.projections.is_empty();
+                let aliases_unknown_parameter = match &destination.base {
+                    HirPlaceBase::Dereference { reference, .. } => {
+                        if let HirExprKind::Local(reference) = reference.kind {
+                            f.locals.iter().any(|local| {
+                                local.parameter
+                                    && local.id != reference
+                                    && types.may_borrow_storage_of(local.ty, *value_type)
+                            })
+                        } else {
+                            false
+                        }
+                    }
+                    _ => false,
+                };
                 if destination.ty != *value_type
                     || value.ty != *value_type
                     || types.guarantees_copy(*value_type)
@@ -17377,6 +17386,7 @@ fn verify_block(
                     || !types.guarantees_relocatable(*value_type)
                     || !types.needs_drop(*value_type)
                     || !admitted_base
+                    || aliases_unknown_parameter
                     || !destination
                         .projections
                         .iter()

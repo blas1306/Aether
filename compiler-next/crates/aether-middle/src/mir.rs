@@ -8343,11 +8343,7 @@ fn validate_rvalue(
                     ..
                 } => function.parameters.iter().any(|parameter| {
                     parameter.local != *reference
-                        && types
-                            .reference_info(parameter.ty)
-                            .is_some_and(|(pointee, _)| {
-                                pointee == *value_type || types.contains_owning(pointee)
-                            })
+                        && types.may_borrow_storage_of(parameter.ty, *value_type)
                 }),
                 _ => false,
             };

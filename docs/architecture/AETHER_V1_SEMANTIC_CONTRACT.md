@@ -2691,6 +2691,10 @@ the old slot intact.
 
 HIR, MIR and SSA retain an explicit `ReplaceOwned` operation. Ordinary owning
 Store, projected Move/Drop, Index and enum-payload replacement remain invalid.
+SSA Stores carry a closed internal provenance contract. Dereference Stores are
+valid only for Copy writes or an independently reconstructed typed descriptor
+commit; initialization and root transfer require memory-local roots. This
+metadata adds no source capability and is erased after verified lowering.
 LLVM lowers only verified operations with the existing concrete layout and
 typed drop glue in strict load-old, store-new, drop-old order. This operation
 does not imply concurrency atomics, boxing, allocation, runtime alias checks or

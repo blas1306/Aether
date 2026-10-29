@@ -148,7 +148,7 @@ pub(super) fn verify(
                 state.booleans.insert(i.result, value);
             }
             match &i.op {
-                SsaOp::Store { place, value } => {
+                SsaOp::Store { place, value, .. } => {
                     if tracked(operand_ty(value)?) {
                         consume(value, &mut state)?;
                         if let SsaPlaceBase::MemoryLocal(local) = place.base

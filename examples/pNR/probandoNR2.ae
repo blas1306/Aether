@@ -1,0 +1,28 @@
+double nr(Function<(double), double> f, Function<(double), double> df, double x0, double tol, int maxiter) {
+    double x = x0;
+    double res = abs(f(x));
+    int iter = 0;
+
+    for (int i in 1:maxiter) {
+        x = x - f(x)/df(x);
+        res = abs(f(x));
+        iter = iter + 1;
+        
+        if (res < tol) {
+            break;
+        }
+    }
+
+    return x;
+}
+
+int main() {
+    double f(double x) { return x*exp(x) - 1; }
+    double df(double x) { return exp(x) + x*exp(x); }
+
+	double xn = nr(f, df, 1, 1e-8, 100);
+
+	println("x = ", xn);
+
+	return 0;			
+}

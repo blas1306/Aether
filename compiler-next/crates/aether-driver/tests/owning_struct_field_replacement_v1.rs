@@ -5,8 +5,8 @@ use std::{fs, path::PathBuf, process::Command};
 use aether_driver::{ClangToolchain, Emit, OptimizationLevel, compile_source_with_optimization};
 use aether_frontend::{SourceFile, TypeId, analyze, parse_source};
 use aether_middle::{
-    BlockId, Operand, Place, PlaceBase, Rvalue, SsaOp, SsaPlaceBase, build_ssa, lower_hir,
-    verify_mir, verify_ssa,
+    BlockId, Operand, Place, PlaceBase, Rvalue, SsaOp, SsaPlaceBase, StoreProvenance, build_ssa,
+    lower_hir, verify_mir, verify_ssa,
 };
 
 struct Output(PathBuf);
@@ -151,6 +151,12 @@ fn unsupported_partial_moves_indices_self_assignment_and_live_borrows_stay_rejec
         "struct S{Buffer<int> a;}int main(){S s=S(Buffer<int>(1,1));ref int x=&s.a[0];Buffer<int> n=Buffer<int>(1,2);s.a=n;return *x;}",
         "struct S{Array<Buffer<int>> a;}int main(){S s=S({Buffer<int>(1,1)});Buffer<int> n=Buffer<int>(1,2);s.a[0]=n;return 0;}",
         "void replace(ref mut Buffer<int> a,ref Buffer<int> possibleAlias){Buffer<int> n=Buffer<int>(1,2);*a=n;}int main(){Buffer<int> x=Buffer<int>(1,1);replace(&mut x,&x);return 0;}",
+        "void replace(ref mut Buffer<int> a,ref int element){Buffer<int> n=Buffer<int>(1,2);*a=n;int x=*element;}int main(){Buffer<int> x=Buffer<int>(1,1);replace(&mut x,&x[0]);return 0;}",
+        "void replace(ref mut List<int> a,ref int element){List<int> n={2};*a=n;int x=*element;}int main(){List<int> x={1};replace(&mut x,&x[0]);return 0;}",
+        "void replace(ref mut Array<int> a,View<int> view){Array<int> n={2};*a=n;int x=view[0];}int main(){Array<int> x={1};replace(&mut x,view(x));return 0;}",
+        "void replace(ref mut Vector<int,Row> a,VectorView<int,Row> view){Vector<int,Row> n=[2];*a=n;int x=view[1];}int main(){Vector<int,Row> x=[1];replace(&mut x,vector_view(x));return 0;}",
+        "void replace(ref mut Matrix<int> a,MatrixView<int> view){Matrix<int> n=[2];*a=n;int x=view[1,1];}int main(){Matrix<int> x=[1];replace(&mut x,matrix_view(x));return 0;}",
+        "struct Nested{Buffer<int> value;}void replace(ref mut Nested a,ref int element){Nested n=Nested(Buffer<int>(1,2));*a=n;int x=*element;}int main(){Nested x=Nested(Buffer<int>(1,1));replace(&mut x,&x.value[0]);return 0;}",
     ] {
         assert!(
             compile_source_with_optimization(
@@ -162,6 +168,81 @@ fn unsupported_partial_moves_indices_self_assignment_and_live_borrows_stay_rejec
             "accepted: {source}"
         );
     }
+}
+
+#[test]
+fn independent_element_reference_remains_admitted() {
+    let source = r#"
+struct Holder { Buffer<int> value; }
+void replaceLocal(ref int independent) {
+    Holder holder = Holder(Buffer<int>(1, 1));
+    Buffer<int> next = Buffer<int>(1, 2);
+    holder.value = next;
+    int observed = *independent;
+}
+int main() {
+    Buffer<int> other = Buffer<int>(1, 7);
+    replaceLocal(&other[0]);
+    return 0;
+}
+"#;
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        compile(source, optimization);
+    }
+}
+
+#[test]
+fn mir_and_ssa_reconstruct_element_alias_risk_from_parameter_types() {
+    let source = SourceFile::new(
+        "parameter_provenance.ae",
+        "void observe(ref int x){}void replace(ref mut Buffer<int> slot,ref bool independent){Buffer<int> n=Buffer<int>(1,2);*slot=n;}int main(){Buffer<int> x=Buffer<int>(1,1);bool b=false;replace(&mut x,&b);return 0;}",
+    );
+    let hir = analyze(parse_source(&source).unwrap()).unwrap();
+    let mir = lower_hir(hir);
+    verify_mir(mir.clone()).unwrap();
+    let reference_int = mir
+        .types
+        .entries()
+        .find_map(|(ty, _)| {
+            (mir.types.reference_info(ty) == Some((TypeId::INT64, false))).then_some(ty)
+        })
+        .unwrap();
+    let target = mir
+        .functions
+        .iter()
+        .position(|function| {
+            function.blocks.iter().any(|block| {
+                block
+                    .instructions
+                    .iter()
+                    .any(|instruction| matches!(instruction.value, Rvalue::ReplaceOwned { .. }))
+            })
+        })
+        .unwrap();
+
+    let mut invalid_mir = mir.clone();
+    let function = &mut invalid_mir.functions[target];
+    let parameter_local = function.parameters[1].local;
+    function.parameters[1].ty = reference_int;
+    function.locals[parameter_local.0 as usize].ty = reference_int;
+    invalid_mir.signatures[function.id.0 as usize].parameters[1].ty = reference_int;
+    assert!(verify_mir(invalid_mir).is_err());
+
+    let verified = verify_mir(mir).unwrap();
+    let mut invalid_ssa = build_ssa(&verified);
+    let function = &mut invalid_ssa.functions[target];
+    let parameter_local = function.parameters[1].local;
+    function.parameters[1].ty = reference_int;
+    function.bindings[parameter_local.0 as usize].ty = reference_int;
+    if let Some(memory) = function
+        .memory_locals
+        .iter_mut()
+        .find(|memory| memory.local == parameter_local)
+    {
+        memory.ty = reference_int;
+    }
+    invalid_ssa.signatures[function.id.0 as usize].parameters[1].ty = reference_int;
+    assert!(verify_ssa(invalid_ssa).is_err());
 }
 
 #[test]
@@ -234,6 +315,7 @@ fn malformed_mir_and_ssa_replacements_are_rejected_independently() {
     replacement.op = SsaOp::Store {
         place: destination,
         value,
+        provenance: StoreProvenance::Initialize,
     };
     assert!(verify_ssa(store_ssa).is_err());
 }

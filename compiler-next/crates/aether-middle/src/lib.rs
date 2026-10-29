@@ -17,8 +17,8 @@ pub use mir::{
     Terminator, TrapKind, UnaryOp, VerifiedMir, lower_hir, verify_mir,
 };
 pub use ssa::{
-    ArcElision, ClassDevirtualization, Devirtualization, OopOptimizations, Phi, SsaBinding,
-    SsaBlock, SsaFunction, SsaInstruction, SsaIr, SsaMemoryLocal, SsaOp, SsaOperand, SsaParameter,
-    SsaPlace, SsaPlaceBase, SsaPlaceProjection, SsaTerminator, ValueId, VerifiedSsa, build_ssa,
-    optimize_oop, verify_ssa,
+    ArcElision, ClassDevirtualization, DescriptorCommitKind, Devirtualization, OopOptimizations,
+    Phi, SsaBinding, SsaBlock, SsaFunction, SsaInstruction, SsaIr, SsaMemoryLocal, SsaOp,
+    SsaOperand, SsaParameter, SsaPlace, SsaPlaceBase, SsaPlaceProjection, SsaTerminator,
+    StoreProvenance, ValueId, VerifiedSsa, build_ssa, optimize_oop, verify_ssa,
 };

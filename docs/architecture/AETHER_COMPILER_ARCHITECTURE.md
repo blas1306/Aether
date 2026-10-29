@@ -2654,11 +2654,12 @@ MIR and SSA each carry `ReplaceOwned { destination, value, value_type }`, requir
 the exact concrete type and writable initialized Field-only place, and consume
 one materialized RHS owner. The operation has no exceptional successor.
 Field-only owning Store on a promoted local root and projected Move/Drop remain
-verifier errors. Existing independently verified internal dereference
-transactions retain their Store representation; closing corruption that
-impersonates `ReplaceOwned` through that shared representation remains part of
-the capability's final qualification. The class/interface ownership ledger also
-treats the RHS as consumed, including when a potentially-throwing RHS call
+verifier errors. Internal dereference transactions retain their Store
+representation, now distinguished by closed `StoreProvenance`. SSA
+independently reconstructs memory-slot state, root capture/publish/Drop and the
+exact ListPush/ListReserve/MatrixAdd producer/source/use contract; a provenance
+tag cannot authorize a malformed Store. The class/interface ownership ledger
+also treats the RHS as consumed, including when a potentially-throwing RHS call
 precedes the replacement.
 
 LLVM computes the verified place address, loads the old value, stores the new

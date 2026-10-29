@@ -26,6 +26,6 @@ boolean esPrimo2(int p) {
 }
 
 int main() {
-	println(esPrimo2(97));
+	println(esPrimo2(101));
 	return 0;
 }

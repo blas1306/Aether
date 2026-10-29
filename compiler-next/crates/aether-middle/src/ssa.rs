@@ -127,6 +127,25 @@ pub enum SsaPlaceBase {
     },
 }
 
+/// Closed identity of the typed transaction whose descriptor is published by
+/// an immediately following memory Store.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DescriptorCommitKind {
+    ListPush,
+    ListReserve,
+    MatrixAdd,
+}
+
+/// Semantic contract claimed by one memory Store.  The SSA verifier rebuilds
+/// this fact from the graph; this tag is never authority by itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StoreProvenance {
+    Copy,
+    Initialize,
+    RootTransfer,
+    DescriptorCommit(DescriptorCommitKind),
+}
+
 /// SSA computation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
@@ -201,6 +220,7 @@ pub enum SsaOp {
     Store {
         place: SsaPlace,
         value: SsaOperand,
+        provenance: StoreProvenance,
     },
     /// Address creation for a typed non-owning reference.
     Borrow {
@@ -934,7 +954,8 @@ fn rename_block(
         stacks[local.0 as usize].push(*result);
         pushes[local.0 as usize] += 1;
     }
-    for instruction in &mir.blocks[block_index].instructions {
+    for (instruction_index, instruction) in mir.blocks[block_index].instructions.iter().enumerate()
+    {
         let memory_destination = match &instruction.destination.base {
             PlaceBase::Local(local) => {
                 mir.locals[local.0 as usize].address_taken
@@ -977,6 +998,13 @@ fn rename_block(
                 op: SsaOp::Store {
                     place: rename_place(&instruction.destination, stacks, mir),
                     value: SsaOperand::Value(value_result),
+                    provenance: mir_store_provenance(
+                        mir,
+                        block_id,
+                        instruction_index,
+                        value_ty,
+                        types,
+                    ),
                 },
                 span: instruction.span,
                 unwind: None,
@@ -1088,6 +1116,48 @@ fn rename_block(
         let new_len = stacks[local].len() - count;
         stacks[local].truncate(new_len);
     }
+}
+
+fn mir_store_provenance(
+    mir: &MirFunction,
+    block: BlockId,
+    instruction_index: usize,
+    value_ty: TypeId,
+    types: &TypeArena,
+) -> StoreProvenance {
+    let instructions = &mir.blocks[block.0 as usize].instructions;
+    let instruction = &instructions[instruction_index];
+    if types.is_copy(value_ty) {
+        return StoreProvenance::Copy;
+    }
+    let descriptor = match instruction.value {
+        Rvalue::ListPush { .. } => Some(DescriptorCommitKind::ListPush),
+        Rvalue::ListReserve { .. } => Some(DescriptorCommitKind::ListReserve),
+        Rvalue::MatrixAdd { .. } => Some(DescriptorCommitKind::MatrixAdd),
+        _ => None,
+    };
+    if let Some(kind) = descriptor {
+        return StoreProvenance::DescriptorCommit(kind);
+    }
+    if matches!(
+        instruction.destination,
+        Place {
+            base: PlaceBase::Local(_),
+            ref projections,
+        } if projections.is_empty()
+    ) {
+        let capture = instructions[..instruction_index]
+            .iter()
+            .rev()
+            .find(|candidate| {
+                matches!(&candidate.value, Rvalue::Move { source } if source == &instruction.destination)
+            })
+            .map(|candidate| &candidate.destination);
+        if capture.is_some() {
+            return StoreProvenance::RootTransfer;
+        }
+    }
+    StoreProvenance::Initialize
 }
 
 #[allow(clippy::too_many_lines)]
@@ -3153,6 +3223,8 @@ fn verify_ssa_function(
             SsaTerminator::Goto(_) | SsaTerminator::Trap(_) => {}
         }
     }
+    verify_memory_store_ledger(function, types, fail)?;
+    verify_store_provenance(function, types, structs, &operand_ty, fail)?;
     aether_frontend::verify_class_metadata(types, structs, enums).map_err(fail)?;
     classes::verify(function, signatures, types, &operand_ty).map_err(fail)?;
     verify_ownership_ledger(function, types, fail)?;
@@ -3161,6 +3233,356 @@ fn verify_ssa_function(
     verify_take_protocol(function, types, fail)?;
     verify_call_borrow_regions(function, types, fail)?;
     verify_format_borrow_regions(function, fail)?;
+    Ok(())
+}
+
+fn verify_memory_store_ledger(
+    function: &SsaFunction,
+    types: &TypeArena,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    const UNINITIALIZED: u8 = 1;
+    const INITIALIZED: u8 = 2;
+    let tracked = function
+        .memory_locals
+        .iter()
+        .filter(|memory| !types.is_copy(memory.ty))
+        .map(|memory| memory.local)
+        .collect::<Vec<_>>();
+    if tracked.is_empty() {
+        return Ok(());
+    }
+    let position = tracked
+        .iter()
+        .enumerate()
+        .map(|(index, local)| (*local, index))
+        .collect::<BTreeMap<_, _>>();
+    let entry = tracked
+        .iter()
+        .map(|local| {
+            if function
+                .memory_locals
+                .iter()
+                .any(|memory| memory.local == *local && memory.parameter.is_some())
+            {
+                INITIALIZED
+            } else {
+                UNINITIALIZED
+            }
+        })
+        .collect::<Vec<_>>();
+    let mut incoming = vec![None::<Vec<u8>>; function.blocks.len()];
+    incoming[function.entry.0 as usize] = Some(entry);
+    let mut queue = VecDeque::from([function.entry]);
+    let merge = |target: BlockId,
+                 state: &[u8],
+                 incoming: &mut Vec<Option<Vec<u8>>>,
+                 queue: &mut VecDeque<BlockId>| {
+        let slot = &mut incoming[target.0 as usize];
+        match slot {
+            Some(existing) => {
+                let joined = existing
+                    .iter()
+                    .zip(state)
+                    .map(|(left, right)| *left | *right)
+                    .collect::<Vec<_>>();
+                if *existing != joined {
+                    *existing = joined;
+                    queue.push_back(target);
+                }
+            }
+            None => {
+                *slot = Some(state.to_vec());
+                queue.push_back(target);
+            }
+        }
+    };
+    let transfer = |instruction: &SsaInstruction, state: &mut [u8]| match &instruction.op {
+        SsaOp::Move {
+            source:
+                SsaPlace {
+                    base: SsaPlaceBase::MemoryLocal(local),
+                    projections,
+                },
+        } if projections.is_empty() => {
+            if let Some(index) = position.get(local) {
+                state[*index] = UNINITIALIZED;
+            }
+        }
+        SsaOp::Store {
+            place:
+                SsaPlace {
+                    base: SsaPlaceBase::MemoryLocal(local),
+                    projections,
+                },
+            ..
+        } if projections.is_empty() => {
+            if let Some(index) = position.get(local) {
+                state[*index] = INITIALIZED;
+            }
+        }
+        SsaOp::Drop {
+            owner:
+                SsaPlace {
+                    base: SsaPlaceBase::MemoryLocal(local),
+                    projections,
+                },
+        } if projections.is_empty() => {
+            if let Some(index) = position.get(local) {
+                state[*index] = UNINITIALIZED;
+            }
+        }
+        _ => {}
+    };
+    while let Some(block_id) = queue.pop_front() {
+        let block = &function.blocks[block_id.0 as usize];
+        let mut state = incoming[block_id.0 as usize]
+            .clone()
+            .expect("queued memory state");
+        for instruction in &block.instructions {
+            if let Some(unwind) = instruction.unwind {
+                merge(unwind, &state, &mut incoming, &mut queue);
+            }
+            transfer(instruction, &mut state);
+        }
+        for target in ssa_targets(&block.terminator) {
+            merge(target, &state, &mut incoming, &mut queue);
+        }
+    }
+    for block in &function.blocks {
+        let mut state = incoming[block.id.0 as usize]
+            .clone()
+            .ok_or_else(|| fail("SSA memory ledger found unreachable block".into()))?;
+        for instruction in &block.instructions {
+            match &instruction.op {
+                SsaOp::Move {
+                    source:
+                        SsaPlace {
+                            base: SsaPlaceBase::MemoryLocal(local),
+                            projections,
+                        },
+                } if projections.is_empty() && position.contains_key(local) => {
+                    if state[position[local]] != INITIALIZED {
+                        return Err(fail("SSA moves an uninitialized memory owner".into()));
+                    }
+                }
+                SsaOp::Store {
+                    place:
+                        SsaPlace {
+                            base: SsaPlaceBase::MemoryLocal(local),
+                            projections,
+                        },
+                    provenance,
+                    ..
+                } if projections.is_empty() && position.contains_key(local) => {
+                    let required = match provenance {
+                        StoreProvenance::Initialize => UNINITIALIZED,
+                        StoreProvenance::RootTransfer => UNINITIALIZED,
+                        StoreProvenance::DescriptorCommit(_) => INITIALIZED,
+                        StoreProvenance::Copy => {
+                            return Err(fail("SSA Copy provenance has owning memory type".into()));
+                        }
+                    };
+                    if state[position[local]] != required {
+                        return Err(fail(
+                            "SSA Store provenance disagrees with slot state".into(),
+                        ));
+                    }
+                }
+                _ => {}
+            }
+            transfer(instruction, &mut state);
+        }
+    }
+    Ok(())
+}
+
+fn ssa_value_use_count(function: &SsaFunction, value: ValueId) -> usize {
+    let instruction_uses = function
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .flat_map(|instruction| op_operands(&instruction.op))
+        .filter(|operand| matches!(operand, SsaOperand::Value(candidate) if *candidate == value))
+        .count();
+    let phi_uses = function
+        .blocks
+        .iter()
+        .flat_map(|block| &block.phis)
+        .flat_map(|phi| &phi.incoming)
+        .filter(|(_, candidate)| *candidate == value)
+        .count();
+    let terminator_uses = function
+        .blocks
+        .iter()
+        .filter(|block| match &block.terminator {
+            SsaTerminator::Branch { condition, .. }
+            | SsaTerminator::ShapeGuard { condition, .. }
+            | SsaTerminator::Switch {
+                discriminant: condition,
+                ..
+            }
+            | SsaTerminator::Return(condition)
+            | SsaTerminator::Throw {
+                payload: condition, ..
+            } => matches!(condition, SsaOperand::Value(candidate) if *candidate == value),
+            _ => false,
+        })
+        .count();
+    instruction_uses + phi_uses + terminator_uses
+}
+
+#[allow(clippy::too_many_lines)]
+fn verify_store_provenance(
+    function: &SsaFunction,
+    types: &TypeArena,
+    structs: &[StructInfo],
+    operand_ty: &impl Fn(&SsaOperand) -> Result<TypeId, String>,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let definition = |value: ValueId| {
+        function.blocks.iter().find_map(|block| {
+            block
+                .instructions
+                .iter()
+                .enumerate()
+                .find(|(_, instruction)| instruction.result == value)
+                .map(|(index, instruction)| (block.id, index, instruction))
+        })
+    };
+    for block in &function.blocks {
+        for (store_index, store) in block.instructions.iter().enumerate() {
+            let SsaOp::Store {
+                place,
+                value,
+                provenance,
+            } = &store.op
+            else {
+                continue;
+            };
+            if store.unwind.is_some() {
+                return Err(fail("SSA Store provenance cannot carry unwind".into()));
+            }
+            let place_ty =
+                ssa_place_type(place, &function.memory_locals, structs, types, operand_ty)
+                    .map_err(fail)?;
+            let SsaOperand::Value(value_id) = value else {
+                return Err(fail(
+                    "SSA Store provenance requires a materialized ValueId".into(),
+                ));
+            };
+            let Some((producer_block, producer_index, producer)) = definition(*value_id) else {
+                return Err(fail("SSA Store value has no instruction definition".into()));
+            };
+            match provenance {
+                StoreProvenance::Copy => {
+                    if !types.is_copy(place_ty) {
+                        return Err(fail("SSA Copy Store has a non-Copy type".into()));
+                    }
+                }
+                StoreProvenance::Initialize => {
+                    let SsaPlaceBase::MemoryLocal(local) = place.base else {
+                        return Err(fail(
+                            "SSA Initialize Store requires a memory-local root".into(),
+                        ));
+                    };
+                    if !place.projections.is_empty()
+                        || types.is_copy(place_ty)
+                        || function
+                            .memory_locals
+                            .iter()
+                            .find(|memory| memory.local == local)
+                            .is_none_or(|memory| memory.parameter.is_some())
+                        || ssa_value_use_count(function, *value_id) != 1
+                    {
+                        return Err(fail("SSA Initialize Store contract is invalid".into()));
+                    }
+                    if block.instructions[..store_index].iter().any(|candidate| {
+                        matches!(&candidate.op, SsaOp::Move { source } if source == place)
+                    }) {
+                        return Err(fail(
+                            "SSA Initialize Store follows an old-owner capture".into(),
+                        ));
+                    }
+                }
+                StoreProvenance::RootTransfer => {
+                    if types.is_copy(place_ty)
+                        || !matches!(place.base, SsaPlaceBase::MemoryLocal(_))
+                        || !place.projections.is_empty()
+                        || !matches!(producer.op, SsaOp::Move { .. })
+                        || ssa_value_use_count(function, *value_id) != 1
+                    {
+                        return Err(fail("SSA RootTransfer publication is invalid".into()));
+                    }
+                    let capture = block.instructions[..store_index]
+                        .iter()
+                        .rev()
+                        .find(|candidate| {
+                            matches!(&candidate.op, SsaOp::Move { source } if source == place)
+                        });
+                    let Some(capture) = capture else {
+                        return Err(fail("SSA RootTransfer lacks old-owner capture".into()));
+                    };
+                    let drops = block.instructions[store_index + 1..]
+                        .iter()
+                        .filter(|candidate| {
+                            matches!(
+                                &candidate.op,
+                                SsaOp::Drop {
+                                    owner: SsaPlace {
+                                        base: SsaPlaceBase::Value(SsaOperand::Value(owner)),
+                                        projections,
+                                    },
+                                } if *owner == capture.result && projections.is_empty()
+                            )
+                        })
+                        .count();
+                    if drops != 1
+                        || ssa_value_use_count(function, capture.result) != 1
+                        || producer_block != block.id
+                        || producer_index >= store_index
+                    {
+                        return Err(fail(
+                            "SSA RootTransfer capture/publish/drop region is invalid".into(),
+                        ));
+                    }
+                    let capture_index = block
+                        .instructions
+                        .iter()
+                        .position(|candidate| candidate.result == capture.result)
+                        .expect("capture belongs to block");
+                    if block.instructions[capture_index..=store_index]
+                        .iter()
+                        .any(|candidate| candidate.unwind.is_some())
+                    {
+                        return Err(fail("SSA RootTransfer region may unwind".into()));
+                    }
+                }
+                StoreProvenance::DescriptorCommit(kind) => {
+                    let source = match (kind, &producer.op) {
+                        (DescriptorCommitKind::ListPush, SsaOp::ListPush { source, .. })
+                        | (DescriptorCommitKind::ListReserve, SsaOp::ListReserve { source, .. })
+                        | (DescriptorCommitKind::MatrixAdd, SsaOp::MatrixAdd { source, .. }) => {
+                            source
+                        }
+                        _ => {
+                            return Err(fail("SSA DescriptorCommit kind/producer mismatch".into()));
+                        }
+                    };
+                    if source != place
+                        || producer_block != block.id
+                        || producer_index.checked_add(1) != Some(store_index)
+                        || producer.unwind.is_some()
+                        || ssa_value_use_count(function, *value_id) != 1
+                    {
+                        return Err(fail(
+                            "SSA DescriptorCommit source/destination/use region is invalid".into(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -4804,7 +5226,7 @@ fn verify_op(
                 return Err("SSA memory load type mismatch".into());
             }
         }
-        SsaOp::Store { place, value } => {
+        SsaOp::Store { place, value, .. } => {
             verify_class_access(place)?;
             if !writable(place)? {
                 return Err("SSA store through shared view/reference".into());
@@ -4973,11 +5395,7 @@ fn verify_op(
             let aliases_unknown_parameter = match &destination.base {
                 SsaPlaceBase::Dereference { reference, .. } => parameters.iter().any(|parameter| {
                     !matches!(reference, SsaOperand::Value(value) if *value == parameter.value)
-                        && types
-                            .reference_info(parameter.ty)
-                            .is_some_and(|(pointee, _)| {
-                                pointee == *value_type || types.contains_owning(pointee)
-                            })
+                        && types.may_borrow_storage_of(parameter.ty, *value_type)
                 }),
                 _ => false,
             };
@@ -6311,7 +6729,7 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
             .into_iter()
             .chain(std::iter::once(value))
             .collect(),
-        SsaOp::Store { place, value } => place_operands(place)
+        SsaOp::Store { place, value, .. } => place_operands(place)
             .into_iter()
             .chain(std::iter::once(value))
             .collect(),

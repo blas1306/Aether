@@ -1,4 +1,4 @@
-import Math.LinearAlgebra as LA;
+import Math.LinearAlgebra as la;
 import Plots as pl;
 
 Vector<double, Column> x = [1, 2, 3, 4];
@@ -12,7 +12,7 @@ Matrix<double> A = [
 ];
 
 Vector<double, Column> z = A \ y;
-double err = LA.norm(A * z - y);
+double err = la.norm(A * z - y);
 
 f(double t) = z[1] * t + z[2];
 

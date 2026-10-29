@@ -1864,7 +1864,7 @@ fn emit_function(
                     )
                     .unwrap();
                 }
-                SsaOp::Store { place, value } => {
+                SsaOp::Store { place, value, .. } => {
                     let pointer = emit_place_pointer(
                         output,
                         function,
