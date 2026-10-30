@@ -1,83 +1,136 @@
-# GRAPHICS-SVG-BACKEND-V1 — reporte de implementación
+# GRAPHICS-SVG-BACKEND-V1 — reporte final de implementación
 
-Estado: **BLOCKED**, 2026-10-26.
+Estado: **CLOSED**, 2026-10-30.
 
-## Autoridad revisada
+## Resultado
 
-Antes de modificar source se revisaron íntegramente
-`GRAPHICS_SVG_BACKEND_ARCH_1`, su reporte, la enmienda owning y su reporte,
-`GRAPHICS_FOUNDATION_ARCH_1`/reportes, `TEXT_UTF8_BUILDER_ARCH_1`/reportes y el
-contrato FORMAT-V1 aplicable.
+Se implementó `graphics.svg` conforme a
+`GRAPHICS_SVG_BACKEND_ARCH_1` y su enmienda owning. La superficie pública es
+exactamente:
 
-La capability `std.Text.fromUtf8` está implementada y no es el bloqueo. La
-Foundation también expone todos los accessors read-only requeridos.
-
-## Bloqueo reproducible
-
-La enmienda exige que `SvgSerializer` sea un `struct` local owning y posea
-directamente tres `Buffer`: output, states y clips. Los tres deben crecer
-geométricamente durante la serialización. En el lenguaje vigente, un
-`Buffer<T>` local puede reemplazarse y un field `Buffer<T>` de una class puede
-reemplazarse, pero un field owning de un struct no puede reemplazarse. Tampoco
-se habilita la operación prestando el field completo como `ref mut Buffer<T>`.
-
-El reproducer mínimo está en
-`reproducers/graphics_svg_owning_buffer_growth.ae`. Ejecutado con:
-
-```text
-cd compiler-next
-cargo run -q -p aether-cli -- check \
-  ../reproducers/graphics_svg_owning_buffer_growth.ae
+```aether
+public string render(ref graphics.Scene scene);
+public void save(ref graphics.Scene scene, ref string path);
 ```
 
-produce:
+`render` produce el documento SVG/XML completo en memoria y `save` usa el
+mismo serializer antes de llamar a `std.File.writeText`. Los errores de texto
+se publican como `GraphicsTextException` antes de abrir el destino; los errores
+nominales de IO se traducen a `GraphicsIoException`.
 
-```text
-error[E0297] (semantic): partial replacement of a non-Copy aggregate is unsupported
-```
+No se modificaron Foundation, Plots, el compiler, el runtime, Core, std ni las
+garantías del lenguaje.
 
-El fallo corresponde a `*output = next`; reemplazar directamente
-`serializer.output` produce la misma clasificación. Sin esa operación no se
-puede publicar crecimiento geométrico de ninguno de los tres buffers owned por
-el struct.
+## Desbloqueo verificado
 
-## Alternativas descartadas
+El reproducer `reproducers/graphics_svg_owning_buffer_growth.ae`, que había
+aislado E0297, ahora pasa check, build y ejecución nativa en O0/O2. El backend
+usa esa capacidad general cerrada por `OWNING-STRUCT-FIELD-REPLACEMENT-V1`; no
+agrega excepción ni intrinsic para Graphics.
 
-- Volver el serializer una class permitiría reemplazar fields, pero contradice
-  expresamente `GRAPHICS_SVG_BACKEND_ARCH_1_AMENDMENT_1` y vuelve a introducir
-  el borrow interior que la enmienda elimina.
-- Guardar los buffers en wrappers class o fuera del serializer viola el
-  ownership local normativo.
-- Precontar y reservar buffers exactos, o imponer una capacidad máxima, cambia
-  la política normativa de crecimiento y sus gates de allocations.
-- Copiar el output a un Buffer local al final agrega la copia innecesaria que
-  la enmienda prohíbe.
-- Modificar el compilador para admitir partial owning replacement está fuera
-  del alcance y de la autorización de este milestone.
+`SvgSerializer` es un `struct` local owning. Posee directamente:
 
-No se dejó un backend parcial ni se modificaron Foundation, std, compiler,
-runtime u otras OAL.
+- `Buffer<uint8> output`;
+- `Buffer<SerializerState> states`;
+- `Buffer<graphics.Rect> clips`.
 
-## Gates
+Los tres buffers crecen geométricamente mediante replacement owning. El
+serializer no escapa de `render`, y el único punto de publicación es
+`std.Text.fromUtf8(&serializer.output, serializer.outputLength)`.
+
+## Implementación
+
+El backend vive en `graphics/src/svg.ae` y mantiene la dependencia unidireccional
+`graphics.svg -> graphics`. Sus propiedades principales son:
+
+- dos traversals read-only: definitions de clip y draws;
+- state privado de transform, clip e ID con push/pop exacto;
+- painter order idéntico al display list, sin sorting, batching o culling;
+- wrappers canónicos por draw, con clip en scene coordinates y transform
+  interior;
+- lowering directo de point, line, polyline, rect, path y text;
+- formatting numérico único mediante `str(float64)` y canonicalización de
+  ambos ceros;
+- RGB `#RRGGBB`, alpha separado y orden fijo de attributes;
+- escaping XML independiente para text/attributes, validación de XML 1.0 y
+  quoting CSS para named font families;
+- documento determinista con LF, `<defs>` obligatorio e IDs densos locales;
+- ninguna lista intermedia de points/path verbs ni copia de arenas Scene.
+
+La complejidad queda en O(commands + payload + output bytes), con peak
+O(output bytes + nesting depth + clips), además del string final y los
+temporales escalares de formatting ya autorizados.
+
+## Qualification dedicada
+
+Se agregó
+`compiler-next/crates/aether-driver/tests/graphics_svg_backend_v1.rs` y la
+dependencia test-only versionada `roxmltree 0.20.0`. Los goldens completos son:
+
+- `graphics/tests/goldens/empty.svg`;
+- `graphics/tests/goldens/representative.svg`.
+
+La suite ejecuta source-to-native en O0/O2 y cubre:
+
+- Scene vacía y viewports `0x0`, `0xh`, `wx0`;
+- XML declaration, namespace, viewport/viewBox, whitespace y LF final;
+- todas las variantes de `Command` y painter order DOM;
+- push/pop, composición no conmutativa, transform singular, clips anidados,
+  redundantes, restaurados y zero-area;
+- point normal/subnormal/extremo, line degenerada con las tres caps, polyline
+  grande, rect zero-area y path multi-subpath con todos los verbs;
+- FillOnly, StrokeOnly, FillAndStroke, ambas fill rules, todas las caps/joins,
+  miter limits y alpha 0/1/intermedio/254/255;
+- signed zero, subnormales y máximos finitos;
+- texto ASCII/multibyte/emoji/combining, whitespace y los cinco caracteres XML;
+- generic/default/named families, spaces, comma, keyword, quotes, backslash y
+  escapes XML/CSS;
+- todas las variantes de weight, slant, align y baseline;
+- rechazo de NUL, cada rango de control XML-invalid, U+FFFE, U+FFFF y family
+  vacía; form feed en named family se representa mediante escape CSS;
+- atomicidad previa a IO, traducción de IOException y bytes exactos de `save`;
+- parseo XML real, resolución de clip IDs, matrices, orden DOM, points/path y
+  recuperación exacta de text/family;
+- equivalencia byte por byte O0/O2 contra los mismos goldens;
+- growth de output/state/clips y balance global de heap allocations/frees;
+- HIR/MIR/SSA/LLVM ordinarios, `ReplaceOwned`, calls directas a Text/File y
+  ausencia de InterfaceCall, registry, FFI, intrinsic o Plots.
+
+## Gates finales
+
+Ejecutados desde `compiler-next`, salvo indicación:
 
 | Gate | Resultado |
 |---|---|
-| Lectura de autoridades normativas | PASS |
-| Prerrequisito `std.Text.fromUtf8` | PASS |
-| Accessors read-only de Foundation | PASS |
-| `cargo test -p aether-driver --test graphics_foundation_v1` | PASS — 8/8 |
-| `cargo test -p aether-driver --test text_utf8_builder_v1` | PASS — 8/8 |
-| `cargo run -q -p aether-cli -- check ../graphics` | PASS |
-| `cargo run -q -p aether-cli -- build ../graphics` | PASS |
-| Serializer local owning con buffers growable | FAIL — E0297 |
-| Backend SVG productivo | BLOCKED |
-| Qualification funcional secciones 26–28 | NOT RUN — backend no construible conforme |
-| Ausencia de cambios en Foundation/compiler/std | PASS |
+| reproducer check/build/run O0/O2 | PASS |
+| `aether check ../graphics -O0/-O2` | PASS |
+| `aether build ../graphics -O0/-O2` | PASS |
+| `aether run ../graphics/tests/svg_consumer -O0/-O2` | PASS |
+| `cargo test -p aether-driver --test graphics_svg_backend_v1` | PASS — 11/11 |
+| `cargo test -p aether-driver --test graphics_foundation_v1 --test text_utf8_builder_v1` | PASS — 16/16 |
+| `cargo test -p aether-driver --test owning_struct_field_replacement_v1 --test ssa_store_provenance_v1` | PASS — 21/21 |
+| `cargo fmt --all -- --check` | PASS |
+| Clippy sobre el test dedicado con `-D warnings` | PASS |
 | `git diff --check` | PASS |
 
-El milestone no puede declararse `CLOSED`. Hace falta una decisión separada de
-lenguaje que permita reemplazo seguro de un field owning en un struct local, o
-una nueva enmienda normativa que autorice otra representación sin violar los
-contratos de ownership y allocations.
+## Archivos del milestone
 
-**Estado final: BLOCKED.**
+- `graphics/src/svg.ae` — backend productivo;
+- `graphics/tests/goldens/empty.svg` — golden de Scene vacía;
+- `graphics/tests/goldens/representative.svg` — golden integral;
+- `graphics/tests/svg_consumer` — consumer real del package y API pública;
+- `compiler-next/crates/aether-driver/tests/graphics_svg_backend_v1.rs` —
+  qualification funcional, estructural, IR y resources;
+- `compiler-next/crates/aether-driver/Cargo.toml` y `Cargo.lock` — parser XML
+  exclusivamente test-only;
+- este reporte.
+
+No se hizo commit ni push.
+
+## Estado final
+
+Todos los criterios de las secciones 26–28 del ARCH y la representación owning
+de la enmienda tienen evidencia reproducible. No queda bloqueo de lenguaje ni
+criterio SVG pendiente dentro del alcance V1.
+
+**Estado final: CLOSED.**

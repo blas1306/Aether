@@ -1,0 +1,703 @@
+package graphics.svg;
+
+import graphics;
+import std.Text;
+import std.File;
+import std.IO;
+
+struct SerializerState {
+    graphics.Transform2D transform;
+    graphics.Rect clip;
+    usize clipId;
+}
+
+struct SvgSerializer {
+    Buffer<uint8> output;
+    Buffer<SerializerState> states;
+    Buffer<graphics.Rect> clips;
+    usize outputLength;
+    usize outputCapacity;
+    usize stateDepth;
+    usize stateCapacity;
+    usize clipLength;
+    usize clipCapacity;
+    usize nextClipId;
+    graphics.Transform2D transform;
+    graphics.Rect clip;
+    usize clipId;
+}
+
+graphics.Transform2D identityTransform() {
+    return graphics.Transform2D(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+}
+
+graphics.Transform2D compose(graphics.Transform2D current, graphics.Transform2D local) {
+    return graphics.Transform2D(
+        current.m11 * local.m11 + current.m21 * local.m12,
+        current.m12 * local.m11 + current.m22 * local.m12,
+        current.m11 * local.m21 + current.m21 * local.m22,
+        current.m12 * local.m21 + current.m22 * local.m22,
+        current.m11 * local.tx + current.m21 * local.ty + current.tx,
+        current.m12 * local.tx + current.m22 * local.ty + current.ty
+    );
+}
+
+graphics.Rect intersectRects(graphics.Rect left, graphics.Rect right) {
+    float64 leftX2 = left.x + left.width;
+    float64 leftY2 = left.y + left.height;
+    float64 rightX2 = right.x + right.width;
+    float64 rightY2 = right.y + right.height;
+    float64 x1 = left.x;
+    float64 y1 = left.y;
+    float64 x2 = leftX2;
+    float64 y2 = leftY2;
+    if (right.x > x1) { x1 = right.x; }
+    if (right.y > y1) { y1 = right.y; }
+    if (rightX2 < x2) { x2 = rightX2; }
+    if (rightY2 < y2) { y2 = rightY2; }
+    if (x2 < x1) { x2 = x1; }
+    if (y2 < y1) { y2 = y1; }
+    return graphics.Rect(x1, y1, x2 - x1, y2 - y1);
+}
+
+void ensureOutput(ref mut SvgSerializer serializer, usize additional) {
+    usize required = (*serializer).outputLength + additional;
+    if (required <= (*serializer).outputCapacity) { return; }
+    usize nextCapacity = 256;
+    if ((*serializer).outputCapacity != 0) {
+        nextCapacity = (*serializer).outputCapacity;
+    }
+    while (nextCapacity < required) { nextCapacity = nextCapacity * 2; }
+    Buffer<uint8> next = Buffer<uint8>(nextCapacity, uint8(0));
+    usize index = 0;
+    while (index < (*serializer).outputLength) {
+        next[index] = (*serializer).output[index];
+        index = index + 1;
+    }
+    (*serializer).output = next;
+    (*serializer).outputCapacity = nextCapacity;
+}
+
+void appendByte(ref mut SvgSerializer serializer, uint8 value) {
+    ensureOutput(serializer, 1);
+    (*serializer).output[(*serializer).outputLength] = value;
+    (*serializer).outputLength = (*serializer).outputLength + 1;
+}
+
+void appendString(ref mut SvgSerializer serializer, ref string value) {
+    usize count = byteLength(*value);
+    ensureOutput(serializer, count);
+    usize index = 0;
+    while (index < count) {
+        (*serializer).output[(*serializer).outputLength] = std.Text.byteAt(*value, index);
+        (*serializer).outputLength = (*serializer).outputLength + 1;
+        index = index + 1;
+    }
+}
+
+void appendLiteral(ref mut SvgSerializer serializer, string value) {
+    appendString(serializer, &value);
+}
+
+void appendNumber(ref mut SvgSerializer serializer, float64 value) {
+    if (value == 0.0) {
+        appendLiteral(serializer, "0");
+        return;
+    }
+    string formatted = str(value);
+    appendString(serializer, &formatted);
+}
+
+void appendUnsigned(ref mut SvgSerializer serializer, usize value) {
+    string formatted = str(value);
+    appendString(serializer, &formatted);
+}
+
+void appendHexNibble(ref mut SvgSerializer serializer, int value) {
+    if (value < 10) {
+        appendByte(serializer, uint8(48 + value));
+    } else {
+        appendByte(serializer, uint8(55 + value));
+    }
+}
+
+void appendColor(ref mut SvgSerializer serializer, graphics.Color color) {
+    appendLiteral(serializer, "#");
+    int red = int(color.red);
+    int green = int(color.green);
+    int blue = int(color.blue);
+    appendHexNibble(serializer, red / 16);
+    appendHexNibble(serializer, red % 16);
+    appendHexNibble(serializer, green / 16);
+    appendHexNibble(serializer, green % 16);
+    appendHexNibble(serializer, blue / 16);
+    appendHexNibble(serializer, blue % 16);
+}
+
+void appendOpacity(ref mut SvgSerializer serializer, uint8 alpha) {
+    appendNumber(serializer, float64(alpha) / 255.0);
+}
+
+void pushState(ref mut SvgSerializer serializer) {
+    if ((*serializer).stateDepth == (*serializer).stateCapacity) {
+        usize nextCapacity = 4;
+        if ((*serializer).stateCapacity != 0) {
+            nextCapacity = (*serializer).stateCapacity * 2;
+        }
+        SerializerState fill = SerializerState(
+            (*serializer).transform, (*serializer).clip, (*serializer).clipId);
+        Buffer<SerializerState> next = Buffer<SerializerState>(nextCapacity, fill);
+        usize index = 0;
+        while (index < (*serializer).stateDepth) {
+            next[index] = (*serializer).states[index];
+            index = index + 1;
+        }
+        (*serializer).states = next;
+        (*serializer).stateCapacity = nextCapacity;
+    }
+    (*serializer).states[(*serializer).stateDepth] = SerializerState(
+        (*serializer).transform, (*serializer).clip, (*serializer).clipId);
+    (*serializer).stateDepth = (*serializer).stateDepth + 1;
+}
+
+void popState(ref mut SvgSerializer serializer) {
+    SerializerState state = (*serializer).states[(*serializer).stateDepth - 1];
+    (*serializer).stateDepth = (*serializer).stateDepth - 1;
+    (*serializer).transform = state.transform;
+    (*serializer).clip = state.clip;
+    (*serializer).clipId = state.clipId;
+}
+
+void appendClip(ref mut SvgSerializer serializer, graphics.Rect clip) {
+    if ((*serializer).clipLength == (*serializer).clipCapacity) {
+        usize nextCapacity = 4;
+        if ((*serializer).clipCapacity != 0) {
+            nextCapacity = (*serializer).clipCapacity * 2;
+        }
+        Buffer<graphics.Rect> next = Buffer<graphics.Rect>(
+            nextCapacity, graphics.Rect(0.0, 0.0, 0.0, 0.0));
+        usize index = 0;
+        while (index < (*serializer).clipLength) {
+            next[index] = (*serializer).clips[index];
+            index = index + 1;
+        }
+        (*serializer).clips = next;
+        (*serializer).clipCapacity = nextCapacity;
+    }
+    (*serializer).clips[(*serializer).clipLength] = clip;
+    (*serializer).clipLength = (*serializer).clipLength + 1;
+}
+
+bool xmlScalarAllowed(int scalar) {
+    if (scalar == 9 || scalar == 10 || scalar == 13) { return true; }
+    if (scalar >= 32 && scalar <= 55295) { return true; }
+    if (scalar >= 57344 && scalar <= 65533) { return true; }
+    return scalar >= 65536 && scalar <= 1114111;
+}
+
+usize utf8ScalarLength(uint8 first) {
+    int value = int(first);
+    if (value < 128) { return 1; }
+    if (value < 224) { return 2; }
+    if (value < 240) { return 3; }
+    return 4;
+}
+
+int decodeScalar(ref graphics.Scene scene, graphics.ByteSpan span, usize index, usize count) {
+    int first = int((*scene).utf8ByteAt(span, index));
+    if (count == 1) { return first; }
+    int second = int((*scene).utf8ByteAt(span, index + 1)) - 128;
+    if (count == 2) { return (first - 192) * 64 + second; }
+    int third = int((*scene).utf8ByteAt(span, index + 2)) - 128;
+    if (count == 3) { return (first - 224) * 4096 + second * 64 + third; }
+    int fourth = int((*scene).utf8ByteAt(span, index + 3)) - 128;
+    return (first - 240) * 262144 + second * 4096 + third * 64 + fourth;
+}
+
+void appendEntityOrBytes(
+    ref mut SvgSerializer serializer,
+    ref graphics.Scene scene,
+    graphics.ByteSpan span,
+    usize index,
+    usize count,
+    int scalar) {
+    if (scalar == 38) { appendLiteral(serializer, "&amp;"); return; }
+    if (scalar == 60) { appendLiteral(serializer, "&lt;"); return; }
+    if (scalar == 62) { appendLiteral(serializer, "&gt;"); return; }
+    if (scalar == 34) { appendLiteral(serializer, "&quot;"); return; }
+    if (scalar == 39) { appendLiteral(serializer, "&apos;"); return; }
+    if (scalar == 9) { appendLiteral(serializer, "&#9;"); return; }
+    if (scalar == 10) { appendLiteral(serializer, "&#10;"); return; }
+    if (scalar == 13) { appendLiteral(serializer, "&#13;"); return; }
+    usize offset = 0;
+    while (offset < count) {
+        appendByte(serializer, (*scene).utf8ByteAt(span, index + offset));
+        offset = offset + 1;
+    }
+}
+
+void appendXmlSpan(
+    ref mut SvgSerializer serializer,
+    ref graphics.Scene scene,
+    graphics.ByteSpan span) {
+    usize index = 0;
+    while (index < span.length) {
+        uint8 first = (*scene).utf8ByteAt(span, index);
+        usize count = utf8ScalarLength(first);
+        int scalar = decodeScalar(scene, span, index, count);
+        if (!xmlScalarAllowed(scalar)) { throw graphics.GraphicsTextException(); }
+        appendEntityOrBytes(serializer, scene, span, index, count, scalar);
+        index = index + count;
+    }
+}
+
+void appendCssEscape(ref mut SvgSerializer serializer, string digits) {
+    appendLiteral(serializer, "\\");
+    appendString(serializer, &digits);
+    appendLiteral(serializer, " ");
+}
+
+void appendNamedFamily(
+    ref mut SvgSerializer serializer,
+    ref graphics.Scene scene,
+    graphics.ByteSpan span) {
+    if (span.length == 0) { throw graphics.GraphicsTextException(); }
+    appendLiteral(serializer, "&quot;");
+    usize index = 0;
+    while (index < span.length) {
+        uint8 first = (*scene).utf8ByteAt(span, index);
+        usize count = utf8ScalarLength(first);
+        int scalar = decodeScalar(scene, span, index, count);
+        if (scalar == 34) { appendCssEscape(serializer, "22"); }
+        else {
+            if (scalar == 92) { appendCssEscape(serializer, "5C"); }
+            else {
+                if (scalar == 9) { appendCssEscape(serializer, "9"); }
+                else {
+                    if (scalar == 10) { appendCssEscape(serializer, "A"); }
+                    else {
+                        if (scalar == 13) { appendCssEscape(serializer, "D"); }
+                        else {
+                            if (scalar == 12) { appendCssEscape(serializer, "C"); }
+                            else {
+                                if (!xmlScalarAllowed(scalar)) {
+                                    throw graphics.GraphicsTextException();
+                                }
+                                appendEntityOrBytes(
+                                    serializer, scene, span, index, count, scalar);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        index = index + count;
+    }
+    appendLiteral(serializer, "&quot;");
+}
+
+void appendFill(ref mut SvgSerializer serializer, graphics.Fill fill) {
+    appendLiteral(serializer, " fill=\"");
+    appendColor(serializer, fill.color);
+    appendLiteral(serializer, "\"");
+    if (fill.color.alpha != uint8(255)) {
+        appendLiteral(serializer, " fill-opacity=\"");
+        appendOpacity(serializer, fill.color.alpha);
+        appendLiteral(serializer, "\"");
+    }
+    appendLiteral(serializer, " fill-rule=\"");
+    match (fill.rule) {
+        graphics.FillRule.NonZero => { appendLiteral(serializer, "nonzero"); }
+        graphics.FillRule.EvenOdd => { appendLiteral(serializer, "evenodd"); }
+    }
+    appendLiteral(serializer, "\"");
+}
+
+void appendStroke(ref mut SvgSerializer serializer, graphics.Stroke stroke) {
+    appendLiteral(serializer, " stroke=\"");
+    appendColor(serializer, stroke.color);
+    appendLiteral(serializer, "\"");
+    if (stroke.color.alpha != uint8(255)) {
+        appendLiteral(serializer, " stroke-opacity=\"");
+        appendOpacity(serializer, stroke.color.alpha);
+        appendLiteral(serializer, "\"");
+    }
+    appendLiteral(serializer, " stroke-width=\"");
+    appendNumber(serializer, stroke.width);
+    appendLiteral(serializer, "\" stroke-linecap=\"");
+    match (stroke.cap) {
+        graphics.LineCap.Butt => { appendLiteral(serializer, "butt"); }
+        graphics.LineCap.Round => { appendLiteral(serializer, "round"); }
+        graphics.LineCap.Square => { appendLiteral(serializer, "square"); }
+    }
+    appendLiteral(serializer, "\" stroke-linejoin=\"");
+    match (stroke.join) {
+        graphics.LineJoin.Miter => { appendLiteral(serializer, "miter"); }
+        graphics.LineJoin.Round => { appendLiteral(serializer, "round"); }
+        graphics.LineJoin.Bevel => { appendLiteral(serializer, "bevel"); }
+    }
+    appendLiteral(serializer, "\" stroke-miterlimit=\"");
+    appendNumber(serializer, stroke.miterLimit);
+    appendLiteral(serializer, "\"");
+}
+
+void appendPaint(ref mut SvgSerializer serializer, graphics.Paint paint) {
+    match (paint) {
+        graphics.Paint.FillOnly(fill) => {
+            appendFill(serializer, fill);
+            appendLiteral(serializer, " stroke=\"none\"");
+        }
+        graphics.Paint.StrokeOnly(stroke) => {
+            appendLiteral(serializer, " fill=\"none\"");
+            appendStroke(serializer, stroke);
+        }
+        graphics.Paint.FillAndStroke(fill, stroke) => {
+            appendFill(serializer, fill);
+            appendStroke(serializer, stroke);
+        }
+    }
+}
+
+void appendTransform(ref mut SvgSerializer serializer, graphics.Transform2D transform) {
+    appendLiteral(serializer, "matrix(");
+    appendNumber(serializer, transform.m11);
+    appendLiteral(serializer, " ");
+    appendNumber(serializer, transform.m12);
+    appendLiteral(serializer, " ");
+    appendNumber(serializer, transform.m21);
+    appendLiteral(serializer, " ");
+    appendNumber(serializer, transform.m22);
+    appendLiteral(serializer, " ");
+    appendNumber(serializer, transform.tx);
+    appendLiteral(serializer, " ");
+    appendNumber(serializer, transform.ty);
+    appendLiteral(serializer, ")");
+}
+
+void openDraw(ref mut SvgSerializer serializer) {
+    appendLiteral(serializer, "  <g clip-path=\"url(#graphics-clip-");
+    appendUnsigned(serializer, (*serializer).clipId);
+    appendLiteral(serializer, ")\">\n    <g transform=\"");
+    appendTransform(serializer, (*serializer).transform);
+    appendLiteral(serializer, "\">\n");
+}
+
+void closeDraw(ref mut SvgSerializer serializer) {
+    appendLiteral(serializer, "    </g>\n  </g>\n");
+}
+
+void appendPoint(ref mut SvgSerializer serializer, graphics.Point point, float64 diameter, graphics.Color color) {
+    appendLiteral(serializer, "      <circle transform=\"matrix(0.5 0 0 0.5 ");
+    appendNumber(serializer, point.x);
+    appendLiteral(serializer, " ");
+    appendNumber(serializer, point.y);
+    appendLiteral(serializer, ")\" cx=\"0\" cy=\"0\" r=\"");
+    appendNumber(serializer, diameter);
+    appendLiteral(serializer, "\" fill=\"");
+    appendColor(serializer, color);
+    appendLiteral(serializer, "\"");
+    if (color.alpha != uint8(255)) {
+        appendLiteral(serializer, " fill-opacity=\"");
+        appendOpacity(serializer, color.alpha);
+        appendLiteral(serializer, "\"");
+    }
+    appendLiteral(serializer, " stroke=\"none\"/>\n");
+}
+
+void appendLine(ref mut SvgSerializer serializer, graphics.Line line, graphics.Stroke stroke) {
+    appendLiteral(serializer, "      <line x1=\"");
+    appendNumber(serializer, line.from.x);
+    appendLiteral(serializer, "\" y1=\"");
+    appendNumber(serializer, line.from.y);
+    appendLiteral(serializer, "\" x2=\"");
+    appendNumber(serializer, line.to.x);
+    appendLiteral(serializer, "\" y2=\"");
+    appendNumber(serializer, line.to.y);
+    appendLiteral(serializer, "\" fill=\"none\"");
+    appendStroke(serializer, stroke);
+    appendLiteral(serializer, "/>\n");
+}
+
+void appendPolyline(
+    ref mut SvgSerializer serializer,
+    ref graphics.Scene scene,
+    graphics.PointSpan span,
+    graphics.Stroke stroke) {
+    appendLiteral(serializer, "      <polyline points=\"");
+    usize index = 0;
+    while (index < span.length) {
+        if (index != 0) { appendLiteral(serializer, " "); }
+        graphics.Point point = (*scene).pointAt(span, index);
+        appendNumber(serializer, point.x);
+        appendLiteral(serializer, ",");
+        appendNumber(serializer, point.y);
+        index = index + 1;
+    }
+    appendLiteral(serializer, "\" fill=\"none\"");
+    appendStroke(serializer, stroke);
+    appendLiteral(serializer, "/>\n");
+}
+
+void appendRect(ref mut SvgSerializer serializer, graphics.Rect rectangle, graphics.Paint paint) {
+    appendLiteral(serializer, "      <rect x=\"");
+    appendNumber(serializer, rectangle.x);
+    appendLiteral(serializer, "\" y=\"");
+    appendNumber(serializer, rectangle.y);
+    appendLiteral(serializer, "\" width=\"");
+    appendNumber(serializer, rectangle.width);
+    appendLiteral(serializer, "\" height=\"");
+    appendNumber(serializer, rectangle.height);
+    appendLiteral(serializer, "\"");
+    appendPaint(serializer, paint);
+    appendLiteral(serializer, "/>\n");
+}
+
+void appendPath(
+    ref mut SvgSerializer serializer,
+    ref graphics.Scene scene,
+    graphics.PathSpan span,
+    graphics.Paint paint) {
+    appendLiteral(serializer, "      <path d=\"");
+    usize index = 0;
+    while (index < span.length) {
+        if (index != 0) { appendLiteral(serializer, " "); }
+        graphics.PathVerb verb = (*scene).pathVerbAt(span, index);
+        match (verb) {
+            graphics.PathVerb.MoveTo(point) => {
+                appendLiteral(serializer, "M ");
+                appendNumber(serializer, point.x);
+                appendLiteral(serializer, " ");
+                appendNumber(serializer, point.y);
+            }
+            graphics.PathVerb.LineTo(point) => {
+                appendLiteral(serializer, "L ");
+                appendNumber(serializer, point.x);
+                appendLiteral(serializer, " ");
+                appendNumber(serializer, point.y);
+            }
+            graphics.PathVerb.CubicTo(control1, control2, end) => {
+                appendLiteral(serializer, "C ");
+                appendNumber(serializer, control1.x);
+                appendLiteral(serializer, " ");
+                appendNumber(serializer, control1.y);
+                appendLiteral(serializer, " ");
+                appendNumber(serializer, control2.x);
+                appendLiteral(serializer, " ");
+                appendNumber(serializer, control2.y);
+                appendLiteral(serializer, " ");
+                appendNumber(serializer, end.x);
+                appendLiteral(serializer, " ");
+                appendNumber(serializer, end.y);
+            }
+            graphics.PathVerb.Close => { appendLiteral(serializer, "Z"); }
+        }
+        index = index + 1;
+    }
+    appendLiteral(serializer, "\"");
+    appendPaint(serializer, paint);
+    appendLiteral(serializer, "/>\n");
+}
+
+void appendText(
+    ref mut SvgSerializer serializer,
+    ref graphics.Scene scene,
+    graphics.TextRecord record) {
+    appendLiteral(serializer, "      <text x=\"");
+    appendNumber(serializer, record.position.x);
+    appendLiteral(serializer, "\" y=\"");
+    appendNumber(serializer, record.position.y);
+    appendLiteral(serializer, "\" fill=\"");
+    appendColor(serializer, record.color);
+    appendLiteral(serializer, "\"");
+    if (record.color.alpha != uint8(255)) {
+        appendLiteral(serializer, " fill-opacity=\"");
+        appendOpacity(serializer, record.color.alpha);
+        appendLiteral(serializer, "\"");
+    }
+    match (record.font.family) {
+        graphics.StoredFontFamily.BackendDefault => { }
+        graphics.StoredFontFamily.Serif => {
+            appendLiteral(serializer, " font-family=\"serif\"");
+        }
+        graphics.StoredFontFamily.SansSerif => {
+            appendLiteral(serializer, " font-family=\"sans-serif\"");
+        }
+        graphics.StoredFontFamily.Monospace => {
+            appendLiteral(serializer, " font-family=\"monospace\"");
+        }
+        graphics.StoredFontFamily.Named(span) => {
+            appendLiteral(serializer, " font-family=\"");
+            appendNamedFamily(serializer, scene, span);
+            appendLiteral(serializer, "\"");
+        }
+    }
+    appendLiteral(serializer, " font-size=\"");
+    appendNumber(serializer, record.size);
+    appendLiteral(serializer, "\" font-weight=\"");
+    match (record.font.weight) {
+        graphics.FontWeight.Normal => { appendLiteral(serializer, "normal"); }
+        graphics.FontWeight.Bold => { appendLiteral(serializer, "bold"); }
+    }
+    appendLiteral(serializer, "\" font-style=\"");
+    match (record.font.slant) {
+        graphics.FontSlant.Normal => { appendLiteral(serializer, "normal"); }
+        graphics.FontSlant.Italic => { appendLiteral(serializer, "italic"); }
+    }
+    appendLiteral(serializer, "\" text-anchor=\"");
+    match (record.align) {
+        graphics.TextAlign.Left => { appendLiteral(serializer, "start"); }
+        graphics.TextAlign.Center => { appendLiteral(serializer, "middle"); }
+        graphics.TextAlign.Right => { appendLiteral(serializer, "end"); }
+    }
+    appendLiteral(serializer, "\" dominant-baseline=\"");
+    match (record.baseline) {
+        graphics.TextBaseline.Alphabetic => { appendLiteral(serializer, "alphabetic"); }
+        graphics.TextBaseline.Top => { appendLiteral(serializer, "text-before-edge"); }
+        graphics.TextBaseline.Middle => { appendLiteral(serializer, "central"); }
+        graphics.TextBaseline.Bottom => { appendLiteral(serializer, "text-after-edge"); }
+    }
+    appendLiteral(serializer,
+        "\" direction=\"ltr\" writing-mode=\"horizontal-tb\" xml:space=\"preserve\">");
+    appendXmlSpan(serializer, scene, record.content);
+    appendLiteral(serializer, "</text>\n");
+}
+
+void collectClips(ref mut SvgSerializer serializer, ref graphics.Scene scene) {
+    appendClip(serializer, (*serializer).clip);
+    usize index = 0;
+    while (index < (*scene).commandCount()) {
+        graphics.Command command = (*scene).commandAt(index);
+        match (command) {
+            graphics.Command.PushState => { pushState(serializer); }
+            graphics.Command.PopState => { popState(serializer); }
+            graphics.Command.ConcatTransform(transform) => { }
+            graphics.Command.IntersectClipRect(rectangle) => {
+                graphics.Rect combined = intersectRects((*serializer).clip, rectangle);
+                (*serializer).clip = combined;
+                (*serializer).clipId = (*serializer).clipLength;
+                appendClip(serializer, combined);
+            }
+            graphics.Command.DrawPoint(point, diameter, color) => { }
+            graphics.Command.DrawLine(line, stroke) => { }
+            graphics.Command.DrawPolyline(span, stroke) => { }
+            graphics.Command.DrawRect(rectangle, paint) => { }
+            graphics.Command.DrawPath(span, paint) => { }
+            graphics.Command.DrawText(record) => { }
+        }
+        index = index + 1;
+    }
+}
+
+void appendClipDefinitions(ref mut SvgSerializer serializer) {
+    appendLiteral(serializer, "  <defs>\n");
+    usize index = 0;
+    while (index < (*serializer).clipLength) {
+        graphics.Rect clip = (*serializer).clips[index];
+        appendLiteral(serializer, "    <clipPath id=\"graphics-clip-");
+        appendUnsigned(serializer, index);
+        appendLiteral(serializer, "\" clipPathUnits=\"userSpaceOnUse\">\n      <rect x=\"");
+        appendNumber(serializer, clip.x);
+        appendLiteral(serializer, "\" y=\"");
+        appendNumber(serializer, clip.y);
+        appendLiteral(serializer, "\" width=\"");
+        appendNumber(serializer, clip.width);
+        appendLiteral(serializer, "\" height=\"");
+        appendNumber(serializer, clip.height);
+        appendLiteral(serializer, "\"/>\n    </clipPath>\n");
+        index = index + 1;
+    }
+    appendLiteral(serializer, "  </defs>\n");
+}
+
+void appendDraws(ref mut SvgSerializer serializer, ref graphics.Scene scene) {
+    usize index = 0;
+    while (index < (*scene).commandCount()) {
+        graphics.Command command = (*scene).commandAt(index);
+        match (command) {
+            graphics.Command.PushState => { pushState(serializer); }
+            graphics.Command.PopState => { popState(serializer); }
+            graphics.Command.ConcatTransform(transform) => {
+                (*serializer).transform = compose((*serializer).transform, transform);
+            }
+            graphics.Command.IntersectClipRect(rectangle) => {
+                (*serializer).clip = intersectRects((*serializer).clip, rectangle);
+                (*serializer).clipId = (*serializer).nextClipId;
+                (*serializer).nextClipId = (*serializer).nextClipId + 1;
+            }
+            graphics.Command.DrawPoint(point, diameter, color) => {
+                openDraw(serializer);
+                appendPoint(serializer, point, diameter, color);
+                closeDraw(serializer);
+            }
+            graphics.Command.DrawLine(line, stroke) => {
+                openDraw(serializer);
+                appendLine(serializer, line, stroke);
+                closeDraw(serializer);
+            }
+            graphics.Command.DrawPolyline(span, stroke) => {
+                openDraw(serializer);
+                appendPolyline(serializer, scene, span, stroke);
+                closeDraw(serializer);
+            }
+            graphics.Command.DrawRect(rectangle, paint) => {
+                openDraw(serializer);
+                appendRect(serializer, rectangle, paint);
+                closeDraw(serializer);
+            }
+            graphics.Command.DrawPath(span, paint) => {
+                openDraw(serializer);
+                appendPath(serializer, scene, span, paint);
+                closeDraw(serializer);
+            }
+            graphics.Command.DrawText(recordIndex) => {
+                openDraw(serializer);
+                appendText(serializer, scene, (*scene).textRecordAt(recordIndex));
+                closeDraw(serializer);
+            }
+        }
+        index = index + 1;
+    }
+}
+
+public string render(ref graphics.Scene scene) {
+    graphics.Viewport viewport = (*scene).viewport();
+    graphics.Rect initialClip = graphics.Rect(0.0, 0.0, viewport.width, viewport.height);
+    SerializerState emptyState = SerializerState(identityTransform(), initialClip, 0);
+    SvgSerializer serializer = SvgSerializer(
+        Buffer<uint8>(0, uint8(0)),
+        Buffer<SerializerState>(0, emptyState),
+        Buffer<graphics.Rect>(0, initialClip),
+        0, 0, 0, 0, 0, 0, 1,
+        identityTransform(), initialClip, 0);
+
+    collectClips(&mut serializer, scene);
+    appendLiteral(&mut serializer, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    appendLiteral(&mut serializer, "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"");
+    appendNumber(&mut serializer, viewport.width);
+    appendLiteral(&mut serializer, "\" height=\"");
+    appendNumber(&mut serializer, viewport.height);
+    appendLiteral(&mut serializer, "\" viewBox=\"0 0 ");
+    appendNumber(&mut serializer, viewport.width);
+    appendLiteral(&mut serializer, " ");
+    appendNumber(&mut serializer, viewport.height);
+    appendLiteral(&mut serializer, "\">\n");
+    appendClipDefinitions(&mut serializer);
+
+    serializer.stateDepth = 0;
+    serializer.transform = identityTransform();
+    serializer.clip = initialClip;
+    serializer.clipId = 0;
+    serializer.nextClipId = 1;
+    appendDraws(&mut serializer, scene);
+    appendLiteral(&mut serializer, "</svg>\n");
+    return std.Text.fromUtf8(&serializer.output, serializer.outputLength);
+}
+
+public void save(ref graphics.Scene scene, ref string path) {
+    string document = render(scene);
+    try {
+        std.File.writeText(path, &document);
+    } catch (std.IO.IOException error) {
+        throw graphics.GraphicsIoException();
+    }
+}

@@ -1,0 +1,17 @@
+package graphicsSvgConsumer;
+
+import graphics as g;
+import graphics.svg as svg;
+
+int main() {
+    g.SceneBuilder builder = g.SceneBuilder(g.Viewport(2.0, 1.0));
+    builder.drawRect(
+        g.Rect(0.0, 0.0, 2.0, 1.0),
+        g.Paint.FillOnly(g.Fill(
+            g.Color(uint8(10), uint8(20), uint8(30), uint8(255)),
+            g.FillRule.NonZero)));
+    g.Scene scene = builder.finish();
+    string document = svg.render(&scene);
+    if (byteLength(document) == 0) { return 1; }
+    return 0;
+}

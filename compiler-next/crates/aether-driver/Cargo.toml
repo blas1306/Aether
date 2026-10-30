@@ -13,6 +13,7 @@ aether-middle = { path = "../aether-middle" }
 aether-backend-llvm = { path = "../aether-backend-llvm" }
 
 [dev-dependencies]
+roxmltree = "0.20"
 semver = "1.0"
 sha2 = "0.10"
 
