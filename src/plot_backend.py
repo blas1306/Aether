@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import sys
 import uuid
 from pathlib import Path
 from typing import Any, Callable
@@ -15,28 +17,53 @@ def _ensure_matplotlib(*, prefer_interactive: bool = False) -> None:
     global plt, FigureCanvasAgg, Figure
     if plt is not None and FigureCanvasAgg is not None and Figure is not None:
         if prefer_interactive and _is_noninteractive_backend(str(plt.get_backend()).lower()):
-            try:
-                plt.switch_backend("qtagg")
-            except Exception:
-                pass
+            _try_interactive_backend()
         return
+
     import matplotlib
+    import matplotlib.pyplot as _plt
 
     backend = str(matplotlib.get_backend()).lower()
-    if prefer_interactive and _is_noninteractive_backend(backend):
+    if prefer_interactive and _is_noninteractive_backend(backend) and _has_graphical_display():
+        _try_interactive_backend(_plt)
+    elif "tk" in backend:
         try:
             matplotlib.use("qtagg", force=True)
         except Exception:
             pass
-    elif "tk" in backend:
-        matplotlib.use("qtagg", force=True)
-    import matplotlib.pyplot as _plt
+
     from matplotlib.backends.backend_agg import FigureCanvasAgg as _FigureCanvasAgg
     from matplotlib.figure import Figure as _Figure
 
     plt = _plt
     FigureCanvasAgg = _FigureCanvasAgg
     Figure = _Figure
+
+
+_candidates = ("qtagg", "qt5agg", "tkagg", "gtk3agg", "gtk4agg", "wxagg")
+
+
+def _has_graphical_display() -> bool:
+    if sys.platform == "darwin" or sys.platform.startswith("win"):
+        return True
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def _try_interactive_backend(plot_module: Any | None = None) -> bool:
+    global plt
+    target = plot_module if plot_module is not None else plt
+    if target is None or not _has_graphical_display():
+        return False
+
+    for candidate in _candidates:
+        try:
+            target.switch_backend(candidate)
+            active = str(target.get_backend()).lower()
+            if not _is_noninteractive_backend(active):
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def _is_noninteractive_backend(backend: str) -> bool:
@@ -462,6 +489,8 @@ class PlotBackend:
 
     def _show_interactive(self) -> None:
         _ensure_matplotlib(prefer_interactive=True)
+        if _is_noninteractive_backend(str(plt.get_backend()).lower()) or not _has_graphical_display():
+            return
         plt.show(block=False)
         self._interactive_show_requested = True
         plt.pause(0.001)
@@ -471,6 +500,8 @@ class PlotBackend:
             return
         _ensure_matplotlib(prefer_interactive=True)
         self._interactive_show_requested = False
+        if _is_noninteractive_backend(str(plt.get_backend()).lower()) or not _has_graphical_display():
+            return
         plt.show(block=True)
 
     def _redraw_interactive(self) -> None:
@@ -494,10 +525,11 @@ class PlotBackend:
             canvas.flush_events()
         except Exception:
             pass
-        try:
-            plt.pause(0.001)
-        except Exception:
-            pass
+        if not _is_noninteractive_backend(str(plt.get_backend()).lower()) and _has_graphical_display():
+            try:
+                plt.pause(0.001)
+            except Exception:
+                pass
 
     def _persist_document_if_needed(self) -> None:
         if self.plot_mode != "document":

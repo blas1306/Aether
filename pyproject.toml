@@ -16,6 +16,7 @@ dependencies = [
     "scipy==1.17.1",
     "sympy==1.14.0",
     "matplotlib==3.10.8",
+    "PyQt6>=6.8,<7",
 ]
 
 [tool.uv.sources]

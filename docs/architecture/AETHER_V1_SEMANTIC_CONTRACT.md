@@ -2677,8 +2677,10 @@ and public builders remain outside the contract.
 
 ## OWNING-STRUCT-FIELD-REPLACEMENT-V1 — owning slot replacement
 
-Status: **IMPLEMENTED, QUALIFICATION PARTIAL** in `compiler-next`; normative
-scope remains [OWNING-STRUCT-FIELD-REPLACEMENT-ARCH-1](OWNING_STRUCT_FIELD_REPLACEMENT_ARCH_1.md).
+Status: **CLOSED** in `compiler-next`; normative scope is
+[OWNING-STRUCT-FIELD-REPLACEMENT-ARCH-1](OWNING_STRUCT_FIELD_REPLACEMENT_ARCH_1.md)
+as amended by
+[OWNING-STRUCT-FIELD-REPLACEMENT-ARCH-1-AMENDMENT-1](OWNING_STRUCT_FIELD_REPLACEMENT_ARCH_1_AMENDMENT_1.md).
 
 Assignment to an initialized direct or nested `Field` slot of concrete,
 source-storable, Relocatable, non-Copy, drop-needing type is a total slot
@@ -2700,12 +2702,14 @@ typed drop glue in strict load-old, store-new, drop-old order. This operation
 does not imply concurrency atomics, boxing, allocation, runtime alias checks or
 `noalias` for `ref mut`.
 
-The current implementation rejects live derived borrows of known local roots
-and conservatively rejects a dereference replacement when another owning
-reference parameter may alias it. Full non-lexical proof that an arbitrary
-unknown-provenance reference ceased to be live before commit remains an open
-qualification item; until it and the full architecture matrix are complete,
-the capability is not declared CLOSED.
+The implementation rejects live derived borrows/views of known local roots and
+conservatively rejects a dereference replacement when another reference/view
+parameter may reach the owner, one of its members or its backing storage.
+Ordinary local references remain lexical; only regions already represented by
+verified call/format `End` metadata or a delimited iteration scope end earlier.
+This V1 profile does not infer general non-lexical lifetimes. Qualification
+covers reborrow/view copies, CFG joins, element/backing aliases, independently
+rooted locals, per-identity lifecycle and independent HIR/MIR/SSA corruption.
 
 ## CORE-V1 — closed prelude functions
 

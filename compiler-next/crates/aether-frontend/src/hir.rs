@@ -22606,6 +22606,19 @@ mod vertical33_tests {
         *value_type = TypeId::BOOL;
         assert!(verify_hir(&wrong_type).is_err());
 
+        let mut wrong_field = hir.clone();
+        let replacement = wrong_field
+            .functions
+            .iter_mut()
+            .flat_map(|function| &mut function.body.statements)
+            .find(|statement| matches!(statement.kind, HirStmtKind::ReplaceOwned { .. }))
+            .expect("replacement statement");
+        let HirStmtKind::ReplaceOwned { destination, .. } = &mut replacement.kind else {
+            unreachable!()
+        };
+        destination.projections[0] = HirPlaceProjection::Field(FieldId(u32::MAX));
+        assert!(verify_hir(&wrong_field).is_err());
+
         let mut ordinary_assign = hir;
         let replacement = ordinary_assign
             .functions

@@ -67,6 +67,33 @@ def test_unqualified_plot_requires_import() -> None:
         run_aether("plot([1; 2; 3]);", plot_mode="document")
 
 
+def test_interactive_plot_does_not_show_with_headless_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    import plot_backend as plotting
+
+    calls: list[tuple[object, ...]] = []
+
+    class FakePyPlot:
+        def get_backend(self) -> str:
+            return "Agg"
+
+        def show(self, *args: object, **kwargs: object) -> None:
+            calls.append(("show", args, kwargs))
+
+        def pause(self, *args: object, **kwargs: object) -> None:
+            calls.append(("pause", args, kwargs))
+
+    fake = FakePyPlot()
+    monkeypatch.setattr(plotting, "plt", fake)
+    monkeypatch.setattr(plotting, "FigureCanvasAgg", object)
+    monkeypatch.setattr(plotting, "Figure", object)
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+    plotting.PlotBackend(plot_mode="interactive")._show_interactive()
+
+    assert calls == []
+
+
 @pytest.mark.parametrize(
     ("source", "message"),
     [
