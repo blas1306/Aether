@@ -1,0 +1,104 @@
+package plotsConsumer;
+
+import plots as p;
+import plots.svg as svg;
+import graphics as g;
+import std.Text;
+
+bool textEquals(ref g.Scene scene, usize recordIndex, ref string expected) {
+    g.TextRecord record = (*scene).textRecordAt(recordIndex);
+    if (record.content.length != byteLength(*expected)) { return false; }
+    usize index = 0;
+    while (index < record.content.length) {
+        if ((*scene).utf8ByteAt(record.content, index) != std.Text.byteAt(*expected, index)) {
+            return false;
+        }
+        index = index + 1;
+    }
+    return true;
+}
+
+bool commandTextEquals(ref g.Scene scene, usize commandIndex, ref string expected) {
+    match ((*scene).commandAt(commandIndex)) {
+        g.Command.DrawText(record) => { return textEquals(scene, record, expected); }
+        g.Command.PushState => { return false; }
+        g.Command.PopState => { return false; }
+        g.Command.ConcatTransform(value) => { return false; }
+        g.Command.IntersectClipRect(value) => { return false; }
+        g.Command.DrawPoint(point, diameter, color) => { return false; }
+        g.Command.DrawLine(value, stroke) => { return false; }
+        g.Command.DrawPolyline(span, stroke) => { return false; }
+        g.Command.DrawRect(value, paint) => { return false; }
+        g.Command.DrawPath(span, paint) => { return false; }
+    }
+}
+
+int main() {
+    Array<p.DataPoint> samples = {
+        p.DataPoint(0.0, 0.0),
+        p.DataPoint(1.0, 1.0),
+        p.DataPoint(2.0, 4.0),
+        p.DataPoint(3.0, 9.0)
+    };
+    p.FigureOptions options = p.defaultOptions();
+    options.title = "Squares";
+    options.xLabel = "x";
+    options.yLabel = "x*x";
+    p.Figure2D figure = p.line(&samples, &options);
+    p.Figure2D sameFigure = figure;
+
+    samples[0] = p.DataPoint(99.0, 99.0);
+    options.title = "changed";
+    options.xLabel = "changed";
+    options.yLabel = "changed";
+
+    g.Scene scene = figure.scene();
+    g.Scene second = sameFigure.scene();
+    if (figure != sameFigure || scene == second || scene.commandCount() != 32 ||
+        second.commandCount() != 32) {
+        return 1;
+    }
+    match (scene.commandAt(3)) {
+        g.Command.DrawPolyline(span, stroke) => {
+            g.Point first = scene.pointAt(span, 0);
+            g.Point last = scene.pointAt(span, 3);
+            if (span.length != 4 || first.x != 72.0 || first.y != 416.0 ||
+                last.x != 616.0 || last.y != 48.0 || stroke.width != 2.0) {
+                return 2;
+            }
+        }
+        g.Command.PushState => { return 2; }
+        g.Command.PopState => { return 2; }
+        g.Command.ConcatTransform(value) => { return 2; }
+        g.Command.IntersectClipRect(value) => { return 2; }
+        g.Command.DrawPoint(point, diameter, color) => { return 2; }
+        g.Command.DrawLine(value, stroke) => { return 2; }
+        g.Command.DrawRect(value, paint) => { return 2; }
+        g.Command.DrawPath(span, paint) => { return 2; }
+        g.Command.DrawText(record) => { return 2; }
+    }
+    match (scene.commandAt(31)) {
+        g.Command.DrawText(record) => {
+            string expected = "Squares";
+            if (!textEquals(&scene, record, &expected)) { return 3; }
+        }
+        g.Command.PushState => { return 3; }
+        g.Command.PopState => { return 3; }
+        g.Command.ConcatTransform(value) => { return 3; }
+        g.Command.IntersectClipRect(value) => { return 3; }
+        g.Command.DrawPoint(point, diameter, color) => { return 3; }
+        g.Command.DrawLine(value, stroke) => { return 3; }
+        g.Command.DrawPolyline(span, stroke) => { return 3; }
+        g.Command.DrawRect(value, paint) => { return 3; }
+        g.Command.DrawPath(span, paint) => { return 3; }
+    }
+    string expectedX = "x";
+    string expectedY = "x*x";
+    if (!commandTextEquals(&scene, 26, &expectedX) ||
+        !commandTextEquals(&scene, 29, &expectedY)) {
+        return 4;
+    }
+    string document = svg.render(&figure);
+    if (byteLength(document) == 0) { return 5; }
+    return 0;
+}

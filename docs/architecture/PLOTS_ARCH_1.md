@@ -1,7 +1,15 @@
 # PLOTS-ARCH-1 — arquitectura nativa de plotting 2D
 
-Estado: **ARQUITECTURA CERRADA; IMPLEMENTACIÓN BLOQUEADA**, enmendado
+Estado: **ARQUITECTURA CERRADA; IMPLEMENTACIÓN V1 CLOSED**, revalidado
 2026-10-31.
+
+> **Enmienda normativa 2 (2026-10-31).**
+> `OOP-OWNING-STRING-FIELDS-V1` quedó CLOSED y la qualification integral de
+> `PLOTS-2D-LINE-V1` pasó en O0/O2. La enmienda 1 se conserva como registro
+> histórico del bloqueo de preflight, pero ya no describe el estado vigente.
+> El package `plots`, el adapter `plots.svg`, el consumer, los goldens y la
+> qualification dedicada implementan este contrato sin cambios de compiler,
+> runtime, Core, std o Graphics.
 
 > **Enmienda normativa 1 (2026-10-31).** La API y la representación objetivo
 > de Plots se preservan, pero los fields `title`, `xLabel` y `yLabel` de
@@ -746,16 +754,13 @@ Los gates deben demostrar:
 
 Estas limitaciones influyen en la forma elegida y no alteran la API objetivo.
 
-### 20.2 Dependencia bloqueante de implementación
+### 20.2 Dependencia de implementación resuelta
 
-El preflight demostró que un field owning de tipo exacto `string` en una class
-es rechazado por el frontend con `E0401`. `Figure2D` requiere tres de esos
-fields para poseer su configuración sin retener borrows. La dependencia se
-resolverá sólo mediante la capability general
-`OOP-OWNING-STRING-FIELDS-V1`, con init, Alias/Transfer, replacement, drop,
-herencia y unwind verificados. Hasta entonces no se implementan `plots` ni
-`plots.svg`, y no se sustituyen los textos por globals, borrows retenidos,
-Buffers de bytes, intrinsics o allowlists.
+El bloqueo histórico `E0401` fue resuelto por la capability general
+`OOP-OWNING-STRING-FIELDS-V1`. `Figure2D` posee directamente `title`, `xLabel`
+y `yLabel`; su HIR/MIR/SSA conserva `StringFieldAlias`, cleanup y drop
+ordinarios. No se introdujo intrinsic, allowlist, global, borrow retenido ni
+lowering específico de Plots.
 
 ### 20.3 Limitaciones de API gráfica, no del lenguaje
 
@@ -765,10 +770,10 @@ Buffers de bytes, intrinsics o allowlists.
 - SVG es un backend de documento: interactividad/windowing requiere otro
   backend futuro, no estado de sesión dentro de Plots.
 
-`Buffer<DataPoint>` privado y `ref Figure2D` superaron el control positivo del
-preflight. Los strings owning no están admitidos y constituyen el bloqueo ya
-registrado; cualquier otro gap debe detener el vertical y abrir un milestone
-general. No se autoriza un intrinsic, allowlist `plots` ni lowering especial.
+`Buffer<DataPoint>` privado, `ref Figure2D` y los tres strings owning superaron
+el preflight y la qualification integral. Cualquier gap futuro debe abrir un
+milestone general; sigue sin autorizarse un intrinsic, allowlist `plots` ni
+lowering especial.
 
 ## 21. Fuera de scope V1
 

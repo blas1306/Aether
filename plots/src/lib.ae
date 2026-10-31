@@ -1,0 +1,442 @@
+package plots;
+
+import graphics;
+import std.Text;
+
+public struct DataPoint {
+    float64 x;
+    float64 y;
+}
+
+public struct Limits {
+    float64 minimum;
+    float64 maximum;
+}
+
+enum LimitMode {
+    Auto,
+    Explicit(Limits),
+}
+
+public struct LineStyle {
+    graphics.Color color;
+    float64 width;
+}
+
+public struct FigureOptions {
+    graphics.Viewport viewport;
+    LimitMode xLimits;
+    LimitMode yLimits;
+    string title;
+    string xLabel;
+    string yLabel;
+    LineStyle line;
+}
+
+public open class PlotException : Exception {
+    public init() {}
+}
+
+public class EmptySeriesException : PlotException {
+    public init() : base() {}
+}
+
+public class NoFiniteDataException : PlotException {
+    public init() : base() {}
+}
+
+public class InvalidFigureException : PlotException {
+    public init() : base() {}
+}
+
+public class InvalidLimitsException : PlotException {
+    public init() : base() {}
+}
+
+public class PlotRangeException : PlotException {
+    public init() : base() {}
+}
+
+struct FigureConstruction {
+    int marker;
+}
+
+bool finite(float64 value) {
+    return value - value == 0.0;
+}
+
+bool finitePoint(DataPoint point) {
+    return finite(point.x) && finite(point.y);
+}
+
+string copyText(ref string value) {
+    usize count = byteLength(*value);
+    Buffer<uint8> bytes = Buffer<uint8>(count, uint8(0));
+    usize index = 0;
+    while (index < count) {
+        bytes[index] = std.Text.byteAt(*value, index);
+        index = index + 1;
+    }
+    return std.Text.fromUtf8(&bytes, count);
+}
+
+graphics.Color black() {
+    return graphics.Color(uint8(0), uint8(0), uint8(0), uint8(255));
+}
+
+graphics.Stroke axisStroke() {
+    return graphics.Stroke(
+        black(), 1.0, graphics.LineCap.Butt, graphics.LineJoin.Miter, 4.0);
+}
+
+graphics.TextStyle textStyle(
+    float64 size, graphics.TextAlign align, graphics.TextBaseline baseline) {
+    return graphics.TextStyle(
+        size, black(),
+        graphics.FontRequest(
+            graphics.FontFamily.SansSerif,
+            graphics.FontWeight.Normal,
+            graphics.FontSlant.Normal),
+        align, baseline);
+}
+
+Limits expandLimits(Limits raw) {
+    float64 minimum = raw.minimum;
+    float64 maximum = raw.maximum;
+    if (minimum == maximum) {
+        float64 delta = abs(minimum) * 0.05;
+        if (delta < 1.0) { delta = 1.0; }
+        float64 lower = minimum - delta;
+        float64 upper = maximum + delta;
+        if (!finite(lower)) { lower = minimum; }
+        if (!finite(upper)) { upper = maximum; }
+        minimum = lower;
+        maximum = upper;
+    }
+    float64 span = maximum - minimum;
+    if (!finite(minimum) || !finite(maximum) || !finite(span) ||
+        !(minimum < maximum) || !(span > 0.0)) {
+        throw PlotRangeException();
+    }
+    return Limits(minimum, maximum);
+}
+
+Limits resolveAxis(
+    ref Buffer<DataPoint> samples,
+    usize sampleCount,
+    LimitMode mode,
+    bool useX) {
+    match (mode) {
+        LimitMode.Explicit(value) => { return expandLimits(value); }
+        LimitMode.Auto => {
+            usize index = 0;
+            bool found = false;
+            float64 minimum = 0.0;
+            float64 maximum = 0.0;
+            while (index < sampleCount) {
+                DataPoint point = (*samples)[index];
+                if (finitePoint(point)) {
+                    float64 value = point.y;
+                    if (useX) { value = point.x; }
+                    if (!found) {
+                        minimum = value;
+                        maximum = value;
+                        found = true;
+                    } else {
+                        if (value < minimum) { minimum = value; }
+                        if (value > maximum) { maximum = value; }
+                    }
+                }
+                index = index + 1;
+            }
+            if (!found) { throw NoFiniteDataException(); }
+            return expandLimits(Limits(minimum, maximum));
+        }
+    }
+}
+
+void validateExplicit(LimitMode mode) {
+    match (mode) {
+        LimitMode.Auto => { }
+        LimitMode.Explicit(value) => {
+            if (!finite(value.minimum) || !finite(value.maximum) ||
+                value.minimum > value.maximum) {
+                throw InvalidLimitsException();
+            }
+        }
+    }
+}
+
+graphics.Point transformPoint(
+    DataPoint point,
+    Limits xLimits,
+    Limits yLimits,
+    float64 plotLeft,
+    float64 plotTop,
+    float64 plotWidth,
+    float64 plotHeight) {
+    float64 sx = plotWidth / (xLimits.maximum - xLimits.minimum);
+    float64 sy = plotHeight / (yLimits.maximum - yLimits.minimum);
+    float64 x = plotLeft + (point.x - xLimits.minimum) * sx;
+    float64 y = plotTop + plotHeight - (point.y - yLimits.minimum) * sy;
+    if (!finite(x) || !finite(y)) { throw PlotRangeException(); }
+    return graphics.Point(x, y);
+}
+
+float64 tickValue(Limits limits, int index) {
+    float64 value = limits.minimum +
+        (limits.maximum - limits.minimum) * float64(index) / 4.0;
+    if (value == 0.0) { value = 0.0; }
+    if (!finite(value)) { throw PlotRangeException(); }
+    return value;
+}
+
+public class Figure2D {
+    Buffer<DataPoint> samples;
+    usize sampleCount;
+    float64 viewportWidth;
+    float64 viewportHeight;
+    LimitMode xLimits;
+    LimitMode yLimits;
+    string title;
+    string xLabel;
+    string yLabel;
+    uint8 seriesRed;
+    uint8 seriesGreen;
+    uint8 seriesBlue;
+    uint8 seriesAlpha;
+    float64 seriesWidth;
+
+    public init(
+        FigureConstruction construction,
+        Buffer<DataPoint> ownedSamples,
+        usize ownedSampleCount,
+        graphics.Viewport ownedViewport,
+        LimitMode ownedXLimits,
+        LimitMode ownedYLimits,
+        string ownedTitle,
+        string ownedXLabel,
+        string ownedYLabel,
+        LineStyle ownedLine) {
+        samples = ownedSamples;
+        sampleCount = ownedSampleCount;
+        viewportWidth = ownedViewport.width;
+        viewportHeight = ownedViewport.height;
+        xLimits = ownedXLimits;
+        yLimits = ownedYLimits;
+        title = ownedTitle;
+        xLabel = ownedXLabel;
+        yLabel = ownedYLabel;
+        seriesRed = ownedLine.color.red;
+        seriesGreen = ownedLine.color.green;
+        seriesBlue = ownedLine.color.blue;
+        seriesAlpha = ownedLine.color.alpha;
+        seriesWidth = ownedLine.width;
+    }
+
+    Limits resolveOwnedAxis(LimitMode mode, bool useX) {
+        match (mode) {
+            LimitMode.Explicit(value) => { return expandLimits(value); }
+            LimitMode.Auto => {
+                usize index = 0;
+                bool found = false;
+                float64 minimum = 0.0;
+                float64 maximum = 0.0;
+                while (index < sampleCount) {
+                    DataPoint point = samples[index];
+                    if (finitePoint(point)) {
+                        float64 value = point.y;
+                        if (useX) { value = point.x; }
+                        if (!found) {
+                            minimum = value;
+                            maximum = value;
+                            found = true;
+                        } else {
+                            if (value < minimum) { minimum = value; }
+                            if (value > maximum) { maximum = value; }
+                        }
+                    }
+                    index = index + 1;
+                }
+                if (!found) { throw NoFiniteDataException(); }
+                return expandLimits(Limits(minimum, maximum));
+            }
+        }
+    }
+
+    public graphics.Scene scene() {
+        Limits resolvedX = resolveOwnedAxis(xLimits, true);
+        Limits resolvedY = resolveOwnedAxis(yLimits, false);
+        float64 plotLeft = 72.0;
+        float64 plotTop = 48.0;
+        float64 plotWidth = viewportWidth - 96.0;
+        float64 plotHeight = viewportHeight - 112.0;
+        graphics.Rect plotRect = graphics.Rect(
+            plotLeft, plotTop, plotWidth, plotHeight);
+
+        graphics.SceneBuilder builder = graphics.SceneBuilder(
+            graphics.Viewport(viewportWidth, viewportHeight));
+        builder.drawRect(
+            graphics.Rect(0.0, 0.0, viewportWidth, viewportHeight),
+            graphics.Paint.FillOnly(graphics.Fill(
+                graphics.Color(uint8(255), uint8(255), uint8(255), uint8(255)),
+                graphics.FillRule.NonZero)));
+
+        graphics.Color seriesColor = graphics.Color(
+            seriesRed, seriesGreen, seriesBlue, seriesAlpha);
+        graphics.Stroke seriesStroke = graphics.Stroke(
+            seriesColor, seriesWidth,
+            graphics.LineCap.Butt, graphics.LineJoin.Miter, 4.0);
+        float64 pointDiameter = seriesWidth;
+        if (pointDiameter < 2.0) { pointDiameter = 2.0; }
+
+        builder.pushState();
+        builder.intersectClipRect(plotRect);
+        usize index = 0;
+        usize runLength = 0;
+        graphics.Point first = graphics.Point(0.0, 0.0);
+        while (index < sampleCount) {
+            DataPoint sample = samples[index];
+            if (finitePoint(sample)) {
+                graphics.Point point = transformPoint(
+                    sample, resolvedX, resolvedY,
+                    plotLeft, plotTop, plotWidth, plotHeight);
+                if (runLength == 0) {
+                    first = point;
+                    runLength = 1;
+                } else {
+                    if (runLength == 1) {
+                        builder.beginPolyline();
+                        builder.addPolylinePoint(first);
+                    }
+                    builder.addPolylinePoint(point);
+                    runLength = runLength + 1;
+                }
+            } else {
+                if (runLength == 1) {
+                    builder.drawPoint(first, pointDiameter, seriesColor);
+                } else {
+                    if (runLength > 1) { builder.endPolyline(seriesStroke); }
+                }
+                runLength = 0;
+            }
+            index = index + 1;
+        }
+        if (runLength == 1) {
+            builder.drawPoint(first, pointDiameter, seriesColor);
+        } else {
+            if (runLength > 1) { builder.endPolyline(seriesStroke); }
+        }
+        builder.popState();
+
+        graphics.Stroke axes = axisStroke();
+        builder.drawRect(plotRect, graphics.Paint.StrokeOnly(axes));
+
+        int tick = 0;
+        while (tick < 5) {
+            float64 fraction = float64(tick) / 4.0;
+            float64 x = plotLeft + plotWidth * fraction;
+            float64 y = plotTop + plotHeight - plotHeight * fraction;
+            builder.drawLine(
+                graphics.Line(
+                    graphics.Point(x, plotTop + plotHeight),
+                    graphics.Point(x, plotTop + plotHeight + 6.0)),
+                axes);
+            builder.drawLine(
+                graphics.Line(
+                    graphics.Point(plotLeft, y),
+                    graphics.Point(plotLeft - 6.0, y)),
+                axes);
+            tick = tick + 1;
+        }
+
+        graphics.TextStyle xTickStyle = textStyle(
+            12.0, graphics.TextAlign.Center, graphics.TextBaseline.Top);
+        graphics.TextStyle yTickStyle = textStyle(
+            12.0, graphics.TextAlign.Right, graphics.TextBaseline.Middle);
+        tick = 0;
+        while (tick < 5) {
+            float64 fraction = float64(tick) / 4.0;
+            float64 x = plotLeft + plotWidth * fraction;
+            float64 y = plotTop + plotHeight - plotHeight * fraction;
+            string xText = str(tickValue(resolvedX, tick));
+            string yText = str(tickValue(resolvedY, tick));
+            builder.drawText(
+                &xText, graphics.Point(x, plotTop + plotHeight + 10.0), &xTickStyle);
+            builder.drawText(
+                &yText, graphics.Point(plotLeft - 10.0, y), &yTickStyle);
+            tick = tick + 1;
+        }
+
+        graphics.TextStyle axisLabelStyle = textStyle(
+            14.0, graphics.TextAlign.Center, graphics.TextBaseline.Middle);
+        if (xLabel != "") {
+            string xLabelText = xLabel;
+            builder.drawText(
+                &xLabelText,
+                graphics.Point(plotLeft + plotWidth / 2.0, viewportHeight - 18.0),
+                &axisLabelStyle);
+        }
+        if (yLabel != "") {
+            string yLabelText = yLabel;
+            builder.pushState();
+            builder.concatTransform(graphics.Transform2D(
+                0.0, -1.0, 1.0, 0.0, 24.0, plotTop + plotHeight / 2.0));
+            builder.drawText(&yLabelText, graphics.Point(0.0, 0.0), &axisLabelStyle);
+            builder.popState();
+        }
+        if (title != "") {
+            string titleText = title;
+            graphics.TextStyle titleStyle = textStyle(
+                16.0, graphics.TextAlign.Center, graphics.TextBaseline.Middle);
+            builder.drawText(
+                &titleText, graphics.Point(plotLeft + plotWidth / 2.0, 24.0), &titleStyle);
+        }
+        return builder.finish();
+    }
+}
+
+public FigureOptions defaultOptions() {
+    return FigureOptions(
+        graphics.Viewport(640.0, 480.0),
+        LimitMode.Auto,
+        LimitMode.Auto,
+        "", "", "",
+        LineStyle(
+            graphics.Color(uint8(31), uint8(119), uint8(180), uint8(255)),
+            2.0));
+}
+
+public Figure2D line(ref Array<DataPoint> points, ref FigureOptions options) {
+    usize count = length(*points);
+    if (count == 0) { throw EmptySeriesException(); }
+    if (!finite((*options).viewport.width) || !finite((*options).viewport.height) ||
+        !((*options).viewport.width - 96.0 > 0.0) ||
+        !((*options).viewport.height - 112.0 > 0.0) ||
+        !finite((*options).line.width) || !((*options).line.width > 0.0)) {
+        throw InvalidFigureException();
+    }
+    validateExplicit((*options).xLimits);
+    validateExplicit((*options).yLimits);
+
+    Buffer<DataPoint> copied = Buffer<DataPoint>(count, DataPoint(0.0, 0.0));
+    usize index = 0;
+    bool foundFinite = false;
+    while (index < count) {
+        copied[index] = (*points)[index];
+        if (finitePoint(copied[index])) { foundFinite = true; }
+        index = index + 1;
+    }
+    if (!foundFinite) { throw NoFiniteDataException(); }
+
+    Limits checkedX = resolveAxis(&copied, count, (*options).xLimits, true);
+    Limits checkedY = resolveAxis(&copied, count, (*options).yLimits, false);
+
+    string ownedTitle = copyText(&(*options).title);
+    string ownedXLabel = copyText(&(*options).xLabel);
+    string ownedYLabel = copyText(&(*options).yLabel);
+    return Figure2D(
+        FigureConstruction(0), copied, count,
+        (*options).viewport, (*options).xLimits, (*options).yLimits,
+        ownedTitle, ownedXLabel, ownedYLabel, (*options).line);
+}

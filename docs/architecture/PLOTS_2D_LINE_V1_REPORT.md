@@ -1,123 +1,144 @@
 # PLOTS-2D-LINE-V1 — reporte de implementación y qualification
 
-Estado: **BLOQUEADO EN PREFLIGHT; NO IMPLEMENTADO**, cerrado documentalmente
-2026-10-31.
+Estado: **CLOSED**, 2026-10-31.
 
 Documento normativo: [PLOTS-ARCH-1](PLOTS_ARCH_1.md).
 
 ## Resultado
 
-El preflight encontró un bloqueo real del lenguaje antes de crear código
-productivo: Aether no admite actualmente un field `string` owning dentro de
-una class. La representación normativa de `Figure2D` exige tres strings owning
-(`title`, `xLabel`, `yLabel`) para que la figura sea inmutable e independiente
-de `FigureOptions`. El frontend rechaza el caso mínimo con `E0401`:
+El vertical nativo de plotting 2D quedó implementado como package OAL
+`plots`, con adapter `plots.svg`. Expone exactamente `DataPoint`, `Limits`,
+`LimitMode`, `LineStyle`, `FigureOptions`, `defaultOptions`, `Figure2D`,
+`line`, `Figure2D.scene`, `plots.svg.render` y `plots.svg.save`.
 
-```text
-class Figure2D {
-    string title;
-    public init(string ownedTitle) { title = ownedTitle; }
-}
-```
+`Figure2D` posee un `Buffer<DataPoint>` exacto y tres fields owning `string`.
+No retiene el `Array`, `FigureOptions`, referencias interiores ni storage del
+caller. Los aliases de Figure conservan identidad ARC; cada `scene()` publica
+una Scene nueva e independiente. La copia textual desde `FigureOptions`
+reconstruye bytes UTF-8 mediante las APIs generales `std.Text.byteAt` y
+`std.Text.fromUtf8`, incluidos UTF-8 y U+0000, antes de instalar los owners en
+la class.
 
-```text
-error[E0401] (semantic): class field requires a scalar/Copy value, an admitted
-private Buffer<E>, or a private non-self concrete class owner
-```
+La representación privada materializa viewport y estilo como sus componentes
+Copy escalares. Esto evita retener aggregates importados en fields de class y
+no cambia la superficie, el ownership ni la semántica pública del contrato.
+Los datos permanecen en el `Buffer<DataPoint>` privado normativo y los textos
+son owners directos de la class.
 
-Esto coincide con el límite todavía declarado por
-`GENERAL_V2_STRING_COMPOSITION_REPORT.md`: “fields class string” permanece
-fuera de alcance. Por tanto, la afirmación de capability en PLOTS-ARCH-1 §5 y
-§20 no está implementada en el lenguaje vigente. La enmienda normativa 1 de
-PLOTS-ARCH-1 preserva la API objetivo y declara explícitamente la dependencia
-`OOP-OWNING-STRING-FIELDS-V1`.
+No se modificaron compiler, runtime, Core, std, Graphics Foundation, Graphics
+SVG, Plots legacy ni ejemplos personales. No se hizo commit ni push.
 
-No se modificaron compiler, runtime, Core, std, Graphics, SVG, Plots legacy ni
-ejemplos. No se creó un `plots` productivo parcial porque omitir, prestar o
-descartar los textos rompería ownership, inmutabilidad y la superficie pública
-normativa. No se hizo commit ni push.
+## Preflight revalidado
 
-## Evidencia de recuperación del entorno
+Los dos projects `reproducers/plots_preflight` y
+`reproducers/plots_preflight_positive` pasaron `check`, `build` y `run` en O0
+y O2. El reproducer antes bloqueado confirma la admisión general del field
+owning `string`; el positivo conserva la evidencia de Buffer privado, copia de
+samples, aliases ARC, `scene()` y delegación SVG. El reproducer de
+transformación pasó en ambos modos con el orden numérico normativo.
 
-Después de recuperar WSL, la evidencia externa aportada para este cierre
-registra `cargo test --workspace -j 1` completamente PASS, usando `.venv`,
-`CARGO_INCREMENTAL=0`, `TMPDIR` sobre ext4 y un `compiler-next/target`
-reconstruido desde cero. También registra `vertical.rs` 220/220 PASS, Graphics
-Foundation y SVG Backend PASS, Owning Struct Field Replacement 16/16 PASS, y
-los tests SVD/oráculos NumPy PASS.
+## Implementación geométrica
 
-Esa evidencia es un gate de regresión posterior a la recuperación, pero **no
-fue ejecutada ni revalidada durante este preflight**. Las comprobaciones propias
-del preflight son únicamente las indicadas abajo para los reproducers O0/O2.
-No se volvió a ejecutar la suite completa para este cierre documental.
+La implementación conserva el contrato de PLOTS-ARCH-1:
 
-## Reproducers de preflight
+- auto limits sobre pares finitos y explicit limits autoritativos;
+- expansión degenerada `max(1, abs(c)*0.05)` con fallback unilateral;
+- rechazo nominal de spans y transformaciones no representables;
+- segmentación por NaN, +Inf y -Inf sin conexión entre finite runs;
+- transformación `xv = L + (x-xmin)*sx` e Y invertido en el orden fijado;
+- margins `72/24/48/64`, cinco ticks por eje y labels mediante `str`;
+- background, clip de datos, runs, frame, ticks, labels y title en painter
+  order normativo;
+- polyline incremental sin arrays temporales de points transformados;
+- `DrawPoint` para todo finite run aislado;
+- estilo Butt/Miter/4 y diámetro singleton `max(2, line.width)`.
 
-- `reproducers/plots_preflight`: reproducer mínimo negativo del field `string`
-  owning en `Figure2D`.
-- `reproducers/plots_preflight_positive`: control positivo que prueba
-  `Buffer<DataPoint>` privado, copia desde `ref Array<DataPoint>`, recorrido en
-  método read, alias ARC, mutation-after-call, `ref Figure2D`, `scene()`, e
-  imports y delegación a `graphics.svg.render`.
-- `reproducers/plots_transform_preflight.ae`: estabilidad y límites de la
-  transformación normativa de §10.
+`plots.svg` sólo crea la Scene temporal y llama directamente a
+`graphics.svg.render/save`. No contiene XML, inspección de Commands, caché,
+estado global ni dependencia Python.
 
-El control positivo pasó `check`, `build` y `run` en O0 y O2. El reproducer
-negativo falla determinísticamente en análisis semántico con `E0401`, antes de
-HIR ejecutable o lowering.
+## Ownership, lifecycle y errores
 
-## Estabilidad numérica de §10
+El consumer y la suite dedicada mutan samples y los tres textos de options
+después de `line`; la Figure y sus Scenes conservan los valores originales.
+Dos llamadas a `scene()` retornan identidades distintas. Los tests de error en
+O0/O2 ejercen cleanup de temporales y owners durante construcción y lowering.
+Las suites globales de owning string fields, class Buffer fields, exceptions y
+ARC volvieron a pasar dentro de `cargo test --workspace`.
 
-Se mantuvo y probó el orden normativo:
+La clasificación observada es exacta:
 
-```text
-sx = W / (xmax - xmin)
-sy = H / (ymax - ymin)
-xv = L + (x - xmin) * sx
-yv = T + H - (y - ymin) * sy
-```
+| Condición | Excepción |
+|---|---|
+| input vacío | `EmptySeriesException` |
+| ningún par finito | `NoFiniteDataException` |
+| viewport o line width inválido | `InvalidFigureException` |
+| explicit endpoints no finitos o invertidos | `InvalidLimitsException` |
+| span, expansión o transformación no representable | `PlotRangeException` |
+| texto SVG inválido | `graphics.GraphicsTextException` sin reclasificar |
 
-Resultados concretos O0/O2:
+## Qualification dedicada
 
-- domains ordinarios preservan exactamente los cuatro anchors;
-- un span subnormal positivo puede hacer overflow en `W / span`, por lo que la
-  transformación debe producir `PlotRangeException` al integrarse;
-- un sample finito muy alejado de explicit limits puede desbordar `x - xmin`
-  antes del clipping y también debe producir `PlotRangeException`;
-- un domain grande con span finito representable continúa transformándose con
-  resultados finitos.
+`compiler-next/crates/aether-driver/tests/plots_2d_line_v1.rs` contiene cinco
+gates integrales y pasa 5/5:
 
-Estos límites ya están exigidos explícitamente por §10. No se propone cambiar
-el orden de operaciones y, por ello, no se añadió una enmienda normativa.
+1. consumer público real O0/O2;
+2. categorías nominales de error y propagación de Graphics;
+3. runs, singleton, clipping, anchors, transformación y painter order exactos;
+4. tres goldens SVG completos, XML válido y bytes idénticos O0/O2;
+5. inspección HIR/MIR/SSA/LLVM y pureza nativa.
 
-## Impacto sobre el vertical
+Los goldens versionados son:
 
-El bloqueo afecta la construcción y publicación de `Figure2D`, y por
-dependencia impide implementar con fidelidad `line`, `scene`, `plots.svg`, los
-goldens y la matriz integral de §19. Las partes no afectadas fueron aisladas y
-probadas por el control positivo, pero no constituyen un package productivo.
+- `plots/tests/goldens/parabola.svg`, curva matemática rotulada y legible;
+- `plots/tests/goldens/gaps.svg`, múltiples runs y singletons por NaN;
+- `plots/tests/goldens/singleton.svg`, ambos domains degenerados.
 
-Para reanudar el vertical hace falta cerrar primero una capability general de
-fields `string` owning en classes, con init, alias ARC de la class, drop normal,
-unwind y replacement interno correctamente calificados. PLOTS no debe resolver
-esa carencia mediante intrinsic, allowlist, estado global, borrow retenido o
-wrapper especial.
+La inspección de Commands verifica clip entre push/pop, puntos transformados
+fuera y dentro del plotRect, ausencia de conexiones sobre gaps, orden de runs,
+frame posterior a datos, diez ticks, diez tick labels, axis labels, rotación Y
+y title. Los casos de limits cubren auto, explicit, degenerados, overflow de
+span y overflow de transformación.
 
-## Gates
+HIR/MIR/SSA contienen `Buffer` y `StringFieldAlias`; LLVM contiene cleanup de
+strings y calls ordinarias de SceneBuilder. Source e IR no incorporan Python,
+NumPy, Matplotlib, FFI, registry, builtin Plots, intrinsic ni allowlist.
+
+## Gates finales
+
+Ejecutados con `CARGO_INCREMENTAL=0`, `TMPDIR=/home/blasm/tmp`, artefactos en
+`compiler-next/target` y paralelismo Cargo `-j 1`:
 
 | Gate | Resultado |
 |---|---|
-| preflight positivo `check/build/run -O0` | PASS |
-| preflight positivo `check/build/run -O2` | PASS |
-| transformación `check/build/run -O0` | PASS |
-| transformación `check/build/run -O2` | PASS |
-| field `string` owning de Figure | BLOCKED — `E0401` |
-| package productivo `plots` / `plots.svg` | NOT RUN — depende del bloqueo |
-| qualification §19 y goldens | NOT RUN — depende del bloqueo |
-| declaración `PLOTS-2D-LINE-V1 CLOSED` | NO |
+| preflight negativo histórico y positivo `check/build/run -O0/-O2` | PASS |
+| transformación preflight `run -O0/-O2` | PASS |
+| package `plots` `check/build -O0/-O2` | PASS |
+| consumer externo `check/build/run -O0/-O2` | PASS |
+| qualification dedicada | PASS — 5/5 |
+| goldens O0/O2, comparación completa y XML | PASS — 3/3 |
+| `cargo test --workspace -j 1` | PASS completo, incluidos 220/220 verticales y doc-tests |
+| `cargo fmt --all -- --check` | PASS |
+| `cargo clippy --workspace --all-targets -j 1` | PASS con warnings preexistentes; cero warnings del test Plots |
+| `git diff --check` | PASS |
 
-**Estado final: BLOCKED BY CLASS STRING FIELDS.**
+Los warnings Clippy preexistentes permanecen en las categorías ya registradas:
+`assert_is_empty`, `needless_borrows_for_generic_args`, `match_same_arms`,
+`too_many_lines` y afines en código ajeno. El único warning inicialmente
+señalado en el test nuevo (`needless_raw_string_hashes`) se corrigió antes del
+cierre y la repetición de Clippy no reportó `plots_2d_line_v1.rs`.
 
-No existe implementación productiva parcial de `plots` o `plots.svg`. El
-próximo trabajo permitido es implementar y calificar primero la capability
-general de fields owning `string`; Plots requiere una instrucción posterior.
+## Archivos del milestone
+
+- `plots/aether.toml`, lockfile y `plots/src/lib.ae`;
+- `plots/src/svg.ae`;
+- `plots/tests/consumer`;
+- `plots/tests/golden_generator`;
+- `plots/tests/goldens/*.svg`;
+- `compiler-next/crates/aether-driver/tests/plots_2d_line_v1.rs`;
+- este reporte y la actualización de estado de PLOTS-ARCH-1.
+
+Todos los criterios esenciales de PLOTS-ARCH-1 §19 tienen evidencia O0/O2 y
+los gates globales permanecen verdes.
+
+**Estado final: PLOTS-2D-LINE-V1 CLOSED.**

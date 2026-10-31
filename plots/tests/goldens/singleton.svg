@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="480" viewBox="0 0 640 480">
+  <defs>
+    <clipPath id="graphics-clip-0" clipPathUnits="userSpaceOnUse">
+      <rect x="0" y="0" width="640" height="480"/>
+    </clipPath>
+    <clipPath id="graphics-clip-1" clipPathUnits="userSpaceOnUse">
+      <rect x="72" y="48" width="544" height="368"/>
+    </clipPath>
+  </defs>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <rect x="0" y="0" width="640" height="480" fill="#FFFFFF" fill-rule="nonzero" stroke="none"/>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-1)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <circle transform="matrix(0.5 0 0 0.5 344 232)" cx="0" cy="0" r="2" fill="#1F77B4" stroke="none"/>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <rect x="72" y="48" width="544" height="368" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4"/>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <line x1="72" y1="416" x2="72" y2="422" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4"/>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <line x1="72" y1="416" x2="66" y2="416" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4"/>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <line x1="208" y1="416" x2="208" y2="422" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4"/>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <line x1="72" y1="324" x2="66" y2="324" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4"/>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <line x1="344" y1="416" x2="344" y2="422" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4"/>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <line x1="72" y1="232" x2="66" y2="232" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4"/>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <line x1="480" y1="416" x2="480" y2="422" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4"/>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <line x1="72" y1="140" x2="66" y2="140" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4"/>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <line x1="616" y1="416" x2="616" y2="422" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4"/>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <line x1="72" y1="48" x2="66" y2="48" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="butt" stroke-linejoin="miter" stroke-miterlimit="4"/>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <text x="72" y="426" fill="#000000" font-family="sans-serif" font-size="12" font-weight="normal" font-style="normal" text-anchor="middle" dominant-baseline="text-before-edge" direction="ltr" writing-mode="horizontal-tb" xml:space="preserve">4</text>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <text x="62" y="416" fill="#000000" font-family="sans-serif" font-size="12" font-weight="normal" font-style="normal" text-anchor="end" dominant-baseline="central" direction="ltr" writing-mode="horizontal-tb" xml:space="preserve">-4</text>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <text x="208" y="426" fill="#000000" font-family="sans-serif" font-size="12" font-weight="normal" font-style="normal" text-anchor="middle" dominant-baseline="text-before-edge" direction="ltr" writing-mode="horizontal-tb" xml:space="preserve">4.5</text>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <text x="62" y="324" fill="#000000" font-family="sans-serif" font-size="12" font-weight="normal" font-style="normal" text-anchor="end" dominant-baseline="central" direction="ltr" writing-mode="horizontal-tb" xml:space="preserve">-3.5</text>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <text x="344" y="426" fill="#000000" font-family="sans-serif" font-size="12" font-weight="normal" font-style="normal" text-anchor="middle" dominant-baseline="text-before-edge" direction="ltr" writing-mode="horizontal-tb" xml:space="preserve">5</text>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <text x="62" y="232" fill="#000000" font-family="sans-serif" font-size="12" font-weight="normal" font-style="normal" text-anchor="end" dominant-baseline="central" direction="ltr" writing-mode="horizontal-tb" xml:space="preserve">-3</text>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <text x="480" y="426" fill="#000000" font-family="sans-serif" font-size="12" font-weight="normal" font-style="normal" text-anchor="middle" dominant-baseline="text-before-edge" direction="ltr" writing-mode="horizontal-tb" xml:space="preserve">5.5</text>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <text x="62" y="140" fill="#000000" font-family="sans-serif" font-size="12" font-weight="normal" font-style="normal" text-anchor="end" dominant-baseline="central" direction="ltr" writing-mode="horizontal-tb" xml:space="preserve">-2.5</text>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <text x="616" y="426" fill="#000000" font-family="sans-serif" font-size="12" font-weight="normal" font-style="normal" text-anchor="middle" dominant-baseline="text-before-edge" direction="ltr" writing-mode="horizontal-tb" xml:space="preserve">6</text>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <text x="62" y="48" fill="#000000" font-family="sans-serif" font-size="12" font-weight="normal" font-style="normal" text-anchor="end" dominant-baseline="central" direction="ltr" writing-mode="horizontal-tb" xml:space="preserve">-2</text>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <text x="344" y="462" fill="#000000" font-family="sans-serif" font-size="14" font-weight="normal" font-style="normal" text-anchor="middle" dominant-baseline="central" direction="ltr" writing-mode="horizontal-tb" xml:space="preserve">constant x</text>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(0 -1 1 0 24 232)">
+      <text x="0" y="0" fill="#000000" font-family="sans-serif" font-size="14" font-weight="normal" font-style="normal" text-anchor="middle" dominant-baseline="central" direction="ltr" writing-mode="horizontal-tb" xml:space="preserve">constant y</text>
+    </g>
+  </g>
+  <g clip-path="url(#graphics-clip-0)">
+    <g transform="matrix(1 0 0 1 0 0)">
+      <text x="344" y="24" fill="#000000" font-family="sans-serif" font-size="16" font-weight="normal" font-style="normal" text-anchor="middle" dominant-baseline="central" direction="ltr" writing-mode="horizontal-tb" xml:space="preserve">Single point</text>
+    </g>
+  </g>
+</svg>

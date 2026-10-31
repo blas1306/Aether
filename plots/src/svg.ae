@@ -1,0 +1,15 @@
+package plots.svg;
+
+import plots;
+import graphics;
+import graphics.svg;
+
+public string render(ref plots.Figure2D figure) {
+    graphics.Scene scene = (*figure).scene();
+    return graphics.svg.render(&scene);
+}
+
+public void save(ref plots.Figure2D figure, ref string path) {
+    graphics.Scene scene = (*figure).scene();
+    graphics.svg.save(&scene, path);
+}

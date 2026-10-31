@@ -1,0 +1,44 @@
+package plotsGoldenGenerator;
+
+import plots as p;
+import plots.svg as svg;
+import graphics;
+
+int main() {
+    Array<p.DataPoint> parabola = {
+        p.DataPoint(-2.0, 4.0), p.DataPoint(-1.0, 1.0), p.DataPoint(0.0, 0.0),
+        p.DataPoint(1.0, 1.0), p.DataPoint(2.0, 4.0)
+    };
+    p.FigureOptions parabolaOptions = p.defaultOptions();
+    parabolaOptions.title = "Parabola: y = x*x";
+    parabolaOptions.xLabel = "x";
+    parabolaOptions.yLabel = "y";
+    parabolaOptions.line = p.LineStyle(
+        graphics.Color(uint8(180), uint8(40), uint8(40), uint8(255)), 3.0);
+    p.Figure2D parabolaFigure = p.line(&parabola, &parabolaOptions);
+    string parabolaPath = "../plots/tests/goldens/parabola.svg";
+    svg.save(&parabolaFigure, &parabolaPath);
+
+    float64 zero = 0.0;
+    float64 nan = zero / zero;
+    Array<p.DataPoint> gaps = {
+        p.DataPoint(-1.0, -1.0), p.DataPoint(0.0, 0.0), p.DataPoint(nan, nan),
+        p.DataPoint(0.5, 1.0), p.DataPoint(nan, 0.0),
+        p.DataPoint(1.0, -1.0), p.DataPoint(2.0, 0.0)
+    };
+    p.FigureOptions gapsOptions = p.defaultOptions();
+    gapsOptions.title = "Finite gaps";
+    p.Figure2D gapsFigure = p.line(&gaps, &gapsOptions);
+    string gapsPath = "../plots/tests/goldens/gaps.svg";
+    svg.save(&gapsFigure, &gapsPath);
+
+    Array<p.DataPoint> singleton = {p.DataPoint(5.0, -3.0)};
+    p.FigureOptions singletonOptions = p.defaultOptions();
+    singletonOptions.title = "Single point";
+    singletonOptions.xLabel = "constant x";
+    singletonOptions.yLabel = "constant y";
+    p.Figure2D singletonFigure = p.line(&singleton, &singletonOptions);
+    string singletonPath = "../plots/tests/goldens/singleton.svg";
+    svg.save(&singletonFigure, &singletonPath);
+    return 0;
+}

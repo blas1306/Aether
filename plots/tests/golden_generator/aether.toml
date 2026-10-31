@@ -1,0 +1,8 @@
+[package]
+name = "plotsGoldenGenerator"
+version = "0.1.0"
+aether = "1"
+
+[dependencies]
+plots = { path = "../.." }
+graphics = { path = "../../../graphics" }

@@ -1,0 +1,7 @@
+[package]
+name = "plots"
+version = "0.1.0"
+aether = "1"
+
+[dependencies]
+graphics = { path = "../graphics" }
