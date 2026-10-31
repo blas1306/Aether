@@ -1,6 +1,13 @@
 # PLOTS-ARCH-1 — reporte de diseño
 
-Estado: **COMPLETADO COMO DISEÑO; NO IMPLEMENTADO**, 2026-10-30.
+Estado: **COMPLETADO COMO DISEÑO; IMPLEMENTACIÓN BLOQUEADA**, actualizado
+2026-10-31.
+
+Este reporte registra la decisión de diseño original. El preflight posterior,
+documentado en [PLOTS-2D-LINE-V1](PLOTS_2D_LINE_V1_REPORT.md), demostró que los
+fields owning `string` de `Figure2D` son rechazados con `E0401`. La enmienda 1
+del documento normativo reemplaza cualquier conclusión de readiness de este
+reporte: la API objetivo se preserva, pero no hay implementación productiva.
 
 Documento normativo: [PLOTS-ARCH-1](PLOTS_ARCH_1.md).
 
@@ -29,7 +36,8 @@ La propuesta fue contrastada con las APIs reales:
 - `graphics.svg` expone únicamente `render(ref Scene)` y
   `save(ref Scene, ref string)`, preservando painter order y clips;
 - shared `ref` de class handles, fields privados `Buffer<Copy aggregate>`,
-  strings owning, exceptions y packages OAL son capabilities vigentes.
+  exceptions y packages OAL son capabilities vigentes;
+- owning `string` en fields de class **no** es vigente y bloquea el vertical.
 
 El builtin legacy y `PlotBackend` Python se inspeccionaron para identificar la
 superficie histórica. No se copiaron su current figure, `hold`, registry,
@@ -94,7 +102,9 @@ retained caching o layout medido deberán justificar un diseño posterior.
 
 Scatter, histogram, bar, legends, sampling de funciones, grids, nice ticks,
 log axes, subplots, interactividad, raster/PNG, themes y mutation incremental
-quedan fuera. El siguiente paso autorizado por este diseño es implementar y
-calificar únicamente `PLOTS-2D-LINE-V1` y su adapter SVG delgado.
+quedan fuera. El siguiente paso técnico es implementar y calificar primero
+`OOP-OWNING-STRING-FIELDS-V1`; reanudar `PLOTS-2D-LINE-V1` y su adapter SVG
+requiere una instrucción posterior.
 
-**Estado final: READY FOR IMPLEMENTATION.**
+**Estado final enmendado: BLOCKED BY CLASS STRING FIELDS; NO PRODUCTIVE
+IMPLEMENTATION.**

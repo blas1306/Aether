@@ -3391,9 +3391,11 @@ fn collect_program_signatures_for_kind(
                     )]);
                 }
                 let admitted_buffer = types.is_admitted_class_buffer_field(ty, *public);
+                let admitted_string = ty == TypeId::STRING;
                 let narrow_class_owner =
                     types.class_id(ty).is_some_and(|owner| owner != cid) && !public;
-                if !admitted_buffer
+                if !admitted_string
+                    && !admitted_buffer
                     && !narrow_class_owner
                     && (!types.guarantees_copy(ty)
                         || types.contains_owning(ty)
@@ -3403,7 +3405,7 @@ fn collect_program_signatures_for_kind(
                 {
                     return Err(vec![classes::error(
                         "E0401",
-                        "class field requires a scalar/Copy value, an admitted private Buffer<E>, or a private non-self concrete class owner",
+                        "class field requires a scalar/Copy value, canonical string, an admitted private Buffer<E>, or a private non-self concrete class owner",
                         field.span,
                     )]);
                 }

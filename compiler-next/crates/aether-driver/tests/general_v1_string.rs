@@ -294,9 +294,8 @@ fn canonical_properties_private_runtime_and_non_string_elision() {
 }
 
 #[test]
-fn out_of_scope_text_surfaces_are_rejected() {
+fn remaining_out_of_scope_text_surfaces_are_rejected() {
     let cases = [
-        "class C{string value;public init(string x){value=x;}}int main(){}",
         "int main(){Buffer<string> x=Buffer<string>(1,\"a\");}",
         "int main(){Matrix<string> x={{\"a\"}};}",
         "int main(){Vector<string,Row> x={\"a\"};}",

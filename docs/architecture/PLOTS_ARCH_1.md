@@ -1,6 +1,16 @@
 # PLOTS-ARCH-1 — arquitectura nativa de plotting 2D
 
-Estado: **ARQUITECTURA CERRADA; SIN IMPLEMENTACIÓN PRODUCTIVA**, 2026-10-30.
+Estado: **ARQUITECTURA CERRADA; IMPLEMENTACIÓN BLOQUEADA**, enmendado
+2026-10-31.
+
+> **Enmienda normativa 1 (2026-10-31).** La API y la representación objetivo
+> de Plots se preservan, pero los fields `title`, `xLabel` y `yLabel` de
+> `Figure2D` dependen de `OOP-OWNING-STRING-FIELDS-V1`. El lenguaje vigente los
+> rechaza con `E0401`; por tanto, toda frase de este documento que describa esos
+> fields, su copia o su destrucción especifica comportamiento objetivo, no una
+> capability ya admitida. `PLOTS-2D-LINE-V1` permanece **BLOCKED** y no autoriza
+> implementación productiva hasta que esa dependencia general se implemente y
+> califique. No se admite workaround específico de Plots.
 
 Este documento diseña el primer vertical nativo de Plots para Aether:
 `PLOTS-2D-LINE-V1`. La autoridad implementada de Graphics Foundation y del
@@ -262,8 +272,10 @@ LineStyle line
 
 `DataPoint`, `Limits`, `LimitMode` y `LineStyle` son Copy/no-drop. Por ello
 `Buffer<DataPoint>` es compatible con el predicado vigente de Buffer y con un
-field privado de class. Las strings son owners ordinarios directos de la
-class, no elements del Buffer.
+field privado de class. Las strings serán owners ordinarios directos de la
+class, no elements del Buffer, una vez cerrada la dependencia
+`OOP-OWNING-STRING-FIELDS-V1`. No son class handles y no se infiere su admisión
+a partir de ARC de objetos.
 
 `line` presta el `Array<DataPoint>` y `FigureOptions` sólo durante la call,
 crea un Buffer exacto y copia cada point una vez. No retiene references,
@@ -716,7 +728,7 @@ Los gates deben demostrar:
 
 ## 20. Limitaciones concretas vigentes
 
-### 20.1 No bloquean este V1
+### 20.1 No bloquean el diseño de este V1
 
 1. **Class handles en retained graphs.** El lenguaje no admite en general
    guardar class handles dentro de aggregates/classes. Por ello `Figure2D` no
@@ -732,10 +744,20 @@ Los gates deben demostrar:
 4. **Named/default user arguments.** No están disponibles como API nativa
    general. V1 usa `FigureOptions` explícito.
 
-Estas limitaciones influyen en la forma elegida, pero ninguna exige modificar
-el compiler para `PLOTS-2D-LINE-V1`.
+Estas limitaciones influyen en la forma elegida y no alteran la API objetivo.
 
-### 20.2 Limitaciones de API gráfica, no del lenguaje
+### 20.2 Dependencia bloqueante de implementación
+
+El preflight demostró que un field owning de tipo exacto `string` en una class
+es rechazado por el frontend con `E0401`. `Figure2D` requiere tres de esos
+fields para poseer su configuración sin retener borrows. La dependencia se
+resolverá sólo mediante la capability general
+`OOP-OWNING-STRING-FIELDS-V1`, con init, Alias/Transfer, replacement, drop,
+herencia y unwind verificados. Hasta entonces no se implementan `plots` ni
+`plots.svg`, y no se sustituyen los textos por globals, borrows retenidos,
+Buffers de bytes, intrinsics o allowlists.
+
+### 20.3 Limitaciones de API gráfica, no del lenguaje
 
 - Graphics no mide text: layout y margins son fijos y no hay garantía de no
   overlap para strings arbitrarias.
@@ -743,10 +765,10 @@ el compiler para `PLOTS-2D-LINE-V1`.
 - SVG es un backend de documento: interactividad/windowing requiere otro
   backend futuro, no estado de sesión dentro de Plots.
 
-Si la implementación real descubre que `Buffer<DataPoint>` como field privado,
-strings owning de Figure o `ref Figure2D` no están admitidos pese a los
-milestones cerrados, debe detenerse y abrir un reproducer/milestone general.
-No se autoriza un intrinsic, allowlist `plots` ni lowering especial.
+`Buffer<DataPoint>` privado y `ref Figure2D` superaron el control positivo del
+preflight. Los strings owning no están admitidos y constituyen el bloqueo ya
+registrado; cualquier otro gap debe detener el vertical y abrir un milestone
+general. No se autoriza un intrinsic, allowlist `plots` ni lowering especial.
 
 ## 21. Fuera de scope V1
 

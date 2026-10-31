@@ -1,6 +1,7 @@
 # PLOTS-2D-LINE-V1 — reporte de implementación y qualification
 
-Estado: **BLOQUEADO EN PREFLIGHT; NO IMPLEMENTADO**, 2026-10-30.
+Estado: **BLOQUEADO EN PREFLIGHT; NO IMPLEMENTADO**, cerrado documentalmente
+2026-10-31.
 
 Documento normativo: [PLOTS-ARCH-1](PLOTS_ARCH_1.md).
 
@@ -27,12 +28,28 @@ private Buffer<E>, or a private non-self concrete class owner
 Esto coincide con el límite todavía declarado por
 `GENERAL_V2_STRING_COMPOSITION_REPORT.md`: “fields class string” permanece
 fuera de alcance. Por tanto, la afirmación de capability en PLOTS-ARCH-1 §5 y
-§20 no está implementada en el lenguaje vigente.
+§20 no está implementada en el lenguaje vigente. La enmienda normativa 1 de
+PLOTS-ARCH-1 preserva la API objetivo y declara explícitamente la dependencia
+`OOP-OWNING-STRING-FIELDS-V1`.
 
 No se modificaron compiler, runtime, Core, std, Graphics, SVG, Plots legacy ni
 ejemplos. No se creó un `plots` productivo parcial porque omitir, prestar o
 descartar los textos rompería ownership, inmutabilidad y la superficie pública
 normativa. No se hizo commit ni push.
+
+## Evidencia de recuperación del entorno
+
+Después de recuperar WSL, la evidencia externa aportada para este cierre
+registra `cargo test --workspace -j 1` completamente PASS, usando `.venv`,
+`CARGO_INCREMENTAL=0`, `TMPDIR` sobre ext4 y un `compiler-next/target`
+reconstruido desde cero. También registra `vertical.rs` 220/220 PASS, Graphics
+Foundation y SVG Backend PASS, Owning Struct Field Replacement 16/16 PASS, y
+los tests SVD/oráculos NumPy PASS.
+
+Esa evidencia es un gate de regresión posterior a la recuperación, pero **no
+fue ejecutada ni revalidada durante este preflight**. Las comprobaciones propias
+del preflight son únicamente las indicadas abajo para los reproducers O0/O2.
+No se volvió a ejecutar la suite completa para este cierre documental.
 
 ## Reproducers de preflight
 
@@ -100,3 +117,7 @@ wrapper especial.
 | declaración `PLOTS-2D-LINE-V1 CLOSED` | NO |
 
 **Estado final: BLOCKED BY CLASS STRING FIELDS.**
+
+No existe implementación productiva parcial de `plots` o `plots.svg`. El
+próximo trabajo permitido es implementar y calificar primero la capability
+general de fields owning `string`; Plots requiere una instrucción posterior.

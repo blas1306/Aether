@@ -760,7 +760,7 @@ impl Analyzer<'_> {
                 }
 
                 self.check_member_access(field.class, field.public, e.span)?;
-                if !self.types.guarantees_copy(field.ty) {
+                if field.ty != TypeId::STRING && !self.types.guarantees_copy(field.ty) {
                     return Err(vec![error(
                         "E0406",
                         "owning fields cannot be extracted or borrowed from a live object",
@@ -785,17 +785,18 @@ impl Analyzer<'_> {
                         e.span,
                     )]);
                 }
-                self.coerce(
-                    self.class_checked(
-                        ClassOp::FieldRead {
-                            receiver,
-                            field: field.id,
-                        },
-                        field.ty,
-                        e.span,
-                    ),
-                    expected,
-                )
+                let op = if field.ty == TypeId::STRING {
+                    ClassOp::StringFieldAlias {
+                        receiver,
+                        field: field.id,
+                    }
+                } else {
+                    ClassOp::FieldRead {
+                        receiver,
+                        field: field.id,
+                    }
+                };
+                self.coerce(self.class_checked(op, field.ty, e.span), expected)
             })());
         }
         let base_call = match &e.kind {
@@ -1440,6 +1441,7 @@ pub(super) fn verify_body(
             match op.as_ref() {
                 ClassOp::BaseInit { base, .. } => state.complete_base(types, *base)?,
                 ClassOp::FieldRead { receiver, field }
+                | ClassOp::StringFieldAlias { receiver, field }
                 | ClassOp::FieldWrite {
                     receiver, field, ..
                 } if matches!(
@@ -1834,7 +1836,8 @@ mod tests {
                 *class = ClassId(999);
                 return true;
             }
-            (1, ClassOp::FieldRead { field, .. }) => {
+            (1, ClassOp::FieldRead { field, .. })
+            | (32, ClassOp::StringFieldAlias { field, .. }) => {
                 *field = FieldId(999);
                 return true;
             }
@@ -1874,6 +1877,13 @@ mod tests {
             }
             (8, ClassOp::FieldWrite { initialize, .. }) if *initialize => {
                 *initialize = false;
+                return true;
+            }
+            (31, ClassOp::StringFieldAlias { receiver, field }) => {
+                **op = ClassOp::FieldRead {
+                    receiver: receiver.clone(),
+                    field: *field,
+                };
                 return true;
             }
             _ => (),
@@ -1951,6 +1961,27 @@ mod tests {
             panic!("expected return");
         }
         assert!(verify_hir(&bad).is_err());
+    }
+
+    #[test]
+    fn hir_string_field_alias_corruptions_reject_without_lowering() {
+        let source = "class C{string value;public init(string value){this.value=value;}public string read(){return value;}}int main(){C c=C(\"x\");string value=c.read();return 0;}";
+        let valid = analyze(
+            crate::parse_source(&crate::SourceFile::new("string-field.ae", source)).unwrap(),
+        )
+        .unwrap();
+        for kind in [31, 32] {
+            let mut bad = valid.clone();
+            assert!(
+                bad.functions
+                    .iter_mut()
+                    .any(|function| mutate_block(&mut function.body, kind))
+            );
+            assert!(
+                verify_hir(&bad).is_err(),
+                "HIR string field mutation {kind}"
+            );
+        }
     }
     #[test]
     fn object_metadata_drop_recipe_is_independently_validated() {

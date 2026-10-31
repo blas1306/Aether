@@ -267,7 +267,9 @@ fn destroy_body(output: &mut String, types: &TypeArena, class: ClassId) {
         };
         let field = types.class_field(*field).unwrap();
         writeln!(output,"  %field{} = getelementptr i8, ptr %value, i64 {}\n  %owned{} = load {}, ptr %field{}\n  call void @aether_drop_{}({} %owned{})",field.id.0,field.offset,field.id.0,llvm_type(types,field.ty),field.id.0,mangle_type(types,field.ty),llvm_type(types,field.ty),field.id.0).unwrap();
-        writeln!(output,"  %bd{} = load i64, ptr @aether_object_buffer_drop_count\n  %bn{} = add i64 %bd{}, 1\n  store i64 %bn{}, ptr @aether_object_buffer_drop_count",field.id.0,field.id.0,field.id.0,field.id.0).unwrap();
+        if field.ty != TypeId::STRING {
+            writeln!(output,"  %bd{} = load i64, ptr @aether_object_buffer_drop_count\n  %bn{} = add i64 %bd{}, 1\n  store i64 %bn{}, ptr @aether_object_buffer_drop_count",field.id.0,field.id.0,field.id.0,field.id.0).unwrap();
+        }
     }
     writeln!(output,"  %destroyed = load i64, ptr @aether_object_destroy_count\n  %destroyed_next = add i64 %destroyed, 1\n  store i64 %destroyed_next, ptr @aether_object_destroy_count\n  call void @aether_free(ptr %value, i64 {}, i64 {})\n  ret void\n}}\n",info.layout.size,info.layout.align).unwrap();
 }
@@ -564,7 +566,9 @@ pub(super) fn emit_op(
                 let field = types.class_field(*field_id).unwrap();
                 let ty = llvm_type(types, field.ty);
                 writeln!(output,"  %rollback_field{result}_{} = getelementptr i8, ptr {}, i64 {}\n  %rollback_owned{result}_{} = load {ty}, ptr %rollback_field{result}_{}\n  call void @aether_drop_{}({ty} %rollback_owned{result}_{})",field_id.0,llvm_operand(object),field.offset,field_id.0,field_id.0,mangle_type(types,field.ty),field_id.0).unwrap();
-                writeln!(output,"  %rollback_drops{result}_{} = load i64, ptr @aether_object_buffer_drop_count\n  %rollback_drops_next{result}_{} = add i64 %rollback_drops{result}_{}, 1\n  store i64 %rollback_drops_next{result}_{}, ptr @aether_object_buffer_drop_count",field_id.0,field_id.0,field_id.0,field_id.0).unwrap();
+                if field.ty != TypeId::STRING {
+                    writeln!(output,"  %rollback_drops{result}_{} = load i64, ptr @aether_object_buffer_drop_count\n  %rollback_drops_next{result}_{} = add i64 %rollback_drops{result}_{}, 1\n  store i64 %rollback_drops_next{result}_{}, ptr @aether_object_buffer_drop_count",field_id.0,field_id.0,field_id.0,field_id.0).unwrap();
+                }
             }
             if *free_allocation {
                 let info = &types.classes()[class.0 as usize];
@@ -643,6 +647,7 @@ pub(super) fn emit_op(
             }
         }
         ClassOp::FieldRead { receiver, field }
+        | ClassOp::StringFieldAlias { receiver, field }
         | ClassOp::FieldWrite {
             receiver, field, ..
         } => {
@@ -677,6 +682,8 @@ pub(super) fn emit_op(
                     .unwrap();
                 }
                 writeln!(output, "  %v{result} = or i1 false, true").unwrap();
+            } else if matches!(op, ClassOp::StringFieldAlias { .. }) {
+                writeln!(output, "  %v{result} = load {ty}, ptr %field{result}\n  call void @aether_string_retain(ptr %v{result})").unwrap();
             } else {
                 writeln!(output, "  %v{result} = load {ty}, ptr %field{result}").unwrap();
             }

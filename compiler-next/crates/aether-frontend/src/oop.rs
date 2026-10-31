@@ -206,6 +206,12 @@ pub enum ClassOp<O, F = HirCallTarget> {
         receiver: O,
         field: FieldId,
     },
+    /// Acquires an independent canonical string owner from an initialized
+    /// class field. This is deliberately distinct from a Copy field load.
+    StringFieldAlias {
+        receiver: O,
+        field: FieldId,
+    },
     /// initialize is a definite field state, independently checked in each IR.
     FieldWrite {
         receiver: O,
@@ -251,7 +257,9 @@ impl<O, F> ClassOp<O, F> {
             | Self::HandleAlias { source }
             | Self::HandleTransfer { source }
             | Self::ReceiverKeepalive { source, .. } => vec![source],
-            Self::FieldRead { receiver, .. } => vec![receiver],
+            Self::FieldRead { receiver, .. } | Self::StringFieldAlias { receiver, .. } => {
+                vec![receiver]
+            }
             Self::FieldWrite {
                 receiver, value, ..
             } => vec![receiver, value],
@@ -414,6 +422,10 @@ impl<O, F> ClassOp<O, F> {
                 transfer: *transfer,
             },
             Self::FieldRead { receiver, field } => ClassOp::FieldRead {
+                receiver: operand(receiver)?,
+                field: *field,
+            },
+            Self::StringFieldAlias { receiver, field } => ClassOp::StringFieldAlias {
                 receiver: operand(receiver)?,
                 field: *field,
             },
@@ -846,6 +858,7 @@ pub fn verify_class_op<O, F>(
             }
         }
         ClassOp::FieldRead { receiver, field }
+        | ClassOp::StringFieldAlias { receiver, field }
         | ClassOp::FieldWrite {
             receiver, field, ..
         } => {
@@ -905,6 +918,11 @@ pub fn verify_class_op<O, F>(
                 require(
                     operand_ty(value)? == info.ty && result == TypeId::BOOL,
                     "field write type mismatch",
+                )?;
+            } else if matches!(op, ClassOp::StringFieldAlias { .. }) {
+                require(
+                    info.ty == TypeId::STRING && result == TypeId::STRING,
+                    "StringFieldAlias requires an exact canonical string field",
                 )?;
             } else {
                 require(
@@ -1033,7 +1051,9 @@ pub fn verify_class_access<O, F>(
                 .ok_or("unknown method")?;
             member(class, m.public)
         }
-        ClassOp::FieldRead { field, .. } | ClassOp::FieldWrite { field, .. } => {
+        ClassOp::FieldRead { field, .. }
+        | ClassOp::StringFieldAlias { field, .. }
+        | ClassOp::FieldWrite { field, .. } => {
             let f = types.class_field(*field).ok_or("unknown class field")?;
             member(f.class, f.public)
         }
@@ -1095,9 +1115,11 @@ pub fn verify_class_metadata(
                 return Err("invalid class field identity".into());
             }
             let admitted_buffer = types.is_admitted_class_buffer_field(f.ty, f.public);
+            let admitted_string = f.ty == TypeId::STRING;
             let narrow_class_owner =
                 types.class_id(f.ty).is_some_and(|owner| owner != c.id) && !f.public;
-            if !admitted_buffer
+            if !admitted_string
+                && !admitted_buffer
                 && !narrow_class_owner
                 && (!types.guarantees_copy(f.ty)
                     || types.contains_owning(f.ty)

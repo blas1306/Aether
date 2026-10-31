@@ -237,6 +237,7 @@ fn borrows(op: &SsaOp, id: ValueId) -> bool {
             | ClassOp::BorrowedClassUpcast { .. }
             | ClassOp::IdentityEq { .. }
             | ClassOp::FieldRead { .. }
+            | ClassOp::StringFieldAlias { .. }
             | ClassOp::ObjectAlloc { .. } => true,
             ClassOp::ReceiverKeepalive {
                 source, transfer, ..

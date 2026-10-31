@@ -4533,6 +4533,16 @@ fn owner_consumptions(function: &SsaFunction, owner: ValueId, op: &SsaOp) -> usi
         | SsaOp::VectorTransposeMove { operand: value, .. } => {
             usize::from(matches!(value, SsaOperand::Value(candidate) if *candidate == owner))
         }
+        SsaOp::Class(op) => match op.as_ref() {
+            ClassOp::FieldWrite { value, .. } => owner_operand_count(owner, [value]),
+            ClassOp::BaseInit { args, .. }
+            | ClassOp::InitCall { args, .. }
+            | ClassOp::BaseMethodCall { args, .. }
+            | ClassOp::VirtualCall { args, .. }
+            | ClassOp::DirectMethodCall { args, .. }
+            | ClassOp::InterfaceCall { args, .. } => owner_operand_count(owner, args),
+            _ => 0,
+        },
         _ => 0,
     }
 }

@@ -387,6 +387,7 @@ pub(super) fn verify(
                             }
                         }
                         ClassOp::FieldRead { receiver, field }
+                        | ClassOp::StringFieldAlias { receiver, field }
                         | ClassOp::FieldWrite {
                             receiver, field, ..
                         } if matches!(
