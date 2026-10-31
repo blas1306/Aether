@@ -1,0 +1,25 @@
+package plotsFunctionConsumer;
+
+import plots as p;
+import plots.svg as svg;
+import plotsFunctionConsumer.functions as functions;
+
+int main() {
+    p.FigureOptions options = p.defaultOptions();
+    options.title = "sin(x)";
+    options.xLabel = "x";
+    options.yLabel = "sin(x)";
+    p.Figure2D figure = p.plotFunction(
+        functions.wave,
+        -3.141592653589793,
+        3.141592653589793,
+        usize(257),
+        &options);
+    string document = svg.render(&figure);
+    if (byteLength(document) == 0) { return 1; }
+    options.title = "changed after construction";
+    string second = svg.render(&figure);
+    if (document != second) { return 2; }
+    return 0;
+}
+

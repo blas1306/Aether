@@ -4,6 +4,10 @@ import plots as p;
 import plots.svg as svg;
 import graphics;
 
+float64 sampledWave(float64 x) {
+    return sin(x);
+}
+
 int main() {
     Array<p.DataPoint> parabola = {
         p.DataPoint(-2.0, 4.0), p.DataPoint(-1.0, 1.0), p.DataPoint(0.0, 0.0),
@@ -40,5 +44,15 @@ int main() {
     p.Figure2D singletonFigure = p.line(&singleton, &singletonOptions);
     string singletonPath = "../plots/tests/goldens/singleton.svg";
     svg.save(&singletonFigure, &singletonPath);
+
+    p.FigureOptions functionOptions = p.defaultOptions();
+    functionOptions.title = "sin(x) sampled";
+    functionOptions.xLabel = "x";
+    functionOptions.yLabel = "sin(x)";
+    p.Figure2D functionFigure = p.plotFunction(
+        sampledWave, -3.141592653589793, 3.141592653589793,
+        usize(17), &functionOptions);
+    string functionPath = "../plots/tests/goldens/function_sine.svg";
+    svg.save(&functionFigure, &functionPath);
     return 0;
 }

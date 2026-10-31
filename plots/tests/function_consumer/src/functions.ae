@@ -1,0 +1,6 @@
+package plotsFunctionConsumer.functions;
+
+public float64 wave(float64 x) {
+    return sin(x);
+}
+

@@ -57,6 +57,14 @@ public class PlotRangeException : PlotException {
     public init() : base() {}
 }
 
+public class InvalidSampleCountException : PlotException {
+    public init() : base() {}
+}
+
+public class InvalidSampleIntervalException : PlotException {
+    public init() : base() {}
+}
+
 struct FigureConstruction {
     int marker;
 }
@@ -439,4 +447,39 @@ public Figure2D line(ref Array<DataPoint> points, ref FigureOptions options) {
         FigureConstruction(0), copied, count,
         (*options).viewport, (*options).xLimits, (*options).yLimits,
         ownedTitle, ownedXLabel, ownedYLabel, (*options).line);
+}
+
+public Figure2D plotFunction(
+    Function<(float64), float64> target,
+    float64 a,
+    float64 b,
+    usize sampleCount,
+    ref FigureOptions options) {
+    if (sampleCount < 2) { throw InvalidSampleCountException(); }
+    if (!finite(a) || !finite(b) || !(a < b)) {
+        throw InvalidSampleIntervalException();
+    }
+    float64 span = b - a;
+    if (!finite(span) || !(span > 0.0)) { throw PlotRangeException(); }
+
+    Array<DataPoint> points = Array<DataPoint>(
+        sampleCount, DataPoint(0.0, 0.0));
+    usize denominator = sampleCount - 1;
+    usize index = 0;
+    while (index < sampleCount) {
+        float64 x = a;
+        if (index == denominator) {
+            x = b;
+        } else {
+            if (index != 0) {
+                float64 t = float64(index) / float64(denominator);
+                x = a + span * t;
+            }
+        }
+        if (!finite(x)) { throw PlotRangeException(); }
+        float64 y = target(x);
+        points[index] = DataPoint(x, y);
+        index = index + 1;
+    }
+    return line(&points, options);
 }
