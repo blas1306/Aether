@@ -1,0 +1,46 @@
+bool finite(float64 value) {
+    return value - value == 0.0;
+}
+
+bool transformedFinite(
+    float64 x, float64 y,
+    float64 xmin, float64 xmax, float64 ymin, float64 ymax,
+    float64 left, float64 top, float64 width, float64 height) {
+    float64 sx = width / (xmax - xmin);
+    float64 sy = height / (ymax - ymin);
+    float64 xv = left + (x - xmin) * sx;
+    float64 yv = top + height - (y - ymin) * sy;
+    return finite(xv) && finite(yv);
+}
+
+int main() {
+    // Ordinary domains preserve all four normative anchors.
+    float64 left = 72.0;
+    float64 top = 48.0;
+    float64 width = 544.0;
+    float64 height = 368.0;
+    float64 sx = width / (3.0 - -1.0);
+    float64 sy = height / (5.0 - -3.0);
+    if (left + (-1.0 - -1.0) * sx != left) { return 1; }
+    if (left + (3.0 - -1.0) * sx != left + width) { return 2; }
+    if (top + height - (-3.0 - -3.0) * sy != top + height) { return 3; }
+    if (top + height - (5.0 - -3.0) * sy != top) { return 4; }
+
+    // The normative scale-first order deliberately rejects a subnormal span:
+    // width / span overflows even at an endpoint.
+    float64 tiny = 5e-324;
+    if (transformedFinite(0.0, 0.0, 0.0, tiny, 0.0, tiny,
+        left, top, width, height)) { return 5; }
+
+    // A finite explicit domain may still reject a far out-of-domain sample
+    // because x - xmin overflows before clipping. Section 10 requires this.
+    float64 large = 1e308;
+    float64 far = 1.7e308;
+    if (transformedFinite(far, 0.5, -large, 0.0, 0.0, 1.0,
+        left, top, width, height)) { return 6; }
+
+    // Large but representable symmetric differences remain accepted.
+    if (!transformedFinite(0.0, 0.0, -8e307, 8e307, -8e307, 8e307,
+        left, top, width, height)) { return 7; }
+    return 0;
+}

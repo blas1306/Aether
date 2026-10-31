@@ -1,0 +1,15 @@
+package plotsPreflight;
+
+class Figure2D {
+    string title;
+
+    public init(string ownedTitle) {
+        title = ownedTitle;
+    }
+}
+
+int main() {
+    string title = "owned" + " title";
+    Figure2D figure = Figure2D(title);
+    return 0;
+}

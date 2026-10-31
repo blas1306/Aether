@@ -1,0 +1,61 @@
+package plotsPreflightPositive;
+
+import graphics as g;
+import graphics.svg as gsvg;
+
+struct DataPoint {
+    float64 x;
+    float64 y;
+}
+
+class Figure2D {
+    Buffer<DataPoint> samples;
+    usize sampleCount;
+
+    public init(ref Array<DataPoint> points) {
+        sampleCount = length(*points);
+        samples = Buffer<DataPoint>(sampleCount, DataPoint(0.0, 0.0));
+        usize index = 0;
+        while (index < sampleCount) {
+            samples[index] = (*points)[index];
+            index = index + 1;
+        }
+    }
+
+    public float64 sum() {
+        float64 result = 0.0;
+        usize index = 0;
+        while (index < sampleCount) {
+            result = result + samples[index].x + samples[index].y;
+            index = index + 1;
+        }
+        return result;
+    }
+
+    public g.Scene scene() {
+        g.SceneBuilder builder = g.SceneBuilder(g.Viewport(100.0, 100.0));
+        if (sampleCount != 0) {
+            builder.drawPoint(
+                g.Point(samples[0].x, samples[0].y), 2.0,
+                g.Color(uint8(0), uint8(0), uint8(0), uint8(255)));
+        }
+        return builder.finish();
+    }
+}
+
+string renderFigure(ref Figure2D figure) {
+    g.Scene scene = (*figure).scene();
+    return gsvg.render(&scene);
+}
+
+int main() {
+    Array<DataPoint> input = {DataPoint(1.0, 2.0), DataPoint(3.0, 4.0)};
+    Figure2D figure = Figure2D(&input);
+    Figure2D sameFigure = figure;
+    input[0] = DataPoint(50.0, 60.0);
+    string document = renderFigure(&sameFigure);
+    if (figure != sameFigure || figure.sum() != 10.0 || byteLength(document) == 0) {
+        return 1;
+    }
+    return 0;
+}
