@@ -1,0 +1,13 @@
+package main;
+
+import helper;
+
+public int apply(Function<(int), int> function, int value) {
+    return function(value);
+}
+
+public int main() {
+    var imported = (int value) => helper.increment(value);
+    var nested = (int value) => apply((int ignored) => 40, value) + 2;
+    return imported(0) + nested(0) - 1;
+}

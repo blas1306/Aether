@@ -19,7 +19,7 @@ pub use ast::{
     AstExprKind, AstField, AstForBinding, AstFunction, AstGenericParam, AstImport,
     AstInterpolationFragment, AstMatchArm, AstMatchMode, AstPackage, AstParameter, AstPlace,
     AstReferenceType, AstStmt, AstStmtKind, AstStruct, AstSubscriptSelector, AstType, AstTypeKind,
-    AstUnaryOp, AstVariant, AstVariantPattern, BindingMutability, ParsedAst,
+    AstUnaryOp, AstVariant, AstVariantPattern, BindingMutability, LambdaId, ParsedAst,
 };
 pub use core::{
     CORE_V1_PROFILE, CoreCall, CoreFunction, CoreSymbol, CoreSymbolKey, PRELUDE_V1, prelude_symbol,

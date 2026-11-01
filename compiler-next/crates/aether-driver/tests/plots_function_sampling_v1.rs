@@ -142,6 +142,28 @@ package q;import plots as p;float64 square(float64 x){return x*x;}int main(){p.F
 }
 
 #[test]
+fn anonymous_function_consumer_runs_without_plots_changes_at_o0_o2() {
+    let source = r"
+package q;import plots as p;
+int main(){
+  p.FigureOptions options=p.defaultOptions();
+  p.Figure2D figure=p.plotFunction((float64 x)=>x*x,-2.0,2.0,usize(5),&options);
+  return 0;
+}";
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        assert_eq!(run(source, optimization), 0, "{optimization:?}");
+    }
+    let compilation = compile(source, OptimizationLevel::O0);
+    for phase in [Emit::Hir, Emit::Mir, Emit::Ssa] {
+        let dump = &compilation.dumps[&phase];
+        assert!(dump.contains("$lambda$"));
+        assert!(dump.contains("FunctionRef"));
+        assert!(dump.contains("IndirectCall"));
+        assert!(!dump.contains("Closure"));
+    }
+}
+
+#[test]
 fn validation_order_cardinality_throw_and_late_options_errors_are_exact() {
     let source = r"
 package q;import plots as p;import graphics;

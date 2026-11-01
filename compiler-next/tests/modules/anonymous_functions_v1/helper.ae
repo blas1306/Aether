@@ -1,0 +1,5 @@
+package helper;
+
+public int increment(int value) {
+    return value + 1;
+}

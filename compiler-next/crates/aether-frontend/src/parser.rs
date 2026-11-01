@@ -16,6 +16,7 @@ pub fn parse(source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<D
         source,
         tokens,
         cursor: 0,
+        synthetic_lambdas: Vec::new(),
     };
     let package = if parser.at(TokenKind::KwPackage) {
         Some(parser.package().map_err(|error| vec![error])?)
@@ -97,6 +98,7 @@ pub fn parse(source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<D
             }
         }
     }
+    functions.append(&mut parser.synthetic_lambdas);
     if package.is_none()
         && interfaces.is_empty()
         && classes.is_empty()
@@ -127,6 +129,7 @@ struct Parser<'a> {
     source: &'a SourceFile,
     tokens: Vec<Token>,
     cursor: usize,
+    synthetic_lambdas: Vec<AstFunction>,
 }
 
 impl Parser<'_> {
@@ -1485,11 +1488,16 @@ impl Parser<'_> {
                 self.identifier_primary(token)?
             }
             TokenKind::LeftParen => {
-                let expr = self.expression()?;
-                let right = self.expect(TokenKind::RightParen, "expected `)` after expression")?;
-                AstExpr {
-                    span: token.span.through(right.span),
-                    ..expr
+                if self.looks_like_lambda() {
+                    self.lambda_expression(&token)?
+                } else {
+                    let expr = self.expression()?;
+                    let right =
+                        self.expect(TokenKind::RightParen, "expected `)` after expression")?;
+                    AstExpr {
+                        span: token.span.through(right.span),
+                        ..expr
+                    }
                 }
             }
             _ => {
@@ -1543,6 +1551,91 @@ impl Parser<'_> {
             }
         }
         Ok(expr)
+    }
+
+    fn looks_like_lambda(&self) -> bool {
+        let mut depth = 1_usize;
+        let mut index = self.cursor;
+        while let Some(token) = self.tokens.get(index) {
+            match token.kind {
+                TokenKind::LeftParen => depth += 1,
+                TokenKind::RightParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return self
+                            .tokens
+                            .get(index + 1)
+                            .is_some_and(|next| next.kind == TokenKind::FatArrow);
+                    }
+                }
+                TokenKind::Eof => return false,
+                _ => {}
+            }
+            index += 1;
+        }
+        false
+    }
+
+    fn lambda_expression(&mut self, left: &Token) -> Result<AstExpr, Diagnostic> {
+        let mut parameters = Vec::new();
+        if !self.at(TokenKind::RightParen) {
+            loop {
+                let parameter_start = self.current().span;
+                let ty = self.ty()?;
+                let name = self.expect(TokenKind::Identifier, "expected lambda parameter name")?;
+                parameters.push(AstParameter {
+                    mutability: BindingMutability::Mutable,
+                    const_span: None,
+                    ty,
+                    name: name.lexeme,
+                    default: None,
+                    default_equals_span: None,
+                    span: parameter_start.through(name.span),
+                });
+                if self.consume(TokenKind::Comma).is_none() {
+                    break;
+                }
+                if self.at(TokenKind::RightParen) {
+                    return Err(self.error("E0104", "expected lambda parameter after `,`"));
+                }
+            }
+        }
+        self.expect(
+            TokenKind::RightParen,
+            "expected `)` after lambda parameters",
+        )?;
+        self.expect(TokenKind::FatArrow, "expected `=>` after lambda parameters")?;
+        let body = self.expression()?;
+        let span = left.span.through(body.span);
+        let id = crate::LambdaId { start: span.start };
+        let target = format!("$lambda${}", id.start);
+        let void_type = AstType {
+            kind: crate::AstTypeKind::Named {
+                module: None,
+                name: "void".into(),
+                arguments: Vec::new(),
+            },
+            span: left.span,
+        };
+        self.synthetic_lambdas.push(AstFunction {
+            public: false,
+            return_type: void_type,
+            name: target.clone(),
+            generic_parameters: Vec::new(),
+            parameters,
+            body: AstBlock {
+                statements: vec![AstStmt {
+                    kind: AstStmtKind::Return(Some(body)),
+                    span,
+                }],
+                span,
+            },
+            span,
+        });
+        Ok(AstExpr {
+            kind: AstExprKind::Lambda { id, target },
+            span,
+        })
     }
 
     fn subscript_selectors(&mut self) -> Result<Vec<crate::AstSubscriptSelector>, Diagnostic> {
@@ -2057,7 +2150,7 @@ impl Parser<'_> {
     }
 
     #[allow(clippy::too_many_lines)]
-    fn parse_string_literal(&self, token: &Token) -> Result<AstExprKind, Diagnostic> {
+    fn parse_string_literal(&mut self, token: &Token) -> Result<AstExprKind, Diagnostic> {
         let spelling = token.lexeme.as_bytes();
         let mut fragments = Vec::new();
         let mut text = String::new();
@@ -2126,12 +2219,15 @@ impl Parser<'_> {
                     source: &field_source,
                     tokens: field_tokens,
                     cursor: 0,
+                    synthetic_lambdas: Vec::new(),
                 };
                 let expression = field_parser.expression()?;
                 if !field_parser.at(TokenKind::Eof) {
                     return Err(field_parser
                         .error("E0109", "expected one expression in interpolation field"));
                 }
+                self.synthetic_lambdas
+                    .append(&mut field_parser.synthetic_lambdas);
                 fragments.push(AstInterpolationFragment::Hole {
                     expression,
                     span: Span::in_source(

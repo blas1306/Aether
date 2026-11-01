@@ -2,6 +2,14 @@
 
 use crate::Span;
 
+/// Stable source identity for an anonymous function.  It is derived only from
+/// source provenance, never from traversal or allocation order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct LambdaId {
+    /// Byte offset of the lambda's opening parenthesis.
+    pub start: usize,
+}
+
 /// Whether source storage may be replaced after its declaration initializer.
 /// This is binding metadata and never forms part of an [`AstType`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -445,6 +453,10 @@ pub enum AstExprKind {
     Bool(bool),
     /// Contextually typed absence; it has no standalone semantic `TypeId`.
     Null,
+    /// Capture-free expression-bodied anonymous function.  The parser also
+    /// creates a module-owned synthetic declaration with `target` as its
+    /// unspellable name; semantic analysis lowers this node to `FunctionRef`.
+    Lambda { id: LambdaId, target: String },
     /// Collection literal. Its concrete collection kind is selected only from
     /// the expected semantic type; future `List<T>` can reuse this node.
     CollectionLiteral(Vec<AstExpr>),

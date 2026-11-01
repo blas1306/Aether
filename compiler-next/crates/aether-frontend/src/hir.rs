@@ -1465,6 +1465,7 @@ fn nullable_loop_expression_effects(
         | AstExprKind::Char(_)
         | AstExprKind::Bool(_)
         | AstExprKind::Null
+        | AstExprKind::Lambda { .. }
         | AstExprKind::Name(_)
         | AstExprKind::QualifiedName { .. } => {}
     }
@@ -4947,6 +4948,99 @@ pub fn analyze_bodies_for_target(
     // bodies type-check Buffer constructors for those exact field types.
     compute_concrete_layouts(&mut types, &d.structs, &d.enums, target)?;
     classes::compute_layouts(&mut types, &d.structs, &d.enums, target)?;
+    // Anonymous functions are collected with a temporary void result so all
+    // module-owned identities exist before any body is checked. Infer their
+    // expression result bottom-up (the parser appends nested lambdas first),
+    // using the ordinary local-inference path, then analyze every body with
+    // its final exact Function signature.
+    let lambda_functions = d
+        .program
+        .modules
+        .iter()
+        .enumerate()
+        .flat_map(|(module_index, module)| {
+            module
+                .ast
+                .functions()
+                .iter()
+                .enumerate()
+                .filter(|(_, function)| function.name.starts_with("$lambda$"))
+                .map(move |(function_index, _)| (module_index, function_index))
+        })
+        .collect::<Vec<_>>();
+    for (module_index, function_index) in lambda_functions {
+        let id = d
+            .signatures
+            .iter()
+            .find(|signature| {
+                signature.module == d.program.modules[module_index].info.id
+                    && signature.name
+                        == d.program.modules[module_index].ast.functions()[function_index].name
+            })
+            .map(|signature| signature.id)
+            .expect("synthetic lambda signature exists");
+        let module = d.program.modules[module_index].info.id;
+        let original = d.program.modules[module_index].ast.functions()[function_index].clone();
+        let expression = match &original.body.statements[0].kind {
+            AstStmtKind::Return(Some(expression)) => expression.clone(),
+            _ => unreachable!("parser emits one expression return per lambda"),
+        };
+        let mut probe = original.clone();
+        probe.body.statements[0].kind = AstStmtKind::Local {
+            mutability: crate::BindingMutability::Mutable,
+            const_span: None,
+            ty: AstType {
+                kind: crate::AstTypeKind::Named {
+                    module: None,
+                    name: "var".into(),
+                    arguments: Vec::new(),
+                },
+                span: expression.span,
+            },
+            name: "$lambda_result".into(),
+            initializer: expression.clone(),
+        };
+        match analyze_function(&probe, id, module, &d, &mut types, target) {
+            Ok((inferred, _)) => {
+                let result = inferred
+                    .locals
+                    .iter()
+                    .find(|local| local.name == "$lambda_result")
+                    .map(|local| local.ty)
+                    .expect("lambda inference local exists");
+                d.signatures[id.0 as usize].return_type = result;
+            }
+            Err(value_error) => {
+                let mut void_probe = original.clone();
+                void_probe.body.statements[0].kind = AstStmtKind::Expr(expression.clone());
+                if analyze_function(&void_probe, id, module, &d, &mut types, target).is_ok() {
+                    d.program.modules[module_index].ast.functions[function_index]
+                        .body
+                        .statements[0]
+                        .kind = AstStmtKind::Expr(expression);
+                } else {
+                    let source_name = d.program.modules[module_index].info.source_name.clone();
+                    return Err(value_error
+                        .into_iter()
+                        .map(|diagnostic| {
+                            if diagnostic.category == DiagnosticCategory::Name {
+                                Diagnostic::new(
+                                    "E0359",
+                                    Phase::Semantic,
+                                    DiagnosticCategory::Name,
+                                    "capture-free anonymous function cannot use a local or parameter from an outer scope",
+                                    diagnostic.span,
+                                )
+                            } else {
+                                diagnostic
+                            }
+                        })
+                        .map(|diagnostic| diagnostic.with_source_name(&source_name))
+                        .collect());
+                }
+            }
+        }
+    }
     for m in &d.program.modules {
         for f in m.ast.functions() {
             let id = FunctionId(functions.len() as u32);
@@ -11962,6 +12056,59 @@ impl Analyzer<'_> {
                 },
                 constant: None,
             },
+            AstExprKind::Lambda { target, .. } => {
+                let Some(id) = self.names[self.module.0 as usize]
+                    .get(target)
+                    .and_then(|ids| ids.first())
+                    .copied()
+                else {
+                    return Err(vec![Diagnostic::new(
+                        "E0358",
+                        Phase::Semantic,
+                        DiagnosticCategory::Name,
+                        "anonymous function target is missing",
+                        Some(e.span),
+                    )]);
+                };
+                let signature = self.signatures[id.0 as usize].clone();
+                let function_type = self
+                    .types
+                    .intern_function(
+                        signature.parameters.iter().map(|p| p.ty).collect(),
+                        signature.return_type,
+                    )
+                    .expect("lambda signature is valid");
+                if let Some(expected) = expected
+                    && expected != function_type
+                    && self.types.nullable_payload(expected) != Some(function_type)
+                {
+                    return Err(vec![Diagnostic::new(
+                        "E0351",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        format!(
+                            "anonymous function has type {}, expected {}",
+                            self.type_name(function_type),
+                            self.type_name(expected)
+                        ),
+                        Some(e.span),
+                    )]);
+                }
+                return self.coerce(
+                    Checked {
+                        expr: HirExpr {
+                            kind: HirExprKind::FunctionRef {
+                                target: HirCallTarget::Declaration(id),
+                                function_type,
+                            },
+                            ty: function_type,
+                            span: e.span,
+                        },
+                        constant: None,
+                    },
+                    expected,
+                );
+            }
             AstExprKind::Name(n) => {
                 if let Some(diagnostic) = self.invalid_default_reference(n, e.span) {
                     return Err(diagnostic);
@@ -20217,6 +20364,7 @@ fn ast_expr_has_call(expr: &AstExpr) -> bool {
         | AstExprKind::Char(_)
         | AstExprKind::Bool(_)
         | AstExprKind::Null
+        | AstExprKind::Lambda { .. }
         | AstExprKind::Name(_)
         | AstExprKind::QualifiedName { .. } => false,
     }
@@ -20283,6 +20431,44 @@ mod tests {
     use crate::{SourceFile, parse_source};
     fn check(s: &str) -> Result<TypedHir, Vec<Diagnostic>> {
         analyze(parse_source(&SourceFile::new("test.ae", s)).unwrap())
+    }
+    #[test]
+    fn anonymous_function_hir_identity_and_signature_corruptions_fail_closed() {
+        let hir = check("int main(){var f=(int x)=>x+1;return f(41);}").unwrap();
+        verify_hir(&hir).unwrap();
+        for mutation in 0..3 {
+            let mut bad = hir.clone();
+            let function_ref = bad
+                .functions
+                .iter_mut()
+                .flat_map(|function| &mut function.body.statements)
+                .find_map(|statement| match &mut statement.kind {
+                    HirStmtKind::Local { initializer, .. }
+                        if matches!(initializer.kind, HirExprKind::FunctionRef { .. }) =>
+                    {
+                        Some(initializer)
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            let HirExprKind::FunctionRef {
+                target,
+                function_type,
+            } = &mut function_ref.kind
+            else {
+                unreachable!()
+            };
+            match mutation {
+                0 => *target = HirCallTarget::Declaration(FunctionId(u32::MAX)),
+                1 => {
+                    *function_type = TypeId::BOOL;
+                    function_ref.ty = TypeId::BOOL;
+                }
+                2 => *target = HirCallTarget::Declaration(FunctionId(0)),
+                _ => unreachable!(),
+            }
+            assert!(verify_hir(&bad).is_err(), "HIR mutation {mutation}");
+        }
     }
     #[test]
     fn class_buffer_field_storage_place_hir_corruptions_fail_closed() {
