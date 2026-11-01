@@ -1,54 +1,33 @@
 import linearAlgebra as la;
+import plots as plt;
 
-struct MinCuad {
-    Vector<double, Column> a;
-    double E;
-}
+void MinimosCuadrados(Vector<double, Column> t, Vector<double, Column> y, Function<(double), Vector<double, Column>> modelo) {
 
-double modelo(int j, double t) {
-    if (j == 1) {
-        return t * t;
-    } else if (j == 2) {
-        return t;
-    } else {
-        return 1.0;
-    }
-}
+    Matrix<double> A = la.zeros(t.length, modelo.length);
 
-MinCuad MinimosCuadrados(Vector<double, Column> t, Vector<double, Column> y, int n, Function<(int, double), double> phi) {
-    int m = t.length;
-
-    Matrix<double> A = la.zeros(m, n);
-
-    for (int i in 1:n) {
-        for (int j in 1:n) {
-            A[i, j] = phi(j, t[i]);
+    for (int i in 1:t.length) {
+        for (int j in 1:modelo.length) {
+            A[i, j] = modelo[j](t[i]);
         }
     }
 
-    Vector<double, Column> a = la.leastSquares(A, y);
+    var theta = la.leastSquares(A, y);
+    println("Coeficientes modelo: ${theta}");
 
-    Vector<double, Column> r = A*a - y;
-    double E = la.dot(r, r);
+    var g = (double x) => la.dot(theta, modelo);
 
-    return MinCuad(a, E);
-}
-
-double evualuarModelo(double x. Vector<double, Column> a, Function<(int, double), double> phi) {
-    double resultado = 0.0;
-
-    for (int j in 1:a.length) {
-        resultado = resultado + a[j]*phi(j, x);
-    }
-
-    return resultado;
+    var fig = plt.scatter(t, y);
+    plt.plot!(g, min(t), max(t), 300); // la cantidad de puntos podemos hacer que sea 300 el default parameter
+    plt.show();
 }
 
 int main() {
-    var t = [-2; -1; 0; 1; 2];
-    var y = [5; 2; 1; 2; 5];
+    Vector<double, Column> t = [-2, -1, 0, 1, 2];
+    Vector<double, Column> y = [5, 2, 1, 3, 5];
 
-    
+    var modelo = (double x) => [1; x; x*x];
+
+    MinimosCuadrados(t, y, modelo);
 
     return 0;
 }

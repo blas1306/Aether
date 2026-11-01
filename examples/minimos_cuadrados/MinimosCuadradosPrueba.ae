@@ -1,0 +1,52 @@
+import linearAlgebra as la;
+import plots as plt;
+
+public class InvalidModelException : Exception {
+    public init() {}
+}
+
+void MinimosCuadrados(Vector<double, Column> t, Vector<double, Column> y, Function<(double), Array<double>> modelo) {
+    int m = t.length;
+
+    // Evaluamos el modelo para conocer la cantidad
+    // de funciones base.
+
+    var primeraFila = modelo(t[1]);
+    int n = primeraFila.length;
+
+    Matrix<double> A = la.zeros(m, n);
+
+    for (int i in 1:m) {
+        var phi = modelo(t[i]);
+
+        if (phi.length != n) {
+            throw InvalidModelException();
+        }
+
+        for (int j in 1:n) {
+            A[i, j] = phi[j];
+        }
+    }
+
+    var theta = la.leastSquares(A, y);
+
+    println("Coeficientes modelo: ${theta}");
+
+    // Closure capturante
+    var g = (double x) => la.dot(theta, modelo(x));
+
+    var fig = plt.scatter(t, y);
+    plt.plot!(fig, g, min(t), max(t), 300);
+    plt.show(fig);
+}
+
+int main() {
+    Vector<double, Column> t = [-2, -1, 0, 1, 2];
+    Vector<double, Column> y = [5, 2, 1, 3, 5];
+
+    var modelo = (double x) => {1; x; x*x};
+
+    MinimosCuadrados(t, y, modelo);
+
+    return 0;
+}
