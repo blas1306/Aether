@@ -1,0 +1,5 @@
+int main() {
+    int offset = 1;
+    var addOffset = (int value) => value + offset;
+    return addOffset(41);
+}
