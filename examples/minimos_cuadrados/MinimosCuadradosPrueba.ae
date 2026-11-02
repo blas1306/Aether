@@ -6,7 +6,7 @@ public class InvalidModelException : Exception {
 }
 
 void MinimosCuadrados(Vector<double, Column> t, Vector<double, Column> y, Function<(double), Array<double>> modelo) {
-    int m = t.length;
+    int m = dimension(t);
 
     // Evaluamos el modelo para conocer la cantidad
     // de funciones base.
@@ -18,10 +18,6 @@ void MinimosCuadrados(Vector<double, Column> t, Vector<double, Column> y, Functi
 
     for (int i in 1:m) {
         var phi = modelo(t[i]);
-
-        if (phi.length != n) {
-            throw InvalidModelException();
-        }
 
         for (int j in 1:n) {
             A[i, j] = phi[j];

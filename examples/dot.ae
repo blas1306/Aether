@@ -1,0 +1,29 @@
+interface Sequence<T> {
+    int length { get; }
+
+    T get(int index);
+}
+
+double dot<A: Sequence<double>, B: Sequence<double>>(A a, B b) {
+    if (a.length != b.length) {
+        throw MismatchException();
+    }
+
+    double resultado = 0.0;
+
+    for (int i in 0:a.length - 1) {
+        resultado = resultado + a.get(i) * b.get(i);
+    }
+
+    return resultado;
+}
+
+int main() {
+    Vector<double, Column> a = [1, 2, 3];
+    Vector<double, Column> b = [4, 5, 6];
+
+    double res = dot(a, b);
+    println("<${a}, ${b}> = ${res}");
+
+    return 0;
+}

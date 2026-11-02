@@ -234,6 +234,10 @@ pub enum AstTypeKind {
         parameters: Vec<AstType>,
         result: Box<AstType>,
     },
+    Closure {
+        parameters: Vec<AstType>,
+        result: Box<AstType>,
+    },
     Nullable {
         payload: Box<AstType>,
         question_span: Span,
@@ -252,9 +256,32 @@ impl AstType {
             } => Some((module.as_deref(), name, arguments)),
             AstTypeKind::Reference(_)
             | AstTypeKind::Function { .. }
+            | AstTypeKind::Closure { .. }
             | AstTypeKind::Nullable { .. } => None,
         }
     }
+}
+
+/// Explicit acquisition mode written in a lambda capture clause.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AstCaptureMode {
+    /// Snapshot a `Copy + Storable` source value.
+    Copy,
+    /// Retain a source value with compiler-qualified intrinsic Alias.
+    Alias,
+    /// Transfer an owning `Storable` root into the environment.
+    Move,
+}
+
+/// One source capture override, retaining exact provenance.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AstCapture {
+    /// Requested acquisition mode.
+    pub mode: AstCaptureMode,
+    /// Lexically resolved root spelling.
+    pub name: String,
+    /// Complete mode-and-name source span.
+    pub span: Span,
 }
 
 /// Explicit non-owning source reference type.
@@ -456,7 +483,11 @@ pub enum AstExprKind {
     /// Capture-free expression-bodied anonymous function.  The parser also
     /// creates a module-owned synthetic declaration with `target` as its
     /// unspellable name; semantic analysis lowers this node to `FunctionRef`.
-    Lambda { id: LambdaId, target: String },
+    Lambda {
+        id: LambdaId,
+        target: String,
+        captures: Vec<AstCapture>,
+    },
     /// Collection literal. Its concrete collection kind is selected only from
     /// the expected semantic type; future `List<T>` can reuse this node.
     CollectionLiteral(Vec<AstExpr>),

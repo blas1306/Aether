@@ -309,6 +309,7 @@ pub fn nullable_layout_of(
                 | TypeData::Class(_)
                 | TypeData::Reference { .. }
                 | TypeData::Function { .. }
+                | TypeData::Closure { .. }
         )
     ) {
         return Some(NullableLayout::Niche { layout: payload });
@@ -380,7 +381,8 @@ pub fn layout_of(
         | TypeData::Class(_)
         | TypeData::ClassToken { .. }
         | TypeData::Reference { .. }
-        | TypeData::Function { .. } => TypeLayout {
+        | TypeData::Function { .. }
+        | TypeData::Closure { .. } => TypeLayout {
             size: u64::from(target.pointer_width / 8),
             align: u64::from(target.pointer_width / 8),
         },
@@ -471,6 +473,19 @@ pub fn format_type(
                 .join(", ");
             format!(
                 "Function<({parameters}), {}>",
+                format_type(types, *result, structs, enums)
+            )
+        }
+        Some(TypeData::Closure { parameters, result }) => {
+            let parameters = types
+                .arguments(*parameters)
+                .unwrap_or(&[])
+                .iter()
+                .map(|parameter| format_type(types, *parameter, structs, enums))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "Closure<({parameters}), {}>",
                 format_type(types, *result, structs, enums)
             )
         }
@@ -3662,7 +3677,10 @@ fn resolve_type_in_module(
         }
         return Ok(types.intern_reference(pointee, reference.mutable));
     }
-    if let crate::AstTypeKind::Function { parameters, result } = &ty.kind {
+    if let crate::AstTypeKind::Function { parameters, result }
+    | crate::AstTypeKind::Closure { parameters, result } = &ty.kind
+    {
+        let closure = matches!(ty.kind, crate::AstTypeKind::Closure { .. });
         let mut resolved = Vec::with_capacity(parameters.len());
         for parameter in parameters {
             let parameter = resolve_type_in_module(
@@ -3702,7 +3720,12 @@ fn resolve_type_in_module(
             struct_arities,
             enum_arities,
         )?;
-        return types.intern_function(resolved, result).map_err(|message| {
+        return (if closure {
+            types.intern_closure(resolved, result)
+        } else {
+            types.intern_function(resolved, result)
+        })
+        .map_err(|message| {
             Diagnostic::new(
                 "E0350",
                 Phase::Semantic,
@@ -4711,7 +4734,8 @@ fn compute_aggregate_layouts(
             | TypeData::Interface(_)
             | TypeData::InterfaceKeepalive { .. }
             | TypeData::Reference { .. }
-            | TypeData::Function { .. } => {
+            | TypeData::Function { .. }
+            | TypeData::Closure { .. } => {
                 let bytes = u64::from(target.pointer_width / 8);
                 TypeLayout {
                     size: bytes,
@@ -4759,6 +4783,7 @@ fn compute_aggregate_layouts(
                             | TypeData::Class(_)
                             | TypeData::Reference { .. }
                             | TypeData::Function { .. }
+                            | TypeData::Closure { .. }
                     )
                 ) {
                     payload_layout
@@ -6766,7 +6791,8 @@ fn compute_concrete_layouts(
             | TypeData::Interface(_)
             | TypeData::InterfaceKeepalive { .. }
             | TypeData::Reference { .. }
-            | TypeData::Function { .. } => {
+            | TypeData::Function { .. }
+            | TypeData::Closure { .. } => {
                 let bytes = u64::from(target.pointer_width / 8);
                 Some(TypeLayout {
                     size: bytes,
@@ -9117,7 +9143,8 @@ impl Analyzer<'_> {
             crate::AstTypeKind::Reference(reference) => {
                 self.contains_nested_generic_omission(&reference.pointee)
             }
-            crate::AstTypeKind::Function { parameters, result } => {
+            crate::AstTypeKind::Function { parameters, result }
+            | crate::AstTypeKind::Closure { parameters, result } => {
                 parameters
                     .iter()
                     .any(|parameter| self.contains_nested_generic_omission(parameter))
@@ -12895,6 +12922,7 @@ impl Analyzer<'_> {
                 | TypeData::EnumInstance(_, _)
                 | TypeData::Reference { .. }
                 | TypeData::Function { .. }
+                | TypeData::Closure { .. }
                 | TypeData::Buffer { .. }
                 | TypeData::Vector { .. }
                 | TypeData::Array { .. }

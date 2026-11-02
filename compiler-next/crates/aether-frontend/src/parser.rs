@@ -630,6 +630,7 @@ impl Parser<'_> {
         })
     }
 
+    #[allow(clippy::too_many_lines)]
     fn ty(&mut self) -> Result<AstType, Diagnostic> {
         if matches!(self.current().kind, TokenKind::KwConst | TokenKind::KwMut) {
             return Err(self.error("E0374", "`const` must precede the complete binding type"));
@@ -680,7 +681,9 @@ impl Parser<'_> {
                 .collect::<Vec<_>>()
                 .join(".")
         });
-        if module.is_none() && name == "Function" && self.at(TokenKind::Less) {
+        if module.is_none() && (name == "Function" || name == "Closure") && self.at(TokenKind::Less)
+        {
+            let owning = name == "Closure";
             self.advance();
             self.expect_function(TokenKind::LeftParen, "expected `(` after `Function<`")?;
             let mut parameters = Vec::new();
@@ -711,9 +714,16 @@ impl Parser<'_> {
                 self.expect_function(TokenKind::Greater, "expected `>` after Function type")?;
             span = span.through(end.span);
             return self.nullable_suffix(AstType {
-                kind: crate::AstTypeKind::Function {
-                    parameters,
-                    result: Box::new(result),
+                kind: if owning {
+                    crate::AstTypeKind::Closure {
+                        parameters,
+                        result: Box::new(result),
+                    }
+                } else {
+                    crate::AstTypeKind::Function {
+                        parameters,
+                        result: Box::new(result),
+                    }
                 },
                 span,
             });
@@ -1562,10 +1572,10 @@ impl Parser<'_> {
                 TokenKind::RightParen => {
                     depth -= 1;
                     if depth == 0 {
-                        return self
-                            .tokens
-                            .get(index + 1)
-                            .is_some_and(|next| next.kind == TokenKind::FatArrow);
+                        return self.tokens.get(index + 1).is_some_and(|next| {
+                            next.kind == TokenKind::FatArrow
+                                || (next.kind == TokenKind::Identifier && next.lexeme == "capture")
+                        });
                     }
                 }
                 TokenKind::Eof => return false,
@@ -1576,6 +1586,7 @@ impl Parser<'_> {
         false
     }
 
+    #[allow(clippy::too_many_lines)]
     fn lambda_expression(&mut self, left: &Token) -> Result<AstExpr, Diagnostic> {
         let mut parameters = Vec::new();
         if !self.at(TokenKind::RightParen) {
@@ -1604,6 +1615,51 @@ impl Parser<'_> {
             TokenKind::RightParen,
             "expected `)` after lambda parameters",
         )?;
+        let mut captures = Vec::new();
+        if self.at(TokenKind::Identifier) && self.current().lexeme == "capture" {
+            self.advance();
+            self.expect(TokenKind::LeftParen, "expected `(` after `capture`")?;
+            if !self.at(TokenKind::RightParen) {
+                loop {
+                    let mode = if self.at(TokenKind::Identifier) || self.at(TokenKind::KwAlias) {
+                        self.advance()
+                    } else {
+                        return Err(self.error("E0368", "expected capture mode"));
+                    };
+                    let capture_mode = match mode.lexeme.as_str() {
+                        "copy" => crate::AstCaptureMode::Copy,
+                        "alias" => crate::AstCaptureMode::Alias,
+                        "move" => crate::AstCaptureMode::Move,
+                        _ => {
+                            return Err(self.error(
+                                "E0368",
+                                "capture mode must be `copy`, `alias`, or `move`",
+                            ));
+                        }
+                    };
+                    let name =
+                        self.expect(TokenKind::Identifier, "expected captured local name")?;
+                    if captures
+                        .iter()
+                        .any(|capture: &crate::AstCapture| capture.name == name.lexeme)
+                    {
+                        return Err(self.error("E0368", "duplicate explicit capture"));
+                    }
+                    captures.push(crate::AstCapture {
+                        mode: capture_mode,
+                        name: name.lexeme,
+                        span: mode.span.through(name.span),
+                    });
+                    if self.consume(TokenKind::Comma).is_none() {
+                        break;
+                    }
+                    if self.at(TokenKind::RightParen) {
+                        return Err(self.error("E0368", "expected capture after `,`"));
+                    }
+                }
+            }
+            self.expect(TokenKind::RightParen, "expected `)` after capture clause")?;
+        }
         self.expect(TokenKind::FatArrow, "expected `=>` after lambda parameters")?;
         let body = self.expression()?;
         let span = left.span.through(body.span);
@@ -1633,7 +1689,11 @@ impl Parser<'_> {
             span,
         });
         Ok(AstExpr {
-            kind: AstExprKind::Lambda { id, target },
+            kind: AstExprKind::Lambda {
+                id,
+                target,
+                captures,
+            },
             span,
         })
     }

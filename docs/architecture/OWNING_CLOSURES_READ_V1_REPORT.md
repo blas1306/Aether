@@ -1,6 +1,84 @@
 # Aether — OWNING-CLOSURES-READ-V1 — ABI Scope Review Report
 
-## Estado
+## Actualización de implementación — PARTIAL (1–2 de noviembre de 2026)
+
+La implementación fue retomada bajo la autoridad de
+`FIRST_CLASS_CLOSURES_ARCH_1_ABI_SCOPE_AMENDMENT.md`. El bloqueo de ABI entre
+compilaciones independientes permanece retirado y no fue reclasificado como
+bloqueo.
+
+Estado actual: **PARTIAL; FRONTEND FOUNDATION IMPLEMENTED; PRODUCTIVE CLOSURE
+VERTICAL NOT YET QUALIFIED**.
+
+Se implementó y verificó:
+
+- `TypeData::Closure` canónico, distinto de `Function`, con firma estructural;
+- propiedades no-Copy, relocatable, storable y needs-Drop;
+- layout de carrier owning de un pointer en el target vigente;
+- parsing de `Closure<(P...), R>` sin conversión a `Function`;
+- parsing y conservación source de `capture(copy x, alias y, move z)`;
+- cláusula opcional/parcial y rechazo fail-closed de modo inválido, trailing
+  entry y captura explícita duplicada;
+- sustitución generic, formatting, mangling y clasificación física de
+  `Closure` separadas de `Function`;
+- helpers non-atomic `aether_closure_retain_v1` y
+  `aether_closure_release_v1`, con overflow/underflow fail-closed, carga del
+  destroy thunk en `2W` y wiring conservador de Drop (todavía no alcanzables
+  desde un productor porque `ClosureCreate` no está implementado).
+
+Evidencia ejecutada:
+
+- `cargo test -p aether-driver --test owning_closures_read_v1`: **4/4 PASS**;
+- `cargo test -p aether-driver --test anonymous_functions_v1`: **5/5 PASS**;
+- `cargo test -p aether-driver --test function_values_v1`: **8/8 PASS**;
+- `CARGO_INCREMENTAL=0 cargo test --workspace -j 1`: todos los grupos
+  observados finalizaron PASS; la sesión de herramienta se perdió después de
+  iniciar el último test largo de registry, que se reejecutó aisladamente;
+- `cargo test -p aether-registry --test registry
+  linear_algebra_oal_publishes_and_runs_real_qr_consumer`: **1/1 PASS** en
+  O0/O2 (1047.50 s);
+- `cargo clippy --workspace --all-targets -j 1`: **código 0**, con warnings
+  preexistentes; los warnings nuevos atribuibles fueron corregidos;
+- `cargo fmt --all --check`: **PASS**;
+- `git diff --check`: **PASS**.
+
+Los dos reproducers fueron ejecutados nuevamente. El automático continúa
+fallando con `E0359`. El explícito ya no falla en parsing: acepta la cláusula y
+luego falla también con `E0359`, demostrando el próximo corte real. La
+declaración sintética todavía se analiza fuera del scope creador, por lo que no
+puede resolver variables libres ni construir recipes de captures.
+
+No están implementados ni se declaran PASS:
+
+- análisis de variables libres, inferencia Copy/Alias y aplicación de overrides;
+- `ClosureCreate`, `ClosureAlias`, `ClosureCall` y metadata de captures en
+  HIR/MIR/SSA;
+- boxes, payload, invoke/destroy thunks, publicación y rollback;
+- integración de helpers ARC con productores, contadores de qualification,
+  replacement, return y keepalive;
+- cleanup normal/unwind y conservación de `ExceptionEvent` para closures;
+- qualification funcional O0/O2, módulos/packages fuente y corruption tests;
+- qualification productiva del runtime Closure; el runtime general sí pasó su
+  regresión de workspace y Clippy.
+
+En consecuencia los gates esenciales del vertical siguen abiertos. Esta
+actualización no sustituye el historial de revisión y desbloqueo conservado a
+continuación, ni presenta interoperabilidad source como interoperabilidad
+binaria.
+
+Archivos modificados en esta actualización:
+
+- `compiler-next/crates/aether-frontend/src/ast.rs`;
+- `compiler-next/crates/aether-frontend/src/lib.rs`;
+- `compiler-next/crates/aether-frontend/src/parser.rs`;
+- `compiler-next/crates/aether-frontend/src/types.rs`;
+- `compiler-next/crates/aether-frontend/src/hir.rs`;
+- `compiler-next/crates/aether-backend-llvm/src/lib.rs`;
+- `compiler-next/crates/aether-driver/tests/owning_closures_read_v1.rs`;
+- `reproducers/owning_closures_read_v1/README.md`;
+- `docs/architecture/OWNING_CLOSURES_READ_V1_REPORT.md`.
+
+## Estado histórico previo a esta actualización
 
 `ABI SCOPE REVIEW COMPLETE; PREVIOUS BLOCKER REMOVED; IMPLEMENTATION NOT
 STARTED; NOT QUALIFIED` (1 de noviembre de 2026).

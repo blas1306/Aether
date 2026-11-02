@@ -10,10 +10,11 @@ cargo run -q -p aether-cli -- check ../reproducers/owning_closures_read_v1/autom
 cargo run -q -p aether-cli -- check ../reproducers/owning_closures_read_v1/explicit_capture_clause.ae
 ```
 
-The first reaches semantic analysis and is rejected with `E0359`: the existing
-anonymous-function vertical deliberately analyzes its synthetic declaration
-outside the creator's lexical scope. The second is rejected by the parser
-because `capture(...)` is not part of the current lambda grammar.
+Current PARTIAL implementation result: both reach semantic analysis and are
+rejected with `E0359`. The explicit clause is now parsed and retained in AST;
+the remaining shared failure is that the existing anonymous-function vertical
+still analyzes its synthetic declaration outside the creator's lexical scope.
+Neither reproducer is a functional PASS yet.
 
 The ABI blocker has no executable producer/consumer reproducer in the current
 pipeline. `CompilationSession` loads every reachable package source and

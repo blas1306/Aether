@@ -416,6 +416,11 @@ pub enum TypeData {
         parameters: TypeArgsId,
         result: TypeId,
     },
+    /// Owning, reference-counted read-only closure carrier.
+    Closure {
+        parameters: TypeArgsId,
+        result: TypeId,
+    },
     /// Fixed-length contiguous owning allocation. This is a compiler-known
     /// generic form rather than a nominal source declaration.
     Buffer {
@@ -577,6 +582,9 @@ impl fmt::Display for TypeData {
             }
             Self::Function { parameters, result } => {
                 write!(f, "Function<args#{}, {result}>", parameters.0)
+            }
+            Self::Closure { parameters, result } => {
+                write!(f, "Closure<args#{}, {result}>", parameters.0)
             }
             Self::Buffer { element } => write!(f, "Buffer<{element}>"),
             Self::Vector {
@@ -1026,6 +1034,29 @@ impl TypeArena {
         Some((self.arguments(parameters)?, result))
     }
 
+    pub fn intern_closure(
+        &mut self,
+        parameters: Vec<TypeId>,
+        result: TypeId,
+    ) -> Result<TypeId, &'static str> {
+        if !self.is_valid(result) || parameters.iter().any(|p| !self.is_valid(*p)) {
+            return Err("Closure signature contains an invalid type");
+        }
+        if parameters.contains(&TypeId::VOID) {
+            return Err("Closure parameter type cannot be void");
+        }
+        let parameters = self.intern_arguments(parameters);
+        Ok(self.intern(TypeData::Closure { parameters, result }))
+    }
+
+    #[must_use]
+    pub fn closure_signature(&self, ty: TypeId) -> Option<(&[TypeId], TypeId)> {
+        let TypeData::Closure { parameters, result } = *self.get(ty)? else {
+            return None;
+        };
+        Some((self.arguments(parameters)?, result))
+    }
+
     pub fn intern_buffer(&mut self, element: TypeId) -> TypeId {
         self.intern(TypeData::Buffer { element })
     }
@@ -1182,7 +1213,10 @@ impl TypeArena {
             }
             Some(TypeData::Reference { pointee, .. }) => self.contains_generic(*pointee),
             Some(TypeData::Nullable(payload)) => self.contains_generic(*payload),
-            Some(TypeData::Function { parameters, result }) => {
+            Some(
+                TypeData::Function { parameters, result }
+                | TypeData::Closure { parameters, result },
+            ) => {
                 self.contains_generic(*result)
                     || self.arguments(*parameters).is_some_and(|parameters| {
                         parameters
@@ -1547,7 +1581,7 @@ impl TypeArena {
                 is_storable: matches!(data, TypeData::Class(_) | TypeData::Interface(_)),
                 needs_drop: true,
             },
-            TypeData::String => TypeProperties {
+            TypeData::String | TypeData::Closure { .. } => TypeProperties {
                 is_known: true,
                 is_copy: false,
                 is_relocatable: true,
@@ -1907,6 +1941,9 @@ impl TypeArena {
                 capability,
                 Capability::Copy | Capability::Relocatable | Capability::Storable
             ),
+            Some(TypeData::Closure { .. }) => {
+                matches!(capability, Capability::Relocatable | Capability::Storable)
+            }
             Some(TypeData::Nullable(payload)) => self.guarantees_capability_with_substitution(
                 payload,
                 capability,
@@ -2353,6 +2390,7 @@ impl TypeArena {
             }
             Some(TypeData::String) => capability == 5,
             Some(TypeData::Function { .. }) => capability == 6,
+            Some(TypeData::Closure { .. }) => capability == 2,
             Some(
                 TypeData::Void
                 | TypeData::Bool
@@ -2425,6 +2463,7 @@ impl TypeArena {
 
     /// Applies one explicit substitution recursively and interns every newly
     /// formed nominal application in this arena.
+    #[allow(clippy::too_many_lines)]
     pub fn substitute(
         &mut self,
         ty: TypeId,
@@ -2477,6 +2516,20 @@ impl TypeArena {
                 Ok(self
                     .intern_function(parameters, result)
                     .expect("substitution preserves Function legality"))
+            }
+            Some(TypeData::Closure { parameters, result }) => {
+                let source = self
+                    .arguments(parameters)
+                    .expect("valid argument identity")
+                    .to_vec();
+                let parameters = source
+                    .into_iter()
+                    .map(|parameter| self.substitute(parameter, substitution))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result = self.substitute(result, substitution)?;
+                Ok(self
+                    .intern_closure(parameters, result)
+                    .expect("substitution preserves Closure legality"))
             }
             Some(TypeData::Buffer { element }) => {
                 let element = self.substitute(element, substitution)?;
@@ -2599,6 +2652,27 @@ impl TypeArena {
                         result,
                     })
                     .expect("monomorphizer interned substituted Function"))
+            }
+            Some(TypeData::Closure { parameters, result }) => {
+                let parameters = self
+                    .arguments(parameters)
+                    .expect("valid argument identity")
+                    .iter()
+                    .map(|parameter| self.substituted_existing(*parameter, substitution))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result = self.substituted_existing(result, substitution)?;
+                let args = self
+                    .argument_ids
+                    .get(&parameters)
+                    .copied()
+                    .expect("monomorphizer interned substituted Closure arguments");
+                Ok(*self
+                    .ids
+                    .get(&TypeData::Closure {
+                        parameters: args,
+                        result,
+                    })
+                    .expect("monomorphizer interned substituted Closure"))
             }
             Some(TypeData::Buffer { element }) => {
                 let element = self.substituted_existing(element, substitution)?;

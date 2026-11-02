@@ -266,10 +266,14 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             _ => None,
         })
         .collect::<BTreeSet<_>>();
+    let has_closure_runtime = types
+        .entries()
+        .any(|(_, data)| matches!(data, TypeData::Closure { .. }));
     let has_owners = !fixed_elements.is_empty()
         || !list_elements.is_empty()
         || has_class_runtime
-        || has_string_runtime;
+        || has_string_runtime
+        || has_closure_runtime;
     let mut output = String::new();
     writeln!(output, "; Aether NEXT-VERTICAL-18").unwrap();
     writeln!(
@@ -294,7 +298,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         writeln!(output, "declare ptr @__errno_location() nounwind\n").unwrap();
     }
     if has_owners {
-        emit_runtime_boundary(&mut output);
+        emit_runtime_boundary(&mut output, has_closure_runtime);
         if has_class_runtime {
             classes::runtime(&mut output, program, suppressed_text_exception);
             classes::witnesses(&mut output, program);
@@ -775,7 +779,7 @@ fn emit_exception_runtime(
     output.push_str("  ret i1 false\n}\n\n");
 }
 
-fn emit_runtime_boundary(output: &mut String) {
+fn emit_runtime_boundary(output: &mut String, has_closure_runtime: bool) {
     output.push_str(
         "@aether_heap_alloc_count = internal global i64 0\n\
          @aether_heap_free_count = internal global i64 0\n\
@@ -825,6 +829,47 @@ fn emit_runtime_boundary(output: &mut String) {
            ret i64 %count\n\
          }\n\n",
     );
+    if has_closure_runtime {
+        output.push_str(
+            r"define ptr @aether_closure_retain_v1(ptr %box) nounwind {
+entry:
+  %strong = load i64, ptr %box
+  %overflow = icmp eq i64 %strong, -1
+  br i1 %overflow, label %trap, label %retain
+retain:
+  %next = add i64 %strong, 1
+  store i64 %next, ptr %box
+  ret ptr %box
+trap:
+  call void @llvm.trap()
+  unreachable
+}
+define void @aether_closure_release_v1(ptr %box) nounwind {
+entry:
+  %strong = load i64, ptr %box
+  %invalid = icmp eq i64 %strong, 0
+  br i1 %invalid, label %trap, label %release
+release:
+  %last = icmp eq i64 %strong, 1
+  br i1 %last, label %destroy, label %decrement
+decrement:
+  %next = sub i64 %strong, 1
+  store i64 %next, ptr %box
+  ret void
+destroy:
+  %destroy_slot = getelementptr i8, ptr %box, i64 16
+  %destroy_thunk = load ptr, ptr %destroy_slot
+  store i64 0, ptr %box
+  call void %destroy_thunk(ptr %box)
+  ret void
+trap:
+  call void @llvm.trap()
+  unreachable
+}
+
+",
+        );
+    }
 }
 
 /// Emit non-trapping physical relocation glue. The source pointer denotes one
@@ -858,6 +903,7 @@ fn emit_relocation_glue(
         | TypeData::Float(_)
         | TypeData::Reference { .. }
         | TypeData::Function { .. }
+        | TypeData::Closure { .. }
         | TypeData::VectorView { .. }
         | TypeData::MatrixView { .. }
         | TypeData::View { .. }
@@ -932,6 +978,9 @@ fn emit_drop_glue(
     .unwrap();
     writeln!(output, "entry:").unwrap();
     match types.get(ty).expect("concrete drop type") {
+        TypeData::Closure { .. } => {
+            output.push_str("  call void @aether_closure_release_v1(ptr %value)\n  ret void\n}\n");
+        }
         TypeData::String => {
             output.push_str("  call void @aether_string_release(ptr %value)\n  ret void\n}\n");
         }
@@ -4660,6 +4709,17 @@ fn mangle_symbol_type(
                 .join("_"),
             mangle_symbol_type(types, *result, modules, structs, enums)
         ),
+        TypeData::Closure { parameters, result } => format!(
+            "Cx{}zR{}",
+            types
+                .arguments(*parameters)
+                .unwrap()
+                .iter()
+                .map(|parameter| mangle_symbol_type(types, *parameter, modules, structs, enums))
+                .collect::<Vec<_>>()
+                .join("_"),
+            mangle_symbol_type(types, *result, modules, structs, enums)
+        ),
         TypeData::Buffer { element } => format!(
             "B{}",
             mangle_symbol_type(types, *element, modules, structs, enums)
@@ -4761,7 +4821,8 @@ fn llvm_type(types: &TypeArena, ty: TypeId) -> String {
         | TypeData::Class(_)
         | TypeData::ClassToken { .. }
         | TypeData::Reference { .. }
-        | TypeData::Function { .. } => "ptr".into(),
+        | TypeData::Function { .. }
+        | TypeData::Closure { .. } => "ptr".into(),
         TypeData::Nullable(payload) if nullable_uses_niche(types, *payload) => {
             llvm_type(types, *payload)
         }
@@ -4848,6 +4909,11 @@ fn mangle_type(types: &TypeArena, ty: TypeId) -> String {
         }
         TypeData::Function { parameters, result } => format!(
             "Fx{}zR{}",
+            mangle_type_arguments(types, *parameters),
+            mangle_type(types, *result)
+        ),
+        TypeData::Closure { parameters, result } => format!(
+            "Cx{}zR{}",
             mangle_type_arguments(types, *parameters),
             mangle_type(types, *result)
         ),
