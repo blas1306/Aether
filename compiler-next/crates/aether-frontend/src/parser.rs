@@ -1619,6 +1619,9 @@ impl Parser<'_> {
         if self.at(TokenKind::Identifier) && self.current().lexeme == "capture" {
             self.advance();
             self.expect(TokenKind::LeftParen, "expected `(` after `capture`")?;
+            if self.at(TokenKind::RightParen) {
+                return Err(self.error("E0368", "capture clause cannot be empty"));
+            }
             if !self.at(TokenKind::RightParen) {
                 loop {
                     let mode = if self.at(TokenKind::Identifier) || self.at(TokenKind::KwAlias) {

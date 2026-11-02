@@ -1,29 +1,25 @@
-interface Sequence<T> {
-    int length { get; }
-
-    T get(int index);
-}
-
-double dot<A: Sequence<double>, B: Sequence<double>>(A a, B b) {
-    if (a.length != b.length) {
-        throw MismatchException();
+double dot(Array<double> a, Array<double> b) {
+    if (length(a) != length(b)) {
+        return 0.0;
     }
 
     double resultado = 0.0;
 
-    for (int i in 0:a.length - 1) {
-        resultado = resultado + a.get(i) * b.get(i);
+    usize i = 0;
+    while (i < length(a)) {
+        resultado = resultado + a[i] * b[i];
+        i = i + 1;
     }
 
     return resultado;
 }
 
 int main() {
-    Vector<double, Column> a = [1, 2, 3];
-    Vector<double, Column> b = [4, 5, 6];
+    Array<double> a = {1, 2, 3};
+    Array<double> b = {4, 5, 6};
 
     double res = dot(a, b);
-    println("<${a}, ${b}> = ${res}");
+    println("dot result = ${res}");
 
     return 0;
 }

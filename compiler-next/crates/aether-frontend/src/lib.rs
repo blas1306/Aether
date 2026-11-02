@@ -27,8 +27,9 @@ pub use core::{
 };
 pub use diagnostic::{Diagnostic, DiagnosticCategory, FixIt, Phase, SourceFile, SourceId, Span};
 pub use hir::{
-    AlgebraicProductKind, CallBorrowOrigin, CallBorrowSource, CallSiteId, CapabilityCompareOp,
-    CapabilityMathOp, CapabilityUnaryOp, CastKind, CatchId, CoercionKind,
+    AlgebraicProductKind, BindingId, CallBorrowOrigin, CallBorrowSource, CallSiteId,
+    CapabilityCompareOp, CapabilityMathOp, CapabilityUnaryOp, CaptureMode, CastKind, CatchId,
+    ClosureCaptureInfo, ClosureCaptureWarning, ClosureEnvironmentInfo, CoercionKind,
     CollectionIterationSource, DeclaredProgram, DefaultArgumentTemplate,
     EnumEqualityClassification, EnumInfo, FieldInfo, FinallyId, FloatValue, FormatBorrowOrigin,
     FormatBorrowSource, FormatSiteId, FunctionId, FunctionInstanceInfo, FunctionSignature,

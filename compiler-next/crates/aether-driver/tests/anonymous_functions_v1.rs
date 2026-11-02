@@ -116,7 +116,7 @@ int main(){int value=99;var f=(int value)=>value+1;return f(41);}
 
     let capture = diagnostics("int main(){int n=4;var f=(int x)=>x+n;return f(1);}");
     assert!(
-        capture.contains("E0359 capture-free anonymous function"),
+        capture.contains("E0376 capturing closure analysis succeeded"),
         "{capture}"
     );
 

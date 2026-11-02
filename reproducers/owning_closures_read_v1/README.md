@@ -10,11 +10,12 @@ cargo run -q -p aether-cli -- check ../reproducers/owning_closures_read_v1/autom
 cargo run -q -p aether-cli -- check ../reproducers/owning_closures_read_v1/explicit_capture_clause.ae
 ```
 
-Current PARTIAL implementation result: both reach semantic analysis and are
-rejected with `E0359`. The explicit clause is now parsed and retained in AST;
-the remaining shared failure is that the existing anonymous-function vertical
-still analyzes its synthetic declaration outside the creator's lexical scope.
-Neither reproducer is a functional PASS yet.
+Current semantic-foundation result: both resolve their outer binding, build
+typed capture metadata and are rejected with `E0376` because productive
+Closure lowering is intentionally not implemented in this subvertical. The
+automatic case selects Copy; the explicit case validates the written Copy.
+Neither reproducer is a functional runtime PASS yet, and neither silently
+degrades to `FunctionRef`.
 
 The ABI blocker has no executable producer/consumer reproducer in the current
 pipeline. `CompilationSession` loads every reachable package source and

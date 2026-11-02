@@ -1,5 +1,29 @@
 # Aether — OWNING-CLOSURES-READ-V1 — ABI Scope Review Report
 
+## Actualización CLOSURE-CAPTURE-ANALYSIS-V1 — CLOSED (2 de noviembre de 2026)
+
+El subvertical semántico dedicado quedó implementado y calificado. La fase de
+declaraciones conserva ahora el scope creador, resuelve variables libres por
+identidad estable, clasifica Copy/Alias/Move, valida cláusulas parciales y
+publica metadata tipada `ClosureEnvironmentInfo`. Incluye shadowing, bindings
+homónimos, lambdas anidadas, capturas transitivas, orden canónico y warning
+estructurado para capturas explícitas no usadas.
+
+Los reproducers ya no fallan con `E0359`: ambos alcanzan `E0376`, la frontera
+explícita que indica que el análisis de Closure tuvo éxito pero su lowering
+productivo todavía no existe. Las lambdas sin captura conservan la ruta
+`FunctionRef` original.
+
+Evidencia focal: `owning_closures_read_v1` 13/13,
+`anonymous_functions_v1` 5/5 y `function_values_v1` 8/8 PASS. Ver
+`CLOSURE_CAPTURE_ANALYSIS_V1_REPORT.md` para metadata, política y qualification.
+El workspace serial completo, fmt, Clippy (código 0 con warnings preexistentes)
+y `git diff --check` también finalizaron correctamente.
+
+`OWNING-CLOSURES-READ-V1` permanece **PARTIAL**: siguen pendientes
+`ClosureCreate/ClosureAlias/ClosureCall`, lowering HIR/MIR/SSA, boxes/thunks,
+runtime productivo, ownership/unwind y qualification O0/O2 de closures reales.
+
 ## Actualización de implementación — PARTIAL (1–2 de noviembre de 2026)
 
 La implementación fue retomada bajo la autoridad de
@@ -42,15 +66,14 @@ Evidencia ejecutada:
 - `cargo fmt --all --check`: **PASS**;
 - `git diff --check`: **PASS**.
 
-Los dos reproducers fueron ejecutados nuevamente. El automático continúa
-fallando con `E0359`. El explícito ya no falla en parsing: acepta la cláusula y
-luego falla también con `E0359`, demostrando el próximo corte real. La
-declaración sintética todavía se analiza fuera del scope creador, por lo que no
-puede resolver variables libres ni construir recipes de captures.
+En esa actualización previa, los dos reproducers todavía fallaban con `E0359`
+porque la declaración sintética se analizaba fuera del scope creador. Ese
+resultado histórico fue sustituido por la actualización
+`CLOSURE-CAPTURE-ANALYSIS-V1` al comienzo de este documento.
 
 No están implementados ni se declaran PASS:
 
-- análisis de variables libres, inferencia Copy/Alias y aplicación de overrides;
+- lowering productivo a partir del análisis de variables libres ya implementado;
 - `ClosureCreate`, `ClosureAlias`, `ClosureCall` y metadata de captures en
   HIR/MIR/SSA;
 - boxes, payload, invoke/destroy thunks, publicación y rollback;
@@ -214,7 +237,11 @@ Todos dependen de una frontera de artefactos que Aether todavía no posee. No
 protegen ninguna ruta adicional del programa compilado conjuntamente y, por
 eso, no son condición técnica para el ABI interno.
 
-## Trabajo real restante de V1
+## Trabajo real restante registrado por la revisión histórica
+
+La lista siguiente describe el corte anterior y se conserva como trazabilidad;
+la actualización al comienzo del documento sustituye sus afirmaciones sobre
+parser, tipos y resolución de capturas.
 
 Los reproducers existentes siguen siendo evidencia útil del estado source:
 

@@ -179,6 +179,50 @@ pub struct ParsedProgram {
 pub struct FunctionId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct LocalId(pub u32);
+/// Stable semantic identity of a source binding captured by a lambda.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct BindingId {
+    pub function: FunctionId,
+    pub ordinal: u32,
+}
+/// Acquisition selected for one closure environment field.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CaptureMode {
+    Copy,
+    Alias,
+    Move,
+}
+/// Fully resolved capture metadata. Names are retained only for diagnostics.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClosureCaptureInfo {
+    pub binding: BindingId,
+    pub name: String,
+    pub explicit: bool,
+    pub mode: CaptureMode,
+    pub source_type: TypeId,
+    pub capture_type: TypeId,
+    pub declaration_span: Span,
+    pub first_use_span: Option<Span>,
+    pub explicit_span: Option<Span>,
+    pub canonical_index: u32,
+}
+/// Semantic result for a capturing lambda, independent of backend layout.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClosureEnvironmentInfo {
+    pub lambda: crate::LambdaId,
+    pub creator: FunctionId,
+    pub target: FunctionId,
+    pub signature: TypeId,
+    pub captures: Vec<ClosureCaptureInfo>,
+}
+/// Non-fatal closure-analysis warning with both relevant source locations.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClosureCaptureWarning {
+    pub code: &'static str,
+    pub message: String,
+    pub capture_span: Span,
+    pub declaration_span: Span,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CatchId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -689,6 +733,8 @@ pub struct DeclaredProgram {
     struct_arities: Vec<usize>,
     enum_arities: Vec<usize>,
     entry: FunctionId,
+    closure_environments: Vec<ClosureEnvironmentInfo>,
+    closure_warnings: Vec<ClosureCaptureWarning>,
 }
 impl DeclaredProgram {
     #[must_use]
@@ -698,6 +744,14 @@ impl DeclaredProgram {
     #[must_use]
     pub fn types(&self) -> &TypeArena {
         &self.types
+    }
+    #[must_use]
+    pub fn closure_environments(&self) -> &[ClosureEnvironmentInfo] {
+        &self.closure_environments
+    }
+    #[must_use]
+    pub fn closure_warnings(&self) -> &[ClosureCaptureWarning] {
+        &self.closure_warnings
     }
 }
 
@@ -3487,7 +3541,7 @@ fn collect_program_signatures_for_kind(
             .first()
             .map_or(FunctionId(0), |signature| signature.id)
     };
-    Ok(DeclaredProgram {
+    let mut declared = DeclaredProgram {
         types,
         program,
         signatures,
@@ -3506,7 +3560,881 @@ fn collect_program_signatures_for_kind(
         struct_arities,
         enum_arities,
         entry,
-    })
+        closure_environments: Vec::new(),
+        closure_warnings: Vec::new(),
+    };
+    analyze_closure_captures(&mut declared)?;
+    Ok(declared)
+}
+
+#[derive(Clone)]
+struct CaptureBinding {
+    id: BindingId,
+    name: String,
+    ty: TypeId,
+    span: Span,
+}
+
+#[derive(Clone)]
+struct CaptureUse {
+    binding: CaptureBinding,
+    span: Span,
+}
+
+/// Resolve closure environments while the creator's lexical scopes still
+/// exist.  This intentionally precedes synthetic-declaration body analysis.
+fn analyze_closure_captures(d: &mut DeclaredProgram) -> Result<(), Vec<Diagnostic>> {
+    let program = d.program.clone();
+    let signatures = d.signatures.clone();
+    let synthetic = program
+        .modules
+        .iter()
+        .flat_map(|module| {
+            module
+                .ast
+                .functions()
+                .iter()
+                .filter(|function| function.name.starts_with("$lambda$"))
+                .map(move |function| ((module.info.id, function.name.clone()), function.clone()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let mut analyzer = CaptureAnalyzer {
+        signatures: &signatures,
+        names: &d.names,
+        imports: &d.imports,
+        module_names: &d.module_names,
+        aliases: &d.aliases,
+        struct_names: &d.struct_names,
+        enum_names: &d.enum_names,
+        struct_arities: &d.struct_arities,
+        enum_arities: &d.enum_arities,
+        synthetic: &synthetic,
+        types: &mut d.types,
+        environments: Vec::new(),
+        warnings: Vec::new(),
+        diagnostics: Vec::new(),
+    };
+    for module in &program.modules {
+        for function in module
+            .ast
+            .functions()
+            .iter()
+            .filter(|function| !function.name.starts_with("$lambda$"))
+        {
+            let Some(signature) = signatures.iter().find(|signature| {
+                signature.module == module.info.id
+                    && signature.name == function.name
+                    && signature.span == function.span
+            }) else {
+                continue;
+            };
+            analyzer.scan_function(module.info.id, signature, function);
+        }
+    }
+    if analyzer.diagnostics.is_empty() {
+        d.closure_environments = analyzer.environments;
+        d.closure_warnings = analyzer.warnings;
+        Ok(())
+    } else {
+        Err(analyzer
+            .diagnostics
+            .into_iter()
+            .map(|diagnostic| {
+                if diagnostic.source_name.is_some() {
+                    diagnostic
+                } else {
+                    let source = program
+                        .modules
+                        .iter()
+                        .find(|module| {
+                            diagnostic
+                                .span
+                                .is_some_and(|span| span.source == module.info.source)
+                        })
+                        .map_or("<memory>", |module| module.info.source_name.as_str());
+                    diagnostic.with_source_name(source)
+                }
+            })
+            .collect())
+    }
+}
+
+struct CaptureAnalyzer<'a> {
+    signatures: &'a [FunctionSignature],
+    names: &'a [BTreeMap<String, Vec<FunctionId>>],
+    imports: &'a [BTreeMap<String, ModuleId>],
+    module_names: &'a BTreeMap<String, ModuleId>,
+    aliases: &'a [BTreeMap<String, TypeId>],
+    struct_names: &'a [BTreeMap<String, StructId>],
+    enum_names: &'a [BTreeMap<String, EnumId>],
+    struct_arities: &'a [usize],
+    enum_arities: &'a [usize],
+    synthetic: &'a BTreeMap<(ModuleId, String), AstFunction>,
+    types: &'a mut TypeArena,
+    environments: Vec<ClosureEnvironmentInfo>,
+    warnings: Vec<ClosureCaptureWarning>,
+    diagnostics: Vec<Diagnostic>,
+}
+
+impl CaptureAnalyzer<'_> {
+    fn scan_function(
+        &mut self,
+        module: ModuleId,
+        signature: &FunctionSignature,
+        function: &AstFunction,
+    ) {
+        let mut next = 0_u32;
+        let mut scopes = vec![BTreeMap::new()];
+        for parameter in &signature.parameters {
+            scopes[0].insert(
+                parameter.name.clone(),
+                CaptureBinding {
+                    id: BindingId {
+                        function: signature.id,
+                        ordinal: next,
+                    },
+                    name: parameter.name.clone(),
+                    ty: parameter.ty,
+                    span: parameter.span,
+                },
+            );
+            next += 1;
+        }
+        self.scan_block(module, signature.id, &function.body, &mut scopes, &mut next);
+    }
+
+    fn scan_block(
+        &mut self,
+        module: ModuleId,
+        owner: FunctionId,
+        block: &AstBlock,
+        scopes: &mut Vec<BTreeMap<String, CaptureBinding>>,
+        next: &mut u32,
+    ) {
+        for statement in &block.statements {
+            match &statement.kind {
+                AstStmtKind::Local {
+                    ty,
+                    name,
+                    initializer,
+                    ..
+                } => {
+                    let inferred = self.scan_expr(module, owner, initializer, scopes);
+                    let binding_type = if matches!(&ty.kind, crate::AstTypeKind::Named { module: None, name, arguments } if name == "var" && arguments.is_empty())
+                    {
+                        inferred
+                    } else {
+                        self.resolve_type(module, owner, ty)
+                    };
+                    if let Some(ty) = binding_type {
+                        scopes.last_mut().expect("scope").insert(
+                            name.clone(),
+                            CaptureBinding {
+                                id: BindingId {
+                                    function: owner,
+                                    ordinal: *next,
+                                },
+                                name: name.clone(),
+                                ty,
+                                span: statement.span,
+                            },
+                        );
+                        *next += 1;
+                    }
+                }
+                AstStmtKind::Assign { place, value } => {
+                    self.scan_expr(module, owner, place, scopes);
+                    self.scan_expr(module, owner, value, scopes);
+                }
+                AstStmtKind::Expr(expression)
+                | AstStmtKind::Throw(Some(expression))
+                | AstStmtKind::Return(Some(expression)) => {
+                    self.scan_expr(module, owner, expression, scopes);
+                }
+                AstStmtKind::If {
+                    condition,
+                    then_block,
+                    else_block,
+                } => {
+                    self.scan_expr(module, owner, condition, scopes);
+                    self.scan_nested_block(module, owner, then_block, scopes, next);
+                    if let Some(block) = else_block {
+                        self.scan_nested_block(module, owner, block, scopes, next);
+                    }
+                }
+                AstStmtKind::While { condition, body } => {
+                    self.scan_expr(module, owner, condition, scopes);
+                    self.scan_nested_block(module, owner, body, scopes, next);
+                }
+                AstStmtKind::ForIn { iterable, body, .. } => {
+                    self.scan_expr(module, owner, iterable, scopes);
+                    self.scan_nested_block(module, owner, body, scopes, next);
+                }
+                AstStmtKind::Match {
+                    scrutinee, arms, ..
+                } => {
+                    self.scan_expr(module, owner, scrutinee, scopes);
+                    for arm in arms {
+                        self.scan_nested_block(module, owner, &arm.body, scopes, next);
+                    }
+                }
+                AstStmtKind::Try {
+                    body,
+                    catches,
+                    finally,
+                } => {
+                    self.scan_nested_block(module, owner, body, scopes, next);
+                    for catch in catches {
+                        self.scan_nested_block(module, owner, &catch.body, scopes, next);
+                    }
+                    if let Some(block) = finally {
+                        self.scan_nested_block(module, owner, block, scopes, next);
+                    }
+                }
+                AstStmtKind::Return(None)
+                | AstStmtKind::Throw(None)
+                | AstStmtKind::Break
+                | AstStmtKind::Continue => {}
+            }
+        }
+    }
+
+    fn scan_nested_block(
+        &mut self,
+        module: ModuleId,
+        owner: FunctionId,
+        block: &AstBlock,
+        scopes: &mut Vec<BTreeMap<String, CaptureBinding>>,
+        next: &mut u32,
+    ) {
+        scopes.push(BTreeMap::new());
+        self.scan_block(module, owner, block, scopes, next);
+        scopes.pop();
+    }
+
+    fn scan_expr(
+        &mut self,
+        module: ModuleId,
+        owner: FunctionId,
+        expression: &AstExpr,
+        scopes: &[BTreeMap<String, CaptureBinding>],
+    ) -> Option<TypeId> {
+        if let AstExprKind::Lambda {
+            id,
+            target,
+            captures,
+        } = &expression.kind
+        {
+            return self.analyze_lambda(module, owner, *id, target, captures, scopes);
+        }
+        self.walk_children(module, owner, expression, scopes);
+        self.infer_expr_type(module, expression, scopes)
+    }
+
+    fn walk_children(
+        &mut self,
+        module: ModuleId,
+        owner: FunctionId,
+        expression: &AstExpr,
+        scopes: &[BTreeMap<String, CaptureBinding>],
+    ) {
+        let mut visit = |value: &AstExpr| {
+            self.scan_expr(module, owner, value, scopes);
+        };
+        match &expression.kind {
+            AstExprKind::CollectionLiteral(values) => values.iter().for_each(&mut visit),
+            AstExprKind::MathematicalLiteral { rows } => {
+                rows.iter().flatten().for_each(&mut visit);
+            }
+            AstExprKind::Interpolation(fragments) => fragments.iter().for_each(|fragment| {
+                if let crate::AstInterpolationFragment::Hole { expression, .. } = fragment {
+                    visit(expression);
+                }
+            }),
+            AstExprKind::Call { args, .. }
+            | AstExprKind::QualifiedCall { args, .. }
+            | AstExprKind::VariantCall { args, .. } => args.iter().for_each(&mut visit),
+            AstExprKind::MethodCall { receiver, args, .. } => {
+                visit(receiver);
+                args.iter().for_each(&mut visit);
+            }
+            AstExprKind::Field { base, .. } => visit(base),
+            AstExprKind::Index { base, selectors } => {
+                visit(base);
+                for selector in selectors {
+                    match selector {
+                        AstSubscriptSelector::Scalar(index) => visit(index),
+                        AstSubscriptSelector::Closed { first, last } => {
+                            visit(first);
+                            visit(last);
+                        }
+                        AstSubscriptSelector::Full => {}
+                    }
+                }
+            }
+            AstExprKind::Unary { operand, .. } => visit(operand),
+            AstExprKind::Binary { left, right, .. } => {
+                visit(left);
+                visit(right);
+            }
+            AstExprKind::Range { start, step, end } => {
+                visit(start);
+                if let Some(step) = step {
+                    visit(step);
+                }
+                visit(end);
+            }
+            AstExprKind::Integer(_)
+            | AstExprKind::Float(_)
+            | AstExprKind::String(_)
+            | AstExprKind::Char(_)
+            | AstExprKind::Bool(_)
+            | AstExprKind::Null
+            | AstExprKind::Lambda { .. }
+            | AstExprKind::Name(_)
+            | AstExprKind::QualifiedName { .. } => {}
+        }
+    }
+
+    fn analyze_lambda(
+        &mut self,
+        module: ModuleId,
+        creator: FunctionId,
+        lambda: crate::LambdaId,
+        target_name: &str,
+        explicit: &[crate::AstCapture],
+        outer_scopes: &[BTreeMap<String, CaptureBinding>],
+    ) -> Option<TypeId> {
+        let target = self
+            .signatures
+            .iter()
+            .find(|signature| signature.module == module && signature.name == target_name)
+            .cloned()?;
+        let declaration = self
+            .synthetic
+            .get(&(module, target_name.to_owned()))?
+            .clone();
+        let (AstStmtKind::Return(Some(body)) | AstStmtKind::Expr(body)) =
+            &declaration.body.statements[0].kind
+        else {
+            return None;
+        };
+        let parameter_names = target
+            .parameters
+            .iter()
+            .map(|parameter| parameter.name.as_str())
+            .collect::<BTreeSet<_>>();
+        let mut body_scopes = outer_scopes.to_vec();
+        body_scopes.push(
+            target
+                .parameters
+                .iter()
+                .enumerate()
+                .map(|(ordinal, parameter)| {
+                    (
+                        parameter.name.clone(),
+                        CaptureBinding {
+                            id: BindingId {
+                                function: target.id,
+                                ordinal: ordinal as u32,
+                            },
+                            name: parameter.name.clone(),
+                            ty: parameter.ty,
+                            span: parameter.span,
+                        },
+                    )
+                })
+                .collect(),
+        );
+        let mut uses = Vec::new();
+        self.collect_free_uses(
+            module,
+            target.id,
+            body,
+            &parameter_names,
+            &body_scopes,
+            &mut uses,
+        );
+        let mut first_uses = BTreeMap::<BindingId, CaptureUse>::new();
+        for usage in uses {
+            first_uses
+                .entry(usage.binding.id)
+                .and_modify(|current| {
+                    if usage.span.start < current.span.start {
+                        *current = usage.clone();
+                    }
+                })
+                .or_insert(usage);
+        }
+        let mut captures = Vec::new();
+        let mut acquired = BTreeSet::new();
+        for item in explicit {
+            if parameter_names.contains(item.name.as_str()) {
+                self.capture_error(
+                    "explicit capture is shadowed by a lambda parameter",
+                    item.span,
+                );
+                continue;
+            }
+            let Some(binding) = lookup_capture(outer_scopes, &item.name) else {
+                self.capture_error(
+                    &format!(
+                        "explicit capture `{}` does not name an outer binding",
+                        item.name
+                    ),
+                    item.span,
+                );
+                continue;
+            };
+            let mode = match item.mode {
+                crate::AstCaptureMode::Copy => CaptureMode::Copy,
+                crate::AstCaptureMode::Alias => CaptureMode::Alias,
+                crate::AstCaptureMode::Move => CaptureMode::Move,
+            };
+            if self.validate_capture_mode(&binding, mode, item.span) {
+                let use_span = first_uses.get(&binding.id).map(|usage| usage.span);
+                if use_span.is_none() {
+                    self.warnings.push(ClosureCaptureWarning {
+                        code: "W0369",
+                        message: format!(
+                            "explicit capture `{}` is not used by the lambda body",
+                            binding.name
+                        ),
+                        capture_span: item.span,
+                        declaration_span: binding.span,
+                    });
+                }
+                acquired.insert(binding.id);
+                captures.push(ClosureCaptureInfo {
+                    binding: binding.id,
+                    name: binding.name.clone(),
+                    explicit: true,
+                    mode,
+                    source_type: binding.ty,
+                    capture_type: binding.ty,
+                    declaration_span: binding.span,
+                    first_use_span: use_span,
+                    explicit_span: Some(item.span),
+                    canonical_index: captures.len() as u32,
+                });
+            }
+        }
+        let mut implicit = first_uses.into_values().collect::<Vec<_>>();
+        implicit.sort_by_key(|usage| (usage.span.start, usage.binding.span.start));
+        for usage in implicit {
+            if acquired.contains(&usage.binding.id) {
+                continue;
+            }
+            let Some(mode) = self.automatic_capture_mode(&usage.binding, usage.span) else {
+                continue;
+            };
+            captures.push(ClosureCaptureInfo {
+                binding: usage.binding.id,
+                name: usage.binding.name,
+                explicit: false,
+                mode,
+                source_type: usage.binding.ty,
+                capture_type: usage.binding.ty,
+                declaration_span: usage.binding.span,
+                first_use_span: Some(usage.span),
+                explicit_span: None,
+                canonical_index: captures.len() as u32,
+            });
+        }
+        let result = self.infer_lambda_body_type(module, body, &target, outer_scopes)?;
+        let parameters = target
+            .parameters
+            .iter()
+            .map(|parameter| parameter.ty)
+            .collect();
+        if captures.is_empty() {
+            self.types.intern_function(parameters, result).ok()
+        } else {
+            let signature = self.types.intern_closure(parameters, result).ok()?;
+            self.environments.push(ClosureEnvironmentInfo {
+                lambda,
+                creator,
+                target: target.id,
+                signature,
+                captures,
+            });
+            Some(signature)
+        }
+    }
+
+    fn collect_free_uses(
+        &mut self,
+        module: ModuleId,
+        owner: FunctionId,
+        expression: &AstExpr,
+        parameters: &BTreeSet<&str>,
+        scopes: &[BTreeMap<String, CaptureBinding>],
+        uses: &mut Vec<CaptureUse>,
+    ) {
+        match &expression.kind {
+            AstExprKind::Unary {
+                op: AstUnaryOp::BorrowMutable,
+                operand,
+            } => {
+                if let AstExprKind::Name(name) = &operand.kind
+                    && !parameters.contains(name.as_str())
+                    && lookup_capture(scopes, name).is_some()
+                {
+                    self.capture_error(
+                        "mutable access to a captured binding is not admitted in Closure V1",
+                        expression.span,
+                    );
+                }
+                self.collect_free_uses(module, owner, operand, parameters, scopes, uses);
+            }
+            AstExprKind::Name(name) => {
+                if !parameters.contains(name.as_str())
+                    && let Some(binding) = lookup_capture(scopes, name)
+                {
+                    uses.push(CaptureUse {
+                        binding,
+                        span: expression.span,
+                    });
+                }
+            }
+            AstExprKind::Call { callee, args, .. } => {
+                if !parameters.contains(callee.as_str())
+                    && let Some(binding) = lookup_capture(scopes, callee)
+                {
+                    uses.push(CaptureUse {
+                        binding,
+                        span: expression.span,
+                    });
+                }
+                for argument in args {
+                    self.collect_free_uses(module, owner, argument, parameters, scopes, uses);
+                }
+            }
+            AstExprKind::Lambda {
+                id,
+                target,
+                captures,
+            } => {
+                self.analyze_lambda(module, owner, *id, target, captures, scopes);
+                if let Some(environment) = self
+                    .environments
+                    .iter()
+                    .find(|environment| environment.lambda == *id)
+                {
+                    for capture in &environment.captures {
+                        if capture.binding.function != owner
+                            && let Some(binding) = scopes
+                                .iter()
+                                .rev()
+                                .flat_map(|scope| scope.values())
+                                .find(|binding| binding.id == capture.binding)
+                        {
+                            uses.push(CaptureUse {
+                                binding: binding.clone(),
+                                span: capture.first_use_span.unwrap_or(expression.span),
+                            });
+                        }
+                    }
+                }
+            }
+            _ => self.collect_free_children(module, owner, expression, parameters, scopes, uses),
+        }
+    }
+
+    fn collect_free_children(
+        &mut self,
+        module: ModuleId,
+        owner: FunctionId,
+        expression: &AstExpr,
+        parameters: &BTreeSet<&str>,
+        scopes: &[BTreeMap<String, CaptureBinding>],
+        uses: &mut Vec<CaptureUse>,
+    ) {
+        let mut visit = |value: &AstExpr| {
+            self.collect_free_uses(module, owner, value, parameters, scopes, uses);
+        };
+        match &expression.kind {
+            AstExprKind::CollectionLiteral(values) => values.iter().for_each(&mut visit),
+            AstExprKind::MathematicalLiteral { rows } => rows.iter().flatten().for_each(&mut visit),
+            AstExprKind::Interpolation(fragments) => fragments.iter().for_each(|fragment| {
+                if let crate::AstInterpolationFragment::Hole { expression, .. } = fragment {
+                    visit(expression);
+                }
+            }),
+            AstExprKind::QualifiedCall { args, .. } | AstExprKind::VariantCall { args, .. } => {
+                args.iter().for_each(&mut visit);
+            }
+            AstExprKind::MethodCall { receiver, args, .. } => {
+                visit(receiver);
+                args.iter().for_each(&mut visit);
+            }
+            AstExprKind::Field { base, .. } => visit(base),
+            AstExprKind::Index { base, selectors } => {
+                visit(base);
+                for selector in selectors {
+                    match selector {
+                        AstSubscriptSelector::Scalar(index) => visit(index),
+                        AstSubscriptSelector::Closed { first, last } => {
+                            visit(first);
+                            visit(last);
+                        }
+                        AstSubscriptSelector::Full => {}
+                    }
+                }
+            }
+            AstExprKind::Unary { operand, .. } => visit(operand),
+            AstExprKind::Binary { left, right, .. } => {
+                visit(left);
+                visit(right);
+            }
+            AstExprKind::Range { start, step, end } => {
+                visit(start);
+                if let Some(step) = step {
+                    visit(step);
+                }
+                visit(end);
+            }
+            AstExprKind::Integer(_)
+            | AstExprKind::Float(_)
+            | AstExprKind::String(_)
+            | AstExprKind::Char(_)
+            | AstExprKind::Bool(_)
+            | AstExprKind::Null
+            | AstExprKind::Name(_)
+            | AstExprKind::Call { .. }
+            | AstExprKind::Lambda { .. }
+            | AstExprKind::QualifiedName { .. } => {}
+        }
+    }
+
+    fn infer_lambda_body_type(
+        &mut self,
+        module: ModuleId,
+        body: &AstExpr,
+        signature: &FunctionSignature,
+        outer: &[BTreeMap<String, CaptureBinding>],
+    ) -> Option<TypeId> {
+        let mut scope = outer.to_vec();
+        scope.push(
+            signature
+                .parameters
+                .iter()
+                .enumerate()
+                .map(|(ordinal, parameter)| {
+                    (
+                        parameter.name.clone(),
+                        CaptureBinding {
+                            id: BindingId {
+                                function: signature.id,
+                                ordinal: ordinal as u32,
+                            },
+                            name: parameter.name.clone(),
+                            ty: parameter.ty,
+                            span: parameter.span,
+                        },
+                    )
+                })
+                .collect(),
+        );
+        self.infer_expr_type(module, body, &scope)
+    }
+
+    fn infer_expr_type(
+        &self,
+        module: ModuleId,
+        expression: &AstExpr,
+        scopes: &[BTreeMap<String, CaptureBinding>],
+    ) -> Option<TypeId> {
+        match &expression.kind {
+            AstExprKind::Integer(_) => Some(TypeId::INT64),
+            AstExprKind::Float(_) => Some(TypeId::FLOAT64),
+            AstExprKind::String(_) | AstExprKind::Interpolation(_) => Some(TypeId::STRING),
+            AstExprKind::Char(_) => Some(TypeId::CHAR),
+            AstExprKind::Bool(_) => Some(TypeId::BOOL),
+            AstExprKind::Name(name) => lookup_capture(scopes, name).map(|binding| binding.ty),
+            AstExprKind::Unary { operand, .. } => self.infer_expr_type(module, operand, scopes),
+            AstExprKind::Binary { op, left, .. } => match op {
+                AstBinaryOp::Less
+                | AstBinaryOp::LessEqual
+                | AstBinaryOp::Greater
+                | AstBinaryOp::GreaterEqual
+                | AstBinaryOp::Equal
+                | AstBinaryOp::NotEqual
+                | AstBinaryOp::LogicalAnd
+                | AstBinaryOp::LogicalOr => Some(TypeId::BOOL),
+                _ => self.infer_expr_type(module, left, scopes),
+            },
+            AstExprKind::Call { callee, .. } => {
+                if let Some(binding) = lookup_capture(scopes, callee)
+                    && let Some(
+                        TypeData::Function { result, .. } | TypeData::Closure { result, .. },
+                    ) = self.types.get(binding.ty)
+                {
+                    return Some(*result);
+                }
+                self.names[module.0 as usize]
+                    .get(callee)
+                    .and_then(|ids| ids.first())
+                    .map(|id| self.signatures[id.0 as usize].return_type)
+            }
+            AstExprKind::QualifiedCall {
+                module: namespace,
+                function,
+                ..
+            } => self.imports[module.0 as usize]
+                .get(namespace)
+                .and_then(|module| self.names[module.0 as usize].get(function))
+                .and_then(|ids| ids.first())
+                .map(|id| self.signatures[id.0 as usize].return_type),
+            AstExprKind::Field { .. }
+            | AstExprKind::Index { .. }
+            | AstExprKind::MethodCall { .. }
+            | AstExprKind::VariantCall { .. }
+            | AstExprKind::CollectionLiteral(_)
+            | AstExprKind::MathematicalLiteral { .. }
+            | AstExprKind::Range { .. }
+            | AstExprKind::QualifiedName { .. }
+            | AstExprKind::Null => None,
+            AstExprKind::Lambda { id, .. } => self
+                .environments
+                .iter()
+                .find(|environment| environment.lambda == *id)
+                .map(|environment| environment.signature),
+        }
+    }
+
+    fn resolve_type(
+        &mut self,
+        module: ModuleId,
+        owner: FunctionId,
+        ty: &AstType,
+    ) -> Option<TypeId> {
+        let generic_scope = self.signatures[owner.0 as usize]
+            .generic_parameters
+            .iter()
+            .map(|parameter| (parameter.name.clone(), parameter.ty))
+            .collect();
+        resolve_type_in_module(
+            ty,
+            module,
+            self.aliases,
+            self.struct_names,
+            self.enum_names,
+            self.imports,
+            self.module_names,
+            self.types,
+            &generic_scope,
+            self.struct_arities,
+            self.enum_arities,
+        )
+        // Local generic-root inference and ordinary body type errors belong
+        // to the authoritative body analyzer. This prepass only needs a type
+        // when it can resolve one without changing diagnostic order.
+        .ok()
+    }
+
+    fn automatic_capture_mode(
+        &mut self,
+        binding: &CaptureBinding,
+        span: Span,
+    ) -> Option<CaptureMode> {
+        if !self.capture_storage_admitted(binding, span) {
+            return None;
+        }
+        if self.types.guarantees_copy(binding.ty) {
+            Some(CaptureMode::Copy)
+        } else if self.has_intrinsic_alias(binding.ty) {
+            Some(CaptureMode::Alias)
+        } else {
+            self.capture_error(
+                &format!(
+                    "move-only binding `{}` requires `capture(move {})`",
+                    binding.name, binding.name
+                ),
+                span,
+            );
+            None
+        }
+    }
+
+    fn validate_capture_mode(
+        &mut self,
+        binding: &CaptureBinding,
+        mode: CaptureMode,
+        span: Span,
+    ) -> bool {
+        if !self.capture_storage_admitted(binding, span) {
+            return false;
+        }
+        let valid = match mode {
+            CaptureMode::Copy => self.types.guarantees_copy(binding.ty),
+            CaptureMode::Alias => self.has_intrinsic_alias(binding.ty),
+            CaptureMode::Move => !self.types.guarantees_copy(binding.ty),
+        };
+        if !valid {
+            self.capture_error(
+                &format!("capture mode {mode:?} is invalid for `{}`", binding.name),
+                span,
+            );
+        }
+        valid
+    }
+
+    fn capture_storage_admitted(&mut self, binding: &CaptureBinding, span: Span) -> bool {
+        let borrowed_or_view = matches!(
+            self.types.get(binding.ty),
+            Some(
+                TypeData::Reference { .. }
+                    | TypeData::View { .. }
+                    | TypeData::VectorView { .. }
+                    | TypeData::MatrixView { .. }
+            )
+        );
+        if borrowed_or_view || !self.types.guarantees_storable(binding.ty) {
+            self.capture_error(
+                &format!(
+                    "binding `{}` has a non-Storable borrowed/view type",
+                    binding.name
+                ),
+                span,
+            );
+            false
+        } else {
+            true
+        }
+    }
+
+    fn has_intrinsic_alias(&self, ty: TypeId) -> bool {
+        matches!(
+            self.types.get(ty),
+            Some(
+                TypeData::String
+                    | TypeData::Class(_)
+                    | TypeData::Interface(_)
+                    | TypeData::Closure { .. }
+            )
+        )
+    }
+
+    fn capture_error(&mut self, message: &str, span: Span) {
+        self.diagnostics.push(Diagnostic::new(
+            "E0369",
+            Phase::Semantic,
+            DiagnosticCategory::Type,
+            message,
+            Some(span),
+        ));
+    }
+}
+
+fn lookup_capture(
+    scopes: &[BTreeMap<String, CaptureBinding>],
+    name: &str,
+) -> Option<CaptureBinding> {
+    scopes
+        .iter()
+        .rev()
+        .find_map(|scope| scope.get(name).cloned())
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum AliasState {
@@ -4936,6 +5864,21 @@ pub fn analyze_bodies_for_target(
     mut d: DeclaredProgram,
     target: TargetProperties,
 ) -> Result<TypedHir, Vec<Diagnostic>> {
+    if let Some(environment) = d.closure_environments.first() {
+        let signature = &d.signatures[environment.target.0 as usize];
+        let source_name = d.program.modules[signature.module.0 as usize]
+            .info
+            .source_name
+            .clone();
+        return Err(vec![Diagnostic::new(
+            "E0376",
+            Phase::Semantic,
+            DiagnosticCategory::Unsupported,
+            "capturing closure analysis succeeded, but productive Closure lowering is not implemented",
+            Some(signature.span),
+        )
+        .with_source_name(&source_name)]);
+    }
     compute_aggregate_layouts(&d.types, &mut d.structs, &mut d.enums, target).map_err(
         |(ty, message)| {
             let (span, module) = match d.types.get(ty) {
