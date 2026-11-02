@@ -1,116 +1,172 @@
-# Aether — OWNING-CLOSURES-READ-V1 — Implementation & Qualification Report
+# Aether — OWNING-CLOSURES-READ-V1 — ABI Scope Review Report
 
 ## Estado
 
-`OWNING-CLOSURES-READ-V1 BLOCKED` (1 de noviembre de 2026).
+`ABI SCOPE REVIEW COMPLETE; PREVIOUS BLOCKER REMOVED; IMPLEMENTATION NOT
+STARTED; NOT QUALIFIED` (1 de noviembre de 2026).
 
-No se modificaron producción, runtime ni los contratos cerrados de
-`Function`. El preflight encontró una dependencia normativa ausente que no se
-puede sustituir mediante metadata paralela, convenciones locales o una prueba
-cross-module aparente.
+Documento normativo de la revisión:
+[FIRST-CLASS-CLOSURES-ARCH-1 — ABI Scope Amendment](FIRST_CLASS_CLOSURES_ARCH_1_ABI_SCOPE_AMENDMENT.md).
 
-## Preflight realizado
+No se modificaron producción, runtime ni los contratos cerrados de `Function`.
+No se implementaron closures ni compilación separada.
 
-Se leyeron completos `FIRST_CLASS_CLOSURES_ARCH_1.md` y su reporte de cierre, y
-se inspeccionaron los caminos reales de:
+## Resultado ejecutivo
 
-- parser, `LambdaId` y declarations sintéticas de anonymous functions;
-- `TypeArena`, `TypeData::Function`, propiedades, sustitución y layouts;
-- `FunctionRef`/`IndirectCall` y sus verificadores HIR, MIR y SSA;
-- ownership, Alias, Move, Drop, replacement, borrows y `EndBorrow`;
-- exception events, cleanup normal/unwind y backend LLVM;
-- allocator, ARC de string/class/interface, linkage y resolución de packages.
+El bloqueo anterior no era una dependencia técnica de
+`OWNING-CLOSURES-READ-V1`. Confundía:
 
-El árbol estaba limpio antes del trabajo. Las regresiones dedicadas previas
-quedaron verdes: `anonymous_functions_v1` 5/5 y `function_values_v1` 8/8, con
-`CARGO_INCREMENTAL=0` y Cargo serial.
+1. corrección del ABI interno de Closure en un programa compilado
+   conjuntamente;
+2. compatibilidad binaria entre compilaciones independientes;
+3. distribución/versionado de libraries Aether precompiladas.
 
-Como gate de no-regresión también se ejecutó `CARGO_INCREMENTAL=0 cargo test
---workspace -j 1`: PASS completo, incluidos frontend, HIR/MIR/SSA, backend,
-ownership, references, strings, classes/interfaces, exceptions V1–V4, OOP,
-generics, Plots, Graphics, packages, consumers numéricos y doc-tests. `cargo
-fmt --all --check` pasó. `cargo clippy --workspace --all-targets -j 1` terminó
-con código cero y únicamente warnings preexistentes (`assert_is_empty`,
-`needless_borrows_for_generic_args`, `match_same_arms`, `too_many_lines` y
-equivalentes); este trabajo no agregó source Rust ni warnings nuevos.
+La infraestructura actual sólo implementa el primer dominio. Una
+`CompilationSession` descubre todas las fuentes transitivas, incluidas las de
+packages fuente; el driver construye un único HIR/MIR/SSA verificado, selecciona
+un único target y llama una vez al backend para emitir un único módulo LLVM.
+No existe una ruta que importe un box Closure producido por otra compilación.
 
-## Bloqueo normativo
+Por tanto, `ClosureABI-v1` puede implementarse y calificarse íntegramente en el
+modelo vigente sin introducir primero artefactos binarios Aether. La metadata
+target/data-layout/epoch y el rechazo productor/consumidor independientes se
+difieren a `COMPILED-ARTIFACT-ABI`.
 
-`ClosureABI-v1` exige metadata de package que registre y compare, como mínimo,
-la versión de Closure ABI, Aether ABI, target triple, fingerprint de data
-layout y compiler ABI epoch. Una mezcla incompatible debe rechazarse antes de
-ejecutar. El milestone prohíbe inventar un canal de metadata paralelo y ordena
-clasificar `BLOCKED` si la infraestructura vigente no ofrece ese contrato.
+Esto deja el vertical arquitectónicamente desbloqueado, pero no lo declara
+implementado, PASS ni CLOSED.
 
-La infraestructura actual no posee una frontera binaria de packages:
+## Evidencia del modelo de compilación
 
-1. `aether-package::PackageMetadata` transporta solamente nombre, versión y la
-   línea opcional de compatibilidad `aether`.
-2. `CompilationSession` descubre y parsea todas las fuentes alcanzables,
-   incluidas las de dependencias.
-3. El driver reúne todo el programa en un único `TypedHir`, un único SSA y una
-   única llamada a `LlvmTextBackend.emit`.
-4. El backend produce un único módulo LLVM y declara expresamente su ABI y
-   mangling como bootstrap internos, no como ABI pública.
-5. No existe importación de interfaces/objetos Aether precompilados, loader de
-   metadata ABI ni etapa donde comparar dos epochs/layouts de compilaciones
-   independientes.
+- `CompilationSession::discover` lee y parsea la entrada y todos sus imports
+  transitivos.
+- Con un project plan, el catálogo agrega las fuentes materializadas de cada
+  package resuelto; no consume interfaces u objetos Aether precompilados.
+- El driver reúne los módulos en un programa, analiza firmas/bodies para un
+  único `TargetDescriptor`, baja a MIR y construye/verifica un único SSA.
+- `LlvmTextBackend.emit(&ssa, &target)` recibe ese programa completo y produce
+  un único string de módulo LLVM.
+- El target bootstrap actual es único y explícito. El backend identifica su ABI
+  y mangling como internos, no como ABI pública de libraries.
+- `PackageMetadata` contiene nombre, versión y compatibilidad opcional de
+  lenguaje; no hay metadata binaria de Closure ABI, layout o compiler epoch.
+- No hay loader/importer de interfaces/objetos Aether ni una etapa donde puedan
+  mezclarse dos representaciones de Closure compiladas independientemente.
 
-Por tanto, un test source con dos módulos sólo demuestra compilación conjunta;
-no puede verificar ownership cross-module ni rechazo de ABI incompatible. Una
-sección LLVM ad hoc, un campo privado sólo del driver o una convención en el
-manifest serían exactamente la metadata paralela prohibida y tampoco crearían
-un consumer binario independiente.
+Los mismos hechos que impiden calificar compilación separada demuestran que no
+existe esa frontera en el alcance V1: productor y consumidor son generados por
+la misma instancia del pipeline.
 
-## Reproducers mínimos
+## Dependencia real de `ClosureABI-v1`
 
-Se agregaron inputs en `reproducers/owning_closures_read_v1/`:
+### Header y payload
 
-- `automatic_copy_capture.ae` alcanza el frontend vigente y falla con `E0359`,
-  confirmando que la declaración sintética capture-free carece del scope
-  léxico exterior necesario para free-variable analysis.
-- `explicit_capture_clause.ae` falla en parsing porque la gramática actual
-  exige `=>` inmediatamente después de los parámetros.
+El header normativo permanece en offsets `0`, `W` y `2W`; layout y alignment se
+calculan una vez con el target de la sesión. Código consumidor en cualquier
+función, módulo fuente o package fuente carga sólo el header común. El payload
+privado se conoce exclusivamente en invoke/destroy thunks del productor.
 
-Estos dos puntos son trabajo propio del vertical y son implementables. No son
-por sí solos el motivo de `BLOCKED`; aíslan el estado source actual. El bloqueo
-es que no hay forma honesta de ejecutar el caso requerido de incompatibilidad
-ABI productor/consumer sin diseñar primero la frontera general de artefactos y
-metadata compilada.
+No hace falta metadata persistida para impedir que un consumidor interno
+interprete otro layout: HIR/MIR/SSA deben conservar un tipo `Closure` distinto
+de `Function`, el backend usa un contrato único y no existe un artefacto externo
+que aporte otra representación.
 
-## Avances deliberadamente no iniciados
+### Identidad y reachability
 
-No se agregó parcialmente `TypeData::Closure`, sintaxis, operaciones HIR/MIR/
-SSA, helpers ARC ni lowering LLVM. Publicar esas piezas sin el ABI cross-module
-bloqueante dejaría un carrier retornable cuyo contrato no puede calificarse y
-contradiría la orden de detener la implementación afectada. Tampoco se
-introdujeron registries, TLS trampolines, casts de autoridad ni bridges
-`Function`/`Closure`.
+Package, module, `LambdaId`, generic instance y versión ABI bastan para formar
+una identidad compiler-internal determinista dentro del programa. El mangling
+debe evitar colisiones y reflejar firma/captures. Invoke thunk, destroy thunk y
+body sintético deben quedar alcanzables cuando sus direcciones se almacenan en
+un box, incluso si no existe otra referencia directa.
 
-La qualification funcional, de corrupción HIR/MIR/SSA, runtime O0/O2 y unwind
-queda `NOT RUN`, no `PASS`: aún no existe implementación productiva que pueda
-ser calificada. Los casos cerrados previos sí se ejecutaron únicamente como
-baseline.
+Estabilidad pública del símbolo, COMDAT entre objetos independientes y
+compatibilidad de mangling entre versiones de compiler no son observables en
+el modelo actual y quedan diferidas.
 
-## Prerrequisito para desbloquear
+### ARC, llamadas, paso y retorno
 
-Hace falta un milestone general de ABI de artefactos Aether que proporcione:
+Los helpers `aether_closure_retain_v1` y `aether_closure_release_v1` continúan
+siendo obligatorios y versionados. V1 debe hacerlos accesibles coherentemente
+desde todo el módulo emitido. La llamada carga `invoke_thunk`, deriva el
+prototype de la firma Closure verificada y pasa el box como argumento oculto.
 
-- formato compiler-owned de interface/object metadata versionada;
-- emisión y consumo independiente de libraries compiladas;
-- target/data-layout fingerprint y compiler ABI epoch generales;
-- validación fail-closed antes del link/load;
-- reachability y linkage estable para símbolos runtime y glue referenciados
-  desde valores exportados.
+Paso y retorno entre módulos/packages fuente no cruzan una frontera binaria:
+el carrier conserva su box y pointers a thunks presentes en el módulo LLVM
+final. Sí requieren qualification real de Alias/Transfer/Move/Drop, keepalive,
+reachability y cleanup normal/unwind.
 
-Una vez cerrado ese prerrequisito, este milestone puede implementar el diseño
-ya normativo sin reabrir `Function` ni la semántica de captures.
+### Exceptions y verificación
 
-## Archivos agregados
+No se relaja ningún gate. HIR, MIR y SSA deben reconstruir y verificar de forma
+independiente capture set/order/mode/source, identidad, recipes, owner tokens,
+borrow/`EndBorrow`, firma de call y edges normal/unwind. `ExceptionEvent` debe
+conservar identidad y el destroy thunk debe ser `nounwind`. O0/O2 deben observar
+el mismo lifecycle y resultado.
 
-- `docs/architecture/OWNING_CLOSURES_READ_V1_REPORT.md`
-- `reproducers/owning_closures_read_v1/README.md`
-- `reproducers/owning_closures_read_v1/automatic_copy_capture.ae`
-- `reproducers/owning_closures_read_v1/explicit_capture_clause.ae`
+## Qualification revisada
 
-Clasificación final: **BLOCKED**.
+| Capacidad | Milestone | Estado actual |
+|---|---|---|
+| closures locales y cross-function | `OWNING-CLOSURES-READ-V1` | NOT IMPLEMENTED |
+| paso/retorno entre módulos fuente | `OWNING-CLOSURES-READ-V1` | NOT IMPLEMENTED |
+| imports de packages fuente en una sesión | `OWNING-CLOSURES-READ-V1` | NOT IMPLEMENTED |
+| header/layout/thunks/helpers internos | `OWNING-CLOSURES-READ-V1` | NOT IMPLEMENTED |
+| ownership, unwind y HIR/MIR/SSA | `OWNING-CLOSURES-READ-V1` | NOT IMPLEMENTED |
+| paridad O0/O2 y ausencia de UAF/leaks | `OWNING-CLOSURES-READ-V1` | NOT RUN |
+| productor/consumidor compilados separados | `COMPILED-ARTIFACT-ABI` | OUT OF SCOPE |
+| metadata target/layout/epoch persistida | `COMPILED-ARTIFACT-ABI` | OUT OF SCOPE |
+| rechazo fail-closed antes de link/load | `COMPILED-ARTIFACT-ABI` | OUT OF SCOPE |
+| libraries Aether precompiladas | `COMPILED-ARTIFACT-ABI` | OUT OF SCOPE |
+
+Un test con dos módulos o packages fuente sólo puede acreditar las primeras
+filas. No puede registrarse como PASS de interoperabilidad de artefactos.
+
+## Gates diferidos y justificación
+
+Se difieren exclusivamente:
+
+- formato compiler-owned de interface/object metadata;
+- importación y enlace de artefactos Aether independientes;
+- target triple y data-layout fingerprint persistidos;
+- Aether/Closure ABI version y compiler ABI epoch persistidos;
+- reglas públicas de mangling, linkage, visibility y symbol export;
+- rechazo pre-link/load de productor/consumidor incompatibles;
+- qualification entre versiones de compiler y distribución de libraries.
+
+Todos dependen de una frontera de artefactos que Aether todavía no posee. No
+protegen ninguna ruta adicional del programa compilado conjuntamente y, por
+eso, no son condición técnica para el ABI interno.
+
+## Trabajo real restante de V1
+
+Los reproducers existentes siguen siendo evidencia útil del estado source:
+
+- `automatic_copy_capture.ae` falla con `E0359` porque la declaración sintética
+  capture-free no dispone del scope exterior para analizar variables libres;
+- `explicit_capture_clause.ae` falla en parsing porque la gramática exige `=>`
+  inmediatamente después de parámetros.
+
+Además faltan `TypeData::Closure`, operaciones y verificadores HIR/MIR/SSA,
+ownership ledgers, ARC helpers, boxes/thunks, reachability, lowering LLVM,
+cleanup normal/unwind y todas las pruebas funcionales/corrupción/O0/O2. Son
+trabajo propio del vertical, no un prerrequisito general oculto.
+
+## Baseline histórico preservado
+
+El preflight que originó este reporte ejecutó, antes de esta enmienda,
+`anonymous_functions_v1` (5/5), `function_values_v1` (8/8),
+`CARGO_INCREMENTAL=0 cargo test --workspace -j 1` y `cargo fmt --all --check`
+con resultado PASS. `cargo clippy --workspace --all-targets -j 1` terminó con
+código cero y warnings preexistentes. Esos resultados son baseline histórico,
+no qualification de closures y no se presentan como rerun de esta revisión
+documental.
+
+## Alcance de esta revisión
+
+Se agregó la enmienda ABI y se actualizaron la arquitectura, su reporte y este
+reporte. No se modificaron compiler, runtime, tests, packages, Plots, Graphics,
+métodos numéricos, reproducers ni ejemplos personales. No se inició
+`OWNING-CLOSURES-READ-V1`, no se creó metadata paralela y no se hizo commit ni
+push.
+
+Clasificación final: **ARCHITECTURALLY UNBLOCKED; IMPLEMENTATION NOT STARTED;
+NOT QUALIFIED**.

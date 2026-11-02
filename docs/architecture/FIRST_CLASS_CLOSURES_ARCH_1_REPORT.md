@@ -5,6 +5,8 @@ Estado: **CLOSED; ARQUITECTURA ACEPTADA; IMPLEMENTACIÓN NO INICIADA**,
 
 Documento normativo:
 [FIRST-CLASS-CLOSURES-ARCH-1](FIRST_CLASS_CLOSURES_ARCH_1.md).
+Enmienda normativa vigente:
+[ABI Scope Amendment](FIRST_CLASS_CLOSURES_ARCH_1_ABI_SCOPE_AMENDMENT.md).
 
 ## Resultado
 
@@ -65,14 +67,20 @@ uno y no hay weak owners.
 
 El invoke thunk usa Aether ABI v1 con `ptr box` como primer argumento oculto y
 puede unwind. El destroy thunk es `void(ptr box)`, `nounwind`, destruye captures
-en orden inverso y libera el allocation. Ownership cross-module usa los helpers
+en orden inverso y libera el allocation. Ownership entre módulos/packages
+fuente usa los helpers
 runtime versionados `aether_closure_retain_v1` y
 `aether_closure_release_v1`.
 
 La identidad de glue incluye package, module, `LambdaId`, generic instance y
-versión ABI. Package metadata fija target, data-layout fingerprint, Aether ABI
-y compiler ABI epoch; combinaciones incompatibles se rechazan antes de
-ejecución. No hay registry, RTTI, TLS trampoline ni adaptación heurística.
+versión ABI. En V1, todas las fuentes transitivas se compilan con un único
+target/data layout y se emiten en un único módulo LLVM. No hay registry, RTTI,
+TLS trampoline ni adaptación heurística.
+
+Metadata persistida de target, data-layout fingerprint, Aether ABI y compiler
+ABI epoch, así como rechazo de combinaciones incompatibles entre productor y
+consumidor compilados independientemente, quedan en
+`COMPILED-ARTIFACT-ABI`. V1 no promete bibliotecas Aether precompiladas.
 
 ## Verticales y qualification
 
@@ -98,7 +106,7 @@ lambdas/callbacks, lifecycle ARC y repeated read invocation. Debe cubrir:
 - assignment/replacement, arguments, return, closures nunca invocadas y
   callbacks escapables;
 - cleanup normal, early return, conditional paths, throw/catch/finally y unwind;
-- offsets/alignment, thunks, metadata/identidad cross-module y counters exactos
+- offsets/alignment, thunks, identidad entre módulos fuente y counters exactos
   alloc/free/retain/release/drop;
 - corrupción independiente de capture set/order/mode/source en HIR, MIR y SSA,
   owner tokens, borrow/`EndBorrow`, recipes de destroy y event identity;
@@ -109,6 +117,13 @@ Los dos verticales mantienen qualification y aceptación independientes. Abrir
 storage en struct/class fields, enum payloads o `Array`/`List` queda para
 milestones dedicados; class fields requieren además política explícita de
 ciclos ARC. References/views y closures mutable/consuming/borrowed siguen fuera.
+
+Los positivos entre módulos y packages califican interoperabilidad de fuentes
+compiladas en una misma `CompilationSession`, no compatibilidad entre artefactos
+binarios. V1 debe cubrir paso y retorno cross-function, cross-source-module y
+cross-source-package, helpers y reachability en el módulo LLVM único. Tests
+productor/consumidor de compilaciones independientes, metadata epoch/fingerprint
+y rechazo pre-link son gates diferidos, no PASS.
 
 ## Riesgos y restricciones
 
@@ -130,9 +145,14 @@ aceptar closures capturantes requerirá en el futuro overload o adapter explíci
 
 ## Alcance de esta enmienda
 
-Sólo se actualizaron el documento arquitectónico y este reporte. No se
-modificaron compiler, runtime, libraries, tests, Plots, métodos numéricos ni
-ejemplos personales. No se inició implementación. La arquitectura se declara
-**CLOSED** porque sintaxis, captura, lifecycle, ABI y qualification pendientes
-quedaron resueltos de forma coherente; los verticales aún no están implementados
-ni qualified.
+La revisión ABI posterior confirmó que el bloqueo por compilación separada no
+era una dependencia real del ABI interno. `CompilationSession` reúne fuentes
+transitivas, el pipeline produce un único HIR/MIR/SSA y `LlvmTextBackend` emite
+un único módulo para un target. Por ello header, thunks, helpers, ownership,
+return y unwind pueden implementarse y calificarse íntegramente en el modelo
+actual.
+
+Se actualizaron sólo documentos de arquitectura y reportes. No se modificaron
+compiler, runtime, libraries, tests, Plots, métodos numéricos ni ejemplos
+personales. No se inició implementación. La arquitectura permanece **CLOSED**;
+los verticales aún no están implementados ni qualified.

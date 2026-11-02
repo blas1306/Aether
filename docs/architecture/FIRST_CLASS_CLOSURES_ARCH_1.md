@@ -3,6 +3,12 @@
 Estado: **CLOSED; ARQUITECTURA ACEPTADA; IMPLEMENTACIÓN NO INICIADA**,
 2026-11-01.
 
+Enmienda normativa vigente:
+[ABI Scope Amendment](FIRST_CLASS_CLOSURES_ARCH_1_ABI_SCOPE_AMENDMENT.md). La
+enmienda distingue ABI interno de módulos/packages fuente compilados en una
+única sesión de compatibilidad entre artefactos binarios independientes. En
+caso de conflicto sobre ese alcance, prevalece la enmienda.
+
 Este documento investiga funciones anónimas y closures de primera clase para
 Aether. No implementa sintaxis, compiler, runtime o libraries, y no cambia los
 contratos vigentes de `Function<(Args), Return>`. La propuesta separa de forma
@@ -420,8 +426,11 @@ Array/List; class fields se separan por riesgo de ciclos ARC
 `closure -> class -> closure`.
 
 Las closures retornadas sí pertenecen al V1 mínimo: sin return no se califica el
-escape owning central de la feature. El ABI cross-module del box es por eso una
-decisión bloqueante, no una optimización opcional.
+escape owning central de la feature. El ABI interno del box entre funciones,
+módulos fuente y packages fuente compilados en la misma `CompilationSession` es
+por eso una decisión bloqueante, no una optimización opcional. Compatibilidad
+entre artefactos producidos por compilaciones independientes pertenece a
+`COMPILED-ARTIFACT-ABI` y no bloquea este vertical.
 
 ## 6. Representación adoptada
 
@@ -448,9 +457,10 @@ layout verificado y ejecuta el body sintético. `destroy_thunk` destruye los
 captures inicializados en orden inverso y libera el box. Retain/release son
 non-atomic, coherentes con el ARC bootstrap actual.
 
-§9 fija normativamente offsets, alignment, calling conventions, helpers,
-identidad y compatibilidad cross-module. El pseudolayout anterior no deja esos
-puntos a elección del backend.
+§9 fija normativamente offsets, alignment, calling conventions, helpers e
+identidad entre módulos fuente. La compatibilidad entre artefactos se rige por
+la enmienda ABI. El pseudolayout anterior no deja esos puntos a elección del
+backend.
 
 Una representación equivalente que reutilice un header class es aceptable en
 backend si preserva estas invariantes. No debe exponer una class nominal, una
@@ -628,7 +638,7 @@ el `destroy_thunk` antes de escribir cero y lo invoca exactamente una vez. El
 destroy thunk recibe el box todavía asignado, destruye payload inversamente y
 lo libera con el mismo size/alignment. No hay weak owners en V1.
 
-### 9.2 Thunks y ownership cross-module
+### 9.2 Thunks y ownership entre módulos fuente
 
 El invoke thunk usa `Aether ABI v1`, la misma lowering/calling convention que
 una función Aether de firma `R(P...)`, precedida por un primer parámetro
@@ -637,7 +647,7 @@ Puede unwind exactamente como el body. El destroy thunk tiene firma
 `void(ptr box)`, es `nounwind` y usa la misma ABI; fallar durante Drop conserva
 el comportamiento abortivo vigente.
 
-Retain y release cross-module se realizan mediante los símbolos runtime
+Retain y release entre módulos/packages fuente se realizan mediante los símbolos runtime
 versionados `aether_closure_retain_v1(ptr) -> ptr` y
 `aether_closure_release_v1(ptr) -> void`. Tienen linkage público de runtime,
 `nounwind`, semántica non-atomic y no ejecutan user code salvo el destroy thunk
@@ -645,12 +655,14 @@ final de release. El compiler puede inlinearlos sólo si preserva exactamente
 este contrato observable y los counters de qualification. Un módulo consumidor
 no necesita conocer el payload.
 
-Invoke/destroy glue se emite una vez en el módulo propietario de la expresión,
-con linkage deduplicable/visibility compatible con el formato de objeto del
-target. Sus direcciones se almacenan en cada box; no se buscan en un registry,
-RTTI, TLS ni por nombre durante invocation o destruction. El módulo/package que
-exporta closures debe mantener ese código link-reachable mientras puedan
-existir valores retornados, como cualquier función referenciada.
+Invoke/destroy glue se emite una vez para la instancia propietaria de la
+expresión dentro del módulo LLVM único, con identidad no colisionante y
+reachability preservada. Sus direcciones se almacenan en cada box; no se buscan
+en un registry, RTTI, TLS ni por nombre durante invocation o destruction. El
+módulo/package fuente que retorna closures debe mantener ese código alcanzable
+mientras puedan existir valores retornados, como cualquier función
+referenciada. Linkage y visibility entre objetos compilados independientemente
+se difieren a `COMPILED-ARTIFACT-ABI`.
 
 ### 9.3 Identidad y compatibilidad
 
@@ -658,16 +670,23 @@ La identidad compiler-internal de una expresión es la tupla estable
 `(PackageId, ModuleId, source LambdaId, GenericInstanceId, ClosureABI-v1)`.
 `LambdaId` proviene de identidad source estable del módulo, no del orden de un
 hash map; el mangling incluye un hash ABI de parámetros, resultado y tipos/modos
-de captures. Esa identidad gobierna symbols, COMDAT/deduplication, reachability
-y diagnósticos cross-module. No define igualdad source entre valores Closure:
-V1 no ofrece comparación de identidad de closures.
+de captures. Esa identidad gobierna symbols, deduplication, reachability y
+diagnósticos entre módulos fuente. COMDAT y estabilidad pública entre objetos
+independientes pertenecen a `COMPILED-ARTIFACT-ABI`. La identidad no define
+igualdad source entre valores Closure: V1 no ofrece comparación de identidad de
+closures.
 
-Metadata de package registra `ClosureABI-v1`, Aether ABI version, target triple,
-data-layout fingerprint y compiler ABI epoch. El linker/package loader rechaza
-una mezcla incompatible antes de ejecutar; no adapta headers ni thunks por
-heurística. Compilers distintos son compatibles sólo si producen metadata
-idéntica para esos campos y respetan este contrato. El payload sigue privado al
-módulo propietario y nunca forma parte de la firma pública.
+Dentro de una `CompilationSession`, un único compiler, target descriptor, data
+layout y backend construyen productores y consumidores y emiten un único módulo
+LLVM. `ClosureABI-v1`, la firma verificada y la identidad anterior son por ello
+el contrato interno suficiente; el payload sigue privado a los thunks del
+productor y nunca forma parte de la firma consumidora.
+
+Metadata persistida de package con Aether/Closure ABI, target triple,
+data-layout fingerprint y compiler ABI epoch, junto con rechazo fail-closed por
+linker/loader, se exige en `COMPILED-ARTIFACT-ABI`. Hasta entonces no se promete
+compatibilidad entre compilers o artefactos Aether independientes y un test
+entre módulos fuente no puede presentarse como evidencia de esa capacidad.
 
 ## 10. Exceptions y unwind
 
@@ -769,14 +788,16 @@ debe esconder su requirement detrás del mismo tipo read-only.
 Antes de implementation hacen falta:
 
 1. agregar `TypeData::Closure` con propiedades/layout uniformes y sustitución;
-2. implementar el ABI cross-module y helpers ARC fijados en §9;
+2. implementar el ABI interno de compilación conjunta y helpers ARC fijados en
+   §9;
 3. free-variable/capture analysis con diagnostics source-spanned;
 4. synthetic function/environment identities estables y reachability;
 5. operaciones/verificadores HIR, MIR y SSA descritos en §8;
 6. lifecycle de `ClosureAlias`, Transfer, replacement, Drop y conditional Drop;
 7. borrow de invocation con cleanup normal/unwind;
 8. backend create/invoke/destroy y counters de heap/ARC;
-9. dumps, diagnostics, LSP grammar/highlighting y package ABI qualification;
+9. dumps, diagnostics, LSP grammar/highlighting y qualification entre módulos/
+   packages fuente;
 10. levantar sólo los gates de return necesarios para Closure V1;
 11. mantener cerrados los gates de aggregate/container/class storage hasta sus
     verticales dedicados.
@@ -811,7 +832,7 @@ propia. Son milestones posteriores, no atajos permitidos en V1.
 | mutation/ref-mut/consume capture | sí, negativo | read-only environment diagnostic |
 | closure local assignment | sí | Alias before old release; self-assignment safe |
 | pass lvalue/fresh | sí | Alias/Transfer respectivamente |
-| return closure | sí | survives scope; exact cross-module ABI |
+| return closure | sí | survives scope; ABI interno exacto en la sesión conjunta |
 | repeated calls | sí | same captures, no per-call consumption |
 | invocation throws then caller catches | sí | owner remains callable if still live |
 | closure owner unwinds out | sí | captures/box cleaned once |
@@ -847,7 +868,7 @@ Qualification must inspect, for O0 and O2:
 - Function lambda remains one code pointer and emits no closure allocation;
 - Closure carrier is one box pointer but invoke prototype includes env first;
 - exact header offsets/alignment and payload field layout;
-- stable thunk prototypes, ABI metadata, mangling and cross-module identity;
+- stable thunk prototypes, mangling e identidad entre módulos fuente;
 - no `bitcast`, `ptrtoint`, global registry or TLS trampoline authority;
 - call vs invoke and correct landing pads;
 - exact alloc/free, retain/release, capture-drop and destroy counters;
@@ -886,7 +907,8 @@ Este vertical no agrega runtime y puede implementarse/calificarse primero.
 - locals, assignment, arguments, returns and repeatable read invocation;
 - free-variable/shadowing, deterministic acquisition, partial cleanup,
   self/nested-lambda and unused-explicit-capture rules from §4;
-- exact cross-module `ClosureABI-v1` from §9;
+- `ClosureABI-v1` interno exacto entre módulos/packages fuente de la sesión
+  conjunta, según §9 y su enmienda de alcance;
 - no borrowed/mutable/consuming captures;
 - aggregate/container/class storage todavía gated;
 - independent O0/O2, ownership/unwind and HIR/MIR/SSA corruption qualification.
@@ -901,6 +923,8 @@ Este vertical no agrega runtime y puede implementarse/calificarse primero.
 6. Borrowed non-escaping closures with regions.
 7. Generic lambda inference and generic `Alias` capability.
 8. Inline/SBO environment and provenance-based devirtualization.
+9. `COMPILED-ARTIFACT-ABI`: interfaces/objetos Aether precompilados, metadata
+   target/data-layout/epoch, rechazo fail-closed y distribución de libraries.
 
 ## 17. Riesgos
 
@@ -914,7 +938,8 @@ Este vertical no agrega runtime y puede implementarse/calificarse primero.
 | ARC cycle through class field | permanent leak | class storage gated until cycle policy |
 | mutable shared environment | semantic races/alias surprise | immutable captures V1 |
 | generic erasure loses Alias | surprising consumption | Alias is concrete-only; no generic claim |
-| incompatible public layout | package ABI break | fixed/versioned §9 header and metadata rejection |
+| layout incompatible dentro de la sesión | memory corruption | header §9 fijo, un único target y verificación por capa |
+| artefactos binarios incompatibles | package ABI break futuro | no soportados en V1; metadata y rechazo en `COMPILED-ARTIFACT-ABI` |
 | optimizer removes needed keepalive | UAF | carrier borrow remains semantic through VerifiedSsa |
 | anonymous symbol collisions | wrong target/reachability | stable module + LambdaId + instance mangling |
 | implementation copies Rust/C#/C++ model | mismatch with Aether | use Aether Copy/Alias/Move/ref contracts and qualification |
@@ -936,8 +961,10 @@ Las decisiones antes pendientes quedan resueltas normativamente:
    parcial, rollback, self-capture, nesting, read-only environment, repeated
    invocation y owner lifecycle quedan fijados en §§3–4 y §10.
 5. **Carrier/ABI:** `ClosureABI-v1` es el header heap de tres words, payload
-   alineado, thunks y helpers versionados de §9. Metadata incompatible se
-   rechaza; no hay adaptación implícita cross-module.
+   alineado, thunks y helpers versionados de §9. En V1 rige entre módulos y
+   packages fuente de una sesión conjunta; no hay adaptación implícita.
+   Metadata y rechazo entre artefactos independientes pertenecen a
+   `COMPILED-ARTIFACT-ABI`.
 6. **Alias:** `Closure` posee Alias intrínseco ARC aunque Alias no sea una
    capability generic pública. Captures Alias son owners independientes, no
    deep copies.
