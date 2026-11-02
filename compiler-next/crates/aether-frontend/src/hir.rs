@@ -215,6 +215,28 @@ pub struct ClosureEnvironmentInfo {
     pub signature: TypeId,
     pub captures: Vec<ClosureCaptureInfo>,
 }
+/// One source acquisition carried by a typed closure construction.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HirClosureCapture {
+    pub binding: BindingId,
+    pub source: LocalId,
+    pub mode: CaptureMode,
+    pub source_type: TypeId,
+    pub capture_type: TypeId,
+    pub canonical_index: u32,
+    pub span: Span,
+}
+/// Stable identities and the closed destruction contract for one environment.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClosureRecipe {
+    pub environment: crate::LambdaId,
+    pub creator: FunctionId,
+    pub target: FunctionId,
+    pub signature: TypeId,
+    pub invoke: String,
+    pub destroy: String,
+    pub destroy_nounwind: bool,
+}
 /// Non-fatal closure-analysis warning with both relevant source locations.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ClosureCaptureWarning {
@@ -764,6 +786,9 @@ pub struct HirLocal {
     pub parameter: bool,
     /// True only for a source local or source parameter.
     pub source_binding: bool,
+    /// Stable source identity. Captured environment slots retain the identity
+    /// of the creator binding while remaining compiler-owned locals.
+    pub binding: Option<BindingId>,
     pub mutability: crate::BindingMutability,
     /// Requires stable memory because this local, or one of its fields, is borrowed.
     pub address_taken: bool,
@@ -786,6 +811,7 @@ pub struct TypedHir {
     instances: Vec<FunctionInstanceInfo>,
     generic_functions: Vec<GenericHirFunction>,
     functions: Vec<HirFunction>,
+    closure_environments: Vec<ClosureEnvironmentInfo>,
     entry: crate::InstanceId,
 }
 impl TypedHir {
@@ -816,6 +842,10 @@ impl TypedHir {
     #[must_use]
     pub fn functions(&self) -> &[HirFunction] {
         &self.functions
+    }
+    #[must_use]
+    pub fn closure_environments(&self) -> &[ClosureEnvironmentInfo] {
+        &self.closure_environments
     }
     #[must_use]
     pub fn instances(&self) -> &[FunctionInstanceInfo] {
@@ -929,6 +959,7 @@ impl TypedHir {
         Vec<EnumInfo>,
         Vec<FunctionInstanceInfo>,
         Vec<HirFunction>,
+        Vec<ClosureEnvironmentInfo>,
         crate::InstanceId,
     ) {
         (
@@ -938,6 +969,7 @@ impl TypedHir {
             self.enums,
             self.instances,
             self.functions,
+            self.closure_environments,
             self.entry,
         )
     }
@@ -1852,6 +1884,17 @@ pub enum HirExprKind {
         target: HirCallTarget,
         function_type: TypeId,
     },
+    /// Fully typed owning environment construction. The box is unpublished
+    /// until all acquisitions in canonical order have completed.
+    ClosureCreate {
+        recipe: ClosureRecipe,
+        captures: Vec<HirClosureCapture>,
+    },
+    /// Acquire an independent owning obligation from a closure lvalue.
+    ClosureAlias {
+        source: LocalId,
+        signature: TypeId,
+    },
     Local(LocalId),
     /// Explicit consuming use of a move-only local.
     Move(LocalId),
@@ -2017,6 +2060,13 @@ pub enum HirExprKind {
     },
     /// Call through a first-class non-capturing function pointer.
     IndirectCall {
+        call_site: CallSiteId,
+        callee: Box<HirExpr>,
+        args: Vec<HirExpr>,
+        signature: TypeId,
+    },
+    /// Read-only invocation through an owning closure carrier.
+    ClosureCall {
         call_site: CallSiteId,
         callee: Box<HirExpr>,
         args: Vec<HirExpr>,
@@ -5864,21 +5914,6 @@ pub fn analyze_bodies_for_target(
     mut d: DeclaredProgram,
     target: TargetProperties,
 ) -> Result<TypedHir, Vec<Diagnostic>> {
-    if let Some(environment) = d.closure_environments.first() {
-        let signature = &d.signatures[environment.target.0 as usize];
-        let source_name = d.program.modules[signature.module.0 as usize]
-            .info
-            .source_name
-            .clone();
-        return Err(vec![Diagnostic::new(
-            "E0376",
-            Phase::Semantic,
-            DiagnosticCategory::Unsupported,
-            "capturing closure analysis succeeded, but productive Closure lowering is not implemented",
-            Some(signature.span),
-        )
-        .with_source_name(&source_name)]);
-    }
     compute_aggregate_layouts(&d.types, &mut d.structs, &mut d.enums, target).map_err(
         |(ty, message)| {
             let (span, module) = match d.types.get(ty) {
@@ -6062,6 +6097,7 @@ pub fn analyze_bodies_for_target(
         instances,
         generic_functions,
         functions,
+        closure_environments: d.closure_environments,
         entry,
     };
     verify_hir(&hir)?;
@@ -6266,6 +6302,7 @@ impl Monomorphizer<'_> {
                     span: local.span,
                     parameter: local.parameter,
                     source_binding: local.source_binding,
+                    binding: local.binding,
                     mutability: local.mutability,
                     address_taken: local.address_taken,
                 })
@@ -6926,6 +6963,27 @@ impl Monomorphizer<'_> {
                     function_type,
                 }
             }
+            HirExprKind::ClosureCreate { recipe, captures } => {
+                let mut recipe = recipe.clone();
+                recipe.signature =
+                    self.substitute_type(recipe.signature, substitution, expression.span)?;
+                let captures = captures
+                    .iter()
+                    .map(|capture| {
+                        let mut capture = capture.clone();
+                        capture.source_type =
+                            self.substitute_type(capture.source_type, substitution, capture.span)?;
+                        capture.capture_type =
+                            self.substitute_type(capture.capture_type, substitution, capture.span)?;
+                        Ok(capture)
+                    })
+                    .collect::<Result<Vec<_>, Vec<Diagnostic>>>()?;
+                HirExprKind::ClosureCreate { recipe, captures }
+            }
+            HirExprKind::ClosureAlias { source, signature } => HirExprKind::ClosureAlias {
+                source: *source,
+                signature: self.substitute_type(*signature, substitution, expression.span)?,
+            },
             HirExprKind::Local(local) => HirExprKind::Local(*local),
             HirExprKind::Move(local) => {
                 if self.types.guarantees_copy(ty) {
@@ -7386,6 +7444,20 @@ impl Monomorphizer<'_> {
                     operand: Box::new(self.substitute_expr(operand, substitution)?),
                 }
             }
+            HirExprKind::ClosureCall {
+                call_site,
+                callee,
+                args,
+                signature,
+            } => HirExprKind::ClosureCall {
+                call_site: *call_site,
+                callee: Box::new(self.substitute_expr(callee, substitution)?),
+                args: args
+                    .iter()
+                    .map(|argument| self.substitute_expr(argument, substitution))
+                    .collect::<Result<Vec<_>, _>>()?,
+                signature: self.substitute_type(*signature, substitution, expression.span)?,
+            },
             HirExprKind::CapabilityCompare {
                 operation,
                 left,
@@ -7960,6 +8032,9 @@ fn analyze_function(
         null_states: BTreeMap::new(),
         next_non_null_proof: 0,
         target,
+        function_id: id,
+        next_binding: 0,
+        closure_environments: &d.closure_environments,
     };
     let mut parameters = vec![];
     for p in &sig.parameters {
@@ -7995,9 +8070,14 @@ fn analyze_function(
             span: p.span,
             parameter: true,
             source_binding: true,
+            binding: Some(BindingId {
+                function: id,
+                ordinal: a.next_binding,
+            }),
             mutability: p.mutability,
             address_taken: false,
         });
+        a.next_binding += 1;
         a.scopes[0].insert(p.name.clone(), local);
         if a.types.nullable_payload(p.ty).is_some() {
             a.null_states.insert(local, NullState::Unknown);
@@ -8008,6 +8088,27 @@ fn analyze_function(
             span: p.span,
             mutability: p.mutability,
         });
+    }
+    if let Some(environment) = d
+        .closure_environments
+        .iter()
+        .find(|environment| environment.target == id)
+    {
+        for capture in &environment.captures {
+            let local = LocalId(a.locals.len() as u32);
+            a.locals.push(HirLocal {
+                id: local,
+                name: capture.name.clone(),
+                ty: capture.capture_type,
+                span: capture.declaration_span,
+                parameter: true,
+                source_binding: false,
+                binding: Some(capture.binding),
+                mutability: crate::BindingMutability::Const,
+                address_taken: false,
+            });
+            a.scopes[0].insert(capture.name.clone(), local);
+        }
     }
     a.validate_declared_defaults(sig, &parameters)?;
     let mut ast_body = f.body.clone();
@@ -8146,6 +8247,15 @@ fn synthesize_ownership(
         if !types.guarantees_copy(parameter.ty) {
             analysis.state[parameter.local.0 as usize] = OwnerState::Owned;
             analysis.active.push(parameter.local);
+        }
+    }
+    for local in locals
+        .iter()
+        .filter(|local| local.parameter && !local.source_binding && local.binding.is_some())
+    {
+        if !types.guarantees_copy(local.ty) {
+            analysis.state[local.id.0 as usize] = OwnerState::Owned;
+            analysis.active.push(local.id);
         }
     }
     analysis.block(body, false)
@@ -8860,6 +8970,24 @@ impl OwnershipAnalysis<'_> {
                 }
             },
             HirExprKind::Move(local) => self.move_local(*local, expr.span),
+            HirExprKind::ClosureCreate { captures, .. } => {
+                for capture in captures {
+                    match capture.mode {
+                        CaptureMode::Copy => {}
+                        CaptureMode::Alias => self.require_owned(capture.source, capture.span)?,
+                        CaptureMode::Move => self.move_local(capture.source, capture.span)?,
+                    }
+                }
+                Ok(())
+            }
+            HirExprKind::ClosureAlias { source, .. } => self.require_owned(*source, expr.span),
+            HirExprKind::ClosureCall { callee, args, .. } => {
+                self.expr(callee)?;
+                for argument in args {
+                    self.expr(argument)?;
+                }
+                Ok(())
+            }
             HirExprKind::Local(local) => {
                 if self.types.guarantees_copy(expr.ty) {
                     Ok(())
@@ -9850,6 +9978,9 @@ struct Analyzer<'a> {
     default_forbidden: Option<(String, BTreeMap<String, bool>)>,
     null_states: BTreeMap<LocalId, NullState>,
     next_non_null_proof: u32,
+    function_id: FunctionId,
+    next_binding: u32,
+    closure_environments: &'a [ClosureEnvironmentInfo],
 }
 
 #[derive(Clone)]
@@ -10758,9 +10889,14 @@ impl Analyzer<'_> {
                         span: s.span,
                         parameter: false,
                         source_binding: true,
+                        binding: Some(BindingId {
+                            function: self.function_id,
+                            ordinal: self.next_binding,
+                        }),
                         mutability: *mutability,
                         address_taken: false,
                     });
+                    self.next_binding += 1;
                     self.scopes.last_mut().unwrap().insert(name.clone(), local);
                     if self.types.nullable_payload(ty).is_some() {
                         let state = match initializer.kind {
@@ -11039,6 +11175,7 @@ impl Analyzer<'_> {
                             span: binding.span,
                             parameter: false,
                             source_binding: false,
+                            binding: None,
                             mutability: crate::BindingMutability::Mutable,
                             address_taken: false,
                         });
@@ -11086,6 +11223,7 @@ impl Analyzer<'_> {
                                 span: iterable.span,
                                 parameter: false,
                                 source_binding: false,
+                                binding: None,
                                 mutability: crate::BindingMutability::Mutable,
                                 address_taken: true,
                             });
@@ -11139,6 +11277,7 @@ impl Analyzer<'_> {
                             span: binding.span,
                             parameter: false,
                             source_binding: false,
+                            binding: None,
                             mutability: crate::BindingMutability::Mutable,
                             address_taken: false,
                         });
@@ -11287,6 +11426,7 @@ impl Analyzer<'_> {
                             span: catch.span,
                             parameter: false,
                             source_binding: false,
+                            binding: None,
                             mutability: crate::BindingMutability::Mutable,
                             address_taken: false,
                         });
@@ -11686,6 +11826,7 @@ impl Analyzer<'_> {
                 span: expression.span,
                 parameter: false,
                 source_binding: false,
+                binding: None,
                 mutability: crate::BindingMutability::Mutable,
                 address_taken: false,
             });
@@ -11985,6 +12126,7 @@ impl Analyzer<'_> {
                     span: *span,
                     parameter: false,
                     source_binding: false,
+                    binding: None,
                     mutability: crate::BindingMutability::Mutable,
                     address_taken: false,
                 });
@@ -13026,7 +13168,9 @@ impl Analyzer<'_> {
                 },
                 constant: None,
             },
-            AstExprKind::Lambda { target, .. } => {
+            AstExprKind::Lambda {
+                id: lambda, target, ..
+            } => {
                 let Some(id) = self.names[self.module.0 as usize]
                     .get(target)
                     .and_then(|ids| ids.first())
@@ -13041,6 +13185,78 @@ impl Analyzer<'_> {
                     )]);
                 };
                 let signature = self.signatures[id.0 as usize].clone();
+                if let Some(environment) = self
+                    .closure_environments
+                    .iter()
+                    .find(|environment| environment.lambda == *lambda)
+                    .cloned()
+                {
+                    let mut captures = Vec::with_capacity(environment.captures.len());
+                    for capture in &environment.captures {
+                        let Some(source) = self
+                            .locals
+                            .iter()
+                            .find(|local| local.binding == Some(capture.binding))
+                            .map(|local| local.id)
+                        else {
+                            return Err(vec![Diagnostic::new(
+                                "E0377",
+                                Phase::Semantic,
+                                DiagnosticCategory::Verification,
+                                "resolved closure capture source is absent from the creator HIR",
+                                Some(e.span),
+                            )]);
+                        };
+                        captures.push(HirClosureCapture {
+                            binding: capture.binding,
+                            source,
+                            mode: capture.mode,
+                            source_type: capture.source_type,
+                            capture_type: capture.capture_type,
+                            canonical_index: capture.canonical_index,
+                            span: capture
+                                .explicit_span
+                                .or(capture.first_use_span)
+                                .unwrap_or(e.span),
+                        });
+                    }
+                    let recipe = ClosureRecipe {
+                        environment: environment.lambda,
+                        creator: environment.creator,
+                        target: environment.target,
+                        signature: environment.signature,
+                        invoke: format!("$closure_invoke_{}", environment.lambda.start),
+                        destroy: format!("$closure_destroy_{}", environment.lambda.start),
+                        destroy_nounwind: true,
+                    };
+                    if let Some(expected) = expected
+                        && expected != environment.signature
+                        && self.types.nullable_payload(expected) != Some(environment.signature)
+                    {
+                        return Err(vec![Diagnostic::new(
+                            "E0351",
+                            Phase::Semantic,
+                            DiagnosticCategory::Type,
+                            format!(
+                                "capturing closure has type {}, expected {}",
+                                self.type_name(environment.signature),
+                                self.type_name(expected)
+                            ),
+                            Some(e.span),
+                        )]);
+                    }
+                    return self.coerce(
+                        Checked {
+                            expr: HirExpr {
+                                kind: HirExprKind::ClosureCreate { recipe, captures },
+                                ty: environment.signature,
+                                span: e.span,
+                            },
+                            constant: None,
+                        },
+                        expected,
+                    );
+                }
                 let function_type = self
                     .types
                     .intern_function(
@@ -13197,6 +13413,15 @@ impl Analyzer<'_> {
                             }))
                         } else if self.types.guarantees_copy(self.locals[l.0 as usize].ty) {
                             HirExprKind::Local(l)
+                        } else if self
+                            .types
+                            .closure_signature(self.locals[l.0 as usize].ty)
+                            .is_some()
+                        {
+                            HirExprKind::ClosureAlias {
+                                source: l,
+                                signature: self.locals[l.0 as usize].ty,
+                            }
                         } else if self.types.is_object_owner(self.locals[l.0 as usize].ty) {
                             HirExprKind::Class(Box::new(ClassOp::HandleAlias {
                                 source: HirExpr {
@@ -14984,7 +15209,12 @@ impl Analyzer<'_> {
             } else {
                 declared
             };
-            let Some((parameters, result)) = self.types.function_signature(signature) else {
+            let closure_call = self.types.closure_signature(signature).is_some();
+            let Some((parameters, result)) = self
+                .types
+                .function_signature(signature)
+                .or_else(|| self.types.closure_signature(signature))
+            else {
                 return Err(vec![Diagnostic::new(
                     "E0215",
                     Phase::Semantic,
@@ -15054,31 +15284,53 @@ impl Analyzer<'_> {
             }
             return Ok(Checked {
                 expr: HirExpr {
-                    kind: HirExprKind::IndirectCall {
-                        call_site,
-                        callee: Box::new(if declared == signature {
-                            HirExpr {
+                    kind: if closure_call {
+                        if declared != signature {
+                            return Err(vec![Diagnostic::new(
+                                "E0455",
+                                Phase::Semantic,
+                                DiagnosticCategory::Unsupported,
+                                "nullable Closure invocation is not admitted in Closure V1",
+                                Some(span),
+                            )]);
+                        }
+                        HirExprKind::ClosureCall {
+                            call_site,
+                            callee: Box::new(HirExpr {
                                 kind: HirExprKind::Local(local),
                                 ty: signature,
                                 span,
-                            }
-                        } else {
-                            HirExpr {
-                                kind: HirExprKind::NullablePayload {
-                                    source: HirPlace {
-                                        base: HirPlaceBase::Local(local),
-                                        projections: Vec::new(),
-                                        ty: declared,
+                            }),
+                            args: checked,
+                            signature,
+                        }
+                    } else {
+                        HirExprKind::IndirectCall {
+                            call_site,
+                            callee: Box::new(if declared == signature {
+                                HirExpr {
+                                    kind: HirExprKind::Local(local),
+                                    ty: signature,
+                                    span,
+                                }
+                            } else {
+                                HirExpr {
+                                    kind: HirExprKind::NullablePayload {
+                                        source: HirPlace {
+                                            base: HirPlaceBase::Local(local),
+                                            projections: Vec::new(),
+                                            ty: declared,
+                                        },
+                                        proof: self.fresh_non_null_proof(),
+                                        access: NullablePayloadAccess::Copy,
                                     },
-                                    proof: self.fresh_non_null_proof(),
-                                    access: NullablePayloadAccess::Copy,
-                                },
-                                ty: signature,
-                                span,
-                            }
-                        }),
-                        args: checked,
-                        signature,
+                                    ty: signature,
+                                    span,
+                                }
+                            }),
+                            args: checked,
+                            signature,
+                        }
                     },
                     ty: result,
                     span,
@@ -16220,6 +16472,7 @@ impl Analyzer<'_> {
                 span: initializer.span,
                 parameter: false,
                 source_binding: false,
+                binding: None,
                 mutability: crate::BindingMutability::Mutable,
                 address_taken: false,
             });
@@ -17925,6 +18178,77 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
     {
         return Err(fail("HIR cardinality invalid".into()));
     }
+    let mut closure_lambdas = BTreeSet::new();
+    for environment in &h.closure_environments {
+        let creator = h
+            .generic_functions
+            .get(environment.creator.0 as usize)
+            .filter(|function| function.id == environment.creator)
+            .ok_or_else(|| fail("HIR Closure environment creator is missing".into()))?;
+        let target = h
+            .generic_functions
+            .get(environment.target.0 as usize)
+            .filter(|function| function.id == environment.target)
+            .ok_or_else(|| fail("HIR Closure environment target is missing".into()))?;
+        let signature = h
+            .signatures
+            .get(environment.target.0 as usize)
+            .ok_or_else(|| fail("HIR Closure target signature is missing".into()))?;
+        let Some((parameters, result)) = h.types.closure_signature(environment.signature) else {
+            return Err(fail(
+                "HIR Closure environment signature is not Closure".into(),
+            ));
+        };
+        if !closure_lambdas.insert(environment.lambda)
+            || environment.captures.is_empty()
+            || parameters
+                != signature
+                    .parameters
+                    .iter()
+                    .map(|parameter| parameter.ty)
+                    .collect::<Vec<_>>()
+            || result != signature.return_type
+        {
+            return Err(fail(
+                "HIR Closure environment identity/signature invalid".into(),
+            ));
+        }
+        let target_slots = target
+            .locals
+            .iter()
+            .filter(|local| {
+                local
+                    .binding
+                    .is_some_and(|binding| binding.function != target.id)
+            })
+            .collect::<Vec<_>>();
+        if target_slots.len() != environment.captures.len() {
+            return Err(fail(
+                "HIR Closure target capture slot cardinality invalid".into(),
+            ));
+        }
+        let mut bindings = BTreeSet::new();
+        for (index, (capture, slot)) in environment.captures.iter().zip(target_slots).enumerate() {
+            let source = creator
+                .locals
+                .iter()
+                .find(|local| local.binding == Some(capture.binding));
+            if capture.canonical_index as usize != index
+                || !bindings.insert(capture.binding)
+                || source.map(|local| local.ty) != Some(capture.source_type)
+                || capture.capture_type != capture.source_type
+                || slot.binding != Some(capture.binding)
+                || slot.ty != capture.capture_type
+                || slot.mutability != crate::BindingMutability::Const
+                || h.types.contains_reference(capture.capture_type)
+                || h.types.contains_view(capture.capture_type)
+            {
+                return Err(fail(
+                    "HIR Closure capture identity/type/order invalid".into(),
+                ));
+            }
+        }
+    }
     for signature in &h.signatures {
         let package = h.modules[signature.module.0 as usize].package;
         let overloaded = h
@@ -18404,7 +18728,10 @@ fn verify_hir_const_initializers(
         return Err(fail("HIR const initializer names an invalid local".into()));
     }
     for local in locals {
-        if !local.source_binding && local.mutability == crate::BindingMutability::Const {
+        if !local.source_binding
+            && local.mutability == crate::BindingMutability::Const
+            && !(local.parameter && local.binding.is_some())
+        {
             return Err(fail("compiler-owned HIR local is marked const".into()));
         }
         if local.source_binding && local.mutability == crate::BindingMutability::Const {
@@ -19990,6 +20317,63 @@ fn verify_expr(
                 return Err(fail("HIR View type/capability mismatch".into()));
             }
         }
+        HirExprKind::ClosureCreate { recipe, captures } => {
+            if recipe.creator != f.function_id
+                || recipe.signature != e.ty
+                || types.closure_signature(e.ty).is_none()
+                || recipe.invoke.is_empty()
+                || recipe.destroy.is_empty()
+                || !recipe.destroy_nounwind
+                || captures.is_empty()
+            {
+                return Err(fail(
+                    "HIR ClosureCreate recipe/signature contract invalid".into(),
+                ));
+            }
+            let mut bindings = BTreeSet::new();
+            for (index, capture) in captures.iter().enumerate() {
+                let source = f
+                    .locals
+                    .get(capture.source.0 as usize)
+                    .ok_or_else(|| fail("HIR ClosureCreate capture source missing".into()))?;
+                let aliasable = capture.source_type == TypeId::STRING
+                    || types.is_object_owner(capture.source_type)
+                    || types.closure_signature(capture.source_type).is_some();
+                if capture.canonical_index as usize != index
+                    || !bindings.insert(capture.binding)
+                    || source.binding != Some(capture.binding)
+                    || source.ty != capture.source_type
+                    || capture.capture_type != capture.source_type
+                    || types.contains_reference(capture.capture_type)
+                    || types.contains_view(capture.capture_type)
+                    || match capture.mode {
+                        CaptureMode::Copy => !types.guarantees_copy(capture.source_type),
+                        CaptureMode::Alias => !aliasable,
+                        CaptureMode::Move => {
+                            types.guarantees_copy(capture.source_type) || aliasable
+                        }
+                    }
+                {
+                    return Err(fail(
+                        "HIR ClosureCreate capture identity/order/mode invalid".into(),
+                    ));
+                }
+            }
+        }
+        HirExprKind::ClosureAlias { source, signature } => {
+            let local = f
+                .locals
+                .get(source.0 as usize)
+                .ok_or_else(|| fail("HIR ClosureAlias source missing".into()))?;
+            if local.ty != *signature
+                || e.ty != *signature
+                || types.closure_signature(*signature).is_none()
+            {
+                return Err(fail(
+                    "HIR ClosureAlias signature/source contract invalid".into(),
+                ));
+            }
+        }
         HirExprKind::FunctionRef {
             target,
             function_type,
@@ -20058,6 +20442,26 @@ fn verify_expr(
                 verify_expr(argument, f, sigs, structs, enums, types, fail)?;
                 if argument.ty != *parameter {
                     return Err(fail("HIR IndirectCall argument type mismatch".into()));
+                }
+            }
+        }
+        HirExprKind::ClosureCall {
+            callee,
+            args,
+            signature,
+            ..
+        } => {
+            verify_expr(callee, f, sigs, structs, enums, types, fail)?;
+            let Some((parameters, result)) = types.closure_signature(*signature) else {
+                return Err(fail("HIR ClosureCall has a non-Closure signature".into()));
+            };
+            if callee.ty != *signature || e.ty != result || args.len() != parameters.len() {
+                return Err(fail("HIR ClosureCall callee/result/arity mismatch".into()));
+            }
+            for (argument, parameter) in args.iter().zip(parameters) {
+                verify_expr(argument, f, sigs, structs, enums, types, fail)?;
+                if argument.ty != *parameter {
+                    return Err(fail("HIR ClosureCall argument type mismatch".into()));
                 }
             }
         }
@@ -21832,6 +22236,7 @@ mod tests {
             span: Span::new(0, 0),
             parameter: false,
             source_binding: false,
+            binding: None,
             mutability: crate::BindingMutability::Mutable,
             address_taken: false,
         });
@@ -23796,5 +24201,61 @@ mod vertical33_tests {
             value,
         };
         assert!(verify_hir(&ordinary_assign).is_err());
+    }
+
+    #[test]
+    fn closure_ownership_hir_corruptions_fail_closed_independently() {
+        let hir = analyze(
+            parse_source(&SourceFile::new(
+                "closure-corrupt.ae",
+                "int main(){int a=1;int b=2;var f=(int x)=>x+a+b;int y=f(3);return y;}",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        verify_hir(&hir).unwrap();
+
+        let mut missing = hir.clone();
+        missing.closure_environments[0].captures.pop();
+        assert!(verify_hir(&missing).is_err());
+
+        let mut duplicate = hir.clone();
+        let first = duplicate.closure_environments[0].captures[0].clone();
+        duplicate.closure_environments[0].captures[1].binding = first.binding;
+        assert!(verify_hir(&duplicate).is_err());
+
+        for mutation in 0..5 {
+            let mut bad = hir.clone();
+            let create = bad
+                .functions
+                .iter_mut()
+                .flat_map(|function| &mut function.body.statements)
+                .find_map(|statement| match &mut statement.kind {
+                    HirStmtKind::Local { initializer, .. }
+                        if matches!(initializer.kind, HirExprKind::ClosureCreate { .. }) =>
+                    {
+                        Some(initializer)
+                    }
+                    _ => None,
+                })
+                .unwrap();
+            let HirExprKind::ClosureCreate { recipe, captures } = &mut create.kind else {
+                unreachable!()
+            };
+            match mutation {
+                0 => captures.swap(0, 1),
+                1 => captures[0].mode = CaptureMode::Alias,
+                2 => {
+                    captures[0].binding = BindingId {
+                        function: FunctionId(u32::MAX),
+                        ordinal: 0,
+                    }
+                }
+                3 => captures[0].capture_type = TypeId::STRING,
+                4 => recipe.destroy_nounwind = false,
+                _ => unreachable!(),
+            }
+            assert!(verify_hir(&bad).is_err(), "mutation {mutation}");
+        }
     }
 }

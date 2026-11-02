@@ -29,7 +29,7 @@ pub use diagnostic::{Diagnostic, DiagnosticCategory, FixIt, Phase, SourceFile, S
 pub use hir::{
     AlgebraicProductKind, BindingId, CallBorrowOrigin, CallBorrowSource, CallSiteId,
     CapabilityCompareOp, CapabilityMathOp, CapabilityUnaryOp, CaptureMode, CastKind, CatchId,
-    ClosureCaptureInfo, ClosureCaptureWarning, ClosureEnvironmentInfo, CoercionKind,
+    ClosureCaptureInfo, ClosureCaptureWarning, ClosureEnvironmentInfo, ClosureRecipe, CoercionKind,
     CollectionIterationSource, DeclaredProgram, DefaultArgumentTemplate,
     EnumEqualityClassification, EnumInfo, FieldInfo, FinallyId, FloatValue, FormatBorrowOrigin,
     FormatBorrowSource, FormatSiteId, FunctionId, FunctionInstanceInfo, FunctionSignature,

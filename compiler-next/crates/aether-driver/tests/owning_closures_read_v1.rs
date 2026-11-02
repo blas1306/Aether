@@ -3,8 +3,10 @@
 use aether_driver::{Emit, OptimizationLevel, compile_source_with_optimization};
 use aether_frontend::{
     AstCaptureMode, AstExprKind, AstStmtKind, AstTypeKind, CaptureMode, SourceFile,
-    TargetProperties, TypeArena, TypeData, TypeId, collect_signatures, layout_of, lex, parse,
+    TargetProperties, TypeArena, TypeData, TypeId, analyze_bodies, collect_signatures, layout_of,
+    lex, parse,
 };
+use aether_middle::{Rvalue, SsaOp, build_ssa, lower_hir, verify_mir, verify_ssa};
 
 fn declared(source: &str) -> aether_frontend::DeclaredProgram {
     let source = SourceFile::new("capture_analysis.ae", source);
@@ -326,5 +328,324 @@ fn productive_boundary_is_explicit_after_capture_analysis() {
         !diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "E0359")
+    );
+}
+
+#[test]
+fn closure_ownership_operations_reach_verified_hir_mir_and_ssa() {
+    let hir = analyze_bodies(declared(
+        "int main(){int offset=1;var f=(int x)=>x+offset;int y=f(2);return y;}",
+    ))
+    .unwrap();
+    let hir_dump = hir.dump();
+    assert!(hir_dump.contains("ClosureCreate"));
+    assert!(hir_dump.contains("ClosureCall"));
+
+    let mir = verify_mir(lower_hir(hir)).unwrap();
+    let mir_dump = mir.dump();
+    assert!(mir_dump.contains("ClosureCreate"));
+    assert!(mir_dump.contains("ClosureBorrow"));
+    assert!(mir_dump.contains("ClosureCall"));
+    assert!(mir_dump.contains("EndClosureBorrow"));
+
+    let ssa = verify_ssa(build_ssa(&mir)).unwrap();
+    let ssa_dump = ssa.dump();
+    assert!(ssa_dump.contains("ClosureCreate"));
+    assert!(ssa_dump.contains("ClosureBorrow"));
+    assert!(ssa_dump.contains("ClosureCall"));
+    assert!(ssa_dump.contains("EndClosureBorrow"));
+}
+
+fn closure_mir() -> aether_middle::FlowMir {
+    lower_hir(
+        analyze_bodies(declared(
+            "int main(){int a=1;int b=2;var f=(int x)=>x+a+b;int y=f(3);return y;}",
+        ))
+        .unwrap(),
+    )
+}
+
+#[test]
+fn closure_mir_corruptions_are_rejected_without_hir_authority() {
+    let mir = closure_mir();
+    verify_mir(mir.clone()).unwrap();
+    for mutation in 0..7 {
+        let mut bad = mir.clone();
+        let create = bad
+            .functions
+            .iter_mut()
+            .flat_map(|function| &mut function.blocks)
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| matches!(instruction.value, Rvalue::ClosureCreate { .. }))
+            .unwrap();
+        let Rvalue::ClosureCreate {
+            recipe, captures, ..
+        } = &mut create.value
+        else {
+            unreachable!()
+        };
+        match mutation {
+            0 => {
+                captures.pop();
+            }
+            1 => captures.swap(0, 1),
+            2 => captures[0].mode = CaptureMode::Alias,
+            3 => captures[0].binding = captures[1].binding,
+            4 => captures[0].capture_type = TypeId::STRING,
+            5 => captures[0].initialized_after = 9,
+            6 => recipe.destroy_nounwind = false,
+            _ => unreachable!(),
+        }
+        assert!(verify_mir(bad).is_err(), "mutation {mutation}");
+    }
+
+    let mut missing_end = mir;
+    for block in missing_end
+        .functions
+        .iter_mut()
+        .flat_map(|function| &mut function.blocks)
+    {
+        block
+            .instructions
+            .retain(|instruction| !matches!(instruction.value, Rvalue::EndClosureBorrow { .. }));
+    }
+    assert!(verify_mir(missing_end).is_err());
+
+    let mut missing_drop = closure_mir();
+    for block in missing_drop
+        .functions
+        .iter_mut()
+        .flat_map(|function| &mut function.blocks)
+    {
+        block
+            .instructions
+            .retain(|instruction| !matches!(instruction.value, Rvalue::Drop { .. }));
+    }
+    assert!(verify_mir(missing_drop).is_err());
+
+    let mut double_drop = closure_mir();
+    let block = double_drop
+        .functions
+        .iter_mut()
+        .flat_map(|function| &mut function.blocks)
+        .find(|block| {
+            block
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction.value, Rvalue::Drop { .. }))
+        })
+        .unwrap();
+    let drop = block
+        .instructions
+        .iter()
+        .find(|instruction| matches!(instruction.value, Rvalue::Drop { .. }))
+        .unwrap()
+        .clone();
+    block.instructions.push(drop);
+    assert!(verify_mir(double_drop).is_err());
+}
+
+#[test]
+fn closure_ssa_corruptions_are_rejected_without_mir_authority() {
+    let verified = verify_mir(closure_mir()).unwrap();
+    let ssa = build_ssa(&verified);
+    verify_ssa(ssa.clone()).unwrap();
+    for mutation in 0..7 {
+        let mut bad = ssa.clone();
+        let create = bad
+            .functions
+            .iter_mut()
+            .flat_map(|function| &mut function.blocks)
+            .flat_map(|block| &mut block.instructions)
+            .find(|instruction| matches!(instruction.op, SsaOp::ClosureCreate { .. }))
+            .unwrap();
+        let SsaOp::ClosureCreate {
+            recipe, captures, ..
+        } = &mut create.op
+        else {
+            unreachable!()
+        };
+        match mutation {
+            0 => {
+                captures.pop();
+            }
+            1 => captures.swap(0, 1),
+            2 => captures[0].mode = CaptureMode::Alias,
+            3 => captures[0].binding = captures[1].binding,
+            4 => captures[0].source_type = TypeId::STRING,
+            5 => captures[0].initialized_before = 8,
+            6 => recipe.destroy_nounwind = false,
+            _ => unreachable!(),
+        }
+        assert!(verify_ssa(bad).is_err(), "mutation {mutation}");
+    }
+
+    let mut missing_end = ssa;
+    for block in missing_end
+        .functions
+        .iter_mut()
+        .flat_map(|function| &mut function.blocks)
+    {
+        block
+            .instructions
+            .retain(|instruction| !matches!(instruction.op, SsaOp::EndClosureBorrow { .. }));
+    }
+    assert!(verify_ssa(missing_end).is_err());
+
+    let verified = verify_mir(closure_mir()).unwrap();
+    let mut missing_drop = build_ssa(&verified);
+    for block in missing_drop
+        .functions
+        .iter_mut()
+        .flat_map(|function| &mut function.blocks)
+    {
+        block
+            .instructions
+            .retain(|instruction| !matches!(instruction.op, SsaOp::Drop { .. }));
+    }
+    assert!(verify_ssa(missing_drop).is_err());
+}
+
+#[test]
+fn copy_alias_and_move_capture_acquisitions_survive_verified_ssa() {
+    let hir = analyze_bodies(declared(
+        r#"int main(){
+  int a=1;
+  string label="x";
+  Matrix<int> data=[1];
+  var f=(int x) capture(copy a, alias label, move data)=>x+a;
+  return 0;
+}"#,
+    ))
+    .unwrap();
+    let mir = verify_mir(lower_hir(hir)).unwrap();
+    let ssa = verify_ssa(build_ssa(&mir)).unwrap();
+    let modes = ssa
+        .as_ssa()
+        .functions
+        .iter()
+        .flat_map(|function| &function.blocks)
+        .flat_map(|block| &block.instructions)
+        .find_map(|instruction| match &instruction.op {
+            SsaOp::ClosureCreate { captures, .. } => Some(
+                captures
+                    .iter()
+                    .map(|capture| capture.mode)
+                    .collect::<Vec<_>>(),
+            ),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(
+        modes,
+        vec![CaptureMode::Copy, CaptureMode::Alias, CaptureMode::Move]
+    );
+}
+
+#[test]
+fn closure_return_argument_alias_and_self_replacement_verify() {
+    let hir = analyze_bodies(declared(
+        r"
+Closure<(int),int> make(){int offset=4;return (int x)=>x+offset;}
+int apply(Closure<(int),int> g){return g(2);}
+int main(){var f=make();f=f;return apply(f);}
+",
+    ))
+    .unwrap();
+    let mir = verify_mir(lower_hir(hir)).unwrap();
+    let dump = mir.dump();
+    assert!(dump.contains("ClosureAlias"));
+    assert!(dump.contains("Drop"));
+    let ssa = verify_ssa(build_ssa(&mir)).unwrap();
+    assert!(ssa.dump().contains("ClosureCall"));
+}
+
+#[test]
+fn closure_invocation_unwind_closes_borrow_and_preserves_event_pad() {
+    let hir = analyze_bodies(declared(
+        r"
+open class Problem:Exception{public init(){}}
+int fail(){throw Problem();}
+int main(){int offset=1;var f=()=>fail()+offset;try{return f();}catch(Problem p){return 42;}}
+",
+    ))
+    .unwrap();
+    let mir = verify_mir(lower_hir(hir)).unwrap();
+    let function = mir
+        .as_mir()
+        .functions
+        .iter()
+        .find(|function| {
+            function.blocks.iter().any(|block| {
+                block
+                    .instructions
+                    .iter()
+                    .any(|instruction| matches!(instruction.value, Rvalue::ClosureCall { .. }))
+            })
+        })
+        .unwrap();
+    let unwind = function
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .find_map(|instruction| {
+            matches!(instruction.value, Rvalue::ClosureCall { .. })
+                .then_some(instruction.unwind)
+                .flatten()
+        })
+        .expect("ClosureCall conservatively unwinds");
+    let pad = &function.blocks[unwind.0 as usize];
+    assert!(pad.landing_pad.is_some());
+    assert!(
+        pad.instructions
+            .iter()
+            .any(|instruction| matches!(instruction.value, Rvalue::EndClosureBorrow { .. }))
+    );
+    assert!(
+        function
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter(|instruction| matches!(instruction.value, Rvalue::EndClosureBorrow { .. }))
+            .count()
+            >= 2
+    );
+
+    let ssa = verify_ssa(build_ssa(&mir)).unwrap();
+    assert!(
+        ssa.as_ssa()
+            .functions
+            .iter()
+            .flat_map(|function| &function.blocks)
+            .filter(|block| block.landing_pad.is_some())
+            .any(|block| block
+                .instructions
+                .iter()
+                .any(|instruction| matches!(instruction.op, SsaOp::EndClosureBorrow { .. })))
+    );
+}
+
+#[test]
+fn nested_closure_transitive_bindings_verify_deterministically() {
+    let source = "int main(){int offset=1;var outer=(int x)=>(int y)=>x+y+offset;return 0;}";
+    let first = analyze_bodies(declared(source)).unwrap();
+    let second = analyze_bodies(declared(source)).unwrap();
+    assert_eq!(first.closure_environments(), second.closure_environments());
+    let mir = verify_mir(lower_hir(first)).unwrap();
+    assert_eq!(mir.as_mir().closure_environments.len(), 2);
+    let ssa = verify_ssa(build_ssa(&mir)).unwrap();
+    assert_eq!(ssa.as_ssa().closure_environments.len(), 2);
+}
+
+#[test]
+fn move_capture_invalidates_source_before_later_hir_use() {
+    let diagnostics = analyze_bodies(declared(
+        "int main(){Matrix<int> data=[1];var f=() capture(move data)=>0;int value=data[1,1];return value;}",
+    ))
+    .unwrap_err();
+    assert!(
+        diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.code == "E0291")
     );
 }

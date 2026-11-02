@@ -1027,6 +1027,7 @@ pub fn compile_source_with_optimization(
     if emits.contains(&Emit::Ssa) {
         dumps.insert(Emit::Ssa, ssa.dump());
     }
+    reject_productive_closure_backend(&ssa)?;
 
     let started = Instant::now();
     let llvm = LlvmTextBackend.emit(&ssa, &target);
@@ -1058,6 +1059,7 @@ pub fn compile_session_with_optimization(
 ) -> Result<Compilation, Vec<Diagnostic>> {
     let analyzed = analyze_session_with_optimization(session, emits, optimization)?;
     let AnalyzedSession { mut checked, ssa } = analyzed;
+    reject_productive_closure_backend(&ssa)?;
     let started = Instant::now();
     let target = TargetDescriptor::linux_x86_64();
     let llvm = LlvmTextBackend.emit(&ssa, &target);
@@ -1072,6 +1074,30 @@ pub fn compile_session_with_optimization(
         dumps: checked.dumps,
         timings_ns: checked.timings_ns,
     })
+}
+
+fn reject_productive_closure_backend(ssa: &VerifiedSsa) -> Result<(), Vec<Diagnostic>> {
+    let program = ssa.as_ssa();
+    let Some(environment) = program.closure_environments.first() else {
+        return Ok(());
+    };
+    let signature = program
+        .signatures
+        .iter()
+        .find(|signature| signature.function_id == environment.target);
+    let mut diagnostic = Diagnostic::new(
+        "E0376",
+        Phase::Backend,
+        DiagnosticCategory::Unsupported,
+        "capturing Closure reached VerifiedSsa, but productive LLVM Closure lowering is not implemented",
+        signature.map(|signature| signature.span),
+    );
+    if let Some(signature) = signature
+        && let Some(module) = program.modules.get(signature.module.0 as usize)
+    {
+        diagnostic = diagnostic.with_source_name(&module.source_name);
+    }
+    Err(vec![diagnostic])
 }
 
 fn analyze_session_with_optimization(

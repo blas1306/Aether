@@ -622,6 +622,7 @@ impl Analyzer<'_> {
             span,
             parameter: false,
             source_binding: false,
+            binding: None,
             mutability: crate::BindingMutability::Mutable,
             address_taken: false,
         });
@@ -1258,6 +1259,8 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
         | E::Bool(_)
         | E::NullableNull { .. }
         | E::FunctionRef { .. }
+        | E::ClosureCreate { .. }
+        | E::ClosureAlias { .. }
         | E::Local(_)
         | E::Move(_)
         | E::AlgebraicValue { .. }
@@ -1347,9 +1350,11 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
             payloads: elements, ..
         } => elements.iter().collect(),
         E::Call { args, .. } => args.iter().map(|argument| &argument.initializer).collect(),
-        E::IndirectCall { callee, args, .. } => std::iter::once(callee.as_ref())
-            .chain(args.iter())
-            .collect(),
+        E::IndirectCall { callee, args, .. } | E::ClosureCall { callee, args, .. } => {
+            std::iter::once(callee.as_ref())
+                .chain(args.iter())
+                .collect()
+        }
         E::StructInit { fields, .. } => fields.iter().map(|(_, e)| e).collect(),
         E::CapabilityBinary { left, right, .. }
         | E::CapabilityCompare { left, right, .. }

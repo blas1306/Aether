@@ -1,5 +1,29 @@
 # Aether — OWNING-CLOSURES-READ-V1 — ABI Scope Review Report
 
+## Actualización CLOSURE-OWNERSHIP-IR-V1 — CLOSED (2 de noviembre de 2026)
+
+El subvertical de ownership IR quedó implementado y calificado. Las closures
+capturantes llegan ahora a `VerifiedSsa` mediante operaciones explícitas
+`ClosureCreate`, `ClosureAlias`, `ClosureBorrow`, `ClosureCall` y
+`EndClosureBorrow`, conservando environment, firma, `BindingId`, tipo, modo,
+orden, recipes, owner transfers y edges normal/unwind. HIR, MIR y SSA poseen
+verificadores independientes y corruption tests propios.
+
+`E0376` se trasladó a la frontera posterior a `VerifiedSsa`: el backend sigue
+fail-closed y no emite boxes, payloads, thunks ni calls parciales. Ver
+`CLOSURE_OWNERSHIP_IR_V1_REPORT.md` para contratos y qualification.
+
+Evidencia focal: `owning_closures_read_v1` 21/21,
+`anonymous_functions_v1` 5/5, `function_values_v1` 8/8, frontend 78/78 y
+middle 29/29 PASS. El workspace serial completo finalizó PASS con código 0,
+incluida la prueba larga de registry (5/5, 951,74 s) y todos los doc-tests. Fmt
+y `git diff --check` finalizaron PASS, y Clippy terminó con código 0 y warnings
+preexistentes.
+
+`OWNING-CLOSURES-READ-V1` permanece **PARTIAL**: faltan allocation/publicación
+LLVM de `ClosureBox`, layout productivo, invoke/destroy thunks, codegen de
+`ClosureCall` y ejecución real O0/O2 de closures capturantes.
+
 ## Actualización CLOSURE-CAPTURE-ANALYSIS-V1 — CLOSED (2 de noviembre de 2026)
 
 El subvertical semántico dedicado quedó implementado y calificado. La fase de

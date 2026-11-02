@@ -65,6 +65,10 @@ impl Backend for LlvmTextBackend {
 #[allow(clippy::too_many_lines)]
 pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let program = ssa.as_ssa();
+    if !program.closure_environments.is_empty() {
+        return "; E0376 capturing Closure reached VerifiedSsa; productive LLVM closure lowering is not implemented\n"
+            .into();
+    }
     let types = &program.types;
     let reachable = (program.modules.len() > 1
         || !types.classes().is_empty()
@@ -1670,6 +1674,13 @@ fn emit_function(
         }
         for instruction in &block.instructions {
             match &instruction.op {
+                SsaOp::ClosureCreate { .. }
+                | SsaOp::ClosureAlias { .. }
+                | SsaOp::ClosureBorrow { .. }
+                | SsaOp::ClosureCall { .. }
+                | SsaOp::EndClosureBorrow { .. } => {
+                    unreachable!("Closure LLVM lowering is guarded by the E0376 backend boundary")
+                }
                 SsaOp::Class(op) => classes::emit_op(
                     output,
                     op,

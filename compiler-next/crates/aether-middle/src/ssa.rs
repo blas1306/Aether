@@ -1,7 +1,9 @@
 //! MIR-to-SSA promotion, phi construction, dominance and verification.
 #![allow(missing_docs)]
 
-use aether_frontend::{ClassOp, IndexSemantics};
+use aether_frontend::{
+    BindingId, CaptureMode, ClassOp, ClosureEnvironmentInfo, ClosureRecipe, IndexSemantics,
+};
 mod classes;
 mod oop_opt;
 pub use oop_opt::{
@@ -71,6 +73,15 @@ pub struct SsaParameter {
     pub ty: TypeId,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SsaCaptureSlot {
+    pub local: LocalId,
+    pub binding: BindingId,
+    pub value: ValueId,
+    pub ty: TypeId,
+    pub canonical_index: u32,
+}
+
 /// One address-taken MIR local retained as explicit stack-backed storage.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SsaMemoryLocal {
@@ -86,6 +97,19 @@ pub struct SsaBinding {
     pub ty: TypeId,
     pub parameter: bool,
     pub mutability: aether_frontend::BindingMutability,
+    pub binding: Option<BindingId>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SsaClosureCapture {
+    pub binding: BindingId,
+    pub source: SsaPlace,
+    pub mode: CaptureMode,
+    pub source_type: TypeId,
+    pub capture_type: TypeId,
+    pub canonical_index: u32,
+    pub initialized_before: u32,
+    pub initialized_after: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -175,6 +199,32 @@ pub enum SsaOp {
     },
     /// Scalar copy.
     Use(SsaOperand),
+    ClosureCreate {
+        recipe: ClosureRecipe,
+        captures: Vec<SsaClosureCapture>,
+        published_after: bool,
+    },
+    ClosureAlias {
+        source: SsaPlace,
+        signature: TypeId,
+    },
+    ClosureBorrow {
+        call_site: aether_frontend::CallSiteId,
+        carrier: SsaPlace,
+        signature: TypeId,
+    },
+    ClosureCall {
+        call_site: aether_frontend::CallSiteId,
+        carrier: SsaPlace,
+        borrow: SsaOperand,
+        args: Vec<SsaOperand>,
+        signature: TypeId,
+    },
+    EndClosureBorrow {
+        call_site: aether_frontend::CallSiteId,
+        carrier: SsaPlace,
+        borrow: SsaOperand,
+    },
     NullableNull {
         nullable_type: TypeId,
     },
@@ -653,6 +703,8 @@ pub struct SsaFunction {
     pub function_id: aether_frontend::FunctionId,
     /// Entry parameter definitions in call order.
     pub parameters: Vec<SsaParameter>,
+    /// Entry definitions read from the hidden closure environment.
+    pub capture_slots: Vec<SsaCaptureSlot>,
     /// Minimal source-binding table retained across promotion.
     pub bindings: Vec<SsaBinding>,
     /// Only address-taken locals cross the SSA/memory boundary.
@@ -685,6 +737,7 @@ pub struct SsaIr {
     pub enums: Vec<EnumInfo>,
     /// Source-unit signature table.
     pub signatures: Vec<FunctionInstanceInfo>,
+    pub closure_environments: Vec<ClosureEnvironmentInfo>,
     /// Function-local SSA graphs in identity order.
     pub functions: Vec<SsaFunction>,
     /// Entry function identity.
@@ -781,6 +834,7 @@ pub fn build_ssa(mir: &VerifiedMir) -> SsaIr {
         structs: mir.structs.clone(),
         enums: mir.enums.clone(),
         signatures: mir.signatures.clone(),
+        closure_environments: mir.closure_environments.clone(),
         functions: mir
             .functions
             .iter()
@@ -838,6 +892,21 @@ fn build_function_ssa(
             ty: parameter.ty,
         })
         .collect();
+    let capture_slots = function
+        .capture_slots
+        .iter()
+        .enumerate()
+        .map(|(index, capture)| SsaCaptureSlot {
+            local: capture.local,
+            binding: capture.binding,
+            value: ValueId(
+                u32::try_from(parameters.len() + index)
+                    .expect("parameter and capture count fits u32"),
+            ),
+            ty: capture.ty,
+            canonical_index: capture.canonical_index,
+        })
+        .collect::<Vec<_>>();
     let memory_locals = function
         .locals
         .iter()
@@ -854,7 +923,7 @@ fn build_function_ssa(
     let bindings = function
         .locals
         .iter()
-        .filter(|local| local.source_binding)
+        .filter(|local| local.binding.is_some())
         .map(|local| SsaBinding {
             local: local.id,
             ty: local.ty,
@@ -863,9 +932,11 @@ fn build_function_ssa(
                 .iter()
                 .any(|parameter| parameter.local == local.id),
             mutability: local.mutability,
+            binding: local.binding,
         })
         .collect();
-    let mut next_value = u32::try_from(parameters.len()).expect("parameter count fits u32");
+    let mut next_value = u32::try_from(parameters.len() + capture_slots.len())
+        .expect("parameter and capture count fits u32");
     let mut phi_results: Vec<BTreeMap<LocalId, ValueId>> =
         vec![BTreeMap::new(); function.blocks.len()];
     for (block_index, locals) in phi_locals.iter().enumerate() {
@@ -899,6 +970,9 @@ fn build_function_ssa(
     for parameter in &parameters {
         stacks[parameter.local.0 as usize].push(parameter.value);
     }
+    for capture in &capture_slots {
+        stacks[capture.local.0 as usize].push(capture.value);
+    }
     rename_block(
         function.entry,
         function,
@@ -921,6 +995,7 @@ fn build_function_ssa(
         id: function.id,
         function_id: function.function_id,
         parameters,
+        capture_slots,
         bindings,
         memory_locals,
         drop_flags: function.drop_flags.clone(),
@@ -1191,6 +1266,65 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
                 .unwrap(),
         )),
         Rvalue::Use(operand) => SsaOp::Use(rename_operand(operand, stacks)),
+        Rvalue::ClosureCreate {
+            recipe,
+            captures,
+            published_after,
+        } => SsaOp::ClosureCreate {
+            recipe: recipe.clone(),
+            captures: captures
+                .iter()
+                .map(|capture| SsaClosureCapture {
+                    binding: capture.binding,
+                    source: rename_place(&capture.source, stacks, mir),
+                    mode: capture.mode,
+                    source_type: capture.source_type,
+                    capture_type: capture.capture_type,
+                    canonical_index: capture.canonical_index,
+                    initialized_before: capture.initialized_before,
+                    initialized_after: capture.initialized_after,
+                })
+                .collect(),
+            published_after: *published_after,
+        },
+        Rvalue::ClosureAlias { source, signature } => SsaOp::ClosureAlias {
+            source: rename_place(source, stacks, mir),
+            signature: *signature,
+        },
+        Rvalue::ClosureBorrow {
+            call_site,
+            carrier,
+            signature,
+        } => SsaOp::ClosureBorrow {
+            call_site: *call_site,
+            carrier: rename_place(carrier, stacks, mir),
+            signature: *signature,
+        },
+        Rvalue::ClosureCall {
+            call_site,
+            carrier,
+            borrow,
+            args,
+            signature,
+        } => SsaOp::ClosureCall {
+            call_site: *call_site,
+            carrier: rename_place(carrier, stacks, mir),
+            borrow: rename_operand(borrow, stacks),
+            args: args
+                .iter()
+                .map(|argument| rename_operand(argument, stacks))
+                .collect(),
+            signature: *signature,
+        },
+        Rvalue::EndClosureBorrow {
+            call_site,
+            carrier,
+            borrow,
+        } => SsaOp::EndClosureBorrow {
+            call_site: *call_site,
+            carrier: rename_place(carrier, stacks, mir),
+            borrow: rename_operand(borrow, stacks),
+        },
         Rvalue::NullableNull { nullable_type } => SsaOp::NullableNull {
             nullable_type: *nullable_type,
         },
@@ -2229,6 +2363,30 @@ fn mir_liveness(function: &MirFunction, cfg: &Cfg) -> Vec<BTreeSet<LocalId>> {
 #[allow(clippy::too_many_lines)]
 pub(crate) fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<LocalId> {
     match value {
+        Rvalue::ClosureCreate { captures, .. } => captures
+            .iter()
+            .flat_map(|capture| place_locals(function, &capture.source))
+            .collect(),
+        Rvalue::ClosureAlias { source, .. }
+        | Rvalue::ClosureBorrow {
+            carrier: source, ..
+        } => place_locals(function, source),
+        Rvalue::ClosureCall {
+            carrier,
+            borrow,
+            args,
+            ..
+        } => place_locals(function, carrier)
+            .into_iter()
+            .chain(operand_local(borrow))
+            .chain(args.iter().filter_map(operand_local))
+            .collect(),
+        Rvalue::EndClosureBorrow {
+            carrier, borrow, ..
+        } => place_locals(function, carrier)
+            .into_iter()
+            .chain(operand_local(borrow))
+            .collect(),
         Rvalue::String(op) => op
             .operands()
             .into_iter()
@@ -2512,6 +2670,7 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
             "SSA function table/body cardinality is invalid".into(),
         ));
     }
+    verify_ssa_closure_environments(&ssa, &fail)?;
     // The shared arena retains generic declaration metadata. Runtime uses are
     // checked for concreteness below; only concrete entries need this audit.
     if ssa
@@ -2663,6 +2822,96 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
     Ok(VerifiedSsa(ssa))
 }
 
+fn verify_ssa_closure_environments(
+    ssa: &SsaIr,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut lambdas = BTreeSet::new();
+    for environment in &ssa.closure_environments {
+        let creator = ssa
+            .functions
+            .iter()
+            .find(|function| function.function_id == environment.creator)
+            .ok_or_else(|| fail("SSA Closure creator is missing".into()))?;
+        let target = ssa
+            .functions
+            .iter()
+            .find(|function| function.function_id == environment.target)
+            .ok_or_else(|| fail("SSA Closure target is missing".into()))?;
+        let target_signature = ssa
+            .signatures
+            .iter()
+            .find(|signature| signature.function_id == environment.target)
+            .ok_or_else(|| fail("SSA Closure target signature is missing".into()))?;
+        let Some((parameters, result)) = ssa.types.closure_signature(environment.signature) else {
+            return Err(fail("SSA Closure environment signature is invalid".into()));
+        };
+        if !lambdas.insert(environment.lambda)
+            || parameters
+                != target_signature
+                    .parameters
+                    .iter()
+                    .map(|parameter| parameter.ty)
+                    .collect::<Vec<_>>()
+            || result != target_signature.return_type
+            || target.capture_slots.len() != environment.captures.len()
+        {
+            return Err(fail(
+                "SSA Closure environment identity/signature invalid".into(),
+            ));
+        }
+        for (index, (capture, slot)) in environment
+            .captures
+            .iter()
+            .zip(&target.capture_slots)
+            .enumerate()
+        {
+            if capture.canonical_index as usize != index
+                || slot.canonical_index as usize != index
+                || slot.binding != capture.binding
+                || slot.ty != capture.capture_type
+            {
+                return Err(fail("SSA Closure capture slots are corrupt".into()));
+            }
+        }
+        let creates = creator
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter_map(|instruction| match &instruction.op {
+                SsaOp::ClosureCreate {
+                    recipe, captures, ..
+                } if recipe.environment == environment.lambda => Some((recipe, captures)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if creates.len() != 1 {
+            return Err(fail("SSA ClosureCreate cardinality invalid".into()));
+        }
+        let (recipe, captures) = creates[0];
+        if recipe.creator != environment.creator
+            || recipe.target != environment.target
+            || recipe.signature != environment.signature
+            || captures.len() != environment.captures.len()
+            || captures
+                .iter()
+                .zip(&environment.captures)
+                .any(|(actual, expected)| {
+                    actual.binding != expected.binding
+                        || actual.mode != expected.mode
+                        || actual.source_type != expected.source_type
+                        || actual.capture_type != expected.capture_type
+                        || actual.canonical_index != expected.canonical_index
+                })
+        {
+            return Err(fail(
+                "SSA ClosureCreate disagrees with environment metadata".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn ssa_value_type_is_complete(ssa: &SsaIr, ty: TypeId) -> bool {
     match ssa.types.get(ty) {
         Some(TypeData::Struct(id)) => ssa
@@ -2798,7 +3047,7 @@ fn verify_ssa_function(
             }
             let may_throw = matches!(
                 instruction.op,
-                SsaOp::Call { .. } | SsaOp::IndirectCall { .. }
+                SsaOp::Call { .. } | SsaOp::IndirectCall { .. } | SsaOp::ClosureCall { .. }
             ) || matches!(
                 instruction.op,
                 SsaOp::Core(ref call)
@@ -2847,6 +3096,7 @@ fn verify_ssa_function(
     #[derive(Clone, Copy)]
     enum Position {
         Parameter,
+        Capture,
         Phi,
         Instruction(usize),
     }
@@ -2873,6 +3123,31 @@ fn verify_ssa_function(
             .is_some()
         {
             return Err(fail("SSA parameter value has multiple definitions".into()));
+        }
+    }
+    for (index, capture) in function.capture_slots.iter().enumerate() {
+        let binding = function
+            .bindings
+            .iter()
+            .find(|binding| binding.local == capture.local);
+        if capture.canonical_index as usize != index
+            || capture.binding.function == function.function_id
+            || binding.and_then(|binding| binding.binding) != Some(capture.binding)
+            || binding.map(|binding| binding.ty) != Some(capture.ty)
+            || definitions
+                .insert(
+                    capture.value,
+                    Definition {
+                        block: function.entry,
+                        position: Position::Capture,
+                        ty: capture.ty,
+                    },
+                )
+                .is_some()
+        {
+            return Err(fail(
+                "SSA capture slot identity/type/order is invalid".into(),
+            ));
         }
     }
     let mut seen_memory = BTreeSet::new();
@@ -3232,6 +3507,7 @@ fn verify_ssa_function(
     verify_matrix_literal_ownership(function, types, fail)?;
     verify_take_protocol(function, types, fail)?;
     verify_call_borrow_regions(function, types, fail)?;
+    verify_closure_borrow_regions(function, fail)?;
     verify_format_borrow_regions(function, fail)?;
     Ok(())
 }
@@ -3615,6 +3891,10 @@ fn verify_ssa_const_bindings(
         }
         if !binding.parameter
             && !function
+                .capture_slots
+                .iter()
+                .any(|capture| capture.local == binding.local)
+            && !function
                 .memory_locals
                 .iter()
                 .any(|local| local.local == binding.local)
@@ -3705,7 +3985,11 @@ fn verify_ssa_const_bindings(
     }
     for binding in &function.bindings {
         if binding.mutability == aether_frontend::BindingMutability::Const {
-            let expected = u32::from(!binding.parameter);
+            let capture = function
+                .capture_slots
+                .iter()
+                .any(|capture| capture.local == binding.local);
+            let expected = u32::from(!binding.parameter && !capture);
             if definitions.get(&binding.local).copied().unwrap_or(0) != expected {
                 return Err(fail(
                     "SSA const binding does not have one source definition".into(),
@@ -3935,6 +4219,156 @@ fn verify_call_borrow_regions(
         }
     }
     Ok(())
+}
+
+fn verify_closure_borrow_regions(
+    function: &SsaFunction,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut borrows = BTreeMap::<ValueId, (aether_frontend::CallSiteId, SsaPlace)>::new();
+    for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+        if let SsaOp::ClosureBorrow {
+            call_site, carrier, ..
+        } = &instruction.op
+            && borrows
+                .insert(instruction.result, (*call_site, carrier.clone()))
+                .is_some()
+        {
+            return Err(fail("SSA ClosureBorrow token is defined twice".into()));
+        }
+    }
+    for (token, (call_site, carrier)) in &borrows {
+        let mut calls = 0;
+        let mut ends = 0;
+        for block in &function.blocks {
+            if block
+                .phis
+                .iter()
+                .any(|phi| phi.incoming.iter().any(|(_, value)| value == token))
+            {
+                return Err(fail("SSA ClosureBorrow token escapes through phi".into()));
+            }
+            for instruction in &block.instructions {
+                let allowed = match &instruction.op {
+                    SsaOp::ClosureCall {
+                        call_site: call,
+                        carrier: actual,
+                        borrow: SsaOperand::Value(actual_token),
+                        ..
+                    } if call == call_site && actual == carrier && actual_token == token => {
+                        calls += 1;
+                        true
+                    }
+                    SsaOp::EndClosureBorrow {
+                        call_site: call,
+                        carrier: actual,
+                        borrow: SsaOperand::Value(actual_token),
+                    } if call == call_site && actual == carrier && actual_token == token => {
+                        ends += 1;
+                        true
+                    }
+                    SsaOp::ClosureBorrow { .. } => true,
+                    _ => false,
+                };
+                if op_operands(&instruction.op)
+                    .into_iter()
+                    .any(|operand| operand == &SsaOperand::Value(*token))
+                    && !allowed
+                {
+                    return Err(fail(
+                        "SSA ClosureBorrow token escapes its invocation".into(),
+                    ));
+                }
+            }
+        }
+        if calls != 1 || ends == 0 {
+            return Err(fail(
+                "SSA ClosureBorrow requires one ClosureCall and EndClosureBorrow on every exit"
+                    .into(),
+            ));
+        }
+    }
+
+    let mut incoming = vec![None; function.blocks.len()];
+    incoming[function.entry.0 as usize] = Some(BTreeSet::<ValueId>::new());
+    let mut queue = VecDeque::from([function.entry]);
+    while let Some(block_id) = queue.pop_front() {
+        let block = &function.blocks[block_id.0 as usize];
+        let mut active = incoming[block_id.0 as usize].clone().expect("queued state");
+        for instruction in &block.instructions {
+            let protected = |place: &SsaPlace| {
+                borrows
+                    .iter()
+                    .any(|(token, (_, carrier))| active.contains(token) && carrier == place)
+            };
+            let invalidates = match &instruction.op {
+                SsaOp::Move { source } | SsaOp::Drop { owner: source } => protected(source),
+                SsaOp::Store { place, .. }
+                | SsaOp::ReplaceOwned {
+                    destination: place, ..
+                }
+                | SsaOp::ReplaceString {
+                    destination: place, ..
+                } => protected(place),
+                _ => false,
+            };
+            if invalidates {
+                return Err(fail(
+                    "SSA Closure carrier is invalidated before EndClosureBorrow".into(),
+                ));
+            }
+            match &instruction.op {
+                SsaOp::ClosureBorrow { .. } => {
+                    if !active.insert(instruction.result) {
+                        return Err(fail("SSA ClosureBorrow begins twice".into()));
+                    }
+                }
+                SsaOp::EndClosureBorrow {
+                    borrow: SsaOperand::Value(token),
+                    ..
+                } if !active.remove(token) => {
+                    return Err(fail("SSA EndClosureBorrow closes no live borrow".into()));
+                }
+                _ => {}
+            }
+            if let Some(target) = instruction.unwind {
+                merge_ssa_closure_borrow(target, &active, &mut incoming, &mut queue, fail)?;
+            }
+        }
+        for target in ssa_targets(&block.terminator) {
+            merge_ssa_closure_borrow(target, &active, &mut incoming, &mut queue, fail)?;
+        }
+        if matches!(
+            block.terminator,
+            SsaTerminator::Return(_)
+                | SsaTerminator::ResumeUnwind { .. }
+                | SsaTerminator::ForwardUnwind { .. }
+        ) && !active.is_empty()
+        {
+            return Err(fail("SSA exit retains a live ClosureBorrow".into()));
+        }
+    }
+    Ok(())
+}
+
+fn merge_ssa_closure_borrow(
+    target: BlockId,
+    state: &BTreeSet<ValueId>,
+    incoming: &mut [Option<BTreeSet<ValueId>>],
+    queue: &mut VecDeque<BlockId>,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    match &incoming[target.0 as usize] {
+        Some(existing) if existing != state => {
+            Err(fail("SSA ClosureBorrow state disagrees at CFG join".into()))
+        }
+        Some(_) => Ok(()),
+        None => {
+            incoming[target.0 as usize] = Some(state.clone());
+            queue.push_back(target);
+            Ok(())
+        }
+    }
 }
 
 fn verify_format_borrow_regions(
@@ -4496,6 +4930,12 @@ fn owner_from_place(function: &SsaFunction, place: &SsaPlace) -> Option<ValueId>
 
 fn owner_consumptions(function: &SsaFunction, owner: ValueId, op: &SsaOp) -> usize {
     match op {
+        SsaOp::ClosureCreate { captures, .. } => captures
+            .iter()
+            .filter(|capture| capture.mode == CaptureMode::Move)
+            .filter(|capture| owner_from_place(function, &capture.source) == Some(owner))
+            .count(),
+        SsaOp::ClosureCall { args, .. } => owner_operand_count(owner, args),
         SsaOp::Move { source }
         | SsaOp::Drop { owner: source }
         | SsaOp::ConsumeEnum { owner: source } => {
@@ -4592,7 +5032,9 @@ fn verify_ownership_ledger(
 ) -> Result<(), Vec<Diagnostic>> {
     // String-containing values use ordinary value/memory roots. Class and
     // algebraic owners retain their dedicated SSA proofs below.
-    let carries_owner = |ty| types.contains_string(ty) && types.needs_drop(ty);
+    let carries_owner = |ty| {
+        (types.contains_string(ty) || types.closure_signature(ty).is_some()) && types.needs_drop(ty)
+    };
     let mut owners = function
         .parameters
         .iter()
@@ -4637,6 +5079,13 @@ fn verify_ownership_ledger(
             .iter()
             .find(|parameter| parameter.value == owner)
             .map(|parameter| parameter.local)
+            .or_else(|| {
+                function
+                    .capture_slots
+                    .iter()
+                    .find(|capture| capture.value == owner)
+                    .map(|capture| capture.local)
+            })
             .or_else(|| {
                 function
                     .blocks
@@ -4975,7 +5424,7 @@ fn verify_ssa_finally_regions(
             let block = &function.blocks[block.0 as usize];
             if block.instructions.iter().any(|instruction| {
                 instruction.unwind.is_some()
-                    || matches!(instruction.op, SsaOp::Call { .. } | SsaOp::IndirectCall { .. })
+                    || matches!(instruction.op, SsaOp::Call { .. } | SsaOp::IndirectCall { .. } | SsaOp::ClosureCall { .. })
                     || matches!(instruction.op, SsaOp::Class(ref op) if matches!(op.as_ref(), ClassOp::DirectMethodCall { .. } | ClassOp::BaseMethodCall { .. } | ClassOp::VirtualCall { .. } | ClassOp::InterfaceCall { .. } | ClassOp::InitCall { .. } | ClassOp::BaseInit { .. }))
             }) || matches!(
                 block.terminator,
@@ -5095,6 +5544,100 @@ fn verify_op(
         Ok(scalar)
     };
     match op {
+        SsaOp::ClosureCreate {
+            recipe,
+            captures,
+            published_after,
+        } => {
+            if result != recipe.signature
+                || types.closure_signature(result).is_none()
+                || !*published_after
+                || !recipe.destroy_nounwind
+                || captures.is_empty()
+            {
+                return Err("SSA ClosureCreate recipe/publication invalid".into());
+            }
+            let mut seen = BTreeSet::new();
+            for (index, capture) in captures.iter().enumerate() {
+                let source_ty =
+                    ssa_place_type(&capture.source, memory_locals, structs, types, operand_ty)?;
+                let aliasable = source_ty == TypeId::STRING
+                    || types.is_object_owner(source_ty)
+                    || types.closure_signature(source_ty).is_some();
+                if capture.canonical_index as usize != index
+                    || capture.initialized_before as usize != index
+                    || capture.initialized_after as usize != index + 1
+                    || !seen.insert(capture.binding)
+                    || capture.source_type != source_ty
+                    || capture.capture_type != source_ty
+                    || match capture.mode {
+                        CaptureMode::Copy => !types.guarantees_copy(source_ty),
+                        CaptureMode::Alias => !aliasable,
+                        CaptureMode::Move => types.guarantees_copy(source_ty) || aliasable,
+                    }
+                {
+                    return Err("SSA ClosureCreate capture acquisition invalid".into());
+                }
+            }
+        }
+        SsaOp::ClosureAlias { source, signature } => {
+            if result != *signature
+                || ssa_place_type(source, memory_locals, structs, types, operand_ty)? != *signature
+                || types.closure_signature(*signature).is_none()
+            {
+                return Err("SSA ClosureAlias contract invalid".into());
+            }
+        }
+        SsaOp::ClosureBorrow {
+            carrier, signature, ..
+        } => {
+            if result != TypeId::BOOL
+                || ssa_place_type(carrier, memory_locals, structs, types, operand_ty)? != *signature
+                || types.closure_signature(*signature).is_none()
+            {
+                return Err("SSA ClosureBorrow contract invalid".into());
+            }
+        }
+        SsaOp::ClosureCall {
+            carrier,
+            borrow,
+            args,
+            signature,
+            ..
+        } => {
+            let Some((parameters, call_result)) = types.closure_signature(*signature) else {
+                return Err("SSA ClosureCall signature is not Closure".into());
+            };
+            if result != call_result
+                || ssa_place_type(carrier, memory_locals, structs, types, operand_ty)? != *signature
+                || operand_ty(borrow)? != TypeId::BOOL
+                || args.len() != parameters.len()
+                || args
+                    .iter()
+                    .zip(parameters)
+                    .any(|(argument, parameter)| operand_ty(argument) != Ok(*parameter))
+            {
+                return Err("SSA ClosureCall carrier/result/arguments invalid".into());
+            }
+        }
+        SsaOp::EndClosureBorrow {
+            carrier, borrow, ..
+        } => {
+            if result != TypeId::BOOL
+                || types
+                    .closure_signature(ssa_place_type(
+                        carrier,
+                        memory_locals,
+                        structs,
+                        types,
+                        operand_ty,
+                    )?)
+                    .is_none()
+                || operand_ty(borrow)? != TypeId::BOOL
+            {
+                return Err("SSA EndClosureBorrow contract invalid".into());
+            }
+        }
         SsaOp::NullableNull { nullable_type } => {
             if result != *nullable_type || types.nullable_payload(*nullable_type).is_none() {
                 return Err("SSA nullable null type mismatch".into());
@@ -6663,6 +7206,30 @@ fn valid_coercion(types: &TypeArena, kind: CoercionKind, from: TypeId, to: TypeI
 #[allow(clippy::too_many_lines)]
 fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
     match op {
+        SsaOp::ClosureCreate { captures, .. } => captures
+            .iter()
+            .flat_map(|capture| place_operands(&capture.source))
+            .collect(),
+        SsaOp::ClosureAlias { source, .. }
+        | SsaOp::ClosureBorrow {
+            carrier: source, ..
+        } => place_operands(source),
+        SsaOp::ClosureCall {
+            carrier,
+            borrow,
+            args,
+            ..
+        } => place_operands(carrier)
+            .into_iter()
+            .chain(std::iter::once(borrow))
+            .chain(args.iter())
+            .collect(),
+        SsaOp::EndClosureBorrow {
+            carrier, borrow, ..
+        } => place_operands(carrier)
+            .into_iter()
+            .chain(std::iter::once(borrow))
+            .collect(),
         SsaOp::String(op) => op.operands(),
         SsaOp::Text { op, .. } => op.operands(),
         SsaOp::Core(op) => op.operands(),

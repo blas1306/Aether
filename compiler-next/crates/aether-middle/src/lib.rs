@@ -11,14 +11,16 @@ mod ssa;
 
 pub use mir::{
     BasicBlock, BinaryOp, BlockId, CallBorrowMetadata, CallBorrowSourceKind, CollectionLoop,
-    ElementInitialization, FinallyRegion, FlowMir, MirDropFlag, MirFunction, MirInstruction,
-    MirLocal, MirParameter, Operand, Place, PlaceBase, PlaceProjection, PushInit, RangeLoop,
-    RangeOperandRole, Relocate, RelocationRange, Rvalue, SliceSelector, SlotPlace, TakeState,
-    Terminator, TrapKind, UnaryOp, VerifiedMir, lower_hir, verify_mir,
+    ElementInitialization, FinallyRegion, FlowMir, MirCaptureSlot, MirClosureCapture, MirDropFlag,
+    MirFunction, MirInstruction, MirLocal, MirParameter, Operand, Place, PlaceBase,
+    PlaceProjection, PushInit, RangeLoop, RangeOperandRole, Relocate, RelocationRange, Rvalue,
+    SliceSelector, SlotPlace, TakeState, Terminator, TrapKind, UnaryOp, VerifiedMir, lower_hir,
+    verify_mir,
 };
 pub use ssa::{
     ArcElision, ClassDevirtualization, DescriptorCommitKind, Devirtualization, OopOptimizations,
-    Phi, SsaBinding, SsaBlock, SsaFunction, SsaInstruction, SsaIr, SsaMemoryLocal, SsaOp,
-    SsaOperand, SsaParameter, SsaPlace, SsaPlaceBase, SsaPlaceProjection, SsaTerminator,
-    StoreProvenance, ValueId, VerifiedSsa, build_ssa, optimize_oop, verify_ssa,
+    Phi, SsaBinding, SsaBlock, SsaCaptureSlot, SsaClosureCapture, SsaFunction, SsaInstruction,
+    SsaIr, SsaMemoryLocal, SsaOp, SsaOperand, SsaParameter, SsaPlace, SsaPlaceBase,
+    SsaPlaceProjection, SsaTerminator, StoreProvenance, ValueId, VerifiedSsa, build_ssa,
+    optimize_oop, verify_ssa,
 };

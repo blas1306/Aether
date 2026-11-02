@@ -8,19 +8,34 @@ public class InvalidModelException : Exception {
 void MinimosCuadrados(Vector<double, Column> t, Vector<double, Column> y, Function<(double), Array<double>> modelo) {
     int m = dimension(t);
 
-    // Evaluamos el modelo para conocer la cantidad
-    // de funciones base.
+    if (m == 0 || dimension(y) != m) {
+        throw InvalidModelException();
+    }
 
     var primeraFila = modelo(t[1]);
     int n = primeraFila.length;
 
+    if (n == 0) {
+        throw InvalidModelException();
+    }
+
     Matrix<double> A = la.zeros(m, n);
 
-    for (int i in 1:m) {
+    // Aprovechamos la primera evaluación.
+    for (int j in 1:n) {
+        A[1, j] = primeraFila[j-1];
+    }
+
+    // Construimos las filas restantes.
+    for (int i in 2:m) {
         var phi = modelo(t[i]);
 
+        if (phi.length != n) {
+            throw InvalidModelException();
+        }
+
         for (int j in 1:n) {
-            A[i, j] = phi[j];
+            A[i, j] = phi[j-1];
         }
     }
 
@@ -28,7 +43,7 @@ void MinimosCuadrados(Vector<double, Column> t, Vector<double, Column> y, Functi
 
     println("Coeficientes modelo: ${theta}");
 
-    // Closure capturante
+    // Closure capturante.
     var g = (double x) => la.dot(theta, modelo(x));
 
     var fig = plt.scatter(t, y);
@@ -40,7 +55,7 @@ int main() {
     Vector<double, Column> t = [-2, -1, 0, 1, 2];
     Vector<double, Column> y = [5, 2, 1, 3, 5];
 
-    var modelo = (double x) => {1; x; x*x};
+    var modelo = (double x) => {1.0; x; x*x};
 
     MinimosCuadrados(t, y, modelo);
 

@@ -12,10 +12,11 @@ use std::fmt::Write;
 use std::sync::Arc;
 
 use aether_frontend::{
-    CastKind, CoercionKind, CollectionIterationSource, Diagnostic, DiagnosticCategory, EnumId,
-    EnumInfo, FieldId, FloatType, FloatValue, FunctionInstanceInfo, HirBinaryOp, HirBlock,
-    HirCallTarget, HirDrop, HirExpr, HirExprKind, HirFinally, HirFunction, HirMatchArm, HirPlace,
-    HirPlaceBase, HirPlaceProjection, HirStmtKind, HirSubscriptResult, HirSubscriptSelector,
+    BindingId, CaptureMode, CastKind, ClosureEnvironmentInfo, ClosureRecipe, CoercionKind,
+    CollectionIterationSource, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId,
+    FloatType, FloatValue, FunctionInstanceInfo, HirBinaryOp, HirBlock, HirCallTarget, HirDrop,
+    HirExpr, HirExprKind, HirFinally, HirFunction, HirMatchArm, HirPlace, HirPlaceBase,
+    HirPlaceProjection, HirStmtKind, HirSubscriptResult, HirSubscriptSelector,
     HirSubscriptSelectorKind, HirUnaryOp, InstanceId, LocalId, MatchMode, ModuleInfo, Phase, Span,
     StructId, StructInfo, StructuralMutation, Substitution, TypeArena, TypeData, TypeId, TypedHir,
     VariantId, format_type,
@@ -147,6 +148,7 @@ pub struct MirLocal {
     pub temporary: bool,
     /// True only for source locals and parameters.
     pub source_binding: bool,
+    pub binding: Option<BindingId>,
     /// Source binding mutability, never a type qualifier.
     pub mutability: aether_frontend::BindingMutability,
     /// Stable memory is required because this local is borrowed.
@@ -161,6 +163,14 @@ pub struct MirParameter {
     /// Canonical semantic type.
     pub ty: TypeId,
     pub mutability: aether_frontend::BindingMutability,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MirCaptureSlot {
+    pub local: LocalId,
+    pub binding: BindingId,
+    pub ty: TypeId,
+    pub canonical_index: u32,
 }
 
 /// One compiler-generated root-level conditional ownership flag.
@@ -350,6 +360,18 @@ pub enum BinaryOp {
     NotEqual,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MirClosureCapture {
+    pub binding: BindingId,
+    pub source: Place,
+    pub mode: CaptureMode,
+    pub source_type: TypeId,
+    pub capture_type: TypeId,
+    pub canonical_index: u32,
+    pub initialized_before: u32,
+    pub initialized_after: u32,
+}
+
 /// Right-hand side of a MIR assignment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
@@ -379,6 +401,35 @@ pub enum Rvalue {
     },
     /// Scalar copy.
     Use(Operand),
+    /// Transactional owning closure environment construction. Each capture
+    /// records the initialized prefix before/after its canonical acquisition;
+    /// publication occurs only after the complete prefix exists.
+    ClosureCreate {
+        recipe: ClosureRecipe,
+        captures: Vec<MirClosureCapture>,
+        published_after: bool,
+    },
+    ClosureAlias {
+        source: Place,
+        signature: TypeId,
+    },
+    ClosureBorrow {
+        call_site: CallSiteId,
+        carrier: Place,
+        signature: TypeId,
+    },
+    ClosureCall {
+        call_site: CallSiteId,
+        carrier: Place,
+        borrow: Operand,
+        args: Vec<Operand>,
+        signature: TypeId,
+    },
+    EndClosureBorrow {
+        call_site: CallSiteId,
+        carrier: Place,
+        borrow: Operand,
+    },
     NullableNull {
         nullable_type: TypeId,
     },
@@ -850,6 +901,8 @@ pub struct MirFunction {
     pub function_id: aether_frontend::FunctionId,
     /// Parameters in call order.
     pub parameters: Vec<MirParameter>,
+    /// Read-only fields supplied by the hidden environment argument.
+    pub capture_slots: Vec<MirCaptureSlot>,
     /// Sparse metadata: only roots needing conditional normal cleanup have flags.
     pub drop_flags: Vec<MirDropFlag>,
     /// Canonical return type.
@@ -938,6 +991,7 @@ pub struct FlowMir {
     pub enums: Vec<EnumInfo>,
     /// Program-global signature table.
     pub signatures: Vec<FunctionInstanceInfo>,
+    pub closure_environments: Vec<ClosureEnvironmentInfo>,
     /// Function-local CFGs in stable identity order.
     pub functions: Vec<MirFunction>,
     /// Entry function identity.
@@ -1011,7 +1065,8 @@ impl VerifiedMir {
 /// Lowers typed, resolved HIR into a raw CFG.
 #[must_use]
 pub fn lower_hir(hir: TypedHir) -> FlowMir {
-    let (modules, mut types, structs, enums, signatures, functions, entry) = hir.into_parts();
+    let (modules, mut types, structs, enums, signatures, functions, closure_environments, entry) =
+        hir.into_parts();
     let exceptions_enabled = types.exception_class().is_some();
     let functions = functions
         .iter()
@@ -1032,6 +1087,7 @@ pub fn lower_hir(hir: TypedHir) -> FlowMir {
         structs,
         enums,
         signatures,
+        closure_environments,
         functions,
         entry,
         exceptions_enabled,
@@ -1127,6 +1183,7 @@ fn lower_function(
             name: Some(local.name.clone()),
             temporary: false,
             source_binding: local.source_binding,
+            binding: local.binding,
             mutability: local.mutability,
             address_taken: local.address_taken,
         })
@@ -1138,6 +1195,21 @@ fn lower_function(
             local: parameter.local,
             ty: parameter.ty,
             mutability: parameter.mutability,
+        })
+        .collect();
+    let capture_slots = function
+        .locals
+        .iter()
+        .filter_map(|local| {
+            let binding = local.binding?;
+            (binding.function != function.function_id).then_some((local, binding))
+        })
+        .enumerate()
+        .map(|(index, (local, binding))| MirCaptureSlot {
+            local: local.id,
+            binding,
+            ty: local.ty,
+            canonical_index: u32::try_from(index).expect("capture count fits u32"),
         })
         .collect();
     let intrinsic_conditional_roots = conditional_drop_roots(&function.body);
@@ -1162,6 +1234,7 @@ fn lower_function(
             id: function.id,
             function_id: function.function_id,
             parameters,
+            capture_slots,
             drop_flags: Vec::new(),
             return_type,
             locals,
@@ -1190,6 +1263,7 @@ fn lower_function(
         root_event: None,
         active_temporary_owners: Vec::new(),
         active_call_borrows: Vec::new(),
+        active_closure_borrows: Vec::new(),
         active_format_borrows: Vec::new(),
         construction_state: function
             .constructor_unwind
@@ -1259,6 +1333,7 @@ struct Builder<'a> {
     root_event: Option<ExceptionEventId>,
     active_temporary_owners: Vec<LocalId>,
     active_call_borrows: Vec<(CallBorrowMetadata, Operand)>,
+    active_closure_borrows: Vec<(CallSiteId, Place, Operand)>,
     active_format_borrows: Vec<(FormatBorrowMetadata, Operand)>,
     construction_state: Option<aether_frontend::ClassInitializationState>,
     loops: Vec<(BlockId, BlockId, usize)>,
@@ -1497,6 +1572,10 @@ impl Builder<'_> {
         let borrows = self.active_call_borrows.clone();
         for (call, reference) in borrows.into_iter().rev() {
             self.emit_end_borrow(call, reference, span);
+        }
+        let closure_borrows = self.active_closure_borrows.clone();
+        for (call_site, carrier, borrow) in closure_borrows.into_iter().rev() {
+            self.emit_end_closure_borrow(call_site, carrier, borrow, span);
         }
         let format_borrows = self.active_format_borrows.clone();
         for (format, reference) in format_borrows.into_iter().rev() {
@@ -3231,6 +3310,50 @@ impl Builder<'_> {
                 );
                 Operand::Local(destination)
             }
+            HirExprKind::ClosureCreate { recipe, captures } => {
+                let captures = captures
+                    .iter()
+                    .map(|capture| MirClosureCapture {
+                        binding: capture.binding,
+                        source: Place {
+                            base: PlaceBase::Local(capture.source),
+                            projections: Vec::new(),
+                        },
+                        mode: capture.mode,
+                        source_type: capture.source_type,
+                        capture_type: capture.capture_type,
+                        canonical_index: capture.canonical_index,
+                        initialized_before: capture.canonical_index,
+                        initialized_after: capture.canonical_index + 1,
+                    })
+                    .collect();
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    operand_place(&Operand::Local(destination)),
+                    Rvalue::ClosureCreate {
+                        recipe: recipe.clone(),
+                        captures,
+                        published_after: true,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::ClosureAlias { source, signature } => {
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    operand_place(&Operand::Local(destination)),
+                    Rvalue::ClosureAlias {
+                        source: Place {
+                            base: PlaceBase::Local(*source),
+                            projections: Vec::new(),
+                        },
+                        signature: *signature,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
             HirExprKind::Local(local) => {
                 if self.function.locals[local.0 as usize].address_taken {
                     let destination = self.temporary(expression.ty);
@@ -4203,6 +4326,49 @@ impl Builder<'_> {
                 self.finish_call_borrows(borrow_start, owner_start, expression.span);
                 Operand::Local(destination)
             }
+            HirExprKind::ClosureCall {
+                call_site,
+                callee,
+                args,
+                signature,
+            } => {
+                let HirExprKind::Local(carrier_local) = callee.kind else {
+                    unreachable!("verified ClosureCall carrier is a local")
+                };
+                let carrier = Place {
+                    base: PlaceBase::Local(carrier_local),
+                    projections: Vec::new(),
+                };
+                let borrow = Operand::Local(self.temporary(TypeId::BOOL));
+                self.assign(
+                    operand_place(&borrow),
+                    Rvalue::ClosureBorrow {
+                        call_site: *call_site,
+                        carrier: carrier.clone(),
+                        signature: *signature,
+                    },
+                    expression.span,
+                );
+                self.active_closure_borrows
+                    .push((*call_site, carrier.clone(), borrow.clone()));
+                let (args, borrow_start, owner_start) = self.lower_call_arguments(args);
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    operand_place(&Operand::Local(destination)),
+                    Rvalue::ClosureCall {
+                        call_site: *call_site,
+                        carrier: carrier.clone(),
+                        borrow: borrow.clone(),
+                        args,
+                        signature: *signature,
+                    },
+                    expression.span,
+                );
+                self.finish_call_borrows(borrow_start, owner_start, expression.span);
+                self.active_closure_borrows.pop();
+                self.emit_end_closure_borrow(*call_site, carrier, borrow, expression.span);
+                Operand::Local(destination)
+            }
             HirExprKind::StructInit { struct_id, fields } => {
                 let fields = fields
                     .iter()
@@ -5155,6 +5321,7 @@ impl Builder<'_> {
             name: None,
             temporary: true,
             source_binding: false,
+            binding: None,
             mutability: aether_frontend::BindingMutability::Mutable,
             address_taken: false,
         });
@@ -5179,7 +5346,9 @@ impl Builder<'_> {
             .expect("typed HIR has no unreachable statements");
         let may_throw = self.exceptions_enabled
             && match &value {
-                Rvalue::Call { .. } | Rvalue::IndirectCall { .. } => true,
+                Rvalue::Call { .. } | Rvalue::IndirectCall { .. } | Rvalue::ClosureCall { .. } => {
+                    true
+                }
                 Rvalue::Core(call) => matches!(
                     call.function.symbol,
                     aether_frontend::CoreSymbol::Print | aether_frontend::CoreSymbol::Println
@@ -5277,6 +5446,25 @@ impl Builder<'_> {
         self.assign(
             operand_place(&Operand::Local(token)),
             Rvalue::EndBorrow { call, reference },
+            span,
+        );
+    }
+
+    fn emit_end_closure_borrow(
+        &mut self,
+        call_site: CallSiteId,
+        carrier: Place,
+        borrow: Operand,
+        span: Span,
+    ) {
+        let token = self.temporary(TypeId::BOOL);
+        self.assign(
+            operand_place(&Operand::Local(token)),
+            Rvalue::EndClosureBorrow {
+                call_site,
+                carrier,
+                borrow,
+            },
             span,
         );
     }
@@ -5494,6 +5682,7 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
             "MIR function table/body cardinality is invalid".into(),
         ));
     }
+    verify_mir_closure_environments(&mir, &fail)?;
     // The shared arena retains generic declaration metadata. Runtime uses are
     // checked for concreteness below; only concrete entries need this audit.
     if mir
@@ -5603,6 +5792,96 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
         )?;
     }
     Ok(VerifiedMir(mir))
+}
+
+fn verify_mir_closure_environments(
+    mir: &FlowMir,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut lambdas = BTreeSet::new();
+    for environment in &mir.closure_environments {
+        let creator = mir
+            .functions
+            .iter()
+            .find(|function| function.function_id == environment.creator)
+            .ok_or_else(|| fail("MIR Closure creator is missing".into()))?;
+        let target = mir
+            .functions
+            .iter()
+            .find(|function| function.function_id == environment.target)
+            .ok_or_else(|| fail("MIR Closure target is missing".into()))?;
+        let target_signature = mir
+            .signatures
+            .iter()
+            .find(|signature| signature.function_id == environment.target)
+            .ok_or_else(|| fail("MIR Closure target signature is missing".into()))?;
+        let Some((parameters, result)) = mir.types.closure_signature(environment.signature) else {
+            return Err(fail("MIR Closure environment signature is invalid".into()));
+        };
+        if !lambdas.insert(environment.lambda)
+            || parameters
+                != target_signature
+                    .parameters
+                    .iter()
+                    .map(|parameter| parameter.ty)
+                    .collect::<Vec<_>>()
+            || result != target_signature.return_type
+            || target.capture_slots.len() != environment.captures.len()
+        {
+            return Err(fail(
+                "MIR Closure environment identity/signature invalid".into(),
+            ));
+        }
+        for (index, (capture, slot)) in environment
+            .captures
+            .iter()
+            .zip(&target.capture_slots)
+            .enumerate()
+        {
+            if capture.canonical_index as usize != index
+                || slot.canonical_index as usize != index
+                || slot.binding != capture.binding
+                || slot.ty != capture.capture_type
+            {
+                return Err(fail("MIR Closure capture slots are corrupt".into()));
+            }
+        }
+        let creates = creator
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter_map(|instruction| match &instruction.value {
+                Rvalue::ClosureCreate {
+                    recipe, captures, ..
+                } if recipe.environment == environment.lambda => Some((recipe, captures)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        if creates.len() != 1 {
+            return Err(fail("MIR ClosureCreate cardinality invalid".into()));
+        }
+        let (recipe, captures) = creates[0];
+        if recipe.creator != environment.creator
+            || recipe.target != environment.target
+            || recipe.signature != environment.signature
+            || captures.len() != environment.captures.len()
+            || captures
+                .iter()
+                .zip(&environment.captures)
+                .any(|(actual, expected)| {
+                    actual.binding != expected.binding
+                        || actual.mode != expected.mode
+                        || actual.source_type != expected.source_type
+                        || actual.capture_type != expected.capture_type
+                        || actual.canonical_index != expected.canonical_index
+                })
+        {
+            return Err(fail(
+                "MIR ClosureCreate disagrees with environment metadata".into(),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn mir_value_type_is_complete(mir: &FlowMir, ty: TypeId) -> bool {
@@ -5730,6 +6009,23 @@ fn verify_mir_function(
             ));
         }
     }
+    for (index, capture) in function.capture_slots.iter().enumerate() {
+        let Some(local) = function.locals.get(capture.local.0 as usize) else {
+            return Err(fail("MIR capture slot local is missing".into()));
+        };
+        if capture.canonical_index as usize != index
+            || capture.binding.function == function.function_id
+            || local.binding != Some(capture.binding)
+            || local.ty != capture.ty
+            || local.source_binding
+            || local.temporary
+            || local.mutability != aether_frontend::BindingMutability::Const
+        {
+            return Err(fail(
+                "MIR capture slot identity/type/order is invalid".into(),
+            ));
+        }
+    }
     verify_const_bindings(function, fail)?;
     verify_range_loops(function, fail)?;
     verify_collection_loops(function, types, fail)?;
@@ -5773,7 +6069,7 @@ fn verify_mir_function(
             }
             let may_throw = matches!(
                 instruction.value,
-                Rvalue::Call { .. } | Rvalue::IndirectCall { .. }
+                Rvalue::Call { .. } | Rvalue::IndirectCall { .. } | Rvalue::ClosureCall { .. }
             ) || matches!(
                 instruction.value,
                 Rvalue::Core(ref call)
@@ -5878,6 +6174,9 @@ fn verify_mir_function(
     initialized_in[function.entry.0 as usize].fill(false);
     for parameter in &function.parameters {
         initialized_in[function.entry.0 as usize][parameter.local.0 as usize] = true;
+    }
+    for capture in &function.capture_slots {
+        initialized_in[function.entry.0 as usize][capture.local.0 as usize] = true;
     }
     let mut changed = true;
     while changed {
@@ -6147,6 +6446,7 @@ fn verify_mir_function(
     }
     verify_take_protocol(function, fail)?;
     verify_call_borrow_regions(function, types, fail)?;
+    verify_closure_borrow_regions(function, fail)?;
     verify_format_borrow_regions(function, fail)?;
     Ok(())
 }
@@ -6540,6 +6840,153 @@ fn verify_call_borrow_regions(
         }
     }
     Ok(())
+}
+
+#[allow(clippy::too_many_lines)]
+fn verify_closure_borrow_regions(
+    function: &MirFunction,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut borrows = BTreeMap::<LocalId, (CallSiteId, Place)>::new();
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            if let Rvalue::ClosureBorrow {
+                call_site, carrier, ..
+            } = &instruction.value
+            {
+                let token = place_root_local(&instruction.destination)
+                    .ok_or_else(|| fail("MIR ClosureBorrow result is not a local".into()))?;
+                if borrows
+                    .insert(token, (*call_site, carrier.clone()))
+                    .is_some()
+                {
+                    return Err(fail("MIR ClosureBorrow token is defined twice".into()));
+                }
+            }
+        }
+    }
+    for (token, (call_site, carrier)) in &borrows {
+        let mut calls = 0;
+        let mut ends = 0;
+        for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+            let allowed = match &instruction.value {
+                Rvalue::ClosureCall {
+                    call_site: call,
+                    carrier: actual,
+                    borrow: Operand::Local(actual_token),
+                    ..
+                } if call == call_site && actual == carrier && actual_token == token => {
+                    calls += 1;
+                    true
+                }
+                Rvalue::EndClosureBorrow {
+                    call_site: call,
+                    carrier: actual,
+                    borrow: Operand::Local(actual_token),
+                } if call == call_site && actual == carrier && actual_token == token => {
+                    ends += 1;
+                    true
+                }
+                Rvalue::ClosureBorrow { .. } => true,
+                _ => false,
+            };
+            let uses = crate::ssa::rvalue_locals(function, &instruction.value)
+                .into_iter()
+                .filter(|local| local == token)
+                .count();
+            if uses != 0 && !allowed {
+                return Err(fail(
+                    "MIR ClosureBorrow token escapes its invocation".into(),
+                ));
+            }
+        }
+        if calls != 1 || ends == 0 {
+            return Err(fail(
+                "MIR ClosureBorrow requires one ClosureCall and EndClosureBorrow on every exit"
+                    .into(),
+            ));
+        }
+    }
+
+    let mut incoming = vec![None; function.blocks.len()];
+    incoming[function.entry.0 as usize] = Some(BTreeSet::<LocalId>::new());
+    let mut queue = VecDeque::from([function.entry]);
+    while let Some(block_id) = queue.pop_front() {
+        let block = &function.blocks[block_id.0 as usize];
+        let mut active = incoming[block_id.0 as usize].clone().expect("queued state");
+        for instruction in &block.instructions {
+            let protected = |place: &Place| {
+                borrows.iter().any(|(token, (_, carrier))| {
+                    active.contains(token) && place_root_local(carrier) == place_root_local(place)
+                })
+            };
+            let invalidates = match &instruction.value {
+                Rvalue::Move { source } | Rvalue::Drop { owner: source } => protected(source),
+                Rvalue::ReplaceOwned { destination, .. }
+                | Rvalue::ReplaceString { destination, .. } => protected(destination),
+                _ => false,
+            } || !matches!(instruction.value, Rvalue::EndClosureBorrow { .. })
+                && protected(&instruction.destination);
+            if invalidates {
+                return Err(fail(
+                    "MIR Closure carrier is moved, dropped, or replaced before EndClosureBorrow"
+                        .into(),
+                ));
+            }
+            match &instruction.value {
+                Rvalue::ClosureBorrow { .. } => {
+                    let token = place_root_local(&instruction.destination).unwrap();
+                    if !active.insert(token) {
+                        return Err(fail("MIR ClosureBorrow begins twice".into()));
+                    }
+                }
+                Rvalue::EndClosureBorrow {
+                    borrow: Operand::Local(token),
+                    ..
+                } if !active.remove(token) => {
+                    return Err(fail("MIR EndClosureBorrow closes no live borrow".into()));
+                }
+                _ => {}
+            }
+            if let Some(target) = instruction.unwind {
+                merge_closure_borrow_state(target, &active, &mut incoming, &mut queue, fail)?;
+            }
+        }
+        let terminator = block.terminator.as_ref().expect("verified MIR");
+        for target in targets(terminator) {
+            merge_closure_borrow_state(target, &active, &mut incoming, &mut queue, fail)?;
+        }
+        if matches!(
+            terminator,
+            Terminator::Return(_)
+                | Terminator::ResumeUnwind { .. }
+                | Terminator::ForwardUnwind { .. }
+        ) && !active.is_empty()
+        {
+            return Err(fail("MIR exit retains a live ClosureBorrow".into()));
+        }
+    }
+    Ok(())
+}
+
+fn merge_closure_borrow_state(
+    target: BlockId,
+    state: &BTreeSet<LocalId>,
+    incoming: &mut [Option<BTreeSet<LocalId>>],
+    queue: &mut VecDeque<BlockId>,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    match &incoming[target.0 as usize] {
+        Some(existing) if existing != state => {
+            Err(fail("MIR ClosureBorrow state disagrees at CFG join".into()))
+        }
+        Some(_) => Ok(()),
+        None => {
+            incoming[target.0 as usize] = Some(state.clone());
+            queue.push_back(target);
+            Ok(())
+        }
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -7263,7 +7710,7 @@ fn verify_finally_regions(
             let block = &function.blocks[block.0 as usize];
             if block.instructions.iter().any(|instruction| {
                 instruction.unwind.is_some()
-                    || matches!(instruction.value, Rvalue::Call { .. } | Rvalue::IndirectCall { .. })
+                    || matches!(instruction.value, Rvalue::Call { .. } | Rvalue::IndirectCall { .. } | Rvalue::ClosureCall { .. })
                     || matches!(instruction.value, Rvalue::Class(ref op) if matches!(op.as_ref(), ClassOp::DirectMethodCall { .. } | ClassOp::BaseMethodCall { .. } | ClassOp::VirtualCall { .. } | ClassOp::InterfaceCall { .. } | ClassOp::InitCall { .. } | ClassOp::BaseInit { .. }))
             }) || matches!(
                 block.terminator,
@@ -7321,6 +7768,11 @@ fn verify_ownership(
             entry[parameter.local.0 as usize] = MirOwnerState::Owned;
         }
     }
+    for capture in &function.capture_slots {
+        if !types.is_copy(capture.ty) {
+            entry[capture.local.0 as usize] = MirOwnerState::Owned;
+        }
+    }
     let mut incoming: Vec<Option<Vec<MirOwnerState>>> = vec![None; function.blocks.len()];
     let borrowed_nonowning_loads = function
         .blocks
@@ -7355,6 +7807,72 @@ fn verify_ownership(
         for instruction in &block.instructions {
             let destination = place_root_local(&instruction.destination);
             match &instruction.value {
+                Rvalue::ClosureCreate { captures, .. } => {
+                    for capture in captures {
+                        match capture.mode {
+                            CaptureMode::Copy => {}
+                            CaptureMode::Alias => {
+                                require_place_owner(
+                                    function,
+                                    types,
+                                    &state,
+                                    &capture.source,
+                                    fail,
+                                )?;
+                            }
+                            CaptureMode::Move => {
+                                let source =
+                                    place_root_local(&capture.source).ok_or_else(|| {
+                                        fail("MIR Closure Move capture lacks an owning root".into())
+                                    })?;
+                                consume_owner(
+                                    function,
+                                    types,
+                                    &mut state,
+                                    source,
+                                    "Closure Move capture",
+                                    fail,
+                                )?;
+                            }
+                        }
+                    }
+                    initialize_owner(function, types, &mut state, destination, fail)?;
+                }
+                Rvalue::ClosureAlias { source, .. } => {
+                    require_place_owner(function, types, &state, source, fail)?;
+                    initialize_owner(function, types, &mut state, destination, fail)?;
+                }
+                Rvalue::ClosureBorrow { carrier, .. }
+                | Rvalue::EndClosureBorrow { carrier, .. } => {
+                    require_place_owner(function, types, &state, carrier, fail)?;
+                }
+                Rvalue::ClosureCall {
+                    carrier,
+                    args,
+                    signature,
+                    ..
+                } => {
+                    require_place_owner(function, types, &state, carrier, fail)?;
+                    let (parameters, _) = types.closure_signature(*signature).ok_or_else(|| {
+                        fail("MIR ownership found invalid Closure signature".into())
+                    })?;
+                    for (argument, parameter) in args.iter().zip(parameters) {
+                        if !types.is_copy(*parameter) {
+                            let local = operand_local_id(argument).ok_or_else(|| {
+                                fail("owned ClosureCall argument is not materialized".into())
+                            })?;
+                            consume_owner(
+                                function,
+                                types,
+                                &mut state,
+                                local,
+                                "ClosureCall argument",
+                                fail,
+                            )?;
+                        }
+                    }
+                    initialize_owner(function, types, &mut state, destination, fail)?;
+                }
                 Rvalue::String(op) => {
                     for operand in op.operands() {
                         if let Operand::Local(local) = operand
@@ -7990,6 +8508,105 @@ fn validate_rvalue(
     initialized: &[bool],
 ) -> Result<(), String> {
     match value {
+        Rvalue::ClosureCreate {
+            recipe,
+            captures,
+            published_after,
+        } => {
+            if destination != recipe.signature
+                || types.closure_signature(destination).is_none()
+                || !*published_after
+                || !recipe.destroy_nounwind
+                || captures.is_empty()
+            {
+                return Err("MIR ClosureCreate recipe/publication invalid".into());
+            }
+            let mut seen = BTreeSet::new();
+            for (index, capture) in captures.iter().enumerate() {
+                validate_place_read(function, &capture.source, structs, types, initialized)?;
+                let source_ty = place_type(function, &capture.source, structs, types)?;
+                let source_local = place_root_local(&capture.source)
+                    .and_then(|local| function.locals.get(local.0 as usize));
+                let aliasable = source_ty == TypeId::STRING
+                    || types.is_object_owner(source_ty)
+                    || types.closure_signature(source_ty).is_some();
+                if capture.canonical_index as usize != index
+                    || capture.initialized_before as usize != index
+                    || capture.initialized_after as usize != index + 1
+                    || !seen.insert(capture.binding)
+                    || source_local.and_then(|local| local.binding) != Some(capture.binding)
+                    || source_ty != capture.source_type
+                    || capture.capture_type != source_ty
+                    || match capture.mode {
+                        CaptureMode::Copy => !types.guarantees_copy(source_ty),
+                        CaptureMode::Alias => !aliasable,
+                        CaptureMode::Move => types.guarantees_copy(source_ty) || aliasable,
+                    }
+                {
+                    return Err("MIR ClosureCreate capture acquisition invalid".into());
+                }
+            }
+        }
+        Rvalue::ClosureAlias { source, signature } => {
+            validate_place_read(function, source, structs, types, initialized)?;
+            if destination != *signature
+                || place_type(function, source, structs, types)? != *signature
+                || types.closure_signature(*signature).is_none()
+            {
+                return Err("MIR ClosureAlias contract invalid".into());
+            }
+        }
+        Rvalue::ClosureBorrow {
+            carrier, signature, ..
+        } => {
+            validate_place_read(function, carrier, structs, types, initialized)?;
+            if destination != TypeId::BOOL
+                || place_type(function, carrier, structs, types)? != *signature
+                || types.closure_signature(*signature).is_none()
+            {
+                return Err("MIR ClosureBorrow contract invalid".into());
+            }
+        }
+        Rvalue::ClosureCall {
+            carrier,
+            borrow,
+            args,
+            signature,
+            ..
+        } => {
+            validate_place_read(function, carrier, structs, types, initialized)?;
+            validate_operand(function, borrow, initialized)?;
+            let Some((parameters, result)) = types.closure_signature(*signature) else {
+                return Err("MIR ClosureCall signature is not Closure".into());
+            };
+            if destination != result
+                || place_type(function, carrier, structs, types)? != *signature
+                || operand_type(function, borrow)? != TypeId::BOOL
+                || args.len() != parameters.len()
+            {
+                return Err("MIR ClosureCall carrier/result/arity invalid".into());
+            }
+            for (argument, parameter) in args.iter().zip(parameters) {
+                validate_operand(function, argument, initialized)?;
+                if operand_type(function, argument)? != *parameter {
+                    return Err("MIR ClosureCall argument type mismatch".into());
+                }
+            }
+        }
+        Rvalue::EndClosureBorrow {
+            carrier, borrow, ..
+        } => {
+            validate_place_read(function, carrier, structs, types, initialized)?;
+            validate_operand(function, borrow, initialized)?;
+            if destination != TypeId::BOOL
+                || types
+                    .closure_signature(place_type(function, carrier, structs, types)?)
+                    .is_none()
+                || operand_type(function, borrow)? != TypeId::BOOL
+            {
+                return Err("MIR EndClosureBorrow contract invalid".into());
+            }
+        }
         Rvalue::NullableNull { nullable_type } => {
             if destination != *nullable_type || types.nullable_payload(*nullable_type).is_none() {
                 return Err("MIR nullable null type mismatch".into());
@@ -10716,10 +11333,12 @@ mod tests {
                 overload_disambiguator: None,
                 span: Span::new(0, 0),
             }],
+            closure_environments: vec![],
             functions: vec![MirFunction {
                 id: InstanceId(0),
                 function_id: FunctionId(0),
                 parameters: vec![],
+                capture_slots: vec![],
                 drop_flags: vec![],
                 return_type: TypeId::INT64,
                 locals: vec![],
