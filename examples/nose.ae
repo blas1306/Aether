@@ -1,7 +1,7 @@
-int resultado = 0;
+int main() {
+    var v = [1, 2, 3];
 
-for (i in 1:10000000) {
-    resultado += 1;
+    println(v);
+
+    return 0;
 }
-
-println(resultado);

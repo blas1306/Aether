@@ -44,6 +44,194 @@ public Matrix<T> identity<T: Storable + Copy + Zero + One>(usize size) {
     return result;
 }
 
+public T dot<T: Storable + Copy + Add + Mul + Zero>(ref Array<T> a, ref Array<T> b) {
+    shapeGuard(length(*a) == length(*b));
+    T result = 0;
+    usize i = 0;
+    while (i < length(*a)) {
+        result = result + (*a)[i] * (*b)[i];
+        i = i + 1;
+    }
+    return result;
+}
+
+public T dot<T: Storable + Copy + Add + Mul + Zero>(ref List<T> a, ref List<T> b) {
+    shapeGuard(length(*a) == length(*b));
+    T result = 0;
+    usize i = 0;
+    while (i < length(*a)) {
+        result = result + (*a)[i] * (*b)[i];
+        i = i + 1;
+    }
+    return result;
+}
+
+public T dot<T: Storable + Copy + Add + Mul + Zero>(ref Array<T> a, ref List<T> b) {
+    shapeGuard(length(*a) == length(*b));
+    T result = 0;
+    usize i = 0;
+    while (i < length(*a)) {
+        result = result + (*a)[i] * (*b)[i];
+        i = i + 1;
+    }
+    return result;
+}
+
+public T dot<T: Storable + Copy + Add + Mul + Zero>(ref List<T> a, ref Array<T> b) {
+    shapeGuard(length(*a) == length(*b));
+    T result = 0;
+    usize i = 0;
+    while (i < length(*a)) {
+        result = result + (*a)[i] * (*b)[i];
+        i = i + 1;
+    }
+    return result;
+}
+
+public T dot<T: Storable + Copy + Add + Mul + Zero>(
+    ref Vector<T,Row> a, ref Vector<T,Row> b) {
+    shapeGuard(dimension(*a) == dimension(*b));
+    T result = 0;
+    usize i = 1;
+    while (i <= dimension(*a)) {
+        result = result + (*a)[i] * (*b)[i];
+        i = i + 1;
+    }
+    return result;
+}
+
+public T dot<T: Storable + Copy + Add + Mul + Zero>(
+    ref Vector<T,Column> a, ref Vector<T,Column> b) {
+    shapeGuard(dimension(*a) == dimension(*b));
+    T result = 0;
+    usize i = 1;
+    while (i <= dimension(*a)) {
+        result = result + (*a)[i] * (*b)[i];
+        i = i + 1;
+    }
+    return result;
+}
+
+public T dot<T: Storable + Copy + Add + Mul + Zero>(
+    ref Vector<T,Row> a, ref Vector<T,Column> b) {
+    shapeGuard(dimension(*a) == dimension(*b));
+    T result = 0;
+    usize i = 1;
+    while (i <= dimension(*a)) {
+        result = result + (*a)[i] * (*b)[i];
+        i = i + 1;
+    }
+    return result;
+}
+
+public T dot<T: Storable + Copy + Add + Mul + Zero>(
+    ref Vector<T,Column> a, ref Vector<T,Row> b) {
+    shapeGuard(dimension(*a) == dimension(*b));
+    T result = 0;
+    usize i = 1;
+    while (i <= dimension(*a)) {
+        result = result + (*a)[i] * (*b)[i];
+        i = i + 1;
+    }
+    return result;
+}
+
+public T dot<T: Storable + Copy + Add + Mul + Zero>(
+    ref Array<T> a, ref Vector<T,Row> b) {
+    shapeGuard(length(*a) == dimension(*b));
+    T result = 0;
+    usize i = 0;
+    while (i < length(*a)) {
+        result = result + (*a)[i] * (*b)[i + 1];
+        i = i + 1;
+    }
+    return result;
+}
+
+public T dot<T: Storable + Copy + Add + Mul + Zero>(
+    ref Vector<T,Row> a, ref Array<T> b) {
+    shapeGuard(dimension(*a) == length(*b));
+    T result = 0;
+    usize i = 0;
+    while (i < length(*b)) {
+        result = result + (*a)[i + 1] * (*b)[i];
+        i = i + 1;
+    }
+    return result;
+}
+
+public T dot<T: Storable + Copy + Add + Mul + Zero>(
+    ref Array<T> a, ref Vector<T,Column> b) {
+    shapeGuard(length(*a) == dimension(*b));
+    T result = 0;
+    usize i = 0;
+    while (i < length(*a)) {
+        result = result + (*a)[i] * (*b)[i + 1];
+        i = i + 1;
+    }
+    return result;
+}
+
+public T dot<T: Storable + Copy + Add + Mul + Zero>(
+    ref Vector<T,Column> a, ref Array<T> b) {
+    shapeGuard(dimension(*a) == length(*b));
+    T result = 0;
+    usize i = 0;
+    while (i < length(*b)) {
+        result = result + (*a)[i + 1] * (*b)[i];
+        i = i + 1;
+    }
+    return result;
+}
+
+public T dot<T: Storable + Copy + Add + Mul + Zero>(
+    ref List<T> a, ref Vector<T,Row> b) {
+    shapeGuard(length(*a) == dimension(*b));
+    T result = 0;
+    usize i = 0;
+    while (i < length(*a)) {
+        result = result + (*a)[i] * (*b)[i + 1];
+        i = i + 1;
+    }
+    return result;
+}
+
+public T dot<T: Storable + Copy + Add + Mul + Zero>(
+    ref Vector<T,Row> a, ref List<T> b) {
+    shapeGuard(dimension(*a) == length(*b));
+    T result = 0;
+    usize i = 0;
+    while (i < length(*b)) {
+        result = result + (*a)[i + 1] * (*b)[i];
+        i = i + 1;
+    }
+    return result;
+}
+
+public T dot<T: Storable + Copy + Add + Mul + Zero>(
+    ref List<T> a, ref Vector<T,Column> b) {
+    shapeGuard(length(*a) == dimension(*b));
+    T result = 0;
+    usize i = 0;
+    while (i < length(*a)) {
+        result = result + (*a)[i] * (*b)[i + 1];
+        i = i + 1;
+    }
+    return result;
+}
+
+public T dot<T: Storable + Copy + Add + Mul + Zero>(
+    ref Vector<T,Column> a, ref List<T> b) {
+    shapeGuard(dimension(*a) == length(*b));
+    T result = 0;
+    usize i = 0;
+    while (i < length(*b)) {
+        result = result + (*a)[i + 1] * (*b)[i];
+        i = i + 1;
+    }
+    return result;
+}
+
 // An economic LU factorization with a 1-based row permutation.  The
 // permutation represents P directly: (P A)[i,j] = A[permutation[i],j].
 public struct LU<T: Storable> {

@@ -1,0 +1,9 @@
+package provider;
+
+public Closure<(int), int> make(int offset) {
+    return (int value) => value + offset;
+}
+
+public int invoke(Closure<(int), int> callback, int value) {
+    return callback(value);
+}

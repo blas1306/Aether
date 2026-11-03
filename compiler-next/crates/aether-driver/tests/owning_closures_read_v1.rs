@@ -1,6 +1,11 @@
-//! OWNING-CLOSURES-READ-V1 foundation and fail-closed qualification.
+//! OWNING-CLOSURES-READ-V1 productive LLVM/runtime qualification.
 
-use aether_driver::{Emit, OptimizationLevel, compile_source_with_optimization};
+use std::{fs, path::PathBuf, process::Command};
+
+use aether_driver::{
+    ClangToolchain, CompilationSession, Emit, OptimizationLevel, compile_session_with_optimization,
+    compile_source_with_optimization,
+};
 use aether_frontend::{
     AstCaptureMode, AstExprKind, AstStmtKind, AstTypeKind, CaptureMode, SourceFile,
     TargetProperties, TypeArena, TypeData, TypeId, analyze_bodies, collect_signatures, layout_of,
@@ -11,6 +16,52 @@ use aether_middle::{Rvalue, SsaOp, build_ssa, lower_hir, verify_mir, verify_ssa}
 fn declared(source: &str) -> aether_frontend::DeclaredProgram {
     let source = SourceFile::new("capture_analysis.ae", source);
     collect_signatures(parse(&source, lex(&source).unwrap()).unwrap()).unwrap()
+}
+
+fn run(source: &str, optimization: OptimizationLevel) -> (i32, String) {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let compilation = compile_source_with_optimization(
+        &SourceFile::new("owning_closures_runtime_v1.ae", source),
+        &[Emit::Llvm],
+        optimization,
+    )
+    .unwrap_or_else(|diagnostics| panic!("{diagnostics:#?}"));
+    let executable = std::env::temp_dir().join(format!(
+        "aether-owning-closures-{}-{}-{optimization:?}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    ClangToolchain::default()
+        .with_optimization(optimization)
+        .link_executable(&compilation.llvm, &executable)
+        .unwrap_or_else(|diagnostics| panic!("{diagnostics:#?}\n{}", compilation.llvm));
+    let status = Command::new(&executable)
+        .status()
+        .unwrap()
+        .code()
+        .unwrap_or(-1);
+    let _ = fs::remove_file(executable);
+    (status, compilation.llvm)
+}
+
+fn execute_llvm(llvm: &str, optimization: OptimizationLevel, label: &str) -> i32 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let executable = std::env::temp_dir().join(format!(
+        "aether-owning-closures-{label}-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    ClangToolchain::default()
+        .with_optimization(optimization)
+        .link_executable(llvm, &executable)
+        .unwrap();
+    let status = Command::new(&executable)
+        .status()
+        .unwrap()
+        .code()
+        .unwrap_or(-1);
+    let _ = fs::remove_file(executable);
+    status
 }
 
 #[test]
@@ -135,6 +186,17 @@ fn versioned_arc_helpers_use_the_v1_header_destroy_offset() {
         compilation
             .llvm
             .contains("call void %destroy_thunk(ptr %box)")
+    );
+    assert!(compilation.llvm.contains("%zero = icmp eq i64 %strong, 0"));
+    assert!(
+        compilation
+            .llvm
+            .contains("%overflow = icmp eq i64 %strong, -1")
+    );
+    assert!(
+        compilation
+            .llvm
+            .contains("%invalid = or i1 %zero, %overflow")
     );
 }
 
@@ -312,23 +374,166 @@ fn nested_lambda_propagates_transitive_capture_by_binding_identity() {
 }
 
 #[test]
-fn productive_boundary_is_explicit_after_capture_analysis() {
-    let source = SourceFile::new(
-        "capture_boundary.ae",
-        "int main(){int offset=1;var f=(int x)=>x+offset;return 0;}",
+fn productive_copy_capture_runs_and_has_exact_v1_header_at_o0_o2() {
+    let source = "int main(){int offset=1;var f=(int x)=>x+offset;return f(41);}";
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        let (status, llvm) = run(source, optimization);
+        assert_eq!(status, 42);
+        assert!(llvm.contains("getelementptr i8, ptr %closure_box"));
+        assert!(llvm.contains("i64 8"));
+        assert!(llvm.contains("getelementptr i8, ptr %box, i64 16"));
+        assert!(llvm.contains("getelementptr i8, ptr %box, i64 24"));
+        assert!(llvm.contains("nounwind"));
+    }
+}
+
+#[test]
+fn productive_lifecycle_alias_move_nested_and_exceptions_run_at_o0_o2() {
+    let cases = [
+        (
+            r"Closure<(int),int> make(){int n=4;return (int x)=>x+n;}
+int apply(Closure<(int),int> f,int x){return f(x);}
+int main(){var f=make();f=f;return apply(f,38);}",
+            42,
+        ),
+        (
+            r#"int main(){int n=1;string label="abcd";var f=(int a,int b) capture(alias label)=>a+b+n;n=99;return f(20,21);}"#,
+            42,
+        ),
+        (
+            r"int main(){int n=1;var outer=(int x)=>(int y)=>x+y+n;var inner=outer(20);return inner(21);}",
+            42,
+        ),
+        (
+            r"class C{int n;public init(int n){this.n=n;}public int get(){return n;}}int main(){C c=C(1);var f=() capture(alias c)=>42;return f();}",
+            42,
+        ),
+        (
+            r"interface I{int get();}class C:I{int n;public init(int n){this.n=n;}public int get(){return n;}}int main(){I i=C(1);var f=() capture(alias i)=>42;return f();}",
+            42,
+        ),
+        (
+            r"int main(){int n=1;var f=(int x)=>x+n;n=20;return f(10)+f(10);}",
+            22,
+        ),
+        (
+            r"int main(){int n=42;var f=()=>n;if(false){return f();}return 42;}",
+            42,
+        ),
+        (
+            r"int main(){Matrix<int> data=[1,2;3,4];var f=() capture(move data)=>42;return f();}",
+            42,
+        ),
+        (
+            r"open class Problem:Exception{public init(){}}
+int fail(){throw Problem();}
+int main(){int n=1;var f=()=>fail()+n;try{return f();}catch(Problem p){return 42;}}",
+            42,
+        ),
+    ];
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        for (source, expected) in cases {
+            let (status, llvm) = run(source, optimization);
+            assert_eq!(status, expected, "{optimization:?}\n{source}\n{llvm}");
+        }
+    }
+}
+
+#[test]
+fn closure_pass_and_return_cross_source_modules_at_o0_o2() {
+    let entry = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/modules/owning_closures_read_v1/main.ae");
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        let compilation = compile_session_with_optimization(
+            CompilationSession::discover(&entry).unwrap(),
+            &[Emit::Llvm],
+            optimization,
+        )
+        .unwrap();
+        assert_eq!(
+            execute_llvm(&compilation.llvm, optimization, "cross-module"),
+            42
+        );
+        assert!(compilation.llvm.contains("__aether_closure_invoke_v1_"));
+        assert!(compilation.llvm.contains("__aether_closure_destroy_v1_"));
+    }
+}
+
+#[test]
+fn arc_allocation_and_destroy_counters_are_exact_for_alias_argument() {
+    let source = "int apply(Closure<(int),int> f){return f(1);} int main(){int n=1;var f=(int x)=>x+n;int value=apply(f);return value-2;}";
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        let compilation = compile_source_with_optimization(
+            &SourceFile::new("closure_counters.ae", source),
+            &[Emit::Llvm],
+            optimization,
+        )
+        .unwrap();
+        let checks = r"  %closure_retains = load i64, ptr @aether_closure_retain_count
+  %closure_releases = load i64, ptr @aether_closure_release_count
+  %closure_destroys = load i64, ptr @aether_closure_destroy_count
+  %heap_allocs = load i64, ptr @aether_heap_alloc_count
+  %heap_frees = load i64, ptr @aether_heap_free_count
+  %retain_ok = icmp eq i64 %closure_retains, 1
+  %release_ok = icmp eq i64 %closure_releases, 2
+  %destroy_ok = icmp eq i64 %closure_destroys, 1
+  %alloc_ok = icmp eq i64 %heap_allocs, 1
+  %free_ok = icmp eq i64 %heap_frees, 1
+  %arc_ok0 = and i1 %retain_ok, %release_ok
+  %arc_ok1 = and i1 %destroy_ok, %alloc_ok
+  %arc_ok2 = and i1 %arc_ok0, %arc_ok1
+  %all_counts_ok = and i1 %arc_ok2, %free_ok
+  %checked_status = select i1 %all_counts_ok, i32 %process_status, i32 99
+  ret i32 %checked_status";
+        let instrumented = compilation
+            .llvm
+            .replace("  ret i32 %process_status", checks);
+        assert_ne!(instrumented, compilation.llvm);
+        assert_eq!(
+            execute_llvm(&instrumented, optimization, "counters"),
+            0,
+            "counter contract at {optimization:?}\n{}",
+            compilation.llvm
+        );
+    }
+}
+
+#[test]
+fn representative_mixed_capture_is_clean_under_address_sanitizer() {
+    let source = r#"int main(){string label="owner";Matrix<int> data=[1,2;3,4];int n=40;var f=(int x) capture(alias label, move data)=>x+n;return f(2);}"#;
+    let compilation = compile_source_with_optimization(
+        &SourceFile::new("closure_asan.ae", source),
+        &[Emit::Llvm],
+        OptimizationLevel::O0,
+    )
+    .unwrap();
+    let stem = std::env::temp_dir().join(format!("aether-closure-asan-{}", std::process::id()));
+    let llvm = stem.with_extension("ll");
+    let executable = stem.with_extension("out");
+    fs::write(&llvm, &compilation.llvm).unwrap();
+    let linked = Command::new("clang")
+        .args(["-O0", "-fsanitize=address"])
+        .arg(&llvm)
+        .arg("-o")
+        .arg(&executable)
+        .status()
+        .unwrap();
+    assert!(linked.success());
+    let output = Command::new(&executable)
+        // LeakSanitizer is unavailable under the sandbox's ptrace policy;
+        // Aether's allocation-balance gate still checks the leak count.
+        .env("ASAN_OPTIONS", "detect_leaks=0:halt_on_error=1")
+        .output()
+        .unwrap();
+    let _ = fs::remove_file(llvm);
+    let _ = fs::remove_file(executable);
+    assert_eq!(
+        output.status.code(),
+        Some(42),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
     );
-    let diagnostics =
-        compile_source_with_optimization(&source, &[Emit::Hir], OptimizationLevel::O0).unwrap_err();
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "E0376")
-    );
-    assert!(
-        !diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "E0359")
-    );
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("AddressSanitizer"));
 }
 
 #[test]

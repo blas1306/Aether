@@ -1,5 +1,35 @@
 # Aether — OWNING-CLOSURES-READ-V1 — ABI Scope Review Report
 
+## Actualización CLOSURE-LLVM-RUNTIME-V1 — PARTIAL (3 de noviembre de 2026)
+
+El backend/runtime productivo quedó implementado y calificado. `ClosureCreate`,
+`ClosureAlias`, `ClosureBorrow`, `ClosureCall`, `EndClosureBorrow`, Move y Drop
+se emiten desde `VerifiedSsa` mediante `ClosureABI-v1`: header 0/W/2W, payload
+alineado desde `align_up(3W, payload_alignment)`, invoke/destroy thunks privados,
+ARC versionado y reachability de bodies sintéticos. Se retiró `E0376`.
+
+La suite focal ejecuta consumers reales O0/O2, comprueba resultado observable,
+contadores alloc/free/retain/release/destroy, captures Copy/Alias/Move,
+replacement/return/nesting, exception cleanup, fuentes distintas y ASan. El
+resultado focal final es 25/25 PASS. Anonymous Functions (5/5), Function Values
+(8/8) y Exceptions V1–V4 (6/6, 8/8, 8/8, 7/7) también finalizaron PASS.
+
+La evidencia, decisiones de layout y lista exacta de archivos están en
+`CLOSURE_LLVM_RUNTIME_V1_REPORT.md`. La compatibilidad entre artefactos
+independientes permanece OUT OF SCOPE bajo la enmienda ABI; no se presenta la
+compilación conjunta como prueba de esa capacidad.
+
+Fmt, Clippy y `git diff --check` terminaron con código 0. El workspace serial
+completo llegó al último test de registry, pero éste falló: el consumer de
+`linearAlgebra` modificado concurrentemente salió 88 en O0. Todos los grupos
+anteriores finalizaron PASS, incluido `vertical` 220/220; el resultado global
+no se presenta como PASS y no se revirtieron los cambios ajenos.
+
+Clasificación conservadora: **CLOSURE-LLVM-RUNTIME-V1 PARTIAL** y
+**OWNING-CLOSURES-READ-V1 PARTIAL** hasta obtener un rerun verde del workspace.
+La implementación productiva y la qualification focal de Closure están
+completas; el único gate abierto registrado es la regresión externa anterior.
+
 ## Actualización CLOSURE-OWNERSHIP-IR-V1 — CLOSED (2 de noviembre de 2026)
 
 El subvertical de ownership IR quedó implementado y calificado. Las closures

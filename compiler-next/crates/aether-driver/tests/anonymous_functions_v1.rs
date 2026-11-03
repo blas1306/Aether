@@ -114,11 +114,15 @@ int main(){int value=99;var f=(int value)=>value+1;return f(41);}
         assert_eq!(status(shadowing, optimization), 42);
     }
 
-    let capture = diagnostics("int main(){int n=4;var f=(int x)=>x+n;return f(1);}");
-    assert!(
-        capture.contains("E0376 capturing Closure reached VerifiedSsa"),
-        "{capture}"
-    );
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        assert_eq!(
+            status(
+                "int main(){int n=4;var f=(int x)=>x+n;return f(1);}",
+                optimization
+            ),
+            5
+        );
+    }
 
     let signature = diagnostics("int main(){Function<(double),double> f=(int x)=>x;return 0;}");
     assert!(

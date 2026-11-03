@@ -1,0 +1,12 @@
+package main;
+
+import provider;
+
+public Closure<(int), int> relay(Closure<(int), int> callback) {
+    return callback;
+}
+
+public int main() {
+    var callback = relay(provider.make(40));
+    return provider.invoke(callback, 1) + callback(1) - 40;
+}

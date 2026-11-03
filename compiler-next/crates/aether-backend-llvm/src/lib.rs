@@ -11,13 +11,14 @@ mod strings;
 mod text;
 mod utf8;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
 
 use aether_frontend::{
-    CastKind, CoercionKind, CoreSymbol, EnumInfo, FieldId, FloatType, FloatValue,
-    FunctionInstanceInfo, IndexSemantics, IntegerType, MatchMode, ModuleInfo, StructInfo,
-    Substitution, TargetProperties, TypeArena, TypeData, TypeId, layout_of,
+    CaptureMode, CastKind, ClosureEnvironmentInfo, CoercionKind, CoreSymbol, EnumInfo, FieldId,
+    FloatType, FloatValue, FunctionId, FunctionInstanceInfo, IndexSemantics, IntegerType, LambdaId,
+    MatchMode, ModuleInfo, StructInfo, Substitution, TargetProperties, TypeArena, TypeData, TypeId,
+    layout_of,
 };
 use aether_middle::{
     BinaryOp, BlockId, SliceSelector, SsaFunction, SsaOp, SsaOperand, SsaPlace, SsaPlaceBase,
@@ -65,11 +66,26 @@ impl Backend for LlvmTextBackend {
 #[allow(clippy::too_many_lines)]
 pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let program = ssa.as_ssa();
-    if !program.closure_environments.is_empty() {
-        return "; E0376 capturing Closure reached VerifiedSsa; productive LLVM closure lowering is not implemented\n"
-            .into();
-    }
+    assert_eq!(
+        target.properties.pointer_width, 64,
+        "ClosureABI-v1 requires the admitted 64-bit pointer/word target"
+    );
     let types = &program.types;
+    let closure_layouts = build_closure_layouts(
+        &program.closure_environments,
+        &program.functions,
+        &program.signatures,
+        &program.modules,
+        &program.structs,
+        &program.enums,
+        types,
+        target,
+    );
+    let closure_targets = program
+        .closure_environments
+        .iter()
+        .map(|environment| environment.target)
+        .collect::<BTreeSet<_>>();
     let reachable = (program.modules.len() > 1
         || !types.classes().is_empty()
         || !types.interfaces().is_empty())
@@ -78,7 +94,9 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let has_exception_routes = program
         .functions
         .iter()
-        .filter(|function| core_reachable.contains(&function.id))
+        .filter(|function| {
+            core_reachable.contains(&function.id) || closure_targets.contains(&function.function_id)
+        })
         .any(|function| !function.exception_events.is_empty());
     let reachable_io = program
         .functions
@@ -492,16 +510,28 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         emit_list_helpers(&mut output, types, *element, layout.size, layout.align);
     }
 
+    for layout in closure_layouts.values() {
+        emit_closure_thunks(
+            &mut output,
+            layout,
+            &program.functions,
+            &program.signatures,
+            types,
+            &program.structs,
+            &program.enums,
+        );
+    }
+
     for function in &program.functions {
-        if reachable
-            .as_ref()
-            .is_some_and(|r| !r.contains(&function.id))
-            || (!core_reachable.contains(&function.id)
+        if closure_layouts.is_empty()
+            && (reachable.as_ref().is_some_and(|r| {
+                !r.contains(&function.id) && !closure_targets.contains(&function.function_id)
+            }) || (!core_reachable.contains(&function.id)
                 && function
                     .blocks
                     .iter()
                     .flat_map(|block| &block.instructions)
-                    .any(|instruction| matches!(instruction.op, SsaOp::Core(_))))
+                    .any(|instruction| matches!(instruction.op, SsaOp::Core(_)))))
         {
             continue;
         }
@@ -559,6 +589,10 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             &program.structs,
             &program.enums,
             types,
+            &closure_layouts,
+            closure_layouts
+                .values()
+                .find(|layout| layout.target == function.function_id),
         );
     }
 
@@ -662,6 +696,199 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     }
     writeln!(output, "}}").unwrap();
     output
+}
+
+#[derive(Clone, Debug)]
+struct ClosureFieldLayout {
+    offset: u64,
+    ty: TypeId,
+}
+
+#[derive(Clone, Debug)]
+struct ClosureCodegenLayout {
+    target: FunctionId,
+    invoke: String,
+    destroy: String,
+    body: String,
+    size: u64,
+    align: u64,
+    fields: Vec<ClosureFieldLayout>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_closure_layouts(
+    environments: &[ClosureEnvironmentInfo],
+    functions: &[SsaFunction],
+    signatures: &[FunctionInstanceInfo],
+    modules: &[ModuleInfo],
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+    types: &TypeArena,
+    target: &TargetDescriptor,
+) -> BTreeMap<LambdaId, ClosureCodegenLayout> {
+    environments
+        .iter()
+        .map(|environment| {
+            let function = functions
+                .iter()
+                .find(|function| function.function_id == environment.target)
+                .expect("verified Closure target function");
+            let signature = &signatures[function.id.0 as usize];
+            let body = bootstrap_symbol(signature, modules, structs, enums, types);
+            let mut payload_align = 1_u64;
+            let mut field_layouts = Vec::with_capacity(environment.captures.len());
+            let layouts = environment
+                .captures
+                .iter()
+                .map(|capture| {
+                    layout_of(
+                        types,
+                        capture.capture_type,
+                        target.properties,
+                        structs,
+                        enums,
+                    )
+                    .expect("verified Closure capture has concrete layout")
+                })
+                .collect::<Vec<_>>();
+            for layout in &layouts {
+                payload_align = payload_align.max(layout.align);
+            }
+            let header_size = 3_u64.checked_mul(8).expect("Closure header size");
+            let mut cursor = align_up_checked(header_size, payload_align);
+            for (capture, layout) in environment.captures.iter().zip(layouts) {
+                cursor = align_up_checked(cursor, layout.align);
+                field_layouts.push(ClosureFieldLayout {
+                    offset: cursor,
+                    ty: capture.capture_type,
+                });
+                cursor = cursor
+                    .checked_add(layout.size)
+                    .expect("Closure environment size overflow");
+            }
+            let allocation_align = 8_u64.max(payload_align);
+            let size = align_up_checked(cursor, allocation_align);
+            let identity = body.trim_start_matches("__aether_v2_");
+            (
+                environment.lambda,
+                ClosureCodegenLayout {
+                    target: environment.target,
+                    invoke: format!("__aether_closure_invoke_v1_{identity}"),
+                    destroy: format!("__aether_closure_destroy_v1_{identity}"),
+                    body,
+                    size,
+                    align: allocation_align,
+                    fields: field_layouts,
+                },
+            )
+        })
+        .collect()
+}
+
+fn align_up_checked(value: u64, align: u64) -> u64 {
+    assert!(
+        align.is_power_of_two(),
+        "verified type alignment is a power of two"
+    );
+    value
+        .checked_add(align - 1)
+        .map(|sum| sum & !(align - 1))
+        .expect("Closure layout overflow")
+}
+
+fn emit_closure_thunks(
+    output: &mut String,
+    layout: &ClosureCodegenLayout,
+    functions: &[SsaFunction],
+    signatures: &[FunctionInstanceInfo],
+    types: &TypeArena,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+) {
+    let function = functions
+        .iter()
+        .find(|function| function.function_id == layout.target)
+        .expect("verified Closure thunk target");
+    let signature = &signatures[function.id.0 as usize];
+    let invoke_parameters = signature
+        .parameters
+        .iter()
+        .enumerate()
+        .map(|(index, parameter)| format!("{} %arg{index}", llvm_type(types, parameter.ty)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    writeln!(
+        output,
+        "define internal {} @{}(ptr %box{}) {{",
+        llvm_type(types, signature.return_type),
+        layout.invoke,
+        if invoke_parameters.is_empty() {
+            String::new()
+        } else {
+            format!(", {invoke_parameters}")
+        }
+    )
+    .unwrap();
+    writeln!(output, "entry:").unwrap();
+    for (index, field) in layout.fields.iter().enumerate() {
+        writeln!(
+            output,
+            "  %capture_slot{index} = getelementptr i8, ptr %box, i64 {}\n  %capture{index} = load {}, ptr %capture_slot{index}",
+            field.offset,
+            llvm_type(types, field.ty)
+        )
+        .unwrap();
+    }
+    let mut body_arguments = signature
+        .parameters
+        .iter()
+        .enumerate()
+        .map(|(index, parameter)| format!("{} %arg{index}", llvm_type(types, parameter.ty)))
+        .collect::<Vec<_>>();
+    body_arguments.extend(
+        layout
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(index, field)| format!("{} %capture{index}", llvm_type(types, field.ty))),
+    );
+    writeln!(
+        output,
+        "  %result = call {} @{}({})\n  ret {} %result\n}}\n",
+        llvm_type(types, signature.return_type),
+        layout.body,
+        body_arguments.join(", "),
+        llvm_type(types, signature.return_type)
+    )
+    .unwrap();
+
+    writeln!(
+        output,
+        "define internal void @{}(ptr %box) nounwind {{\nentry:",
+        layout.destroy
+    )
+    .unwrap();
+    for (index, field) in layout.fields.iter().enumerate().rev() {
+        if !types.needs_drop(field.ty) {
+            continue;
+        }
+        writeln!(
+            output,
+            "  %destroy_slot{index} = getelementptr i8, ptr %box, i64 {}\n  %destroy_value{index} = load {}, ptr %destroy_slot{index}\n  call void @aether_drop_{}({} %destroy_value{index})",
+            field.offset,
+            llvm_type(types, field.ty),
+            mangle_type(types, field.ty),
+            llvm_type(types, field.ty)
+        )
+        .unwrap();
+    }
+    writeln!(
+        output,
+        "  %destroy_events = load i64, ptr @aether_closure_destroy_count\n  %destroy_events_next = add i64 %destroy_events, 1\n  store i64 %destroy_events_next, ptr @aether_closure_destroy_count\n  call void @aether_free(ptr %box, i64 {}, i64 {})\n  ret void\n}}\n",
+        layout.size, layout.align
+    )
+    .unwrap();
+    let _ = (structs, enums);
 }
 
 #[allow(clippy::too_many_lines)]
@@ -835,14 +1062,22 @@ fn emit_runtime_boundary(output: &mut String, has_closure_runtime: bool) {
     );
     if has_closure_runtime {
         output.push_str(
-            r"define ptr @aether_closure_retain_v1(ptr %box) nounwind {
+            r"@aether_closure_retain_count = internal global i64 0
+@aether_closure_release_count = internal global i64 0
+@aether_closure_destroy_count = internal global i64 0
+define ptr @aether_closure_retain_v1(ptr %box) nounwind {
 entry:
   %strong = load i64, ptr %box
+  %zero = icmp eq i64 %strong, 0
   %overflow = icmp eq i64 %strong, -1
-  br i1 %overflow, label %trap, label %retain
+  %invalid = or i1 %zero, %overflow
+  br i1 %invalid, label %trap, label %retain
 retain:
   %next = add i64 %strong, 1
   store i64 %next, ptr %box
+  %events = load i64, ptr @aether_closure_retain_count
+  %events_next = add i64 %events, 1
+  store i64 %events_next, ptr @aether_closure_retain_count
   ret ptr %box
 trap:
   call void @llvm.trap()
@@ -854,6 +1089,9 @@ entry:
   %invalid = icmp eq i64 %strong, 0
   br i1 %invalid, label %trap, label %release
 release:
+  %events = load i64, ptr @aether_closure_release_count
+  %events_next = add i64 %events, 1
+  store i64 %events_next, ptr @aether_closure_release_count
   %last = icmp eq i64 %strong, 1
   br i1 %last, label %destroy, label %decrement
 decrement:
@@ -1538,13 +1776,25 @@ fn emit_function(
     structs: &[StructInfo],
     enums: &[EnumInfo],
     types: &TypeArena,
+    closure_layouts: &BTreeMap<LambdaId, ClosureCodegenLayout>,
+    closure_layout: Option<&ClosureCodegenLayout>,
 ) {
-    let parameters = function
+    let mut parameters = function
         .parameters
         .iter()
         .map(|parameter| format!("{} %v{}", llvm_type(types, parameter.ty), parameter.value.0))
-        .collect::<Vec<_>>()
-        .join(", ");
+        .collect::<Vec<_>>();
+    if closure_layout.is_some() {
+        parameters.extend(
+            function
+                .capture_slots
+                .iter()
+                .map(|capture| format!("{} %v{}", llvm_type(types, capture.ty), capture.value.0)),
+        );
+    } else {
+        debug_assert_eq!(function.capture_slots.len(), 0);
+    }
+    let parameters = parameters.join(", ");
     writeln!(
         output,
         "define {} @{}({parameters}){} {{",
@@ -1674,12 +1924,131 @@ fn emit_function(
         }
         for instruction in &block.instructions {
             match &instruction.op {
-                SsaOp::ClosureCreate { .. }
-                | SsaOp::ClosureAlias { .. }
-                | SsaOp::ClosureBorrow { .. }
-                | SsaOp::ClosureCall { .. }
-                | SsaOp::EndClosureBorrow { .. } => {
-                    unreachable!("Closure LLVM lowering is guarded by the E0376 backend boundary")
+                SsaOp::ClosureCreate {
+                    recipe, captures, ..
+                } => {
+                    let layout = &closure_layouts[&recipe.environment];
+                    writeln!(
+                        output,
+                        "  %closure_box{} = call ptr @aether_alloc(i64 {}, i64 {})",
+                        instruction.result.0, layout.size, layout.align
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  store i64 1, ptr %closure_box{}",
+                        instruction.result.0
+                    )
+                    .unwrap();
+                    writeln!(output, "  %closure_invoke_slot{} = getelementptr i8, ptr %closure_box{}, i64 8\n  store ptr @{}, ptr %closure_invoke_slot{}", instruction.result.0, instruction.result.0, layout.invoke, instruction.result.0).unwrap();
+                    writeln!(output, "  %closure_destroy_slot{} = getelementptr i8, ptr %closure_box{}, i64 16\n  store ptr @{}, ptr %closure_destroy_slot{}", instruction.result.0, instruction.result.0, layout.destroy, instruction.result.0).unwrap();
+                    for (index, (capture, field)) in captures.iter().zip(&layout.fields).enumerate()
+                    {
+                        let name_id = 0x4000_0000_u32
+                            .checked_add(instruction.result.0.saturating_mul(1024))
+                            .and_then(|base| {
+                                base.checked_add(
+                                    u32::try_from(index)
+                                        .expect("Closure capture index fits in u32"),
+                                )
+                            })
+                            .expect("Closure capture temporary identity overflow");
+                        let (value, ty) = emit_place_value(
+                            output,
+                            function,
+                            &capture.source,
+                            name_id,
+                            types,
+                            structs,
+                        );
+                        debug_assert_eq!(ty, field.ty);
+                        if capture.mode == CaptureMode::Alias {
+                            emit_retain_value(
+                                output,
+                                &value,
+                                ty,
+                                &format!("capture{index}"),
+                                types,
+                            );
+                        }
+                        writeln!(output, "  %closure_field{}_{} = getelementptr i8, ptr %closure_box{}, i64 {}\n  store {} {value}, ptr %closure_field{}_{}", instruction.result.0, index, instruction.result.0, field.offset, llvm_type(types, ty), instruction.result.0, index).unwrap();
+                    }
+                    writeln!(output, "  %v{} = getelementptr i8, ptr %closure_box{}, i64 0 ; publish fully initialized Closure owner", instruction.result.0, instruction.result.0).unwrap();
+                }
+                SsaOp::ClosureAlias { source, .. } => {
+                    let (value, ty) = emit_place_value(
+                        output,
+                        function,
+                        source,
+                        instruction.result.0,
+                        types,
+                        structs,
+                    );
+                    debug_assert!(types.closure_signature(ty).is_some());
+                    writeln!(
+                        output,
+                        "  %v{} = call ptr @aether_closure_retain_v1(ptr {value})",
+                        instruction.result.0
+                    )
+                    .unwrap();
+                }
+                SsaOp::ClosureBorrow { .. } => {
+                    writeln!(output, "  %v{} = select i1 true, i1 true, i1 true ; ClosureBorrow keeps the verified carrier owner live", instruction.result.0).unwrap();
+                }
+                SsaOp::ClosureCall {
+                    carrier,
+                    args,
+                    signature,
+                    ..
+                } => {
+                    let (box_value, box_ty) = emit_place_value(
+                        output,
+                        function,
+                        carrier,
+                        instruction.result.0,
+                        types,
+                        structs,
+                    );
+                    debug_assert_eq!(box_ty, *signature);
+                    let (parameters, result) = types
+                        .closure_signature(*signature)
+                        .expect("verified ClosureCall signature");
+                    let mut arguments = vec![format!("ptr {box_value}")];
+                    arguments.extend(args.iter().zip(parameters).map(|(argument, parameter)| {
+                        format!(
+                            "{} {}",
+                            llvm_type(types, *parameter),
+                            llvm_operand(argument)
+                        )
+                    }));
+                    writeln!(output, "  %closure_invoke_slot{} = getelementptr i8, ptr {box_value}, i64 8\n  %closure_invoke{} = load ptr, ptr %closure_invoke_slot{}", instruction.result.0, instruction.result.0, instruction.result.0).unwrap();
+                    if let Some(unwind) = instruction.unwind {
+                        writeln!(output, "  %v{} = invoke {} %closure_invoke{}({}) to label %{} unwind label %{}", instruction.result.0, llvm_type(types, result), instruction.result.0, arguments.join(", "), continuation_label(block.id, instruction.result.0), block_label(unwind)).unwrap();
+                        writeln!(
+                            output,
+                            "{}:",
+                            continuation_label(block.id, instruction.result.0)
+                        )
+                        .unwrap();
+                    } else {
+                        writeln!(
+                            output,
+                            "  %v{} = call {} %closure_invoke{}({})",
+                            instruction.result.0,
+                            llvm_type(types, result),
+                            instruction.result.0,
+                            arguments.join(", ")
+                        )
+                        .unwrap();
+                    }
+                }
+                SsaOp::EndClosureBorrow { .. } => {
+                    writeln!(
+                        output,
+                        "  %v{} = select i1 true, i1 true, i1 true ; EndClosureBorrow",
+                        instruction.result.0
+                    )
+                    .unwrap();
                 }
                 SsaOp::Class(op) => classes::emit_op(
                     output,
@@ -2767,6 +3136,18 @@ fn emit_function(
                     }
                 }
                 SsaOp::Drop { owner } => {
+                    if matches!(
+                        &owner.base,
+                        SsaPlaceBase::Value(SsaOperand::Value(value))
+                            if owner.projections.is_empty()
+                                && function
+                                    .capture_slots
+                                    .iter()
+                                    .any(|capture| capture.value == *value)
+                    ) {
+                        writeln!(output, "  %v{} = select i1 true, i1 true, i1 true ; read-only Closure capture slot is destroyed only by the destroy thunk", instruction.result.0).unwrap();
+                        continue;
+                    }
                     if function
                         .oop_optimizations
                         .arc
@@ -5361,6 +5742,38 @@ fn emit_drop_value(
     .unwrap();
 }
 
+fn emit_retain_value(
+    output: &mut String,
+    value: &str,
+    ty: TypeId,
+    prefix: &str,
+    types: &TypeArena,
+) {
+    match types.get(ty).expect("verified retained type") {
+        TypeData::String => {
+            writeln!(output, "  call void @aether_string_retain(ptr {value})").unwrap();
+        }
+        TypeData::Class(_) | TypeData::ClassToken { .. } => {
+            writeln!(output, "  call void @aether_object_retain(ptr {value})").unwrap();
+        }
+        TypeData::Interface(_) | TypeData::InterfaceKeepalive { .. } => {
+            writeln!(
+                output,
+                "  %{prefix}_object = extractvalue {{ ptr, ptr }} {value}, 0\n  call void @aether_object_retain(ptr %{prefix}_object)"
+            )
+            .unwrap();
+        }
+        TypeData::Closure { .. } => {
+            writeln!(
+                output,
+                "  %{prefix}_retained = call ptr @aether_closure_retain_v1(ptr {value})"
+            )
+            .unwrap();
+        }
+        _ => unreachable!("verified Alias capture has an intrinsic retain operation"),
+    }
+}
+
 fn ssa_backend_place_type(
     function: &SsaFunction,
     place: &SsaPlace,
@@ -5468,6 +5881,13 @@ fn operand_type(function: &SsaFunction, operand: &SsaOperand) -> TypeId {
             .iter()
             .find(|parameter| parameter.value == *value)
             .map(|parameter| parameter.ty)
+            .or_else(|| {
+                function
+                    .capture_slots
+                    .iter()
+                    .find(|capture| capture.value == *value)
+                    .map(|capture| capture.ty)
+            })
             .or_else(|| {
                 function.blocks.iter().find_map(|block| {
                     block
