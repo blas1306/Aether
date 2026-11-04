@@ -141,6 +141,26 @@ impl fmt::Display for Capability {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TypeArgsId(pub u32);
 
+/// Canonical identity of one structural callable signature. Signatures are
+/// arena-owned metadata and deliberately are not value types.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CallableSignatureId(pub u32);
+
+/// Exact invariant callable signature used by parameterized requirements.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CallableSignature {
+    pub parameters: TypeArgsId,
+    pub result: TypeId,
+}
+
+/// A generic requirement is either one of the existing atomic capabilities or
+/// an exact structural callable signature.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum GenericRequirement {
+    Atomic(Capability),
+    Invocable(CallableSignatureId),
+}
+
 /// Session-local identity of a concrete callable monomorphization.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct InstanceId(pub u32);
@@ -662,10 +682,13 @@ pub struct TypeArena {
     ids: HashMap<TypeData, TypeId>,
     argument_lists: Vec<Vec<TypeId>>,
     argument_ids: HashMap<Vec<TypeId>, TypeArgsId>,
+    callable_signatures: Vec<CallableSignature>,
+    callable_signature_ids: HashMap<CallableSignature, CallableSignatureId>,
     concrete_layouts: HashMap<TypeId, (u64, u64)>,
     struct_properties: HashMap<StructId, AggregateProperties>,
     enum_properties: HashMap<EnumId, AggregateProperties>,
     generic_capabilities: HashMap<GenericParamId, BTreeSet<Capability>>,
+    generic_requirements: HashMap<GenericParamId, BTreeSet<GenericRequirement>>,
     generic_names: HashMap<GenericParamId, String>,
     property_cache: RwLock<HashMap<TypeId, TypeProperties>>,
     semantic_timings: SemanticTimings,
@@ -682,10 +705,13 @@ impl Clone for TypeArena {
             ids: self.ids.clone(),
             argument_lists: self.argument_lists.clone(),
             argument_ids: self.argument_ids.clone(),
+            callable_signatures: self.callable_signatures.clone(),
+            callable_signature_ids: self.callable_signature_ids.clone(),
             concrete_layouts: self.concrete_layouts.clone(),
             struct_properties: self.struct_properties.clone(),
             enum_properties: self.enum_properties.clone(),
             generic_capabilities: self.generic_capabilities.clone(),
+            generic_requirements: self.generic_requirements.clone(),
             generic_names: self.generic_names.clone(),
             semantic_timings: SemanticTimings(RwLock::new(self.semantic_timings_ns())),
             property_cache: RwLock::new(
@@ -708,10 +734,13 @@ impl PartialEq for TypeArena {
             && self.ids == other.ids
             && self.argument_lists == other.argument_lists
             && self.argument_ids == other.argument_ids
+            && self.callable_signatures == other.callable_signatures
+            && self.callable_signature_ids == other.callable_signature_ids
             && self.concrete_layouts == other.concrete_layouts
             && self.struct_properties == other.struct_properties
             && self.enum_properties == other.enum_properties
             && self.generic_capabilities == other.generic_capabilities
+            && self.generic_requirements == other.generic_requirements
             && self.generic_names == other.generic_names
     }
 }
@@ -881,10 +910,13 @@ impl TypeArena {
             ids: HashMap::new(),
             argument_lists: Vec::new(),
             argument_ids: HashMap::new(),
+            callable_signatures: Vec::new(),
+            callable_signature_ids: HashMap::new(),
             concrete_layouts: HashMap::new(),
             struct_properties: HashMap::new(),
             enum_properties: HashMap::new(),
             generic_capabilities: HashMap::new(),
+            generic_requirements: HashMap::new(),
             generic_names: HashMap::new(),
             property_cache: RwLock::new(HashMap::new()),
             semantic_timings: SemanticTimings::default(),
@@ -1160,6 +1192,26 @@ impl TypeArena {
         self.generic_capabilities.get(&id)
     }
 
+    /// Registers the complete declaration-owned requirements for symbolic
+    /// forwarding. Atomic entries mirror the legacy capability set; callers
+    /// must not derive one kind from the other.
+    pub fn register_generic_requirements(
+        &mut self,
+        id: GenericParamId,
+        requirements: impl IntoIterator<Item = GenericRequirement>,
+    ) {
+        self.generic_requirements
+            .insert(id, requirements.into_iter().collect());
+    }
+
+    #[must_use]
+    pub fn generic_requirements(
+        &self,
+        id: GenericParamId,
+    ) -> Option<&BTreeSet<GenericRequirement>> {
+        self.generic_requirements.get(&id)
+    }
+
     #[must_use]
     pub fn generic_name(&self, id: GenericParamId) -> Option<&str> {
         self.generic_names.get(&id).map(String::as_str)
@@ -1180,6 +1232,90 @@ impl TypeArena {
     #[must_use]
     pub fn arguments(&self, id: TypeArgsId) -> Option<&[TypeId]> {
         self.argument_lists.get(id.0 as usize).map(Vec::as_slice)
+    }
+
+    /// Interns exact callable metadata without adding a `TypeData` variant.
+    pub fn intern_callable_signature(
+        &mut self,
+        parameters: Vec<TypeId>,
+        result: TypeId,
+    ) -> Result<CallableSignatureId, &'static str> {
+        if !self.is_valid(result) || parameters.iter().any(|ty| !self.is_valid(*ty)) {
+            return Err("Invocable signature contains an invalid type");
+        }
+        if parameters.contains(&TypeId::VOID) {
+            return Err("Invocable parameter type cannot be void");
+        }
+        let parameters = self.intern_arguments(parameters);
+        let signature = CallableSignature { parameters, result };
+        if let Some(id) = self.callable_signature_ids.get(&signature) {
+            return Ok(*id);
+        }
+        let id = CallableSignatureId(
+            u32::try_from(self.callable_signatures.len())
+                .expect("callable signature arena fits u32"),
+        );
+        self.callable_signatures.push(signature);
+        self.callable_signature_ids.insert(signature, id);
+        Ok(id)
+    }
+
+    #[must_use]
+    pub fn callable_signature(&self, id: CallableSignatureId) -> Option<CallableSignature> {
+        self.callable_signatures.get(id.0 as usize).copied()
+    }
+
+    #[must_use]
+    pub fn callable_signature_parts(&self, id: CallableSignatureId) -> Option<(&[TypeId], TypeId)> {
+        let signature = self.callable_signature(id)?;
+        Some((self.arguments(signature.parameters)?, signature.result))
+    }
+
+    /// Exact structural satisfaction. No conversion, property, nominal method
+    /// or reference rule participates.
+    #[must_use]
+    pub fn satisfies_requirement(&self, ty: TypeId, requirement: GenericRequirement) -> bool {
+        match requirement {
+            GenericRequirement::Atomic(capability) => self.guarantees_capability(ty, capability),
+            GenericRequirement::Invocable(required) => {
+                if let Some(parameter) = self.generic_param(ty) {
+                    return self
+                        .generic_requirements(parameter)
+                        .is_some_and(|requirements| requirements.contains(&requirement));
+                }
+                let Some(required) = self.callable_signature(required) else {
+                    return false;
+                };
+                matches!(
+                    self.get(ty),
+                    Some(TypeData::Function { parameters, result }
+                        | TypeData::Closure { parameters, result })
+                        if *parameters == required.parameters && *result == required.result
+                )
+            }
+        }
+    }
+
+    /// Recursively substitutes and re-interns callable signature metadata.
+    pub fn substitute_callable_signature(
+        &mut self,
+        signature: CallableSignatureId,
+        substitution: &Substitution,
+    ) -> Result<CallableSignatureId, GenericParamId> {
+        let signature = self
+            .callable_signature(signature)
+            .expect("valid callable signature identity");
+        let parameters = self
+            .arguments(signature.parameters)
+            .expect("valid callable parameter identity")
+            .to_vec()
+            .into_iter()
+            .map(|ty| self.substitute(ty, substitution))
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = self.substitute(signature.result, substitution)?;
+        Ok(self
+            .intern_callable_signature(parameters, result)
+            .expect("substitution preserves Invocable legality"))
     }
 
     #[must_use]
@@ -2775,6 +2911,69 @@ impl Substitution {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invocable_signatures_are_canonical_exact_and_substitutable() {
+        let mut types = TypeArena::new();
+        let signature = types
+            .intern_callable_signature(vec![TypeId::INT64], TypeId::BOOL)
+            .unwrap();
+        assert_eq!(
+            signature,
+            types
+                .intern_callable_signature(vec![TypeId::INT64], TypeId::BOOL)
+                .unwrap()
+        );
+        let function = types
+            .intern_function(vec![TypeId::INT64], TypeId::BOOL)
+            .unwrap();
+        let closure = types
+            .intern_closure(vec![TypeId::INT64], TypeId::BOOL)
+            .unwrap();
+        let wrong = types
+            .intern_function(vec![TypeId::INT32], TypeId::BOOL)
+            .unwrap();
+        let wrong_arity = types
+            .intern_function(vec![TypeId::INT64, TypeId::INT64], TypeId::BOOL)
+            .unwrap();
+        let wrong_result = types
+            .intern_function(vec![TypeId::INT64], TypeId::INT64)
+            .unwrap();
+        let requirement = GenericRequirement::Invocable(signature);
+        assert!(types.satisfies_requirement(function, requirement));
+        assert!(types.satisfies_requirement(closure, requirement));
+        assert!(!types.satisfies_requirement(wrong, requirement));
+        assert!(!types.satisfies_requirement(wrong_arity, requirement));
+        assert!(!types.satisfies_requirement(wrong_result, requirement));
+        let reference = types.intern_reference(function, false);
+        assert!(!types.satisfies_requirement(reference, requirement));
+        assert!(!types.satisfies_requirement(TypeId::INT64, requirement));
+
+        let parameter = GenericParamId {
+            owner: GenericOwner::Function(7),
+            index: 0,
+        };
+        let parameter_ty = types.intern(TypeData::GenericParam(parameter));
+        let nested_parameter = types.intern_array(parameter_ty);
+        let nested_result = types
+            .intern_function(vec![parameter_ty], parameter_ty)
+            .unwrap();
+        let open = types
+            .intern_callable_signature(vec![nested_parameter], nested_result)
+            .unwrap();
+        let substitution = Substitution::new([parameter], [TypeId::FLOAT64]);
+        let closed = types
+            .substitute_callable_signature(open, &substitution)
+            .unwrap();
+        let nested_closed = types.intern_array(TypeId::FLOAT64);
+        let result_closed = types
+            .intern_function(vec![TypeId::FLOAT64], TypeId::FLOAT64)
+            .unwrap();
+        assert_eq!(
+            types.callable_signature_parts(closed),
+            Some((&[nested_closed][..], result_closed))
+        );
+    }
 
     #[test]
     fn storable_concrete_properties_are_independent_and_structural() {

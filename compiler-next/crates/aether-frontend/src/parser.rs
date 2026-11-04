@@ -728,6 +728,15 @@ impl Parser<'_> {
                 span,
             });
         }
+        if module.is_none() && name == "Invocable" {
+            return Err(Diagnostic::new(
+                "E0470",
+                Phase::Parse,
+                DiagnosticCategory::Type,
+                "Invocable is a generic requirement and cannot be used as a value type",
+                Some(span),
+            ));
+        }
         let arguments = self.type_arguments()?;
         let span = arguments
             .last()
@@ -793,9 +802,60 @@ impl Parser<'_> {
                 loop {
                     let capability =
                         self.expect(TokenKind::Identifier, "expected capability name after `:`")?;
+                    let mut span = capability.span;
+                    let invocable = if capability.lexeme == "Invocable" {
+                        self.expect(TokenKind::Less, "expected `<` after `Invocable`")?;
+                        self.expect(TokenKind::LeftParen, "expected `(` after `Invocable<`")?;
+                        let mut parameters = Vec::new();
+                        if !self.at(TokenKind::RightParen) {
+                            loop {
+                                let parameter = self.ty().map_err(|_| {
+                                    self.error(
+                                        "E0470",
+                                        "invalid Invocable signature; expected a parameter type",
+                                    )
+                                })?;
+                                parameters.push(parameter);
+                                if self.consume(TokenKind::Comma).is_none() {
+                                    break;
+                                }
+                                if self.at(TokenKind::RightParen) {
+                                    return Err(self.error(
+                                        "E0470",
+                                        "trailing comma is not allowed in an Invocable parameter list",
+                                    ));
+                                }
+                            }
+                        }
+                        self.expect(
+                            TokenKind::RightParen,
+                            "expected `)` after Invocable parameters",
+                        )?;
+                        self.expect(
+                            TokenKind::Comma,
+                            "expected `,` before Invocable result type",
+                        )?;
+                        let result = self.ty().map_err(|_| {
+                            self.error(
+                                "E0470",
+                                "invalid Invocable signature; expected a result type",
+                            )
+                        })?;
+                        let end = self
+                            .expect(TokenKind::Greater, "expected `>` after Invocable signature")?;
+                        span = span.through(end.span);
+                        Some(crate::AstInvocableSignature {
+                            parameters,
+                            result: Box::new(result),
+                            span,
+                        })
+                    } else {
+                        None
+                    };
                     constraints.push(AstCapabilityConstraint {
                         name: capability.lexeme,
-                        span: capability.span,
+                        invocable,
+                        span,
                     });
                     if self.consume(TokenKind::Plus).is_none() {
                         break;
@@ -2422,5 +2482,59 @@ mod tests {
             parse_source(&SourceFile::new("bad.ae", "int main( { return 0; }")).unwrap_err();
         assert_eq!(error[0].phase, crate::Phase::Parse);
         assert!(error[0].span.is_some());
+    }
+
+    #[test]
+    fn parses_invocable_constraint_signatures() {
+        let source = SourceFile::new(
+            "invocable.ae",
+            "R apply<P,R,C:Copy+Invocable<(P,int),R>>(C f,P x){return x;}",
+        );
+        let ast = parse_source(&source).unwrap();
+        let constraint = &ast.functions()[0].generic_parameters[2].constraints[1];
+        let signature = constraint.invocable.as_ref().unwrap();
+        assert_eq!(constraint.name, "Invocable");
+        assert_eq!(signature.parameters.len(), 2);
+        assert_eq!(signature.result.named().unwrap().1, "R");
+
+        let empty = parse_source(&SourceFile::new(
+            "empty.ae",
+            "void run<C:Invocable<(),void>>(C f){return;}",
+        ))
+        .unwrap();
+        assert_eq!(
+            empty.functions()[0].generic_parameters[0].constraints[0]
+                .invocable
+                .as_ref()
+                .unwrap()
+                .parameters,
+            Vec::new()
+        );
+    }
+
+    #[test]
+    fn rejects_incomplete_invocable_signatures() {
+        for source in [
+            "void f<C:Invocable<(int)>>(C c){return;}",
+            "void f<C:Invocable<(int),>>(C c){return;}",
+            "void f<C:Invocable<(int,),void>>(C c){return;}",
+        ] {
+            assert!(parse_source(&SourceFile::new("bad.ae", source)).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_invocable_in_every_value_type_position() {
+        for source in [
+            "Invocable<(int),int> value;",
+            "Array<Invocable<(int),int>> values;",
+            "Invocable<(int),int> make(){return 0;}",
+        ] {
+            let errors = parse_source(&SourceFile::new("bad.ae", source)).unwrap_err();
+            assert_eq!(
+                errors[0].code, "E0470",
+                "unexpected diagnostic for {source}"
+            );
+        }
     }
 }

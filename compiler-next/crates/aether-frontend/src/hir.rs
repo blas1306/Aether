@@ -25,8 +25,9 @@ use crate::{
     AstBinaryOp, AstBlock, AstExpr, AstExprKind, AstFunction, AstMatchArm, AstMatchMode,
     AstStmtKind, AstSubscriptSelector, AstType, AstUnaryOp, BehavioralCapability, Capability,
     CollectionElementAdmission, CollectionKind, Diagnostic, DiagnosticCategory, EnumId, FieldId,
-    FloatType, GenericOwner, GenericParamId, IntegerType, ParsedAst, Phase, SourceId, Span,
-    StructId, Substitution, TargetProperties, TypeArena, TypeData, TypeId, VariantId,
+    FloatType, GenericOwner, GenericParamId, GenericRequirement, IntegerType, ParsedAst, Phase,
+    SourceId, Span, StructId, Substitution, TargetProperties, TypeArena, TypeData, TypeId,
+    VariantId,
 };
 use crate::{IndexSemantics, Orientation};
 use std::collections::{BTreeMap, BTreeSet};
@@ -318,6 +319,31 @@ pub struct GenericConstraintSpelling {
     pub spelling: String,
     pub span: Span,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GenericRequirementId {
+    pub owner: GenericOwner,
+    pub parameter: GenericParamId,
+    pub ordinal: u32,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ConstraintEvidenceId(pub GenericRequirementId);
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConstraintEvidence {
+    pub id: ConstraintEvidenceId,
+    pub owner: GenericOwner,
+    pub parameter: GenericParamId,
+    pub requirement: GenericRequirementId,
+    pub declaration_ordinal: u32,
+    pub span: Span,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GenericRequirementInfo {
+    pub id: GenericRequirementId,
+    pub requirement: GenericRequirement,
+    pub evidence: ConstraintEvidence,
+    pub declaration_ordinal: u32,
+    pub span: Span,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GenericParamInfo {
     pub id: GenericParamId,
@@ -327,6 +353,8 @@ pub struct GenericParamInfo {
     pub declared_constraints: Vec<GenericConstraintSpelling>,
     /// Normalized atomic closure used for proofs.
     pub capabilities: BTreeSet<Capability>,
+    /// Parameterized and atomic requirements with declaration-owned evidence.
+    pub requirements: Vec<GenericRequirementInfo>,
     pub span: Span,
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2641,10 +2669,25 @@ fn collect_program_signatures_for_kind(
     let mut next_field = 0_u32;
     for (id, module_id, declaration) in struct_decls {
         let module = &program.modules[module_id.0 as usize];
-        let generic_parameters = collect_generic_parameters(
+        let mut generic_parameters = collect_generic_parameters(
             GenericOwner::Struct(id),
             &declaration.generic_parameters,
             &mut types,
+        )
+        .map_err(|diagnostic| vec![src(diagnostic, module)])?;
+        resolve_parameterized_requirements(
+            GenericOwner::Struct(id),
+            &declaration.generic_parameters,
+            &mut generic_parameters,
+            module_id,
+            &aliases,
+            &struct_names,
+            &enum_names,
+            &imports,
+            &module_names,
+            &mut types,
+            &struct_arities,
+            &enum_arities,
         )
         .map_err(|diagnostic| vec![src(diagnostic, module)])?;
         let generic_scope = generic_parameters
@@ -2755,10 +2798,25 @@ fn collect_program_signatures_for_kind(
     let mut variant_names = Vec::with_capacity(enum_decls.len());
     for (id, module_id, declaration) in enum_decls {
         let module = &program.modules[module_id.0 as usize];
-        let generic_parameters = collect_generic_parameters(
+        let mut generic_parameters = collect_generic_parameters(
             GenericOwner::Enum(id),
             &declaration.generic_parameters,
             &mut types,
+        )
+        .map_err(|diagnostic| vec![src(diagnostic, module)])?;
+        resolve_parameterized_requirements(
+            GenericOwner::Enum(id),
+            &declaration.generic_parameters,
+            &mut generic_parameters,
+            module_id,
+            &aliases,
+            &struct_names,
+            &enum_names,
+            &imports,
+            &module_names,
+            &mut types,
+            &struct_arities,
+            &enum_arities,
         )
         .map_err(|diagnostic| vec![src(diagnostic, module)])?;
         let generic_scope = generic_parameters
@@ -3123,10 +3181,25 @@ fn collect_program_signatures_for_kind(
                     module,
                 )]);
             }
-            let generic_parameters = collect_generic_parameters(
+            let mut generic_parameters = collect_generic_parameters(
                 GenericOwner::Function(id.0),
                 &f.generic_parameters,
                 &mut types,
+            )
+            .map_err(|diagnostic| vec![src(diagnostic, module)])?;
+            resolve_parameterized_requirements(
+                GenericOwner::Function(id.0),
+                &f.generic_parameters,
+                &mut generic_parameters,
+                module.info.id,
+                &aliases,
+                &struct_names,
+                &enum_names,
+                &imports,
+                &module_names,
+                &mut types,
+                &struct_arities,
+                &enum_arities,
             )
             .map_err(|diagnostic| vec![src(diagnostic, module)])?;
             let generic_scope = generic_parameters
@@ -5137,7 +5210,8 @@ fn collect_generic_parameters(
                 index: index as u32,
             };
             let mut capabilities = BTreeSet::new();
-            for constraint in &parameter.constraints {
+            let mut atomic_requirements = Vec::new();
+            for (declaration_ordinal, constraint) in parameter.constraints.iter().enumerate() {
                 let expanded: Vec<Capability> = match constraint.name.as_str() {
                     "Copy" => vec![Capability::Copy],
                     "Relocatable" => vec![Capability::Relocatable],
@@ -5159,6 +5233,7 @@ fn collect_generic_parameters(
                     "RingOps" => ring_ops().to_vec(),
                     "FieldOps" => field_ops().to_vec(),
                     "RealOps" => real_ops().to_vec(),
+                    "Invocable" if constraint.invocable.is_some() => Vec::new(),
                     _ => {
                         return Err(Diagnostic::new(
                             "E0314",
@@ -5182,12 +5257,46 @@ fn collect_generic_parameters(
                             Some(constraint.span),
                         ));
                     }
+                    atomic_requirements.push((
+                        capability,
+                        declaration_ordinal as u32,
+                        constraint.span,
+                    ));
                 }
             }
             types.register_generic_capabilities(
                 id,
                 parameter.name.clone(),
                 capabilities.iter().copied(),
+            );
+            let requirements = atomic_requirements
+                .into_iter()
+                .enumerate()
+                .map(|(ordinal, (capability, declaration_ordinal, span))| {
+                    let requirement_id = GenericRequirementId {
+                        owner,
+                        parameter: id,
+                        ordinal: ordinal as u32,
+                    };
+                    GenericRequirementInfo {
+                        id: requirement_id,
+                        requirement: GenericRequirement::Atomic(capability),
+                        evidence: ConstraintEvidence {
+                            id: ConstraintEvidenceId(requirement_id),
+                            owner,
+                            parameter: id,
+                            requirement: requirement_id,
+                            declaration_ordinal,
+                            span,
+                        },
+                        declaration_ordinal,
+                        span,
+                    }
+                })
+                .collect::<Vec<_>>();
+            types.register_generic_requirements(
+                id,
+                requirements.iter().map(|requirement| requirement.requirement),
             );
             Ok(GenericParamInfo {
                 id,
@@ -5202,12 +5311,143 @@ fn collect_generic_parameters(
                     })
                     .collect(),
                 capabilities,
+                requirements,
                 span: parameter.span,
             })
         })
         .collect();
     types.record_semantic_time("frontend.detail.constraint_resolution", started);
     result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn resolve_parameterized_requirements(
+    owner: GenericOwner,
+    ast_parameters: &[crate::AstGenericParam],
+    parameters: &mut [GenericParamInfo],
+    current: ModuleId,
+    aliases: &[BTreeMap<String, TypeId>],
+    struct_names: &[BTreeMap<String, StructId>],
+    enum_names: &[BTreeMap<String, EnumId>],
+    imports: &[BTreeMap<String, ModuleId>],
+    module_names: &BTreeMap<String, ModuleId>,
+    types: &mut TypeArena,
+    struct_arities: &[usize],
+    enum_arities: &[usize],
+) -> Result<(), Diagnostic> {
+    let generic_scope = parameters
+        .iter()
+        .map(|parameter| (parameter.name.clone(), parameter.ty))
+        .collect::<BTreeMap<_, _>>();
+    for (ast_parameter, parameter) in ast_parameters.iter().zip(parameters.iter_mut()) {
+        let mut invocable = None;
+        for (declaration_ordinal, constraint) in ast_parameter.constraints.iter().enumerate() {
+            let Some(source_signature) = &constraint.invocable else {
+                continue;
+            };
+            let mut resolved_parameters = Vec::with_capacity(source_signature.parameters.len());
+            for source in &source_signature.parameters {
+                let resolved = resolve_type_in_module(
+                    source,
+                    current,
+                    aliases,
+                    struct_names,
+                    enum_names,
+                    imports,
+                    module_names,
+                    types,
+                    &generic_scope,
+                    struct_arities,
+                    enum_arities,
+                )?;
+                if resolved == TypeId::VOID {
+                    return Err(Diagnostic::new(
+                        "E0471",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        "Invocable parameter type cannot be void",
+                        Some(source.span),
+                    ));
+                }
+                resolved_parameters.push(resolved);
+            }
+            let result = resolve_type_in_module(
+                &source_signature.result,
+                current,
+                aliases,
+                struct_names,
+                enum_names,
+                imports,
+                module_names,
+                types,
+                &generic_scope,
+                struct_arities,
+                enum_arities,
+            )?;
+            let signature = types
+                .intern_callable_signature(resolved_parameters, result)
+                .map_err(|message| {
+                    Diagnostic::new(
+                        "E0471",
+                        Phase::Semantic,
+                        DiagnosticCategory::Type,
+                        message,
+                        Some(source_signature.span),
+                    )
+                })?;
+            if let Some(previous) = invocable {
+                return Err(Diagnostic::new(
+                    if previous == signature {
+                        "E0315"
+                    } else {
+                        "E0472"
+                    },
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    if previous == signature {
+                        format!(
+                            "duplicate `Invocable` constraint on generic parameter `{}`",
+                            parameter.name
+                        )
+                    } else {
+                        format!(
+                            "contradictory `Invocable` requirements on generic parameter `{}`",
+                            parameter.name
+                        )
+                    },
+                    Some(constraint.span),
+                ));
+            }
+            invocable = Some(signature);
+            let ordinal = u32::try_from(parameter.requirements.len())
+                .expect("requirements per generic parameter fit u32");
+            let id = GenericRequirementId {
+                owner,
+                parameter: parameter.id,
+                ordinal,
+            };
+            let requirement = GenericRequirement::Invocable(signature);
+            parameter.requirements.push(GenericRequirementInfo {
+                id,
+                requirement,
+                evidence: ConstraintEvidence {
+                    id: ConstraintEvidenceId(id),
+                    owner,
+                    parameter: parameter.id,
+                    requirement: id,
+                    declaration_ordinal: declaration_ordinal as u32,
+                    span: constraint.span,
+                },
+                declaration_ordinal: declaration_ordinal as u32,
+                span: constraint.span,
+            });
+        }
+        types.register_generic_requirements(
+            parameter.id,
+            parameter.requirements.iter().map(|info| info.requirement),
+        );
+    }
+    Ok(())
 }
 
 fn ring_ops() -> [Capability; 7] {
@@ -5301,6 +5541,10 @@ fn validate_generic_constraints(
         )]);
     }
 
+    let substitution = Substitution::new(
+        parameters.iter().map(|parameter| parameter.id),
+        arguments.iter().copied(),
+    );
     for (parameter, argument) in parameters.iter().zip(arguments) {
         let mut requirements = parameter.capabilities.iter().copied().collect::<Vec<_>>();
         // A sealed nominal mismatch is more fundamental than any missing
@@ -5347,6 +5591,71 @@ fn validate_generic_constraints(
                     format!(
                         "{subject} {detail} `{capability}`; required by generic parameter `{}` of `{declaration_name}`{}",
                         parameter.name, guarantee_detail
+                    ),
+                    Some(span),
+                )]);
+            }
+        }
+        for info in &parameter.requirements {
+            let GenericRequirement::Invocable(required) = info.requirement else {
+                continue;
+            };
+            let matches_signature = |actual_parameters: &[TypeId], actual_result: TypeId| {
+                let Some((required_parameters, required_result)) =
+                    types.callable_signature_parts(required)
+                else {
+                    return false;
+                };
+                required_parameters.len() == actual_parameters.len()
+                    && required_parameters.iter().zip(actual_parameters).all(
+                        |(required, actual)| {
+                            types.substituted_existing(*required, &substitution).ok()
+                                == Some(*actual)
+                        },
+                    )
+                    && types
+                        .substituted_existing(required_result, &substitution)
+                        .ok()
+                        == Some(actual_result)
+            };
+            let satisfied = if let Some(symbolic) = types.generic_param(*argument) {
+                types.generic_requirements(symbolic).is_some_and(|requirements| {
+                    requirements.iter().any(|candidate| {
+                        matches!(candidate, GenericRequirement::Invocable(signature)
+                            if types.callable_signature_parts(*signature)
+                                .is_some_and(|(parameters, result)| matches_signature(parameters, result)))
+                    })
+                })
+            } else {
+                match types.get(*argument) {
+                    Some(
+                        TypeData::Function { parameters, result }
+                        | TypeData::Closure { parameters, result },
+                    ) => types
+                        .arguments(*parameters)
+                        .is_some_and(|parameters| matches_signature(parameters, *result)),
+                    _ => false,
+                }
+            };
+            if !satisfied {
+                let actual = format_type(types, *argument, structs, enums);
+                let mismatch = matches!(
+                    types.get(*argument),
+                    Some(TypeData::Function { .. } | TypeData::Closure { .. })
+                );
+                return Err(vec![Diagnostic::new(
+                    if inferred { "E0474" } else { "E0473" },
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    format!(
+                        "{} `{actual}` {} `Invocable<...>` required by generic parameter `{}` of `{declaration_name}`",
+                        if inferred { "inferred type" } else { "type" },
+                        if mismatch {
+                            "has a signature mismatch with"
+                        } else {
+                            "does not satisfy"
+                        },
+                        parameter.name,
                     ),
                     Some(span),
                 )]);
@@ -5553,12 +5862,95 @@ fn infer_generic_arguments(
             }
             Ok(())
         }
+        (
+            Some(TypeData::Function {
+                parameters: left,
+                result: left_result,
+            }),
+            Some(TypeData::Function {
+                parameters: right,
+                result: right_result,
+            }),
+        )
+        | (
+            Some(TypeData::Closure {
+                parameters: left,
+                result: left_result,
+            }),
+            Some(TypeData::Closure {
+                parameters: right,
+                result: right_result,
+            }),
+        ) => {
+            let left_parameters = types.arguments(*left).unwrap();
+            let right_parameters = types.arguments(*right).unwrap();
+            if left_parameters.len() != right_parameters.len() {
+                return Err(vec![type_error(
+                    "callable arity does not match generic parameter pattern",
+                    Span::in_source(SourceId(0), 0, 0),
+                )]);
+            }
+            for (left, right) in left_parameters.iter().zip(right_parameters) {
+                infer_generic_arguments(types, *left, *right, inferred)?;
+            }
+            infer_generic_arguments(types, *left_result, *right_result, inferred)
+        }
         _ if pattern == actual => Ok(()),
         _ => Err(vec![type_error(
             "argument does not match generic parameter pattern",
             Span::in_source(SourceId(0), 0, 0),
         )]),
     }
+}
+
+fn infer_invocable_requirements(
+    types: &TypeArena,
+    parameters: &[GenericParamInfo],
+    inferred: &mut BTreeMap<GenericParamId, TypeId>,
+) -> Result<(), Vec<Diagnostic>> {
+    // A carrier can reveal binders that appear only in its requirement's
+    // signature. Repeating is finite because bindings are insert-only and a
+    // conflicting second source fails immediately.
+    for _ in 0..=parameters.len() {
+        let before = inferred.len();
+        for parameter in parameters {
+            let Some(carrier) = inferred.get(&parameter.id).copied() else {
+                continue;
+            };
+            let Some((actual_parameters, actual_result)) = (match types.get(carrier) {
+                Some(
+                    TypeData::Function { parameters, result }
+                    | TypeData::Closure { parameters, result },
+                ) => Some((types.arguments(*parameters).unwrap(), *result)),
+                _ => None,
+            }) else {
+                continue;
+            };
+            for info in &parameter.requirements {
+                let GenericRequirement::Invocable(signature) = info.requirement else {
+                    continue;
+                };
+                let Some((patterns, pattern_result)) = types.callable_signature_parts(signature)
+                else {
+                    continue;
+                };
+                if patterns.len() != actual_parameters.len() {
+                    return Err(vec![type_error(
+                        "callable arity conflicts with Invocable requirement",
+                        info.span,
+                    )]);
+                }
+                for (pattern, actual) in patterns.iter().zip(actual_parameters) {
+                    infer_generic_arguments(types, *pattern, *actual, inferred)?;
+                }
+                infer_generic_arguments(types, pattern_result, actual_result, inferred)?;
+            }
+        }
+        if inferred.len() == before {
+            break;
+        }
+    }
+    Ok(())
 }
 
 fn align_up(value: u64, align: u64) -> u64 {
@@ -15215,6 +15607,27 @@ impl Analyzer<'_> {
                 .function_signature(signature)
                 .or_else(|| self.types.closure_signature(signature))
             else {
+                if let Some(binder) = self.types.generic_param(signature)
+                    && self.signatures[self.function_id.0 as usize]
+                        .generic_parameters
+                        .iter()
+                        .find(|parameter| parameter.id == binder)
+                        .is_some_and(|parameter| {
+                            parameter.requirements.iter().any(|requirement| {
+                                matches!(requirement.requirement, GenericRequirement::Invocable(_))
+                            })
+                        })
+                {
+                    return Err(vec![Diagnostic::new(
+                        "E0475",
+                        Phase::Semantic,
+                        DiagnosticCategory::Unsupported,
+                        format!(
+                            "invocation of generic `{n}` requires CapabilityInvoke lowering, which is not implemented in INVOCABLE-CAPABILITY-V1 M0/M1"
+                        ),
+                        Some(span),
+                    )]);
+                }
                 return Err(vec![Diagnostic::new(
                     "E0215",
                     Phase::Semantic,
@@ -16365,6 +16778,7 @@ impl Analyzer<'_> {
                 infer_generic_arguments(self.types, parameter.ty, argument.expr.ty, &mut inferred)?;
                 checked.push(Some(PrecheckedCallArgument::Value(argument)));
             }
+            infer_invocable_requirements(self.types, &s.generic_parameters, &mut inferred)?;
             for parameter in &s.generic_parameters {
                 let Some(argument) = inferred.get(&parameter.id).copied() else {
                     return Err(vec![Diagnostic::new(
@@ -18561,12 +18975,58 @@ fn verify_parametric_hir(
         .chain(structs.iter().flat_map(|s| &s.generic_parameters))
         .chain(enums.iter().flat_map(|s| &s.generic_parameters))
     {
+        let requirement_set = parameter
+            .requirements
+            .iter()
+            .map(|info| info.requirement)
+            .collect::<BTreeSet<_>>();
+        let mut invocable_count = 0;
+        for (ordinal, info) in parameter.requirements.iter().enumerate() {
+            let expected_id = GenericRequirementId {
+                owner: parameter.id.owner,
+                parameter: parameter.id,
+                ordinal: ordinal as u32,
+            };
+            if info.id != expected_id
+                || info.evidence.id != ConstraintEvidenceId(expected_id)
+                || info.evidence.owner != parameter.id.owner
+                || info.evidence.parameter != parameter.id
+                || info.evidence.requirement != expected_id
+                || info.evidence.declaration_ordinal != info.declaration_ordinal
+                || info.evidence.span != info.span
+            {
+                return Err(fail(
+                    "HIR generic requirement evidence ownership/identity mismatch".into(),
+                ));
+            }
+            if let GenericRequirement::Invocable(signature) = info.requirement {
+                invocable_count += 1;
+                let Some((arguments, result)) = types.callable_signature_parts(signature) else {
+                    return Err(fail(
+                        "HIR Invocable requirement has an invalid signature".into(),
+                    ));
+                };
+                if !types.is_valid(result)
+                    || arguments
+                        .iter()
+                        .any(|ty| !types.is_valid(*ty) || *ty == TypeId::VOID)
+                    || info.declaration_ordinal as usize >= parameter.declared_constraints.len()
+                {
+                    return Err(fail(
+                        "HIR Invocable requirement signature/provenance invalid".into(),
+                    ));
+                }
+            }
+        }
         if types.generic_param(parameter.ty) != Some(parameter.id)
             || types.generic_capabilities(parameter.id) != Some(&parameter.capabilities)
+            || types.generic_requirements(parameter.id) != Some(&requirement_set)
             || types.generic_name(parameter.id) != Some(parameter.name.as_str())
+            || requirement_set.len() != parameter.requirements.len()
+            || invocable_count > 1
         {
             return Err(fail(
-                "HIR generic capability declaration/arena metadata mismatch".into(),
+                "HIR generic requirement declaration/arena metadata mismatch".into(),
             ));
         }
     }
@@ -21806,6 +22266,147 @@ mod tests {
     use crate::{SourceFile, parse_source};
     fn check(s: &str) -> Result<TypedHir, Vec<Diagnostic>> {
         analyze(parse_source(&SourceFile::new("test.ae", s)).unwrap())
+    }
+    #[test]
+    fn invocable_requirements_have_canonical_owned_evidence() {
+        let ast = parse_source(&SourceFile::new(
+            "test.ae",
+            "alias Scalar=double; C keep<P,C:Copy+Invocable<(P),Scalar>>(C f){return f;} int main(){return 0;}",
+        ))
+        .unwrap();
+        let declared = collect_signatures(ast).unwrap();
+        let parameter = &declared.signatures[0].generic_parameters[1];
+        let requirement = parameter
+            .requirements
+            .iter()
+            .find(|info| matches!(info.requirement, GenericRequirement::Invocable(_)))
+            .unwrap();
+        let GenericRequirement::Invocable(signature) = requirement.requirement else {
+            unreachable!()
+        };
+        let (arguments, result) = declared.types.callable_signature_parts(signature).unwrap();
+        assert_eq!(arguments.len(), 1);
+        assert_eq!(result, TypeId::FLOAT64);
+        assert_eq!(requirement.evidence.owner, GenericOwner::Function(0));
+        assert_eq!(requirement.evidence.parameter, parameter.id);
+        assert_eq!(requirement.evidence.requirement, requirement.id);
+        assert!(parameter.capabilities.contains(&Capability::Copy));
+        assert!(
+            !parameter
+                .capabilities
+                .iter()
+                .any(|capability| { capability.to_string() == "Invocable" })
+        );
+    }
+
+    #[test]
+    fn invocable_duplicates_void_parameters_and_contradictions_are_rejected() {
+        for source in [
+            "C f<C:Invocable<(int),int>+Invocable<(int),int>>(C c){return c;}int main(){return 0;}",
+            "alias Scalar=int;C f<C:Invocable<(Scalar),Scalar>+Invocable<(int),int>>(C c){return c;}int main(){return 0;}",
+            "C f<C:Invocable<(int),int>+Invocable<(double),int>>(C c){return c;}int main(){return 0;}",
+            "C f<C:Invocable<(void),int>>(C c){return c;}int main(){return 0;}",
+            "C f<C:Invocable<(Missing),int>>(C c){return c;}int main(){return 0;}",
+        ] {
+            let ast = parse_source(&SourceFile::new("test.ae", source)).unwrap();
+            assert!(collect_signatures(ast).is_err(), "accepted {source}");
+        }
+    }
+
+    #[test]
+    fn invocable_call_inference_decomposes_function_signature() {
+        let hir = check(
+            "C accept<P,R,C:Invocable<(P),R>>(C f){return f;} int inc(int x){return x+1;} int main(){Function<(int),int> f=inc;Function<(int),int> g=accept(f);return g(1);}",
+        )
+        .unwrap();
+        let instance = hir
+            .instances
+            .iter()
+            .find(|instance| instance.function_id == FunctionId(0))
+            .unwrap();
+        assert_eq!(instance.type_arguments.len(), 3);
+        assert_eq!(instance.type_arguments[0], TypeId::INT64);
+        assert_eq!(instance.type_arguments[1], TypeId::INT64);
+        assert!(matches!(
+            hir.types.get(instance.type_arguments[2]),
+            Some(TypeData::Function { .. })
+        ));
+    }
+
+    #[test]
+    fn invocable_validation_accepts_exact_function_and_closure_only() {
+        check(
+            "C keep0<C:Invocable<(),void>>(C f){return f;} C keep2<C:Invocable<(int,bool),int>>(C f){return f;} void noop(){return;} int main(){Function<(),void> f=noop;Function<(),void> g=keep0(f);int n=1;var c=(int x,bool y)=>x+n;var d=keep2(c);return 0;}",
+        )
+        .unwrap();
+
+        let non_callable = check(
+            "C keep<C:Invocable<(int),int>>(C f){return f;}int main(){int x=keep(1);return x;}",
+        )
+        .unwrap_err();
+        assert_eq!(non_callable[0].code, "E0474");
+        assert!(non_callable[0].message.contains("does not satisfy"));
+
+        let mismatch = check(
+            "C keep<P,R,C:Invocable<(P),R>>(C f){return f;}int inc(int x){return x+1;}int main(){Function<(int),int> f=inc;var g=keep<int,bool,Function<(int),int>>(f);return 0;}",
+        )
+        .unwrap_err();
+        assert_eq!(mismatch[0].code, "E0473");
+        assert!(mismatch[0].message.contains("signature mismatch"));
+    }
+
+    #[test]
+    fn invocable_symbolic_forwarding_and_inference_conflicts_are_exact() {
+        check(
+            "C accept<P,R,C:Invocable<(P),R>>(C f){return f;} D forward<P,R,D:Invocable<(P),R>>(D f){return accept<P,R,D>(f);} int main(){return 0;}",
+        )
+        .unwrap();
+
+        let errors = check(
+            "C accept<P,R,C:Invocable<(P),R>>(C f,P x){return f;} int inc(int x){return x+1;} int main(){Function<(int),int> f=inc;Function<(int),int> g=accept(f,true);return 0;}",
+        )
+        .unwrap_err();
+        assert!(
+            errors[0].message.contains("conflict"),
+            "unexpected conflict diagnostic: {}",
+            errors[0].message
+        );
+    }
+
+    #[test]
+    fn generic_invocation_stops_at_the_m0_m1_boundary() {
+        let errors =
+            check("R apply<P,R,C:Invocable<(P),R>>(C f,P x){return f(x);}int main(){return 0;}")
+                .unwrap_err();
+        assert_eq!(errors[0].code, "E0475");
+        assert!(errors[0].message.contains("CapabilityInvoke"));
+    }
+
+    #[test]
+    fn verifier_rejects_corrupt_invocable_evidence_ownership() {
+        let hir =
+            check("C keep<P,C:Invocable<(P),P>>(C f){return f;}int main(){return 0;}").unwrap();
+        for mutation in 0..5 {
+            let mut bad = hir.clone();
+            let requirement = bad.signatures[0].generic_parameters[1]
+                .requirements
+                .iter_mut()
+                .find(|info| matches!(info.requirement, GenericRequirement::Invocable(_)))
+                .unwrap();
+            match mutation {
+                0 => requirement.evidence.owner = GenericOwner::Function(1),
+                1 => requirement.evidence.parameter.index = 0,
+                2 => requirement.evidence.declaration_ordinal += 1,
+                3 => requirement.evidence.requirement.ordinal += 1,
+                4 => {
+                    requirement.requirement =
+                        GenericRequirement::Invocable(crate::CallableSignatureId(u32::MAX));
+                }
+                _ => unreachable!(),
+            }
+            let errors = verify_hir(&bad).unwrap_err();
+            assert_eq!(errors[0].code, "E0348", "mutation {mutation}");
+        }
     }
     #[test]
     fn anonymous_function_hir_identity_and_signature_corruptions_fail_closed() {

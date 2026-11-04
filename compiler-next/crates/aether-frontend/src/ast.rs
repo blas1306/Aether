@@ -310,7 +310,22 @@ pub struct AstGenericParam {
 pub struct AstCapabilityConstraint {
     /// Exact source spelling, such as `Copy` or `Relocatable`.
     pub name: String,
+    /// Parameterized callable signature. This is present only for the
+    /// compiler-known `Invocable<(P...), R>` requirement.
+    pub invocable: Option<AstInvocableSignature>,
     /// Capability-name provenance.
+    pub span: Span,
+}
+
+/// Unresolved source signature carried by an `Invocable` requirement.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AstInvocableSignature {
+    /// Exact, ordered parameter types. The empty tuple is represented by an
+    /// empty vector and a single parameter remains a one-element vector.
+    pub parameters: Vec<AstType>,
+    /// Result type; unlike parameters this may be `void`.
+    pub result: Box<AstType>,
+    /// Complete `Invocable<(P...), R>` provenance.
     pub span: Span,
 }
 

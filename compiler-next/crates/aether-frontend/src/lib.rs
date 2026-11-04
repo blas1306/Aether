@@ -17,9 +17,10 @@ pub use oop::*;
 pub use ast::{
     AstAlias, AstBinaryOp, AstBlock, AstCapabilityConstraint, AstCapture, AstCaptureMode, AstCatch,
     AstEnum, AstExpr, AstExprKind, AstField, AstForBinding, AstFunction, AstGenericParam,
-    AstImport, AstInterpolationFragment, AstMatchArm, AstMatchMode, AstPackage, AstParameter,
-    AstPlace, AstReferenceType, AstStmt, AstStmtKind, AstStruct, AstSubscriptSelector, AstType,
-    AstTypeKind, AstUnaryOp, AstVariant, AstVariantPattern, BindingMutability, LambdaId, ParsedAst,
+    AstImport, AstInterpolationFragment, AstInvocableSignature, AstMatchArm, AstMatchMode,
+    AstPackage, AstParameter, AstPlace, AstReferenceType, AstStmt, AstStmtKind, AstStruct,
+    AstSubscriptSelector, AstType, AstTypeKind, AstUnaryOp, AstVariant, AstVariantPattern,
+    BindingMutability, LambdaId, ParsedAst,
 };
 pub use core::{
     CORE_V1_PROFILE, CoreCall, CoreFunction, CoreSymbol, CoreSymbolKey, PRELUDE_V1, prelude_symbol,
@@ -30,10 +31,11 @@ pub use hir::{
     AlgebraicProductKind, BindingId, CallBorrowOrigin, CallBorrowSource, CallSiteId,
     CapabilityCompareOp, CapabilityMathOp, CapabilityUnaryOp, CaptureMode, CastKind, CatchId,
     ClosureCaptureInfo, ClosureCaptureWarning, ClosureEnvironmentInfo, ClosureRecipe, CoercionKind,
-    CollectionIterationSource, DeclaredProgram, DefaultArgumentTemplate,
-    EnumEqualityClassification, EnumInfo, FieldInfo, FinallyId, FloatValue, FormatBorrowOrigin,
-    FormatBorrowSource, FormatSiteId, FunctionId, FunctionInstanceInfo, FunctionSignature,
-    GenericConstraintSpelling, GenericHirFunction, GenericParamInfo, HirBinaryOp, HirBlock,
+    CollectionIterationSource, ConstraintEvidence, ConstraintEvidenceId, DeclaredProgram,
+    DefaultArgumentTemplate, EnumEqualityClassification, EnumInfo, FieldInfo, FinallyId,
+    FloatValue, FormatBorrowOrigin, FormatBorrowSource, FormatSiteId, FunctionId,
+    FunctionInstanceInfo, FunctionSignature, GenericConstraintSpelling, GenericHirFunction,
+    GenericParamInfo, GenericRequirementId, GenericRequirementInfo, HirBinaryOp, HirBlock,
     HirCallArgument, HirCallArgumentOrigin, HirCallTarget, HirCatch, HirDrop, HirExpr, HirExprKind,
     HirFinally, HirFunction, HirLocal, HirMatchArm, HirMatchBinding, HirParameter, HirPlace,
     HirPlaceBase, HirPlaceProjection, HirStmt, HirStmtKind, HirSubscript, HirSubscriptAxis,
@@ -62,11 +64,12 @@ pub use strings::{
 };
 pub use text::{TextOp, verify_text_op};
 pub use types::{
-    AlgebraicCapability, BehavioralCapability, Capability, CollectionElementAdmission,
-    CollectionKind, EnumId, FieldId, FloatType, GenericOwner, GenericParamId, IndexSemantics,
-    InstanceId, IntegerType, MatrixAxisVectorViewDescriptor, MatrixViewDescriptor, MatrixViewField,
-    Orientation, StructId, Substitution, TargetProperties, TypeArena, TypeArgsId, TypeData, TypeId,
-    TypeProperties, VariantId, VectorViewDescriptor, VectorViewField,
+    AlgebraicCapability, BehavioralCapability, CallableSignature, CallableSignatureId, Capability,
+    CollectionElementAdmission, CollectionKind, EnumId, FieldId, FloatType, GenericOwner,
+    GenericParamId, GenericRequirement, IndexSemantics, InstanceId, IntegerType,
+    MatrixAxisVectorViewDescriptor, MatrixViewDescriptor, MatrixViewField, Orientation, StructId,
+    Substitution, TargetProperties, TypeArena, TypeArgsId, TypeData, TypeId, TypeProperties,
+    VariantId, VectorViewDescriptor, VectorViewField,
 };
 
 /// Lexes and parses one source file.
