@@ -104,7 +104,7 @@ public T dot<T: Storable + Copy + Add + Mul + Zero>(
     ref Vector<T,Column> a, ref Vector<T,Column> b) {
     shapeGuard(dimension(*a) == dimension(*b));
     T result = 0;
-    usize i = 1;
+    usize i = 1; // a
     while (i <= dimension(*a)) {
         result = result + (*a)[i] * (*b)[i];
         i = i + 1;
