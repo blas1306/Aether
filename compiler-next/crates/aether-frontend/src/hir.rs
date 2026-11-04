@@ -7853,14 +7853,175 @@ impl Monomorphizer<'_> {
                     .collect::<Result<Vec<_>, _>>()?,
                 signature: self.substitute_type(*signature, substitution, expression.span)?,
             },
-            HirExprKind::CapabilityInvoke(_) => {
-                return Err(vec![Diagnostic::new(
-                    "E0475",
-                    Phase::Semantic,
-                    DiagnosticCategory::Unsupported,
-                    "verified generic CapabilityInvoke reached the M2/M3 specialization boundary",
-                    Some(expression.span),
-                )]);
+            HirExprKind::CapabilityInvoke(invoke) => {
+                let binder = self
+                    .types
+                    .generic_param(invoke.callee_type)
+                    .ok_or_else(|| {
+                        vec![Diagnostic::new(
+                            "E0348",
+                            Phase::Semantic,
+                            DiagnosticCategory::Verification,
+                            "CapabilityInvoke specialization lost its generic binder",
+                            Some(expression.span),
+                        )]
+                    })?;
+                let GenericOwner::Function(owner_index) = binder.owner else {
+                    return Err(vec![Diagnostic::new(
+                        "E0348",
+                        Phase::Semantic,
+                        DiagnosticCategory::Verification,
+                        "CapabilityInvoke specialization binder is not function-owned",
+                        Some(expression.span),
+                    )]);
+                };
+                if self
+                    .current
+                    .and_then(|index| self.queue.get(index))
+                    .is_none_or(|instance| instance.function.0 != owner_index)
+                {
+                    return Err(vec![Diagnostic::new(
+                        "E0348",
+                        Phase::Semantic,
+                        DiagnosticCategory::Verification,
+                        "CapabilityInvoke specialization binder belongs to another declaration",
+                        Some(expression.span),
+                    )]);
+                }
+                let parameter = self
+                    .signatures
+                    .get(owner_index as usize)
+                    .filter(|owner| owner.id.0 == owner_index)
+                    .and_then(|owner| {
+                        owner
+                            .generic_parameters
+                            .iter()
+                            .find(|parameter| parameter.id == binder)
+                    });
+                let Some(parameter) = parameter else {
+                    return Err(vec![Diagnostic::new(
+                        "E0348",
+                        Phase::Semantic,
+                        DiagnosticCategory::Verification,
+                        "CapabilityInvoke specialization has foreign declaration evidence",
+                        Some(expression.span),
+                    )]);
+                };
+                let Some(requirement) = parameter
+                    .requirements
+                    .iter()
+                    .find(|requirement| requirement.id == invoke.requirement)
+                else {
+                    return Err(vec![Diagnostic::new(
+                        "E0348",
+                        Phase::Semantic,
+                        DiagnosticCategory::Verification,
+                        "CapabilityInvoke specialization requirement is missing",
+                        Some(expression.span),
+                    )]);
+                };
+                let GenericRequirement::Invocable(open_signature) = requirement.requirement else {
+                    return Err(vec![Diagnostic::new(
+                        "E0348",
+                        Phase::Semantic,
+                        DiagnosticCategory::Verification,
+                        "CapabilityInvoke specialization requirement is not Invocable",
+                        Some(expression.span),
+                    )]);
+                };
+                if invoke.evidence != requirement.evidence.id
+                    || requirement.evidence.owner != binder.owner
+                    || requirement.evidence.parameter != binder
+                    || requirement.evidence.requirement != invoke.requirement
+                    || invoke.required_signature != open_signature
+                    || invoke.satisfaction.parameter != binder
+                    || invoke.satisfaction.requirement != invoke.requirement
+                    || invoke.satisfaction.signature != open_signature
+                    || invoke.mode != CapabilityInvokeMode::RepeatableRead
+                    || invoke.effect != CapabilityInvokeEffect::MayUnwind
+                    || invoke.provenance != expression.span
+                {
+                    return Err(vec![Diagnostic::new(
+                        "E0348",
+                        Phase::Semantic,
+                        DiagnosticCategory::Verification,
+                        "CapabilityInvoke specialization proof is inconsistent",
+                        Some(expression.span),
+                    )]);
+                }
+                let concrete_callee_type =
+                    self.substitute_type(invoke.callee_type, substitution, expression.span)?;
+                let concrete_signature = self
+                    .types
+                    .substitute_callable_signature(open_signature, substitution)
+                    .map_err(|parameter| {
+                        vec![incomplete_substitution(parameter, expression.span)]
+                    })?;
+                if !self.types.satisfies_requirement(
+                    concrete_callee_type,
+                    GenericRequirement::Invocable(concrete_signature),
+                ) {
+                    return Err(vec![Diagnostic::new(
+                        "E0475",
+                        Phase::Semantic,
+                        DiagnosticCategory::Verification,
+                        "CapabilityInvoke specialization does not exactly satisfy Invocable",
+                        Some(expression.span),
+                    )]);
+                }
+                let callee = Box::new(self.substitute_expr(&invoke.callee, substitution)?);
+                let args = invoke
+                    .arguments
+                    .iter()
+                    .map(|argument| self.substitute_expr(argument, substitution))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let result_type =
+                    self.substitute_type(invoke.result_type, substitution, expression.span)?;
+                let Some((parameters, result)) =
+                    self.types.callable_signature_parts(concrete_signature)
+                else {
+                    unreachable!("substituted callable signature is interned")
+                };
+                if callee.ty != concrete_callee_type
+                    || result != result_type
+                    || result != ty
+                    || args.len() != parameters.len()
+                    || args
+                        .iter()
+                        .zip(parameters)
+                        .any(|(argument, parameter)| argument.ty != *parameter)
+                {
+                    return Err(vec![Diagnostic::new(
+                        "E0348",
+                        Phase::Semantic,
+                        DiagnosticCategory::Verification,
+                        "CapabilityInvoke specialization changed its exact signature",
+                        Some(expression.span),
+                    )]);
+                }
+                match self.types.get(concrete_callee_type) {
+                    Some(TypeData::Function { .. }) => HirExprKind::IndirectCall {
+                        call_site: invoke.call_site,
+                        callee,
+                        args,
+                        signature: concrete_callee_type,
+                    },
+                    Some(TypeData::Closure { .. }) => HirExprKind::ClosureCall {
+                        call_site: invoke.call_site,
+                        callee,
+                        args,
+                        signature: concrete_callee_type,
+                    },
+                    _ => {
+                        return Err(vec![Diagnostic::new(
+                            "E0475",
+                            Phase::Semantic,
+                            DiagnosticCategory::Unsupported,
+                            "Invocable specialization is neither Function nor Closure",
+                            Some(expression.span),
+                        )]);
+                    }
+                }
             }
             HirExprKind::StructInit { struct_id, fields } => HirExprKind::StructInit {
                 struct_id: *struct_id,
@@ -19145,7 +19306,9 @@ fn hir_value_type_is_complete(
                 pointee: payload, ..
             },
         ) => hir_value_type_is_complete(types, *payload, structs, enums),
-        Some(TypeData::Function { parameters, result }) => {
+        Some(
+            TypeData::Function { parameters, result } | TypeData::Closure { parameters, result },
+        ) => {
             types.arguments(*parameters).is_some_and(|parameters| {
                 parameters
                     .iter()
@@ -22764,6 +22927,13 @@ mod tests {
             .expect("generic test function has a return")
     }
 
+    fn concrete_returned_expression(function: &mut HirFunction) -> &mut HirExpr {
+        let HirStmtKind::Return { value, .. } = &mut function.body.statements[0].kind else {
+            panic!("expected return")
+        };
+        value
+    }
+
     #[test]
     fn invocable_m2_ownership_repeat_return_early_exit_and_boundary() {
         let repeated = check(
@@ -22818,12 +22988,32 @@ mod tests {
                 .unwrap_err();
         assert_eq!(moved[0].code, "E0291");
 
-        let boundary = check(
+        let specialized = check(
             "int apply<C:Invocable<(int),int>>(C f,int x){return f(x);}int inc(int x){return x+1;}int main(){Function<(int),int> f=inc;return apply(f,1);}",
         )
-        .unwrap_err();
-        assert_eq!(boundary[0].code, "E0475");
-        assert!(boundary[0].message.contains("M2/M3"));
+        .unwrap();
+        let instance = specialized
+            .functions
+            .iter()
+            .find(|function| function.function_id == FunctionId(0))
+            .unwrap();
+        let HirStmtKind::Return { value, drops } = &instance.body.statements[0].kind else {
+            panic!("expected return")
+        };
+        let HirExprKind::IndirectCall {
+            call_site,
+            signature,
+            ..
+        } = value.kind
+        else {
+            panic!("expected specialized IndirectCall")
+        };
+        assert_eq!(call_site, CallSiteId(0));
+        assert!(matches!(
+            specialized.types.get(signature),
+            Some(TypeData::Function { .. })
+        ));
+        assert_eq!(drops.as_slice(), []);
     }
 
     #[test]
@@ -22970,6 +23160,107 @@ mod tests {
         };
         drops[0] = HirDrop::Conditional(LocalId(0));
         assert!(verify_hir(&invented_cleanup).is_err());
+    }
+
+    #[test]
+    fn invocable_m3_concrete_dispatch_and_residue_corruptions_fail_closed() {
+        let source = "int apply<C:Invocable<(int),int>>(C f,int x){return f(x);}int inc(int x){return x+1;}int main(){Function<(int),int> f=inc;int a=apply(f,1);int n=1;var c=(int x) capture(copy n)=>x+n;return a+apply(c,1);}";
+        let hir = check(source).unwrap();
+        verify_hir(&hir).unwrap();
+        let function_index = hir
+            .functions
+            .iter()
+            .position(|function| {
+                function.function_id == FunctionId(0)
+                    && matches!(
+                        hir.types.get(function.parameters[0].ty),
+                        Some(TypeData::Function { .. })
+                    )
+            })
+            .unwrap();
+        let closure_index = hir
+            .functions
+            .iter()
+            .position(|function| {
+                function.function_id == FunctionId(0)
+                    && matches!(
+                        hir.types.get(function.parameters[0].ty),
+                        Some(TypeData::Closure { .. })
+                    )
+            })
+            .unwrap();
+
+        let mut function_as_closure = hir.clone();
+        let value =
+            concrete_returned_expression(&mut function_as_closure.functions[function_index]);
+        let HirExprKind::IndirectCall {
+            call_site,
+            callee,
+            args,
+            signature,
+        } = &value.kind
+        else {
+            panic!("expected IndirectCall")
+        };
+        value.kind = HirExprKind::ClosureCall {
+            call_site: *call_site,
+            callee: callee.clone(),
+            args: args.clone(),
+            signature: *signature,
+        };
+        assert!(verify_hir(&function_as_closure).is_err());
+
+        let mut closure_as_function = hir.clone();
+        let value = concrete_returned_expression(&mut closure_as_function.functions[closure_index]);
+        let HirExprKind::ClosureCall {
+            call_site,
+            callee,
+            args,
+            signature,
+        } = &value.kind
+        else {
+            panic!("expected ClosureCall")
+        };
+        value.kind = HirExprKind::IndirectCall {
+            call_site: *call_site,
+            callee: callee.clone(),
+            args: args.clone(),
+            signature: *signature,
+        };
+        assert!(verify_hir(&closure_as_function).is_err());
+
+        let mut fictitious_function_drop = hir.clone();
+        let HirStmtKind::Return { drops, .. } = &mut fictitious_function_drop.functions
+            [function_index]
+            .body
+            .statements[0]
+            .kind
+        else {
+            panic!("expected return")
+        };
+        drops.push(HirDrop::Unconditional(LocalId(0)));
+        assert!(verify_hir(&fictitious_function_drop).is_err());
+
+        let mut omitted_closure_drop = hir.clone();
+        let HirStmtKind::Return { drops, .. } = &mut omitted_closure_drop.functions[closure_index]
+            .body
+            .statements[0]
+            .kind
+        else {
+            panic!("expected return")
+        };
+        drops.clear();
+        assert!(verify_hir(&omitted_closure_drop).is_err());
+
+        let mut residual_generic = hir.clone();
+        residual_generic.functions[function_index].locals[0].ty =
+            residual_generic.generic_functions[0].locals[0].ty;
+        assert!(verify_hir(&residual_generic).is_err());
+
+        let mut residual_invoke = hir.clone();
+        let symbolic = returned_expression(&mut residual_invoke.generic_functions[0]).clone();
+        *concrete_returned_expression(&mut residual_invoke.functions[function_index]) = symbolic;
+        assert!(verify_hir(&residual_invoke).is_err());
     }
 
     #[test]
