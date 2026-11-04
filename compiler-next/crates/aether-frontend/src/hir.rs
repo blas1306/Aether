@@ -336,6 +336,78 @@ pub struct ConstraintEvidence {
     pub declaration_ordinal: u32,
     pub span: Span,
 }
+
+/// Symbolic proof that one declaration-owned Invocable requirement authorizes
+/// an operation.  It deliberately does not choose Function or Closure; that
+/// is a specialization concern.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SatisfactionEvidence {
+    pub parameter: GenericParamId,
+    pub requirement: GenericRequirementId,
+    pub signature: crate::CallableSignatureId,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CapabilityInvokeMode {
+    RepeatableRead,
+    /// Not admitted in INVOCABLE-CAPABILITY-V1. Kept representable so the
+    /// independent verifier can reject corrupted proof-carrying HIR.
+    Consuming,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CapabilityInvokeEffect {
+    MayUnwind,
+    /// Not admitted in V1: invocation can never erase its exceptional edge.
+    NoUnwind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CapabilityInvoke {
+    pub callee: Box<HirExpr>,
+    pub callee_type: TypeId,
+    pub arguments: Vec<HirExpr>,
+    pub result_type: TypeId,
+    pub requirement: GenericRequirementId,
+    pub evidence: ConstraintEvidenceId,
+    pub required_signature: crate::CallableSignatureId,
+    pub satisfaction: SatisfactionEvidence,
+    pub mode: CapabilityInvokeMode,
+    pub effect: CapabilityInvokeEffect,
+    pub call_site: CallSiteId,
+    pub provenance: Span,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GenericOwnerState {
+    Owned,
+    Moved,
+    MaybeMoved,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GenericOwnerSource {
+    ParameterByValue,
+    Local,
+    Temporary,
+}
+
+/// Declaration-level root whose concrete lifecycle is intentionally unknown.
+/// Path-local transfer and cleanup are carried by Move and `HirDrop` nodes; this
+/// ledger prevents the root obligation itself from disappearing pre-M3.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GenericOwnerObligation {
+    pub root: LocalId,
+    pub ty: TypeId,
+    pub state: GenericOwnerState,
+    pub source: GenericOwnerSource,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GenericUnwindObligation {
+    pub call_site: CallSiteId,
+    pub drops: Vec<HirDrop>,
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GenericRequirementInfo {
     pub id: GenericRequirementId,
@@ -1020,6 +1092,8 @@ pub struct GenericHirFunction {
     pub parameters: Vec<HirParameter>,
     pub locals: Vec<HirLocal>,
     pub body: HirBlock,
+    pub generic_owner_obligations: Vec<GenericOwnerObligation>,
+    pub generic_unwind_obligations: Vec<GenericUnwindObligation>,
     pub constructor_unwind: Option<crate::ConstructorUnwindPlan>,
     pub span: Span,
 }
@@ -2100,6 +2174,9 @@ pub enum HirExprKind {
         args: Vec<HirExpr>,
         signature: TypeId,
     },
+    /// Proof-carrying invocation of an open generic carrier. This node exists
+    /// only in generic HIR and is fail-closed at the M2/M3 boundary.
+    CapabilityInvoke(Box<CapabilityInvoke>),
     StructInit {
         struct_id: StructId,
         fields: Vec<(FieldId, HirExpr)>,
@@ -7776,6 +7853,15 @@ impl Monomorphizer<'_> {
                     .collect::<Result<Vec<_>, _>>()?,
                 signature: self.substitute_type(*signature, substitution, expression.span)?,
             },
+            HirExprKind::CapabilityInvoke(_) => {
+                return Err(vec![Diagnostic::new(
+                    "E0475",
+                    Phase::Semantic,
+                    DiagnosticCategory::Unsupported,
+                    "verified generic CapabilityInvoke reached the M2/M3 specialization boundary",
+                    Some(expression.span),
+                )]);
+            }
             HirExprKind::StructInit { struct_id, fields } => HirExprKind::StructInit {
                 struct_id: *struct_id,
                 fields: fields
@@ -8553,7 +8639,20 @@ fn analyze_function(
             Some(f.body.span),
         )]);
     }
-    synthesize_ownership(&mut body, &a.locals, &parameters, a.types)?;
+    let generic_unwind_obligations =
+        synthesize_ownership(&mut body, &a.locals, &parameters, a.types)?;
+    let generic_owner_obligations = parameters
+        .iter()
+        .filter(|parameter| {
+            a.types.contains_generic(parameter.ty) && !a.types.guarantees_copy(parameter.ty)
+        })
+        .map(|parameter| GenericOwnerObligation {
+            root: parameter.local,
+            ty: parameter.ty,
+            state: GenericOwnerState::Owned,
+            source: GenericOwnerSource::ParameterByValue,
+        })
+        .collect();
     let constructor_unwind = a
         .class_method
         .as_ref()
@@ -8576,6 +8675,8 @@ fn analyze_function(
         parameters,
         locals: a.locals,
         body,
+        generic_owner_obligations,
+        generic_unwind_obligations,
         constructor_unwind,
         span: f.span,
     };
@@ -8606,6 +8707,7 @@ struct OwnershipAnalysis<'a> {
     borrow_indices: Vec<Option<u64>>,
     storage_references: Vec<bool>,
     loop_boundaries: Vec<usize>,
+    capability_unwind: BTreeMap<CallSiteId, Vec<HirDrop>>,
 }
 
 fn synthesize_ownership(
@@ -8613,7 +8715,7 @@ fn synthesize_ownership(
     locals: &[HirLocal],
     parameters: &[HirParameter],
     types: &TypeArena,
-) -> Result<(), Vec<Diagnostic>> {
+) -> Result<Vec<GenericUnwindObligation>, Vec<Diagnostic>> {
     let mut analysis = OwnershipAnalysis {
         types,
         locals,
@@ -8629,6 +8731,7 @@ fn synthesize_ownership(
         borrow_indices: vec![None; locals.len()],
         storage_references: vec![false; locals.len()],
         loop_boundaries: Vec::new(),
+        capability_unwind: BTreeMap::new(),
     };
     for parameter in parameters {
         // An incoming view borrows caller storage. Its parameter is the local
@@ -8650,7 +8753,12 @@ fn synthesize_ownership(
             analysis.active.push(local.id);
         }
     }
-    analysis.block(body, false)
+    analysis.block(body, false)?;
+    Ok(analysis
+        .capability_unwind
+        .into_iter()
+        .map(|(call_site, drops)| GenericUnwindObligation { call_site, drops })
+        .collect())
 }
 
 impl OwnershipAnalysis<'_> {
@@ -9377,6 +9485,40 @@ impl OwnershipAnalysis<'_> {
                 self.expr(callee)?;
                 for argument in args {
                     self.expr(argument)?;
+                }
+                Ok(())
+            }
+            HirExprKind::CapabilityInvoke(invoke) => {
+                self.expr(&invoke.callee)?;
+                for argument in &invoke.arguments {
+                    self.expr(argument)?;
+                }
+                let drops = self
+                    .active
+                    .iter()
+                    .rev()
+                    .copied()
+                    .filter_map(|local| {
+                        if !self.types.needs_drop(self.locals[local.0 as usize].ty) {
+                            return None;
+                        }
+                        match self.state[local.0 as usize] {
+                            OwnerState::Owned => Some(HirDrop::Unconditional(local)),
+                            OwnerState::MaybeMoved => Some(HirDrop::Conditional(local)),
+                            _ => None,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                if self
+                    .capability_unwind
+                    .insert(invoke.call_site, drops)
+                    .is_some()
+                {
+                    return Err(self.error(
+                        "E0348",
+                        "duplicate CapabilityInvoke CallSiteId",
+                        expr.span,
+                    ));
                 }
                 Ok(())
             }
@@ -15608,25 +15750,109 @@ impl Analyzer<'_> {
                 .or_else(|| self.types.closure_signature(signature))
             else {
                 if let Some(binder) = self.types.generic_param(signature)
-                    && self.signatures[self.function_id.0 as usize]
+                    && let Some(requirement) = self.signatures[self.function_id.0 as usize]
                         .generic_parameters
                         .iter()
                         .find(|parameter| parameter.id == binder)
-                        .is_some_and(|parameter| {
-                            parameter.requirements.iter().any(|requirement| {
+                        .and_then(|parameter| {
+                            parameter.requirements.iter().find(|requirement| {
                                 matches!(requirement.requirement, GenericRequirement::Invocable(_))
                             })
                         })
+                        .cloned()
                 {
-                    return Err(vec![Diagnostic::new(
-                        "E0475",
-                        Phase::Semantic,
-                        DiagnosticCategory::Unsupported,
-                        format!(
-                            "invocation of generic `{n}` requires CapabilityInvoke lowering, which is not implemented in INVOCABLE-CAPABILITY-V1 M0/M1"
-                        ),
-                        Some(span),
-                    )]);
+                    let GenericRequirement::Invocable(required_signature) = requirement.requirement
+                    else {
+                        unreachable!("filtered Invocable requirement")
+                    };
+                    let (parameters, result) = self
+                        .types
+                        .callable_signature_parts(required_signature)
+                        .expect("collected Invocable signature is canonical");
+                    let parameters = parameters.to_vec();
+                    if args.len() != parameters.len() {
+                        return Err(vec![Diagnostic::new(
+                            if args.len() < parameters.len() {
+                                "E0366"
+                            } else {
+                                "E0352"
+                            },
+                            Phase::Semantic,
+                            DiagnosticCategory::Type,
+                            format!(
+                                "generic Invocable value expects {} arguments, found {}",
+                                parameters.len(),
+                                args.len()
+                            ),
+                            Some(span),
+                        )]);
+                    }
+                    let call_site = self.call_site();
+                    let mut checked = Vec::with_capacity(args.len());
+                    for (index, (argument, parameter)) in
+                        args.iter().zip(parameters.iter()).enumerate()
+                    {
+                        let argument = self
+                            .adapt_call_argument(
+                                argument,
+                                *parameter,
+                                call_site,
+                                u32::try_from(index).expect("argument index fits u32"),
+                                None,
+                            )
+                            .map_err(|mut diagnostics| {
+                                if let Some(diagnostic) = diagnostics.first_mut() {
+                                    diagnostic.code = "E0353";
+                                    diagnostic.message = format!(
+                                        "generic Invocable argument {} is incompatible with signature: {}",
+                                        index + 1,
+                                        diagnostic.message
+                                    );
+                                }
+                                diagnostics
+                            })?;
+                        if argument.ty != *parameter
+                            || matches!(argument.kind, HirExprKind::Coerce { .. })
+                        {
+                            return Err(vec![Diagnostic::new(
+                                "E0353",
+                                Phase::Semantic,
+                                DiagnosticCategory::Type,
+                                "generic Invocable invocation requires exact argument types",
+                                Some(argument.span),
+                            )]);
+                        }
+                        checked.push(argument);
+                    }
+                    return Ok(Checked {
+                        expr: HirExpr {
+                            kind: HirExprKind::CapabilityInvoke(Box::new(CapabilityInvoke {
+                                callee: Box::new(HirExpr {
+                                    kind: HirExprKind::Local(local),
+                                    ty: signature,
+                                    span,
+                                }),
+                                callee_type: signature,
+                                arguments: checked,
+                                result_type: result,
+                                requirement: requirement.id,
+                                evidence: requirement.evidence.id,
+                                required_signature,
+                                satisfaction: SatisfactionEvidence {
+                                    parameter: binder,
+                                    requirement: requirement.id,
+                                    signature: required_signature,
+                                },
+                                mode: CapabilityInvokeMode::RepeatableRead,
+                                effect: CapabilityInvokeEffect::MayUnwind,
+                                call_site,
+                                provenance: span,
+                            })),
+                            ty: result,
+                            span,
+                        },
+                        constant: None,
+                    });
                 }
                 return Err(vec![Diagnostic::new(
                     "E0215",
@@ -19107,6 +19333,38 @@ fn verify_parametric_hir(
             &[],
             &fail,
         )?;
+        let expected_owners = declaration
+            .parameters
+            .iter()
+            .filter(|parameter| {
+                types.contains_generic(parameter.ty) && !types.guarantees_copy(parameter.ty)
+            })
+            .map(|parameter| GenericOwnerObligation {
+                root: parameter.local,
+                ty: parameter.ty,
+                state: GenericOwnerState::Owned,
+                source: GenericOwnerSource::ParameterByValue,
+            })
+            .collect::<Vec<_>>();
+        if declaration.generic_owner_obligations != expected_owners {
+            return Err(fail(
+                "generic HIR symbolic owner obligation ledger mismatch".into(),
+            ));
+        }
+        let mut expected_body = declaration.body.clone();
+        let expected_unwind = synthesize_ownership(
+            &mut expected_body,
+            &declaration.locals,
+            &declaration.parameters,
+            types,
+        )?;
+        if expected_body != declaration.body
+            || expected_unwind != declaration.generic_unwind_obligations
+        {
+            return Err(fail(
+                "generic HIR symbolic cleanup/unwind obligations mismatch".into(),
+            ));
+        }
     }
     Ok(())
 }
@@ -19949,6 +20207,9 @@ fn verify_block(
                 verify_expr(value, f, sigs, structs, enums, types, fail)?;
                 let mut seen = BTreeSet::new();
                 if value.ty != ret
+                    || (types.contains_generic(value.ty)
+                        && !types.guarantees_copy(value.ty)
+                        && matches!(value.kind, HirExprKind::Local(_)))
                     || drops.iter().any(|drop| {
                         let local = drop.local();
                         !seen.insert(local)
@@ -20900,7 +21161,8 @@ fn verify_expr(
             }
             for (argument, parameter) in args.iter().zip(parameters) {
                 verify_expr(argument, f, sigs, structs, enums, types, fail)?;
-                if argument.ty != *parameter {
+                if argument.ty != *parameter || matches!(argument.kind, HirExprKind::Coerce { .. })
+                {
                     return Err(fail("HIR IndirectCall argument type mismatch".into()));
                 }
             }
@@ -20924,6 +21186,9 @@ fn verify_expr(
                     return Err(fail("HIR ClosureCall argument type mismatch".into()));
                 }
             }
+        }
+        HirExprKind::CapabilityInvoke(_) => {
+            verify_capability_invoke(e, f, sigs, structs, enums, types, fail)?;
         }
         HirExprKind::Call {
             call_site,
@@ -21524,6 +21789,93 @@ fn verify_expr(
             }
         }
         _ => {}
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_capability_invoke(
+    expression: &HirExpr,
+    function: &VerificationFunction<'_>,
+    signatures: VerificationSignatures<'_>,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+    types: &TypeArena,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let HirExprKind::CapabilityInvoke(invoke) = &expression.kind else {
+        return Err(fail("expected HIR CapabilityInvoke".into()));
+    };
+    let CapabilityInvoke {
+        callee,
+        callee_type,
+        arguments,
+        result_type,
+        requirement,
+        evidence,
+        required_signature,
+        satisfaction,
+        mode,
+        effect,
+        provenance,
+        ..
+    } = invoke.as_ref();
+    let VerificationSignatures::Parametric(declarations) = signatures else {
+        return Err(fail(
+            "residual CapabilityInvoke reached concrete HIR".into(),
+        ));
+    };
+    verify_expr(callee, function, signatures, structs, enums, types, fail)?;
+    let binder = types
+        .generic_param(*callee_type)
+        .ok_or_else(|| fail("HIR CapabilityInvoke callee type is not a generic binder".into()))?;
+    let declaration = declarations
+        .get(function.function_id.0 as usize)
+        .filter(|signature| signature.id == function.function_id)
+        .ok_or_else(|| fail("HIR CapabilityInvoke declaration is missing".into()))?;
+    let parameter = declaration
+        .generic_parameters
+        .iter()
+        .find(|parameter| parameter.id == binder)
+        .ok_or_else(|| fail("HIR CapabilityInvoke binder is foreign".into()))?;
+    let info = parameter
+        .requirements
+        .iter()
+        .find(|info| info.id == *requirement)
+        .ok_or_else(|| fail("HIR CapabilityInvoke requirement is missing".into()))?;
+    let GenericRequirement::Invocable(signature) = info.requirement else {
+        return Err(fail(
+            "HIR CapabilityInvoke requirement is not Invocable".into(),
+        ));
+    };
+    let (parameters, result) = types
+        .callable_signature_parts(signature)
+        .ok_or_else(|| fail("HIR CapabilityInvoke signature is invalid".into()))?;
+    if callee.ty != *callee_type
+        || !matches!(callee.kind, HirExprKind::Local(_))
+        || *evidence != info.evidence.id
+        || info.evidence.owner != GenericOwner::Function(function.function_id.0)
+        || info.evidence.parameter != binder
+        || *required_signature != signature
+        || satisfaction.parameter != binder
+        || satisfaction.requirement != *requirement
+        || satisfaction.signature != signature
+        || *result_type != result
+        || expression.ty != result
+        || arguments.len() != parameters.len()
+        || *mode != CapabilityInvokeMode::RepeatableRead
+        || *effect != CapabilityInvokeEffect::MayUnwind
+        || *provenance != expression.span
+    {
+        return Err(fail(
+            "HIR CapabilityInvoke proof/type/mode/effect/provenance contract invalid".into(),
+        ));
+    }
+    for (argument, parameter) in arguments.iter().zip(parameters) {
+        verify_expr(argument, function, signatures, structs, enums, types, fail)?;
+        if argument.ty != *parameter || matches!(argument.kind, HirExprKind::Coerce { .. }) {
+            return Err(fail("HIR CapabilityInvoke argument type mismatch".into()));
+        }
     }
     Ok(())
 }
@@ -22374,12 +22726,267 @@ mod tests {
     }
 
     #[test]
-    fn generic_invocation_stops_at_the_m0_m1_boundary() {
-        let errors =
+    fn generic_invocation_builds_verified_m2_hir() {
+        let hir =
             check("R apply<P,R,C:Invocable<(P),R>>(C f,P x){return f(x);}int main(){return 0;}")
+                .unwrap();
+        verify_hir(&hir).unwrap();
+        let function = &hir.generic_functions[0];
+        let HirStmtKind::Return { value, drops } = &function.body.statements[0].kind else {
+            panic!("expected return")
+        };
+        let HirExprKind::CapabilityInvoke(invoke) = &value.kind else {
+            panic!("expected CapabilityInvoke")
+        };
+        assert_eq!(invoke.callee_type, function.parameters[0].ty);
+        assert_eq!(invoke.arguments.len(), 1);
+        assert_eq!(invoke.result_type, value.ty);
+        assert_eq!(invoke.mode, CapabilityInvokeMode::RepeatableRead);
+        assert_eq!(invoke.effect, CapabilityInvokeEffect::MayUnwind);
+        assert_eq!(drops, &[HirDrop::Unconditional(LocalId(0))]);
+        assert_eq!(function.generic_owner_obligations.len(), 2);
+        assert_eq!(function.generic_unwind_obligations.len(), 1);
+        assert_eq!(
+            function.generic_unwind_obligations[0].drops,
+            vec![HirDrop::Unconditional(LocalId(0))]
+        );
+    }
+
+    fn returned_expression(function: &mut GenericHirFunction) -> &mut HirExpr {
+        function
+            .body
+            .statements
+            .iter_mut()
+            .find_map(|statement| match &mut statement.kind {
+                HirStmtKind::Return { value, .. } => Some(value),
+                _ => None,
+            })
+            .expect("generic test function has a return")
+    }
+
+    #[test]
+    fn invocable_m2_ownership_repeat_return_early_exit_and_boundary() {
+        let repeated = check(
+            "int twice<C:Invocable<(int),int>>(C f,int x){return f(x)+f(x);}int main(){return 0;}",
+        )
+        .unwrap();
+        let function = &repeated.generic_functions[0];
+        assert_eq!(function.generic_unwind_obligations.len(), 2);
+        assert!(
+            function
+                .generic_unwind_obligations
+                .iter()
+                .all(|edge| edge.drops == [HirDrop::Unconditional(LocalId(0))])
+        );
+
+        let ignored =
+            check("void ignore<C:Invocable<(int),int>>(C f){return;}int main(){return 0;}")
+                .unwrap();
+        let HirStmtKind::Return { drops, .. } =
+            &ignored.generic_functions[0].body.statements[0].kind
+        else {
+            panic!("expected return")
+        };
+        assert_eq!(drops, &[HirDrop::Unconditional(LocalId(0))]);
+
+        let relay =
+            check("C relay<C:Invocable<(int),int>>(C f){return f;}int main(){return 0;}").unwrap();
+        let HirStmtKind::Return { value, drops } =
+            &relay.generic_functions[0].body.statements[0].kind
+        else {
+            panic!("expected return")
+        };
+        assert!(matches!(value.kind, HirExprKind::Move(LocalId(0))));
+        assert_eq!(drops.as_slice(), []);
+
+        let early = check(
+            "int early<C:Invocable<(int),int>>(C f,int x,bool stop){if(stop){return 0;}return f(x);}int main(){return 0;}",
+        )
+        .unwrap();
+        let HirStmtKind::If { then_block, .. } =
+            &early.generic_functions[0].body.statements[0].kind
+        else {
+            panic!("expected if")
+        };
+        let HirStmtKind::Return { drops, .. } = &then_block.statements[0].kind else {
+            panic!("expected early return")
+        };
+        assert_eq!(drops, &[HirDrop::Unconditional(LocalId(0))]);
+
+        let moved =
+            check("int bad<C:Invocable<(int),int>>(C f){C g=f;return f(1);}int main(){return 0;}")
                 .unwrap_err();
-        assert_eq!(errors[0].code, "E0475");
-        assert!(errors[0].message.contains("CapabilityInvoke"));
+        assert_eq!(moved[0].code, "E0291");
+
+        let boundary = check(
+            "int apply<C:Invocable<(int),int>>(C f,int x){return f(x);}int inc(int x){return x+1;}int main(){Function<(int),int> f=inc;return apply(f,1);}",
+        )
+        .unwrap_err();
+        assert_eq!(boundary[0].code, "E0475");
+        assert!(boundary[0].message.contains("M2/M3"));
+    }
+
+    #[test]
+    fn capability_invoke_corruptions_fail_closed_independently() {
+        let source =
+            "R apply<P,R,C:Copy+Invocable<(P),R>>(C f,P x){return f(x);}int main(){return 0;}";
+        let hir = check(source).unwrap();
+        for mutation in 0..11 {
+            let mut bad = hir.clone();
+            let atomic = bad.signatures[0].generic_parameters[2].requirements[0].id;
+            let function = &mut bad.generic_functions[0];
+            let value = returned_expression(function);
+            let HirExprKind::CapabilityInvoke(invoke) = &mut value.kind else {
+                panic!("expected CapabilityInvoke")
+            };
+            match mutation {
+                0 => invoke.requirement.ordinal = u32::MAX,
+                1 => invoke.evidence.0.ordinal = u32::MAX,
+                2 => {
+                    invoke.requirement = atomic;
+                    invoke.evidence = ConstraintEvidenceId(atomic);
+                    invoke.satisfaction.requirement = atomic;
+                }
+                3 => invoke.required_signature = crate::CallableSignatureId(u32::MAX),
+                4 => invoke.callee_type = TypeId::BOOL,
+                5 => {
+                    invoke.arguments.clear();
+                }
+                6 => invoke.arguments[0].ty = TypeId::BOOL,
+                7 => invoke.result_type = TypeId::BOOL,
+                8 => invoke.mode = CapabilityInvokeMode::Consuming,
+                9 => invoke.effect = CapabilityInvokeEffect::NoUnwind,
+                10 => invoke.provenance.end += 1,
+                _ => unreachable!(),
+            }
+            assert!(verify_hir(&bad).is_err(), "accepted mutation {mutation}");
+        }
+
+        let mut moved = hir.clone();
+        let value = returned_expression(&mut moved.generic_functions[0]);
+        let HirExprKind::CapabilityInvoke(invoke) = &mut value.kind else {
+            unreachable!()
+        };
+        invoke.callee.kind = HirExprKind::Move(LocalId(0));
+        assert!(verify_hir(&moved).is_err());
+
+        let mut duplicate_owner = hir.clone();
+        let owner = duplicate_owner.generic_functions[0].generic_owner_obligations[0];
+        duplicate_owner.generic_functions[0]
+            .generic_owner_obligations
+            .push(owner);
+        assert!(verify_hir(&duplicate_owner).is_err());
+
+        let mut missing_cleanup =
+            check("R apply<P,R,C:Invocable<(P),R>>(C f,P x){return f(x);}int main(){return 0;}")
+                .unwrap();
+        let HirStmtKind::Return { drops, .. } =
+            &mut missing_cleanup.generic_functions[0].body.statements[0].kind
+        else {
+            unreachable!()
+        };
+        drops.clear();
+        assert!(verify_hir(&missing_cleanup).is_err());
+
+        let mut missing_unwind = hir.clone();
+        missing_unwind.generic_functions[0]
+            .generic_unwind_obligations
+            .clear();
+        assert!(verify_hir(&missing_unwind).is_err());
+
+        let mut transfer_without_invalidation =
+            check("C relay<C:Invocable<(int),int>>(C f){return f;}int main(){return 0;}").unwrap();
+        let value = returned_expression(&mut transfer_without_invalidation.generic_functions[0]);
+        value.kind = HirExprKind::Local(LocalId(0));
+        assert!(verify_hir(&transfer_without_invalidation).is_err());
+
+        let mut duplicate_site = check(
+            "int twice<C:Invocable<(int),int>>(C f,int x){return f(x)+f(x);}int main(){return 0;}",
+        )
+        .unwrap();
+        let value = returned_expression(&mut duplicate_site.generic_functions[0]);
+        let HirExprKind::Binary { left, right, .. } = &mut value.kind else {
+            unreachable!()
+        };
+        let HirExprKind::CapabilityInvoke(first) = &left.kind else {
+            unreachable!()
+        };
+        let HirExprKind::CapabilityInvoke(second) = &mut right.kind else {
+            unreachable!()
+        };
+        second.call_site = first.call_site;
+        assert!(verify_hir(&duplicate_site).is_err());
+
+        let mut foreign = check(
+            "R apply<P,R,C:Invocable<(P),R>>(C f,P x){return f(x);}R other<P,R,D:Invocable<(P),R>>(D f,P x){return f(x);}int main(){return 0;}",
+        )
+        .unwrap();
+        let foreign_evidence = foreign.signatures[1].generic_parameters[2].requirements[0]
+            .evidence
+            .id;
+        let value = returned_expression(&mut foreign.generic_functions[0]);
+        let HirExprKind::CapabilityInvoke(invoke) = &mut value.kind else {
+            unreachable!()
+        };
+        invoke.evidence = foreign_evidence;
+        assert!(verify_hir(&foreign).is_err());
+
+        let mut foreign_binder = check(
+            "R choose<P,R,F:Invocable<(P),R>,G:Invocable<(P),R>>(F f,G g,P x){return f(x);}int main(){return 0;}",
+        )
+        .unwrap();
+        let other_evidence = foreign_binder.signatures[0].generic_parameters[3].requirements[0]
+            .evidence
+            .id;
+        let value = returned_expression(&mut foreign_binder.generic_functions[0]);
+        let HirExprKind::CapabilityInvoke(invoke) = &mut value.kind else {
+            unreachable!()
+        };
+        invoke.evidence = other_evidence;
+        assert!(verify_hir(&foreign_binder).is_err());
+
+        let mut lost_early = check(
+            "int early<C:Invocable<(int),int>>(C f,bool stop){if(stop){return 0;}return f(1);}int main(){return 0;}",
+        )
+        .unwrap();
+        let HirStmtKind::If { then_block, .. } =
+            &mut lost_early.generic_functions[0].body.statements[0].kind
+        else {
+            unreachable!()
+        };
+        let HirStmtKind::Return { drops, .. } = &mut then_block.statements[0].kind else {
+            unreachable!()
+        };
+        drops.clear();
+        assert!(verify_hir(&lost_early).is_err());
+
+        let mut invented_cleanup =
+            check("void ignore<C:Invocable<(int),int>>(C f){return;}int main(){return 0;}")
+                .unwrap();
+        let HirStmtKind::Return { drops, .. } =
+            &mut invented_cleanup.generic_functions[0].body.statements[0].kind
+        else {
+            unreachable!()
+        };
+        drops[0] = HirDrop::Conditional(LocalId(0));
+        assert!(verify_hir(&invented_cleanup).is_err());
+    }
+
+    #[test]
+    fn invocable_does_not_grant_unrelated_generic_operations() {
+        for source in [
+            "C bad<C:Invocable<(int),int>>(C f){C g=f;return f;}int main(){return 0;}",
+            "C bad<C:Invocable<(int),int>>(C f){return f+f;}int main(){return 0;}",
+            "bool bad<C:Invocable<(int),int>>(C f){return f==f;}int main(){return 0;}",
+            "void bad<C:Invocable<(int),int>>(C f){Array<C> a={f};return;}int main(){return 0;}",
+            "int bad<C:Invocable<(int),int>>(ref C f){return f(1);}int main(){return 0;}",
+            "int bad<C:Invocable<(double),int>>(C f,int x){return f(x);}int main(){return 0;}",
+        ] {
+            assert!(
+                check(source).is_err(),
+                "accepted unauthorized body: {source}"
+            );
+        }
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Aether — INVOCABLE-CAPABILITY-ARCH-1
 
-Estado: **ARCHITECTURE CLOSED; IMPLEMENTATION NOT STARTED**, 2026-11-04.
+Estado: **ARCHITECTURE CLOSED; M0/M1/M2 CLOSED; V1 PARTIAL**, 2026-11-04.
 
 Este documento define la arquitectura normativa de `INVOCABLE-CAPABILITY-V1`.
 No admite todavía la feature en el lenguaje y no autoriza cambios de ABI,
@@ -779,4 +779,5 @@ decisión adicional —cleanup de un parámetro cuya especialización puede o no
 necesitar Drop— queda resuelto mediante obligación simbólica de owner en HIR
 generic, nunca mediante una capability falsa.
 
-Clasificación final: **ARCHITECTURE CLOSED; IMPLEMENTATION NOT STARTED**.
+Clasificación vigente: **ARCHITECTURE CLOSED; M0/M1/M2 CLOSED; V1 PARTIAL**.
+M3 y M4 permanecen pendientes y fuera del alcance de M2.

@@ -29,13 +29,15 @@ pub use core::{
 pub use diagnostic::{Diagnostic, DiagnosticCategory, FixIt, Phase, SourceFile, SourceId, Span};
 pub use hir::{
     AlgebraicProductKind, BindingId, CallBorrowOrigin, CallBorrowSource, CallSiteId,
-    CapabilityCompareOp, CapabilityMathOp, CapabilityUnaryOp, CaptureMode, CastKind, CatchId,
-    ClosureCaptureInfo, ClosureCaptureWarning, ClosureEnvironmentInfo, ClosureRecipe, CoercionKind,
+    CapabilityCompareOp, CapabilityInvoke, CapabilityInvokeEffect, CapabilityInvokeMode,
+    CapabilityMathOp, CapabilityUnaryOp, CaptureMode, CastKind, CatchId, ClosureCaptureInfo,
+    ClosureCaptureWarning, ClosureEnvironmentInfo, ClosureRecipe, CoercionKind,
     CollectionIterationSource, ConstraintEvidence, ConstraintEvidenceId, DeclaredProgram,
     DefaultArgumentTemplate, EnumEqualityClassification, EnumInfo, FieldInfo, FinallyId,
     FloatValue, FormatBorrowOrigin, FormatBorrowSource, FormatSiteId, FunctionId,
     FunctionInstanceInfo, FunctionSignature, GenericConstraintSpelling, GenericHirFunction,
-    GenericParamInfo, GenericRequirementId, GenericRequirementInfo, HirBinaryOp, HirBlock,
+    GenericOwnerObligation, GenericOwnerSource, GenericOwnerState, GenericParamInfo,
+    GenericRequirementId, GenericRequirementInfo, GenericUnwindObligation, HirBinaryOp, HirBlock,
     HirCallArgument, HirCallArgumentOrigin, HirCallTarget, HirCatch, HirDrop, HirExpr, HirExprKind,
     HirFinally, HirFunction, HirLocal, HirMatchArm, HirMatchBinding, HirParameter, HirPlace,
     HirPlaceBase, HirPlaceProjection, HirStmt, HirStmtKind, HirSubscript, HirSubscriptAxis,
@@ -46,12 +48,12 @@ pub use hir::{
     MatrixAddMetadataRecipe, MatrixAddShapeRecipe, MatrixProductExtent, ModuleId, ModuleInfo,
     MutationEffect, NonNullProofId, NullableLayout, NullablePayloadAccess, OriginKey,
     OutputArgumentKind, PackageId, PackageInstanceKey, PackageKey, PackagePath, ParameterSignature,
-    ParsedModule, ParsedProgram, ResolvedImport, ScalarSide, SliceAssignmentContract,
-    SliceAssignmentSnapshot, SourceUnitKey, StructInfo, StructuralMutation, SymbolKey,
-    TypeAliasInfo, TypeLayout, TypedHir, VariantInfo, VariantPayloadInfo, analyze, analyze_bodies,
-    analyze_bodies_for_target, classify_enum_equality, collect_library_program_signatures,
-    collect_program_signatures, collect_signatures, format_type, layout_of, nullable_layout_of,
-    verify_hir,
+    ParsedModule, ParsedProgram, ResolvedImport, SatisfactionEvidence, ScalarSide,
+    SliceAssignmentContract, SliceAssignmentSnapshot, SourceUnitKey, StructInfo,
+    StructuralMutation, SymbolKey, TypeAliasInfo, TypeLayout, TypedHir, VariantInfo,
+    VariantPayloadInfo, analyze, analyze_bodies, analyze_bodies_for_target, classify_enum_equality,
+    collect_library_program_signatures, collect_program_signatures, collect_signatures,
+    format_type, layout_of, nullable_layout_of, verify_hir,
 };
 pub use lexer::{Token, TokenKind, lex};
 pub use parser::parse;

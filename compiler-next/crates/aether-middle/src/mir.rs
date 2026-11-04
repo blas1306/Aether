@@ -4369,6 +4369,9 @@ impl Builder<'_> {
                 self.emit_end_closure_borrow(*call_site, carrier, borrow, expression.span);
                 Operand::Local(destination)
             }
+            HirExprKind::CapabilityInvoke(_) => {
+                unreachable!("CapabilityInvoke must be rejected or specialized before MIR")
+            }
             HirExprKind::StructInit { struct_id, fields } => {
                 let fields = fields
                     .iter()

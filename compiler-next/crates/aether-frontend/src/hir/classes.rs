@@ -1355,6 +1355,9 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
                 .chain(args.iter())
                 .collect()
         }
+        E::CapabilityInvoke(invoke) => std::iter::once(invoke.callee.as_ref())
+            .chain(invoke.arguments.iter())
+            .collect(),
         E::StructInit { fields, .. } => fields.iter().map(|(_, e)| e).collect(),
         E::CapabilityBinary { left, right, .. }
         | E::CapabilityCompare { left, right, .. }
