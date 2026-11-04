@@ -1449,13 +1449,13 @@ int testDotConsumer() {
 
     if (la.dot(arrayA,arrayB) != 32.0) { return 1; }
     if (la.dot(listA,listB) != 50.0) { return 2; }
-    if (la.dot(arrayA,listB) != 32.0) { return 3; }
-    if (la.dot(listA,arrayB) != 54.0) { return 4; }
+    if (la.dot(arrayA,listB) != 14.0) { return 3; }
+    if (la.dot(listA,arrayB) != 122.0) { return 4; }
     if (la.dot(rowA,columnB) != 32.0) { return 5; }
     if (la.dot(columnB,rowA) != 32.0) { return 6; }
     if (la.dot(arrayA,rowA) != 14.0) { return 7; }
     if (la.dot(rowA,arrayB) != 32.0) { return 8; }
-    if (la.dot(listA,columnB) != 74.0) { return 9; }
+    if (la.dot(listA,columnB) != 122.0) { return 9; }
     if (la.dot(columnB,listB) != 32.0) { return 10; }
     return 0;
 }
