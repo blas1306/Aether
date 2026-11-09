@@ -1,0 +1,16 @@
+package main;
+
+import provider;
+
+public int plusOne(int value) {
+    return value + 1;
+}
+
+public int main() {
+    Function<(int),int> function = plusOne;
+    int first = provider.apply(function, 20);
+    int offset = 1;
+    var closure = (int value) capture(copy offset) => value + offset;
+    int second = provider.apply(closure, 20);
+    return first + second - 42;
+}

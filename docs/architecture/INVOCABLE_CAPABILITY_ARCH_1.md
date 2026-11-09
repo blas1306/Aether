@@ -1,11 +1,10 @@
 # Aether — INVOCABLE-CAPABILITY-ARCH-1
 
-Estado: **ARCHITECTURE CLOSED; M0/M1/M2 CLOSED; V1 PARTIAL**, 2026-11-04.
+Estado: **ARCHITECTURE CLOSED; M0/M1/M2/M3/M4 CLOSED; V1 CLOSED**, 2026-11-09.
 
 Este documento define la arquitectura normativa de `INVOCABLE-CAPABILITY-V1`.
-No admite todavía la feature en el lenguaje y no autoriza cambios de ABI,
-runtime o bibliotecas. La primera implementación debe cerrar los gates de la
-sección 18 antes de declarar soporte.
+La implementación quedó admitida tras cerrar los gates de la sección 18, sin
+cambios de ABI, runtime o bibliotecas.
 
 ## 1. Decisión
 
@@ -779,5 +778,6 @@ decisión adicional —cleanup de un parámetro cuya especialización puede o no
 necesitar Drop— queda resuelto mediante obligación simbólica de owner en HIR
 generic, nunca mediante una capability falsa.
 
-Clasificación vigente: **ARCHITECTURE CLOSED; M0/M1/M2 CLOSED; V1 PARTIAL**.
-M3 y M4 permanecen pendientes y fuera del alcance de M2.
+Clasificación vigente: **ARCHITECTURE CLOSED; M0/M1/M2/M3/M4 CLOSED; V1
+CLOSED**. La qualification final de los 17 gates, O0/O2, coste, corrupciones y
+workspace completo se registra en `INVOCABLE_CAPABILITY_M4_REPORT.md`.

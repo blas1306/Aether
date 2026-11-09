@@ -1,6 +1,6 @@
 # Aether — INVOCABLE-CAPABILITY-ARCH-1 — Report
 
-Estado: **ARCHITECTURE CLOSED; M0/M1/M2 CLOSED; V1 PARTIAL**, 2026-11-04.
+Estado: **ARCHITECTURE CLOSED; M0/M1/M2/M3/M4 CLOSED; V1 CLOSED**, 2026-11-09.
 
 Documento normativo:
 [INVOCABLE_CAPABILITY_ARCH_1](INVOCABLE_CAPABILITY_ARCH_1.md).
@@ -138,6 +138,7 @@ Sólo se crearon:
 Se preservaron los documentos de exploración existentes y todos los cambios
 ajenos. No se hizo commit ni push.
 
-Clasificación vigente: **ARCHITECTURE CLOSED; M0/M1/M2 CLOSED; V1 PARTIAL**.
-La implementación y qualification de M2 se registran en
-`INVOCABLE_CAPABILITY_M2_REPORT.md`; M3 y M4 permanecen fuera de alcance.
+Clasificación vigente: **ARCHITECTURE CLOSED; M0/M1/M2/M3/M4 CLOSED; V1
+CLOSED**. Los reportes M2 y M3 conservan la qualification incremental; el
+cierre exhaustivo de los 17 gates se registra en
+`INVOCABLE_CAPABILITY_M4_REPORT.md`.

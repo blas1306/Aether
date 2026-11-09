@@ -12500,7 +12500,10 @@ impl Analyzer<'_> {
             let initializer = self.expression(expression, None)?.expr;
             if !matches!(
                 initializer.kind,
-                HirExprKind::Call { .. } | HirExprKind::IndirectCall { .. } | HirExprKind::Class(_)
+                HirExprKind::Call { .. }
+                    | HirExprKind::IndirectCall { .. }
+                    | HirExprKind::CapabilityInvoke(_)
+                    | HirExprKind::Class(_)
             ) || (initializer.ty != TypeId::VOID && !self.types.guarantees_copy(initializer.ty))
             {
                 return Err(vec![Diagnostic::new(

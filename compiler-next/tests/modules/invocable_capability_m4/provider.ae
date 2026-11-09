@@ -1,0 +1,5 @@
+package provider;
+
+public R apply<P,R,C:Invocable<(P),R>>(C callback,P value) {
+    return callback(value);
+}
