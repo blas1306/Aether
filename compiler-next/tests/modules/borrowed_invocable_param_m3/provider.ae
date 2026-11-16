@@ -1,0 +1,9 @@
+package provider;
+
+public R apply<P,R,C:Invocable<(P),R>>(ref C callback,P value) {
+    return callback(value);
+}
+
+public R forward<P,R,C:Invocable<(P),R>>(ref C callback,P value) {
+    return apply<P,R,C>(callback,value);
+}

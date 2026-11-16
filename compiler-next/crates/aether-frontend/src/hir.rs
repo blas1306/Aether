@@ -378,6 +378,50 @@ pub struct CapabilityInvoke {
     pub provenance: Span,
 }
 
+/// Proof-carrying invocation through an exact shared `ref C` parameter. The
+/// capability remains owned by the pointee binder `C`; `carrier` is a Place
+/// and must never be turned into an owning load in generic HIR.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BorrowedCapabilityInvoke {
+    pub carrier: HirPlace,
+    pub reference_type: TypeId,
+    pub carrier_type: TypeId,
+    pub arguments: Vec<HirExpr>,
+    pub result_type: TypeId,
+    pub requirement: GenericRequirementId,
+    pub evidence: ConstraintEvidenceId,
+    pub required_signature: crate::CallableSignatureId,
+    pub satisfaction: SatisfactionEvidence,
+    pub mode: CapabilityInvokeMode,
+    pub effect: CapabilityInvokeEffect,
+    pub call_site: CallSiteId,
+    pub provenance: Span,
+}
+
+/// Storage supplying the environment for a read-only Closure invocation.
+/// `OwnedLocal` preserves the original owning-Closure contract. A
+/// `BorrowedPlace` never denotes a new owner: it is the exact dereference of a
+/// shared declaration parameter and remains fail-closed at the M1/M2 boundary.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ClosureCarrier {
+    OwnedLocal(LocalId),
+    BorrowedPlace {
+        place: HirPlace,
+        /// Canonical declaration parameter from which `place` was derived.
+        parameter: LocalId,
+        /// Original exceptional event identity, retained as integrity metadata.
+        call_site: CallSiteId,
+    },
+}
+
+/// Integrity metadata for the Copy load used by a borrowed Function call.
+/// It is concrete HIR metadata only; no generic evidence crosses into MIR.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BorrowedFunctionOrigin {
+    pub parameter: LocalId,
+    pub call_site: CallSiteId,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GenericOwnerState {
     Owned,
@@ -2166,17 +2210,21 @@ pub enum HirExprKind {
         callee: Box<HirExpr>,
         args: Vec<HirExpr>,
         signature: TypeId,
+        borrowed: Option<BorrowedFunctionOrigin>,
     },
     /// Read-only invocation through an owning closure carrier.
     ClosureCall {
         call_site: CallSiteId,
-        callee: Box<HirExpr>,
+        carrier: ClosureCarrier,
         args: Vec<HirExpr>,
         signature: TypeId,
     },
     /// Proof-carrying invocation of an open generic carrier. This node exists
     /// only in generic HIR and is fail-closed at the M2/M3 boundary.
     CapabilityInvoke(Box<CapabilityInvoke>),
+    /// Shared invocation of a declaration parameter whose exact type is
+    /// `ref C`. This is generic-HIR-only and is fail-closed before MIR.
+    BorrowedCapabilityInvoke(Box<BorrowedCapabilityInvoke>),
     StructInit {
         struct_id: StructId,
         fields: Vec<(FieldId, HirExpr)>,
@@ -7288,6 +7336,187 @@ impl Monomorphizer<'_> {
         }
     }
 
+    fn specialize_borrowed_capability_invoke(
+        &mut self,
+        invoke: &BorrowedCapabilityInvoke,
+        substitution: &Substitution,
+        expression: &HirExpr,
+        concrete_result: TypeId,
+    ) -> Result<HirExprKind, Vec<Diagnostic>> {
+        let fail = |message: &'static str| {
+            vec![Diagnostic::new(
+                "E0348",
+                Phase::Semantic,
+                DiagnosticCategory::Verification,
+                message,
+                Some(expression.span),
+            )]
+        };
+        let binder = self
+            .types
+            .generic_param(invoke.carrier_type)
+            .ok_or_else(|| fail("borrowed invocation specialization lost its generic binder"))?;
+        let GenericOwner::Function(owner_index) = binder.owner else {
+            return Err(fail(
+                "borrowed invocation specialization binder is not function-owned",
+            ));
+        };
+        if self
+            .current
+            .and_then(|index| self.queue.get(index))
+            .is_none_or(|instance| instance.function.0 != owner_index)
+        {
+            return Err(fail(
+                "borrowed invocation specialization binder belongs to another declaration",
+            ));
+        }
+        let parameter = self
+            .signatures
+            .get(owner_index as usize)
+            .filter(|owner| owner.id.0 == owner_index)
+            .and_then(|owner| {
+                owner
+                    .generic_parameters
+                    .iter()
+                    .find(|parameter| parameter.id == binder)
+            })
+            .ok_or_else(|| fail("borrowed invocation has foreign declaration evidence"))?;
+        let requirement = parameter
+            .requirements
+            .iter()
+            .find(|requirement| requirement.id == invoke.requirement)
+            .ok_or_else(|| fail("borrowed invocation specialization requirement is missing"))?;
+        let GenericRequirement::Invocable(open_signature) = requirement.requirement else {
+            return Err(fail(
+                "borrowed invocation specialization requirement is not Invocable",
+            ));
+        };
+        if invoke.evidence != requirement.evidence.id
+            || requirement.evidence.owner != binder.owner
+            || requirement.evidence.parameter != binder
+            || requirement.evidence.requirement != invoke.requirement
+            || invoke.required_signature != open_signature
+            || invoke.satisfaction.parameter != binder
+            || invoke.satisfaction.requirement != invoke.requirement
+            || invoke.satisfaction.signature != open_signature
+            || invoke.mode != CapabilityInvokeMode::RepeatableRead
+            || invoke.effect != CapabilityInvokeEffect::MayUnwind
+            || invoke.provenance != expression.span
+        {
+            return Err(fail(
+                "borrowed invocation specialization proof is inconsistent",
+            ));
+        }
+        let HirPlaceBase::Dereference {
+            reference,
+            mutable: false,
+        } = &invoke.carrier.base
+        else {
+            return Err(fail(
+                "borrowed invocation specialization carrier is not a shared dereference",
+            ));
+        };
+        let HirExprKind::Local(reference_local) = reference.kind else {
+            return Err(fail(
+                "borrowed invocation specialization carrier is not rooted in its parameter",
+            ));
+        };
+        let declaration = &self.declarations[owner_index as usize];
+        if !invoke.carrier.projections.is_empty()
+            || declaration
+                .parameters
+                .iter()
+                .find(|parameter| parameter.local == reference_local)
+                .is_none_or(|parameter| parameter.ty != invoke.reference_type)
+            || self.types.reference_info(invoke.reference_type)
+                != Some((invoke.carrier_type, false))
+        {
+            return Err(fail(
+                "borrowed invocation specialization carrier provenance is invalid",
+            ));
+        }
+
+        let carrier_type =
+            self.substitute_type(invoke.carrier_type, substitution, expression.span)?;
+        let reference_type =
+            self.substitute_type(invoke.reference_type, substitution, expression.span)?;
+        let signature = self
+            .types
+            .substitute_callable_signature(open_signature, substitution)
+            .map_err(|parameter| vec![incomplete_substitution(parameter, expression.span)])?;
+        if !self
+            .types
+            .satisfies_requirement(carrier_type, GenericRequirement::Invocable(signature))
+            || self.types.reference_info(reference_type) != Some((carrier_type, false))
+        {
+            return Err(vec![Diagnostic::new(
+                "E0475",
+                Phase::Semantic,
+                DiagnosticCategory::Verification,
+                "borrowed invocation specialization does not exactly satisfy Invocable",
+                Some(expression.span),
+            )]);
+        }
+        let carrier = self.substitute_place(&invoke.carrier, substitution)?;
+        let arguments = invoke
+            .arguments
+            .iter()
+            .map(|argument| self.substitute_expr(argument, substitution))
+            .collect::<Result<Vec<_>, _>>()?;
+        let result = self.substitute_type(invoke.result_type, substitution, expression.span)?;
+        let (parameters, signature_result) = self
+            .types
+            .callable_signature_parts(signature)
+            .expect("substituted borrowed callable signature is canonical");
+        if carrier.ty != carrier_type
+            || reference.ty != invoke.reference_type
+            || signature_result != result
+            || result != concrete_result
+            || arguments.len() != parameters.len()
+            || arguments
+                .iter()
+                .zip(parameters)
+                .any(|(argument, parameter)| argument.ty != *parameter)
+        {
+            return Err(fail(
+                "borrowed invocation specialization changed its exact signature",
+            ));
+        }
+        match self.types.get(carrier_type) {
+            Some(TypeData::Function { .. }) => Ok(HirExprKind::IndirectCall {
+                call_site: invoke.call_site,
+                callee: Box::new(HirExpr {
+                    kind: HirExprKind::Load(carrier),
+                    ty: carrier_type,
+                    span: expression.span,
+                }),
+                args: arguments,
+                signature: carrier_type,
+                borrowed: Some(BorrowedFunctionOrigin {
+                    parameter: reference_local,
+                    call_site: invoke.call_site,
+                }),
+            }),
+            Some(TypeData::Closure { .. }) => Ok(HirExprKind::ClosureCall {
+                call_site: invoke.call_site,
+                carrier: ClosureCarrier::BorrowedPlace {
+                    place: carrier,
+                    parameter: reference_local,
+                    call_site: invoke.call_site,
+                },
+                args: arguments,
+                signature: carrier_type,
+            }),
+            _ => Err(vec![Diagnostic::new(
+                "E0475",
+                Phase::Semantic,
+                DiagnosticCategory::Unsupported,
+                "borrowed Invocable specialization is neither Function nor Closure",
+                Some(expression.span),
+            )]),
+        }
+    }
+
     fn substitute_expr(
         &mut self,
         expression: &HirExpr,
@@ -7844,6 +8073,7 @@ impl Monomorphizer<'_> {
                 callee,
                 args,
                 signature,
+                borrowed,
             } => HirExprKind::IndirectCall {
                 call_site: *call_site,
                 callee: Box::new(self.substitute_expr(callee, substitution)?),
@@ -7852,6 +8082,7 @@ impl Monomorphizer<'_> {
                     .map(|argument| self.substitute_expr(argument, substitution))
                     .collect::<Result<Vec<_>, _>>()?,
                 signature: self.substitute_type(*signature, substitution, expression.span)?,
+                borrowed: *borrowed,
             },
             HirExprKind::CapabilityInvoke(invoke) => {
                 let binder = self
@@ -8005,13 +8236,25 @@ impl Monomorphizer<'_> {
                         callee,
                         args,
                         signature: concrete_callee_type,
+                        borrowed: None,
                     },
-                    Some(TypeData::Closure { .. }) => HirExprKind::ClosureCall {
-                        call_site: invoke.call_site,
-                        callee,
-                        args,
-                        signature: concrete_callee_type,
-                    },
+                    Some(TypeData::Closure { .. }) => {
+                        let HirExprKind::Local(local) = callee.kind else {
+                            return Err(vec![Diagnostic::new(
+                                "E0348",
+                                Phase::Semantic,
+                                DiagnosticCategory::Verification,
+                                "Closure capability specialization lost its owning local carrier",
+                                Some(expression.span),
+                            )]);
+                        };
+                        HirExprKind::ClosureCall {
+                            call_site: invoke.call_site,
+                            carrier: ClosureCarrier::OwnedLocal(local),
+                            args,
+                            signature: concrete_callee_type,
+                        }
+                    }
                     _ => {
                         return Err(vec![Diagnostic::new(
                             "E0475",
@@ -8022,6 +8265,9 @@ impl Monomorphizer<'_> {
                         )]);
                     }
                 }
+            }
+            HirExprKind::BorrowedCapabilityInvoke(invoke) => {
+                self.specialize_borrowed_capability_invoke(invoke, substitution, expression, ty)?
             }
             HirExprKind::StructInit { struct_id, fields } => HirExprKind::StructInit {
                 struct_id: *struct_id,
@@ -8085,12 +8331,23 @@ impl Monomorphizer<'_> {
             }
             HirExprKind::ClosureCall {
                 call_site,
-                callee,
+                carrier,
                 args,
                 signature,
             } => HirExprKind::ClosureCall {
                 call_site: *call_site,
-                callee: Box::new(self.substitute_expr(callee, substitution)?),
+                carrier: match carrier {
+                    ClosureCarrier::OwnedLocal(local) => ClosureCarrier::OwnedLocal(*local),
+                    ClosureCarrier::BorrowedPlace {
+                        place,
+                        parameter,
+                        call_site,
+                    } => ClosureCarrier::BorrowedPlace {
+                        place: self.substitute_place(place, substitution)?,
+                        parameter: *parameter,
+                        call_site: *call_site,
+                    },
+                },
                 args: args
                     .iter()
                     .map(|argument| self.substitute_expr(argument, substitution))
@@ -9642,8 +9899,11 @@ impl OwnershipAnalysis<'_> {
                 Ok(())
             }
             HirExprKind::ClosureAlias { source, .. } => self.require_owned(*source, expr.span),
-            HirExprKind::ClosureCall { callee, args, .. } => {
-                self.expr(callee)?;
+            HirExprKind::ClosureCall { carrier, args, .. } => {
+                match carrier {
+                    ClosureCarrier::OwnedLocal(local) => self.require_owned(*local, expr.span)?,
+                    ClosureCarrier::BorrowedPlace { place, .. } => self.place(place, expr.span)?,
+                }
                 for argument in args {
                     self.expr(argument)?;
                 }
@@ -9678,6 +9938,40 @@ impl OwnershipAnalysis<'_> {
                     return Err(self.error(
                         "E0348",
                         "duplicate CapabilityInvoke CallSiteId",
+                        expr.span,
+                    ));
+                }
+                Ok(())
+            }
+            HirExprKind::BorrowedCapabilityInvoke(invoke) => {
+                self.place(&invoke.carrier, expr.span)?;
+                for argument in &invoke.arguments {
+                    self.expr(argument)?;
+                }
+                let drops = self
+                    .active
+                    .iter()
+                    .rev()
+                    .copied()
+                    .filter_map(|local| {
+                        if !self.types.needs_drop(self.locals[local.0 as usize].ty) {
+                            return None;
+                        }
+                        match self.state[local.0 as usize] {
+                            OwnerState::Owned => Some(HirDrop::Unconditional(local)),
+                            OwnerState::MaybeMoved => Some(HirDrop::Conditional(local)),
+                            _ => None,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                if self
+                    .capability_unwind
+                    .insert(invoke.call_site, drops)
+                    .is_some()
+                {
+                    return Err(self.error(
+                        "E0348",
+                        "duplicate BorrowedCapabilityInvoke CallSiteId",
                         expr.span,
                     ));
                 }
@@ -12503,6 +12797,7 @@ impl Analyzer<'_> {
                 HirExprKind::Call { .. }
                     | HirExprKind::IndirectCall { .. }
                     | HirExprKind::CapabilityInvoke(_)
+                    | HirExprKind::BorrowedCapabilityInvoke(_)
                     | HirExprKind::Class(_)
             ) || (initializer.ty != TypeId::VOID && !self.types.guarantees_copy(initializer.ty))
             {
@@ -15913,6 +16208,123 @@ impl Analyzer<'_> {
                 .function_signature(signature)
                 .or_else(|| self.types.closure_signature(signature))
             else {
+                if let Some((carrier_type, false)) = self.types.reference_info(signature)
+                    && self.locals[local.0 as usize].parameter
+                    && let Some(binder) = self.types.generic_param(carrier_type)
+                    && let Some(requirement) = self.signatures[self.function_id.0 as usize]
+                        .generic_parameters
+                        .iter()
+                        .find(|parameter| parameter.id == binder)
+                        .and_then(|parameter| {
+                            parameter.requirements.iter().find(|requirement| {
+                                matches!(requirement.requirement, GenericRequirement::Invocable(_))
+                            })
+                        })
+                        .cloned()
+                {
+                    let GenericRequirement::Invocable(required_signature) = requirement.requirement
+                    else {
+                        unreachable!("filtered Invocable requirement")
+                    };
+                    let (parameters, result) = self
+                        .types
+                        .callable_signature_parts(required_signature)
+                        .expect("collected Invocable signature is canonical");
+                    let parameters = parameters.to_vec();
+                    if args.len() != parameters.len() {
+                        return Err(vec![Diagnostic::new(
+                            if args.len() < parameters.len() {
+                                "E0366"
+                            } else {
+                                "E0352"
+                            },
+                            Phase::Semantic,
+                            DiagnosticCategory::Type,
+                            format!(
+                                "borrowed generic Invocable value expects {} arguments, found {}",
+                                parameters.len(),
+                                args.len()
+                            ),
+                            Some(span),
+                        )]);
+                    }
+                    let call_site = self.call_site();
+                    let mut checked = Vec::with_capacity(args.len());
+                    for (index, (argument, parameter)) in
+                        args.iter().zip(parameters.iter()).enumerate()
+                    {
+                        let argument = self
+                            .adapt_call_argument(
+                                argument,
+                                *parameter,
+                                call_site,
+                                u32::try_from(index).expect("argument index fits u32"),
+                                None,
+                            )
+                            .map_err(|mut diagnostics| {
+                                if let Some(diagnostic) = diagnostics.first_mut() {
+                                    diagnostic.code = "E0353";
+                                    diagnostic.message = format!(
+                                        "borrowed generic Invocable argument {} is incompatible with signature: {}",
+                                        index + 1,
+                                        diagnostic.message
+                                    );
+                                }
+                                diagnostics
+                            })?;
+                        if argument.ty != *parameter
+                            || matches!(argument.kind, HirExprKind::Coerce { .. })
+                        {
+                            return Err(vec![Diagnostic::new(
+                                "E0353",
+                                Phase::Semantic,
+                                DiagnosticCategory::Type,
+                                "borrowed generic Invocable invocation requires exact argument types",
+                                Some(argument.span),
+                            )]);
+                        }
+                        checked.push(argument);
+                    }
+                    return Ok(Checked {
+                        expr: HirExpr {
+                            kind: HirExprKind::BorrowedCapabilityInvoke(Box::new(
+                                BorrowedCapabilityInvoke {
+                                    carrier: HirPlace {
+                                        base: HirPlaceBase::Dereference {
+                                            reference: Box::new(HirExpr {
+                                                kind: HirExprKind::Local(local),
+                                                ty: signature,
+                                                span,
+                                            }),
+                                            mutable: false,
+                                        },
+                                        projections: Vec::new(),
+                                        ty: carrier_type,
+                                    },
+                                    reference_type: signature,
+                                    carrier_type,
+                                    arguments: checked,
+                                    result_type: result,
+                                    requirement: requirement.id,
+                                    evidence: requirement.evidence.id,
+                                    required_signature,
+                                    satisfaction: SatisfactionEvidence {
+                                        parameter: binder,
+                                        requirement: requirement.id,
+                                        signature: required_signature,
+                                    },
+                                    mode: CapabilityInvokeMode::RepeatableRead,
+                                    effect: CapabilityInvokeEffect::MayUnwind,
+                                    call_site,
+                                    provenance: span,
+                                },
+                            )),
+                            ty: result,
+                            span,
+                        },
+                        constant: None,
+                    });
+                }
                 if let Some(binder) = self.types.generic_param(signature)
                     && let Some(requirement) = self.signatures[self.function_id.0 as usize]
                         .generic_parameters
@@ -16099,11 +16511,7 @@ impl Analyzer<'_> {
                         }
                         HirExprKind::ClosureCall {
                             call_site,
-                            callee: Box::new(HirExpr {
-                                kind: HirExprKind::Local(local),
-                                ty: signature,
-                                span,
-                            }),
+                            carrier: ClosureCarrier::OwnedLocal(local),
                             args: checked,
                             signature,
                         }
@@ -16133,6 +16541,7 @@ impl Analyzer<'_> {
                             }),
                             args: checked,
                             signature,
+                            borrowed: None,
                         }
                     },
                     ty: result,
@@ -19245,6 +19654,7 @@ pub fn verify_hir(h: &TypedHir) -> Result<(), Vec<Diagnostic>> {
             &f.body,
             &VerificationFunction {
                 locals: &f.locals,
+                parameters: &f.parameters,
                 function_id: f.function_id,
             },
             s.return_type,
@@ -19335,6 +19745,7 @@ fn hir_value_type_is_complete(
 /// Shared borrowed body context; generic verification creates no `InstanceId`.
 struct VerificationFunction<'a> {
     locals: &'a [HirLocal],
+    parameters: &'a [HirParameter],
     function_id: FunctionId,
 }
 
@@ -19445,6 +19856,7 @@ fn verify_parametric_hir(
         .map_err(&fail)?;
         let function = VerificationFunction {
             locals: &declaration.locals,
+            parameters: &declaration.parameters,
             function_id: declaration.id,
         };
         for (parameter, signature_parameter) in
@@ -20684,6 +21096,11 @@ fn verify_expr(
         }
         HirExprKind::Load(place) => {
             verify_place(place, f, sigs, structs, enums, types, fail)?;
+            if is_borrowed_invocable_parameter_place(place, f, sigs, types) {
+                return Err(fail(
+                    "HIR invents an owning load from a borrowed Invocable parameter".into(),
+                ));
+            }
             let borrowed_nullable_class_read =
                 matches!(place.base, HirPlaceBase::Dereference { mutable: false, .. })
                     && types
@@ -20699,6 +21116,11 @@ fn verify_expr(
         }
         HirExprKind::Borrow { place, mutable } => {
             verify_place(place, f, sigs, structs, enums, types, fail)?;
+            if is_borrowed_invocable_parameter_place(place, f, sigs, types) {
+                return Err(fail(
+                    "HIR aliases the pointee of a borrowed Invocable parameter".into(),
+                ));
+            }
             if types.reference_info(e.ty) != Some((place.ty, *mutable)) {
                 return Err(fail("HIR borrow type/capability mismatch".into()));
             }
@@ -21313,10 +21735,11 @@ fn verify_expr(
             }
         }
         HirExprKind::IndirectCall {
+            call_site,
             callee,
             args,
             signature,
-            ..
+            borrowed,
         } => {
             verify_expr(callee, f, sigs, structs, enums, types, fail)?;
             let Some((parameters, result)) = types.function_signature(*signature) else {
@@ -21324,6 +21747,61 @@ fn verify_expr(
             };
             if callee.ty != *signature || e.ty != result || args.len() != parameters.len() {
                 return Err(fail("HIR IndirectCall callee/result/arity mismatch".into()));
+            }
+            if let Some(origin) = borrowed {
+                let HirExprKind::Load(place) = &callee.kind else {
+                    return Err(fail("HIR borrowed Function call has no Copy load".into()));
+                };
+                let HirPlaceBase::Dereference {
+                    reference,
+                    mutable: false,
+                } = &place.base
+                else {
+                    return Err(fail(
+                        "HIR borrowed Function carrier is not a shared dereference".into(),
+                    ));
+                };
+                let HirExprKind::Local(local) = reference.kind else {
+                    return Err(fail(
+                        "HIR borrowed Function carrier is not rooted in a parameter".into(),
+                    ));
+                };
+                let local_info = f
+                    .locals
+                    .get(local.0 as usize)
+                    .ok_or_else(|| fail("HIR borrowed Function parameter is missing".into()))?;
+                let declared = f
+                    .parameters
+                    .iter()
+                    .find(|parameter| parameter.local == local);
+                if local != origin.parameter
+                    || *call_site != origin.call_site
+                    || !place.projections.is_empty()
+                    || place.ty != *signature
+                    || types.reference_info(reference.ty) != Some((*signature, false))
+                    || local_info.ty != reference.ty
+                    || !local_info.parameter
+                    || !local_info.source_binding
+                    || declared.is_none_or(|parameter| parameter.ty != reference.ty)
+                {
+                    return Err(fail(
+                        "HIR borrowed Function carrier provenance/type contract invalid".into(),
+                    ));
+                }
+            } else if let HirExprKind::Load(place) = &callee.kind
+                && let HirPlaceBase::Dereference {
+                    reference,
+                    mutable: false,
+                } = &place.base
+                && let HirExprKind::Local(local) = reference.kind
+                && f.parameters
+                    .iter()
+                    .any(|parameter| parameter.local == local)
+                && types.reference_info(reference.ty) == Some((*signature, false))
+            {
+                return Err(fail(
+                    "HIR borrowed Function call is missing provenance metadata".into(),
+                ));
             }
             for (argument, parameter) in args.iter().zip(parameters) {
                 verify_expr(argument, f, sigs, structs, enums, types, fail)?;
@@ -21334,16 +21812,69 @@ fn verify_expr(
             }
         }
         HirExprKind::ClosureCall {
-            callee,
+            call_site,
+            carrier,
             args,
             signature,
-            ..
         } => {
-            verify_expr(callee, f, sigs, structs, enums, types, fail)?;
             let Some((parameters, result)) = types.closure_signature(*signature) else {
                 return Err(fail("HIR ClosureCall has a non-Closure signature".into()));
             };
-            if callee.ty != *signature || e.ty != result || args.len() != parameters.len() {
+            match carrier {
+                ClosureCarrier::OwnedLocal(local) => {
+                    let info = f
+                        .locals
+                        .get(local.0 as usize)
+                        .ok_or_else(|| fail("HIR ClosureCall owner is missing".into()))?;
+                    if info.ty != *signature {
+                        return Err(fail("HIR ClosureCall owner type mismatch".into()));
+                    }
+                }
+                ClosureCarrier::BorrowedPlace {
+                    place,
+                    parameter,
+                    call_site: origin_site,
+                } => {
+                    verify_place(place, f, sigs, structs, enums, types, fail)?;
+                    let HirPlaceBase::Dereference {
+                        reference,
+                        mutable: false,
+                    } = &place.base
+                    else {
+                        return Err(fail(
+                            "HIR borrowed Closure carrier is not a shared dereference".into(),
+                        ));
+                    };
+                    let HirExprKind::Local(local) = reference.kind else {
+                        return Err(fail(
+                            "HIR borrowed Closure carrier is not rooted in a parameter".into(),
+                        ));
+                    };
+                    let local_info = f
+                        .locals
+                        .get(local.0 as usize)
+                        .ok_or_else(|| fail("HIR borrowed Closure parameter is missing".into()))?;
+                    let declared = f
+                        .parameters
+                        .iter()
+                        .find(|parameter| parameter.local == local);
+                    if local != *parameter
+                        || origin_site != call_site
+                        || !place.projections.is_empty()
+                        || place.ty != *signature
+                        || types.reference_info(reference.ty) != Some((*signature, false))
+                        || local_info.ty != reference.ty
+                        || !local_info.parameter
+                        || !local_info.source_binding
+                        || declared.is_none_or(|parameter| parameter.ty != reference.ty)
+                    {
+                        return Err(fail(
+                            "HIR borrowed Closure carrier provenance/type contract invalid".into(),
+                        ));
+                    }
+                }
+            }
+            if e.ty != result || args.len() != parameters.len() {
                 return Err(fail("HIR ClosureCall callee/result/arity mismatch".into()));
             }
             for (argument, parameter) in args.iter().zip(parameters) {
@@ -21355,6 +21886,9 @@ fn verify_expr(
         }
         HirExprKind::CapabilityInvoke(_) => {
             verify_capability_invoke(e, f, sigs, structs, enums, types, fail)?;
+        }
+        HirExprKind::BorrowedCapabilityInvoke(_) => {
+            verify_borrowed_capability_invoke(e, f, sigs, structs, enums, types, fail)?;
         }
         HirExprKind::Call {
             call_site,
@@ -21959,6 +22493,53 @@ fn verify_expr(
     Ok(())
 }
 
+fn is_borrowed_invocable_parameter_place(
+    place: &HirPlace,
+    function: &VerificationFunction<'_>,
+    signatures: VerificationSignatures<'_>,
+    types: &TypeArena,
+) -> bool {
+    let VerificationSignatures::Parametric(declarations) = signatures else {
+        return false;
+    };
+    let HirPlaceBase::Dereference {
+        reference,
+        mutable: false,
+    } = &place.base
+    else {
+        return false;
+    };
+    let HirExprKind::Local(local) = reference.kind else {
+        return false;
+    };
+    let Some(local_info) = function.locals.get(local.0 as usize) else {
+        return false;
+    };
+    if !local_info.parameter
+        || !place.projections.is_empty()
+        || types.reference_info(local_info.ty) != Some((place.ty, false))
+    {
+        return false;
+    }
+    let Some(binder) = types.generic_param(place.ty) else {
+        return false;
+    };
+    declarations
+        .get(function.function_id.0 as usize)
+        .filter(|declaration| declaration.id == function.function_id)
+        .and_then(|declaration| {
+            declaration
+                .generic_parameters
+                .iter()
+                .find(|parameter| parameter.id == binder)
+        })
+        .is_some_and(|parameter| {
+            parameter.requirements.iter().any(|requirement| {
+                matches!(requirement.requirement, GenericRequirement::Invocable(_))
+            })
+        })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn verify_capability_invoke(
     expression: &HirExpr,
@@ -22041,6 +22622,118 @@ fn verify_capability_invoke(
         verify_expr(argument, function, signatures, structs, enums, types, fail)?;
         if argument.ty != *parameter || matches!(argument.kind, HirExprKind::Coerce { .. }) {
             return Err(fail("HIR CapabilityInvoke argument type mismatch".into()));
+        }
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_borrowed_capability_invoke(
+    expression: &HirExpr,
+    function: &VerificationFunction<'_>,
+    signatures: VerificationSignatures<'_>,
+    structs: &[StructInfo],
+    enums: &[EnumInfo],
+    types: &TypeArena,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let HirExprKind::BorrowedCapabilityInvoke(invoke) = &expression.kind else {
+        return Err(fail("expected HIR BorrowedCapabilityInvoke".into()));
+    };
+    let VerificationSignatures::Parametric(declarations) = signatures else {
+        return Err(fail(
+            "residual BorrowedCapabilityInvoke reached concrete HIR".into(),
+        ));
+    };
+    verify_place(
+        &invoke.carrier,
+        function,
+        signatures,
+        structs,
+        enums,
+        types,
+        fail,
+    )?;
+    let binder = types
+        .generic_param(invoke.carrier_type)
+        .ok_or_else(|| fail("HIR borrowed carrier type is not a generic binder".into()))?;
+    let declaration = declarations
+        .get(function.function_id.0 as usize)
+        .filter(|signature| signature.id == function.function_id)
+        .ok_or_else(|| fail("HIR borrowed invocation declaration is missing".into()))?;
+    let generic_parameter = declaration
+        .generic_parameters
+        .iter()
+        .find(|parameter| parameter.id == binder)
+        .ok_or_else(|| fail("HIR borrowed invocation binder is foreign".into()))?;
+    let info = generic_parameter
+        .requirements
+        .iter()
+        .find(|info| info.id == invoke.requirement)
+        .ok_or_else(|| fail("HIR borrowed invocation requirement is missing".into()))?;
+    let GenericRequirement::Invocable(signature) = info.requirement else {
+        return Err(fail(
+            "HIR borrowed invocation requirement is not Invocable".into(),
+        ));
+    };
+    let (parameters, result) = types
+        .callable_signature_parts(signature)
+        .ok_or_else(|| fail("HIR borrowed invocation signature is invalid".into()))?;
+
+    let HirPlaceBase::Dereference { reference, mutable } = &invoke.carrier.base else {
+        return Err(fail(
+            "HIR borrowed carrier is not a single parameter dereference".into(),
+        ));
+    };
+    let HirExprKind::Local(reference_local) = reference.kind else {
+        return Err(fail(
+            "HIR borrowed carrier reference is not the original parameter".into(),
+        ));
+    };
+    let local = function
+        .locals
+        .get(reference_local.0 as usize)
+        .ok_or_else(|| fail("HIR borrowed carrier parameter is missing".into()))?;
+    let declared_parameter = function
+        .parameters
+        .iter()
+        .find(|parameter| parameter.local == reference_local)
+        .ok_or_else(|| fail("HIR borrowed carrier root is not a declaration parameter".into()))?;
+    if *mutable
+        || !invoke.carrier.projections.is_empty()
+        || invoke.carrier.ty != invoke.carrier_type
+        || types.reference_info(invoke.reference_type) != Some((invoke.carrier_type, false))
+        || reference.ty != invoke.reference_type
+        || local.ty != invoke.reference_type
+        || declared_parameter.ty != invoke.reference_type
+        || !local.parameter
+        || !local.source_binding
+        || invoke.evidence != info.evidence.id
+        || info.evidence.owner != GenericOwner::Function(function.function_id.0)
+        || info.evidence.parameter != binder
+        || info.evidence.requirement != invoke.requirement
+        || invoke.required_signature != signature
+        || invoke.satisfaction.parameter != binder
+        || invoke.satisfaction.requirement != invoke.requirement
+        || invoke.satisfaction.signature != signature
+        || invoke.result_type != result
+        || expression.ty != result
+        || invoke.arguments.len() != parameters.len()
+        || invoke.mode != CapabilityInvokeMode::RepeatableRead
+        || invoke.effect != CapabilityInvokeEffect::MayUnwind
+        || invoke.provenance != expression.span
+    {
+        return Err(fail(
+            "HIR borrowed invocation parameter/place/proof/type/mode/effect/provenance contract invalid"
+                .into(),
+        ));
+    }
+    for (argument, parameter) in invoke.arguments.iter().zip(parameters) {
+        verify_expr(argument, function, signatures, structs, enums, types, fail)?;
+        if argument.ty != *parameter || matches!(argument.kind, HirExprKind::Coerce { .. }) {
+            return Err(fail(
+                "HIR BorrowedCapabilityInvoke argument type mismatch".into(),
+            ));
         }
     }
     Ok(())
@@ -22918,6 +23611,463 @@ mod tests {
         );
     }
 
+    #[test]
+    fn borrowed_invocable_m0_builds_repeatable_verified_generic_hir() {
+        let hir = check(
+            "R apply<P,R,C:Invocable<(P),R>>(ref C f,P x){return f(x);}int main(){return 0;}",
+        )
+        .unwrap();
+        verify_hir(&hir).unwrap();
+        let function = &hir.generic_functions[0];
+        let HirStmtKind::Return { value, drops } = &function.body.statements[0].kind else {
+            panic!("expected return")
+        };
+        let HirExprKind::BorrowedCapabilityInvoke(invoke) = &value.kind else {
+            panic!("expected BorrowedCapabilityInvoke")
+        };
+        assert_eq!(invoke.reference_type, function.parameters[0].ty);
+        assert_eq!(
+            hir.types.reference_info(invoke.reference_type),
+            Some((invoke.carrier_type, false))
+        );
+        assert!(matches!(
+            invoke.carrier.base,
+            HirPlaceBase::Dereference { mutable: false, .. }
+        ));
+        assert_eq!(invoke.carrier.projections.len(), 0);
+        assert_eq!(invoke.mode, CapabilityInvokeMode::RepeatableRead);
+        assert_eq!(invoke.effect, CapabilityInvokeEffect::MayUnwind);
+        assert!(drops.iter().all(|drop| !matches!(drop, HirDrop::Unconditional(local) | HirDrop::Conditional(local) if *local == function.parameters[0].local)));
+        assert!(
+            function
+                .generic_owner_obligations
+                .iter()
+                .all(|owner| owner.root != function.parameters[0].local)
+        );
+        assert_eq!(function.generic_unwind_obligations.len(), 1);
+
+        let repeated = check(
+            "int twice<C:Invocable<(int),int>>(ref C f,int x){return f(x)+f(x);}int main(){return 0;}",
+        )
+        .unwrap();
+        assert_eq!(
+            repeated.generic_functions[0]
+                .generic_unwind_obligations
+                .len(),
+            2
+        );
+        verify_hir(&repeated).unwrap();
+
+        check(
+            "R apply<P,R,C:Invocable<(P),R>>(ref C f,P x){return f(x);}R forward<P,R,C:Invocable<(P),R>>(ref C f,P x){return apply<P,R,C>(f,x);}int main(){return 0;}",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn borrowed_invocable_m1_specializes_function_and_closure_carriers() {
+        let function = check(
+            "int apply<C:Invocable<(int),int>>(ref C f,int x){return f(x);}int inc(int x){return x+1;}int main(){Function<(int),int> f=inc;return apply(f,1);}",
+        )
+        .unwrap();
+        let specialized = function
+            .functions
+            .iter()
+            .find(|function| function.function_id == FunctionId(0))
+            .unwrap();
+        let value = match &specialized.body.statements[0].kind {
+            HirStmtKind::Return { value, drops } => {
+                assert!(drops.is_empty());
+                value
+            }
+            _ => panic!("expected return"),
+        };
+        let HirExprKind::IndirectCall {
+            call_site,
+            callee,
+            signature,
+            ..
+        } = &value.kind
+        else {
+            panic!("expected borrowed Function IndirectCall")
+        };
+        assert_eq!(*call_site, CallSiteId(0));
+        assert!(matches!(callee.kind, HirExprKind::Load(_)));
+        assert!(matches!(
+            function.types.get(*signature),
+            Some(TypeData::Function { .. })
+        ));
+
+        for source in [
+            "int apply<C:Invocable<(int),int>>(ref C f,int x){return f(x);}int main(){int n=1;var f=(int x)=>x+n;return apply(f,1);}",
+            "int apply<C:Invocable<(int),int>>(ref C f,int x){return f(x);}int main(){int n=1;return apply((int x)=>x+n,1);}",
+        ] {
+            let closure = check(source).unwrap();
+            let specialized = closure
+                .functions
+                .iter()
+                .find(|function| function.function_id == FunctionId(0))
+                .unwrap();
+            let value = match &specialized.body.statements[0].kind {
+                HirStmtKind::Return { value, drops } => {
+                    assert!(drops.is_empty());
+                    value
+                }
+                _ => panic!("expected return"),
+            };
+            let HirExprKind::ClosureCall {
+                call_site,
+                carrier: ClosureCarrier::BorrowedPlace { place, .. },
+                signature,
+                ..
+            } = &value.kind
+            else {
+                panic!("expected borrowed ClosureCall")
+            };
+            assert_eq!(*call_site, CallSiteId(0));
+            assert!(matches!(
+                place.base,
+                HirPlaceBase::Dereference { mutable: false, .. }
+            ));
+            assert!(matches!(
+                closure.types.get(*signature),
+                Some(TypeData::Closure { .. })
+            ));
+        }
+
+        let ref_satisfaction = check(
+            "int apply<C:Invocable<(int),int>>(ref C f,int x){return f(x);}int inc(int x){return x+1;}int main(){Function<(int),int> f=inc;return apply<ref Function<(int),int>>(f,1);}",
+        )
+        .unwrap_err();
+        assert_ne!(ref_satisfaction[0].code, "E0476");
+    }
+
+    #[test]
+    fn borrowed_invocable_m1_concrete_corruptions_fail_closed() {
+        let source = "int apply<C:Invocable<(int),int>>(ref C f,ref C other,int x){return f(x);}int inc(int x){return x+1;}int main(){Function<(int),int> f=inc;int a=apply(f,f,1);int n=1;var c=(int x)=>x+n;return a+apply(c,c,1);}";
+        let hir = check(source).unwrap();
+        let function_index = hir
+            .functions
+            .iter()
+            .position(|function| {
+                function.function_id == FunctionId(0)
+                    && hir
+                        .types
+                        .reference_info(function.parameters[0].ty)
+                        .is_some_and(|(pointee, _)| {
+                            matches!(hir.types.get(pointee), Some(TypeData::Function { .. }))
+                        })
+            })
+            .unwrap();
+        let closure_index = hir
+            .functions
+            .iter()
+            .position(|function| {
+                function.function_id == FunctionId(0)
+                    && hir
+                        .types
+                        .reference_info(function.parameters[0].ty)
+                        .is_some_and(|(pointee, _)| {
+                            matches!(hir.types.get(pointee), Some(TypeData::Closure { .. }))
+                        })
+            })
+            .unwrap();
+
+        let mut function_as_closure = hir.clone();
+        let value =
+            concrete_returned_expression(&mut function_as_closure.functions[function_index]);
+        let HirExprKind::IndirectCall {
+            call_site,
+            callee,
+            args,
+            signature,
+            ..
+        } = &value.kind
+        else {
+            panic!("expected borrowed Function call")
+        };
+        let HirExprKind::Load(place) = &callee.kind else {
+            panic!("expected borrowed Function load")
+        };
+        value.kind = HirExprKind::ClosureCall {
+            call_site: *call_site,
+            carrier: ClosureCarrier::BorrowedPlace {
+                place: place.clone(),
+                parameter: LocalId(0),
+                call_site: *call_site,
+            },
+            args: args.clone(),
+            signature: *signature,
+        };
+        assert!(verify_hir(&function_as_closure).is_err());
+
+        for mutation in 0..4 {
+            let mut bad = hir.clone();
+            let other_parameter_type = bad.functions[function_index].locals[1].ty;
+            let value = concrete_returned_expression(&mut bad.functions[function_index]);
+            let HirExprKind::IndirectCall {
+                call_site,
+                callee,
+                borrowed,
+                ..
+            } = &mut value.kind
+            else {
+                panic!("expected borrowed Function call")
+            };
+            let HirExprKind::Load(place) = &mut callee.kind else {
+                panic!("expected Function Copy load")
+            };
+            match mutation {
+                0 => borrowed.as_mut().unwrap().parameter = LocalId(1),
+                1 => borrowed.as_mut().unwrap().call_site = CallSiteId(call_site.0 + 1),
+                2 => {
+                    let HirPlaceBase::Dereference { reference, .. } = &mut place.base else {
+                        panic!("expected dereference")
+                    };
+                    reference.kind = HirExprKind::Local(LocalId(1));
+                    reference.ty = other_parameter_type;
+                }
+                3 => *borrowed = None,
+                _ => unreachable!(),
+            }
+            assert!(
+                verify_hir(&bad).is_err(),
+                "accepted Function M1 mutation {mutation}"
+            );
+        }
+
+        let mut closure_as_function = hir.clone();
+        let value = concrete_returned_expression(&mut closure_as_function.functions[closure_index]);
+        let HirExprKind::ClosureCall {
+            call_site,
+            carrier: ClosureCarrier::BorrowedPlace { place, .. },
+            args,
+            signature,
+        } = &value.kind
+        else {
+            panic!("expected borrowed Closure call")
+        };
+        value.kind = HirExprKind::IndirectCall {
+            call_site: *call_site,
+            callee: Box::new(HirExpr {
+                kind: HirExprKind::Load(place.clone()),
+                ty: *signature,
+                span: value.span,
+            }),
+            args: args.clone(),
+            signature: *signature,
+            borrowed: Some(BorrowedFunctionOrigin {
+                parameter: LocalId(0),
+                call_site: *call_site,
+            }),
+        };
+        assert!(verify_hir(&closure_as_function).is_err());
+
+        for mutation in 0..6 {
+            let mut bad = hir.clone();
+            let other_parameter_type = bad.functions[closure_index].locals[1].ty;
+            let value = concrete_returned_expression(&mut bad.functions[closure_index]);
+            let HirExprKind::ClosureCall {
+                call_site,
+                carrier:
+                    ClosureCarrier::BorrowedPlace {
+                        place,
+                        parameter,
+                        call_site: origin_site,
+                    },
+                signature,
+                ..
+            } = &mut value.kind
+            else {
+                panic!("expected borrowed Closure call")
+            };
+            let HirPlaceBase::Dereference { reference, mutable } = &mut place.base else {
+                panic!("expected dereference")
+            };
+            match mutation {
+                0 => *mutable = true,
+                1 => place.ty = TypeId::BOOL,
+                2 => {
+                    reference.kind = HirExprKind::Local(LocalId(1));
+                    reference.ty = other_parameter_type;
+                }
+                3 => *parameter = LocalId(1),
+                4 => *origin_site = CallSiteId(call_site.0 + 1),
+                5 => *signature = TypeId::BOOL,
+                _ => unreachable!(),
+            }
+            assert!(verify_hir(&bad).is_err(), "accepted M1 mutation {mutation}");
+        }
+
+        let (borrowed_place, closure_signature) = {
+            let function = &hir.functions[closure_index];
+            let HirStmtKind::Return { value, .. } = &function.body.statements[0].kind else {
+                unreachable!()
+            };
+            let HirExprKind::ClosureCall {
+                carrier: ClosureCarrier::BorrowedPlace { place, .. },
+                signature,
+                ..
+            } = &value.kind
+            else {
+                unreachable!()
+            };
+            (place.clone(), *signature)
+        };
+        let mut invented_load = hir.clone();
+        concrete_returned_expression(&mut invented_load.functions[closure_index]).kind =
+            HirExprKind::Load(borrowed_place);
+        assert!(verify_hir(&invented_load).is_err());
+
+        let mut invented_alias = hir.clone();
+        concrete_returned_expression(&mut invented_alias.functions[closure_index]).kind =
+            HirExprKind::ClosureAlias {
+                source: LocalId(0),
+                signature: closure_signature,
+            };
+        assert!(verify_hir(&invented_alias).is_err());
+
+        let mut fictitious_drop = hir.clone();
+        let HirStmtKind::Return { drops, .. } =
+            &mut fictitious_drop.functions[closure_index].body.statements[0].kind
+        else {
+            panic!("expected return")
+        };
+        drops.push(HirDrop::Unconditional(LocalId(0)));
+        assert!(verify_hir(&fictitious_drop).is_err());
+
+        let mut residual = hir.clone();
+        *concrete_returned_expression(&mut residual.functions[closure_index]) =
+            returned_expression(&mut residual.generic_functions[0]).clone();
+        assert!(verify_hir(&residual).is_err());
+
+        let mut residual_type = hir.clone();
+        residual_type.functions[closure_index].locals[0].ty =
+            residual_type.generic_functions[0].locals[0].ty;
+        assert!(verify_hir(&residual_type).is_err());
+    }
+
+    #[test]
+    fn borrowed_invocable_m0_rejects_mutable_nonparameter_and_owning_uses() {
+        for source in [
+            "R bad<P,R,C:Invocable<(P),R>>(ref mut C f,P x){return f(x);}int main(){return 0;}",
+            "C bad<C:Invocable<(int),int>>(ref C f){C x=*f;return x;}int main(){return 0;}",
+            "void bad<C:Invocable<(int),int>>(ref C f){*f=*f;return;}int main(){return 0;}",
+            "ref C bad<C:Invocable<(int),int>>(ref C f){return f;}int main(){return 0;}",
+            "void bad<C:Invocable<(int),int>>(ref C f){var g=(int x)=>f(x);return;}int main(){return 0;}",
+        ] {
+            assert!(
+                check(source).is_err(),
+                "accepted forbidden borrowed use: {source}"
+            );
+        }
+    }
+
+    #[test]
+    fn borrowed_invocable_m0_corruptions_fail_closed() {
+        let source =
+            "R apply<P,R,C:Copy+Invocable<(P),R>>(ref C f,P x){return f(x);}int main(){return 0;}";
+        let hir = check(source).unwrap();
+        for mutation in 0..13 {
+            let mut bad = hir.clone();
+            let p_binder = bad.signatures[0].generic_parameters[0].id;
+            let function = &mut bad.generic_functions[0];
+            let other_type = function.locals[1].ty;
+            let value = returned_expression(function);
+            let HirExprKind::BorrowedCapabilityInvoke(invoke) = &mut value.kind else {
+                panic!("expected BorrowedCapabilityInvoke")
+            };
+            match mutation {
+                0 => invoke.evidence.0.parameter = p_binder,
+                1 => invoke.satisfaction.parameter = p_binder,
+                2 => invoke.requirement.owner = GenericOwner::Function(1),
+                3 => {
+                    let HirPlaceBase::Dereference { mutable, .. } = &mut invoke.carrier.base else {
+                        unreachable!()
+                    };
+                    *mutable = true;
+                }
+                4 => {
+                    let HirPlaceBase::Dereference { reference, .. } = &mut invoke.carrier.base
+                    else {
+                        unreachable!()
+                    };
+                    reference.kind = HirExprKind::Local(LocalId(1));
+                    reference.ty = other_type;
+                }
+                5 => invoke.carrier.ty = other_type,
+                6 => invoke.reference_type = invoke.carrier_type,
+                7 => invoke.required_signature = crate::CallableSignatureId(u32::MAX),
+                8 => invoke.arguments.clear(),
+                9 => invoke.result_type = TypeId::BOOL,
+                10 => invoke.mode = CapabilityInvokeMode::Consuming,
+                11 => invoke.effect = CapabilityInvokeEffect::NoUnwind,
+                12 => invoke.provenance.end += 1,
+                _ => unreachable!(),
+            }
+            assert!(
+                verify_hir(&bad).is_err(),
+                "accepted borrowed mutation {mutation}"
+            );
+        }
+
+        let mut layered = hir.clone();
+        let original_reference = layered.generic_functions[0].parameters[0].ty;
+        let extra_reference = layered.types.intern_reference(original_reference, false);
+        let value = returned_expression(&mut layered.generic_functions[0]);
+        let HirExprKind::BorrowedCapabilityInvoke(invoke) = &mut value.kind else {
+            unreachable!()
+        };
+        invoke.reference_type = extra_reference;
+        assert!(verify_hir(&layered).is_err());
+
+        let mut owner = hir.clone();
+        let parameter = owner.generic_functions[0].parameters[0].clone();
+        let parameter_type = owner.generic_functions[0].locals[parameter.local.0 as usize].ty;
+        owner.generic_functions[0]
+            .generic_owner_obligations
+            .push(GenericOwnerObligation {
+                root: parameter.local,
+                ty: parameter_type,
+                state: GenericOwnerState::Owned,
+                source: GenericOwnerSource::ParameterByValue,
+            });
+        assert!(verify_hir(&owner).is_err());
+
+        let mut owner_load = hir.clone();
+        let local = owner_load.generic_functions[0].parameters[0].local;
+        let value = returned_expression(&mut owner_load.generic_functions[0]);
+        let HirExprKind::BorrowedCapabilityInvoke(invoke) = &mut value.kind else {
+            unreachable!()
+        };
+        let HirPlaceBase::Dereference { reference, .. } = &mut invoke.carrier.base else {
+            unreachable!()
+        };
+        reference.kind = HirExprKind::Load(HirPlace {
+            base: HirPlaceBase::Local(local),
+            projections: Vec::new(),
+            ty: reference.ty,
+        });
+        assert!(verify_hir(&owner_load).is_err());
+
+        let mut duplicate_site = check(
+            "int twice<C:Invocable<(int),int>>(ref C f,int x){return f(x)+f(x);}int main(){return 0;}",
+        )
+        .unwrap();
+        let value = returned_expression(&mut duplicate_site.generic_functions[0]);
+        let HirExprKind::Binary { left, right, .. } = &mut value.kind else {
+            panic!("expected binary")
+        };
+        let HirExprKind::BorrowedCapabilityInvoke(first) = &left.kind else {
+            panic!("expected first borrowed invocation")
+        };
+        let HirExprKind::BorrowedCapabilityInvoke(second) = &mut right.kind else {
+            panic!("expected second borrowed invocation")
+        };
+        second.call_site = first.call_site;
+        assert!(verify_hir(&duplicate_site).is_err());
+    }
+
     fn returned_expression(function: &mut GenericHirFunction) -> &mut HirExpr {
         function
             .body
@@ -23201,13 +24351,17 @@ mod tests {
             callee,
             args,
             signature,
+            ..
         } = &value.kind
         else {
             panic!("expected IndirectCall")
         };
         value.kind = HirExprKind::ClosureCall {
             call_site: *call_site,
-            callee: callee.clone(),
+            carrier: match callee.kind {
+                HirExprKind::Local(local) => ClosureCarrier::OwnedLocal(local),
+                _ => panic!("expected local Function carrier"),
+            },
             args: args.clone(),
             signature: *signature,
         };
@@ -23217,18 +24371,26 @@ mod tests {
         let value = concrete_returned_expression(&mut closure_as_function.functions[closure_index]);
         let HirExprKind::ClosureCall {
             call_site,
-            callee,
+            carrier,
             args,
             signature,
         } = &value.kind
         else {
             panic!("expected ClosureCall")
         };
+        let ClosureCarrier::OwnedLocal(local) = carrier else {
+            panic!("expected owned Closure carrier")
+        };
         value.kind = HirExprKind::IndirectCall {
             call_site: *call_site,
-            callee: callee.clone(),
+            callee: Box::new(HirExpr {
+                kind: HirExprKind::Local(*local),
+                ty: *signature,
+                span: value.span,
+            }),
             args: args.clone(),
             signature: *signature,
+            borrowed: None,
         };
         assert!(verify_hir(&closure_as_function).is_err());
 
@@ -23273,7 +24435,6 @@ mod tests {
             "C bad<C:Invocable<(int),int>>(C f){return f+f;}int main(){return 0;}",
             "bool bad<C:Invocable<(int),int>>(C f){return f==f;}int main(){return 0;}",
             "void bad<C:Invocable<(int),int>>(C f){Array<C> a={f};return;}int main(){return 0;}",
-            "int bad<C:Invocable<(int),int>>(ref C f){return f(1);}int main(){return 0;}",
             "int bad<C:Invocable<(double),int>>(C f,int x){return f(x);}int main(){return 0;}",
         ] {
             assert!(

@@ -1,0 +1,14 @@
+int main() {
+    Array<double> arr = {3, 2.5, 5, 1.2};
+    
+    int n = int(length(arr));
+    List<int> idx = {};
+
+    for (int i in 1:n) {
+        push(idx, i);
+    }
+
+    for (int value in idx) {
+        println(value);
+    }
+}

@@ -3507,8 +3507,87 @@ fn verify_ssa_function(
     verify_matrix_literal_ownership(function, types, fail)?;
     verify_take_protocol(function, types, fail)?;
     verify_call_borrow_regions(function, types, fail)?;
-    verify_closure_borrow_regions(function, fail)?;
+    verify_borrowed_function_calls(function, types, fail)?;
+    verify_closure_borrow_regions(function, types, fail)?;
     verify_format_borrow_regions(function, fail)?;
+    Ok(())
+}
+
+fn verify_borrowed_function_calls(
+    function: &SsaFunction,
+    types: &TypeArena,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    for load in function.blocks.iter().flat_map(|block| &block.instructions) {
+        let SsaOp::Load {
+            place:
+                SsaPlace {
+                    base: SsaPlaceBase::Dereference { reference, mutable },
+                    projections,
+                },
+        } = &load.op
+        else {
+            continue;
+        };
+        let SsaOperand::Value(reference) = reference else {
+            continue;
+        };
+        let Some(parameter) = function
+            .parameters
+            .iter()
+            .find(|parameter| parameter.value == *reference)
+        else {
+            continue;
+        };
+        let Some((pointee, reference_mutable)) = types.reference_info(parameter.ty) else {
+            continue;
+        };
+        if types.function_signature(pointee).is_none() {
+            continue;
+        }
+        if *mutable || reference_mutable || !projections.is_empty() {
+            return Err(fail(
+                "SSA borrowed Function load lacks exact shared parameter provenance".into(),
+            ));
+        }
+        let mut calls = 0;
+        for block in &function.blocks {
+            if block
+                .phis
+                .iter()
+                .any(|phi| phi.incoming.iter().any(|(_, value)| *value == load.result))
+            {
+                return Err(fail(
+                    "SSA borrowed Function code pointer escapes through phi".into(),
+                ));
+            }
+            for instruction in &block.instructions {
+                let allowed = matches!(
+                    &instruction.op,
+                    SsaOp::IndirectCall {
+                        callee: SsaOperand::Value(callee),
+                        signature,
+                        ..
+                    } if *callee == load.result && *signature == pointee
+                );
+                let used = op_operands(&instruction.op)
+                    .into_iter()
+                    .any(|operand| operand == &SsaOperand::Value(load.result));
+                if allowed {
+                    calls += 1;
+                } else if used {
+                    return Err(fail(
+                        "SSA borrowed Function code pointer escapes its exact IndirectCall".into(),
+                    ));
+                }
+            }
+        }
+        if calls != 1 {
+            return Err(fail(
+                "SSA borrowed Function load requires one exact IndirectCall".into(),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -4221,20 +4300,48 @@ fn verify_call_borrow_regions(
     Ok(())
 }
 
+#[allow(clippy::too_many_lines)]
 fn verify_closure_borrow_regions(
     function: &SsaFunction,
+    types: &TypeArena,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
     let mut borrows = BTreeMap::<ValueId, (aether_frontend::CallSiteId, SsaPlace)>::new();
     for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
         if let SsaOp::ClosureBorrow {
-            call_site, carrier, ..
+            call_site,
+            carrier,
+            signature,
         } = &instruction.op
-            && borrows
+        {
+            if let SsaPlaceBase::Dereference { reference, mutable } = &carrier.base {
+                let SsaOperand::Value(reference) = reference else {
+                    return Err(fail(
+                        "SSA borrowed Closure carrier reference is not a value".into(),
+                    ));
+                };
+                let parameter = function
+                    .parameters
+                    .iter()
+                    .find(|parameter| parameter.value == *reference);
+                if *mutable
+                    || !carrier.projections.is_empty()
+                    || parameter.is_none_or(|parameter| {
+                        types.reference_info(parameter.ty) != Some((*signature, false))
+                    })
+                {
+                    return Err(fail(
+                        "SSA borrowed Closure carrier lacks exact shared parameter provenance"
+                            .into(),
+                    ));
+                }
+            }
+            if borrows
                 .insert(instruction.result, (*call_site, carrier.clone()))
                 .is_some()
-        {
-            return Err(fail("SSA ClosureBorrow token is defined twice".into()));
+            {
+                return Err(fail("SSA ClosureBorrow token is defined twice".into()));
+            }
         }
     }
     for (token, (call_site, carrier)) in &borrows {
@@ -4303,6 +4410,9 @@ fn verify_closure_borrow_regions(
             };
             let invalidates = match &instruction.op {
                 SsaOp::Move { source } | SsaOp::Drop { owner: source } => protected(source),
+                SsaOp::Load { place } | SsaOp::ClosureAlias { source: place, .. } => {
+                    protected(place)
+                }
                 SsaOp::Store { place, .. }
                 | SsaOp::ReplaceOwned {
                     destination: place, ..
@@ -4322,6 +4432,14 @@ fn verify_closure_borrow_regions(
                     if !active.insert(instruction.result) {
                         return Err(fail("SSA ClosureBorrow begins twice".into()));
                     }
+                }
+                SsaOp::ClosureCall {
+                    borrow: SsaOperand::Value(token),
+                    ..
+                } if !active.contains(token) => {
+                    return Err(fail(
+                        "SSA ClosureCall uses an inactive ClosureBorrow token".into(),
+                    ));
                 }
                 SsaOp::EndClosureBorrow {
                     borrow: SsaOperand::Value(token),

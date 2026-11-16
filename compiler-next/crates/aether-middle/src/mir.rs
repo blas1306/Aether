@@ -4306,6 +4306,7 @@ impl Builder<'_> {
                 callee,
                 args,
                 signature,
+                ..
             } => {
                 let callee = self.lower_expr(callee);
                 let (args, borrow_start, owner_start) = self.lower_call_arguments(args);
@@ -4328,16 +4329,18 @@ impl Builder<'_> {
             }
             HirExprKind::ClosureCall {
                 call_site,
-                callee,
+                carrier,
                 args,
                 signature,
             } => {
-                let HirExprKind::Local(carrier_local) = callee.kind else {
-                    unreachable!("verified ClosureCall carrier is a local")
-                };
-                let carrier = Place {
-                    base: PlaceBase::Local(carrier_local),
-                    projections: Vec::new(),
+                let carrier = match carrier {
+                    aether_frontend::ClosureCarrier::OwnedLocal(carrier_local) => Place {
+                        base: PlaceBase::Local(*carrier_local),
+                        projections: Vec::new(),
+                    },
+                    aether_frontend::ClosureCarrier::BorrowedPlace { place, .. } => {
+                        self.lower_place(place)
+                    }
                 };
                 let borrow = Operand::Local(self.temporary(TypeId::BOOL));
                 self.assign(
@@ -4371,6 +4374,9 @@ impl Builder<'_> {
             }
             HirExprKind::CapabilityInvoke(_) => {
                 unreachable!("CapabilityInvoke must be rejected or specialized before MIR")
+            }
+            HirExprKind::BorrowedCapabilityInvoke(_) => {
+                unreachable!("BorrowedCapabilityInvoke must be rejected or specialized before MIR")
             }
             HirExprKind::StructInit { struct_id, fields } => {
                 let fields = fields
@@ -6449,7 +6455,8 @@ fn verify_mir_function(
     }
     verify_take_protocol(function, fail)?;
     verify_call_borrow_regions(function, types, fail)?;
-    verify_closure_borrow_regions(function, fail)?;
+    verify_borrowed_function_calls(function, types, fail)?;
+    verify_closure_borrow_regions(function, types, fail)?;
     verify_format_borrow_regions(function, fail)?;
     Ok(())
 }
@@ -6845,18 +6852,111 @@ fn verify_call_borrow_regions(
     Ok(())
 }
 
+fn verify_borrowed_function_calls(
+    function: &MirFunction,
+    types: &TypeArena,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    for load in function.blocks.iter().flat_map(|block| &block.instructions) {
+        let Rvalue::Load(Place {
+            base: PlaceBase::Dereference { reference, mutable },
+            projections,
+        }) = &load.value
+        else {
+            continue;
+        };
+        let Operand::Local(reference) = reference else {
+            continue;
+        };
+        let Some(parameter) = function
+            .parameters
+            .iter()
+            .find(|parameter| parameter.local == *reference)
+        else {
+            continue;
+        };
+        let Some((pointee, reference_mutable)) = types.reference_info(parameter.ty) else {
+            continue;
+        };
+        if types.function_signature(pointee).is_none() {
+            continue;
+        }
+        let loaded = place_root_local(&load.destination)
+            .filter(|_| load.destination.projections.is_empty())
+            .ok_or_else(|| fail("MIR borrowed Function load result is not a local".into()))?;
+        if *mutable || reference_mutable || !projections.is_empty() {
+            return Err(fail(
+                "MIR borrowed Function load lacks exact shared parameter provenance".into(),
+            ));
+        }
+        let mut calls = 0;
+        for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+            let allowed = matches!(
+                &instruction.value,
+                Rvalue::IndirectCall {
+                    callee: Operand::Local(callee),
+                    signature,
+                    ..
+                } if *callee == loaded && *signature == pointee
+            );
+            let uses = crate::ssa::rvalue_locals(function, &instruction.value)
+                .into_iter()
+                .filter(|local| *local == loaded)
+                .count();
+            if allowed {
+                calls += 1;
+            } else if uses != 0 {
+                return Err(fail(
+                    "MIR borrowed Function code pointer escapes its exact IndirectCall".into(),
+                ));
+            }
+        }
+        if calls != 1 {
+            return Err(fail(
+                "MIR borrowed Function load requires one exact IndirectCall".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_lines)]
 fn verify_closure_borrow_regions(
     function: &MirFunction,
+    types: &TypeArena,
     fail: &impl Fn(String) -> Vec<Diagnostic>,
 ) -> Result<(), Vec<Diagnostic>> {
     let mut borrows = BTreeMap::<LocalId, (CallSiteId, Place)>::new();
     for block in &function.blocks {
         for instruction in &block.instructions {
             if let Rvalue::ClosureBorrow {
-                call_site, carrier, ..
+                call_site,
+                carrier,
+                signature,
             } = &instruction.value
             {
+                if let PlaceBase::Dereference { reference, mutable } = &carrier.base {
+                    let Operand::Local(reference) = reference else {
+                        return Err(fail(
+                            "MIR borrowed Closure carrier reference is not a local".into(),
+                        ));
+                    };
+                    let parameter = function
+                        .parameters
+                        .iter()
+                        .find(|parameter| parameter.local == *reference);
+                    if *mutable
+                        || !carrier.projections.is_empty()
+                        || parameter.is_none_or(|parameter| {
+                            types.reference_info(parameter.ty) != Some((*signature, false))
+                        })
+                    {
+                        return Err(fail(
+                            "MIR borrowed Closure carrier lacks exact shared parameter provenance"
+                                .into(),
+                        ));
+                    }
+                }
                 let token = place_root_local(&instruction.destination)
                     .ok_or_else(|| fail("MIR ClosureBorrow result is not a local".into()))?;
                 if borrows
@@ -6924,7 +7024,10 @@ fn verify_closure_borrow_regions(
                 })
             };
             let invalidates = match &instruction.value {
-                Rvalue::Move { source } | Rvalue::Drop { owner: source } => protected(source),
+                Rvalue::Move { source }
+                | Rvalue::Drop { owner: source }
+                | Rvalue::Load(source)
+                | Rvalue::ClosureAlias { source, .. } => protected(source),
                 Rvalue::ReplaceOwned { destination, .. }
                 | Rvalue::ReplaceString { destination, .. } => protected(destination),
                 _ => false,
@@ -6942,6 +7045,14 @@ fn verify_closure_borrow_regions(
                     if !active.insert(token) {
                         return Err(fail("MIR ClosureBorrow begins twice".into()));
                     }
+                }
+                Rvalue::ClosureCall {
+                    borrow: Operand::Local(token),
+                    ..
+                } if !active.contains(token) => {
+                    return Err(fail(
+                        "MIR ClosureCall uses an inactive ClosureBorrow token".into(),
+                    ));
                 }
                 Rvalue::EndClosureBorrow {
                     borrow: Operand::Local(token),

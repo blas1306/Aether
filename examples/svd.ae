@@ -1,0 +1,69 @@
+import linearAlgebra as la;
+
+struct resSVD {
+    Maxtrix<double> U;
+    Maxtrix<double> S;
+    Maxtrix<double> V;
+}
+
+struct Spec {
+    Maxtrix<double> Vap;
+    Maxtrix<double> Vep;
+}
+
+struct sortIndex {
+    Array<double> arr;
+    List<int> index;
+}
+
+sortIndex indexSort(Array<double> arr) {
+    Array<double> copia = arr.copy();
+    copia.sort(reverse = true);
+    int n = length(arr);
+
+    List<int> getIndices(Array<double> arr, Array<double> copia) {
+        Map<int, Deque<int>> hash = HashMap();
+
+        for (int i in 0:(n-1)) {
+            int valor = original[i];
+
+            if (!hash.containsKey(valor)) {
+                hash.put(valor, ArrayDeque<>());
+            }
+
+            hash.get(valor).putLast(i);
+        }
+
+        List<int> idx = {};
+
+        for (int i in 1:n) {
+            push(idx, i);
+        }
+
+        for (int i in 0:(n-1)) {
+            var queue = hash.get(copia[i]);
+            idx[i] = queue.popFisrt();
+        }
+
+        return idx;
+    }
+
+}
+
+resSVD SVD(Maxtrix<double> A) {
+    int m = A.rows;
+    int n = A.columns;
+    r = rank(A);
+
+    Maxtrix<double> U = la.zeros(m, m);
+    Maxtrix<double> S = la.zeros(m, n);
+    Maxtrix<double> V = la.zeros(n, n);
+
+    Spec VapVep = la.eig(A'*A);
+    var Vap = VapVep.Vap;
+    var Vep = VapVep.Vep;
+
+    var l = diag(Vap);
+
+    return resSVD(U, S, V);
+}

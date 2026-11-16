@@ -1350,12 +1350,21 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
             payloads: elements, ..
         } => elements.iter().collect(),
         E::Call { args, .. } => args.iter().map(|argument| &argument.initializer).collect(),
-        E::IndirectCall { callee, args, .. } | E::ClosureCall { callee, args, .. } => {
-            std::iter::once(callee.as_ref())
+        E::IndirectCall { callee, args, .. } => std::iter::once(callee.as_ref())
+            .chain(args.iter())
+            .collect(),
+        E::ClosureCall { carrier, args, .. } => match carrier {
+            crate::hir::ClosureCarrier::OwnedLocal(_) => args.iter().collect(),
+            crate::hir::ClosureCarrier::BorrowedPlace { place, .. } => place_children(place)
+                .into_iter()
                 .chain(args.iter())
-                .collect()
-        }
+                .collect(),
+        },
         E::CapabilityInvoke(invoke) => std::iter::once(invoke.callee.as_ref())
+            .chain(invoke.arguments.iter())
+            .collect(),
+        E::BorrowedCapabilityInvoke(invoke) => place_children(&invoke.carrier)
+            .into_iter()
             .chain(invoke.arguments.iter())
             .collect(),
         E::StructInit { fields, .. } => fields.iter().map(|(_, e)| e).collect(),
