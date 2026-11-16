@@ -1,4 +1,4 @@
-//! PLOTS-INVOCABLE-INTEGRATION-V1 candidate and blocker qualification.
+//! PLOTS-INVOCABLE-INTEGRATION-V1 productive API qualification.
 
 use std::{fs, path::PathBuf, process::Command};
 
@@ -15,7 +15,7 @@ const PLOTS_SVG: &str = include_str!("../../../../plots/src/svg.ae");
 struct Project(PathBuf);
 
 impl Project {
-    fn candidate(label: &str, source: &str, with_svg: bool) -> Self {
+    fn productive(label: &str, source: &str, with_svg: bool) -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let root = std::env::temp_dir().join(format!(
             "aether-plots-invocable-{label}-{}-{}",
@@ -24,7 +24,7 @@ impl Project {
         ));
         fs::create_dir(&root).unwrap();
         fs::write(root.join("graphics.ae"), GRAPHICS).unwrap();
-        fs::write(root.join("plots.ae"), candidate_plots()).unwrap();
+        fs::write(root.join("plots.ae"), productive_plots()).unwrap();
         if with_svg {
             fs::write(root.join("graphics_svg.ae"), GRAPHICS_SVG).unwrap();
             fs::write(root.join("plots_svg.ae"), PLOTS_SVG).unwrap();
@@ -56,19 +56,19 @@ impl Drop for Project {
     }
 }
 
-fn candidate_plots() -> String {
-    let old = "public Figure2D plotFunction(\n    Function<(float64), float64> target,";
-    let new = "public Figure2D plotFunction<C: Invocable<(float64), float64>>(\n    ref C target,";
-    assert_eq!(PLOTS.matches(old).count(), 1);
-    PLOTS.replacen(old, new, 1)
+fn productive_plots() -> String {
+    let signature =
+        "public Figure2D plotFunction<C: Invocable<(float64), float64>>(\n    ref C target,";
+    assert_eq!(PLOTS.matches(signature).count(), 1);
+    PLOTS.to_owned()
 }
 
-fn compile_candidate(
+fn compile_productive(
     source: &str,
     with_svg: bool,
     optimization: OptimizationLevel,
 ) -> Result<Compilation, Vec<aether_frontend::Diagnostic>> {
-    let project = Project::candidate("compile", source, with_svg);
+    let project = Project::productive("compile", source, with_svg);
     compile_session_with_optimization(
         CompilationSession::discover(&project.entry()).unwrap(),
         &[Emit::Hir, Emit::Mir, Emit::Ssa, Emit::Llvm],
@@ -141,9 +141,9 @@ int main(){
 }";
 
 #[test]
-fn candidate_without_svg_accepts_function_and_closure_borrowed_o0_o2() {
+fn productive_api_accepts_function_and_closure_borrowed_o0_o2() {
     for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
-        let compilation = compile_candidate(CORE_CONSUMER, false, optimization)
+        let compilation = compile_productive(CORE_CONSUMER, false, optimization)
             .unwrap_or_else(|diagnostics| panic!("{diagnostics:#?}"));
         assert_eq!(execute(&compilation.llvm, "core", optimization), 0);
         assert_eq!(
@@ -167,24 +167,29 @@ fn candidate_without_svg_accepts_function_and_closure_borrowed_o0_o2() {
 }
 
 #[test]
-fn candidate_with_svg_emits_valid_runtime_dependencies_o0_o2() {
-    let source = r"
+fn productive_api_renders_equivalent_deterministic_svg_o0_o2() {
+    let source = r#"
 package q;import plots as p;import plots.svg as svg;
 float64 square(float64 x){return x*x;}
 int main(){
   Function<(float64),float64> top=square;
-  float64 scale=2.0;
-  var closure=(float64 x) capture(copy scale)=>scale*x;
+  float64 factor=1.0;
+  var closure=(float64 x) capture(copy factor)=>factor*x*x;
   p.FigureOptions o=p.defaultOptions();
+  o.title="Invocable SVG";
+  o.xLabel="input";
+  o.yLabel="square";
   p.Figure2D functionFigure=p.plotFunction(top,0.0,2.0,usize(3),&o);
   p.Figure2D closureFigure=p.plotFunction(closure,0.0,2.0,usize(3),&o);
   string functionDocument=svg.render(&functionFigure);
   string closureDocument=svg.render(&closureFigure);
-  if(byteLength(functionDocument)==0||byteLength(closureDocument)==0){return 1;}
+  string repeatedDocument=svg.render(&closureFigure);
+  if(byteLength(functionDocument)==0||functionDocument!=closureDocument||
+     closureDocument!=repeatedDocument||closure(3.0)!=9.0){return 1;}
   return 0;
-}";
+}"#;
     for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
-        let compilation = compile_candidate(source, true, optimization).unwrap();
+        let compilation = compile_productive(source, true, optimization).unwrap();
         assert!(!compilation.llvm.contains("@aether_io_read_line"));
         assert!(!compilation.llvm.contains("@aether_io_read_text"));
         assert!(!compilation.llvm.contains("@aether_io_write_text"));
@@ -249,7 +254,7 @@ int main(){Function<(int),int> f=inc;return apply(f,1)-2;}
 }
 
 #[test]
-fn candidate_rejects_incompatible_callback_signatures() {
+fn productive_api_rejects_incompatible_callback_signatures() {
     let cases = [
         "int bad(int x){return x;}int main(){p.FigureOptions o=p.defaultOptions();p.Figure2D f=p.plotFunction(bad,0.0,1.0,usize(2),&o);return 0;}",
         "float64 bad(float64 x,float64 y){return x+y;}int main(){p.FigureOptions o=p.defaultOptions();p.Figure2D f=p.plotFunction(bad,0.0,1.0,usize(2),&o);return 0;}",
@@ -257,7 +262,7 @@ fn candidate_rejects_incompatible_callback_signatures() {
     ];
     for body in cases {
         let source = format!("package q;import plots as p;{body}");
-        let diagnostics = compile_candidate(&source, false, OptimizationLevel::O0).unwrap_err();
+        let diagnostics = compile_productive(&source, false, OptimizationLevel::O0).unwrap_err();
         let text = format!("{diagnostics:#?}");
         assert!(
             text.contains("E0205") || text.contains("Invocable"),
@@ -267,7 +272,7 @@ fn candidate_rejects_incompatible_callback_signatures() {
 }
 
 #[test]
-fn candidate_closure_unwind_cleans_up_and_owner_remains_reusable_o0_o2() {
+fn productive_api_closure_unwind_cleans_up_and_owner_remains_reusable_o0_o2() {
     let source = r"
 package q;import plots as p;
 open class Stop:Exception{public init(){}}
@@ -283,7 +288,7 @@ int main(){
   return 0;
 }";
     for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
-        let compilation = compile_candidate(source, false, optimization)
+        let compilation = compile_productive(source, false, optimization)
             .unwrap_or_else(|diagnostics| panic!("{diagnostics:#?}"));
         assert_eq!(execute(&compilation.llvm, "unwind", optimization), 0);
         assert_eq!(
