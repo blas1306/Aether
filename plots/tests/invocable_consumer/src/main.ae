@@ -1,0 +1,60 @@
+package plotsInvocableConsumer;
+
+import plots as p;
+import plots.svg as svg;
+import plotsInvocableConsumer.functions as functions;
+
+int main() {
+    p.FigureOptions options = p.defaultOptions();
+
+    Function<(float64), float64> top = functions.square;
+    p.Figure2D fromFunction = p.plotFunction(
+        top, -2.0, 2.0, usize(5), &options);
+    p.Figure2D fromTopLevel = p.plotFunction(
+        functions.square, -2.0, 2.0, usize(5), &options);
+    p.Figure2D fromLambda = p.plotFunction(
+        (float64 x) => x * x, -2.0, 2.0, usize(5), &options);
+
+    float64 scale = 2.0;
+    var copied = (float64 x) capture(copy scale) => scale * x;
+    p.Figure2D fromCopy = p.plotFunction(
+        copied, 0.0, 2.0, usize(3), &options);
+    if (copied(3.0) != 6.0) { return 1; }
+    p.Figure2D fromFreshCopy = p.plotFunction(
+        (float64 x) capture(copy scale) => scale * x,
+        0.0, 2.0, usize(3), &options);
+
+    string label = "abc";
+    var aliased = (float64 x) capture(alias label) =>
+        x + float64(byteLength(label));
+    p.Figure2D fromAlias = p.plotFunction(
+        aliased, 0.0, 2.0, usize(3), &options);
+    if (aliased(1.0) != 4.0) { return 2; }
+    p.Figure2D fromFreshAlias = p.plotFunction(
+        (float64 x) capture(alias label) =>
+            x + float64(byteLength(label)),
+        0.0, 2.0, usize(3), &options);
+
+    Matrix<float64> data = [3.0];
+    var moved = (float64 x) capture(move data) => x + 3.0;
+    p.Figure2D fromMove = p.plotFunction(
+        moved, 0.0, 2.0, usize(3), &options);
+    if (moved(1.0) != 4.0) { return 3; }
+    Matrix<float64> freshData = [4.0];
+    p.Figure2D fromFreshMove = p.plotFunction(
+        (float64 x) capture(move freshData) => x + 4.0,
+        0.0, 2.0, usize(3), &options);
+
+    string first = svg.render(&fromFunction);
+    if (first != svg.render(&fromTopLevel) ||
+        first != svg.render(&fromLambda) ||
+        byteLength(svg.render(&fromCopy)) == 0 ||
+        byteLength(svg.render(&fromFreshCopy)) == 0 ||
+        byteLength(svg.render(&fromAlias)) == 0 ||
+        byteLength(svg.render(&fromFreshAlias)) == 0 ||
+        byteLength(svg.render(&fromMove)) == 0 ||
+        byteLength(svg.render(&fromFreshMove)) == 0) {
+        return 4;
+    }
+    return 0;
+}

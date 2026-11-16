@@ -74,7 +74,21 @@ pub(super) fn reachable_functions(
     program: &aether_middle::SsaIr,
 ) -> BTreeSet<aether_frontend::InstanceId> {
     let mut reachable = BTreeSet::new();
-    let mut pending = vec![program.entry];
+    // Closure bodies are invoked indirectly through their environment thunk,
+    // so no ordinary SSA Call edge points at them.  Treat every materialized
+    // closure target as a root and then follow its direct calls normally.
+    let closure_targets = program
+        .closure_environments
+        .iter()
+        .map(|environment| environment.target)
+        .collect::<BTreeSet<_>>();
+    let mut pending = program
+        .signatures
+        .iter()
+        .filter(|signature| closure_targets.contains(&signature.function_id))
+        .map(|signature| signature.id)
+        .chain(std::iter::once(program.entry))
+        .collect::<Vec<_>>();
     while let Some(id) = pending.pop() {
         if !reachable.insert(id) {
             continue;

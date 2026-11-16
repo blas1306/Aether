@@ -12,48 +12,42 @@ struct Spec {
 }
 
 struct sortIndex {
-    Array<double> arr;
+    List<double> arr;
     List<int> index;
 }
 
-sortIndex indexSort(Array<double> arr) {
-    Array<double> copia = arr.copy();
+sortIndex indexSort(List<double> arr) {
+    List<double> copia = arr.copy();
     copia.sort(reverse = true);
+
     int n = length(arr);
 
-    List<int> getIndices(Array<double> arr, Array<double> copia) {
-        Map<int, Deque<int>> hash = HashMap();
+    Map<double, Deque<int>> hash = HashMap();
 
-        for (int i in 0:(n-1)) {
-            int valor = original[i];
+    for (int i in 0:(n-1)) {
+        double valor = arr[i];
 
-            if (!hash.containsKey(valor)) {
-                hash.put(valor, ArrayDeque<>());
-            }
-
-            hash.get(valor).putLast(i);
+        if (!hash.containsKey(valor)) {
+            hash.put(valor, ArrayDeque<int>());
         }
 
-        List<int> idx = {};
-
-        for (int i in 1:n) {
-            push(idx, i);
-        }
-
-        for (int i in 0:(n-1)) {
-            var queue = hash.get(copia[i]);
-            idx[i] = queue.popFisrt();
-        }
-
-        return idx;
+        hash.get(valor).pushLast(i);
     }
 
+    List<int> idx = {};
+
+    for (int i in 0:(n-1)) {
+        double valor = copia[i];
+        idx.push(hash.get(valor).popFirst());
+    }
+
+    return sortIndex(copia, idx);
 }
 
 resSVD SVD(Maxtrix<double> A) {
     int m = A.rows;
     int n = A.columns;
-    r = rank(A);
+    int r = A.rank;
 
     Maxtrix<double> U = la.zeros(m, m);
     Maxtrix<double> S = la.zeros(m, n);
@@ -63,7 +57,39 @@ resSVD SVD(Maxtrix<double> A) {
     var Vap = VapVep.Vap;
     var Vep = VapVep.Vep;
 
-    var l = diag(Vap);
+    List<double> l = {};
+
+    for (int i in 0:(n-1)) { 
+        l.push(Vap(i+1, i+1));
+    }
+
+    var lambdaSort = indexSort(l);
+    var lambda = lambdaSort.arr;
+    var idx = lambdaSort.index;
+
+    for (int i in 0:n-1) {
+        V[1:n, i+1] = Vep[1:n, idx[i]+1];
+    }
+
+    List<double> sigma = {};
+
+    for (int i in 0:n-1) {
+        sigma.push(sqrt(max(lambda[i], 0)));
+    }
+
+    for (int i in 0:min(m, n)-1) {
+        S[i+1, i+1] = sigma[i];
+    }
+
+    for (int i in 0:r-1) {
+        U[1:m, i+1] = (1/sigma[i])*(A*V[1:n, i+1]);
+    }
+
+    if (r < m) {
+        U_r = U(1:m, 1:r);
+        U_new = la.N(U_r');
+        U = [U_r, U_new];
+    }
 
     return resSVD(U, S, V);
 }

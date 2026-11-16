@@ -523,15 +523,14 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     }
 
     for function in &program.functions {
-        if closure_layouts.is_empty()
-            && (reachable.as_ref().is_some_and(|r| {
-                !r.contains(&function.id) && !closure_targets.contains(&function.function_id)
-            }) || (!core_reachable.contains(&function.id)
-                && function
-                    .blocks
-                    .iter()
-                    .flat_map(|block| &block.instructions)
-                    .any(|instruction| matches!(instruction.op, SsaOp::Core(_)))))
+        if reachable.as_ref().is_some_and(|r| {
+            !r.contains(&function.id) && !closure_targets.contains(&function.function_id)
+        }) || (!core_reachable.contains(&function.id)
+            && function
+                .blocks
+                .iter()
+                .flat_map(|block| &block.instructions)
+                .any(|instruction| matches!(instruction.op, SsaOp::Core(_))))
         {
             continue;
         }

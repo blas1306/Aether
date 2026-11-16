@@ -1,0 +1,5 @@
+package plotsInvocableConsumer.functions;
+
+public float64 square(float64 x) {
+    return x * x;
+}
