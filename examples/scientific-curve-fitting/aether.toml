@@ -1,0 +1,9 @@
+[package]
+name = "scientificCurveFitting"
+version = "0.1.0"
+aether = "1"
+
+[dependencies]
+linearAlgebra = { path = "../../linearAlgebra" }
+plots = { path = "../../plots" }
+graphics = { path = "../../graphics" }

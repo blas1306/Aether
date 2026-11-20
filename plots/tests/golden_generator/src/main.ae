@@ -54,5 +54,31 @@ int main() {
         usize(17), &functionOptions);
     string functionPath = "../plots/tests/goldens/function_sine.svg";
     svg.save(&functionFigure, &functionPath);
+
+    p.FigureOptions multiseriesOptions = p.defaultOptions();
+    multiseriesOptions.title = "Line and observations";
+    multiseriesOptions.xLabel = "x";
+    multiseriesOptions.yLabel = "y";
+    p.Figure2D multiseriesFigure = p.figure(&multiseriesOptions);
+    p.addFunction(
+        multiseriesFigure, sampledWave,
+        -3.141592653589793, 3.141592653589793, usize(17),
+        p.LineStyle(
+            graphics.Color(uint8(40), uint8(90), uint8(180), uint8(255)),
+            2.0));
+    Array<p.DataPoint> observations = {
+        p.DataPoint(-3.141592653589793, 0.0),
+        p.DataPoint(-1.5707963267948966, -1.0),
+        p.DataPoint(0.0, 0.0),
+        p.DataPoint(1.5707963267948966, 1.0),
+        p.DataPoint(3.141592653589793, 0.0)
+    };
+    multiseriesFigure.addScatter(
+        &observations,
+        p.ScatterStyle(
+            graphics.Color(uint8(210), uint8(65), uint8(50), uint8(220)),
+            8.0));
+    string multiseriesPath = "../plots/tests/goldens/multiseries.svg";
+    svg.save(&multiseriesFigure, &multiseriesPath);
     return 0;
 }
