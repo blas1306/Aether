@@ -1,6 +1,7 @@
 package plots;
 
 import graphics;
+import std.Format;
 import std.Text;
 
 public struct DataPoint {
@@ -218,6 +219,188 @@ float64 tickValue(Limits limits, int index) {
     if (value == 0.0) { value = 0.0; }
     if (!finite(value)) { throw PlotRangeException(); }
     return value;
+}
+
+int decimalOrder(float64 positive) {
+    int order = 0;
+    float64 scaled = positive;
+    if (scaled >= 10.0) {
+        while (scaled >= 10.0 && order < 309) {
+            scaled = scaled / 10.0;
+            order = order + 1;
+        }
+    } else {
+        while (scaled < 1.0 && order > -324) {
+            scaled = scaled * 10.0;
+            order = order - 1;
+        }
+    }
+    return order;
+}
+
+string trimTickText(ref string value) {
+    usize count = byteLength(*value);
+    usize exponent = count;
+    usize point = count;
+    usize index = 0;
+    while (index < count) {
+        uint8 byte = std.Text.byteAt(*value, index);
+        if (byte == uint8(46)) { point = index; }
+        if (byte == uint8(101)) {
+            exponent = index;
+            index = count;
+        } else {
+            index = index + 1;
+        }
+    }
+
+    usize mantissaEnd = exponent;
+    if (point < exponent) {
+        while (mantissaEnd > point + 1 &&
+               std.Text.byteAt(*value, mantissaEnd - 1) == uint8(48)) {
+            mantissaEnd = mantissaEnd - 1;
+        }
+        if (mantissaEnd == point + 1) { mantissaEnd = point; }
+    }
+
+    usize resultLength = mantissaEnd + count - exponent;
+    Buffer<uint8> bytes = Buffer<uint8>(resultLength, uint8(0));
+    index = 0;
+    while (index < mantissaEnd) {
+        bytes[index] = std.Text.byteAt(*value, index);
+        index = index + 1;
+    }
+    usize source = exponent;
+    while (source < count) {
+        bytes[index] = std.Text.byteAt(*value, source);
+        index = index + 1;
+        source = source + 1;
+    }
+    return std.Text.fromUtf8(&bytes, resultLength);
+}
+
+struct TickFormat {
+    bool canonical;
+    bool fixed;
+    int precision;
+}
+
+struct ParsedTick {
+    bool valid;
+    float64 value;
+}
+
+string formatTickValue(float64 value, TickFormat format) {
+    if (format.canonical) { return str(value); }
+    if (value == 0.0) { return "0"; }
+    if (format.fixed) {
+        string fixed = std.Format.fixed(value, usize(format.precision));
+        return trimTickText(&fixed);
+    }
+    string scientific = std.Format.scientific(value, usize(format.precision));
+    return trimTickText(&scientific);
+}
+
+ParsedTick parseFormattedTick(float64 original, TickFormat format) {
+    string label = formatTickValue(original, format);
+    match (std.Text.parseDouble(label)) {
+        std.Text.DoubleParseResult.Value(parsed) => {
+            bool valid = finite(parsed) && !(original != 0.0 && parsed == 0.0);
+            return ParsedTick(valid, parsed);
+        }
+        std.Text.DoubleParseResult.Invalid => { return ParsedTick(false, 0.0); }
+        std.Text.DoubleParseResult.Overflow => { return ParsedTick(false, 0.0); }
+        std.Text.DoubleParseResult.Underflow => { return ParsedTick(false, 0.0); }
+    }
+}
+
+bool tickFormatPreservesOrder(
+    ref Buffer<float64> values,
+    TickFormat format) {
+    ParsedTick previous = parseFormattedTick((*values)[0], format);
+    if (!previous.valid) { return false; }
+    usize index = 1;
+    while (index < 5) {
+        ParsedTick current = parseFormattedTick((*values)[index], format);
+        if (!current.valid) { return false; }
+        float64 left = (*values)[index - 1];
+        float64 right = (*values)[index];
+        float64 previousParsed = previous.value;
+        float64 currentParsed = current.value;
+        if (left < right) {
+            if (!(previousParsed < currentParsed)) { return false; }
+        } else {
+            if (left != right || previousParsed != currentParsed) { return false; }
+        }
+        previous = current;
+        index = index + 1;
+    }
+    return true;
+}
+
+TickFormat selectTickFormat(Limits limits) {
+    Buffer<float64> values = Buffer<float64>(5, 0.0);
+    usize index = 0;
+    while (index < 5) {
+        values[index] = tickValue(limits, int(index));
+        index = index + 1;
+    }
+
+    bool hasSpacing = false;
+    float64 spacing = 0.0;
+    index = 1;
+    while (index < 5) {
+        float64 difference = values[index] - values[index - 1];
+        if (difference > 0.0 && (!hasSpacing || difference < spacing)) {
+            spacing = difference;
+            hasSpacing = true;
+        }
+        index = index + 1;
+    }
+    if (!hasSpacing) { return TickFormat(true, false, 0); }
+
+    float64 largest = 0.0;
+    float64 smallestNonzero = 0.0;
+    bool hasNonzero = false;
+    index = 0;
+    while (index < 5) {
+        float64 magnitude = abs(values[index]);
+        if (magnitude > largest) { largest = magnitude; }
+        if (magnitude > 0.0 && (!hasNonzero || magnitude < smallestNonzero)) {
+            smallestNonzero = magnitude;
+            hasNonzero = true;
+        }
+        index = index + 1;
+    }
+    if (!hasNonzero) { return TickFormat(true, false, 0); }
+
+    int spacingOrder = decimalOrder(spacing);
+    int largestOrder = decimalOrder(largest);
+    int smallestOrder = decimalOrder(smallestNonzero);
+    int fixedFractional = 1 - spacingOrder;
+    if (fixedFractional < 0) { fixedFractional = 0; }
+    int integerDigits = largestOrder + 1;
+    if (integerDigits < 1) { integerDigits = 1; }
+    int predictedFixed = integerDigits + fixedFractional + 2;
+    bool useFixed = smallestOrder >= -6 && largestOrder < 21 &&
+        fixedFractional <= 12 && predictedFixed <= 24;
+
+    int significantDigits = largestOrder - spacingOrder + 2;
+    if (significantDigits < 1) { significantDigits = 1; }
+    if (significantDigits > 17) { significantDigits = 17; }
+    int precision = significantDigits - 1;
+    if (useFixed) { precision = fixedFractional; }
+
+    int maximumPrecision = 16;
+    if (useFixed) { maximumPrecision = 16 - largestOrder; }
+    if (maximumPrecision < precision) { maximumPrecision = precision; }
+
+    while (precision <= maximumPrecision) {
+        TickFormat candidate = TickFormat(false, useFixed, precision);
+        if (tickFormatPreservesOrder(&values, candidate)) { return candidate; }
+        precision = precision + 1;
+    }
+    return TickFormat(true, false, 0);
 }
 
 public class Figure2D {
@@ -500,13 +683,17 @@ public class Figure2D {
             12.0, graphics.TextAlign.Center, graphics.TextBaseline.Top);
         graphics.TextStyle yTickStyle = textStyle(
             12.0, graphics.TextAlign.Right, graphics.TextBaseline.Middle);
+        TickFormat xTickFormat = selectTickFormat(resolvedX);
+        TickFormat yTickFormat = selectTickFormat(resolvedY);
         tick = 0;
         while (tick < 5) {
             float64 fraction = float64(tick) / 4.0;
             float64 x = plotLeft + plotWidth * fraction;
             float64 y = plotTop + plotHeight - plotHeight * fraction;
-            string xText = str(tickValue(resolvedX, tick));
-            string yText = str(tickValue(resolvedY, tick));
+            string xText = formatTickValue(
+                tickValue(resolvedX, tick), xTickFormat);
+            string yText = formatTickValue(
+                tickValue(resolvedY, tick), yTickFormat);
             builder.drawText(
                 &xText, graphics.Point(x, plotTop + plotHeight + 10.0), &xTickStyle);
             builder.drawText(
