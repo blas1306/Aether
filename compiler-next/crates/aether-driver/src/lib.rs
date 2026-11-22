@@ -492,6 +492,10 @@ fn discover_catalog_with_plan(
             "package std.Text; public class InvalidUtf8Exception:Exception{public init(){}} public string fromUtf8(ref Buffer<uint8> bytes,usize length){return \"\";} public struct ScalarOffset { usize value; } enum FindResult { Found(ScalarOffset), NotFound, } enum ByteSliceResult { Slice(string), InvalidRange, OutOfBounds, InvalidBoundary, } enum IntParseResult { Value(int), Invalid, Overflow, } enum DoubleParseResult { Value(double), Invalid, Overflow, Underflow, }",
         ),
         (
+            vec!["std", "Format"],
+            "package std.Format; public string fixed(float32 value,usize fractionalDigits){return \"\";} public string fixed(float64 value,usize fractionalDigits){return \"\";} public string scientific(float32 value,usize fractionalDigits){return \"\";} public string scientific(float64 value,usize fractionalDigits){return \"\";}",
+        ),
+        (
             vec!["std", "IO"],
             if io_public {
                 "package std.IO; public open class IOException:Exception{public init(){}} public class InvalidTextEncodingException:IOException{public init():base(){}} enum ReadLineResult{Line(string),End,} public ReadLineResult readLine(){ReadLineResult result=ReadLineResult.End;return result;} public void eprint(ref string value){return;} public void eprintln(ref string value){return;}"

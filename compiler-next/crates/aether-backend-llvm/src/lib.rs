@@ -4,6 +4,7 @@ mod algebraic;
 mod classes;
 mod core;
 mod elementwise;
+mod format;
 mod io;
 mod mathematical;
 mod process;
@@ -131,6 +132,18 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
                 types,
             )
         });
+    let reachable_format = program
+        .functions
+        .iter()
+        .filter(|function| core_reachable.contains(&function.id))
+        .filter_map(|function| {
+            format::function_kind(
+                &program.signatures[function.id.0 as usize],
+                &program.modules,
+                types,
+            )
+        })
+        .collect::<Vec<_>>();
     let suppressed_text_exception = (!reachable_text_from_utf8)
         .then(|| text::invalid_utf8_exception(types, &program.modules))
         .flatten();
@@ -222,7 +235,8 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     let has_core_output = core_calls
         .iter()
         .any(|(symbol, _)| matches!(symbol, CoreSymbol::Print | CoreSymbol::Println));
-    let has_format_runtime = core_calls
+    let has_explicit_format = !reachable_format.is_empty();
+    let has_format_runtime = has_explicit_format || core_calls
         .iter()
         .any(|(symbol, _)| *symbol == CoreSymbol::Str)
         || program.functions.iter().any(|function| {
@@ -329,6 +343,9 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
     if has_string_runtime {
         strings::emit_literals(&mut output, program);
         strings::runtime(&mut output, has_format_runtime);
+    }
+    if has_explicit_format {
+        format::runtime(&mut output);
     }
     let io_validates_utf8 = reachable_io.iter().any(|kind| {
         matches!(
@@ -558,6 +575,19 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         if process::is_args(signature, &program.modules, types) {
             process::emit_function(
                 &mut output,
+                function,
+                signature,
+                &program.modules,
+                &program.structs,
+                &program.enums,
+                types,
+            );
+            continue;
+        }
+        if let Some(kind) = format::function_kind(signature, &program.modules, types) {
+            format::emit_function(
+                &mut output,
+                kind,
                 function,
                 signature,
                 &program.modules,

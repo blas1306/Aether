@@ -17392,7 +17392,7 @@ impl Analyzer<'_> {
         for id in &arity_candidates {
             self.restore(&checkpoint);
             match self.call_id(*id, name, type_arguments, args, span, expected) {
-                Ok(_) => viable.push(*id),
+                Ok(checked) => viable.push((*id, overload_conversion_cost(&checked.expr))),
                 Err(diagnostics) => {
                     if diagnostics
                         .iter()
@@ -17407,8 +17407,16 @@ impl Analyzer<'_> {
             }
         }
         self.restore(&checkpoint);
+        if !viable.is_empty() {
+            let best_cost = viable
+                .iter()
+                .map(|(_, cost)| *cost)
+                .min()
+                .expect("non-empty viable overload set");
+            viable.retain(|(_, cost)| *cost == best_cost);
+        }
         if viable.len() == 1 {
-            return self.call_id(viable[0], name, type_arguments, args, span, expected);
+            return self.call_id(viable[0].0, name, type_arguments, args, span, expected);
         }
         let display = |ids: &[FunctionId]| {
             ids.iter()
@@ -17417,7 +17425,8 @@ impl Analyzer<'_> {
                 .join("\n")
         };
         if viable.len() > 1 {
-            let orientation_ambiguity = viable.iter().all(|id| {
+            let viable_ids = viable.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+            let orientation_ambiguity = viable_ids.iter().all(|id| {
                 matches!(
                     self.types.get(self.signatures[id.0 as usize].return_type),
                     Some(TypeData::Vector { .. })
@@ -17434,7 +17443,7 @@ impl Analyzer<'_> {
                     } else {
                         "ambiguous overload"
                     },
-                    display(&viable)
+                    display(&viable_ids)
                 ),
                 Some(span),
             )]);
@@ -18892,6 +18901,17 @@ impl Analyzer<'_> {
 
     fn type_name(&self, ty: TypeId) -> String {
         format_type(self.types, ty, self.structs, self.enums)
+    }
+}
+
+fn overload_conversion_cost(expression: &HirExpr) -> usize {
+    match &expression.kind {
+        HirExprKind::Coerce { operand, .. } => 1 + overload_conversion_cost(operand),
+        HirExprKind::Call { args, .. } => args
+            .iter()
+            .filter(|argument| matches!(argument.initializer.kind, HirExprKind::Coerce { .. }))
+            .count(),
+        _ => 0,
     }
 }
 
