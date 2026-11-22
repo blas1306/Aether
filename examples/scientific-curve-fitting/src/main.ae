@@ -15,39 +15,16 @@ int main() {
     ];
     Vector<float64,Column> observed = [0.0, 4.0, 5.0, 8.0, 8.0];
 
-    if (observed[1] != 0.0 ||
-        observed[2] != 4.0 ||
-        observed[3] != 5.0 ||
-        observed[4] != 8.0 ||
-        observed[5] != 8.0) {
-        return 1;
-    }
-
-    la.SVD<float64> factor = la.svd(design);
-    Vector<float64,Column> coefficients = la.leastSquares(factor, observed);
+    var coefficients = la.leastSquares(design, observed);
     float64 intercept = coefficients[1];
     float64 slope = coefficients[2];
 
-    Vector<float64,Column> predicted = design * coefficients;
-    Vector<float64,Column> residuals = observed - predicted;
-    float64 sse = 0.0;
-    usize index = 1;
-    while (index <= usize(5)) {
-        sse = sse + residuals[index] * residuals[index];
-        index = index + 1;
-    }
-    if (abs(residuals[1] - (-1.0)) > 1.0e-10 ||
-        abs(residuals[2] - 1.0) > 1.0e-10 ||
-        abs(residuals[3] - 0.0) > 1.0e-10 ||
-        abs(residuals[4] - 1.0) > 1.0e-10 ||
-        abs(residuals[5] - (-1.0)) > 1.0e-10) {
-        return 2;
-    }
-    if (abs(intercept - 1.0) > 1.0e-10 ||
-        abs(slope - 2.0) > 1.0e-10 ||
-        abs(sse - 4.0) > 1.0e-10) {
-        return 3;
-    }
+    var predicted = design * coefficients;
+    var residuals = observed - predicted;
+    float64 sse = la.dot(residuals, residuals);
+
+    println("fit: y = " + str(intercept) + " + " + str(slope) + "x");
+    println("SSE: " + str(sse));
 
     var fittedLine = (float64 x) capture(copy intercept, copy slope) =>
         intercept + slope * x;
@@ -82,8 +59,8 @@ int main() {
             g.Color(uint8(214), uint8(39), uint8(40), uint8(255)),
             8.0));
 
-    if (abs(fittedLine(4.0) - 9.0) > 1.0e-10) { return 4; }
     string outputPath = "curve_fit.svg";
     svg.save(&figure, &outputPath);
+    println("SVG: " + outputPath);
     return 0;
 }

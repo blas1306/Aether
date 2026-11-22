@@ -1,29 +1,21 @@
 # Scientific curve fitting report
 
-## Result
+The example is the compact consumer for the
+`SCIENTIFIC-CURVE-FITTING-ERGONOMICS-V1` qualification. Its design matrix
+contains an intercept column and `x = [0, 1, 2, 3, 4]`; the response is
+`[0, 4, 5, 8, 8]`.
 
-The design matrix contains an intercept column and the coordinates `0` through
-`4`. The response is `[0, 4, 5, 8, 8]`. SVD-backed least squares produces, to
-the checked tolerance:
+The direct `leastSquares(design, observed)` overload remains SVD-backed. It
+produces, within the qualification tolerance, intercept `1`, slope `2`,
+predictions `[1, 3, 5, 7, 9]`, residuals `[-1, 1, 0, 1, -1]`, and SSE `4`.
+The example calculates SSE with `dot(residuals, residuals)`.
 
-- intercept: `1`;
-- slope: `2`;
-- predicted values: `[1, 3, 5, 7, 9]`;
-- residuals: `[-1, 1, 0, 1, -1]`;
-- SSE: `4`.
+Exhaustive checks no longer live inside the introductory program. The external
+driver qualification verifies every datum and scientific result independently,
+runs the consumer at O0 and O2, parses the generated XML, checks the 33-point
+polyline and five marker coordinates, painter order, explicit viewport limits,
+byte determinism, and closure ownership/lifetime behavior.
 
-The executable checks every observed value and every residual independently,
-so another dataset with the same coefficients and SSE cannot satisfy the
-consumer contract.
-
-The capturing `fittedLine` closure is borrowed by `plots.addFunction`, sampled
-exactly 33 times, and remains usable after sampling. The resulting line is
-inserted first. Five copied observations are inserted with `addScatter`
-afterward, preserving painter order. Both series therefore use one transform,
-one clipping region, and joint explicit limits `X: [0, 4]`, `Y: [0, 9]`.
-Explicit limits keep the SVG axes exact even when the SVD result differs from
-the mathematical coefficients by rounding error.
-
-This consumer traces the first CLOSED Borrowed Invocable result into a
-scientific application: the callback owner is neither stored nor consumed, and
-the SVG is deterministic in O0 and O2.
+The capturing closure is evaluated eagerly by `plots.addFunction`. The line is
+inserted before the scatter observations, and both use one viewport with limits
+`X: [0, 4]`, `Y: [0, 9]`.

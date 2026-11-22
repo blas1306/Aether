@@ -16,6 +16,34 @@ const SCIENTIFIC_CONSUMER: &str =
     include_str!("../../../../examples/scientific-curve-fitting/src/main.ae");
 const MULTISERIES_GOLDEN: &str = include_str!("../../../../plots/tests/goldens/multiseries.svg");
 
+const SCIENTIFIC_QUALIFICATION: &str = r"
+package q;import linearAlgebra as la;
+int main(){
+ Matrix<float64> design=[1.0,0.0;1.0,1.0;1.0,2.0;1.0,3.0;1.0,4.0];
+ Vector<float64,Column> observed=[0.0,4.0,5.0,8.0,8.0];
+ usize row=1;while(row<=usize(5)){
+  if(design[row,1]!=1.0||design[row,2]!=float64(row-1)){return 1;}
+  row=row+1;
+ }
+ if(observed[1]!=0.0||observed[2]!=4.0||observed[3]!=5.0||
+    observed[4]!=8.0||observed[5]!=8.0){return 2;}
+ var coefficients=la.leastSquares(design,observed);
+ var predicted=design*coefficients;
+ var residuals=observed-predicted;
+ float64 sse=la.dot(residuals,residuals);
+ if(abs(coefficients[1]-1.0)>1.0e-10||
+    abs(coefficients[2]-2.0)>1.0e-10){return 3;}
+ if(abs(predicted[1]-1.0)>1.0e-10||abs(predicted[2]-3.0)>1.0e-10||
+    abs(predicted[3]-5.0)>1.0e-10||abs(predicted[4]-7.0)>1.0e-10||
+    abs(predicted[5]-9.0)>1.0e-10){return 4;}
+ if(abs(residuals[1]-(-1.0))>1.0e-10||abs(residuals[2]-1.0)>1.0e-10||
+    abs(residuals[3])>1.0e-10||abs(residuals[4]-1.0)>1.0e-10||
+    abs(residuals[5]-(-1.0))>1.0e-10){return 5;}
+ if(abs(sse-4.0)>1.0e-10){return 6;}
+ return 0;
+}
+";
+
 struct Project(PathBuf);
 
 impl Project {
@@ -88,7 +116,10 @@ fn output(source: &str, optimization: OptimizationLevel) -> std::process::Output
         .with_optimization(optimization)
         .link_executable(&llvm, &executable)
         .unwrap();
-    Command::new(executable).output().unwrap()
+    Command::new(executable)
+        .current_dir(&project.0)
+        .output()
+        .unwrap()
 }
 
 fn instrument_closure_counts(llvm: &str) -> String {
@@ -115,6 +146,7 @@ fn run_llvm(llvm: &str, optimization: OptimizationLevel) -> i32 {
         .link_executable(llvm, &executable)
         .unwrap();
     Command::new(executable)
+        .current_dir(&project.0)
         .status()
         .unwrap()
         .code()
@@ -154,6 +186,7 @@ fn run_with_balanced_heap(source: &str, optimization: OptimizationLevel) -> i32 
         .link_executable(&guarded, &executable)
         .unwrap();
     Command::new(executable)
+        .current_dir(&project.0)
         .status()
         .unwrap()
         .code()
@@ -521,6 +554,23 @@ fn representative_multiseries_golden_is_xml_and_deterministic_o0_o2() {
 
 #[test]
 fn scientific_curve_fitting_consumer_is_exact_and_deterministic_o0_o2() {
+    let compact_source = SCIENTIFIC_CONSUMER.split_whitespace().collect::<String>();
+    assert!(
+        compact_source.contains("Matrix<float64>design=[1.0,0.0;1.0,1.0;1.0,2.0;1.0,3.0;1.0,4.0];")
+    );
+    assert!(compact_source.contains("Vector<float64,Column>observed=[0.0,4.0,5.0,8.0,8.0];"));
+    assert!(compact_source.contains("la.leastSquares(design,observed)"));
+    assert!(compact_source.contains("predicted=design*coefficients"));
+    assert!(compact_source.contains("residuals=observed-predicted"));
+    assert!(compact_source.contains("la.dot(residuals,residuals)"));
+    assert!(compact_source.contains("capture(copyintercept,copyslope)=>intercept+slope*x"));
+    assert!(compact_source.contains("options.xLimits=p.LimitMode.Explicit(p.Limits(0.0,4.0))"));
+    assert!(compact_source.contains("options.yLimits=p.LimitMode.Explicit(p.Limits(0.0,9.0))"));
+
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        assert_eq!(run(SCIENTIFIC_QUALIFICATION, optimization), 0);
+    }
+
     let o0 = render_to_file(SCIENTIFIC_CONSUMER, "curve_fit.svg", OptimizationLevel::O0);
     let o2 = render_to_file(SCIENTIFIC_CONSUMER, "curve_fit.svg", OptimizationLevel::O2);
     assert_eq!(o0, o2);
@@ -556,8 +606,22 @@ fn scientific_curve_fitting_consumer_is_exact_and_deterministic_o0_o2() {
             .count(),
         33
     );
+    let line_points = polylines[0].attribute("points").unwrap();
+    assert!(line_points.starts_with("72,375.1111111111111 "));
+    assert!(line_points.ends_with("616,48.000000000000114"));
     assert!(o0.find("<polyline").unwrap() < o0.find("<circle").unwrap());
-    assert!(o0.contains("points=\"72,375.1111111111111"));
-    assert!(o0.contains(">0</text>"));
-    assert!(o0.contains(">9</text>"));
+
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        let llvm = compile(SCIENTIFIC_CONSUMER, optimization);
+        assert_eq!(
+            run_llvm(&instrument_closure_counts(&llvm), optimization),
+            0,
+            "{optimization:?}"
+        );
+        assert_eq!(
+            run_with_balanced_heap(SCIENTIFIC_CONSUMER, optimization),
+            0,
+            "{optimization:?}"
+        );
+    }
 }
