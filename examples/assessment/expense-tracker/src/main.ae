@@ -1,0 +1,187 @@
+package assessmentExpenseTracker;
+
+import std.File;
+import std.IO;
+import std.Process;
+import std.Text;
+
+public struct Expense {
+    double amount;
+    string description;
+}
+
+enum LoadStatus {
+    Success,
+    InvalidData,
+    IoError,
+}
+
+struct LoadResult {
+    List<Expense> expenses;
+    LoadStatus status;
+}
+
+LoadResult loadExpenses(ref string path) {
+    LoadResult result = LoadResult({}, LoadStatus.Success);
+    string content = "";
+    try {
+        content = std.File.readText(path);
+    } catch (std.File.FileNotFoundException error) {
+        return result;
+    } catch (std.IO.IOException error) {
+        result.status = LoadStatus.IoError;
+        return result;
+    }
+
+    List<string> lines = std.Text.lines(content);
+    usize lineIndex = 0;
+    while (lineIndex < length(lines)) {
+        if (lines[lineIndex] == "") {
+            result.status = LoadStatus.InvalidData;
+            return result;
+        }
+        List<string> fields = std.Text.split(lines[lineIndex], "\t");
+        if (length(fields) != 2) {
+            result.status = LoadStatus.InvalidData;
+            return result;
+        }
+        double amount = 0.0;
+        match (std.Text.parseDouble(fields[0])) {
+            std.Text.DoubleParseResult.Value(value) => { amount = value; }
+            std.Text.DoubleParseResult.Invalid => {
+                result.status = LoadStatus.InvalidData;
+                return result;
+            }
+            std.Text.DoubleParseResult.Overflow => {
+                result.status = LoadStatus.InvalidData;
+                return result;
+            }
+            std.Text.DoubleParseResult.Underflow => {
+                result.status = LoadStatus.InvalidData;
+                return result;
+            }
+        }
+        if (amount <= 0.0 || amount - amount != 0.0) {
+            result.status = LoadStatus.InvalidData;
+            return result;
+        }
+        if (fields[1] == "") {
+            result.status = LoadStatus.InvalidData;
+            return result;
+        }
+        string description = remove(fields, 1);
+        push(result.expenses, Expense(amount, description));
+        lineIndex = lineIndex + 1;
+    }
+    return result;
+}
+
+int saveExpenses(ref string path, ref List<Expense> expenses) {
+    string content = "";
+    for (ref Expense expense in *expenses) {
+        content = content + str((*expense).amount);
+        content = content + "\t";
+        content = content + (*expense).description;
+        content = content + "\n";
+    }
+    try {
+        std.File.writeTextAtomic(path, content);
+    } catch (std.IO.IOException error) {
+        println("error: could not save expenses");
+        return 4;
+    }
+    return 0;
+}
+
+void printUsage() {
+    println("usage:");
+    println("  expense-tracker <file> add <amount> <description>");
+    println("  expense-tracker <file> list");
+    println("  expense-tracker <file> total");
+}
+
+int main() {
+    Array<string> arguments = std.Process.args();
+    if (length(arguments) == 0 || arguments[0] == "help" || arguments[0] == "--help") {
+        printUsage();
+        return 0;
+    }
+    if (length(arguments) < 2) {
+        printUsage();
+        return 2;
+    }
+
+    LoadResult loaded = loadExpenses(arguments[0]);
+    if (loaded.status == LoadStatus.InvalidData) {
+        println("error: invalid expense file");
+        return 3;
+    }
+    if (loaded.status == LoadStatus.IoError) {
+        println("error: could not read expense file");
+        return 3;
+    }
+
+    string command = "" + arguments[1];
+    if (command == "add") {
+        if (length(arguments) != 4) {
+            printUsage();
+            return 2;
+        }
+        double amount = 0.0;
+        match (std.Text.parseDouble(arguments[2])) {
+            std.Text.DoubleParseResult.Value(value) => { amount = value; }
+            std.Text.DoubleParseResult.Invalid => {
+                println("error: invalid amount");
+                return 2;
+            }
+            std.Text.DoubleParseResult.Overflow => {
+                println("error: invalid amount");
+                return 2;
+            }
+            std.Text.DoubleParseResult.Underflow => {
+                println("error: invalid amount");
+                return 2;
+            }
+        }
+        if (amount <= 0.0 || amount - amount != 0.0) {
+            println("error: amount must be finite and positive");
+            return 2;
+        }
+        if (arguments[3] == "" || std.Text.contains(arguments[3], "\t") ||
+            std.Text.contains(arguments[3], "\n") || std.Text.contains(arguments[3], "\r")) {
+            println("error: description must be one non-empty line without tabs");
+            return 2;
+        }
+        string description = "" + arguments[3];
+        push(loaded.expenses, Expense(amount, description));
+        int saved = saveExpenses(arguments[0], loaded.expenses);
+        if (saved != 0) { return saved; }
+        println("expense added: " + str(amount));
+        return 0;
+    }
+
+    if (command == "list") {
+        if (length(arguments) != 2) { printUsage(); return 2; }
+        usize index = 1;
+        for (ref Expense expense in loaded.expenses) {
+            println("#" + str(index) + " | " + (*expense).description + " | " +
+                str((*expense).amount));
+            index = index + 1;
+        }
+        return 0;
+    }
+
+    if (command == "total") {
+        if (length(arguments) != 2) { printUsage(); return 2; }
+        double total = 0.0;
+        for (ref Expense expense in loaded.expenses) {
+            total = total + (*expense).amount;
+        }
+        println("total: " + str(total));
+        return 0;
+    }
+
+    println("error: unknown command " + command);
+    printUsage();
+    return 2;
+}

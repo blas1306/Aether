@@ -1,0 +1,86 @@
+package assessmentDataProcessor;
+
+import std.File;
+import std.IO;
+import std.Process;
+import std.Text;
+
+int fail(ref string message) {
+    println("error: " + *message);
+    return 2;
+}
+
+int main() {
+    Array<string> arguments = std.Process.args();
+    if (length(arguments) != 2) {
+        println("usage: data-processor <input.csv> <output.txt>");
+        return 2;
+    }
+    string inputPath = "" + arguments[0];
+    string outputPath = "" + arguments[1];
+
+    string content = "";
+    try {
+        content = std.File.readText(inputPath);
+    } catch (std.File.FileNotFoundException error) {
+        return fail("input file not found");
+    } catch (std.IO.InvalidTextEncodingException error) {
+        return fail("input is not valid UTF-8");
+    } catch (std.IO.IOException error) {
+        return fail("could not read input file");
+    }
+
+    List<string> lines = std.Text.lines(content);
+    if (length(lines) == 0) { return fail("empty input"); }
+    string header = std.Text.trim(lines[0]);
+    if (header != "id,value") { return fail("expected header id,value"); }
+
+    List<double> values = {};
+    usize lineIndex = 1;
+    while (lineIndex < length(lines)) {
+        string line = std.Text.trim(lines[lineIndex]);
+        if (line == "") { return fail("empty row"); }
+        List<string> fields = std.Text.split(line, ",");
+        if (length(fields) != 2) { return fail("row must contain exactly two fields"); }
+
+        string idToken = std.Text.trim(fields[0]);
+        match (std.Text.parseInt(idToken)) {
+            std.Text.IntParseResult.Value(id) => {
+                if (id <= 0) { return fail("id must be positive"); }
+            }
+            std.Text.IntParseResult.Invalid => { return fail("invalid id"); }
+            std.Text.IntParseResult.Overflow => { return fail("id overflow"); }
+        }
+
+        string valueToken = std.Text.trim(fields[1]);
+        match (std.Text.parseDouble(valueToken)) {
+            std.Text.DoubleParseResult.Value(value) => {
+                if (value - value != 0.0) { return fail("value must be finite"); }
+                push(values, value);
+            }
+            std.Text.DoubleParseResult.Invalid => { return fail("invalid value"); }
+            std.Text.DoubleParseResult.Overflow => { return fail("value overflow"); }
+            std.Text.DoubleParseResult.Underflow => { return fail("value underflow"); }
+        }
+        lineIndex = lineIndex + 1;
+    }
+
+    if (length(values) == 0) { return fail("dataset has no records"); }
+    double sum = 0.0;
+    for (value in values) {
+        sum = sum + value;
+        if (sum - sum != 0.0) { return fail("non-finite sum"); }
+    }
+    double average = sum / double(length(values));
+    string output = "count=" + str(length(values));
+    output = output + "\nsum=" + str(sum);
+    output = output + "\naverage=" + str(average) + "\n";
+
+    try {
+        std.File.writeText(outputPath, output);
+    } catch (std.IO.IOException error) {
+        return fail("could not write output file");
+    }
+    println(output);
+    return 0;
+}

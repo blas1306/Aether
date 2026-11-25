@@ -1,0 +1,71 @@
+package assessmentNumericalSolver;
+
+import linearAlgebra as la;
+import std.Process;
+
+int runNormal() {
+    Matrix<float64> A = [3.0, 1.0; 1.0, 2.0];
+    Vector<float64,Column> b = [5.0, 5.0];
+
+    Vector<float64,Column> xLU = la.solve(A, b);
+    Vector<float64,Column> residualLU = A * xLU - b;
+    float64 normLU = sqrt(la.dot(residualLU, residualLU));
+
+    la.QR<float64> factor = la.qr(A);
+    Vector<float64,Column> xQR = la.solve(factor, b);
+    Vector<float64,Column> residualQR = A * xQR - b;
+    float64 normQR = sqrt(la.dot(residualQR, residualQR));
+
+    println("LU x = [" + str(xLU[1]) + ", " + str(xLU[2]) + "]");
+    println("LU residual norm = " + str(normLU));
+    println("QR x = [" + str(xQR[1]) + ", " + str(xQR[2]) + "]");
+    println("QR residual norm = " + str(normQR));
+    return 0;
+}
+
+int runSingularLU() {
+    Matrix<float64> A = [1.0, 0.0; 0.0, 0.0];
+    Vector<float64,Column> b = [1.0, 1.0];
+    try {
+        Vector<float64,Column> x = la.solve(A, b);
+        println("unexpected LU result: " + str(x[1]));
+    } catch (la.SingularMatrixException error) {
+        println("LU rejected singular matrix");
+        return 0;
+    }
+    return 1;
+}
+
+int runSingularQR() {
+    Matrix<float64> A = [1.0, 0.0; 0.0, 0.0];
+    Vector<float64,Column> b = [1.0, 1.0];
+    try {
+        la.QR<float64> factor = la.qr(A);
+        Vector<float64,Column> x = la.solve(factor, b);
+        println("unexpected QR result: " + str(x[1]));
+    } catch (la.RankDeficientMatrixException error) {
+        println("QR rejected rank-deficient matrix");
+        return 0;
+    }
+    return 1;
+}
+
+int runDimensionMismatch() {
+    Matrix<float64> A = [1.0, 0.0; 0.0, 1.0];
+    Vector<float64,Column> b = [1.0];
+    Vector<float64,Column> x = la.solve(A, b);
+    println(x);
+    return 1;
+}
+
+int main() {
+    Array<string> arguments = std.Process.args();
+    if (length(arguments) == 0 || arguments[0] == "normal") {
+        return runNormal();
+    }
+    if (arguments[0] == "singular-lu") { return runSingularLU(); }
+    if (arguments[0] == "singular-qr") { return runSingularQR(); }
+    if (arguments[0] == "dimension-mismatch") { return runDimensionMismatch(); }
+    println("usage: numerical-solver [normal|singular-lu|singular-qr|dimension-mismatch]");
+    return 2;
+}
