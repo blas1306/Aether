@@ -3190,6 +3190,12 @@ impl Builder<'_> {
 
     #[allow(clippy::too_many_lines)]
     fn lower_expr(&mut self, expression: &HirExpr) -> Operand {
+        if matches!(
+            expression.kind,
+            HirExprKind::ShortCircuitAnd { .. } | HirExprKind::ShortCircuitOr { .. }
+        ) {
+            return self.lower_short_circuit(expression);
+        }
         match &expression.kind {
             HirExprKind::Unit => Operand::Unit,
             HirExprKind::Class(op) => self.lower_class(op, expression.ty, expression.span),
@@ -3278,36 +3284,8 @@ impl Builder<'_> {
                 );
                 Operand::Local(destination)
             }
-            HirExprKind::ShortCircuitAnd { left, right }
-            | HirExprKind::ShortCircuitOr { left, right } => {
-                let is_and = matches!(expression.kind, HirExprKind::ShortCircuitAnd { .. });
-                let destination = self.temporary(TypeId::BOOL);
-                let left = self.lower_expr(left);
-                let rhs_block = self.new_block();
-                let short_block = self.new_block();
-                let join = self.new_block();
-                self.terminate(Terminator::Branch {
-                    condition: left,
-                    then_block: if is_and { rhs_block } else { short_block },
-                    else_block: if is_and { short_block } else { rhs_block },
-                });
-                self.current = Some(short_block);
-                self.assign(
-                    operand_place(&Operand::Local(destination)),
-                    Rvalue::Use(Operand::Bool(!is_and)),
-                    expression.span,
-                );
-                self.terminate(Terminator::Goto(join));
-                self.current = Some(rhs_block);
-                let rhs = self.lower_expr(right);
-                self.assign(
-                    operand_place(&Operand::Local(destination)),
-                    Rvalue::Use(rhs),
-                    expression.span,
-                );
-                self.terminate(Terminator::Goto(join));
-                self.current = Some(join);
-                Operand::Local(destination)
+            HirExprKind::ShortCircuitAnd { .. } | HirExprKind::ShortCircuitOr { .. } => {
+                unreachable!("short-circuit expressions are lowered iteratively")
             }
             HirExprKind::FunctionRef {
                 target,
@@ -4790,6 +4768,51 @@ impl Builder<'_> {
                 Operand::Local(destination)
             }
         }
+    }
+
+    fn lower_short_circuit(&mut self, expression: &HirExpr) -> Operand {
+        let mut leftmost = expression;
+        let mut spine = Vec::new();
+        loop {
+            let (is_and, left, right) = match &leftmost.kind {
+                HirExprKind::ShortCircuitAnd { left, right } => (true, left, right),
+                HirExprKind::ShortCircuitOr { left, right } => (false, left, right),
+                _ => break,
+            };
+            spine.push((is_and, leftmost.span, right.as_ref()));
+            leftmost = left;
+        }
+
+        let mut value = self.lower_expr(leftmost);
+        for (is_and, span, right) in spine.into_iter().rev() {
+            let destination = self.temporary(TypeId::BOOL);
+            let rhs_block = self.new_block();
+            let short_block = self.new_block();
+            let join = self.new_block();
+            self.terminate(Terminator::Branch {
+                condition: value,
+                then_block: if is_and { rhs_block } else { short_block },
+                else_block: if is_and { short_block } else { rhs_block },
+            });
+            self.current = Some(short_block);
+            self.assign(
+                operand_place(&Operand::Local(destination)),
+                Rvalue::Use(Operand::Bool(!is_and)),
+                span,
+            );
+            self.terminate(Terminator::Goto(join));
+            self.current = Some(rhs_block);
+            let rhs = self.lower_expr(right);
+            self.assign(
+                operand_place(&Operand::Local(destination)),
+                Rvalue::Use(rhs),
+                span,
+            );
+            self.terminate(Terminator::Goto(join));
+            self.current = Some(join);
+            value = Operand::Local(destination);
+        }
+        value
     }
 
     #[allow(clippy::too_many_lines)]

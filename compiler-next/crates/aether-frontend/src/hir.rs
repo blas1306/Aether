@@ -7552,6 +7552,12 @@ impl Monomorphizer<'_> {
         expression: &HirExpr,
         substitution: &Substitution,
     ) -> Result<HirExpr, Vec<Diagnostic>> {
+        if matches!(
+            expression.kind,
+            HirExprKind::ShortCircuitAnd { .. } | HirExprKind::ShortCircuitOr { .. }
+        ) {
+            return self.substitute_short_circuit(expression, substitution);
+        }
         let ty = self.substitute_type(expression.ty, substitution, expression.span)?;
         let kind = match &expression.kind {
             HirExprKind::Unit => HirExprKind::Unit,
@@ -7651,14 +7657,9 @@ impl Monomorphizer<'_> {
                 proof: *proof,
                 access: *access,
             },
-            HirExprKind::ShortCircuitAnd { left, right } => HirExprKind::ShortCircuitAnd {
-                left: Box::new(self.substitute_expr(left, substitution)?),
-                right: Box::new(self.substitute_expr(right, substitution)?),
-            },
-            HirExprKind::ShortCircuitOr { left, right } => HirExprKind::ShortCircuitOr {
-                left: Box::new(self.substitute_expr(left, substitution)?),
-                right: Box::new(self.substitute_expr(right, substitution)?),
-            },
+            HirExprKind::ShortCircuitAnd { .. } | HirExprKind::ShortCircuitOr { .. } => {
+                unreachable!("short-circuit expressions are substituted iteratively")
+            }
             HirExprKind::LogicalNot { operand } => HirExprKind::LogicalNot {
                 operand: Box::new(self.substitute_expr(operand, substitution)?),
             },
@@ -8631,6 +8632,46 @@ impl Monomorphizer<'_> {
             ty,
             span: expression.span,
         })
+    }
+
+    fn substitute_short_circuit(
+        &mut self,
+        expression: &HirExpr,
+        substitution: &Substitution,
+    ) -> Result<HirExpr, Vec<Diagnostic>> {
+        let mut leftmost = expression;
+        let mut spine = Vec::new();
+        loop {
+            let (is_and, left, right) = match &leftmost.kind {
+                HirExprKind::ShortCircuitAnd { left, right } => (true, left, right),
+                HirExprKind::ShortCircuitOr { left, right } => (false, left, right),
+                _ => break,
+            };
+            spine.push((is_and, leftmost, right.as_ref()));
+            leftmost = left;
+        }
+
+        let mut rebuilt = self.substitute_expr(leftmost, substitution)?;
+        for (is_and, original, right) in spine.into_iter().rev() {
+            let right = self.substitute_expr(right, substitution)?;
+            let kind = if is_and {
+                HirExprKind::ShortCircuitAnd {
+                    left: Box::new(rebuilt),
+                    right: Box::new(right),
+                }
+            } else {
+                HirExprKind::ShortCircuitOr {
+                    left: Box::new(rebuilt),
+                    right: Box::new(right),
+                }
+            };
+            rebuilt = HirExpr {
+                kind,
+                ty: self.substitute_type(original.ty, substitution, original.span)?,
+                span: original.span,
+            };
+        }
+        Ok(rebuilt)
     }
 }
 
@@ -13968,6 +14009,20 @@ impl Analyzer<'_> {
         e: &AstExpr,
         expected: Option<TypeId>,
     ) -> Result<Checked, Vec<Diagnostic>> {
+        if let AstExprKind::Binary { op, left, right } = &e.kind
+            && matches!(op, AstBinaryOp::LogicalAnd | AstBinaryOp::LogicalOr)
+        {
+            let checked = self.logical_binary(*op, left, right, e.span)?;
+            return self.coerce(checked, expected);
+        }
+        self.expression_non_logical(e, expected)
+    }
+
+    fn expression_non_logical(
+        &mut self,
+        e: &AstExpr,
+        expected: Option<TypeId>,
+    ) -> Result<Checked, Vec<Diagnostic>> {
         if matches!(&e.kind, AstExprKind::Call { callee, .. } if callee == "shapeGuard")
             || matches!(&e.kind, AstExprKind::Name(name) if name == "shapeGuard")
         {
@@ -18298,32 +18353,10 @@ impl Analyzer<'_> {
         expected: Option<TypeId>,
         span: Span,
     ) -> Result<Checked, Vec<Diagnostic>> {
-        if matches!(op, AstBinaryOp::LogicalAnd | AstBinaryOp::LogicalOr) {
-            let left = self.expression(la, Some(TypeId::BOOL))?.expr;
-            let saved = self.null_states.clone();
-            self.refine_for_condition(la, op == AstBinaryOp::LogicalAnd);
-            let right = self.expression(ra, Some(TypeId::BOOL))?.expr;
-            self.null_states = saved;
-            let kind = if op == AstBinaryOp::LogicalAnd {
-                HirExprKind::ShortCircuitAnd {
-                    left: Box::new(left),
-                    right: Box::new(right),
-                }
-            } else {
-                HirExprKind::ShortCircuitOr {
-                    left: Box::new(left),
-                    right: Box::new(right),
-                }
-            };
-            return Ok(Checked {
-                expr: HirExpr {
-                    kind,
-                    ty: TypeId::BOOL,
-                    span,
-                },
-                constant: None,
-            });
-        }
+        debug_assert!(!matches!(
+            op,
+            AstBinaryOp::LogicalAnd | AstBinaryOp::LogicalOr
+        ));
         if matches!(
             op,
             AstBinaryOp::Equal
@@ -18844,6 +18877,55 @@ impl Analyzer<'_> {
             check_value(self.types, v, common, span, self.target)?
         }
         Ok(bin_result(self.types, op, l, r, result, constant))
+    }
+
+    fn logical_binary(
+        &mut self,
+        op: AstBinaryOp,
+        left_ast: &AstExpr,
+        right_ast: &AstExpr,
+        span: Span,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        debug_assert!(matches!(
+            op,
+            AstBinaryOp::LogicalAnd | AstBinaryOp::LogicalOr
+        ));
+        let mut spine = vec![(op, left_ast, right_ast, span)];
+        let mut leftmost = left_ast;
+        while let AstExprKind::Binary { op, left, right } = &leftmost.kind
+            && matches!(op, AstBinaryOp::LogicalAnd | AstBinaryOp::LogicalOr)
+        {
+            spine.push((*op, left, right, leftmost.span));
+            leftmost = left;
+        }
+
+        let mut left = self.expression(leftmost, Some(TypeId::BOOL))?.expr;
+        for (op, left_ast, right_ast, span) in spine.into_iter().rev() {
+            let saved = self.null_states.clone();
+            self.refine_for_condition(left_ast, op == AstBinaryOp::LogicalAnd);
+            let right = self.expression(right_ast, Some(TypeId::BOOL))?.expr;
+            self.null_states = saved;
+            let kind = if op == AstBinaryOp::LogicalAnd {
+                HirExprKind::ShortCircuitAnd {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }
+            } else {
+                HirExprKind::ShortCircuitOr {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                }
+            };
+            left = HirExpr {
+                kind,
+                ty: TypeId::BOOL,
+                span,
+            };
+        }
+        Ok(Checked {
+            expr: left,
+            constant: None,
+        })
     }
 
     fn ast_is_string(&self, expression: &AstExpr) -> bool {
