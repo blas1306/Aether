@@ -8,6 +8,14 @@ cambio local previo de INDEX-DEREFERENCE-DIAGNOSTIC-V1 (F2) sobre `HEAD`.
 La independencia está demostrada en la sección 8; el fallo no fue corregido ni
 su expectativa fue modificada dentro de F3.
 
+> Seguimiento de integración, 2026-11-25: la excepción anterior se conserva
+> como resultado histórico de la qualification de F3, no como PASS
+> retroactivo. `INDEX-DEREFERENCE-DIAGNOSTIC-V1-AMENDMENT-1` corrigió después
+> la compatibilidad F2/Nullable, y `FRONTEND-STACK-USAGE-V1` eliminó el
+> agotamiento de stack independiente. En esa ejecución posterior,
+> `cargo test --workspace -j 1` completó con PASS sin `RUST_MIN_STACK`. Por
+> tanto la excepción ya no bloquea el workspace integrado actual.
+
 Autoridad normativa: `SHAPE_CONTRACT_DIAGNOSTICS_ARCH_1.md`.
 
 ## 1. Preflight y preservación
