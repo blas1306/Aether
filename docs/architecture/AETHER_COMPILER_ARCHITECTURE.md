@@ -20,6 +20,9 @@ This document complements the normative
 [`AETHER_V1_LANGUAGE_CHARTER.md`](AETHER_V1_LANGUAGE_CHARTER.md) and working
 [`AETHER_V1_SEMANTIC_CONTRACT.md`](AETHER_V1_SEMANTIC_CONTRACT.md).  “Current”
 always means the audited commit.  “Candidate” is design, not implemented fact.
+The current implementation-authority policy is maintained separately in
+[`COMPILER_AUTHORITY.md`](COMPILER_AUTHORITY.md); it governs any present-day
+reading of the historical pipeline descriptions below.
 
 ## OOP architecture proposal
 

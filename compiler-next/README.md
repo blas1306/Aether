@@ -1155,7 +1155,9 @@ artifact. There is no interpreter or fallback.
 
 ## Qualification
 
-Run all layer and native tests with:
+The official qualification is governed by the
+[compiler authority policy](../docs/architecture/COMPILER_AUTHORITY.md). Run
+all layer and native tests with:
 
 ```bash
 cargo test --workspace
@@ -1163,12 +1165,23 @@ cargo clippy --workspace --all-targets -- -D warnings
 tests/run-differential.sh
 ```
 
-`tests/differential.tsv` remains the versioned admission manifest. It distinguishes
-legacy-equivalent cases, deliberate `int64` changes, v1-contract cases,
-open-decision rejection and fail-closed rejection. The integration suite checks
-all new-compiler admission expectations and executes multiple native artifacts.
-Legacy-equivalent native cases are separately compared with the legacy CLI in
-qualification environments that contain its Python dependencies.
+`tests/run-differential.sh` is an official `compiler-next` gate despite its
+historical filename. It validates every current-compiler expectation in the
+versioned `tests/differential.tsv` manifest, including exact accepted exit
+statuses, diagnostic IDs for rejection and runtime traps. It never invokes or
+discovers Python, `compiler-rs`, `aether-compiler-core`, PyO3 or Maturin.
+
+The manifest retains a legacy observation column only as historical evidence.
+To inspect those observations explicitly, run the non-normative opt-in mode:
+
+```bash
+tests/run-legacy-differential.sh
+```
+
+That mode requires the frozen Python CLI and reports expected semantic
+divergences as historical results. Its availability and exit status never
+contribute to official qualification. The integration suite also checks all
+current-compiler admission expectations and executes multiple native artifacts.
 `tests/modules/v1-contract.tsv` records the Vertical-2 multi-file contract;
 these cases are not forced through legacy differential semantics.
 

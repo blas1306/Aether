@@ -2,49 +2,95 @@
 set -uo pipefail
 
 workspace=$(cd "$(dirname "$0")/.." && pwd)
-repo_root=$(cd "$workspace/.." && pwd)
-legacy_python=${AETHER_LEGACY_PYTHON:-"$repo_root/.venv/bin/python"}
+manifest=${AETHER_QUALIFICATION_MANIFEST:-"$workspace/tests/differential.tsv"}
 
-cargo build --quiet --manifest-path "$workspace/Cargo.toml" -p aether-driver --bin aether-next || exit 1
-next="$workspace/target/debug/aether-next"
+if [[ -n "${AETHER_NEXT_BIN:-}" ]]; then
+    next=$AETHER_NEXT_BIN
+else
+    cargo build --quiet --manifest-path "$workspace/Cargo.toml" \
+        -p aether-driver --bin aether-next || exit 2
+    next="$workspace/target/debug/aether-next"
+fi
+
+if [[ ! -x "$next" ]]; then
+    echo "qualification infrastructure error: compiler-next driver is not executable: $next" >&2
+    exit 2
+fi
+if [[ ! -r "$manifest" ]]; then
+    echo "qualification infrastructure error: manifest is not readable: $manifest" >&2
+    exit 2
+fi
+
 failures=0
 checked=0
 
-while IFS=$'\t' read -r id class new_result legacy_result source; do
-    [[ -z "$id" || "$id" == \#* || "$legacy_result" == "n/a" ]] && continue
-    source_path="$workspace/tests/$source"
-
-    "$next" run "$source_path" >/dev/null 2>&1
-    new_status=$?
-    if [[ "$new_result" == accept:* ]]; then
-        expected=${new_result#accept:}
-        if [[ $new_status -ne $expected ]]; then
-            echo "$id: new=$new_status expected=$expected"
-            failures=$((failures + 1))
-        fi
-    elif [[ "$new_result" == reject:* && $new_status -eq 0 ]]; then
-        echo "$id: new unexpectedly accepted"
-        failures=$((failures + 1))
-    fi
-
-    (
-        cd "$repo_root" || exit 125
-        "$legacy_python" -m aether.cli "$source_path" >/dev/null 2>&1
-    )
-    legacy_status=$?
-    if [[ "$legacy_result" == accept:* ]]; then
-        expected=${legacy_result#accept:}
-        if [[ $legacy_status -ne $expected ]]; then
-            echo "$id: legacy=$legacy_status expected=$expected"
-            failures=$((failures + 1))
-        fi
-    elif [[ "$legacy_result" == reject* && $legacy_status -eq 0 ]]; then
-        echo "$id: legacy unexpectedly accepted"
-        failures=$((failures + 1))
-    fi
+while IFS=$'\t' read -r id class current_result legacy_result source extra; do
+    [[ -z "$id" || "$id" == \#* ]] && continue
     checked=$((checked + 1))
-    echo "$id: new=$new_status legacy=$legacy_status [$class]"
-done < "$workspace/tests/differential.tsv"
 
-echo "differential: checked=$checked failures=$failures"
-exit "$failures"
+    if [[ -z "$class" || -z "$current_result" || -z "$legacy_result" || -z "$source" || -n "$extra" ]]; then
+        echo "$id: FAIL malformed qualification row" >&2
+        failures=$((failures + 1))
+        continue
+    fi
+
+    source_path="$workspace/tests/$source"
+    if [[ ! -r "$source_path" ]]; then
+        echo "$id: FAIL source is not readable: $source_path" >&2
+        failures=$((failures + 1))
+        continue
+    fi
+
+    output=$("$next" run "$source_path" 2>&1)
+    current_status=$?
+
+    case "$current_result" in
+        accept:*)
+            expected=${current_result#accept:}
+            if [[ ! "$expected" =~ ^[0-9]+$ ]]; then
+                echo "$id: FAIL invalid current expectation: $current_result" >&2
+                failures=$((failures + 1))
+            elif [[ $current_status -ne $expected ]]; then
+                echo "$id: FAIL compiler-next status=$current_status expected=$expected [$class]" >&2
+                [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+                failures=$((failures + 1))
+            else
+                echo "$id: PASS compiler-next=$current_status [$class]"
+            fi
+            ;;
+        reject:*)
+            expected=${current_result#reject:}
+            if [[ -z "$expected" ]]; then
+                echo "$id: FAIL invalid current expectation: $current_result" >&2
+                failures=$((failures + 1))
+            elif [[ $current_status -eq 0 ]]; then
+                echo "$id: FAIL compiler-next unexpectedly accepted; expected=$expected [$class]" >&2
+                failures=$((failures + 1))
+            elif ! grep -Fq "error[$expected]" <<<"$output"; then
+                echo "$id: FAIL compiler-next rejected without expected diagnostic $expected (status=$current_status) [$class]" >&2
+                [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+                failures=$((failures + 1))
+            else
+                echo "$id: PASS compiler-next=reject:$expected [$class]"
+            fi
+            ;;
+        trap)
+            # aether-next maps signal termination to status 1. Compilation and
+            # driver/infrastructure failures use status 2 and cannot satisfy a trap.
+            if [[ $current_status -ne 1 ]]; then
+                echo "$id: FAIL compiler-next status=$current_status expected=trap [$class]" >&2
+                [[ -n "$output" ]] && printf '%s\n' "$output" >&2
+                failures=$((failures + 1))
+            else
+                echo "$id: PASS compiler-next=trap [$class]"
+            fi
+            ;;
+        *)
+            echo "$id: FAIL unknown current expectation: $current_result" >&2
+            failures=$((failures + 1))
+            ;;
+    esac
+done < "$manifest"
+
+echo "qualification: mode=official checked=$checked failures=$failures"
+[[ $failures -eq 0 ]]

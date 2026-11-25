@@ -114,6 +114,7 @@ reimplementaciones de NumPy/SciPy/BLAS/LAPACK.
 
 ## Documentos de consolidación v1
 
+- [Política normativa de autoridad del compilador](docs/architecture/COMPILER_AUTHORITY.md)
 - [Especificación normativa Aether v1](docs/aether/AETHER_LANGUAGE_SPEC_V1.md)
 - [Perfil native normativo v1 / capability profile 24](docs/aether/AETHER_NATIVE_PROFILE_V1.md)
 - [Índice y clasificación documental](docs/aether/README.md)
@@ -132,8 +133,9 @@ preferencia estética.
 
 ## Instalación y primer uso
 
-La interfaz oficial es la CLI Rust de `compiler-next`. Desde el checkout se
-instala de forma portable con Cargo:
+La interfaz oficial es la CLI Rust de `compiler-next`, conforme a la
+[política de autoridad del compilador](docs/architecture/COMPILER_AUTHORITY.md).
+Desde el checkout se instala de forma portable con Cargo:
 
 ```bash
 cargo install --path compiler-next/crates/aether-cli

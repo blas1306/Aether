@@ -1,4 +1,4 @@
-# id	class	new_result	legacy_result	source
+# id	class	official_result	historical_legacy_result	source
 return_zero	LEGACY_EQUIVALENT	accept:0	accept:0	programs/return_zero.ae
 arithmetic	LEGACY_EQUIVALENT	accept:14	accept:14	programs/arithmetic.ae
 sum_loop	LEGACY_EQUIVALENT	accept:45	accept:45	programs/sum_loop.ae
