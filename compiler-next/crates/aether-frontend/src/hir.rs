@@ -13240,18 +13240,35 @@ impl Analyzer<'_> {
                 op: AstUnaryOp::Dereference,
                 operand,
             } => {
-                let reference = self.expression(operand, None)?.expr;
+                let reference = if self.dereference_operand_is_place(operand) {
+                    let place = self.resolve_expr_place(operand, false)?;
+                    let effective_type = self.flow_refined_place_type(&place);
+                    if self.types.reference_info(effective_type).is_none() {
+                        return Err(self.invalid_dereference(effective_type, expression.span));
+                    }
+                    if effective_type != place.ty {
+                        // Nullable flow refinement is represented by an explicit
+                        // NullablePayload expression and proof. Reuse that closed
+                        // path only after the type-only probe has established that
+                        // the payload is a reference; ordinary projected Places
+                        // must not be loaded merely to diagnose dereference.
+                        self.expression(operand, Some(effective_type))?.expr
+                    } else if let HirPlaceBase::Local(local) = &place.base
+                        && place.projections.is_empty()
+                    {
+                        HirExpr {
+                            kind: HirExprKind::Local(*local),
+                            ty: place.ty,
+                            span: operand.span,
+                        }
+                    } else {
+                        self.load_place(place, operand.span)?.expr
+                    }
+                } else {
+                    self.expression(operand, None)?.expr
+                };
                 let Some((pointee, mutable)) = self.types.reference_info(reference.ty) else {
-                    return Err(vec![Diagnostic::new(
-                        "E0271",
-                        Phase::Semantic,
-                        DiagnosticCategory::Type,
-                        format!(
-                            "cannot dereference non-reference type {}",
-                            self.type_name(reference.ty)
-                        ),
-                        Some(expression.span),
-                    )]);
+                    return Err(self.invalid_dereference(reference.ty, expression.span));
                 };
                 if writable && !mutable {
                     return Err(vec![Diagnostic::new(
@@ -13383,6 +13400,48 @@ impl Analyzer<'_> {
                 Some(expression.span),
             )]),
         }
+    }
+
+    fn flow_refined_place_type(&self, place: &HirPlace) -> TypeId {
+        let HirPlaceBase::Local(local) = place.base else {
+            return place.ty;
+        };
+        if !place.projections.is_empty()
+            || self.null_states.get(&local) != Some(&NullState::NonNull)
+        {
+            return place.ty;
+        }
+        self.types.nullable_payload(place.ty).unwrap_or(place.ty)
+    }
+
+    fn dereference_operand_is_place(&self, expression: &AstExpr) -> bool {
+        if let Some((_, field)) = self.class_field_source(expression) {
+            return self.types.buffer_element(field.ty).is_some();
+        }
+        match &expression.kind {
+            AstExprKind::Name(name) => self.lookup(name).is_some(),
+            AstExprKind::Field { base, .. } | AstExprKind::Index { base, .. } => {
+                self.dereference_operand_is_place(base)
+            }
+            AstExprKind::Unary {
+                op: AstUnaryOp::Dereference,
+                ..
+            } => true,
+            _ => false,
+        }
+    }
+
+    fn invalid_dereference(&self, ty: TypeId, span: Span) -> Vec<Diagnostic> {
+        vec![Diagnostic::new(
+            "E0271",
+            Phase::Semantic,
+            DiagnosticCategory::Type,
+            format!(
+                "cannot dereference expression of type `{}`: `*` requires `ref T` or `ref mut T`; `*` does not create a borrow",
+                self.type_name(ty)
+            ),
+            Some(span),
+        )]
     }
 
     fn slice_assignment(
