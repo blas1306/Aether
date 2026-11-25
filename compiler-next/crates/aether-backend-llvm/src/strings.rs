@@ -898,6 +898,7 @@ fn emit_interpolation(
     types: &TypeArena,
     operand: impl Fn(&SsaOperand) -> String,
 ) {
+    let mut observed_strings = vec![None; fragments.len()];
     for (index, fragment) in fragments.iter().enumerate() {
         if let InterpolationFragment::Hole {
             value,
@@ -922,6 +923,7 @@ fn emit_interpolation(
                     types,
                     &operand,
                 );
+                observed_strings[index] = Some(value.clone());
                 writeln!(
                     output,
                     "  %fmt_len{result}_{index} = call i64 @aether_string_length(ptr {value})"
@@ -1002,22 +1004,12 @@ fn emit_interpolation(
                 format!("getelementptr (i8, ptr @{}, i64 24)", literal_name(bytes)),
                 bytes.len().to_string(),
             ),
-            InterpolationFragment::Hole {
-                value,
-                formatted_type,
-                access,
-                ..
-            } if *formatted_type == aether_frontend::TypeId::STRING => {
-                let observed = observed_value(
-                    output,
-                    result,
-                    index,
-                    value,
-                    *access,
-                    *formatted_type,
-                    types,
-                    &operand,
-                );
+            InterpolationFragment::Hole { formatted_type, .. }
+                if *formatted_type == aether_frontend::TypeId::STRING =>
+            {
+                let observed = observed_strings[index]
+                    .as_ref()
+                    .expect("string interpolation was observed during sizing");
                 writeln!(
                     output,
                     "  %fmt_src{result}_{index} = call ptr @aether_string_data(ptr {observed})"

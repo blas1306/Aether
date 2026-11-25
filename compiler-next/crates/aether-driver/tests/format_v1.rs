@@ -1,6 +1,6 @@
 //! FORMAT-V1 canonical scalar strings and interpolation qualification.
 
-use std::{fs, path::PathBuf, process::Command};
+use std::{collections::BTreeSet, fs, path::PathBuf, process::Command};
 
 use aether_driver::{Emit, OptimizationLevel, compile_source_with_optimization};
 use aether_frontend::{
@@ -64,6 +64,22 @@ fn execute(llvm: &str, optimization: OptimizationLevel) -> std::process::Output 
     Command::new(executable).output().unwrap()
 }
 
+fn assert_instruction_names_are_function_local(llvm: &str) {
+    let mut names = None::<BTreeSet<&str>>;
+    for line in llvm.lines() {
+        if line.starts_with("define ") {
+            assert!(names.replace(BTreeSet::new()).is_none());
+        } else if line == "}" {
+            names = None;
+        } else if let Some(function_names) = names.as_mut()
+            && let Some((name, _)) = line.trim().split_once(" = ")
+            && name.starts_with('%')
+        {
+            assert!(function_names.insert(name), "duplicate LLVM local {name}");
+        }
+    }
+}
+
 #[test]
 fn scalar_spellings_and_float_thresholds_are_byte_exact_at_o0_o2() {
     let source = r#"int main(){
@@ -109,6 +125,42 @@ fn interpolation_keeps_a_structured_plan_and_one_publication() {
             .llvm
             .contains("call ptr @aether_string_allocate")
     );
+}
+
+#[test]
+fn borrowed_string_interpolation_names_are_unique_in_o0_o2() {
+    let original = include_str!("../../../tests/programs/iteration_v3_smoke.ae");
+    let nested = r#"
+int helper(ref string value){println("helper=${*value}");return 0;}
+int other(ref string value){string line="other=${*value}";println(line);return 0;}
+int main(){
+ Array<string> left={"A","BB"};List<string> right={"x","yz"};
+ for(word in left){
+  println("outer=${*word}");
+  if(byteLength(*word)==1){println("short=${*word}");}else{println("long=${*word}");}
+  for(item in right){println("pair=${*word}:${*item}");}
+  helper(word);other(word);
+ }
+ println(str(7));
+ return 0;
+}"#;
+    let expected = b"outer=A\nshort=A\npair=A:x\npair=A:yz\nhelper=A\nother=A\nouter=BB\nlong=BB\npair=BB:x\npair=BB:yz\nhelper=BB\nother=BB\n7\n";
+
+    for optimization in [OptimizationLevel::O0, OptimizationLevel::O2] {
+        let original_compilation = compile(original, optimization);
+        assert_instruction_names_are_function_local(&original_compilation.llvm);
+        let original_output = execute(&original_compilation.llvm, optimization);
+        assert_eq!(original_output.status.code(), Some(0), "{optimization:?}");
+        assert_eq!(original_output.stdout, b"A\0B\nh\xc3\xa9\n");
+
+        let nested_compilation = compile(nested, optimization);
+        assert_instruction_names_are_function_local(&nested_compilation.llvm);
+        assert!(nested_compilation.llvm.contains("%fmt_observed"));
+        assert!(nested_compilation.llvm.contains("%format_buffer"));
+        let nested_output = execute(&nested_compilation.llvm, optimization);
+        assert_eq!(nested_output.status.code(), Some(0), "{optimization:?}");
+        assert_eq!(nested_output.stdout, expected, "{optimization:?}");
+    }
 }
 
 #[test]
