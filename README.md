@@ -52,13 +52,13 @@ imprime `25`.
 - `int` checked de 32 bits, `double`, `boolean`, funciones tipadas y `void`;
 - `if`, `while`, rangos, `for-in`, `break`, `continue` y short-circuit;
 - entry point explícito `int main()` o script normalizado a `main`;
-- argumentos de proceso mediante snapshots owned `System.args()` y forwarding
-  del CLI después de `--`;
-- archivos de texto UTF-8 con `io.readText`, `io.writeText`,
-  `io.writeTextAtomic` e `io.appendText`,
-  resultados nominales y bytes length-aware;
+- argumentos de proceso mediante snapshots owned `std.Process.args()` y
+  forwarding del CLI después de `--`;
+- archivos de texto UTF-8 con `std.File.readText`, `std.File.writeText` y
+  `std.File.writeTextAtomic`, excepciones nominales y bytes length-aware;
 - persistencia ALPT1 manual del Expense Tracker en AST/native Linux, con
-  payloads length-prefixed, rechazo fail-closed y save atómico/durable POSIX;
+  payloads length-prefixed, rechazo fail-closed y publicación atómica POSIX,
+  sin garantía de durabilidad ante crash o pérdida de energía;
 - structs por valor, constructores, métodos, `this`, copia, igualdad e
   impresión para el subconjunto de campos soportado por backend;
 - nullable tagged, classes por referencia con ARC/fields/constructores/métodos
@@ -191,27 +191,87 @@ Pasar argumentos al programa (el shell ya resuelve quoting):
 aether run program.ae -- add "Dinner with friends"
 ```
 
-El programa consulta `System.args()` tras `import System;`. El array no incluye
-el ejecutable, `run`, el archivo ni `--`. Sin separador se entregan cero
-argumentos.
+El programa consulta `std.Process.args()` tras `import std.Process;`. La función
+devuelve un `Array<string>` owned nuevo que no incluye el ejecutable, `run`, el
+archivo ni `--`. Sin separador se entregan cero argumentos.
 
-La API mínima de archivos requiere `import io;`. Es exclusivamente de texto
-UTF-8: `FileReadResult loaded = io.readText(path)` y
-`FileStatus status = io.writeText(path, content)`/`io.writeTextAtomic(...)`/
-`io.appendText(...)`. No
-normaliza newlines ni agrega terminadores; native está disponible por ahora en
-Linux/POSIX.
+La API mínima de archivos requiere `import std.File;`; las excepciones base y
+de encoding requieren `import std.IO;`. Es exclusivamente de texto UTF-8:
+`std.File.readText(path)` retorna `string`, mientras que
+`std.File.writeText(path, content)` y
+`std.File.writeTextAtomic(path, content)` retornan `void`. `readText` valida
+UTF-8; las tres operaciones preservan los bytes admitidos sin normalizar
+newlines ni agregar terminadores. Este ejemplo usa además `std.Text` y
+`std.Process` como lo haría un consumer CLI:
+
+```aether
+package ioQuickstart;
+
+import std.File;
+import std.IO;
+import std.Process;
+import std.Text;
+
+int main() {
+    Array<string> arguments = std.Process.args();
+    if (length(arguments) != 2) {
+        println("usage: io-quickstart <input.txt> <output.txt>");
+        return 2;
+    }
+
+    try {
+        string content = std.File.readText(arguments[0]);
+        List<string> lines = std.Text.lines(content);
+        string normalized = std.Text.trim(content) + "\n";
+        std.File.writeTextAtomic(arguments[1], normalized);
+        println("lines: " + str(length(lines)));
+    } catch (std.File.FileNotFoundException error) {
+        println("error: input file not found");
+        return 3;
+    } catch (std.File.PermissionDeniedException error) {
+        println("error: permission denied");
+        return 4;
+    } catch (std.IO.InvalidTextEncodingException error) {
+        println("error: input is not valid UTF-8");
+        return 5;
+    } catch (std.IO.IOException error) {
+        println("error: file IO failed");
+        return 6;
+    }
+    return 0;
+}
+```
+
+`FileNotFoundException` y `PermissionDeniedException` derivan de
+`std.IO.IOException`; `InvalidTextEncodingException` también deriva de esa base.
+Otros fallos operativos usan `IOException`.
+
+`writeText` crea o trunca el target y puede dejar un archivo vacío o parcial si
+falla. En Linux/POSIX calificado, `writeTextAtomic` escribe y cierra un temporal
+en el mismo directorio y publica con un único reemplazo: observers del nombre
+ven el archivo anterior o el nuevo completo. Un fallo recuperable anterior a
+publicar conserva el target anterior. La operación no ejecuta `fsync` de archivo
+ni de directorio y no garantiza durabilidad ante crash del sistema o pérdida de
+energía. Tampoco ofrece locking, compare-and-swap, transacciones multiarchivo o
+preservación de metadata.
+
+Los contratos calificados de esta superficie están en
+[IO-V1](docs/architecture/IO_V1_REPORT.md),
+[TEXT-V1](docs/architecture/TEXT_V1_REPORT.md),
+[TEXT-LINES-V1](docs/architecture/TEXT_LINES_V1_REPORT.md),
+[PROCESS-ARGS-V1](docs/architecture/PROCESS_ARGS_V1_REPORT.md) y
+[FILE-ATOMIC-WRITE-V1](docs/architecture/FILE_ATOMIC_WRITE_V1_REPORT.md).
 
 El Expense Tracker demuestra persistencia estructurada sin JSON/reflection:
 
 ```bash
-aether run examples/expense_tracker/Main.ae -- expenses.alpt add expense 1 19.95 food "Lunch" 2026-07-16
-aether run examples/expense_tracker/Main.ae -- expenses.alpt list
+aether run examples/expense_tracker/main.ae -- expenses.alpt add expense 1 19.95 food "Lunch" 2026-07-16
+aether run examples/expense_tracker/main.ae -- expenses.alpt list
 ```
 
 El archivo usa ALPT1 revision 1. `saveLedger` publica mediante
-`io.writeTextAtomic`: temporal seguro, fsync, rename y fsync del directorio en
-POSIX; no añade locking ni backups.
+`std.File.writeTextAtomic` con el contrato de reemplazo atómico descrito arriba;
+no añade durabilidad, locking ni backups.
 
 La interfaz Python histórica queda congelada y sólo se usa explícitamente para
 la superficie aún no migrada, como el intérprete AST:
