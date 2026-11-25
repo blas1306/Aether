@@ -54,6 +54,19 @@ fn without_spans(dump: &str) -> String {
         .join("\n")
 }
 
+// Trap diagnostics deliberately retain their physical line and column so a
+// comment-only rewrite can still change the eventual runtime message.
+fn without_physical_locations(dump: &str) -> String {
+    without_spans(dump)
+        .lines()
+        .filter(|line| {
+            let line = line.trim();
+            !line.starts_with("line: ") && !line.starts_with("column: ")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[test]
 fn entry_normalizes_before_ownership_and_backend() {
     for text in [
@@ -209,12 +222,19 @@ fn comments_preserve_tokens_and_all_semantic_phases() {
         let actual = compile_source(&commented, EMITS).unwrap();
         for phase in EMITS {
             assert_eq!(
-                without_spans(&baseline.dumps[phase]),
-                without_spans(&actual.dumps[phase]),
+                without_physical_locations(&baseline.dumps[phase]),
+                without_physical_locations(&actual.dumps[phase]),
                 "{phase:?}"
             );
         }
-        assert_eq!(baseline.llvm, actual.llvm);
+        if baseline.dumps[&Emit::Hir].contains("TrapDiagnosticSite {") {
+            assert_ne!(baseline.llvm, actual.llvm);
+            for llvm in [&baseline.llvm, &actual.llvm] {
+                assert!(llvm.contains("columns(left) == rows(right)"));
+            }
+        } else {
+            assert_eq!(baseline.llvm, actual.llvm);
+        }
     }
 }
 

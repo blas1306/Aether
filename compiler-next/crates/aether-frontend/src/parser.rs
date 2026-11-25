@@ -113,6 +113,8 @@ pub fn parse(source: &SourceFile, tokens: Vec<Token>) -> Result<ParsedAst, Vec<D
         )])
     } else {
         Ok(ParsedAst {
+            source_name: parser.source.name.clone(),
+            source_text: parser.source.text.clone(),
             package,
             imports,
             aliases,

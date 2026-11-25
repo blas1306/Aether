@@ -22,8 +22,8 @@ use aether_frontend::{
     layout_of,
 };
 use aether_middle::{
-    BinaryOp, BlockId, SliceSelector, SsaFunction, SsaOp, SsaOperand, SsaPlace, SsaPlaceBase,
-    SsaPlaceProjection, SsaTerminator, TrapKind, UnaryOp, VerifiedSsa,
+    BinaryOp, BlockId, SliceSelector, SsaFunction, SsaIr, SsaOp, SsaOperand, SsaPlace,
+    SsaPlaceBase, SsaPlaceProjection, SsaTerminator, TrapKind, UnaryOp, VerifiedSsa,
 };
 
 /// Minimal explicit target contract for the admitted bootstrap platform.
@@ -99,6 +99,14 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             core_reachable.contains(&function.id) || closure_targets.contains(&function.function_id)
         })
         .any(|function| !function.exception_events.is_empty());
+    let has_shape_diagnostics = program.functions.iter().any(|function| {
+        function.blocks.iter().any(|block| {
+            matches!(block.terminator, SsaTerminator::ShapeGuard { .. })
+                || block.instructions.iter().any(|instruction| {
+                    matches!(&instruction.op, SsaOp::AlgebraicProduct { kernel, .. } if kernel.diagnostic.is_some())
+                })
+        })
+    });
     let reachable_io = program
         .functions
         .iter()
@@ -327,11 +335,17 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         }
     }
     writeln!(output, "declare void @llvm.trap() cold noreturn nounwind\n").unwrap();
-    if has_string_runtime || has_exception_routes {
+    if has_string_runtime || has_exception_routes || has_shape_diagnostics {
         writeln!(output, "declare i64 @write(i32, ptr, i64)\n").unwrap();
     }
-    if has_exception_routes || has_io_runtime {
+    if has_exception_routes || has_io_runtime || has_shape_diagnostics {
         writeln!(output, "declare ptr @__errno_location() nounwind\n").unwrap();
+    }
+    if has_shape_diagnostics || has_exception_routes {
+        emit_diagnostic_writer(&mut output);
+    }
+    if has_shape_diagnostics {
+        emit_shape_diagnostic_runtime(&mut output, program);
     }
     if has_owners {
         emit_runtime_boundary(&mut output, has_closure_runtime);
@@ -920,6 +934,176 @@ fn emit_closure_thunks(
     let _ = (structs, enums);
 }
 
+fn emit_diagnostic_writer(output: &mut String) {
+    output.push_str(
+        "define internal i1 @aether_diagnostic_write_all(ptr %data, i64 %length) nounwind {\n\
+         entry:\n\
+           br label %loop\n\
+         loop:\n\
+           %offset = phi i64 [ 0, %entry ], [ %next, %progress ], [ %offset, %retry ]\n\
+           %done = icmp eq i64 %offset, %length\n\
+           br i1 %done, label %ok, label %attempt\n\
+         attempt:\n\
+           %remaining = sub i64 %length, %offset\n\
+           %cursor = getelementptr i8, ptr %data, i64 %offset\n\
+           %written = call i64 @write(i32 2, ptr %cursor, i64 %remaining)\n\
+           %positive = icmp sgt i64 %written, 0\n\
+           br i1 %positive, label %progress, label %failed\n\
+         progress:\n\
+           %next = add i64 %offset, %written\n\
+           br label %loop\n\
+         failed:\n\
+           %zero = icmp eq i64 %written, 0\n\
+           br i1 %zero, label %error, label %errno\n\
+         errno:\n\
+           %errno_pointer = call ptr @__errno_location()\n\
+           %errno_value = load i32, ptr %errno_pointer\n\
+           %interrupted = icmp eq i32 %errno_value, 4\n\
+           br i1 %interrupted, label %retry, label %error\n\
+         retry:\n\
+           br label %loop\n\
+         ok:\n\
+           ret i1 true\n\
+         error:\n\
+           ret i1 false\n\
+         }\n",
+    );
+}
+
+fn diagnostic_metadata(text: &str) -> String {
+    let mut escaped = String::new();
+    for character in text.chars() {
+        match character {
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            character if character.is_control() => {
+                write!(escaped, "\\u{{{:x}}}", u32::from(character)).unwrap();
+            }
+            character => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+fn llvm_diagnostic_bytes(bytes: &[u8]) -> String {
+    let mut encoded = String::new();
+    for byte in bytes {
+        if (0x20..=0x7e).contains(byte) && *byte != b'"' && *byte != b'\\' {
+            encoded.push(char::from(*byte));
+        } else {
+            write!(encoded, "\\{byte:02X}").unwrap();
+        }
+    }
+    encoded
+}
+
+fn shape_site_symbol(function: &SsaFunction, ordinal: u32, part: &str) -> String {
+    format!("aether_shape_site_{}_{}_{}", function.id.0, ordinal, part)
+}
+
+fn emit_shape_site_constants(
+    output: &mut String,
+    function: &SsaFunction,
+    diagnostic: &aether_frontend::TrapDiagnosticSite,
+) {
+    let prefix = format!(
+        "Aether trap: ShapeMismatch at {}:{}:{} in {}: {}",
+        diagnostic_metadata(&diagnostic.source_name),
+        diagnostic.line,
+        diagnostic.column,
+        diagnostic_metadata(&diagnostic.operation),
+        diagnostic_metadata(&diagnostic.contract),
+    );
+    let prefix_symbol = shape_site_symbol(function, diagnostic.id.ordinal, "prefix");
+    writeln!(
+        output,
+        "@{prefix_symbol} = private constant [{} x i8] c\"{}\"",
+        prefix.len(),
+        llvm_diagnostic_bytes(prefix.as_bytes())
+    )
+    .unwrap();
+    for (index, label) in diagnostic.observation_labels.iter().enumerate() {
+        let label = diagnostic_metadata(label);
+        let symbol = shape_site_symbol(function, diagnostic.id.ordinal, &format!("label{index}"));
+        writeln!(
+            output,
+            "@{symbol} = private constant [{} x i8] c\"{}\"",
+            label.len(),
+            llvm_diagnostic_bytes(label.as_bytes())
+        )
+        .unwrap();
+    }
+}
+
+fn emit_shape_diagnostic_runtime(output: &mut String, program: &SsaIr) {
+    output.push_str(
+        "@aether_shape_open = private constant [2 x i8] c\" [\"\n\
+         @aether_shape_equals = private constant [1 x i8] c\"=\"\n\
+         @aether_shape_separator = private constant [2 x i8] c\", \"\n\
+         @aether_shape_close = private constant [2 x i8] c\"]\\0A\"\n\
+         @aether_shape_newline = private constant [1 x i8] c\"\\0A\"\n",
+    );
+    for function in &program.functions {
+        for block in &function.blocks {
+            if let SsaTerminator::ShapeGuard { diagnostic, .. } = &block.terminator {
+                emit_shape_site_constants(output, function, diagnostic);
+            }
+            for instruction in &block.instructions {
+                if let SsaOp::AlgebraicProduct { kernel, .. } = &instruction.op
+                    && let Some(diagnostic) = &kernel.diagnostic
+                {
+                    emit_shape_site_constants(output, function, diagnostic);
+                }
+            }
+        }
+    }
+    output.push_str(
+        "define internal void @aether_shape_write_u64(i64 %value) nounwind {\n\
+         entry:\n\
+           %buffer = alloca [20 x i8], align 1\n\
+           br label %digits\n\
+         digits:\n\
+           %current = phi i64 [ %value, %entry ], [ %quotient, %digits ]\n\
+           %index = phi i64 [ 20, %entry ], [ %next_index, %digits ]\n\
+           %remainder = urem i64 %current, 10\n\
+           %digit = trunc i64 %remainder to i8\n\
+           %ascii = add i8 %digit, 48\n\
+           %next_index = sub i64 %index, 1\n\
+           %slot = getelementptr [20 x i8], ptr %buffer, i64 0, i64 %next_index\n\
+           store i8 %ascii, ptr %slot\n\
+           %quotient = udiv i64 %current, 10\n\
+           %more = icmp ne i64 %quotient, 0\n\
+           br i1 %more, label %digits, label %write\n\
+         write:\n\
+           %length = sub i64 20, %next_index\n\
+           %start = getelementptr [20 x i8], ptr %buffer, i64 0, i64 %next_index\n\
+           %written = call i1 @aether_diagnostic_write_all(ptr %start, i64 %length)\n\
+           ret void\n\
+         }\n\
+         define internal void @aether_report_shape_mismatch(ptr %prefix, i64 %prefix_length, i64 %count, i64 %first, i64 %second, ptr %first_label, i64 %first_label_length, ptr %second_label, i64 %second_label_length) nounwind {\n\
+         entry:\n\
+           %prefix_written = call i1 @aether_diagnostic_write_all(ptr %prefix, i64 %prefix_length)\n\
+           %has_observations = icmp eq i64 %count, 2\n\
+           br i1 %has_observations, label %observations, label %newline\n\
+         observations:\n\
+           %open_written = call i1 @aether_diagnostic_write_all(ptr @aether_shape_open, i64 2)\n\
+           %label1_written = call i1 @aether_diagnostic_write_all(ptr %first_label, i64 %first_label_length)\n\
+           %equals1_written = call i1 @aether_diagnostic_write_all(ptr @aether_shape_equals, i64 1)\n\
+           call void @aether_shape_write_u64(i64 %first)\n\
+           %separator_written = call i1 @aether_diagnostic_write_all(ptr @aether_shape_separator, i64 2)\n\
+           %label2_written = call i1 @aether_diagnostic_write_all(ptr %second_label, i64 %second_label_length)\n\
+           %equals2_written = call i1 @aether_diagnostic_write_all(ptr @aether_shape_equals, i64 1)\n\
+           call void @aether_shape_write_u64(i64 %second)\n\
+           %close_written = call i1 @aether_diagnostic_write_all(ptr @aether_shape_close, i64 2)\n\
+           ret void\n\
+         newline:\n\
+           %newline_written = call i1 @aether_diagnostic_write_all(ptr @aether_shape_newline, i64 1)\n\
+           ret void\n\
+         }\n",
+    );
+}
+
 #[allow(clippy::too_many_lines)]
 fn emit_exception_runtime(
     output: &mut String,
@@ -952,37 +1136,6 @@ fn emit_exception_runtime(
            store ptr %payload, ptr %record\n\
            call void @__cxa_throw(ptr %record, ptr @_ZTIPv, ptr @aether_exception_record_destroy)\n\
            unreachable\n\
-         }\n\
-         define internal i1 @aether_diagnostic_write_all(ptr %data, i64 %length) nounwind {\n\
-         entry:\n\
-           br label %loop\n\
-         loop:\n\
-           %offset = phi i64 [ 0, %entry ], [ %next, %progress ], [ %offset, %retry ]\n\
-           %done = icmp eq i64 %offset, %length\n\
-           br i1 %done, label %ok, label %attempt\n\
-         attempt:\n\
-           %remaining = sub i64 %length, %offset\n\
-           %cursor = getelementptr i8, ptr %data, i64 %offset\n\
-           %written = call i64 @write(i32 2, ptr %cursor, i64 %remaining)\n\
-           %positive = icmp sgt i64 %written, 0\n\
-           br i1 %positive, label %progress, label %failed\n\
-         progress:\n\
-           %next = add i64 %offset, %written\n\
-           br label %loop\n\
-         failed:\n\
-           %zero = icmp eq i64 %written, 0\n\
-           br i1 %zero, label %error, label %errno\n\
-         errno:\n\
-           %errno_pointer = call ptr @__errno_location()\n\
-           %errno_value = load i32, ptr %errno_pointer\n\
-           %interrupted = icmp eq i32 %errno_value, 4\n\
-           br i1 %interrupted, label %retry, label %error\n\
-         retry:\n\
-           br label %loop\n\
-         ok:\n\
-           ret i1 true\n\
-         error:\n\
-           ret i1 false\n\
          }\n",
     );
     writeln!(output, "define internal void @aether_report_unhandled(ptr %payload) nounwind {{\nentry:\n  %descriptor_address = getelementptr i8, ptr %payload, i64 {}\n  %dynamic_descriptor = load ptr, ptr %descriptor_address\n  %diagnostic_slot = getelementptr ptr, ptr %dynamic_descriptor, i64 {}\n  %diagnostic = load ptr, ptr %diagnostic_slot\n  %name_address = getelementptr {{ ptr, i64 }}, ptr %diagnostic, i32 0, i32 0\n  %name = load ptr, ptr %name_address\n  %length_address = getelementptr {{ ptr, i64 }}, ptr %diagnostic, i32 0, i32 1\n  %length = load i64, ptr %length_address\n  %prefix_ok = call i1 @aether_diagnostic_write_all(ptr @aether_unhandled_prefix, i64 10)\n  br i1 %prefix_ok, label %write_name, label %return\nwrite_name:\n  %name_ok = call i1 @aether_diagnostic_write_all(ptr %name, i64 %length)\n  br i1 %name_ok, label %write_newline, label %return\nwrite_newline:\n  %newline_ok = call i1 @aether_diagnostic_write_all(ptr @aether_unhandled_newline, i64 1)\n  br label %return\nreturn:\n  ret void\n}}\n", classes::OBJECT_DESCRIPTOR_BYTE_OFFSET, classes::CLASS_DESCRIPTOR_DIAGNOSTIC_SLOT).unwrap();
@@ -2548,6 +2701,7 @@ fn emit_function(
                         ],
                         instruction.result.0,
                         block.id,
+                        function.id.0,
                     );
                 }
                 SsaOp::ElementwiseBinary {
@@ -4291,15 +4445,69 @@ fn emit_function(
                 condition,
                 success,
                 failure,
+                diagnostic,
+                observations,
                 ..
-            } => writeln!(
-                output,
-                "  br i1 {}, label %{}, label %{}",
-                llvm_operand(condition),
-                block_label(*success),
-                block_label(*failure)
-            )
-            .unwrap(),
+            } => {
+                let diagnostic_label = format!(
+                    "shape_diagnostic_{}_{}",
+                    function.id.0, diagnostic.id.ordinal
+                );
+                writeln!(
+                    output,
+                    "  br i1 {}, label %{}, label %{diagnostic_label}\n{diagnostic_label}:",
+                    llvm_operand(condition),
+                    block_label(*success),
+                )
+                .unwrap();
+                let prefix = format!(
+                    "Aether trap: ShapeMismatch at {}:{}:{} in {}: {}",
+                    diagnostic_metadata(&diagnostic.source_name),
+                    diagnostic.line,
+                    diagnostic.column,
+                    diagnostic_metadata(&diagnostic.operation),
+                    diagnostic_metadata(&diagnostic.contract),
+                );
+                let prefix_symbol = shape_site_symbol(function, diagnostic.id.ordinal, "prefix");
+                let (
+                    count,
+                    first,
+                    second,
+                    first_label,
+                    first_label_length,
+                    second_label,
+                    second_label_length,
+                ) = if let [first, second] = observations.as_slice() {
+                    let first_text = diagnostic_metadata(&diagnostic.observation_labels[0]);
+                    let second_text = diagnostic_metadata(&diagnostic.observation_labels[1]);
+                    (
+                        2,
+                        llvm_operand(first),
+                        llvm_operand(second),
+                        format!(
+                            "@{}",
+                            shape_site_symbol(function, diagnostic.id.ordinal, "label0")
+                        ),
+                        first_text.len(),
+                        format!(
+                            "@{}",
+                            shape_site_symbol(function, diagnostic.id.ordinal, "label1")
+                        ),
+                        second_text.len(),
+                    )
+                } else {
+                    (
+                        0,
+                        "0".into(),
+                        "0".into(),
+                        "null".into(),
+                        0,
+                        "null".into(),
+                        0,
+                    )
+                };
+                writeln!(output, "  call void @aether_report_shape_mismatch(ptr @{prefix_symbol}, i64 {}, i64 {count}, i64 {first}, i64 {second}, ptr {first_label}, i64 {first_label_length}, ptr {second_label}, i64 {second_label_length})\n  br label %{}", prefix.len(), block_label(*failure)).unwrap();
+            }
             SsaTerminator::Switch {
                 discriminant,
                 cases,

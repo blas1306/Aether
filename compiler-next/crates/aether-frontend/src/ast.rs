@@ -23,6 +23,12 @@ pub enum BindingMutability {
 /// Parsed compilation unit. Construction is restricted to the parser.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ParsedAst {
+    /// Logical source provenance retained for diagnostics that are materialized
+    /// after parsing (it is never a physical filesystem identity).
+    pub(crate) source_name: String,
+    /// Source text is kept only through semantic analysis so source spans can
+    /// be turned into stable line/column and contract metadata.
+    pub(crate) source_text: String,
     pub(crate) package: Option<AstPackage>,
     pub(crate) imports: Vec<AstImport>,
     pub(crate) aliases: Vec<AstAlias>,

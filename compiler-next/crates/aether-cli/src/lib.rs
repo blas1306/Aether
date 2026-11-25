@@ -18,6 +18,43 @@ use aether_package::{
     prepare_environment_uninstall, publish_publication, remove, resolve, sync, update,
 };
 
+#[cfg(unix)]
+fn signal_status_message(status: &std::process::ExitStatus) -> String {
+    use std::os::unix::process::ExitStatusExt;
+
+    let Some(signal) = status.signal() else {
+        return "aether: error: program terminated without a representable exit status".into();
+    };
+    let name = match signal {
+        1 => Some("SIGHUP"),
+        2 => Some("SIGINT"),
+        3 => Some("SIGQUIT"),
+        4 => Some("SIGILL"),
+        6 => Some("SIGABRT"),
+        8 => Some("SIGFPE"),
+        9 => Some("SIGKILL"),
+        11 => Some("SIGSEGV"),
+        13 => Some("SIGPIPE"),
+        14 => Some("SIGALRM"),
+        15 => Some("SIGTERM"),
+        _ => None,
+    };
+    if let Some(name) = name {
+        format!("aether: error: program terminated by signal {signal} ({name})")
+    } else {
+        format!("aether: error: program terminated by signal {signal}")
+    }
+}
+
+#[cfg(not(unix))]
+fn signal_status_message(_status: &std::process::ExitStatus) -> String {
+    "aether: error: program terminated without a representable exit status".into()
+}
+
+fn render_signal_status(status: &std::process::ExitStatus) {
+    eprintln!("{}", signal_status_message(status));
+}
+
 const USAGE: &str = "usage: aether run <file.ae|directory> [options] [-- args...]\n       aether build <file.ae|directory> [-o artifact] [options]\n       aether check <file.ae|directory> [options]\n       aether init [--lib] <packageName>\n       aether sync <project> [registry-options]\n       aether update <project> [registry-options]\n       aether add <package> <project> [--path <path>] [registry-options]\n       aether remove <package> <project> [registry-options]\n       aether publish <project> [--dry-run] [--registry <https-url>]\n       aether env create <path>\n       aether install <package> [--env <path>] [registry-options] [-O0|-O2]\n       aether uninstall <package> [--env <path>] [registry-options]\n       aether <file.ae> [options] [-- args...]\noptions: -O0 | -O2, --emit ast|hir|mir|ssa|llvm, --timings\nregistry-options: --registry <https-url>, --cache-dir <path>, --offline\n         (`check` does not accept `--emit llvm`)";
 
 /// CLI operation after shorthand normalization and argument validation.
@@ -563,7 +600,7 @@ where
             if let Some(code) = status.code() {
                 code
             } else {
-                eprintln!("aether: error: program terminated without a representable exit status");
+                render_signal_status(&status);
                 1
             }
         }
@@ -1147,6 +1184,26 @@ mod tests {
                 program_args: vec![raw]
             }
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn signal_presentation_uses_the_real_signal_and_not_exit_132() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let sigill = std::process::ExitStatus::from_raw(4);
+        assert_eq!(
+            super::signal_status_message(&sigill),
+            "aether: error: program terminated by signal 4 (SIGILL)"
+        );
+        let sigterm = std::process::ExitStatus::from_raw(15);
+        assert_eq!(
+            super::signal_status_message(&sigterm),
+            "aether: error: program terminated by signal 15 (SIGTERM)"
+        );
+        let exit_132 = std::process::ExitStatus::from_raw(132 << 8);
+        assert_eq!(exit_132.code(), Some(132));
+        assert_eq!(exit_132.signal(), None);
     }
 
     #[test]

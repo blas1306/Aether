@@ -66,6 +66,7 @@ pub struct AlgebraicProductKernel {
     pub accumulate_op: Option<BinaryOp>,
     pub zero: Option<Operand>,
     pub program: Vec<ProductStep>,
+    pub diagnostic: Option<aether_frontend::TrapDiagnosticSite>,
 }
 
 impl AlgebraicProductKernel {
@@ -166,6 +167,7 @@ impl AlgebraicProductKernel {
             accumulate_op: reduction.as_ref().map(|r| r.0),
             zero: reduction.map(|r| r.1),
             program,
+            diagnostic: None,
         }
     }
 
@@ -264,6 +266,7 @@ impl AlgebraicProductKernel {
             accumulate_op: Some(accumulate_op),
             zero: Some(zero),
             program,
+            diagnostic: None,
         }
     }
 
@@ -366,6 +369,7 @@ impl AlgebraicProductKernel {
             accumulate_op: Some(accumulate_op),
             zero: Some(zero),
             program,
+            diagnostic: None,
         }
     }
 
@@ -403,6 +407,23 @@ impl AlgebraicProductKernel {
         result: TypeId,
     ) -> Result<(), String> {
         let inner = self.kind == ProductKind::ReductionKernel;
+        let requires_diagnostic = self.kind != ProductKind::OuterProductKernel;
+        if requires_diagnostic
+            != self.diagnostic.as_ref().is_some_and(|diagnostic| {
+                diagnostic.kind == aether_frontend::HirTrapKind::ShapeMismatch
+                    && diagnostic.span.start < diagnostic.span.end
+                    && diagnostic.line > 0
+                    && diagnostic.column > 0
+                    && !diagnostic.operation.is_empty()
+                    && !diagnostic.source_name.is_empty()
+                    && !diagnostic.contract.is_empty()
+                    && diagnostic.observation_labels.len() == 2
+            })
+        {
+            return Err("algebraic ShapeMismatch diagnostic metadata invalid".into());
+        }
+        let mut normalized = self.clone();
+        normalized.diagnostic = None;
         let e = self.element_type;
         let (lo, ro) = if inner {
             (Orientation::Row, Orientation::Column)
@@ -443,7 +464,7 @@ impl AlgebraicProductKernel {
                 || types.matrix_view_info(left).is_none_or(|(t, _)| t != e)
                 || types.matrix_view_info(right).is_none_or(|(t, _)| t != e)
                 || types.matrix_element(result) != Some(e)
-                || *self != Self::new_matrix_matrix(e, mul, add, zero)
+                || normalized != Self::new_matrix_matrix(e, mul, add, zero)
             {
                 return Err("Matrix algebraic map-reduction sources/result/three extents/guard/allocation/strides/zero/row-column-contraction initialization schedule invalid".into());
             }
@@ -461,7 +482,7 @@ impl AlgebraicProductKernel {
                 || !input(vt, orientation)
                 || types.vector_element(result) != Some(e)
                 || types.vector_like_info(result) != Some((e, orientation))
-                || *self != Self::new_matrix_vector(e, mul, add, zero, matrix)
+                || normalized != Self::new_matrix_vector(e, mul, add, zero, matrix)
             {
                 return Err("algebraic map-reduction source/result orientation, result/contraction extent, guard/allocation/stride/zero/ordered initialization schedule invalid".into());
             }
@@ -476,7 +497,7 @@ impl AlgebraicProductKernel {
             } else {
                 types.matrix_element(result) != Some(e)
             })
-            || *self != Self::new(e, mul, inner.then_some((add, zero)))
+            || normalized != Self::new(e, mul, inner.then_some((add, zero)))
         {
             return Err("algebraic kernel orientation/result/guard/stride/operations/accumulator/initialization schedule invalid".into());
         }

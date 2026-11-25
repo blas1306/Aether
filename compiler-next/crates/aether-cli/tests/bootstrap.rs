@@ -179,6 +179,44 @@ fn official_name_reaches_compiler_next_authority() {
 
 #[test]
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn run_reports_real_sigill_after_the_child_shape_diagnostic() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let directory = Directory::new("shape-signal");
+    directory.write(
+        "shape.ae",
+        "int main(){\n  shapeGuard(false);\n  return 0;\n}",
+    );
+    directory.write("exit132.ae", "int main(){return 132;}");
+    for optimization in ["-O0", "-O2"] {
+        let ran = cli(&directory, &["run", "shape.ae", optimization]);
+        assert_eq!(ran.status.code(), Some(1), "{optimization}");
+        assert!(ran.stdout.is_empty(), "{optimization}");
+        assert_eq!(ran.stderr, b"Aether trap: ShapeMismatch at shape.ae:2:3 in main: false\naether: error: program terminated by signal 4 (SIGILL)\n", "{optimization}");
+
+        let artifact = format!("shape-program-{optimization}");
+        let built = cli(
+            &directory,
+            &["build", "shape.ae", optimization, "-o", &artifact],
+        );
+        assert!(built.status.success(), "{optimization}");
+        let direct = Command::new(directory.0.join(artifact)).output().unwrap();
+        assert_eq!(direct.status.signal(), Some(4), "{optimization}");
+        assert!(direct.stdout.is_empty(), "{optimization}");
+        assert_eq!(
+            direct.stderr, b"Aether trap: ShapeMismatch at shape.ae:2:3 in main: false\n",
+            "{optimization}"
+        );
+
+        let ordinary = cli(&directory, &["run", "exit132.ae", optimization]);
+        assert_eq!(ordinary.status.code(), Some(132), "{optimization}");
+        assert!(ordinary.stdout.is_empty(), "{optimization}");
+        assert!(ordinary.stderr.is_empty(), "{optimization}");
+    }
+}
+
+#[test]
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 fn file_operations_ignore_neighbor_manifest_and_handle_spaces() {
     let directory = Directory::new("manifest");
     directory.write("aether.toml", "this is deliberately invalid = [");

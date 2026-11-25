@@ -647,6 +647,8 @@ pub enum SsaTerminator {
         failure: BlockId,
         trap: TrapKind,
         span: Span,
+        diagnostic: aether_frontend::TrapDiagnosticSite,
+        observations: Vec<SsaOperand>,
     },
     Switch {
         discriminant: SsaOperand,
@@ -2139,12 +2141,19 @@ fn rename_terminator(terminator: &Terminator, stacks: &[Vec<ValueId>]) -> SsaTer
             failure,
             trap,
             span,
+            diagnostic,
+            observations,
         } => SsaTerminator::ShapeGuard {
             condition: rename_operand(condition, stacks),
             success: *success,
             failure: *failure,
             trap: *trap,
             span: *span,
+            diagnostic: diagnostic.clone(),
+            observations: observations
+                .iter()
+                .map(|observation| rename_operand(observation, stacks))
+                .collect(),
         },
         Terminator::Switch {
             discriminant,
@@ -2764,6 +2773,51 @@ pub fn verify_ssa(ssa: SsaIr) -> Result<VerifiedSsa, Vec<Diagnostic>> {
         if signature.module.0 as usize >= ssa.modules.len() {
             return Err(fail("SSA signature names an unknown module".into()));
         }
+        let module = &ssa.modules[signature.module.0 as usize];
+        let expected_operation =
+            if module.display_name.starts_with('<') || module.display_name == "<anonymous>" {
+                signature.name.clone()
+            } else {
+                format!("{}.{}", module.display_name, signature.name)
+            };
+        let diagnostic_sites = function
+            .blocks
+            .iter()
+            .flat_map(|block| {
+                let terminator = match &block.terminator {
+                    SsaTerminator::ShapeGuard { diagnostic, .. } => Some(diagnostic),
+                    _ => None,
+                };
+                terminator
+                    .into_iter()
+                    .chain(block.instructions.iter().filter_map(
+                        |instruction| match &instruction.op {
+                            SsaOp::AlgebraicProduct { kernel, .. } => kernel.diagnostic.as_ref(),
+                            _ => None,
+                        },
+                    ))
+            })
+            .collect::<Vec<_>>();
+        let ordinals = diagnostic_sites
+            .iter()
+            .map(|site| site.id.ordinal)
+            .collect::<BTreeSet<_>>();
+        if ordinals.len() != diagnostic_sites.len()
+            || ordinals
+                .iter()
+                .copied()
+                .ne(0..u32::try_from(ordinals.len()).expect("site count fits u32"))
+            || diagnostic_sites.iter().any(|site| {
+                site.id.function != function.function_id
+                    || site.operation != expected_operation
+                    || site.source_name != module.source_name
+                    || site.span.source != module.source
+            })
+        {
+            return Err(fail(
+                "SSA trap diagnostic site identity/provenance is invalid".into(),
+            ));
+        }
         if ssa.types.contains_reference(signature.return_type)
             || ssa.types.contains_view(signature.return_type)
             || ssa.structs.iter().any(|info| {
@@ -3369,8 +3423,14 @@ fn verify_ssa_function(
                 failure,
                 trap,
                 span,
+                diagnostic,
+                observations,
             } => {
                 validate_use(condition, block.id, Some(block.instructions.len())).map_err(&fail)?;
+                for observation in observations {
+                    validate_use(observation, block.id, Some(block.instructions.len()))
+                        .map_err(&fail)?;
+                }
                 let failure_block = &function.blocks[failure.0 as usize];
                 let materialized = match (condition, block.instructions.last()) {
                     (SsaOperand::Value(value), Some(instruction)) => {
@@ -3382,11 +3442,43 @@ fn verify_ssa_function(
                     }
                     _ => false,
                 };
+                let observations_reused = if observations.is_empty() {
+                    diagnostic.observation_labels.is_empty()
+                } else {
+                    match block
+                        .instructions
+                        .get(block.instructions.len().saturating_sub(2))
+                        .map(|instruction| &instruction.op)
+                    {
+                        Some(SsaOp::Binary {
+                            op:
+                                BinaryOp::Less
+                                | BinaryOp::LessEqual
+                                | BinaryOp::Greater
+                                | BinaryOp::GreaterEqual
+                                | BinaryOp::Equal
+                                | BinaryOp::NotEqual,
+                            left,
+                            right,
+                            trap: None,
+                            secondary_trap: None,
+                        }) => observations.as_slice() == [left.clone(), right.clone()],
+                        _ => false,
+                    }
+                };
                 if operand_ty(condition).map_err(&fail)? != TypeId::BOOL
                     || !materialized
+                    || !observations_reused
+                    || observations.len() != diagnostic.observation_labels.len()
+                    || observations
+                        .iter()
+                        .any(|observation| operand_ty(observation).ok() != Some(TypeId::USIZE))
                     || success == failure
                     || failure.0.checked_add(1) != Some(success.0)
                     || *trap != TrapKind::ShapeMismatch
+                    || diagnostic.kind != aether_frontend::HirTrapKind::ShapeMismatch
+                    || diagnostic.id.function != function.function_id
+                    || diagnostic.span != *span
                     || span.start >= span.end
                     || !failure_block.phis.is_empty()
                     || !failure_block.instructions.is_empty()
@@ -6126,6 +6218,13 @@ fn verify_op(
             kernel,
         } => {
             kernel.verify(types, operand_ty(left)?, operand_ty(right)?, result)?;
+            if kernel
+                .diagnostic
+                .as_ref()
+                .is_some_and(|diagnostic| diagnostic.id.function != function_id)
+            {
+                return Err("SSA algebraic diagnostic owner is invalid".into());
+            }
         }
         SsaOp::ElementwiseBinary {
             left,

@@ -1177,6 +1177,28 @@ pub enum HirTrapKind {
     IntegerOverflow,
 }
 
+/// Stable semantic identity of one source-authorized diagnostic trap site.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct TrapDiagnosticSiteId {
+    pub function: FunctionId,
+    pub ordinal: u32,
+}
+
+/// Presentation metadata for an abortive trap. This is compiler metadata, not
+/// a source value, runtime object, exception payload, or control-flow input.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrapDiagnosticSite {
+    pub id: TrapDiagnosticSiteId,
+    pub kind: HirTrapKind,
+    pub operation: String,
+    pub source_name: String,
+    pub span: Span,
+    pub line: u32,
+    pub column: u32,
+    pub contract: String,
+    pub observation_labels: Vec<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum HirStmtKind {
     Nop,
@@ -1231,6 +1253,7 @@ pub enum HirStmtKind {
     ShapeGuard {
         condition: HirExpr,
         trap: HirTrapKind,
+        diagnostic: TrapDiagnosticSite,
     },
     If {
         condition: HirExpr,
@@ -1937,6 +1960,7 @@ pub enum HirExprKind {
         element_type: TypeId,
         product_op: MathElementOp,
         product: AlgebraicProductKind,
+        diagnostic: Option<TrapDiagnosticSite>,
     },
     /// Parametric homogeneous T op T -> T; behavior is the sole operator tag.
     /// Monomorphization must reify this before concrete HIR crosses into MIR.
@@ -2368,6 +2392,7 @@ fn merge_package_overloads(
 
 pub fn collect_signatures(ast: ParsedAst) -> Result<DeclaredProgram, Vec<Diagnostic>> {
     let source = ast.functions.first().map_or(SourceId(0), |f| f.span.source);
+    let source_name = ast.source_name.clone();
     let package_key = ast.package().map_or(PackageKey::Anonymous, |package| {
         PackageKey::named(OriginKey::Project, PackagePath(package.path.clone()))
     });
@@ -2382,12 +2407,12 @@ pub fn collect_signatures(ast: ParsedAst) -> Result<DeclaredProgram, Vec<Diagnos
                 id: ModuleId(0),
                 key: SourceUnitKey {
                     package: package_key,
-                    logical_source: LogicalSourceKey("<memory>".into()),
+                    logical_source: LogicalSourceKey(source_name.clone()),
                 },
                 package: PackageId(0),
                 display_name,
                 source,
-                source_name: "<memory>".into(),
+                source_name,
                 imports: vec![],
                 semantic_dependencies: BTreeSet::new(),
             },
@@ -6938,9 +6963,14 @@ impl Monomorphizer<'_> {
                             newline: *newline,
                             argument_kind: *argument_kind,
                         },
-                        HirStmtKind::ShapeGuard { condition, trap } => HirStmtKind::ShapeGuard {
+                        HirStmtKind::ShapeGuard {
+                            condition,
+                            trap,
+                            diagnostic,
+                        } => HirStmtKind::ShapeGuard {
                             condition: self.substitute_expr(condition, substitution)?,
                             trap: *trap,
+                            diagnostic: diagnostic.clone(),
                         },
                         HirStmtKind::ListPush {
                             target,
@@ -8437,6 +8467,7 @@ impl Monomorphizer<'_> {
                 element_type,
                 product_op,
                 product,
+                diagnostic,
             } => HirExprKind::AlgebraicProduct {
                 left: Box::new(self.substitute_expr(left, substitution)?),
                 right: Box::new(self.substitute_expr(right, substitution)?),
@@ -8447,6 +8478,7 @@ impl Monomorphizer<'_> {
                     substitution,
                     expression.span,
                 )?,
+                diagnostic: diagnostic.clone(),
                 product: match product {
                     AlgebraicProductKind::MatrixMatrix {
                         shape_check,
@@ -8930,6 +8962,17 @@ fn analyze_function(
         target,
         function_id: id,
         next_binding: 0,
+        next_trap_diagnostic_site: 0,
+        diagnostic_source_name: &d.program.modules[module.0 as usize].ast.source_name,
+        diagnostic_source_text: &d.program.modules[module.0 as usize].ast.source_text,
+        diagnostic_operation: {
+            let package = &d.program.modules[module.0 as usize].info.display_name;
+            if package.starts_with('<') || package == "<anonymous>" {
+                sig.name.clone()
+            } else {
+                format!("{package}.{}", sig.name)
+            }
+        },
         closure_environments: &d.closure_environments,
     };
     let mut parameters = vec![];
@@ -10969,6 +11012,10 @@ struct Analyzer<'a> {
     next_non_null_proof: u32,
     function_id: FunctionId,
     next_binding: u32,
+    next_trap_diagnostic_site: u32,
+    diagnostic_source_name: &'a str,
+    diagnostic_source_text: &'a str,
+    diagnostic_operation: String,
     closure_environments: &'a [ClosureEnvironmentInfo],
 }
 
@@ -10992,6 +11039,7 @@ struct AnalyzerCheckpoint {
     default_forbidden: Option<(String, BTreeMap<String, bool>)>,
     null_states: BTreeMap<LocalId, NullState>,
     next_non_null_proof: u32,
+    next_trap_diagnostic_site: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -11070,6 +11118,7 @@ impl Analyzer<'_> {
             default_forbidden: self.default_forbidden.clone(),
             null_states: self.null_states.clone(),
             next_non_null_proof: self.next_non_null_proof,
+            next_trap_diagnostic_site: self.next_trap_diagnostic_site,
         }
     }
 
@@ -11093,6 +11142,7 @@ impl Analyzer<'_> {
         self.default_forbidden
             .clone_from(&checkpoint.default_forbidden);
         self.null_states = checkpoint.null_states.clone();
+        self.next_trap_diagnostic_site = checkpoint.next_trap_diagnostic_site;
         self.next_non_null_proof = checkpoint.next_non_null_proof;
     }
 
@@ -12553,6 +12603,10 @@ impl Analyzer<'_> {
                     HirStmtKind::Continue { drops: Vec::new() }
                 }
             };
+            let mut kind = kind;
+            if let HirStmtKind::ShapeGuard { diagnostic, .. } = &mut kind {
+                diagnostic.span = s.span;
+            }
             let hs = HirStmt {
                 kind,
                 span: s.span,
@@ -12569,6 +12623,95 @@ impl Analyzer<'_> {
             exit_drops: Vec::new(),
             span: b.span,
         })
+    }
+
+    fn diagnostic_text(&self, span: Span) -> String {
+        self.diagnostic_source_text
+            .get(span.start..span.end)
+            .unwrap_or("shape condition")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn diagnostic_line_column(&self, offset: usize) -> (u32, u32) {
+        let prefix = self
+            .diagnostic_source_text
+            .get(..offset.min(self.diagnostic_source_text.len()))
+            .unwrap_or("");
+        let line = prefix.bytes().filter(|byte| *byte == b'\n').count() + 1;
+        let column = prefix
+            .rsplit_once('\n')
+            .map_or(prefix.chars().count() + 1, |(_, tail)| {
+                tail.chars().count() + 1
+            });
+        (
+            u32::try_from(line).unwrap_or(u32::MAX),
+            u32::try_from(column).unwrap_or(u32::MAX),
+        )
+    }
+
+    fn diagnostic_extent_expression(expression: &AstExpr) -> bool {
+        matches!(
+            &expression.kind,
+            AstExprKind::Call { callee, args, type_arguments }
+                if type_arguments.is_empty()
+                    && args.len() == 1
+                    && matches!(callee.as_str(), "rows" | "columns" | "dimension" | "length")
+        )
+    }
+
+    fn shape_observation_labels(&self, condition: &AstExpr) -> Vec<String> {
+        let AstExprKind::Binary {
+            op:
+                AstBinaryOp::Equal
+                | AstBinaryOp::NotEqual
+                | AstBinaryOp::Less
+                | AstBinaryOp::LessEqual
+                | AstBinaryOp::Greater
+                | AstBinaryOp::GreaterEqual,
+            left,
+            right,
+        } = &condition.kind
+        else {
+            return Vec::new();
+        };
+        if Self::diagnostic_extent_expression(left) && Self::diagnostic_extent_expression(right) {
+            vec![
+                self.diagnostic_text(left.span),
+                self.diagnostic_text(right.span),
+            ]
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn native_shape_diagnostic(
+        &mut self,
+        span: Span,
+        contract: &str,
+        observation_labels: &[&str],
+    ) -> TrapDiagnosticSite {
+        let (line, column) = self.diagnostic_line_column(span.start);
+        let diagnostic = TrapDiagnosticSite {
+            id: TrapDiagnosticSiteId {
+                function: self.function_id,
+                ordinal: self.next_trap_diagnostic_site,
+            },
+            kind: HirTrapKind::ShapeMismatch,
+            operation: self.diagnostic_operation.clone(),
+            source_name: self.diagnostic_source_name.to_owned(),
+            span,
+            line,
+            column,
+            contract: contract.to_owned(),
+            observation_labels: observation_labels
+                .iter()
+                .map(|label| (*label).to_owned())
+                .collect(),
+        };
+        self.next_trap_diagnostic_site += 1;
+        diagnostic
     }
 
     fn effect_statement(&mut self, expression: &AstExpr) -> Result<HirStmtKind, Vec<Diagnostic>> {
@@ -12596,6 +12739,9 @@ impl Analyzer<'_> {
                         Some(expression.span),
                     )]);
                 }
+                let observation_labels = self.shape_observation_labels(&args[0]);
+                let contract = self.diagnostic_text(args[0].span);
+                let (line, column) = self.diagnostic_line_column(expression.span.start);
                 let condition = self.expression(&args[0], Some(TypeId::BOOL))?.expr;
                 if condition.ty != TypeId::BOOL {
                     return Err(vec![Diagnostic::new(
@@ -12606,9 +12752,25 @@ impl Analyzer<'_> {
                         Some(args[0].span),
                     )]);
                 }
+                let id = TrapDiagnosticSiteId {
+                    function: self.function_id,
+                    ordinal: self.next_trap_diagnostic_site,
+                };
+                self.next_trap_diagnostic_site += 1;
                 return Ok(HirStmtKind::ShapeGuard {
                     condition,
                     trap: HirTrapKind::ShapeMismatch,
+                    diagnostic: TrapDiagnosticSite {
+                        id,
+                        kind: HirTrapKind::ShapeMismatch,
+                        operation: self.diagnostic_operation.clone(),
+                        source_name: self.diagnostic_source_name.to_owned(),
+                        span: expression.span,
+                        line,
+                        column,
+                        contract,
+                        observation_labels,
+                    },
                 });
             }
             AstExprKind::QualifiedCall { function, .. } if function == "shapeGuard" => {
@@ -20547,10 +20709,52 @@ fn verify_block(
                     }
                 }
             }
-            HirStmtKind::ShapeGuard { condition, trap } => {
+            HirStmtKind::ShapeGuard {
+                condition,
+                trap,
+                diagnostic,
+            } => {
                 verify_expr(condition, f, sigs, structs, enums, types, fail)?;
+                let captured_extents = match &condition.kind {
+                    HirExprKind::Binary {
+                        op:
+                            HirBinaryOp::Less
+                            | HirBinaryOp::LessEqual
+                            | HirBinaryOp::Greater
+                            | HirBinaryOp::GreaterEqual
+                            | HirBinaryOp::Equal
+                            | HirBinaryOp::NotEqual,
+                        left,
+                        right,
+                    } => {
+                        let extent = |expr: &HirExpr| {
+                            matches!(
+                                expr.kind,
+                                HirExprKind::MatrixRows { .. }
+                                    | HirExprKind::MatrixColumns { .. }
+                                    | HirExprKind::VectorDimension { .. }
+                                    | HirExprKind::ArrayLength { .. }
+                                    | HirExprKind::ListLength { .. }
+                            ) && expr.ty == TypeId::USIZE
+                        };
+                        extent(left) && extent(right)
+                    }
+                    _ => false,
+                };
                 if condition.ty != TypeId::BOOL
                     || *trap != HirTrapKind::ShapeMismatch
+                    || diagnostic.kind != *trap
+                    || diagnostic.id.function != f.function_id
+                    || diagnostic.id.ordinal == u32::MAX
+                    || diagnostic.span != s.span
+                    || diagnostic.source_name.is_empty()
+                    || diagnostic.operation.is_empty()
+                    || diagnostic.contract.is_empty()
+                    || diagnostic.line == 0
+                    || diagnostic.column == 0
+                    || !matches!(diagnostic.observation_labels.len(), 0 | 2)
+                    || (diagnostic.observation_labels.len() == 2 && !captured_extents)
+                    || diagnostic.observation_labels.iter().any(String::is_empty)
                     || s.compiler_generated
                     || s.span.start >= s.span.end
                     || condition.span.source != s.span.source
@@ -22256,9 +22460,28 @@ fn verify_expr(
             element_type,
             product_op,
             product,
+            diagnostic,
         } => {
             verify_expr(left, f, sigs, structs, enums, types, fail)?;
             verify_expr(right, f, sigs, structs, enums, types, fail)?;
+            let requires_diagnostic = !matches!(product, AlgebraicProductKind::Outer { .. });
+            if requires_diagnostic
+                != diagnostic.as_ref().is_some_and(|site| {
+                    site.kind == HirTrapKind::ShapeMismatch
+                        && site.id.function == f.function_id
+                        && site.span == e.span
+                        && site.line > 0
+                        && site.column > 0
+                        && !site.operation.is_empty()
+                        && !site.source_name.is_empty()
+                        && !site.contract.is_empty()
+                        && site.observation_labels.len() == 2
+                })
+            {
+                return Err(fail(
+                    "HIR algebraic ShapeMismatch diagnostic metadata invalid".into(),
+                ));
+            }
             if let AlgebraicProductKind::MatrixMatrix { zero, .. } = product {
                 let (expected_op, expected) =
                     matrix_matrix_recipe(types, *element_type, e.span).map_err(fail)?;
@@ -26083,6 +26306,7 @@ mod tests {
                     element_type,
                     product_op,
                     product,
+                    ..
                 } = &mut value.kind
                 else {
                     panic!()
@@ -26280,6 +26504,7 @@ mod vertical32_tests {
                     element_type,
                     product_op,
                     product,
+                    ..
                 } = &mut value.kind
                 else {
                     panic!()
@@ -26413,6 +26638,7 @@ mod vertical33_tests {
                 element_type,
                 product_op,
                 product,
+                ..
             } = &mut value.kind
             else {
                 panic!()
@@ -26781,7 +27007,7 @@ mod vertical33_tests {
         )
         .unwrap();
         verify_hir(&hir).unwrap();
-        for corrupt in 0..4 {
+        for corrupt in 0..8 {
             let mut bad = hir.clone();
             let statement = &mut bad.functions[0].body.statements[0];
             match corrupt {
@@ -26792,16 +27018,34 @@ mod vertical33_tests {
                     condition.ty = TypeId::INT64;
                 }
                 1 => {
-                    let HirStmtKind::ShapeGuard { condition, .. } = &statement.kind else {
+                    let HirStmtKind::ShapeGuard {
+                        condition,
+                        diagnostic,
+                        ..
+                    } = &statement.kind
+                    else {
                         unreachable!()
                     };
                     statement.kind = HirStmtKind::ShapeGuard {
                         condition: condition.clone(),
                         trap: HirTrapKind::IntegerOverflow,
+                        diagnostic: diagnostic.clone(),
                     };
                 }
                 2 => statement.span = Span::default(),
                 3 => statement.compiler_generated = true,
+                4..=7 => {
+                    let HirStmtKind::ShapeGuard { diagnostic, .. } = &mut statement.kind else {
+                        unreachable!()
+                    };
+                    match corrupt {
+                        4 => diagnostic.operation.clear(),
+                        5 => diagnostic.id.function = FunctionId(u32::MAX),
+                        6 => diagnostic.span = Span::default(),
+                        7 => diagnostic.observation_labels.push("invented".into()),
+                        _ => unreachable!(),
+                    }
+                }
                 _ => unreachable!(),
             }
             assert!(

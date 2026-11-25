@@ -67,6 +67,13 @@ impl Analyzer<'_> {
             } else {
                 self.types.intern_matrix(element)
             };
+            let diagnostic = inner.then(|| {
+                self.native_shape_diagnostic(
+                    span,
+                    "dimension(left) == dimension(right)",
+                    &["dimension(left)", "dimension(right)"],
+                )
+            });
             return Ok(Checked {
                 expr: HirExpr {
                     kind: HirExprKind::AlgebraicProduct {
@@ -75,6 +82,7 @@ impl Analyzer<'_> {
                         element_type: element,
                         product_op,
                         product,
+                        diagnostic,
                     },
                     ty,
                     span,
@@ -93,6 +101,11 @@ impl Analyzer<'_> {
                 .map_err(|reason| error("E0346", &reason))?;
             self.types.intern_matrix_view(element, false);
             let ty = self.types.intern_matrix(element);
+            let diagnostic = Some(self.native_shape_diagnostic(
+                span,
+                "columns(left) == rows(right)",
+                &["columns(left)", "rows(right)"],
+            ));
             return Ok(Checked {
                 expr: HirExpr {
                     kind: HirExprKind::AlgebraicProduct {
@@ -101,6 +114,7 @@ impl Analyzer<'_> {
                         element_type: element,
                         product_op,
                         product,
+                        diagnostic,
                     },
                     ty,
                     span,
@@ -134,6 +148,19 @@ impl Analyzer<'_> {
             self.types.intern_matrix_view(element, false);
             self.types.intern_vector_view(element, orientation, false);
             let ty = self.types.intern_vector(element, orientation);
+            let diagnostic = Some(if side == ScalarSide::Left {
+                self.native_shape_diagnostic(
+                    span,
+                    "columns(left) == dimension(right)",
+                    &["columns(left)", "dimension(right)"],
+                )
+            } else {
+                self.native_shape_diagnostic(
+                    span,
+                    "dimension(left) == rows(right)",
+                    &["dimension(left)", "rows(right)"],
+                )
+            });
             return Ok(Checked {
                 expr: HirExpr {
                     kind: HirExprKind::AlgebraicProduct {
@@ -142,6 +169,7 @@ impl Analyzer<'_> {
                         element_type: element,
                         product_op,
                         product,
+                        diagnostic,
                     },
                     ty,
                     span,

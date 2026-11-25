@@ -218,7 +218,7 @@ fn malformed_mir_and_ssa_guards_fail_closed() {
         .position(|block| matches!(block.terminator, Some(Terminator::ShapeGuard { .. })))
         .unwrap();
 
-    for corrupt in 0..7 {
+    for corrupt in 0..10 {
         let mut bad = raw.clone();
         let (success_id, failure_id) = match bad.functions[0].blocks[guard_block]
             .terminator
@@ -273,6 +273,28 @@ fn malformed_mir_and_ssa_guards_fail_closed() {
                     .instructions
                     .push(instruction);
             }
+            7..=9 => {
+                let Terminator::ShapeGuard {
+                    diagnostic,
+                    observations,
+                    ..
+                } = bad.functions[0].blocks[guard_block]
+                    .terminator
+                    .as_mut()
+                    .unwrap()
+                else {
+                    unreachable!()
+                };
+                match corrupt {
+                    7 => diagnostic.operation = "wrong.owner".into(),
+                    8 => diagnostic.id.function = aether_frontend::FunctionId(u32::MAX),
+                    9 => observations.push(Operand::Int {
+                        value: 1,
+                        ty: TypeId::INT64,
+                    }),
+                    _ => unreachable!(),
+                }
+            }
             _ => unreachable!(),
         }
         assert!(
@@ -288,7 +310,7 @@ fn malformed_mir_and_ssa_guards_fail_closed() {
         .iter()
         .position(|block| matches!(block.terminator, SsaTerminator::ShapeGuard { .. }))
         .unwrap();
-    for corrupt in 0..8 {
+    for corrupt in 0..11 {
         let mut bad = ssa.clone();
         let (success_id, failure_id) = match &bad.functions[0].blocks[guard_block].terminator {
             SsaTerminator::ShapeGuard {
@@ -353,6 +375,25 @@ fn malformed_mir_and_ssa_guards_fail_closed() {
                 bad.functions[0].blocks[failure_id.0 as usize]
                     .instructions
                     .push(instruction);
+            }
+            8..=10 => {
+                let SsaTerminator::ShapeGuard {
+                    diagnostic,
+                    observations,
+                    ..
+                } = &mut bad.functions[0].blocks[guard_block].terminator
+                else {
+                    unreachable!()
+                };
+                match corrupt {
+                    8 => diagnostic.operation = "wrong.owner".into(),
+                    9 => diagnostic.id.function = aether_frontend::FunctionId(u32::MAX),
+                    10 => observations.push(SsaOperand::Int {
+                        value: 1,
+                        ty: TypeId::INT64,
+                    }),
+                    _ => unreachable!(),
+                }
             }
             _ => unreachable!(),
         }

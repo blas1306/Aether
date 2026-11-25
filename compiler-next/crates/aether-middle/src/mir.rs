@@ -18,8 +18,8 @@ use aether_frontend::{
     HirExpr, HirExprKind, HirFinally, HirFunction, HirMatchArm, HirPlace, HirPlaceBase,
     HirPlaceProjection, HirStmtKind, HirSubscriptResult, HirSubscriptSelector,
     HirSubscriptSelectorKind, HirUnaryOp, InstanceId, LocalId, MatchMode, ModuleInfo, Phase, Span,
-    StructId, StructInfo, StructuralMutation, Substitution, TypeArena, TypeData, TypeId, TypedHir,
-    VariantId, format_type,
+    StructId, StructInfo, StructuralMutation, Substitution, TrapDiagnosticSite, TypeArena,
+    TypeData, TypeId, TypedHir, VariantId, format_type,
 };
 
 /// Basic-block identity, equal to its stable vector index.
@@ -845,6 +845,8 @@ pub enum Terminator {
         failure: BlockId,
         trap: TrapKind,
         span: Span,
+        diagnostic: TrapDiagnosticSite,
+        observations: Vec<Operand>,
     },
     /// Reusable integral multi-way control flow. `exhaustive_enum` records the
     /// stronger contract emitted by source enum matching.
@@ -1910,8 +1912,26 @@ impl Builder<'_> {
                         self.emit_drop(root, statement.span);
                     }
                 }
-                HirStmtKind::ShapeGuard { condition, trap } => {
+                HirStmtKind::ShapeGuard {
+                    condition,
+                    trap,
+                    diagnostic,
+                } => {
                     let evaluated = self.lower_expr(condition);
+                    let observations = if diagnostic.observation_labels.len() == 2 {
+                        self.function.blocks[self.current.expect("shape guard block").0 as usize]
+                            .instructions
+                            .last()
+                            .and_then(|instruction| match &instruction.value {
+                                Rvalue::Binary { left, right, .. } => {
+                                    Some(vec![left.clone(), right.clone()])
+                                }
+                                _ => None,
+                            })
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
                     let condition = self.temporary(TypeId::BOOL);
                     self.assign(
                         Place {
@@ -1935,6 +1955,8 @@ impl Builder<'_> {
                         failure,
                         trap,
                         span: statement.span,
+                        diagnostic: diagnostic.clone(),
+                        observations,
                     });
                     self.current = Some(failure);
                     self.terminate(Terminator::Trap(TrapKind::ShapeMismatch));
@@ -4490,6 +4512,7 @@ impl Builder<'_> {
                 element_type,
                 product_op,
                 product,
+                diagnostic,
             } => {
                 let concrete = |op| match op {
                     aether_frontend::MathElementOp::Concrete(
@@ -4526,7 +4549,7 @@ impl Builder<'_> {
                     } => Some((concrete(*accumulate_op), self.lower_expr(zero))),
                     aether_frontend::AlgebraicProductKind::Outer { .. } => None,
                 };
-                let kernel = if let aether_frontend::AlgebraicProductKind::MatrixVector {
+                let mut kernel = if let aether_frontend::AlgebraicProductKind::MatrixVector {
                     matrix_side,
                     ..
                 } = product
@@ -4561,6 +4584,7 @@ impl Builder<'_> {
                         reduction,
                     )
                 };
+                kernel.diagnostic.clone_from(diagnostic);
                 let destination = self.temporary(expression.ty);
                 self.assign(
                     Place {
@@ -5756,6 +5780,51 @@ pub fn verify_mir(mir: FlowMir) -> Result<VerifiedMir, Vec<Diagnostic>> {
         if signature.module.0 as usize >= mir.modules.len() {
             return Err(fail("MIR signature names an unknown module".into()));
         }
+        let module = &mir.modules[signature.module.0 as usize];
+        let expected_operation =
+            if module.display_name.starts_with('<') || module.display_name == "<anonymous>" {
+                signature.name.clone()
+            } else {
+                format!("{}.{}", module.display_name, signature.name)
+            };
+        let diagnostic_sites = function
+            .blocks
+            .iter()
+            .flat_map(|block| {
+                let terminator = match block.terminator.as_ref() {
+                    Some(Terminator::ShapeGuard { diagnostic, .. }) => Some(diagnostic),
+                    _ => None,
+                };
+                terminator
+                    .into_iter()
+                    .chain(block.instructions.iter().filter_map(|instruction| {
+                        match &instruction.value {
+                            Rvalue::AlgebraicProduct { kernel, .. } => kernel.diagnostic.as_ref(),
+                            _ => None,
+                        }
+                    }))
+            })
+            .collect::<Vec<_>>();
+        let ordinals = diagnostic_sites
+            .iter()
+            .map(|site| site.id.ordinal)
+            .collect::<BTreeSet<_>>();
+        if ordinals.len() != diagnostic_sites.len()
+            || ordinals
+                .iter()
+                .copied()
+                .ne(0..u32::try_from(ordinals.len()).expect("site count fits u32"))
+            || diagnostic_sites.iter().any(|site| {
+                site.id.function != function.function_id
+                    || site.operation != expected_operation
+                    || site.source_name != module.source_name
+                    || site.span.source != module.source
+            })
+        {
+            return Err(fail(
+                "MIR trap diagnostic site identity/provenance is invalid".into(),
+            ));
+        }
         if mir.types.contains_reference(signature.return_type)
             || mir.types.contains_view(signature.return_type)
             || mir.structs.iter().any(|info| {
@@ -6306,9 +6375,15 @@ fn verify_mir_function(
                 failure,
                 trap,
                 span,
+                diagnostic,
+                observations,
             } => {
                 validate_operand(function, condition, &initialized)
                     .map_err(|message| fail(message.clone()))?;
+                for observation in observations {
+                    validate_operand(function, observation, &initialized)
+                        .map_err(|message| fail(message.clone()))?;
+                }
                 let failure_block = &function.blocks[failure.0 as usize];
                 let materialized = match (condition, block.instructions.last()) {
                     (Operand::Local(local), Some(instruction)) => {
@@ -6323,12 +6398,44 @@ fn verify_mir_function(
                     }
                     _ => false,
                 };
+                let observations_reused = if observations.is_empty() {
+                    diagnostic.observation_labels.is_empty()
+                } else {
+                    match block
+                        .instructions
+                        .get(block.instructions.len().saturating_sub(2))
+                        .map(|instruction| &instruction.value)
+                    {
+                        Some(Rvalue::Binary {
+                            op:
+                                BinaryOp::Less
+                                | BinaryOp::LessEqual
+                                | BinaryOp::Greater
+                                | BinaryOp::GreaterEqual
+                                | BinaryOp::Equal
+                                | BinaryOp::NotEqual,
+                            left,
+                            right,
+                            trap: None,
+                            secondary_trap: None,
+                        }) => observations.as_slice() == [left.clone(), right.clone()],
+                        _ => false,
+                    }
+                };
                 if operand_type(function, condition).map_err(|message| fail(message.clone()))?
                     != TypeId::BOOL
                     || !materialized
+                    || !observations_reused
+                    || observations.len() != diagnostic.observation_labels.len()
+                    || observations.iter().any(|observation| {
+                        operand_type(function, observation).ok() != Some(TypeId::USIZE)
+                    })
                     || success == failure
                     || failure.0.checked_add(1) != Some(success.0)
                     || *trap != TrapKind::ShapeMismatch
+                    || diagnostic.kind != aether_frontend::HirTrapKind::ShapeMismatch
+                    || diagnostic.id.function != function.function_id
+                    || diagnostic.span != *span
                     || span.start >= span.end
                     || !failure_block.instructions.is_empty()
                     || failure_block.landing_pad.is_some()
@@ -9019,6 +9126,13 @@ fn validate_rvalue(
                 operand_type(function, right)?,
                 destination,
             )?;
+            if kernel
+                .diagnostic
+                .as_ref()
+                .is_some_and(|diagnostic| diagnostic.id.function != function.function_id)
+            {
+                return Err("MIR algebraic diagnostic owner is invalid".into());
+            }
         }
         Rvalue::ElementwiseBinary {
             left,

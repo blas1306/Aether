@@ -15,6 +15,7 @@ pub(super) fn emit(
     inputs: [(&str, &str); 2],
     id: u32,
     block: BlockId,
+    function_instance: u32,
 ) {
     let prefix = format!("vp{id}");
     writeln!(
@@ -46,6 +47,7 @@ pub(super) fn emit(
         prefix,
         id,
         block,
+        function_instance,
     };
     emitter.steps(&kernel.program, &mut format!("vp{id}_entry"));
 }
@@ -57,8 +59,39 @@ struct Emitter<'a> {
     prefix: String,
     id: u32,
     block: BlockId,
+    function_instance: u32,
 }
 impl Emitter<'_> {
+    fn shape_failure(&mut self, left: &str, right: &str, next: &str) {
+        let p = &self.prefix;
+        let diagnostic = self
+            .kernel
+            .diagnostic
+            .as_ref()
+            .expect("verified algebraic ShapeMismatch diagnostic");
+        let failure = format!("{p}_shape_diagnostic");
+        writeln!(
+            self.output,
+            "  %{p}_equal = icmp eq i64 {left}, {right}\n  br i1 %{p}_equal, label %{next}, label %{failure}\n{failure}:"
+        )
+        .unwrap();
+        let prefix = format!(
+            "Aether trap: ShapeMismatch at {}:{}:{} in {}: {}",
+            super::diagnostic_metadata(&diagnostic.source_name),
+            diagnostic.line,
+            diagnostic.column,
+            super::diagnostic_metadata(&diagnostic.operation),
+            super::diagnostic_metadata(&diagnostic.contract),
+        );
+        let first_label = super::diagnostic_metadata(&diagnostic.observation_labels[0]);
+        let second_label = super::diagnostic_metadata(&diagnostic.observation_labels[1]);
+        let base = format!(
+            "aether_shape_site_{}_{}",
+            self.function_instance, diagnostic.id.ordinal
+        );
+        writeln!(self.output, "  call void @aether_report_shape_mismatch(ptr @{base}_prefix, i64 {}, i64 2, i64 {left}, i64 {right}, ptr @{base}_label0, i64 {}, ptr @{base}_label1, i64 {})\n  br label %trap_shape_mismatch\n{next}:", prefix.len(), first_label.len(), second_label.len()).unwrap();
+    }
+
     fn scalar(&mut self, op: BinaryOp, name: &str, left: &str, right: &str, current: &mut String) {
         let p = &self.prefix;
         let et = llvm_type(self.types, self.kernel.element_type);
@@ -93,7 +126,11 @@ impl Emitter<'_> {
                     ..
                 } => {
                     let next = format!("{p}_shape_ok");
-                    writeln!(self.output, "  %{p}_equal = icmp eq i64 %{p}_Left_{left_axis:?}, %{p}_Right_{right_axis:?}\n  br i1 %{p}_equal, label %{next}, label %trap_shape_mismatch\n{next}:").unwrap();
+                    self.shape_failure(
+                        &format!("%{p}_Left_{left_axis:?}"),
+                        &format!("%{p}_Right_{right_axis:?}"),
+                        &next,
+                    );
                     *current = next;
                 }
                 ProductStep::SelectSourceExtent {
@@ -181,7 +218,11 @@ impl Emitter<'_> {
                 ProductStep::Math(math) => match math {
                     MathStep::ShapeGuard { axis, .. } => {
                         let next = format!("{p}_shape_ok");
-                        writeln!(self.output, "  %{p}_equal = icmp eq i64 %{p}_Left_{axis:?}, %{p}_Right_{axis:?}\n  br i1 %{p}_equal, label %{next}, label %trap_shape_mismatch\n{next}:").unwrap();
+                        self.shape_failure(
+                            &format!("%{p}_Left_{axis:?}"),
+                            &format!("%{p}_Right_{axis:?}"),
+                            &next,
+                        );
                         *current = next;
                     }
                     MathStep::Allocate { extents, .. } => {
