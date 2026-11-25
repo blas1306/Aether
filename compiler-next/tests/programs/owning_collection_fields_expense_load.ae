@@ -1,0 +1,29 @@
+enum LoadState {
+    Loaded,
+    Missing
+}
+
+struct Expense {
+    int amount;
+    string description;
+}
+
+struct LoadResult {
+    List<Expense> items;
+    LoadState state;
+}
+
+LoadResult loadExpenses() {
+    LoadResult result = LoadResult({}, LoadState.Loaded);
+    push(result.items, Expense(12, "loaded"));
+    return result;
+}
+
+int main() {
+    LoadResult result = loadExpenses();
+    push(result.items, Expense(30, "added"));
+    if (length(result.items) != 2) {
+        return 1;
+    }
+    return 0;
+}

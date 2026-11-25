@@ -3500,6 +3500,7 @@ fn verify_ssa_function(
     }
     verify_memory_store_ledger(function, types, fail)?;
     verify_store_provenance(function, types, structs, &operand_ty, fail)?;
+    verify_descriptor_insert_continuations(function, types, &operand_ty, fail)?;
     aether_frontend::verify_class_metadata(types, structs, enums).map_err(fail)?;
     classes::verify(function, signatures, types, &operand_ty).map_err(fail)?;
     verify_ownership_ledger(function, types, fail)?;
@@ -3787,6 +3788,84 @@ fn ssa_value_use_count(function: &SsaFunction, value: ValueId) -> usize {
     instruction_uses + phi_uses + terminator_uses
 }
 
+fn descriptor_mutation(op: &SsaOp) -> Option<(DescriptorCommitKind, &SsaPlace)> {
+    match op {
+        SsaOp::ListPush { source, .. } => Some((DescriptorCommitKind::ListPush, source)),
+        SsaOp::ListReserve { source, .. } => Some((DescriptorCommitKind::ListReserve, source)),
+        SsaOp::MatrixAdd { source, .. } => Some((DescriptorCommitKind::MatrixAdd, source)),
+        _ => None,
+    }
+}
+
+fn verify_descriptor_insert_continuations(
+    function: &SsaFunction,
+    types: &TypeArena,
+    operand_ty: &impl Fn(&SsaOperand) -> Result<TypeId, String>,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let definition = |value: ValueId| {
+        function.blocks.iter().find_map(|block| {
+            block
+                .instructions
+                .iter()
+                .enumerate()
+                .find(|(_, instruction)| instruction.result == value)
+                .map(|(index, instruction)| (block.id, index, instruction))
+        })
+    };
+    for block in &function.blocks {
+        for (insert_index, insert) in block.instructions.iter().enumerate() {
+            let SsaOp::InsertField {
+                aggregate,
+                projections,
+                value,
+            } = &insert.op
+            else {
+                continue;
+            };
+            let value_ty = operand_ty(value).map_err(fail)?;
+            if types.is_copy(value_ty) || !types.needs_drop(value_ty) {
+                continue;
+            }
+            let SsaOperand::Value(value_id) = value else {
+                return Err(fail(
+                    "SSA owning InsertField requires a materialized descriptor mutation".into(),
+                ));
+            };
+            let Some((producer_block, producer_index, producer)) = definition(*value_id) else {
+                return Err(fail(
+                    "SSA owning InsertField value has no instruction definition".into(),
+                ));
+            };
+            let Some((_, source)) = descriptor_mutation(&producer.op) else {
+                return Err(fail(
+                    "SSA owning InsertField lacks a typed descriptor producer".into(),
+                ));
+            };
+            let expected_source = SsaPlace {
+                base: SsaPlaceBase::Value(aggregate.clone()),
+                projections: projections
+                    .iter()
+                    .copied()
+                    .map(SsaPlaceProjection::Field)
+                    .collect(),
+            };
+            if source != &expected_source
+                || producer_block != block.id
+                || producer_index.checked_add(1) != Some(insert_index)
+                || producer.unwind.is_some()
+                || insert.unwind.is_some()
+                || ssa_value_use_count(function, *value_id) != 1
+            {
+                return Err(fail(
+                    "SSA descriptor mutation/InsertField continuation is invalid".into(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_lines)]
 fn verify_store_provenance(
     function: &SsaFunction,
@@ -3914,16 +3993,12 @@ fn verify_store_provenance(
                     }
                 }
                 StoreProvenance::DescriptorCommit(kind) => {
-                    let source = match (kind, &producer.op) {
-                        (DescriptorCommitKind::ListPush, SsaOp::ListPush { source, .. })
-                        | (DescriptorCommitKind::ListReserve, SsaOp::ListReserve { source, .. })
-                        | (DescriptorCommitKind::MatrixAdd, SsaOp::MatrixAdd { source, .. }) => {
-                            source
-                        }
-                        _ => {
-                            return Err(fail("SSA DescriptorCommit kind/producer mismatch".into()));
-                        }
+                    let Some((producer_kind, source)) = descriptor_mutation(&producer.op) else {
+                        return Err(fail("SSA DescriptorCommit kind/producer mismatch".into()));
                     };
+                    if kind != &producer_kind {
+                        return Err(fail("SSA DescriptorCommit kind/producer mismatch".into()));
+                    }
                     if source != place
                         || producer_block != block.id
                         || producer_index.checked_add(1) != Some(store_index)
@@ -5078,18 +5153,37 @@ fn owner_consumptions(function: &SsaFunction, owner: ValueId, op: &SsaOp) -> usi
         | SsaOp::ListInit {
             elements: payloads, ..
         } => owner_operand_count(owner, payloads),
-        SsaOp::ListPush { value, .. }
-        | SsaOp::MatrixAdd { vector: value, .. }
-        | SsaOp::NullableInject { payload: value, .. }
+        SsaOp::ListPush { source, value, .. } => {
+            usize::from(matches!(value, SsaOperand::Value(candidate) if *candidate == owner))
+                + usize::from(
+                    matches!(&source.base, SsaPlaceBase::Value(SsaOperand::Value(candidate)) if *candidate == owner)
+                        && source.projections.is_empty(),
+                )
+        }
+        SsaOp::ListReserve { source, .. } => usize::from(
+            matches!(&source.base, SsaPlaceBase::Value(SsaOperand::Value(candidate)) if *candidate == owner)
+                && source.projections.is_empty(),
+        ),
+        SsaOp::MatrixAdd { source, vector, .. } => {
+            usize::from(matches!(vector, SsaOperand::Value(candidate) if *candidate == owner))
+                + usize::from(
+                    matches!(&source.base, SsaPlaceBase::Value(SsaOperand::Value(candidate)) if *candidate == owner)
+                        && source.projections.is_empty(),
+                )
+        }
+        SsaOp::NullableInject { payload: value, .. }
         | SsaOp::CollectionOwnerCapture { value, .. }
         | SsaOp::ReplaceString { value, .. }
         | SsaOp::ReplaceOwned { value, .. }
         | SsaOp::Store { value, .. }
-        | SsaOp::InsertField {
-            aggregate: value, ..
-        }
         | SsaOp::VectorTransposeMove { operand: value, .. } => {
             usize::from(matches!(value, SsaOperand::Value(candidate) if *candidate == owner))
+        }
+        SsaOp::InsertField {
+            aggregate, value, ..
+        } => {
+            usize::from(matches!(aggregate, SsaOperand::Value(candidate) if *candidate == owner))
+                + usize::from(matches!(value, SsaOperand::Value(candidate) if *candidate == owner))
         }
         SsaOp::Class(op) => match op.as_ref() {
             ClassOp::FieldWrite { value, .. } => owner_operand_count(owner, [value]),
@@ -5897,7 +5991,11 @@ fn verify_op(
                 return Err("SSA memory load type mismatch".into());
             }
         }
-        SsaOp::Store { place, value, .. } => {
+        SsaOp::Store {
+            place,
+            value,
+            provenance,
+        } => {
             verify_class_access(place)?;
             if !writable(place)? {
                 return Err("SSA store through shared view/reference".into());
@@ -5915,7 +6013,8 @@ fn verify_op(
                     && place
                         .projections
                         .iter()
-                        .all(|projection| matches!(projection, SsaPlaceProjection::Field(_))))
+                        .all(|projection| matches!(projection, SsaPlaceProjection::Field(_)))
+                    && !matches!(provenance, StoreProvenance::DescriptorCommit(_)))
             {
                 return Err(format!(
                     "SSA memory store type/ownership contract invalid: {place:?}, value type {value_ty:?}"
