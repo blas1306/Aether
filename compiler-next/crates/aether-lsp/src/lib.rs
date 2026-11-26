@@ -23,6 +23,39 @@ enum Outbound {
 struct OpenFile {
     document: DocumentId,
     version: Option<i64>,
+    path: PathBuf,
+    role: DocumentRole,
+}
+
+#[derive(Clone)]
+enum DocumentRole {
+    /// A standalone source or the canonical entry of a validated project.
+    AnalysisTarget(Option<PathBuf>),
+    /// A project module is diagnosed through the canonical project entry target.
+    ProjectMember(PathBuf),
+    /// A manifest claimed this source, but its authoritative locked graph was unavailable.
+    ProjectUnavailable(PathBuf, Arc<str>),
+    /// The project boundary itself could not be represented safely.
+    InternalFailure(Arc<str>),
+}
+
+enum ProjectContext {
+    Ready {
+        project: ProjectId,
+        root: PathBuf,
+        entry: bool,
+    },
+    Unavailable(PathBuf, String),
+    Standalone,
+    InternalFailure(String),
+}
+
+struct ProjectRecord {
+    id: ProjectId,
+    entry: PathBuf,
+    generation: u64,
+    plan: ProjectPlan,
+    available: bool,
 }
 
 #[derive(Default)]
@@ -38,7 +71,7 @@ struct Server {
     scheduler: Option<AnalysisScheduler>,
     root: Option<PathBuf>,
     documents: HashMap<String, OpenFile>,
-    projects: HashMap<PathBuf, (ProjectId, PathBuf)>,
+    projects: HashMap<PathBuf, ProjectRecord>,
     next_project: u64,
     publication: Arc<Mutex<PublicationState>>,
     initialized: bool,
@@ -176,7 +209,29 @@ impl Server {
             eprintln!("aether-lsp: virtual documents are not analyzable in diagnostics V1");
             return;
         };
-        let project = self.project_for(&path);
+        let context = self.project_for(&path);
+        let (project, role) = match context {
+            ProjectContext::Ready {
+                project,
+                root,
+                entry,
+            } => (
+                Some(project),
+                if entry {
+                    DocumentRole::AnalysisTarget(Some(root))
+                } else {
+                    DocumentRole::ProjectMember(root)
+                },
+            ),
+            ProjectContext::Unavailable(root, message) => (
+                None,
+                DocumentRole::ProjectUnavailable(root, Arc::from(message)),
+            ),
+            ProjectContext::Standalone => (None, DocumentRole::AnalysisTarget(None)),
+            ProjectContext::InternalFailure(message) => {
+                (None, DocumentRole::InternalFailure(Arc::from(message)))
+            }
+        };
         let Some(workspace) = &self.workspace else {
             return;
         };
@@ -198,6 +253,8 @@ impl Server {
                     OpenFile {
                         document: document_id,
                         version,
+                        path,
+                        role,
                     },
                 );
                 let mut publication = self.publication.lock().expect("publication state poisoned");
@@ -317,13 +374,7 @@ impl Server {
             let (diagnostics, version) = if affected_uri == uri {
                 (Vec::new(), open.version)
             } else {
-                let diagnostics = publication
-                    .contributions
-                    .values()
-                    .filter_map(|items| items.get(&affected_uri))
-                    .flatten()
-                    .cloned()
-                    .collect();
+                let diagnostics = merged_diagnostics(&publication, &affected_uri);
                 let version = publication
                     .files
                     .values()
@@ -343,18 +394,29 @@ impl Server {
         self.schedule_all();
     }
 
-    fn project_for(&mut self, path: &Path) -> Option<ProjectId> {
-        let workspace_root = self.root.as_deref()?;
-        let mut cursor = path.parent()?;
+    fn project_for(&mut self, path: &Path) -> ProjectContext {
+        let Some(workspace_root) = self.root.as_deref() else {
+            return ProjectContext::InternalFailure("workspace root is unavailable".into());
+        };
+        let Some(mut cursor) = path.parent() else {
+            return ProjectContext::InternalFailure("document has no parent directory".into());
+        };
         loop {
             if cursor.join("aether.toml").is_file() {
-                let canonical = cursor.canonicalize().ok()?;
-                if let Some((id, entry)) = self.projects.get(&canonical) {
-                    return path
-                        .canonicalize()
-                        .ok()
-                        .filter(|candidate| candidate == entry)
-                        .map(|_| *id);
+                let canonical = match cursor.canonicalize() {
+                    Ok(path) => path,
+                    Err(error) => {
+                        return ProjectContext::InternalFailure(format!(
+                            "could not canonicalize project root: {error}"
+                        ));
+                    }
+                };
+                if let Some(record) = self.projects.get(&canonical) {
+                    return ProjectContext::Ready {
+                        project: record.id,
+                        root: canonical,
+                        entry: same_file_or_lexical(path, &record.entry),
+                    };
                 }
                 match ProjectPlan::load_read_only(&canonical) {
                     Ok(plan) => {
@@ -362,34 +424,180 @@ impl Server {
                         self.next_project += 1;
                         let entry = plan.source().to_path_buf();
                         if let Some(workspace) = &self.workspace {
-                            workspace.set_project(id, 1, plan);
+                            workspace.set_project(id, 1, plan.clone());
                         }
-                        self.projects.insert(canonical, (id, entry.clone()));
-                        return path
-                            .canonicalize()
-                            .ok()
-                            .filter(|candidate| candidate == &entry)
-                            .map(|_| id);
+                        self.projects.insert(
+                            canonical.clone(),
+                            ProjectRecord {
+                                id,
+                                entry: entry.clone(),
+                                generation: 1,
+                                plan,
+                                available: true,
+                            },
+                        );
+                        return ProjectContext::Ready {
+                            project: id,
+                            root: canonical,
+                            entry: same_file_or_lexical(path, &entry),
+                        };
                     }
                     Err(error) => {
                         eprintln!("aether-lsp: project is not read-only analyzable: {error}");
-                        return None;
+                        return ProjectContext::Unavailable(canonical, error);
                     }
                 }
             }
             if cursor == workspace_root {
                 break;
             }
-            cursor = cursor.parent()?;
+            let Some(parent) = cursor.parent() else {
+                break;
+            };
+            cursor = parent;
         }
-        None
+        ProjectContext::Standalone
     }
 
     fn schedule_all(&mut self) {
-        let targets: Vec<DocumentId> = self.documents.values().map(|file| file.document).collect();
-        for target in targets {
-            self.schedule(target);
+        self.refresh_projects();
+        let targets: Vec<(DocumentId, DocumentRole)> = self
+            .documents
+            .values()
+            .map(|file| (file.document, file.role.clone()))
+            .collect();
+        for (target, role) in targets {
+            match role {
+                DocumentRole::AnalysisTarget(_) => self.schedule(target),
+                DocumentRole::ProjectMember(_) => self.publish_empty_contribution(target),
+                DocumentRole::ProjectUnavailable(_, message) => self.publish_context_diagnostic(
+                    target,
+                    "aether.project-unavailable",
+                    &format!("Aether project is unavailable: {message}"),
+                ),
+                DocumentRole::InternalFailure(message) => self.publish_context_diagnostic(
+                    target,
+                    "aether.project-internal-failure",
+                    &format!("Aether project context failed internally: {message}"),
+                ),
+            }
         }
+    }
+
+    fn refresh_projects(&mut self) {
+        let roots: BTreeSet<PathBuf> = self
+            .documents
+            .values()
+            .filter_map(|file| role_project_root(&file.role).cloned())
+            .collect();
+        for root in roots {
+            match ProjectPlan::load_read_only(&root) {
+                Ok(plan) => {
+                    let entry = plan.source().to_path_buf();
+                    let (id, generation, changed) =
+                        if let Some(record) = self.projects.get_mut(&root) {
+                            let changed = !record.available || record.plan != plan;
+                            if changed {
+                                record.generation += 1;
+                                record.entry.clone_from(&entry);
+                                record.plan = plan.clone();
+                                record.available = true;
+                            }
+                            (record.id, record.generation, changed)
+                        } else {
+                            let id = ProjectId(self.next_project);
+                            self.next_project += 1;
+                            self.projects.insert(
+                                root.clone(),
+                                ProjectRecord {
+                                    id,
+                                    entry: entry.clone(),
+                                    generation: 1,
+                                    plan: plan.clone(),
+                                    available: true,
+                                },
+                            );
+                            (id, 1, true)
+                        };
+                    if changed {
+                        if let Some(workspace) = &self.workspace {
+                            workspace.set_project(id, generation, plan);
+                        }
+                    }
+                    for file in self.documents.values_mut().filter(|file| {
+                        role_project_root(&file.role).is_some_and(|candidate| candidate == &root)
+                    }) {
+                        file.role = if same_file_or_lexical(&file.path, &entry) {
+                            DocumentRole::AnalysisTarget(Some(root.clone()))
+                        } else {
+                            DocumentRole::ProjectMember(root.clone())
+                        };
+                        if let Some(workspace) = &self.workspace {
+                            let _ = workspace.set_document_project(file.document, Some(id));
+                        }
+                    }
+                }
+                Err(error) => {
+                    if let Some(record) = self.projects.get_mut(&root) {
+                        if record.available {
+                            record.available = false;
+                            record.generation += 1;
+                            if let Some(workspace) = &self.workspace {
+                                workspace.set_project_generation(record.id, record.generation);
+                            }
+                        }
+                    }
+                    let message: Arc<str> = Arc::from(error);
+                    for file in self.documents.values_mut().filter(|file| {
+                        role_project_root(&file.role).is_some_and(|candidate| candidate == &root)
+                    }) {
+                        file.role = DocumentRole::ProjectUnavailable(root.clone(), message.clone());
+                        if let Some(workspace) = &self.workspace {
+                            let _ = workspace.set_document_project(file.document, None);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn publish_context_diagnostic(&self, target: DocumentId, code: &str, message: &str) {
+        let mut state = self.publication.lock().expect("publication state poisoned");
+        let Some((uri, _)) = state.files.get(&target).cloned() else {
+            return;
+        };
+        *state.epochs.entry(target).or_default() += 1;
+        let diagnostic = json!({
+            "range": default_range(),
+            "severity": 1,
+            "code": code,
+            "source": "aether-project",
+            "message": message,
+        });
+        let previous: BTreeSet<String> = state
+            .contributions
+            .insert(target, BTreeMap::from([(uri.clone(), vec![diagnostic])]))
+            .unwrap_or_default()
+            .into_keys()
+            .collect();
+        let affected: BTreeSet<String> = previous.into_iter().chain([uri]).collect();
+        enqueue_publications(&state, &self.output, affected);
+    }
+
+    fn publish_empty_contribution(&self, target: DocumentId) {
+        let mut state = self.publication.lock().expect("publication state poisoned");
+        let Some((uri, _)) = state.files.get(&target).cloned() else {
+            return;
+        };
+        *state.epochs.entry(target).or_default() += 1;
+        let previous: BTreeSet<String> = state
+            .contributions
+            .insert(target, BTreeMap::from([(uri.clone(), Vec::new())]))
+            .unwrap_or_default()
+            .into_keys()
+            .collect();
+        let affected: BTreeSet<String> = previous.into_iter().chain([uri]).collect();
+        enqueue_publications(&state, &self.output, affected);
     }
 
     fn schedule(&mut self, target: DocumentId) {
@@ -446,24 +654,57 @@ impl Server {
                 .into_keys()
                 .collect();
             let affected: BTreeSet<String> = previous.into_iter().chain(next.into_keys()).collect();
-            for uri in affected {
-                let diagnostics = state
-                    .contributions
-                    .values()
-                    .filter_map(|items| items.get(&uri))
-                    .flatten()
-                    .cloned()
-                    .collect();
-                let version = state
-                    .files
-                    .values()
-                    .find_map(|(candidate, version)| (candidate == &uri).then_some(*version))
-                    .flatten();
-                // Validation and queue insertion share the same lock. A later edit/close must
-                // therefore enqueue its newer publication after this one.
-                let _ = output.send(Outbound::Message(publish(&uri, diagnostics, version)));
-            }
+            // Validation and queue insertion share the same lock. A later edit/close must
+            // therefore enqueue its newer publication after this one.
+            enqueue_publications(&state, &output, affected);
         });
+    }
+}
+
+fn same_file_or_lexical(path: &Path, expected: &Path) -> bool {
+    path.canonicalize()
+        .map_or_else(|_| path == expected, |candidate| candidate == expected)
+}
+
+fn role_project_root(role: &DocumentRole) -> Option<&PathBuf> {
+    match role {
+        DocumentRole::AnalysisTarget(Some(root))
+        | DocumentRole::ProjectMember(root)
+        | DocumentRole::ProjectUnavailable(root, _) => Some(root),
+        DocumentRole::AnalysisTarget(None) | DocumentRole::InternalFailure(_) => None,
+    }
+}
+
+fn merged_diagnostics(state: &PublicationState, uri: &str) -> Vec<Value> {
+    let mut unique = BTreeMap::new();
+    for diagnostic in state
+        .contributions
+        .values()
+        .filter_map(|items| items.get(uri))
+        .flatten()
+    {
+        // The complete protocol value is the publication-local semantic identity. This includes
+        // range, severity, code, source, message and related locations, rather than collapsing
+        // distinct diagnostics merely because their code and range happen to match.
+        let identity = serde_json::to_string(diagnostic).expect("diagnostic JSON is serializable");
+        unique.entry(identity).or_insert_with(|| diagnostic.clone());
+    }
+    unique.into_values().collect()
+}
+
+fn enqueue_publications(
+    state: &PublicationState,
+    output: &mpsc::Sender<Outbound>,
+    affected: BTreeSet<String>,
+) {
+    for uri in affected {
+        let diagnostics = merged_diagnostics(state, &uri);
+        let version = state
+            .files
+            .values()
+            .find_map(|(candidate, version)| (candidate == &uri).then_some(*version))
+            .flatten();
+        let _ = output.send(Outbound::Message(publish(&uri, diagnostics, version)));
     }
 }
 
@@ -654,6 +895,18 @@ fn path_to_file_uri(path: &Path) -> String {
 mod tests {
     use super::*;
 
+    struct FailingWriter;
+
+    impl Write for FailingWriter {
+        fn write(&mut self, _buffer: &[u8]) -> io::Result<usize> {
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "disconnected"))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
     #[test]
     fn uri_round_trip_handles_unicode_and_spaces() {
         let path = Path::new("/tmp/á ether/main.ae");
@@ -677,5 +930,37 @@ mod tests {
         let mut reader = BufReader::new(input.as_bytes());
         assert!(read_message(&mut reader).unwrap().unwrap().is_ok());
         assert!(read_message(&mut reader).unwrap().unwrap().is_ok());
+    }
+
+    #[test]
+    fn diagnostic_union_deduplicates_exact_values_but_preserves_distinct_messages() {
+        let common = json!({"range": default_range(), "code": "E1", "message": "first"});
+        let distinct = json!({"range": default_range(), "code": "E1", "message": "second"});
+        let state = PublicationState {
+            contributions: HashMap::from([
+                (
+                    DocumentId(1),
+                    BTreeMap::from([("file:///x.ae".into(), vec![common.clone()])]),
+                ),
+                (
+                    DocumentId(2),
+                    BTreeMap::from([("file:///x.ae".into(), vec![common, distinct])]),
+                ),
+            ]),
+            ..PublicationState::default()
+        };
+        let merged = merged_diagnostics(&state, "file:///x.ae");
+        assert_eq!(merged.len(), 2);
+        assert_ne!(merged[0]["message"], merged[1]["message"]);
+    }
+
+    #[test]
+    fn writer_disconnect_terminates_without_panicking() {
+        let (sender, receiver) = mpsc::channel();
+        sender
+            .send(Outbound::Message(json!({"jsonrpc": "2.0"})))
+            .unwrap();
+        drop(sender);
+        writer_loop(FailingWriter, receiver);
     }
 }

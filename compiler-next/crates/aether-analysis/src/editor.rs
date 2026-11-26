@@ -457,6 +457,24 @@ impl EditorWorkspace {
             .cloned()
     }
 
+    /// Changes the validated project association for an existing document.
+    pub fn set_document_project(
+        &self,
+        document: DocumentId,
+        project: Option<ProjectId>,
+    ) -> Result<(), StoreError> {
+        let mut state = self.state.write().expect("document store poisoned");
+        let record = state
+            .documents
+            .get_mut(&document)
+            .ok_or(StoreError::UnknownDocument(document))?;
+        if record.project != project {
+            record.project = project;
+            state.revision += 1;
+        }
+        Ok(())
+    }
+
     /// Updates analysis configuration and invalidates prior results.
     pub fn set_config(&self, config: AnalysisConfig) {
         let mut state = self.state.write().expect("document store poisoned");

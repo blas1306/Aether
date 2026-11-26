@@ -22,6 +22,15 @@ impl TestDirectory {
         fs::create_dir(&path).unwrap();
         Self(path)
     }
+
+    fn write(&self, relative: &str, contents: &str) -> PathBuf {
+        let path = self.0.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(&path, contents).unwrap();
+        path
+    }
 }
 
 impl Drop for TestDirectory {
@@ -111,6 +120,18 @@ impl Client {
             if message["method"] == "textDocument/publishDiagnostics"
                 && message["params"]["uri"] == uri
                 && message["params"]["version"] == version
+            {
+                return message;
+            }
+        }
+        panic!("no matching diagnostics publication");
+    }
+
+    fn diagnostics_for_uri(&mut self, uri: &str) -> Value {
+        for _ in 0..20 {
+            let message = self.receive();
+            if message["method"] == "textDocument/publishDiagnostics"
+                && message["params"]["uri"] == uri
             {
                 return message;
             }
@@ -291,5 +312,156 @@ fn imported_unsaved_overlay_is_published_on_imported_uri() {
             .unwrap()
             .is_empty()
     );
+    client.shutdown();
+}
+
+#[test]
+fn project_without_usable_lock_fails_closed_instead_of_using_standalone_rules() {
+    for lock in [None, Some("this is not a lock")] {
+        let directory = TestDirectory::new();
+        directory.write(
+            "aether.toml",
+            "[package]\nname='app'\nversion='0.1.0'\n[application]\nentry='src/main.ae'\n",
+        );
+        let main = directory.write("src/main.ae", "int main(){return unknown_name;}");
+        if let Some(lock) = lock {
+            directory.write("aether.lock", lock);
+        }
+        let uri = file_uri(&main);
+        let mut client = Client::start();
+        client.initialize(&directory.0);
+        client.send(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+                "uri": uri, "languageId": "aether", "version": 1,
+                "text": "int main(){return unknown_name;}"
+            }}
+        }));
+        let diagnostics = client.diagnostics_for(&uri, 1);
+        let items = diagnostics["params"]["diagnostics"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["code"], "aether.project-unavailable");
+        assert_eq!(items[0]["source"], "aether-project");
+        assert!(items.iter().all(|item| item["code"] != "E0202"));
+        client.shutdown();
+    }
+}
+
+#[test]
+fn valid_locked_project_uses_canonical_project_analysis() {
+    let directory = TestDirectory::new();
+    let lock = "lock-version = 1\nroot = 'root:app@0.1.0'\n\n[[package]]\nid = 'root:app@0.1.0'\nname = 'app'\nversion = '0.1.0'\nsource = 'root'\n";
+    directory.write(
+        "aether.toml",
+        "[package]\nname='app'\nversion='0.1.0'\n[application]\nentry='src/main.ae'\n",
+    );
+    directory.write("aether.lock", lock);
+    let main = directory.write("src/main.ae", "int main(){return unknown_name;}");
+    let uri = file_uri(&main);
+    let mut client = Client::start();
+    client.initialize(&directory.0);
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+            "uri": uri, "languageId": "aether", "version": 3,
+            "text": "int main(){return unknown_name;}"
+        }}
+    }));
+    let diagnostics = client.diagnostics_for(&uri, 3);
+    assert!(
+        diagnostics["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["code"] == "E0202")
+    );
+
+    fs::remove_file(directory.0.join("aether.lock")).unwrap();
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+            "textDocument": {"uri": uri, "version": 4},
+            "contentChanges": [{"text": "int main(){return 0;}"}]
+        }
+    }));
+    let unavailable = client.diagnostics_for(&uri, 4);
+    assert_eq!(
+        unavailable["params"]["diagnostics"][0]["code"],
+        "aether.project-unavailable"
+    );
+
+    directory.write("aether.lock", lock);
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+            "textDocument": {"uri": uri, "version": 5},
+            "contentChanges": [{"text": "int main(){return 0;}"}]
+        }
+    }));
+    assert_eq!(
+        client.diagnostics_for(&uri, 5)["params"]["diagnostics"],
+        json!([])
+    );
+    client.shutdown();
+}
+
+#[test]
+fn identical_shared_diagnostics_are_deduplicated_across_targets() {
+    let directory = TestDirectory::new();
+    let first = directory.write(
+        "first.ae",
+        "import Alpha; int main(){return Alpha.value();}",
+    );
+    let second = directory.write(
+        "second.ae",
+        "import Alpha; int other(){return Alpha.value();}",
+    );
+    let alpha = directory.write("alpha.ae", "package Alpha; public int value( { return 1; }");
+    let first_uri = file_uri(&first);
+    let second_uri = file_uri(&second);
+    let alpha_uri = file_uri(&alpha);
+    let mut client = Client::start();
+    client.initialize(&directory.0);
+
+    for (uri, version, text) in [
+        (
+            &first_uri,
+            1,
+            "import Alpha; int main(){return Alpha.value();}",
+        ),
+        (
+            &second_uri,
+            2,
+            "import Alpha; int other(){return Alpha.value();}",
+        ),
+    ] {
+        client.send(&json!({
+            "jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+                "uri": uri, "languageId": "aether", "version": version, "text": text
+            }}
+        }));
+        if version == 1 {
+            assert!(
+                !client.diagnostics_for_uri(&alpha_uri)["params"]["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+    }
+
+    // Publications for one completed target are enqueued in URI order. Observing second.ae
+    // therefore means the immediately preceding Alpha publication contains both contributions.
+    let mut last_alpha = None;
+    loop {
+        let message = client.receive();
+        if message["method"] != "textDocument/publishDiagnostics" {
+            continue;
+        }
+        if message["params"]["uri"] == alpha_uri {
+            last_alpha = Some(message);
+        } else if message["params"]["uri"] == second_uri {
+            break;
+        }
+    }
+    let last_alpha = last_alpha.unwrap();
+    let items = last_alpha["params"]["diagnostics"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "identical target contributions must merge");
     client.shutdown();
 }
