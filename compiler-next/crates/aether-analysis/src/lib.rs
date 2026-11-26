@@ -14,7 +14,16 @@ use aether_frontend::{
 use aether_package::{PackageInstanceKey, PackageMetadata, ProjectKind, ResolvedPackage};
 use sha2::{Digest, Sha256};
 
+mod diagnostics;
 mod editor;
+
+pub use diagnostics::{
+    AdaptationFailure, AnalysisCoverage, AnalysisFailure, AnalysisMeasurements, AnalysisRequest,
+    AnalysisResult, AnalysisStage, AnalysisState, AnalysisTarget, AnalysisValidity,
+    CanonicalAnalyzer, DiagnosticSeverity, EditorDiagnostic, EditorFix, EditorPosition,
+    EditorRange, LineIndex, LineIndexError, PartialReason, RelatedInformation, RequestId,
+    SemanticSnapshot, SnapshotSource, SourceIdentity, SourceTable,
+};
 
 pub use editor::{
     AnalysisConfig, AnalysisSnapshot, ChangeDocument, DiskBase, DocumentId, DocumentLocator,
@@ -66,6 +75,13 @@ pub enum SourceProvenance {
         document: DocumentId,
         /// Monotonic version captured by the snapshot.
         version: DocumentVersion,
+    },
+    /// Compiler-owned source which cannot be replaced by an editor overlay.
+    Toolchain {
+        /// Stable logical display name.
+        logical_name: Arc<str>,
+        /// Digest of the embedded source.
+        fingerprint: ContentFingerprint,
     },
 }
 
@@ -148,6 +164,9 @@ pub struct SessionModule {
     info: ModuleInfo,
     source: SourceFile,
     ast: ParsedAst,
+    path: PathBuf,
+    fingerprint: ContentFingerprint,
+    provenance: SourceProvenance,
 }
 
 impl SessionModule {
@@ -161,6 +180,24 @@ impl SessionModule {
     #[must_use]
     pub const fn source(&self) -> &SourceFile {
         &self.source
+    }
+
+    /// Provider locator used to obtain this exact source.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// Digest of the exact immutable text parsed for this module.
+    #[must_use]
+    pub const fn fingerprint(&self) -> ContentFingerprint {
+        self.fingerprint
+    }
+
+    /// Origin of the exact bytes used by this session.
+    #[must_use]
+    pub const fn provenance(&self) -> &SourceProvenance {
+        &self.provenance
     }
 }
 
@@ -241,6 +278,8 @@ struct CatalogUnit {
     package: PackageKey,
     toolchain: bool,
     owner: Option<PackageInstanceKey>,
+    fingerprint: ContentFingerprint,
+    provenance: SourceProvenance,
 }
 
 struct SourceCandidate {
@@ -250,6 +289,15 @@ struct SourceCandidate {
     package_path: Option<Vec<String>>,
     owner: Option<PackageInstanceKey>,
     owner_name: Option<String>,
+    fingerprint: ContentFingerprint,
+    provenance: SourceProvenance,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct AssignedSource {
+    pub(crate) source: SourceFile,
+    pub(crate) fingerprint: ContentFingerprint,
+    pub(crate) provenance: SourceProvenance,
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::too_many_lines)]
@@ -272,6 +320,16 @@ pub fn discover_catalog_with_provider(
     entry_path: &Path,
     project: Option<&ProjectPlan>,
     provider: &dyn SourceProvider,
+) -> Result<CompilationSession, Vec<Diagnostic>> {
+    discover_catalog_with_provider_traced(entry_path, project, provider, &mut |_| {})
+}
+
+#[allow(clippy::cast_possible_truncation, clippy::too_many_lines)]
+pub(crate) fn discover_catalog_with_provider_traced(
+    entry_path: &Path,
+    project: Option<&ProjectPlan>,
+    provider: &dyn SourceProvider,
+    assigned: &mut dyn FnMut(AssignedSource),
 ) -> Result<CompilationSession, Vec<Diagnostic>> {
     let discovery_started = Instant::now();
     let entry_absolute = match entry_path.canonicalize() {
@@ -340,6 +398,8 @@ pub fn discover_catalog_with_provider(
                 ))]
             })?;
         let text = content.text.to_string();
+        let fingerprint = content.fingerprint;
+        let provenance = content.provenance;
         file_load_ns += started.elapsed().as_nanos();
         let package_path = catalog_package_header(&text);
         if package_path
@@ -359,11 +419,13 @@ pub fn discover_catalog_with_provider(
         }
         candidates.push(SourceCandidate {
             path,
-            logical,
+            logical: logical.clone(),
             text,
             package_path,
             owner,
             owner_name,
+            fingerprint,
+            provenance,
         });
     }
     let entry_candidate = candidates
@@ -389,6 +451,11 @@ pub fn discover_catalog_with_provider(
             let source_id = SourceId(units.len() as u32);
             let source =
                 SourceFile::with_id(source_id, candidate.logical.clone(), candidate.text.clone());
+            assigned(AssignedSource {
+                source: source.clone(),
+                fingerprint: candidate.fingerprint,
+                provenance: candidate.provenance.clone(),
+            });
             let started = Instant::now();
             let ast = parse_source(&source).map_err(|diagnostics| {
                 diagnostics
@@ -442,6 +509,8 @@ pub fn discover_catalog_with_provider(
                 package,
                 toolchain: false,
                 owner: candidate.owner.clone(),
+                fingerprint: candidate.fingerprint,
+                provenance: candidate.provenance.clone(),
             });
         }
     } else if let Some(package) = entry_package {
@@ -453,6 +522,11 @@ pub fn discover_catalog_with_provider(
             candidate.logical.clone(),
             candidate.text.clone(),
         );
+        assigned(AssignedSource {
+            source: source.clone(),
+            fingerprint: candidate.fingerprint,
+            provenance: candidate.provenance.clone(),
+        });
         let started = Instant::now();
         let ast = parse_source(&source).map_err(|diagnostics| {
             diagnostics
@@ -484,6 +558,8 @@ pub fn discover_catalog_with_provider(
             package: PackageKey::Anonymous,
             toolchain: false,
             owner: None,
+            fingerprint: candidate.fingerprint,
+            provenance: candidate.provenance.clone(),
         });
     }
     while let Some(package) = pending.pop_first() {
@@ -514,6 +590,11 @@ pub fn discover_catalog_with_provider(
             let source_id = SourceId(units.len() as u32);
             let source =
                 SourceFile::with_id(source_id, candidate.logical.clone(), candidate.text.clone());
+            assigned(AssignedSource {
+                source: source.clone(),
+                fingerprint: candidate.fingerprint,
+                provenance: candidate.provenance.clone(),
+            });
             let started = Instant::now();
             let ast = parse_source(&source).map_err(|diagnostics| {
                 diagnostics
@@ -546,6 +627,8 @@ pub fn discover_catalog_with_provider(
                 package: verified,
                 toolchain: false,
                 owner: None,
+                fingerprint: candidate.fingerprint,
+                provenance: candidate.provenance.clone(),
             });
         }
     }
@@ -622,17 +705,29 @@ pub fn discover_catalog_with_provider(
         let std_source_id = SourceId(units.len() as u32);
         let logical = format!("{}/package.ae", path.0.join("/"));
         let std_source = SourceFile::with_id(std_source_id, format!("<toolchain>/{logical}"), text);
+        let fingerprint = ContentFingerprint(Sha256::digest(text.as_bytes()).into());
+        let provenance = SourceProvenance::Toolchain {
+            logical_name: Arc::from(format!("<toolchain>/{logical}")),
+            fingerprint,
+        };
+        assigned(AssignedSource {
+            source: std_source.clone(),
+            fingerprint,
+            provenance: provenance.clone(),
+        });
         let started = Instant::now();
         let std_ast = parse_source(&std_source)?;
         parse_ns += started.elapsed().as_nanos();
         units.push(CatalogUnit {
             path: PathBuf::from(format!("<toolchain>/{logical}")),
-            logical,
+            logical: logical.clone(),
             source: std_source,
             ast: std_ast,
             package: PackageKey::named(OriginKey::Toolchain, path),
             toolchain: true,
             owner: None,
+            fingerprint,
+            provenance,
         });
     }
 
@@ -688,6 +783,9 @@ pub fn discover_catalog_with_provider(
             },
             source: unit.source.clone(),
             ast: unit.ast.clone(),
+            path: unit.path.clone(),
+            fingerprint: unit.fingerprint,
+            provenance: unit.provenance.clone(),
         })
         .collect::<Vec<_>>();
     for (index, unit) in units.iter().enumerate() {
