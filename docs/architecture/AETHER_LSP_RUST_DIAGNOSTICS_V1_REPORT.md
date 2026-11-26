@@ -154,16 +154,50 @@ Resultados confirmados:
 `aether-lsp → aether-analysis → aether-frontend/aether-package` más
 `serde_json`; no aparece código legacy ni backend.
 
-## 11. Limitaciones
+## 11. Validación manual posterior al cierre inicial
+
+El 26 de noviembre de 2026 se realizó un smoke test manual posterior a la
+qualification automatizada histórica. Esta sección registra sólo lo observado
+y no modifica los resultados automatizados de la sección anterior.
+
+### Entorno observado
+
+- VS Code en Linux.
+- Extensión `aether-dev.aether-vscode@0.1.0`.
+- Binario `<checkout>/compiler-next/target/debug/aether-lsp --stdio`.
+- Proceso Rust confirmado mediante `pgrep`.
+- Configuración local del ejecutable ajustada para utilizar el binario Rust.
+
+### Resultados observados
+
+1. El servidor Python anterior seguía ejecutándose inicialmente porque una
+   configuración de workspace sobrescribía la configuración global.
+2. Después de corregir la selección del ejecutable, VS Code inició el LSP Rust.
+3. La ausencia de `;` produjo un diagnóstico equivalente a `E0100`.
+4. Un archivo sin `int main()` produjo un diagnóstico equivalente a `E0200`.
+5. Una referencia a `variableInexistente` produjo un diagnóstico equivalente a
+   `E0202`.
+6. Al reemplazar ese identificador por `x`, el diagnóstico desapareció.
+7. `aether run scrap/error.ae` ejecutó el programa corregido y produjo `10`.
+8. El resaltado de sintaxis de la extensión continuó funcionando.
+
+### Pruebas manuales pendientes
+
+No se probaron todavía la GUI de IntelliJ, imports no guardados, escenarios
+multiarchivo ni cancelación manual. Por lo tanto, esta validación manual no
+declara PASS para esas superficies.
+
+## 12. Limitaciones
 
 V1 sólo acepta documentos `file:`. No implementa features de navegación o
 edición, debounce, parsing incremental ni preemption dentro de una fase frontend.
 Los packages de registry que no puedan validarse offline con la autoridad actual
 fallan seguro; el servidor no sincroniza, actualiza, descarga ni materializa.
 No se reemplazó el LSP Python instalado ni las configuraciones predeterminadas de
-VS Code/IntelliJ. No se realizaron smoke tests GUI en este entorno sin IDE.
+VS Code/IntelliJ. El cierre inicial no incluyó smoke tests GUI; la validación
+manual posterior observada se registra por separado en la sección 11.
 
-## 12. Archivos modificados
+## 13. Archivos modificados
 
 - `compiler-next/Cargo.toml`
 - `compiler-next/Cargo.lock`
@@ -175,7 +209,7 @@ VS Code/IntelliJ. No se realizaron smoke tests GUI en este entorno sin IDE.
 - `compiler-next/crates/aether-lsp/tests/protocol.rs`
 - `docs/architecture/AETHER_LSP_RUST_DIAGNOSTICS_V1_REPORT.md`
 
-## 13. Prueba manual temporal
+## 14. Prueba manual temporal
 
 Construir sin instalar ni reemplazar el Python:
 
@@ -195,6 +229,6 @@ IntelliJ, Settings → Languages & Frameworks → Aether → “Aether language 
 executable”, usar la misma ruta. Ambos launchers ya agregan `--stdio`. Restaurar
 la preferencia después de validar; no se cambió ningún default del repositorio.
 
-## 14. Mensaje de commit sugerido
+## 15. Mensaje de commit sugerido
 
 `feat(lsp): add native Rust diagnostics server`
