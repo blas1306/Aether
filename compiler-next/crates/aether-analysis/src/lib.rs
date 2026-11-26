@@ -16,6 +16,7 @@ use sha2::{Digest, Sha256};
 
 mod diagnostics;
 mod editor;
+mod lifecycle;
 
 pub use diagnostics::{
     AdaptationFailure, AnalysisCoverage, AnalysisFailure, AnalysisMeasurements, AnalysisRequest,
@@ -30,6 +31,10 @@ pub use editor::{
     DocumentRecord, DocumentState, DocumentVersion, EditorWorkspace, FileChange, OpenDocument,
     OverlaySourceProvider, ProjectId, PublishDecision, SavedDocument, SnapshotDiscovery,
     SnapshotSourceRead, SnapshotStamp, StoreError, WorkspaceId,
+};
+pub use lifecycle::{
+    AnalysisScheduler, CancellationToken, InvalidRequestTransition, RequestCompletion,
+    RequestHandle, RequestState, SchedulerMeasurements,
 };
 
 /// Content digest of the exact immutable bytes returned by a source provider.

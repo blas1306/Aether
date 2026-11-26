@@ -10,9 +10,10 @@ use std::sync::{Arc, Mutex, RwLock};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    CompilationSession, ContentFingerprint, DiskSourceProvider, ProjectPlan, SourceContent,
-    SourceDescriptor, SourceLocator, SourceProvenance, SourceProvider, SourceProviderError,
-    SourceScope, discover_catalog_with_provider,
+    AnalysisResult, AnalysisTarget, CancellationToken, CompilationSession, ContentFingerprint,
+    DiskSourceProvider, ProjectPlan, SourceContent, SourceDescriptor, SourceLocator,
+    SourceProvenance, SourceProvider, SourceProviderError, SourceScope,
+    discover_catalog_with_provider,
 };
 
 static NEXT_WORKSPACE_ID: AtomicU64 = AtomicU64::new(1);
@@ -562,6 +563,50 @@ impl EditorWorkspace {
         }
         PublishDecision::Current
     }
+
+    /// Atomically validates a scheduled result against workspace state and exact external inputs.
+    pub(crate) fn may_publish_analysis(
+        &self,
+        target: &AnalysisTarget,
+        result: &AnalysisResult,
+        cancellation: &CancellationToken,
+        latest: bool,
+    ) -> PublishDecision {
+        if cancellation.is_cancellation_requested() {
+            let _ = cancellation.checkpoint();
+            return PublishDecision::Cancelled;
+        }
+        let state = self.state.read().expect("document store poisoned");
+        if let AnalysisTarget::Document(document) = target {
+            let Some(record) = state.documents.get(document) else {
+                return PublishDecision::DocumentClosed;
+            };
+            if matches!(record.state, DocumentState::Closed { .. }) {
+                return PublishDecision::DocumentClosed;
+            }
+        }
+        if !latest || result.stamp.workspace != self.id || result.stamp.revision != state.revision {
+            return PublishDecision::Stale;
+        }
+        // Keep the workspace read lock through verification: document/config mutations cannot
+        // race the decision. External filesystem atomicity is bounded by the provider contract.
+        for read in result
+            .source_reads
+            .iter()
+            .filter(|read| !read.from_overlay && !read.toolchain)
+        {
+            if cancellation.is_cancellation_requested() {
+                let _ = cancellation.checkpoint();
+                return PublishDecision::Cancelled;
+            }
+            match DiskSourceProvider.read(&SourceLocator::Disk(read.path.clone())) {
+                Ok(content) if content.fingerprint == read.fingerprint => {}
+                Ok(_) => return PublishDecision::SourceChanged,
+                Err(error) => return PublishDecision::ProviderError(error.to_string()),
+            }
+        }
+        PublishDecision::Current
+    }
 }
 
 /// Complete identity/revision label for one immutable snapshot.
@@ -603,6 +648,12 @@ pub(crate) struct SnapshotDocument {
 }
 
 impl AnalysisSnapshot {
+    /// Approximate immutable overlay bytes retained by this snapshot.
+    #[must_use]
+    pub fn retained_text_bytes(&self) -> usize {
+        self.overlays.values().map(|entry| entry.text.len()).sum()
+    }
+
     /// Captured analysis configuration.
     #[must_use]
     pub fn config(&self) -> &AnalysisConfig {
@@ -709,6 +760,8 @@ pub enum PublishDecision {
     SourceChanged,
     /// A disk source can no longer be verified.
     ProviderError(String),
+    /// Cooperative cancellation was observed before publication.
+    Cancelled,
 }
 
 /// Provider composition used by editor snapshots. It never assigns semantic identities.

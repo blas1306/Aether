@@ -14,8 +14,9 @@ use aether_frontend::{
 use aether_package::ProjectKind;
 
 use crate::{
-    AnalysisSnapshot, AssignedSource, ContentFingerprint, DocumentId, DocumentVersion, ProjectId,
-    SnapshotStamp, SourceProvenance, discover_catalog_with_provider_traced,
+    AnalysisSnapshot, AssignedSource, CancellationToken, ContentFingerprint, DocumentId,
+    DocumentVersion, ProjectId, SnapshotSourceRead, SnapshotStamp, SourceProvenance,
+    SourceProvider, SourceProviderError, discover_catalog_with_provider_traced,
 };
 
 /// Stable identity used to present one exact snapshot source to an editor.
@@ -344,7 +345,7 @@ fn adapt_diagnostics(
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct RequestId(pub u64);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum AnalysisTarget {
     Document(DocumentId),
     Project(ProjectId),
@@ -359,6 +360,7 @@ pub struct AnalysisRequest {
     pub id: RequestId,
     pub target: AnalysisTarget,
     pub snapshot: AnalysisSnapshot,
+    pub cancellation: CancellationToken,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -373,6 +375,7 @@ pub enum AnalysisStage {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PartialReason {
     FrontendStopped,
+    Cancelled,
     MissingInput,
     InternalFailure,
 }
@@ -401,6 +404,9 @@ pub struct AnalysisState {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AnalysisMeasurements {
+    pub queue_ns: u128,
+    pub analysis_ns: u128,
+    pub cancellation_observation_ns: Option<u128>,
     pub discovery_ns: u128,
     pub declarations_ns: u128,
     pub semantic_ns: u128,
@@ -429,10 +435,12 @@ pub struct AnalysisResult {
     pub semantic: Option<Arc<SemanticSnapshot>>,
     pub measurements: AnalysisMeasurements,
     pub adaptation_failures: Vec<AdaptationFailure>,
+    pub(crate) source_reads: Arc<[SnapshotSourceRead]>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AnalysisFailure {
+    Cancelled,
     UnknownTarget,
     ClosedDocument(DocumentId),
     VirtualDocument(DocumentId),
@@ -453,6 +461,7 @@ pub struct CanonicalAnalyzer;
 impl CanonicalAnalyzer {
     #[allow(clippy::too_many_lines)]
     pub fn analyze(&self, request: AnalysisRequest) -> Result<AnalysisResult, AnalysisFailure> {
+        request.cancellation.checkpoint()?;
         let (entry, project_id) = match &request.target {
             AnalysisTarget::Document(document) => {
                 let Some((path, project, open)) = request.snapshot.document_target(*document)
@@ -485,8 +494,13 @@ impl CanonicalAnalyzer {
             })
             .transpose()?;
         let library = project.is_some_and(|plan| plan.kind() == ProjectKind::Library);
-        let provider = request.snapshot.provider();
+        request.cancellation.checkpoint()?;
+        let provider = CancellableProvider {
+            inner: request.snapshot.provider(),
+            cancellation: request.cancellation.clone(),
+        };
         let mut assigned = Vec::new();
+        request.cancellation.checkpoint()?;
         let discovery_started = Instant::now();
         let session =
             match discover_catalog_with_provider_traced(&entry, project, &provider, &mut |source| {
@@ -494,18 +508,29 @@ impl CanonicalAnalyzer {
             }) {
                 Ok(session) => session,
                 Err(diagnostics) => {
+                    request.cancellation.checkpoint()?;
                     let measurements = AnalysisMeasurements {
                         discovery_ns: discovery_started.elapsed().as_nanos(),
                         ..AnalysisMeasurements::default()
                     };
-                    return partial_discovery_result(request, diagnostics, &assigned, measurements);
+                    let reads = provider.inner.source_inventory().into();
+                    return partial_discovery_result(
+                        request,
+                        diagnostics,
+                        &assigned,
+                        measurements,
+                        reads,
+                    );
                 }
             };
+        request.cancellation.checkpoint()?;
         let mut measurements = AnalysisMeasurements {
             discovery_ns: discovery_started.elapsed().as_nanos(),
             ..AnalysisMeasurements::default()
         };
         let sources = Arc::new(table_from_session(&session)?);
+        let source_reads = provider.inner.source_inventory().into();
+        request.cancellation.checkpoint()?;
         let declarations_started = Instant::now();
         let declared = if library {
             collect_library_program_signatures(session.into_parsed_program())
@@ -513,6 +538,7 @@ impl CanonicalAnalyzer {
             collect_program_signatures(session.into_parsed_program())
         };
         measurements.declarations_ns = declarations_started.elapsed().as_nanos();
+        request.cancellation.checkpoint()?;
         let declared = match declared {
             Ok(declared) => declared,
             Err(diagnostics) => {
@@ -522,12 +548,15 @@ impl CanonicalAnalyzer {
                     diagnostics,
                     AnalysisStage::Declarations,
                     measurements,
+                    Arc::clone(&source_reads),
                 );
             }
         };
         let semantic_started = Instant::now();
+        request.cancellation.checkpoint()?;
         let hir = analyze_bodies_for_target(declared, TargetProperties::LINUX_X86_64);
         measurements.semantic_ns = semantic_started.elapsed().as_nanos();
+        request.cancellation.checkpoint()?;
         let hir = match hir {
             Ok(hir) => hir,
             Err(diagnostics) => {
@@ -537,10 +566,12 @@ impl CanonicalAnalyzer {
                     diagnostics,
                     AnalysisStage::Semantic,
                     measurements,
+                    Arc::clone(&source_reads),
                 );
             }
         };
         let verification_started = Instant::now();
+        request.cancellation.checkpoint()?;
         if let Err(diagnostics) = verify_hir(&hir) {
             measurements.verification_ns = verification_started.elapsed().as_nanos();
             return frontend_error_result(
@@ -549,9 +580,11 @@ impl CanonicalAnalyzer {
                 diagnostics,
                 AnalysisStage::Semantic,
                 measurements,
+                Arc::clone(&source_reads),
             );
         }
         measurements.verification_ns = verification_started.elapsed().as_nanos();
+        request.cancellation.checkpoint()?;
         Ok(AnalysisResult {
             request: request.id,
             stamp: request.snapshot.stamp,
@@ -563,6 +596,7 @@ impl CanonicalAnalyzer {
             semantic: Some(Arc::new(SemanticSnapshot { sources, hir })),
             measurements,
             adaptation_failures: Vec::new(),
+            source_reads,
         })
     }
 }
@@ -573,7 +607,9 @@ fn frontend_error_result(
     diagnostics: Vec<Diagnostic>,
     reached: AnalysisStage,
     measurements: AnalysisMeasurements,
+    source_reads: Arc<[SnapshotSourceRead]>,
 ) -> Result<AnalysisResult, AnalysisFailure> {
+    request.cancellation.checkpoint()?;
     let mut adaptation_failures = Vec::new();
     let diagnostics = adapt_diagnostics(diagnostics, sources, &mut adaptation_failures)?;
     Ok(AnalysisResult {
@@ -590,6 +626,7 @@ fn frontend_error_result(
         semantic: None,
         measurements,
         adaptation_failures,
+        source_reads,
     })
 }
 
@@ -598,6 +635,7 @@ fn partial_discovery_result(
     diagnostics: Vec<Diagnostic>,
     assigned: &[AssignedSource],
     measurements: AnalysisMeasurements,
+    source_reads: Arc<[SnapshotSourceRead]>,
 ) -> Result<AnalysisResult, AnalysisFailure> {
     let mut table = SourceTable::default();
     for diagnostic in &diagnostics {
@@ -635,7 +673,41 @@ fn partial_discovery_result(
             Phase::Parse | Phase::Semantic => AnalysisStage::Parse,
             _ => AnalysisStage::Input,
         });
-    frontend_error_result(request, &table, diagnostics, reached, measurements)
+    frontend_error_result(
+        request,
+        &table,
+        diagnostics,
+        reached,
+        measurements,
+        source_reads,
+    )
+}
+
+struct CancellableProvider<P> {
+    inner: P,
+    cancellation: CancellationToken,
+}
+
+impl<P: SourceProvider> SourceProvider for CancellableProvider<P> {
+    fn enumerate(
+        &self,
+        scope: &crate::SourceScope,
+    ) -> Result<Vec<crate::SourceDescriptor>, SourceProviderError> {
+        self.cancellation.provider_checkpoint()?;
+        let result = self.inner.enumerate(scope);
+        self.cancellation.provider_checkpoint()?;
+        result
+    }
+
+    fn read(
+        &self,
+        locator: &crate::SourceLocator,
+    ) -> Result<crate::SourceContent, SourceProviderError> {
+        self.cancellation.provider_checkpoint()?;
+        let result = self.inner.read(locator);
+        self.cancellation.provider_checkpoint()?;
+        result
+    }
 }
 
 #[cfg(test)]
@@ -643,6 +715,8 @@ mod tests {
     use super::*;
     use std::fs;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    use sha2::Digest;
 
     use crate::{DocumentLocator, EditorWorkspace, OpenDocument};
 
@@ -789,6 +863,49 @@ mod tests {
     }
 
     #[test]
+    fn cancellation_is_observed_at_the_provider_boundary() {
+        struct CancellingProvider(CancellationToken);
+
+        impl SourceProvider for CancellingProvider {
+            fn enumerate(
+                &self,
+                _scope: &crate::SourceScope,
+            ) -> Result<Vec<crate::SourceDescriptor>, SourceProviderError> {
+                Ok(Vec::new())
+            }
+
+            fn read(
+                &self,
+                _locator: &crate::SourceLocator,
+            ) -> Result<crate::SourceContent, SourceProviderError> {
+                self.0.cancel();
+                let text: Arc<str> = Arc::from("int main(){return 0;}");
+                Ok(crate::SourceContent {
+                    fingerprint: ContentFingerprint(sha2::Sha256::digest(text.as_bytes()).into()),
+                    text,
+                    provenance: SourceProvenance::Disk {
+                        canonical_path: PathBuf::from("main.ae"),
+                        fingerprint: ContentFingerprint([0; 32]),
+                    },
+                })
+            }
+        }
+
+        let token = CancellationToken::new();
+        let provider = CancellableProvider {
+            inner: CancellingProvider(token.clone()),
+            cancellation: token.clone(),
+        };
+        assert!(
+            provider
+                .read(&crate::SourceLocator::Disk(PathBuf::from("main.ae")))
+                .is_err()
+        );
+        assert!(token.is_cancellation_requested());
+        assert!(token.is_cancellation_observed());
+    }
+
+    #[test]
     fn analyzer_qualifies_only_verified_frontend_as_complete_valid() {
         let directory = TestDir::new();
         let entry = directory.0.join("main.ae");
@@ -807,6 +924,7 @@ mod tests {
                 id: RequestId(1),
                 target: AnalysisTarget::Document(document),
                 snapshot: workspace.snapshot(),
+                cancellation: CancellationToken::new(),
             })
             .unwrap();
         assert_eq!(result.state.coverage, AnalysisCoverage::Complete);
@@ -838,6 +956,7 @@ mod tests {
                 id: RequestId(2),
                 target: AnalysisTarget::Document(document),
                 snapshot: workspace.snapshot(),
+                cancellation: CancellationToken::new(),
             })
             .unwrap();
         assert_eq!(result.state.validity, AnalysisValidity::Invalid);
@@ -873,6 +992,7 @@ mod tests {
                 id: RequestId(4),
                 target: AnalysisTarget::Document(document),
                 snapshot: workspace.snapshot(),
+                cancellation: CancellationToken::new(),
             })
             .unwrap();
         assert_eq!(
@@ -902,6 +1022,7 @@ mod tests {
                 id: RequestId(5),
                 target: AnalysisTarget::Document(document),
                 snapshot: workspace.snapshot(),
+                cancellation: CancellationToken::new(),
             })
             .unwrap();
         assert_eq!(
@@ -949,6 +1070,7 @@ mod tests {
                 id: RequestId(3),
                 target: AnalysisTarget::Document(entry_document),
                 snapshot: workspace.snapshot(),
+                cancellation: CancellationToken::new(),
             })
             .unwrap();
         assert_eq!(result.state.validity, AnalysisValidity::Invalid);
