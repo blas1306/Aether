@@ -145,6 +145,61 @@ pub struct SymbolKey {
     pub package: PackageKey,
     pub member: String,
 }
+/// Snapshot-local identity selected by the authoritative frontend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CompilerEntityId {
+    Module(ModuleId),
+    Function(FunctionId),
+    Struct(StructId),
+    Enum(EnumId),
+}
+
+/// Official logical identity, present only where an existing compiler key applies.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum LogicalDeclarationKey {
+    PackageMember(SymbolKey),
+    SourceUnit(SourceUnitKey),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeclarationKind {
+    Function,
+    Struct,
+    Enum,
+}
+
+/// Source-facing declaration fact emitted by declaration collection.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeclarationFact {
+    pub entity: CompilerEntityId,
+    pub source: SourceId,
+    pub module: ModuleId,
+    pub kind: DeclarationKind,
+    pub name: String,
+    pub full_span: Span,
+    pub name_span: Span,
+    pub owner: Option<CompilerEntityId>,
+    pub logical: Option<LogicalDeclarationKey>,
+}
+
+/// Minimal semantic facts owned by one frontend run.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SemanticFacts {
+    declarations: Vec<DeclarationFact>,
+}
+
+impl SemanticFacts {
+    #[must_use]
+    pub fn declarations(&self) -> &[DeclarationFact] {
+        &self.declarations
+    }
+
+    /// Builds an owned fact set. Consumers must validate it against the matching HIR/session.
+    #[must_use]
+    pub fn from_declarations(declarations: Vec<DeclarationFact>) -> Self {
+        Self { declarations }
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedImport {
     pub name: String,
@@ -901,6 +956,7 @@ pub struct DeclaredProgram {
     entry: FunctionId,
     closure_environments: Vec<ClosureEnvironmentInfo>,
     closure_warnings: Vec<ClosureCaptureWarning>,
+    semantic_facts: SemanticFacts,
 }
 impl DeclaredProgram {
     #[must_use]
@@ -956,6 +1012,7 @@ pub struct TypedHir {
     generic_functions: Vec<GenericHirFunction>,
     functions: Vec<HirFunction>,
     closure_environments: Vec<ClosureEnvironmentInfo>,
+    semantic_facts: SemanticFacts,
     entry: crate::InstanceId,
 }
 impl TypedHir {
@@ -990,6 +1047,10 @@ impl TypedHir {
     #[must_use]
     pub fn closure_environments(&self) -> &[ClosureEnvironmentInfo] {
         &self.closure_environments
+    }
+    #[must_use]
+    pub const fn semantic_facts(&self) -> &SemanticFacts {
+        &self.semantic_facts
     }
     #[must_use]
     pub fn instances(&self) -> &[FunctionInstanceInfo] {
@@ -2444,10 +2505,9 @@ pub fn collect_library_program_signatures(
             "<library-analysis>",
             "int main(){return 0;}",
         ))?;
-        program.modules[entry]
-            .ast
-            .functions
-            .push(sentinel.functions[0].clone());
+        let mut sentinel = sentinel.functions[0].clone();
+        sentinel.name_span = None;
+        program.modules[entry].ast.functions.push(sentinel);
     }
     collect_program_signatures_for_kind(program, true)
 }
@@ -3835,9 +3895,94 @@ fn collect_program_signatures_for_kind(
         entry,
         closure_environments: Vec::new(),
         closure_warnings: Vec::new(),
+        semantic_facts: SemanticFacts::default(),
     };
+    declared.semantic_facts = collect_declaration_facts(&declared);
     analyze_closure_captures(&mut declared)?;
     Ok(declared)
+}
+
+fn collect_declaration_facts(declared: &DeclaredProgram) -> SemanticFacts {
+    let owner = |module| Some(CompilerEntityId::Module(module));
+    let source = |module: ModuleId| declared.program.modules[module.0 as usize].info.source;
+    let modules = declared
+        .program
+        .modules
+        .iter()
+        .map(|module| module.info.clone())
+        .collect::<Vec<_>>();
+    let mut declarations = Vec::new();
+    declarations.extend(declared.signatures.iter().filter_map(|signature| {
+        if signature.name.starts_with('$') {
+            return None;
+        }
+        let name_span = declared.program.modules[signature.module.0 as usize]
+            .ast
+            .functions()
+            .iter()
+            .find(|function| function.name == signature.name && function.span == signature.span)?
+            .name_span?;
+        Some(DeclarationFact {
+            entity: CompilerEntityId::Function(signature.id),
+            source: source(signature.module),
+            module: signature.module,
+            kind: DeclarationKind::Function,
+            name: signature.name.clone(),
+            full_span: signature.span,
+            name_span,
+            owner: owner(signature.module),
+            logical: Some(LogicalDeclarationKey::PackageMember(
+                signature.symbol_key(&modules),
+            )),
+        })
+    }));
+    declarations.extend(declared.structs.iter().map(|info| {
+        let declaration = declared.program.modules[info.module.0 as usize]
+            .ast
+            .structs()
+            .iter()
+            .find(|declaration| declaration.name == info.name && declaration.span == info.span)
+            .expect("collected struct retains its source declaration");
+        DeclarationFact {
+            entity: CompilerEntityId::Struct(info.id),
+            source: source(info.module),
+            module: info.module,
+            kind: DeclarationKind::Struct,
+            name: info.name.clone(),
+            full_span: info.span,
+            name_span: declaration.name_span,
+            owner: owner(info.module),
+            logical: None,
+        }
+    }));
+    declarations.extend(declared.enums.iter().map(|info| {
+        let declaration = declared.program.modules[info.module.0 as usize]
+            .ast
+            .enums()
+            .iter()
+            .find(|declaration| declaration.name == info.name && declaration.span == info.span)
+            .expect("collected enum retains its source declaration");
+        DeclarationFact {
+            entity: CompilerEntityId::Enum(info.id),
+            source: source(info.module),
+            module: info.module,
+            kind: DeclarationKind::Enum,
+            name: info.name.clone(),
+            full_span: info.span,
+            name_span: declaration.name_span,
+            owner: owner(info.module),
+            logical: None,
+        }
+    }));
+    declarations.sort_by_key(|fact| {
+        (
+            fact.module,
+            fact.full_span.start,
+            fact.full_span.end,
+            fact.entity,
+        )
+    });
+    SemanticFacts { declarations }
 }
 
 #[derive(Clone)]
@@ -6640,6 +6785,7 @@ pub fn analyze_bodies_for_target(
         generic_functions,
         functions,
         closure_environments: d.closure_environments,
+        semantic_facts: d.semantic_facts,
         entry,
     };
     verify_hir(&hir)?;

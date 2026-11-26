@@ -347,6 +347,7 @@ impl Parser<'_> {
                         span: token.span,
                     },
                     "init".into(),
+                    Some(token.span),
                     token.span,
                 )?;
                 initializer = Some(crate::AstClassMethod {
@@ -361,7 +362,8 @@ impl Parser<'_> {
                 let ty = self.ty()?;
                 let member = self.expect(TokenKind::Identifier, "expected field or method name")?;
                 if self.at(TokenKind::LeftParen) {
-                    let function = self.function_tail(ty, member.lexeme, start)?;
+                    let function =
+                        self.function_tail(ty, member.lexeme, Some(member.span), start)?;
                     methods.push(crate::AstClassMethod {
                         open: method_open,
                         overriding,
@@ -404,9 +406,8 @@ impl Parser<'_> {
 
     fn enum_decl(&mut self) -> Result<AstEnum, Diagnostic> {
         let start = self.expect(TokenKind::KwEnum, "expected `enum`")?.span;
-        let name = self
-            .expect(TokenKind::Identifier, "expected enum name")?
-            .lexeme;
+        let name_token = self.expect(TokenKind::Identifier, "expected enum name")?;
+        let name = name_token.lexeme;
         let generic_parameters = self.generic_parameters()?;
         self.expect(TokenKind::LeftBrace, "expected `{` after enum name")?;
         let mut variants = Vec::new();
@@ -450,6 +451,7 @@ impl Parser<'_> {
             .span;
         Ok(AstEnum {
             name,
+            name_span: name_token.span,
             generic_parameters,
             variants,
             span: start.through(end),
@@ -465,9 +467,8 @@ impl Parser<'_> {
             false
         };
         self.expect(TokenKind::KwStruct, "expected `struct`")?;
-        let name = self
-            .expect(TokenKind::Identifier, "expected struct name")?
-            .lexeme;
+        let name_token = self.expect(TokenKind::Identifier, "expected struct name")?;
+        let name = name_token.lexeme;
         let generic_parameters = self.generic_parameters()?;
         self.expect(TokenKind::LeftBrace, "expected `{` after struct name")?;
         let mut fields = Vec::new();
@@ -489,6 +490,7 @@ impl Parser<'_> {
         Ok(AstStruct {
             public,
             name,
+            name_span: name_token.span,
             generic_parameters,
             fields,
             span: start.through(end.span),
@@ -542,10 +544,8 @@ impl Parser<'_> {
             false
         };
         let return_type = self.ty()?;
-        let name = self
-            .expect(TokenKind::Identifier, "expected function name")?
-            .lexeme;
-        let mut function = self.function_tail(return_type, name, start)?;
+        let name = self.expect(TokenKind::Identifier, "expected function name")?;
+        let mut function = self.function_tail(return_type, name.lexeme, Some(name.span), start)?;
         function.public = public;
         Ok(function)
     }
@@ -554,6 +554,7 @@ impl Parser<'_> {
         &mut self,
         return_type: AstType,
         name: String,
+        name_span: Option<crate::Span>,
         start: crate::Span,
     ) -> Result<AstFunction, Diagnostic> {
         let generic_parameters = self.generic_parameters()?;
@@ -625,6 +626,7 @@ impl Parser<'_> {
             public: false,
             return_type,
             name,
+            name_span,
             generic_parameters,
             parameters,
             span: start.through(body.span),
@@ -1742,6 +1744,7 @@ impl Parser<'_> {
             public: false,
             return_type: void_type,
             name: target.clone(),
+            name_span: None,
             generic_parameters: Vec::new(),
             parameters,
             body: AstBlock {

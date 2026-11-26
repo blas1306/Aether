@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use aether_frontend::{
-    Diagnostic, DiagnosticCategory, Phase, SourceId, SourceUnitKey, Span, TargetProperties,
-    TypedHir, analyze_bodies_for_target, collect_library_program_signatures,
+    Diagnostic, DiagnosticCategory, Phase, SemanticFacts, SourceId, SourceUnitKey, Span,
+    TargetProperties, TypedHir, analyze_bodies_for_target, collect_library_program_signatures,
     collect_program_signatures, verify_hir,
 };
 use aether_package::ProjectKind;
@@ -415,7 +415,9 @@ pub struct AnalysisMeasurements {
 
 #[derive(Debug)]
 pub struct SemanticSnapshot {
+    stamp: SnapshotStamp,
     pub sources: Arc<SourceTable>,
+    facts: Arc<SemanticFacts>,
     hir: TypedHir,
 }
 
@@ -423,6 +425,16 @@ impl SemanticSnapshot {
     #[must_use]
     pub const fn hir(&self) -> &TypedHir {
         &self.hir
+    }
+
+    #[must_use]
+    pub const fn stamp(&self) -> &SnapshotStamp {
+        &self.stamp
+    }
+
+    #[must_use]
+    pub fn facts(&self) -> &SemanticFacts {
+        &self.facts
     }
 }
 
@@ -585,15 +597,22 @@ impl CanonicalAnalyzer {
         }
         measurements.verification_ns = verification_started.elapsed().as_nanos();
         request.cancellation.checkpoint()?;
+        let facts =
+            crate::symbols::validate_declaration_facts(hir.semantic_facts(), &hir, &sources)?;
         Ok(AnalysisResult {
             request: request.id,
-            stamp: request.snapshot.stamp,
+            stamp: request.snapshot.stamp.clone(),
             state: AnalysisState {
                 coverage: AnalysisCoverage::Complete,
                 validity: AnalysisValidity::Valid,
             },
             diagnostics: Vec::new(),
-            semantic: Some(Arc::new(SemanticSnapshot { sources, hir })),
+            semantic: Some(Arc::new(SemanticSnapshot {
+                stamp: request.snapshot.stamp,
+                sources,
+                facts,
+                hir,
+            })),
             measurements,
             adaptation_failures: Vec::new(),
             source_reads,
@@ -931,9 +950,166 @@ mod tests {
         assert_eq!(result.state.validity, AnalysisValidity::Valid);
         let semantic = result.semantic.unwrap();
         assert_eq!(semantic.sources.iter().count(), 1);
+        assert_eq!(semantic.stamp(), &workspace.snapshot().stamp);
+        assert_eq!(
+            semantic
+                .facts()
+                .declarations()
+                .iter()
+                .map(|fact| fact.name.as_str())
+                .collect::<Vec<_>>(),
+            ["main"]
+        );
         assert_eq!(
             semantic.sources.get(SourceId(0)).unwrap().identity,
             SourceIdentity::Document(document)
+        );
+    }
+
+    #[test]
+    fn semantic_snapshot_maps_unicode_prefix_and_rejects_corrupt_facts() {
+        let directory = TestDir::new();
+        let entry = directory.0.join("main.ae");
+        let text: Arc<str> = Arc::from("// é e\u{301} 😀\r\nint main(){return 0;}");
+        fs::write(&entry, text.as_ref()).unwrap();
+        let workspace = EditorWorkspace::new(&directory.0).unwrap();
+        let document = workspace
+            .open(OpenDocument {
+                locator: DocumentLocator::file(&entry).unwrap(),
+                text: Arc::clone(&text),
+                client_version: Some(7),
+                project: None,
+            })
+            .unwrap();
+        let result = CanonicalAnalyzer
+            .analyze(AnalysisRequest {
+                id: RequestId(70),
+                target: AnalysisTarget::Document(document),
+                snapshot: workspace.snapshot(),
+                cancellation: CancellationToken::new(),
+            })
+            .unwrap();
+        let semantic = result.semantic.unwrap();
+        let fact = &semantic.facts().declarations()[0];
+        let mapped = semantic.sources.get(fact.source).unwrap();
+        assert_eq!(
+            mapped.line_index.span_to_range(fact.name_span).unwrap(),
+            EditorRange {
+                start: EditorPosition {
+                    line: 1,
+                    character: 4,
+                },
+                end: EditorPosition {
+                    line: 1,
+                    character: 8,
+                },
+            }
+        );
+
+        let mut declarations = semantic.facts().declarations().to_vec();
+        declarations[0].name_span.end = text.len() + 1;
+        let corrupt = SemanticFacts::from_declarations(declarations);
+        assert!(matches!(
+            crate::symbols::validate_declaration_facts(
+                &corrupt,
+                semantic.hir(),
+                &semantic.sources,
+            ),
+            Err(AnalysisFailure::Internal(message))
+                if message.contains("name span is not contained")
+        ));
+    }
+
+    #[test]
+    fn dense_declaration_ids_are_scoped_by_snapshot_stamp() {
+        let directory = TestDir::new();
+        let entry = directory.0.join("main.ae");
+        fs::write(&entry, "int main(){return 0;}").unwrap();
+        let workspace = EditorWorkspace::new(&directory.0).unwrap();
+        let document = workspace
+            .open(OpenDocument {
+                locator: DocumentLocator::file(&entry).unwrap(),
+                text: Arc::from("int main(){return 0;}"),
+                client_version: Some(1),
+                project: None,
+            })
+            .unwrap();
+        let first = CanonicalAnalyzer
+            .analyze(AnalysisRequest {
+                id: RequestId(72),
+                target: AnalysisTarget::Document(document),
+                snapshot: workspace.snapshot(),
+                cancellation: CancellationToken::new(),
+            })
+            .unwrap()
+            .semantic
+            .unwrap();
+        let first_main = first.facts().declarations()[0].entity;
+
+        workspace
+            .change(crate::ChangeDocument {
+                document,
+                text: Arc::from("int main(){return 1;}"),
+                client_version: Some(2),
+            })
+            .unwrap();
+        let second = CanonicalAnalyzer
+            .analyze(AnalysisRequest {
+                id: RequestId(73),
+                target: AnalysisTarget::Document(document),
+                snapshot: workspace.snapshot(),
+                cancellation: CancellationToken::new(),
+            })
+            .unwrap()
+            .semantic
+            .unwrap();
+        let second_main = second.facts().declarations()[0].entity;
+
+        assert_ne!(first.stamp(), second.stamp());
+        assert_eq!(first_main, second_main);
+        assert!(!Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn rejected_declarations_never_reach_semantic_facts() {
+        let directory = TestDir::new();
+        let entry = directory.0.join("main.ae");
+        let text: Arc<str> = Arc::from(
+            "int duplicate(){return 1;} int duplicate(){return 2;} int main(){return 0;}",
+        );
+        fs::write(&entry, text.as_ref()).unwrap();
+        let workspace = EditorWorkspace::new(&directory.0).unwrap();
+        let document = workspace
+            .open(OpenDocument {
+                locator: DocumentLocator::file(&entry).unwrap(),
+                text,
+                client_version: Some(1),
+                project: None,
+            })
+            .unwrap();
+        let result = CanonicalAnalyzer
+            .analyze(AnalysisRequest {
+                id: RequestId(74),
+                target: AnalysisTarget::Document(document),
+                snapshot: workspace.snapshot(),
+                cancellation: CancellationToken::new(),
+            })
+            .unwrap();
+
+        assert_eq!(result.state.validity, AnalysisValidity::Invalid);
+        assert_eq!(
+            result.state.coverage,
+            AnalysisCoverage::Partial {
+                reached: AnalysisStage::Declarations,
+                reason: PartialReason::FrontendStopped,
+            }
+        );
+        assert!(result.semantic.is_none());
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code.as_ref() == "E0211")
         );
     }
 
@@ -1077,5 +1253,57 @@ mod tests {
         assert!(result.diagnostics.iter().any(
             |diagnostic| diagnostic.source == Some(SourceIdentity::Document(imported_document))
         ));
+    }
+
+    #[test]
+    fn facts_include_imported_overlay_declarations_with_distinct_module_identity() {
+        let directory = TestDir::new();
+        let entry = directory.0.join("main.ae");
+        let imported = directory.0.join("alpha.ae");
+        let entry_text: Arc<str> = Arc::from(
+            "import Alpha; int value(){return 2;} int main(){return Alpha.value()+value();}",
+        );
+        let imported_text: Arc<str> = Arc::from("package Alpha; public int value(){return 1;}");
+        fs::write(&entry, entry_text.as_ref()).unwrap();
+        fs::write(&imported, imported_text.as_ref()).unwrap();
+        let workspace = EditorWorkspace::new(&directory.0).unwrap();
+        let entry_document = workspace
+            .open(OpenDocument {
+                locator: DocumentLocator::file(&entry).unwrap(),
+                text: Arc::clone(&entry_text),
+                client_version: Some(1),
+                project: None,
+            })
+            .unwrap();
+        let imported_document = workspace
+            .open(OpenDocument {
+                locator: DocumentLocator::file(&imported).unwrap(),
+                text: Arc::clone(&imported_text),
+                client_version: Some(4),
+                project: None,
+            })
+            .unwrap();
+        let result = CanonicalAnalyzer
+            .analyze(AnalysisRequest {
+                id: RequestId(71),
+                target: AnalysisTarget::Document(entry_document),
+                snapshot: workspace.snapshot(),
+                cancellation: CancellationToken::new(),
+            })
+            .unwrap();
+        let semantic = result.semantic.unwrap();
+        let values = semantic
+            .facts()
+            .declarations()
+            .iter()
+            .filter(|fact| fact.name == "value")
+            .collect::<Vec<_>>();
+        assert_eq!(values.len(), 2);
+        assert_ne!(values[0].module, values[1].module);
+        assert_ne!(values[0].entity, values[1].entity);
+        assert!(values.iter().any(|fact| {
+            semantic.sources.get(fact.source).unwrap().identity
+                == SourceIdentity::Document(imported_document)
+        }));
     }
 }

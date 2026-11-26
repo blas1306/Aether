@@ -17,6 +17,7 @@ use sha2::{Digest, Sha256};
 mod diagnostics;
 mod editor;
 mod lifecycle;
+mod symbols;
 
 pub use diagnostics::{
     AdaptationFailure, AnalysisCoverage, AnalysisFailure, AnalysisMeasurements, AnalysisRequest,

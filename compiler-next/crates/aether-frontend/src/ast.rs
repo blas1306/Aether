@@ -116,6 +116,7 @@ pub struct AstPackage {
 #[allow(missing_docs)]
 pub struct AstEnum {
     pub name: String,
+    pub name_span: Span,
     pub generic_parameters: Vec<AstGenericParam>,
     pub variants: Vec<AstVariant>,
     pub span: Span,
@@ -137,6 +138,8 @@ pub struct AstStruct {
     pub public: bool,
     /// Declared nominal name.
     pub name: String,
+    /// Exact identifier-token provenance.
+    pub name_span: Span,
     /// Unconstrained type parameters in declaration order.
     pub generic_parameters: Vec<AstGenericParam>,
     /// Fields in semantically significant declaration order.
@@ -187,6 +190,8 @@ pub struct AstFunction {
     pub return_type: AstType,
     /// Written function name.
     pub name: String,
+    /// Exact identifier-token provenance, absent only for compiler-generated functions.
+    pub name_span: Option<Span>,
     /// Unconstrained type parameters in declaration order.
     pub generic_parameters: Vec<AstGenericParam>,
     /// Scalar parameters in source order.
