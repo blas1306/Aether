@@ -3,6 +3,7 @@ members = [
     "crates/aether-package",
     "crates/aether-frontend",
     "crates/aether-analysis",
+    "crates/aether-lsp",
     "crates/aether-middle",
     "crates/aether-backend-llvm",
     "crates/aether-driver",

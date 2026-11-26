@@ -1,0 +1,18 @@
+[package]
+name = "aether-lsp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+aether-analysis = { path = "../aether-analysis" }
+serde_json = "1"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "aether-lsp"
+path = "src/main.rs"

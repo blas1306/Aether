@@ -49,6 +49,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "aether-lsp"
+version = "0.1.0"
+dependencies = [
+ "aether-analysis",
+ "serde_json",
+]
+
+[[package]]
 name = "aether-middle"
 version = "0.1.0"
 dependencies = [

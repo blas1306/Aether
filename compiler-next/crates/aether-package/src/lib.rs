@@ -476,6 +476,25 @@ pub fn resolve(
     Resolver::new(registry).resolve_root(root)
 }
 
+/// Loads and validates an existing lock without taking a transaction lock, writing files, or
+/// creating a new resolution. Editor integrations use this boundary to remain strictly read-only.
+pub fn load_locked(
+    root: &Path,
+    registry: Option<&dyn RegistryProvider>,
+) -> Result<ResolvedGraph, String> {
+    let root = canonical_directory(root, "project root")?;
+    let lock_path = root.join(LOCK_FILE);
+    if !lock_path.is_file() {
+        return Err(format!(
+            "project lockfile `{}` is required for read-only analysis",
+            lock_path.display()
+        ));
+    }
+    let lock = read_lock(&lock_path)?;
+    validate_locked(&root, &lock, registry)
+        .map_err(|error| format!("{error}; run `aether update` outside the editor"))
+}
+
 /// Reuses and validates an existing lock, or creates one atomically when absent.
 pub fn sync(root: &Path, registry: Option<&dyn RegistryProvider>) -> Result<ResolvedGraph, String> {
     let root = canonical_directory(root, "project root")?;

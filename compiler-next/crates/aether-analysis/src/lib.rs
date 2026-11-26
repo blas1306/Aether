@@ -1209,6 +1209,18 @@ pub struct ProjectPlan {
 }
 
 impl ProjectPlan {
+    /// Loads the existing package lock through the package authority without network or writes.
+    pub fn load_read_only(root: &Path) -> Result<Self, String> {
+        let graph = aether_package::load_locked(root, None)?;
+        Self::resolved(graph.root, &graph.packages).map_err(|diagnostics| {
+            diagnostics
+                .into_iter()
+                .map(|diagnostic| diagnostic.message)
+                .collect::<Vec<_>>()
+                .join("; ")
+        })
+    }
+
     /// Revalidates canonical paths and critical V1 project invariants.
     pub fn new(
         root: impl AsRef<Path>,
