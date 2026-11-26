@@ -246,6 +246,89 @@ fn document_symbols_are_hierarchical_exact_and_follow_overlays_and_disk() {
 }
 
 #[test]
+fn document_symbols_recover_after_invalid_blank_line_enum_and_rapid_edits() {
+    let directory = TestDirectory::new();
+    let initial = "struct NewtonResultado{double raiz;double res;int iter;}\nint main(){return 0;}";
+    let source = directory.write("main.ae", initial);
+    let uri = file_uri(&source);
+    let mut client = Client::start();
+    client.initialize(&directory.0);
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+            "uri": uri, "languageId": "aether", "version": 1, "text": initial
+        }}
+    }));
+
+    let opened = client.document_symbols(44, &uri);
+    assert_eq!(opened["result"][0]["name"], "NewtonResultado");
+    assert_eq!(opened["result"][0]["children"].as_array().unwrap().len(), 3);
+    assert_eq!(opened["result"][1]["name"], "main");
+
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+            "textDocument": {"uri": uri, "version": 2},
+            "contentChanges": [{"text": "struct NewtonResultado{"}]
+        }
+    }));
+    let invalid = client.document_symbols(45, &uri);
+    assert_eq!(invalid["error"]["code"], -32803);
+
+    let blank_lines =
+        "\n\nstruct NewtonResultado{double raiz;double res;int iter;}\n\nint main(){return 0;}\n";
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+            "textDocument": {"uri": uri, "version": 3},
+            "contentChanges": [{"text": blank_lines}]
+        }
+    }));
+    let after_blank_lines = client.document_symbols(46, &uri);
+    assert_eq!(after_blank_lines["result"][0]["name"], "NewtonResultado");
+    assert_eq!(after_blank_lines["result"][1]["name"], "main");
+
+    let with_enum = "\n\nstruct NewtonResultado{double raiz;double res;int iter;}\n\nenum Color{Rojo,Verde,Azul}\n\nint main(){return 0;}\n";
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+            "textDocument": {"uri": uri, "version": 4},
+            "contentChanges": [{"text": with_enum}]
+        }
+    }));
+    let after_enum = client.document_symbols(47, &uri);
+    assert_eq!(after_enum["result"][1]["name"], "Color");
+    assert_eq!(
+        after_enum["result"][1]["children"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    assert_eq!(after_enum["result"][2]["name"], "main");
+
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+            "textDocument": {"uri": uri, "version": 5},
+            "contentChanges": [{"text": "int broken("}]
+        }
+    }));
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+            "textDocument": {"uri": uri, "version": 6},
+            "contentChanges": [{"text": "int helper(){return 1;}\nint main(){return helper();}"}]
+        }
+    }));
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+            "textDocument": {"uri": uri, "version": 7},
+            "contentChanges": [{"text": with_enum}]
+        }
+    }));
+    let after_rapid_edits = client.document_symbols(48, &uri);
+    assert_eq!(after_rapid_edits["result"][0]["name"], "NewtonResultado");
+    assert_eq!(after_rapid_edits["result"][1]["name"], "Color");
+    assert_eq!(after_rapid_edits["result"][2]["name"], "main");
+    client.shutdown();
+}
+
+#[test]
 fn document_symbols_map_classes_interfaces_and_explicit_members_only() {
     let directory = TestDirectory::new();
     let text = "interface I{int f();}open class A:I{Buffer<int> value;public init(Buffer<int> value){this.value=value;}public open int f(){return 1;}}class B:A{Buffer<int> value2;public init(Buffer<int> value,Buffer<int> value2):base(value){this.value2=value2;}public override int f(){return 7;}}int main(){B b=B(Buffer<int>(2,1),Buffer<int>(2,2));I i=b;return i.f();}";
@@ -366,6 +449,61 @@ fn document_symbol_requests_are_cancellable_and_stale_results_are_errors() {
     client.send(&json!({"jsonrpc": "2.0", "method": "exit"}));
     drop(client.input);
     assert!(client.child.wait().unwrap().success());
+}
+
+#[test]
+fn cancelling_an_older_document_symbol_request_does_not_cancel_its_successor() {
+    let directory = TestDirectory::new();
+    let mut large = String::new();
+    for index in 0..4_000 {
+        writeln!(large, "int f{index}(){{return {index};}}").unwrap();
+    }
+    large.push_str("int main(){return 0;}");
+    let source = directory.write("main.ae", &large);
+    let uri = file_uri(&source);
+    let mut client = Client::start();
+    client.initialize(&directory.0);
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+            "uri": uri, "languageId": "aether", "version": 1, "text": large
+        }}
+    }));
+    client.send(&json!({
+        "jsonrpc": "2.0", "id": 80, "method": "textDocument/documentSymbol",
+        "params": {"textDocument": {"uri": uri}}
+    }));
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": 80}
+    }));
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+            "textDocument": {"uri": uri, "version": 2},
+            "contentChanges": [{"text": "enum Color{Rojo,Verde,Azul}\nint main(){return 0;}"}]
+        }
+    }));
+    client.send(&json!({
+        "jsonrpc": "2.0", "id": 81, "method": "textDocument/documentSymbol",
+        "params": {"textDocument": {"uri": uri}}
+    }));
+
+    let mut cancelled = false;
+    let mut succeeded = false;
+    while !cancelled || !succeeded {
+        let message = client.receive();
+        if message["id"] == 80 {
+            assert_eq!(message["error"]["code"], -32800);
+            cancelled = true;
+        } else if message["id"] == 81 {
+            let symbols = message["result"]
+                .as_array()
+                .unwrap_or_else(|| panic!("successor response was not successful: {message}"));
+            assert_eq!(symbols.len(), 2);
+            assert_eq!(message["result"][0]["name"], "Color");
+            assert_eq!(message["result"][1]["name"], "main");
+            succeeded = true;
+        }
+    }
+    client.shutdown();
 }
 
 fn file_uri(path: &Path) -> String {
