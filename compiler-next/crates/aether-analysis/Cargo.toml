@@ -1,0 +1,15 @@
+[package]
+name = "aether-analysis"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+aether-package = { path = "../aether-package" }
+aether-frontend = { path = "../aether-frontend" }
+sha2 = "0.10"
+
+[lints]
+workspace = true
