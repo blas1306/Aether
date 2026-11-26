@@ -180,9 +180,8 @@ impl Parser<'_> {
             self.advance();
         }
         self.advance();
-        let name = self
-            .expect(TokenKind::Identifier, "expected interface name")?
-            .lexeme;
+        let name_token = self.expect(TokenKind::Identifier, "expected interface name")?;
+        let name = name_token.lexeme;
         self.expect(
             TokenKind::LeftBrace,
             "flat interface requires `{`; generics and inheritance are unavailable",
@@ -211,9 +210,8 @@ impl Parser<'_> {
                 ));
             }
             let result = self.ty()?;
-            let method = self
-                .expect(TokenKind::Identifier, "expected requirement name")?
-                .lexeme;
+            let method_token = self.expect(TokenKind::Identifier, "expected requirement name")?;
+            let method = method_token.lexeme;
             self.expect(
                 TokenKind::LeftParen,
                 "interface members must be non-generic method requirements",
@@ -250,21 +248,23 @@ impl Parser<'_> {
                 }
             }
             self.expect(TokenKind::RightParen, "expected `)`")?;
-            self.expect(
+            let end = self.expect(
                 TokenKind::Semicolon,
                 "interface requirement must end with `;`; bodies are unavailable",
             )?;
             requirements.push(crate::AstRequirement {
                 name: method,
+                name_span: method_token.span,
                 mutable,
                 parameters,
                 result,
-                span,
+                span: span.through(end.span),
             });
         }
         let end = self.expect(TokenKind::RightBrace, "expected `}`")?.span;
         Ok(crate::AstInterface {
             name,
+            name_span: name_token.span,
             public,
             requirements,
             span: start.through(end),
@@ -288,9 +288,8 @@ impl Parser<'_> {
             return Err(self.error("E0400", "expected concrete class declaration"));
         }
         self.advance();
-        let name = self
-            .expect(TokenKind::Identifier, "expected class name")?
-            .lexeme;
+        let name_token = self.expect(TokenKind::Identifier, "expected class name")?;
+        let name = name_token.lexeme;
         let mut relations = Vec::new();
         if self.consume(TokenKind::Colon).is_some() {
             loop {
@@ -383,6 +382,7 @@ impl Parser<'_> {
                         AstField {
                             ty,
                             name: member.lexeme,
+                            name_span: member.span,
                             span: start.through(end),
                         },
                     ));
@@ -396,6 +396,7 @@ impl Parser<'_> {
             open,
             relations,
             name,
+            name_span: Some(name_token.span),
             public,
             fields,
             methods,
@@ -436,6 +437,7 @@ impl Parser<'_> {
             }
             variants.push(AstVariant {
                 name: variant.lexeme,
+                name_span: variant.span,
                 payloads,
                 span: variant.span.through(end),
             });
@@ -483,6 +485,7 @@ impl Parser<'_> {
             fields.push(AstField {
                 ty,
                 name: field.lexeme,
+                name_span: field.span,
                 span: field_start.through(end.span),
             });
         }

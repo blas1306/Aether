@@ -40,12 +40,9 @@ double ddf(double x) {
 int main() {
     NewtonResultado nr = NR4(f, df, ddf, 1, 1e-8, 100);
 
-    println("x = ");
-    println(nr.raiz);
-    println("res = ");
-    println(nr.res);
-    println("iter = ");
-    println(nr.iter);
+    println("x = ${nr.raiz}");
+    println("res = ${nr.res}");
+    println("iter = ${nr.iter}");
 
     return 0;
 }

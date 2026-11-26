@@ -128,6 +128,7 @@ pub(super) fn inject_exception_core(program: &mut ParsedProgram) -> Result<(), V
             open: true,
             relations: Vec::new(),
             name: "Exception".into(),
+            name_span: None,
             public: true,
             fields: Vec::new(),
             methods: Vec::new(),

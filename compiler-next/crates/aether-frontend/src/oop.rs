@@ -32,6 +32,7 @@ pub struct AstClass {
     pub open: bool,
     pub relations: Vec<crate::AstType>,
     pub name: String,
+    pub name_span: Option<Span>,
     pub public: bool,
     pub fields: Vec<(bool, AstField)>,
     pub methods: Vec<AstClassMethod>,

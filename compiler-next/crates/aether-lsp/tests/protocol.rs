@@ -1,5 +1,6 @@
 //! End-to-end protocol tests against the real `aether-lsp` executable.
 
+use std::fmt::Write as _;
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -106,6 +107,10 @@ impl Client {
             response["result"]["capabilities"]["textDocumentSync"]["change"],
             1
         );
+        assert_eq!(
+            response["result"]["capabilities"]["documentSymbolProvider"],
+            true
+        );
         assert!(
             response["result"]["capabilities"]
                 .get("hoverProvider")
@@ -139,6 +144,20 @@ impl Client {
         panic!("no matching diagnostics publication");
     }
 
+    fn document_symbols(&mut self, id: i64, uri: &str) -> Value {
+        self.send(&json!({
+            "jsonrpc": "2.0", "id": id, "method": "textDocument/documentSymbol",
+            "params": {"textDocument": {"uri": uri}}
+        }));
+        for _ in 0..30 {
+            let message = self.receive();
+            if message["id"] == id {
+                return message;
+            }
+        }
+        panic!("no matching documentSymbol response");
+    }
+
     fn shutdown(mut self) {
         self.send(&json!({"jsonrpc": "2.0", "id": 99, "method": "shutdown"}));
         loop {
@@ -150,6 +169,203 @@ impl Client {
         drop(self.input);
         assert!(self.child.wait().unwrap().success());
     }
+}
+
+#[test]
+fn document_symbols_are_hierarchical_exact_and_follow_overlays_and_disk() {
+    let directory = TestDirectory::new();
+    let source = directory.write(
+        "main.ae",
+        "// 😀\r\nstruct Box{int value;}\r\nenum Choice{One,Two}\r\nint main(){return 0;}",
+    );
+    let uri = file_uri(&source);
+    let mut client = Client::start();
+    client.initialize(&directory.0);
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+            "uri": uri, "languageId": "aether", "version": 1,
+            "text": "// 😀\r\nstruct Box{int value;}\r\nenum Choice{One,Two}\r\nint main(){return 0;}"
+        }}
+    }));
+
+    let response = client.document_symbols(40, &uri);
+    let symbols = response["result"].as_array().unwrap();
+    assert_eq!(
+        symbols
+            .iter()
+            .map(|symbol| {
+                (
+                    symbol["name"].as_str().unwrap(),
+                    symbol["kind"].as_u64().unwrap(),
+                )
+            })
+            .collect::<Vec<_>>(),
+        [("Box", 23), ("Choice", 10), ("main", 12)]
+    );
+    assert_eq!(
+        symbols[0]["selectionRange"],
+        json!({"start":{"line":1,"character":7},"end":{"line":1,"character":10}})
+    );
+    assert_eq!(
+        symbols[0]["range"],
+        json!({"start":{"line":1,"character":0},"end":{"line":1,"character":22}})
+    );
+    assert_eq!(symbols[0]["children"][0]["name"], "value");
+    assert_eq!(symbols[0]["children"][0]["kind"], 8);
+    assert_eq!(symbols[1]["children"][0]["kind"], 22);
+    assert_eq!(symbols[1]["children"][1]["name"], "Two");
+
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+            "textDocument": {"uri": uri, "version": 2},
+            "contentChanges": [{"text": "\n\nint helper(){return 1;}\nint main(){return helper();}"}]
+        }
+    }));
+    let changed = client.document_symbols(41, &uri);
+    assert_eq!(changed["result"][0]["name"], "helper");
+    assert_eq!(changed["result"][0]["selectionRange"]["start"]["line"], 2);
+    assert_eq!(changed["result"][1]["name"], "main");
+
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+            "textDocument": {"uri": uri, "version": 3},
+            "contentChanges": [{"text": "int broken( { return 0; }"}]
+        }
+    }));
+    let invalid = client.document_symbols(42, &uri);
+    assert_eq!(invalid["error"]["code"], -32803);
+
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didClose",
+        "params": {"textDocument": {"uri": uri}}
+    }));
+    let closed = client.document_symbols(43, &uri);
+    assert_eq!(closed["result"][0]["name"], "Box");
+    assert_eq!(closed["result"][2]["name"], "main");
+    client.shutdown();
+}
+
+#[test]
+fn document_symbols_map_classes_interfaces_and_explicit_members_only() {
+    let directory = TestDirectory::new();
+    let text = "interface I{int f();}open class A:I{Buffer<int> value;public init(Buffer<int> value){this.value=value;}public open int f(){return 1;}}class B:A{Buffer<int> value2;public init(Buffer<int> value,Buffer<int> value2):base(value){this.value2=value2;}public override int f(){return 7;}}int main(){B b=B(Buffer<int>(2,1),Buffer<int>(2,2));I i=b;return i.f();}";
+    let source = directory.write("main.ae", text);
+    let uri = file_uri(&source);
+    let mut client = Client::start();
+    client.initialize(&directory.0);
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+            "uri": uri, "languageId": "aether", "version": 1, "text": text
+        }}
+    }));
+    let response = client.document_symbols(60, &uri);
+    let symbols = response["result"].as_array().unwrap();
+    assert_eq!(symbols[0]["name"], "I");
+    assert_eq!(symbols[0]["kind"], 11);
+    assert_eq!(symbols[0]["children"][0]["name"], "f");
+    assert_eq!(symbols[0]["children"][0]["kind"], 6);
+    assert_eq!(symbols[1]["name"], "A");
+    assert_eq!(symbols[1]["kind"], 5);
+    assert_eq!(
+        symbols[1]["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|symbol| (
+                symbol["name"].as_str().unwrap(),
+                symbol["kind"].as_u64().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        [("value", 8), ("init", 9), ("f", 6)]
+    );
+    assert_eq!(symbols[2]["children"][2]["name"], "f");
+    assert!(
+        symbols
+            .iter()
+            .all(|symbol| !symbol["name"].as_str().unwrap().starts_with('$'))
+    );
+    client.shutdown();
+}
+
+#[test]
+fn document_symbol_requests_are_cancellable_and_stale_results_are_errors() {
+    let directory = TestDirectory::new();
+    let mut large = String::new();
+    for index in 0..4_000 {
+        writeln!(large, "int f{index}(){{return {index};}}").unwrap();
+    }
+    large.push_str("int main(){return 0;}");
+    let source = directory.write("main.ae", &large);
+    let uri = file_uri(&source);
+    let mut client = Client::start();
+    client.initialize(&directory.0);
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+            "uri": uri, "languageId": "aether", "version": 1, "text": large
+        }}
+    }));
+    client.send(&json!({
+        "jsonrpc": "2.0", "id": 70, "method": "textDocument/documentSymbol",
+        "params": {"textDocument": {"uri": uri}}
+    }));
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": 70}
+    }));
+    loop {
+        let message = client.receive();
+        if message["id"] == 70 {
+            assert_eq!(message["error"]["code"], -32800);
+            break;
+        }
+    }
+
+    client.send(&json!({
+        "jsonrpc": "2.0", "id": 71, "method": "textDocument/documentSymbol",
+        "params": {"textDocument": {"uri": uri}}
+    }));
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+            "textDocument": {"uri": uri, "version": 2},
+            "contentChanges": [{"text": "int main(){return 0;}"}]
+        }
+    }));
+    loop {
+        let message = client.receive();
+        if message["id"] == 71 {
+            assert_eq!(message["error"]["code"], -32801);
+            break;
+        }
+    }
+    let current = client.document_symbols(72, &uri);
+    assert_eq!(current["result"].as_array().unwrap().len(), 1);
+    assert_eq!(current["result"][0]["name"], "main");
+
+    client.send(&json!({
+        "jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
+            "textDocument": {"uri": uri, "version": 3},
+            "contentChanges": [{"text": large}]
+        }
+    }));
+    client.send(&json!({
+        "jsonrpc": "2.0", "id": 73, "method": "textDocument/documentSymbol",
+        "params": {"textDocument": {"uri": uri}}
+    }));
+    client.send(&json!({"jsonrpc": "2.0", "id": 99, "method": "shutdown"}));
+    let mut cancelled = false;
+    let mut shutdown = false;
+    while !cancelled || !shutdown {
+        let message = client.receive();
+        if message["id"] == 73 {
+            assert_eq!(message["error"]["code"], -32800);
+            cancelled = true;
+        } else if message["id"] == 99 {
+            assert!(message["result"].is_null());
+            shutdown = true;
+        }
+    }
+    client.send(&json!({"jsonrpc": "2.0", "method": "exit"}));
+    drop(client.input);
+    assert!(client.child.wait().unwrap().success());
 }
 
 fn file_uri(path: &Path) -> String {
@@ -342,6 +558,8 @@ fn project_without_usable_lock_fails_closed_instead_of_using_standalone_rules() 
         assert_eq!(items[0]["code"], "aether.project-unavailable");
         assert_eq!(items[0]["source"], "aether-project");
         assert!(items.iter().all(|item| item["code"] != "E0202"));
+        let symbols = client.document_symbols(10, &uri);
+        assert_eq!(symbols["error"]["code"], -32803);
         client.shutdown();
     }
 }

@@ -16,6 +16,7 @@ pub struct WitnessId(pub u32);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AstInterface {
     pub name: String,
+    pub name_span: Span,
     pub public: bool,
     pub requirements: Vec<AstRequirement>,
     pub span: Span,
@@ -23,6 +24,7 @@ pub struct AstInterface {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AstRequirement {
     pub name: String,
+    pub name_span: Span,
     pub mutable: bool,
     pub parameters: Vec<AstParameter>,
     pub result: AstType,

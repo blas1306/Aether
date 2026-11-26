@@ -152,6 +152,11 @@ pub enum CompilerEntityId {
     Function(FunctionId),
     Struct(StructId),
     Enum(EnumId),
+    Field(FieldId),
+    Variant(VariantId),
+    Class(ClassId),
+    Interface(crate::InterfaceId),
+    Requirement(crate::RequirementId),
 }
 
 /// Official logical identity, present only where an existing compiler key applies.
@@ -166,6 +171,13 @@ pub enum DeclarationKind {
     Function,
     Struct,
     Enum,
+    Field,
+    Variant,
+    Class,
+    Method,
+    Initializer,
+    Interface,
+    Requirement,
 }
 
 /// Source-facing declaration fact emitted by declaration collection.
@@ -3955,6 +3967,27 @@ fn collect_declaration_facts(declared: &DeclaredProgram) -> SemanticFacts {
             logical: None,
         }
     }));
+    for info in &declared.structs {
+        let declaration = declared.program.modules[info.module.0 as usize]
+            .ast
+            .structs()
+            .iter()
+            .find(|declaration| declaration.span == info.span)
+            .expect("collected struct retains its source declaration");
+        declarations.extend(info.fields.iter().zip(&declaration.fields).map(
+            |(field, source_field)| DeclarationFact {
+                entity: CompilerEntityId::Field(field.id),
+                source: source(info.module),
+                module: info.module,
+                kind: DeclarationKind::Field,
+                name: field.name.clone(),
+                full_span: field.span,
+                name_span: source_field.name_span,
+                owner: Some(CompilerEntityId::Struct(info.id)),
+                logical: None,
+            },
+        ));
+    }
     declarations.extend(declared.enums.iter().map(|info| {
         let declaration = declared.program.modules[info.module.0 as usize]
             .ast
@@ -3974,6 +4007,132 @@ fn collect_declaration_facts(declared: &DeclaredProgram) -> SemanticFacts {
             logical: None,
         }
     }));
+    for info in &declared.enums {
+        let declaration = declared.program.modules[info.module.0 as usize]
+            .ast
+            .enums()
+            .iter()
+            .find(|declaration| declaration.span == info.span)
+            .expect("collected enum retains its source declaration");
+        declarations.extend(info.variants.iter().zip(&declaration.variants).map(
+            |(variant, source_variant)| DeclarationFact {
+                entity: CompilerEntityId::Variant(variant.id),
+                source: source(info.module),
+                module: info.module,
+                kind: DeclarationKind::Variant,
+                name: variant.name.clone(),
+                full_span: variant.span,
+                name_span: source_variant.name_span,
+                owner: Some(CompilerEntityId::Enum(info.id)),
+                logical: None,
+            },
+        ));
+    }
+    for class in declared.types.classes() {
+        let declaration = declared.program.modules[class.module.0 as usize]
+            .ast
+            .classes()
+            .iter()
+            .find(|declaration| declaration.span == class.span)
+            .expect("collected class retains its source declaration");
+        let Some(name_span) = declaration.name_span else {
+            continue;
+        };
+        declarations.push(DeclarationFact {
+            entity: CompilerEntityId::Class(class.id),
+            source: source(class.module),
+            module: class.module,
+            kind: DeclarationKind::Class,
+            name: class.name.clone(),
+            full_span: class.span,
+            name_span,
+            owner: owner(class.module),
+            logical: None,
+        });
+        declarations.extend(class.fields.iter().zip(&declaration.fields).map(
+            |(field, (_, source_field))| DeclarationFact {
+                entity: CompilerEntityId::Field(field.id),
+                source: source(class.module),
+                module: class.module,
+                kind: DeclarationKind::Field,
+                name: field.name.clone(),
+                full_span: field.span,
+                name_span: source_field.name_span,
+                owner: Some(CompilerEntityId::Class(class.id)),
+                logical: None,
+            },
+        ));
+        for method in &class.methods {
+            let signature = &declared.signatures[method.function.0 as usize];
+            let source_method = if method.initializing {
+                declaration.initializer.as_ref()
+            } else {
+                declaration
+                    .methods
+                    .iter()
+                    .find(|candidate| candidate.function.span == signature.span)
+            };
+            let Some(source_method) = source_method else {
+                continue;
+            };
+            let Some(method_name_span) = source_method.function.name_span else {
+                continue;
+            };
+            declarations.push(DeclarationFact {
+                entity: CompilerEntityId::Function(method.function),
+                source: source(class.module),
+                module: class.module,
+                kind: if method.initializing {
+                    DeclarationKind::Initializer
+                } else {
+                    DeclarationKind::Method
+                },
+                name: method.name.clone(),
+                full_span: signature.span,
+                name_span: method_name_span,
+                owner: Some(CompilerEntityId::Class(class.id)),
+                logical: Some(LogicalDeclarationKey::PackageMember(
+                    signature.symbol_key(&modules),
+                )),
+            });
+        }
+    }
+    for interface in declared.types.interfaces() {
+        let declaration = declared.program.modules[interface.module.0 as usize]
+            .ast
+            .interfaces()
+            .iter()
+            .find(|declaration| declaration.span == interface.span)
+            .expect("collected interface retains its source declaration");
+        declarations.push(DeclarationFact {
+            entity: CompilerEntityId::Interface(interface.id),
+            source: source(interface.module),
+            module: interface.module,
+            kind: DeclarationKind::Interface,
+            name: interface.name.clone(),
+            full_span: interface.span,
+            name_span: declaration.name_span,
+            owner: owner(interface.module),
+            logical: None,
+        });
+        declarations.extend(
+            interface
+                .requirements
+                .iter()
+                .zip(&declaration.requirements)
+                .map(|(requirement, source_requirement)| DeclarationFact {
+                    entity: CompilerEntityId::Requirement(requirement.id),
+                    source: source(interface.module),
+                    module: interface.module,
+                    kind: DeclarationKind::Requirement,
+                    name: requirement.name.clone(),
+                    full_span: requirement.span,
+                    name_span: source_requirement.name_span,
+                    owner: Some(CompilerEntityId::Interface(interface.id)),
+                    logical: None,
+                }),
+        );
+    }
     declarations.sort_by_key(|fact| {
         (
             fact.module,

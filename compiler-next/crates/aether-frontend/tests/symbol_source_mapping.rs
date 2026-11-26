@@ -8,29 +8,32 @@ fn structural_declarations_keep_exact_name_spans_and_official_identity() {
     let hir = analyze(parse_source(&SourceFile::new("unicode.ae", source)).unwrap()).unwrap();
     let facts = hir.semantic_facts().declarations();
 
-    assert_eq!(facts.len(), 4);
+    assert_eq!(facts.len(), 7);
     assert_eq!(
         facts
             .iter()
             .map(|fact| fact.name.as_str())
             .collect::<Vec<_>>(),
-        ["Box", "Choice", "helper", "main"]
+        ["Box", "value", "Choice", "One", "Two", "helper", "main"]
     );
     for fact in facts {
         assert_eq!(&source[fact.name_span.start..fact.name_span.end], fact.name);
         assert_eq!(fact.full_span.source, fact.name_span.source);
         assert!(fact.full_span.start <= fact.name_span.start);
         assert!(fact.name_span.end <= fact.full_span.end);
-        assert_eq!(fact.owner, Some(CompilerEntityId::Module(fact.module)));
     }
 
     assert!(matches!(facts[0].entity, CompilerEntityId::Struct(_)));
     assert_eq!(facts[0].kind, DeclarationKind::Struct);
-    assert!(matches!(facts[1].entity, CompilerEntityId::Enum(_)));
-    assert_eq!(facts[1].kind, DeclarationKind::Enum);
-    assert!(matches!(facts[2].entity, CompilerEntityId::Function(_)));
-    assert_eq!(facts[2].kind, DeclarationKind::Function);
-    assert!(facts[2].logical.is_some());
+    assert_eq!(facts[1].owner, Some(facts[0].entity));
+    assert!(matches!(facts[1].entity, CompilerEntityId::Field(_)));
+    assert!(matches!(facts[2].entity, CompilerEntityId::Enum(_)));
+    assert_eq!(facts[2].kind, DeclarationKind::Enum);
+    assert_eq!(facts[3].owner, Some(facts[2].entity));
+    assert_eq!(facts[4].owner, Some(facts[2].entity));
+    assert!(matches!(facts[5].entity, CompilerEntityId::Function(_)));
+    assert_eq!(facts[5].kind, DeclarationKind::Function);
+    assert!(facts[5].logical.is_some());
 }
 
 #[test]

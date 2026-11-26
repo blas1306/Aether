@@ -127,6 +127,7 @@ pub struct AstEnum {
 #[allow(missing_docs)]
 pub struct AstVariant {
     pub name: String,
+    pub name_span: Span,
     pub payloads: Vec<AstType>,
     pub span: Span,
 }
@@ -155,6 +156,8 @@ pub struct AstField {
     pub ty: AstType,
     /// Source field name.
     pub name: String,
+    /// Exact identifier-token provenance.
+    pub name_span: Span,
     /// Field declaration provenance.
     pub span: Span,
 }

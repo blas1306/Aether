@@ -1,6 +1,7 @@
 //! Snapshot-local document symbol queries over validated semantic declaration facts.
 #![allow(missing_docs)]
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use aether_frontend::{
@@ -20,6 +21,13 @@ pub enum DocumentSymbolCategory {
     Function,
     Struct,
     Enum,
+    Field,
+    Variant,
+    Class,
+    Method,
+    Initializer,
+    Interface,
+    Requirement,
 }
 
 /// Exact source location of a document symbol in one immutable snapshot.
@@ -74,6 +82,7 @@ pub enum DocumentSymbolResult {
 impl SemanticSnapshot {
     /// Returns structural declarations owned by `source` in deterministic document order.
     #[must_use]
+    #[allow(clippy::too_many_lines)] // Location materialization and hierarchy assembly stay fail-closed together.
     pub fn document_symbols(&self, source: SourceId) -> DocumentSymbolResult {
         let Some(snapshot_source) = self.sources.get(source) else {
             return DocumentSymbolResult::Unavailable(DocumentSymbolsUnavailable::SourceNotFound(
@@ -102,7 +111,8 @@ impl SemanticSnapshot {
             )
         });
 
-        let mut symbols = Vec::with_capacity(facts.len());
+        let mut symbols = BTreeMap::new();
+        let mut owners = BTreeMap::new();
         for fact in facts {
             let Ok(full_range) = snapshot_source.line_index.span_to_range(fact.full_span) else {
                 return DocumentSymbolResult::Unavailable(
@@ -124,31 +134,86 @@ impl SemanticSnapshot {
                     DocumentSymbolsUnavailable::InternalFailure,
                 );
             }
-            symbols.push(DocumentSymbol {
-                entity: fact.entity,
-                snapshot: self.stamp().clone(),
-                name: Arc::from(fact.name.as_str()),
-                category: match fact.kind {
-                    DeclarationKind::Function => DocumentSymbolCategory::Function,
-                    DeclarationKind::Struct => DocumentSymbolCategory::Struct,
-                    DeclarationKind::Enum => DocumentSymbolCategory::Enum,
+            owners.insert(fact.entity, fact.owner);
+            symbols.insert(
+                fact.entity,
+                DocumentSymbol {
+                    entity: fact.entity,
+                    snapshot: self.stamp().clone(),
+                    name: Arc::from(fact.name.as_str()),
+                    category: match fact.kind {
+                        DeclarationKind::Function => DocumentSymbolCategory::Function,
+                        DeclarationKind::Struct => DocumentSymbolCategory::Struct,
+                        DeclarationKind::Enum => DocumentSymbolCategory::Enum,
+                        DeclarationKind::Field => DocumentSymbolCategory::Field,
+                        DeclarationKind::Variant => DocumentSymbolCategory::Variant,
+                        DeclarationKind::Class => DocumentSymbolCategory::Class,
+                        DeclarationKind::Method => DocumentSymbolCategory::Method,
+                        DeclarationKind::Initializer => DocumentSymbolCategory::Initializer,
+                        DeclarationKind::Interface => DocumentSymbolCategory::Interface,
+                        DeclarationKind::Requirement => DocumentSymbolCategory::Requirement,
+                    },
+                    location: DocumentSymbolLocation {
+                        source: snapshot_source.identity.clone(),
+                        source_unit: snapshot_source.unit.clone(),
+                        document_version: snapshot_source.document_version,
+                        full_span: fact.full_span,
+                        selection_span: fact.name_span,
+                        full_range,
+                        selection_range,
+                        editable,
+                    },
+                    module: fact.module,
+                    logical: fact.logical.clone(),
+                    children: Vec::new(),
                 },
-                location: DocumentSymbolLocation {
-                    source: snapshot_source.identity.clone(),
-                    source_unit: snapshot_source.unit.clone(),
-                    document_version: snapshot_source.document_version,
-                    full_span: fact.full_span,
-                    selection_span: fact.name_span,
-                    full_range,
-                    selection_range,
-                    editable,
-                },
-                module: fact.module,
-                logical: fact.logical.clone(),
-                children: Vec::new(),
-            });
+            );
         }
-        DocumentSymbolResult::Available(symbols)
+        let mut children: BTreeMap<CompilerEntityId, Vec<CompilerEntityId>> = BTreeMap::new();
+        let mut roots = Vec::new();
+        for (entity, owner) in owners {
+            match owner {
+                Some(CompilerEntityId::Module(_)) => roots.push(entity),
+                Some(parent) if symbols.contains_key(&parent) => {
+                    children.entry(parent).or_default().push(entity);
+                }
+                _ => {
+                    return DocumentSymbolResult::Unavailable(
+                        DocumentSymbolsUnavailable::InternalFailure,
+                    );
+                }
+            }
+        }
+        let order = |entity: &CompilerEntityId| {
+            let symbol = &symbols[entity];
+            (
+                symbol.location.full_span.start,
+                symbol.location.selection_span.start,
+                *entity,
+            )
+        };
+        roots.sort_by_key(order);
+        for members in children.values_mut() {
+            members.sort_by_key(order);
+        }
+        for (parent, members) in children {
+            let nested = members
+                .into_iter()
+                .filter_map(|member| symbols.remove(&member))
+                .collect();
+            let Some(symbol) = symbols.get_mut(&parent) else {
+                return DocumentSymbolResult::Unavailable(
+                    DocumentSymbolsUnavailable::InternalFailure,
+                );
+            };
+            symbol.children = nested;
+        }
+        DocumentSymbolResult::Available(
+            roots
+                .into_iter()
+                .filter_map(|entity| symbols.remove(&entity))
+                .collect(),
+        )
     }
 }
 
@@ -206,7 +271,11 @@ pub(crate) fn validate_declaration_facts(
     hir: &TypedHir,
     sources: &SourceTable,
 ) -> Result<Arc<SemanticFacts>, AnalysisFailure> {
+    let mut entities = BTreeSet::new();
     for fact in facts.declarations() {
+        if !entities.insert(fact.entity) {
+            return Err(invalid(fact, "duplicate compiler entity identity"));
+        }
         validate_fact(fact, hir, sources)?;
     }
     Ok(Arc::new(facts.clone()))
@@ -220,6 +289,7 @@ fn invalid(fact: &DeclarationFact, reason: impl AsRef<str>) -> AnalysisFailure {
     ))
 }
 
+#[allow(clippy::too_many_lines)] // Each identity arena is validated explicitly at one trust boundary.
 fn validate_fact(
     fact: &DeclarationFact,
     hir: &TypedHir,
@@ -263,12 +333,11 @@ fn validate_fact(
     if source.unit.as_ref() != Some(&module.key) {
         return Err(invalid(fact, "module key does not match source catalog"));
     }
-    if fact.owner != Some(CompilerEntityId::Module(fact.module)) {
-        return Err(invalid(fact, "top-level declaration has invalid owner"));
-    }
-
     match (fact.kind, fact.entity) {
         (DeclarationKind::Function, CompilerEntityId::Function(id)) => {
+            if fact.owner != Some(CompilerEntityId::Module(fact.module)) {
+                return Err(invalid(fact, "top-level function has invalid owner"));
+            }
             let signature = hir
                 .signatures()
                 .get(id.0 as usize)
@@ -287,6 +356,9 @@ fn validate_fact(
             }
         }
         (DeclarationKind::Struct, CompilerEntityId::Struct(id)) => {
+            if fact.owner != Some(CompilerEntityId::Module(fact.module)) {
+                return Err(invalid(fact, "struct has invalid owner"));
+            }
             let info = hir
                 .structs()
                 .get(id.0 as usize)
@@ -301,6 +373,9 @@ fn validate_fact(
             }
         }
         (DeclarationKind::Enum, CompilerEntityId::Enum(id)) => {
+            if fact.owner != Some(CompilerEntityId::Module(fact.module)) {
+                return Err(invalid(fact, "enum has invalid owner"));
+            }
             let info = hir
                 .enums()
                 .get(id.0 as usize)
@@ -312,6 +387,152 @@ fn validate_fact(
                 || fact.logical.is_some()
             {
                 return Err(invalid(fact, "enum identity metadata mismatch"));
+            }
+        }
+        (DeclarationKind::Field, CompilerEntityId::Field(id)) => {
+            let struct_field = hir
+                .structs()
+                .iter()
+                .flat_map(|owner| owner.fields.iter().map(move |field| (owner, field)))
+                .find(|(_, field)| field.id == id);
+            let class_field = hir
+                .types()
+                .classes()
+                .iter()
+                .flat_map(|owner| owner.fields.iter().map(move |field| (owner, field)))
+                .find(|(_, field)| field.id == id);
+            match (struct_field, class_field) {
+                (Some((owner, field)), None)
+                    if fact.owner == Some(CompilerEntityId::Struct(owner.id))
+                        && owner.module == fact.module
+                        && field.owner == owner.id
+                        && field.name == fact.name
+                        && field.span == fact.full_span
+                        && fact.logical.is_none() => {}
+                (None, Some((owner, field)))
+                    if fact.owner == Some(CompilerEntityId::Class(owner.id))
+                        && owner.module == fact.module
+                        && field.class == owner.id
+                        && field.name == fact.name
+                        && field.span == fact.full_span
+                        && fact.logical.is_none() => {}
+                _ => return Err(invalid(fact, "field identity or owner metadata mismatch")),
+            }
+        }
+        (DeclarationKind::Variant, CompilerEntityId::Variant(id)) => {
+            let owner = hir
+                .enums()
+                .get(id.enum_id.0 as usize)
+                .filter(|owner| owner.id == id.enum_id)
+                .ok_or_else(|| invalid(fact, "unknown VariantId owner"))?;
+            let variant = owner
+                .variants
+                .get(id.index as usize)
+                .filter(|variant| variant.id == id)
+                .ok_or_else(|| invalid(fact, "unknown VariantId"))?;
+            if fact.owner != Some(CompilerEntityId::Enum(owner.id))
+                || owner.module != fact.module
+                || variant.owner != owner.id
+                || variant.name != fact.name
+                || variant.span != fact.full_span
+                || fact.logical.is_some()
+            {
+                return Err(invalid(fact, "variant identity or owner metadata mismatch"));
+            }
+        }
+        (DeclarationKind::Class, CompilerEntityId::Class(id)) => {
+            let info = hir
+                .types()
+                .classes()
+                .get(id.0 as usize)
+                .filter(|info| info.id == id)
+                .ok_or_else(|| invalid(fact, "unknown ClassId"))?;
+            if fact.owner != Some(CompilerEntityId::Module(fact.module))
+                || info.module != fact.module
+                || info.name != fact.name
+                || info.span != fact.full_span
+                || fact.logical.is_some()
+            {
+                return Err(invalid(fact, "class identity metadata mismatch"));
+            }
+        }
+        (
+            kind @ (DeclarationKind::Method | DeclarationKind::Initializer),
+            CompilerEntityId::Function(id),
+        ) => {
+            let signature = hir
+                .signatures()
+                .get(id.0 as usize)
+                .filter(|signature| signature.id == id)
+                .ok_or_else(|| invalid(fact, "unknown method FunctionId"))?;
+            let (class, method) = hir
+                .types()
+                .classes()
+                .iter()
+                .find_map(|class| {
+                    class
+                        .methods
+                        .iter()
+                        .find(|method| method.function == id)
+                        .map(|method| (class, method))
+                })
+                .ok_or_else(|| invalid(fact, "FunctionId is not a class method"))?;
+            let expected_kind = if method.initializing {
+                DeclarationKind::Initializer
+            } else {
+                DeclarationKind::Method
+            };
+            let expected_logical =
+                LogicalDeclarationKey::PackageMember(signature.symbol_key(hir.modules()));
+            if kind != expected_kind
+                || fact.owner != Some(CompilerEntityId::Class(class.id))
+                || class.module != fact.module
+                || signature.module != fact.module
+                || method.name != fact.name
+                || signature.span != fact.full_span
+                || fact.logical.as_ref() != Some(&expected_logical)
+            {
+                return Err(invalid(fact, "method identity or owner metadata mismatch"));
+            }
+        }
+        (DeclarationKind::Interface, CompilerEntityId::Interface(id)) => {
+            let info = hir
+                .types()
+                .interfaces()
+                .get(id.0 as usize)
+                .filter(|info| info.id == id)
+                .ok_or_else(|| invalid(fact, "unknown InterfaceId"))?;
+            if fact.owner != Some(CompilerEntityId::Module(fact.module))
+                || info.module != fact.module
+                || info.name != fact.name
+                || info.span != fact.full_span
+                || fact.logical.is_some()
+            {
+                return Err(invalid(fact, "interface identity metadata mismatch"));
+            }
+        }
+        (DeclarationKind::Requirement, CompilerEntityId::Requirement(id)) => {
+            let interface = hir
+                .types()
+                .interfaces()
+                .get(id.interface.0 as usize)
+                .filter(|info| info.id == id.interface)
+                .ok_or_else(|| invalid(fact, "unknown RequirementId owner"))?;
+            let requirement = interface
+                .requirements
+                .get(id.index as usize)
+                .filter(|requirement| requirement.id == id)
+                .ok_or_else(|| invalid(fact, "unknown RequirementId"))?;
+            if fact.owner != Some(CompilerEntityId::Interface(interface.id))
+                || interface.module != fact.module
+                || requirement.name != fact.name
+                || requirement.span != fact.full_span
+                || fact.logical.is_some()
+            {
+                return Err(invalid(
+                    fact,
+                    "requirement identity or owner metadata mismatch",
+                ));
             }
         }
         _ => return Err(invalid(fact, "declaration kind/entity mismatch")),
@@ -438,6 +659,7 @@ mod tests {
             .declarations()
             .iter()
             .filter(|fact| fact.source == source)
+            .filter(|fact| matches!(fact.owner, Some(CompilerEntityId::Module(_))))
             .cloned()
             .collect::<Vec<_>>();
         let symbols = available(result.document_symbols(source));
@@ -467,10 +689,28 @@ mod tests {
             assert_eq!(symbol.logical, fact.logical);
             assert_eq!(symbol.location.full_span, fact.full_span);
             assert_eq!(symbol.location.selection_span, fact.name_span);
-            assert!(symbol.children.is_empty());
             assert_eq!(symbol.snapshot, result.stamp);
             assert_eq!(symbol.location.document_version, Some(DocumentVersion(1)));
         }
+        assert_eq!(
+            symbols[0]
+                .children
+                .iter()
+                .map(|symbol| (symbol.name.as_ref(), symbol.category))
+                .collect::<Vec<_>>(),
+            [("value", DocumentSymbolCategory::Field)]
+        );
+        assert_eq!(
+            symbols[1]
+                .children
+                .iter()
+                .map(|symbol| (symbol.name.as_ref(), symbol.category))
+                .collect::<Vec<_>>(),
+            [
+                ("One", DocumentSymbolCategory::Variant),
+                ("Two", DocumentSymbolCategory::Variant),
+            ]
+        );
         assert_eq!(
             symbols[0].location.selection_range.start,
             EditorPosition {
@@ -478,6 +718,85 @@ mod tests {
                 character: 7,
             }
         );
+    }
+
+    #[test]
+    fn classes_interfaces_overrides_initializers_and_requirements_form_real_hierarchies() {
+        let text = "interface I{int f();}open class A:I{Buffer<int> value;public init(Buffer<int> value){this.value=value;}public open int f(){return 1;}}class B:A{Buffer<int> value2;public init(Buffer<int> value,Buffer<int> value2):base(value){this.value2=value2;}public override int f(){return 7;}}int main(){B b=B(Buffer<int>(2,1),Buffer<int>(2,2));I i=b;return i.f();}";
+        let project = TestProject::new(text);
+        let result = project.analyze(41);
+        let source = source_for(&result, &SourceIdentity::Document(project.document));
+        let symbols = available(result.document_symbols(source));
+
+        assert_eq!(
+            symbols
+                .iter()
+                .map(|symbol| (symbol.name.as_ref(), symbol.category))
+                .collect::<Vec<_>>(),
+            [
+                ("I", DocumentSymbolCategory::Interface),
+                ("A", DocumentSymbolCategory::Class),
+                ("B", DocumentSymbolCategory::Class),
+                ("main", DocumentSymbolCategory::Function),
+            ]
+        );
+        assert_eq!(
+            symbols[0]
+                .children
+                .iter()
+                .map(|symbol| (symbol.name.as_ref(), symbol.category))
+                .collect::<Vec<_>>(),
+            [("f", DocumentSymbolCategory::Requirement)]
+        );
+        for class in [&symbols[1], &symbols[2]] {
+            assert_eq!(
+                class
+                    .children
+                    .iter()
+                    .map(|symbol| symbol.category)
+                    .collect::<Vec<_>>(),
+                [
+                    DocumentSymbolCategory::Field,
+                    DocumentSymbolCategory::Initializer,
+                    DocumentSymbolCategory::Method,
+                ]
+            );
+            assert_eq!(class.children[1].name.as_ref(), "init");
+            assert_eq!(class.children[2].name.as_ref(), "f");
+            assert_ne!(class.children[1].entity, class.children[2].entity);
+        }
+        assert!(
+            symbols
+                .iter()
+                .flat_map(|symbol| std::iter::once(symbol).chain(&symbol.children))
+                .all(|symbol| !symbol.name.starts_with('$'))
+        );
+        assert_ne!(symbols[1].children[2].entity, symbols[2].children[2].entity);
+        assert_eq!(available(result.document_symbols(source)), symbols);
+    }
+
+    #[test]
+    fn corrupt_member_owner_and_duplicate_cross_category_identity_fail_closed() {
+        let project = TestProject::new(
+            "struct A{int same;}struct B{int same;}enum E{same}int main(){return 0;}",
+        );
+        let result = project.analyze(42);
+        let snapshot = result.semantic.as_ref().unwrap();
+        let mut declarations = snapshot.facts().declarations().to_vec();
+        let member = declarations
+            .iter_mut()
+            .find(|fact| fact.kind == DeclarationKind::Field)
+            .unwrap();
+        member.owner = Some(CompilerEntityId::Module(member.module));
+        let corrupt_owner = SemanticFacts::from_declarations(declarations);
+        assert!(
+            validate_declaration_facts(&corrupt_owner, snapshot.hir(), &snapshot.sources).is_err()
+        );
+
+        let mut declarations = snapshot.facts().declarations().to_vec();
+        declarations.push(declarations[0].clone());
+        let duplicate = SemanticFacts::from_declarations(declarations);
+        assert!(validate_declaration_facts(&duplicate, snapshot.hir(), &snapshot.sources).is_err());
     }
 
     #[test]

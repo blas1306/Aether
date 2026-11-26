@@ -8,9 +8,10 @@ use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 
 use aether_analysis::{
-    AnalysisScheduler, AnalysisTarget, ChangeDocument, DiagnosticSeverity, DocumentId,
-    DocumentLocator, EditorDiagnostic, EditorRange, EditorWorkspace, OpenDocument, ProjectId,
-    ProjectPlan, RequestState, SavedDocument, SourceIdentity,
+    AnalysisScheduler, AnalysisTarget, CancellationToken, ChangeDocument, DiagnosticSeverity,
+    DocumentId, DocumentLocator, DocumentSymbol, DocumentSymbolCategory, DocumentSymbolResult,
+    DocumentSymbolsUnavailable, EditorDiagnostic, EditorRange, EditorWorkspace, OpenDocument,
+    ProjectId, ProjectPlan, RequestId, RequestState, SavedDocument, SourceIdentity,
 };
 use serde_json::{Value, json};
 
@@ -74,6 +75,7 @@ struct Server {
     projects: HashMap<PathBuf, ProjectRecord>,
     next_project: u64,
     publication: Arc<Mutex<PublicationState>>,
+    pending_requests: Arc<Mutex<HashMap<String, (RequestId, CancellationToken)>>>,
     initialized: bool,
     shutdown: bool,
 }
@@ -89,6 +91,7 @@ impl Server {
             projects: HashMap::new(),
             next_project: 1,
             publication: Arc::new(Mutex::new(PublicationState::default())),
+            pending_requests: Arc::new(Mutex::new(HashMap::new())),
             initialized: false,
             shutdown: false,
         }
@@ -120,9 +123,18 @@ impl Server {
         let id = object.get("id").cloned();
         match method {
             Some("initialize") => self.initialize(id.unwrap_or(Value::Null), object.get("params")),
-            Some("initialized" | "$/cancelRequest") => {}
+            Some("initialized") => {}
+            Some("$/cancelRequest") => self.cancel_request(object.get("params")),
             Some("shutdown") => {
                 self.shutdown = true;
+                for (_, cancellation) in self
+                    .pending_requests
+                    .lock()
+                    .expect("pending request state poisoned")
+                    .values()
+                {
+                    cancellation.cancel();
+                }
                 if let Some(mut scheduler) = self.scheduler.take() {
                     scheduler.shutdown();
                 }
@@ -135,6 +147,9 @@ impl Server {
             }
             Some("textDocument/didSave") if !self.shutdown => self.did_save(object.get("params")),
             Some("textDocument/didClose") if !self.shutdown => self.did_close(object.get("params")),
+            Some("textDocument/documentSymbol") if !self.shutdown => {
+                self.document_symbols(id.unwrap_or(Value::Null), object.get("params"));
+            }
             Some(unknown) if id.is_some() => {
                 self.error(
                     id.unwrap_or(Value::Null),
@@ -181,6 +196,7 @@ impl Server {
                         "serverInfo": {"name": "aether-lsp", "version": env!("CARGO_PKG_VERSION")},
                         "capabilities": {
                             "positionEncoding": "utf-16",
+                            "documentSymbolProvider": true,
                             "textDocumentSync": {
                                 "openClose": true,
                                 "change": 1,
@@ -192,6 +208,159 @@ impl Server {
             }
             Err(error) => self.error(id, -32603, format!("invalid workspace root: {error}")),
         }
+    }
+
+    fn cancel_request(&self, params: Option<&Value>) {
+        let Some(id) = params.and_then(|params| params.get("id")) else {
+            return;
+        };
+        let Some(key) = request_key(id) else { return };
+        if let Some((_, cancellation)) = self
+            .pending_requests
+            .lock()
+            .expect("pending request state poisoned")
+            .get(&key)
+        {
+            cancellation.cancel();
+        }
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn document_symbols(&mut self, id: Value, params: Option<&Value>) {
+        let Some(key) = request_key(&id) else {
+            self.error(id, -32600, "request ID must be a string or number");
+            return;
+        };
+        if self
+            .pending_requests
+            .lock()
+            .expect("pending request state poisoned")
+            .contains_key(&key)
+        {
+            self.error(id, -32600, "request ID is already in use");
+            return;
+        }
+        let Some(uri) = params
+            .and_then(|params| params.get("textDocument"))
+            .and_then(|document| document.get("uri"))
+            .and_then(Value::as_str)
+        else {
+            self.error(id, -32602, "documentSymbol requires a textDocument URI");
+            return;
+        };
+        let Some(path) = file_uri_to_path(uri) else {
+            self.error(id, -32602, "only file URIs support document symbols");
+            return;
+        };
+        let Some(root) = self.root.as_deref() else {
+            self.error(id, -32603, "workspace is unavailable");
+            return;
+        };
+        let comparable = path.canonicalize().unwrap_or_else(|_| path.clone());
+        if !comparable.starts_with(root) {
+            self.error(id, -32803, "document is outside the workspace");
+            return;
+        }
+
+        self.refresh_projects();
+        let open = self.documents.get(uri).cloned();
+        if open.is_none() && !path.is_file() {
+            self.error(id, -32803, "document source is unavailable");
+            return;
+        }
+        let (entry, project, requested_document) = if let Some(open) = open {
+            match open.role {
+                DocumentRole::AnalysisTarget(Some(root)) | DocumentRole::ProjectMember(root) => {
+                    let Some(record) = self.projects.get(&root).filter(|record| record.available)
+                    else {
+                        self.error(id, -32803, "Aether project is unavailable");
+                        return;
+                    };
+                    (record.entry.clone(), Some(record.id), Some(open.document))
+                }
+                DocumentRole::AnalysisTarget(None) => {
+                    (open.path.clone(), None, Some(open.document))
+                }
+                DocumentRole::ProjectUnavailable(_, ref message) => {
+                    self.error(
+                        id,
+                        -32803,
+                        format!("Aether project is unavailable: {message}"),
+                    );
+                    return;
+                }
+                DocumentRole::InternalFailure(ref message) => {
+                    self.error(id, -32603, format!("project context failed: {message}"));
+                    return;
+                }
+            }
+        } else {
+            match self.project_for(&path) {
+                ProjectContext::Ready { project, root, .. } => {
+                    let Some(record) = self.projects.get(&root) else {
+                        self.error(id, -32603, "project record is unavailable");
+                        return;
+                    };
+                    (record.entry.clone(), Some(project), None)
+                }
+                ProjectContext::Unavailable(_, message) => {
+                    self.error(
+                        id,
+                        -32803,
+                        format!("Aether project is unavailable: {message}"),
+                    );
+                    return;
+                }
+                ProjectContext::Standalone => (path.clone(), None, None),
+                ProjectContext::InternalFailure(message) => {
+                    self.error(id, -32603, format!("project context failed: {message}"));
+                    return;
+                }
+            }
+        };
+        let Some(scheduler) = &self.scheduler else {
+            self.error(id, -32603, "analysis scheduler is unavailable");
+            return;
+        };
+        let handle = match scheduler.request(AnalysisTarget::Path { entry, project }) {
+            Ok(handle) => handle,
+            Err(error) => {
+                self.error(id, -32603, format!("could not schedule analysis: {error}"));
+                return;
+            }
+        };
+        let request = handle.id();
+        let cancellation = handle.cancellation();
+        {
+            let mut pending = self
+                .pending_requests
+                .lock()
+                .expect("pending request state poisoned");
+            pending.insert(key.clone(), (request, cancellation));
+        }
+        let output = self.output.clone();
+        let pending = Arc::clone(&self.pending_requests);
+        let requested_path = comparable;
+        thread::spawn(move || {
+            let response = match handle.wait() {
+                Ok(completion) => document_symbol_response(
+                    id.clone(),
+                    &completion,
+                    requested_document,
+                    &requested_path,
+                ),
+                Err(error) => protocol_error(id.clone(), -32603, error.to_string()),
+            };
+            let mut requests = pending.lock().expect("pending request state poisoned");
+            let current = requests
+                .get(&key)
+                .is_some_and(|(current, _)| *current == request);
+            if current {
+                requests.remove(&key);
+                drop(requests);
+                let _ = output.send(Outbound::Message(response));
+            }
+        });
     }
 
     fn did_open(&mut self, params: Option<&Value>) {
@@ -659,6 +828,135 @@ impl Server {
             enqueue_publications(&state, &output, affected);
         });
     }
+}
+
+fn request_key(id: &Value) -> Option<String> {
+    matches!(id, Value::String(_) | Value::Number(_))
+        .then(|| serde_json::to_string(id).expect("request ID is JSON serializable"))
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn protocol_error(id: Value, code: i64, message: impl Into<String>) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {"code": code, "message": message.into()}
+    })
+}
+
+fn document_symbol_response(
+    id: Value,
+    completion: &aether_analysis::RequestCompletion,
+    requested_document: Option<DocumentId>,
+    requested_path: &Path,
+) -> Value {
+    match completion.state {
+        RequestState::Cancelled => {
+            return protocol_error(id, -32800, "document symbol request was cancelled");
+        }
+        RequestState::Stale => {
+            return protocol_error(id, -32801, "document changed during analysis");
+        }
+        RequestState::TargetClosed => {
+            return protocol_error(id, -32801, "document closed during analysis");
+        }
+        RequestState::SourceChanged => {
+            return protocol_error(id, -32801, "source changed during analysis");
+        }
+        RequestState::InternalFailure => {
+            let detail = completion
+                .failure
+                .as_ref()
+                .map_or_else(|| "analysis failed internally".into(), ToString::to_string);
+            return protocol_error(id, -32603, detail);
+        }
+        RequestState::Queued | RequestState::Running => {
+            return protocol_error(id, -32603, "analysis request did not finish");
+        }
+        RequestState::Published => {}
+    }
+    let Some(result) = completion.result.as_ref() else {
+        return protocol_error(id, -32603, "analysis completed without a result");
+    };
+    let Some(snapshot) = result.semantic.as_ref() else {
+        return protocol_error(
+            id,
+            -32803,
+            format!(
+                "document symbols are unavailable because analysis is {:?}",
+                result.state
+            ),
+        );
+    };
+    let source = snapshot
+        .sources
+        .iter()
+        .find(|source| match &source.identity {
+            SourceIdentity::Document(document) => requested_document == Some(*document),
+            SourceIdentity::Disk(path) => requested_document.is_none() && path == requested_path,
+            SourceIdentity::Toolchain(_) => false,
+        });
+    let Some(source) = source else {
+        return protocol_error(
+            id,
+            -32803,
+            "requested source is not present in the current semantic snapshot",
+        );
+    };
+    match completion.document_symbols(source.source_id) {
+        DocumentSymbolResult::Available(symbols) => json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "result": symbols.iter().map(lsp_document_symbol).collect::<Vec<_>>()
+        }),
+        DocumentSymbolResult::Unavailable(reason) => {
+            let (code, message) = match reason {
+                DocumentSymbolsUnavailable::Cancelled => {
+                    (-32800, "document symbol request was cancelled".into())
+                }
+                DocumentSymbolsUnavailable::SnapshotStale
+                | DocumentSymbolsUnavailable::TargetClosed
+                | DocumentSymbolsUnavailable::SourceChanged => (
+                    -32801,
+                    format!("document symbols became unavailable: {reason:?}"),
+                ),
+                DocumentSymbolsUnavailable::AnalysisUnavailable(_) => (
+                    -32803,
+                    format!("document analysis cannot provide symbols: {reason:?}"),
+                ),
+                DocumentSymbolsUnavailable::SourceNotFound(_)
+                | DocumentSymbolsUnavailable::SourceNotEditable(_) => (
+                    -32803,
+                    format!("document source cannot provide symbols: {reason:?}"),
+                ),
+                DocumentSymbolsUnavailable::InternalFailure => (
+                    -32603,
+                    "document symbol adaptation failed internally".into(),
+                ),
+            };
+            protocol_error(id, code, message)
+        }
+    }
+}
+
+fn lsp_document_symbol(symbol: &DocumentSymbol) -> Value {
+    json!({
+        "name": symbol.name.as_ref(),
+        "kind": match symbol.category {
+            DocumentSymbolCategory::Function => 12,
+            DocumentSymbolCategory::Struct => 23,
+            DocumentSymbolCategory::Enum => 10,
+            DocumentSymbolCategory::Field => 8,
+            DocumentSymbolCategory::Variant => 22,
+            DocumentSymbolCategory::Class => 5,
+            DocumentSymbolCategory::Method | DocumentSymbolCategory::Requirement => 6,
+            DocumentSymbolCategory::Initializer => 9,
+            DocumentSymbolCategory::Interface => 11,
+        },
+        "range": lsp_range(symbol.location.full_range),
+        "selectionRange": lsp_range(symbol.location.selection_range),
+        "children": symbol.children.iter().map(lsp_document_symbol).collect::<Vec<_>>(),
+    })
 }
 
 fn same_file_or_lexical(path: &Path, expected: &Path) -> bool {
