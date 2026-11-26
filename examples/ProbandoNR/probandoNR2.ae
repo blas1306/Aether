@@ -12,25 +12,29 @@ NewtonResultado NR2(Function<(double), double> f, Function<(double), double> df,
     while ((res > tol) && (iter < maxiter)) {
         x = x - f(x)/df(x);
         res = abs(f(x));
-        iter += 1;
+        iter = iter + 1;
     }
 
     return NewtonResultado(x, res, iter);
 }
 
 double f(double x) {
-    double f = x*exp(x) - 1;
-    return f;
+    return x*exp(x) - 1;
 }
 
 double df(double x) {
-    double df = exp(x) + x*exp(x);
-    return df;
+    return exp(x) + x*exp(x);
 }
 
-NewtonResultado nr = NR2(f, df, 1, 1e-8, 100);
+int main() {
+    NewtonResultado nr = NR2(f, df, 1, 1e-8, 100);
 
-println("x = ", nr.raiz);
-println("res = ", nr.res);
-println("iter = ", nr.iter);
+    println("x = ");
+    println(nr.raiz);
+    println("res = ");
+    println(nr.res);
+    println("iter = ");
+    println(nr.iter);
 
+    return 0;
+}

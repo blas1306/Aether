@@ -37,6 +37,10 @@ pub use lifecycle::{
     AnalysisScheduler, CancellationToken, InvalidRequestTransition, RequestCompletion,
     RequestHandle, RequestState, SchedulerMeasurements,
 };
+pub use symbols::{
+    DocumentSymbol, DocumentSymbolCategory, DocumentSymbolLocation, DocumentSymbolResult,
+    DocumentSymbolsUnavailable,
+};
 
 /// Content digest of the exact immutable bytes returned by a source provider.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
