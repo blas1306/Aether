@@ -14,6 +14,15 @@ use aether_frontend::{
 use aether_package::{PackageInstanceKey, PackageMetadata, ProjectKind, ResolvedPackage};
 use sha2::{Digest, Sha256};
 
+mod editor;
+
+pub use editor::{
+    AnalysisConfig, AnalysisSnapshot, ChangeDocument, DiskBase, DocumentId, DocumentLocator,
+    DocumentRecord, DocumentState, DocumentVersion, EditorWorkspace, FileChange, OpenDocument,
+    OverlaySourceProvider, ProjectId, PublishDecision, SavedDocument, SnapshotDiscovery,
+    SnapshotSourceRead, SnapshotStamp, StoreError, WorkspaceId,
+};
+
 /// Content digest of the exact immutable bytes returned by a source provider.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ContentFingerprint(pub [u8; 32]);
@@ -51,6 +60,13 @@ pub enum SourceProvenance {
         /// Digest of the returned content.
         fingerprint: ContentFingerprint,
     },
+    /// Content captured from an open editor document.
+    Overlay {
+        /// Stable document identity in the owning workspace.
+        document: DocumentId,
+        /// Monotonic version captured by the snapshot.
+        version: DocumentVersion,
+    },
 }
 
 /// Immutable content returned by a provider.
@@ -67,7 +83,7 @@ pub struct SourceContent {
 /// Failure while enumerating or reading provider content.
 #[derive(Debug)]
 pub struct SourceProviderError {
-    message: String,
+    pub(crate) message: String,
 }
 
 impl std::fmt::Display for SourceProviderError {
@@ -258,12 +274,26 @@ pub fn discover_catalog_with_provider(
     provider: &dyn SourceProvider,
 ) -> Result<CompilationSession, Vec<Diagnostic>> {
     let discovery_started = Instant::now();
-    let entry_absolute = entry_path.canonicalize().map_err(|error| {
-        vec![io_diagnostic(format!(
-            "could not read entry source `{}`: {error}",
-            entry_path.display()
-        ))]
-    })?;
+    let entry_absolute = match entry_path.canonicalize() {
+        Ok(path) => path,
+        Err(canonical_error) => {
+            let path = canonical_or_lexical_absolute(entry_path).map_err(|error| {
+                vec![io_diagnostic(format!(
+                    "could not read entry source `{}`: {error}",
+                    entry_path.display()
+                ))]
+            })?;
+            provider
+                .read(&SourceLocator::Disk(path.clone()))
+                .map_err(|_| {
+                    vec![io_diagnostic(format!(
+                        "could not read entry source `{}`: {canonical_error}",
+                        entry_path.display()
+                    ))]
+                })?;
+            path
+        }
+    };
     let source_root = source_root_for_entry(&entry_absolute);
     let mut paths = Vec::new();
     if let Some(plan) = project {
@@ -338,7 +368,7 @@ pub fn discover_catalog_with_provider(
     }
     let entry_candidate = candidates
         .iter()
-        .position(|candidate| candidate.path.canonicalize().ok().as_ref() == Some(&entry_absolute))
+        .position(|candidate| paths_refer_to_same_source(&candidate.path, &entry_absolute))
         .ok_or_else(|| {
             vec![io_diagnostic(
                 "entry source is outside its source root catalog",
@@ -367,7 +397,7 @@ pub fn discover_catalog_with_provider(
                     .collect::<Vec<_>>()
             })?;
             parse_ns += started.elapsed().as_nanos();
-            let is_entry = candidate.path.canonicalize().ok().as_ref() == Some(&entry_absolute);
+            let is_entry = paths_refer_to_same_source(&candidate.path, &entry_absolute);
             let package = match ast.package() {
                 Some(declaration) => {
                     let owner_name = candidate
@@ -666,9 +696,7 @@ pub fn discover_catalog_with_provider(
     }
     let entry = units
         .iter()
-        .position(|unit| {
-            !unit.toolchain && unit.path.canonicalize().ok().as_ref() == Some(&entry_absolute)
-        })
+        .position(|unit| !unit.toolchain && paths_refer_to_same_source(&unit.path, &entry_absolute))
         .map(|index| ModuleId(index as u32))
         .ok_or_else(|| {
             vec![io_diagnostic(
@@ -693,6 +721,28 @@ pub fn source_root_for_entry(entry_path: &Path) -> PathBuf {
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf()
+}
+
+fn canonical_or_lexical_absolute(path: &Path) -> std::io::Result<PathBuf> {
+    if let Ok(canonical) = path.canonicalize() {
+        return Ok(canonical);
+    }
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(path)
+    };
+    let Some(parent) = absolute.parent() else {
+        return Ok(absolute);
+    };
+    Ok(parent
+        .canonicalize()
+        .unwrap_or_else(|_| parent.to_path_buf())
+        .join(absolute.file_name().unwrap_or_default()))
+}
+
+fn paths_refer_to_same_source(left: &Path, right: &Path) -> bool {
+    canonical_or_lexical_absolute(left).ok() == canonical_or_lexical_absolute(right).ok()
 }
 
 fn catalog_package_header(text: &str) -> Option<Vec<String>> {
