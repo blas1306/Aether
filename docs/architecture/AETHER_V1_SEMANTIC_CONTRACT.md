@@ -973,10 +973,36 @@ verify it. Backend normalization may sign-extend or zero-extend narrower
 integers to the target's offset width only when this preserves the complete
 source value; it must never truncate `uint64`.
 
-This amendment does not apply to slice/range endpoints, range expression
-types, iterator bindings, `row`/`column` projection arguments, collection
-mutation APIs such as `swap_remove`, or any other parameter whose contract is
-`usize`. It introduces no unchecked indexing and no general range analysis.
+**INTEGER-SLICE-BOUNDS-V1 amendment (2026-11-26).** The same ten native
+integer types are admitted for both endpoints of inclusive `Closed { first,
+last }` slice selectors and for scalar selectors in a mixed subscript. The two
+closed endpoints may have different integer types; each retains its concrete
+`TypeId` through HIR, MIR, and SSA. This does not introduce a general numeric
+conversion.
+
+Operands are evaluated exactly once in source order: base first, selectors
+left-to-right, and `first` before `last`; assignment evaluates its RHS after
+the selectors. Runtime validation compares the complete mathematical values
+of `first` and `last` before checking either bound. A negative signed value is
+less than every unsigned value, and a `uint64` value is never narrowed or
+reinterpreted as signed. Invalid order produces `SliceOrderError`; otherwise
+an endpoint outside the collection's existing logical domain produces
+`SliceBoundsError`. Only after those checks may lowering adjust the base or
+compute length, stride, offset, and address. Scalar selectors in a mixed
+subscript retain `IndexOutOfBounds` and the scalar-index validation rules
+above.
+
+Closed slices remain inclusive and non-empty, including equal endpoints of
+length one. `Full` remains the only selector that may describe an empty axis;
+no sentinel, open endpoint, reverse, step, or indexing from the end is added.
+Array/List copies, Vector/Matrix views, shape/orientation, assignment snapshot,
+overlap, ownership, provenance, and the prohibition on slicing linear
+Buffer/View remain unchanged.
+
+Neither indexing amendment applies to range expression types, iterator
+bindings, `row`/`column` projection arguments, collection mutation APIs such
+as `swap_remove`, or any other parameter whose contract is `usize`. They
+introduce no unchecked indexing and no general range analysis.
 
 ### 6.5 Initialized storage extraction — NEXT-VERTICAL-18 DECIDED
 

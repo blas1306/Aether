@@ -5835,11 +5835,13 @@ fn verify_op(
                 index_base,
             } => (vec![], *axis, *semantics, *index_base, false),
         };
-        if operands
-            .into_iter()
-            .any(|operand| operand_ty(operand) != Ok(TypeId::USIZE))
-        {
-            return Err("SSA slice selector operand is not usize".into());
+        if operands.into_iter().any(|operand| {
+            operand_ty(operand)
+                .ok()
+                .and_then(|ty| types.integer_info(ty))
+                .is_none()
+        }) {
+            return Err("SSA slice selector operand is not integer".into());
         }
         let expected_base = u8::from(semantics != IndexSemantics::ZeroBased);
         if actual_axis != axis || actual_semantics != semantics || base != expected_base {

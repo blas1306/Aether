@@ -231,6 +231,16 @@ Los operandos se contextualizan como `usize`, igual que indexing vigente. Un
 conocido; de otro modo se produce el trap estructurado correspondiente antes de
 restar la base o calcular un offset.
 
+**Enmienda INTEGER-SLICE-BOUNDS-V1 (2026-11-26).** La restricción histórica
+del párrafo anterior queda reemplazada para selectores `Closed` y escalares de
+subscripts mixtos: se admiten `int8`, `int16`, `int32`, `int64`, `isize`,
+`uint8`, `uint16`, `uint32`, `uint64` y `usize`, con `int` como alias de
+`int64`. Los extremos pueden tener tipos enteros distintos y conservan esos
+tipos hasta backend. El orden matemático se comprueba antes que bounds, sin
+truncar ni reinterpretar `uint64` y considerando todo signed negativo menor
+que todo unsigned. Esta enmienda no cambia bases, dominios, traps, tipos de
+resultado ni semántica de ownership.
+
 Los diagnostics no hablan genéricamente de "array" para un Vector/Matrix. Deben
 incluir tipo/eje, base y extent real, por ejemplo `Vector slice 1-based range`
 o `Matrix column slice ... extent 0`.
@@ -248,8 +258,10 @@ subscript     := expression "[" selector ("," selector)* "]"
 
 `closed-slice` incluye ambos extremos y su longitud, tras validar, es
 `b - a + 1`. `a > b` es inválido; no representa un slice vacío ni reverso.
-`a:`, `:b`, `a:s:b`, más de un colon y negative indices son errores de sintaxis
-específicos.
+`a:`, `:b`, `a:s:b` y más de un colon son errores de sintaxis específicos. Un
+entero signed negativo sí es una expresión de endpoint válida desde
+INTEGER-SLICE-BOUNDS-V1, pero falla bounds (o participa antes en el error de
+orden); sigue sin existir indexación relativa desde el final.
 
 `[:]` significa toda la dimensión y no se descompone en endpoints. Es válido
 para extent cero y produce longitud cero. Por diseño, la única forma de obtener

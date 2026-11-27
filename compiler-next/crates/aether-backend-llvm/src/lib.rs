@@ -2745,9 +2745,11 @@ fn emit_function(
                     writeln!(output, "  %slice{id}_source_ptr = extractvalue {source_llvm} {source_value}, 0\n  %slice{id}_extent = extractvalue {source_llvm} {source_value}, 1").unwrap();
                     let (offset, length, _) = emit_slice_selector(
                         output,
+                        function,
                         selector,
                         &format!("%slice{id}_extent"),
                         &format!("slice{id}_selector"),
+                        types,
                     );
                     slice_order_trap |= matches!(selector, SliceSelector::Closed { .. });
                     slice_bounds_trap |= matches!(selector, SliceSelector::Closed { .. });
@@ -2806,9 +2808,11 @@ fn emit_function(
                     };
                     let (offset, length, _) = emit_slice_selector(
                         output,
+                        function,
                         selector,
                         &format!("%vs{id}_extent"),
                         &format!("vs{id}_selector"),
+                        types,
                     );
                     slice_order_trap |= matches!(selector, SliceSelector::Closed { .. });
                     slice_bounds_trap |= matches!(selector, SliceSelector::Closed { .. });
@@ -2873,15 +2877,19 @@ fn emit_function(
                     );
                     let (row_offset, row_length, row_scalar) = emit_slice_selector(
                         output,
+                        function,
                         &selectors[0],
                         &fields[0],
                         &format!("ms{id}_row"),
+                        types,
                     );
                     let (column_offset, column_length, column_scalar) = emit_slice_selector(
                         output,
+                        function,
                         &selectors[1],
                         &fields[1],
                         &format!("ms{id}_column"),
+                        types,
                     );
                     bounds_trap |= row_scalar || column_scalar;
                     slice_order_trap |= selectors
@@ -2949,9 +2957,11 @@ fn emit_function(
                                 writeln!(output, "  %sa{id}_target_extent = extractvalue {target_llvm} {target_value}, 1").unwrap();
                                 let (offset, length, _) = emit_slice_selector(
                                     output,
+                                    function,
                                     &selectors[0],
                                     &format!("%sa{id}_target_extent"),
                                     &format!("sa{id}_linear"),
+                                    types,
                                 );
                                 let stride = if types.vector_view_info(target_ty).is_some() {
                                     writeln!(output, "  %sa{id}_target_stride = extractvalue {target_llvm} {target_value}, 2").unwrap();
@@ -2979,15 +2989,19 @@ fn emit_function(
                                 };
                                 let (row_offset, row_length, _) = emit_slice_selector(
                                     output,
+                                    function,
                                     &selectors[0],
                                     &format!("%sa{id}_target_rows"),
                                     &format!("sa{id}_row"),
+                                    types,
                                 );
                                 let (column_offset, column_length, _) = emit_slice_selector(
                                     output,
+                                    function,
                                     &selectors[1],
                                     &format!("%sa{id}_target_columns"),
                                     &format!("sa{id}_column"),
+                                    types,
                                 );
                                 writeln!(output, "  %sa{id}_target_row_offset = mul i64 {row_offset}, {row_stride}\n  %sa{id}_target_column_offset = mul i64 {column_offset}, {column_stride}\n  %sa{id}_target_offset = add i64 %sa{id}_target_row_offset, %sa{id}_target_column_offset\n  %sa{id}_target_base = getelementptr {element_llvm}, ptr %sa{id}_target_ptr, i64 %sa{id}_target_offset").unwrap();
                                 let logical = match contract {
@@ -4703,16 +4717,19 @@ fn emit_function(
 
 fn emit_slice_selector(
     output: &mut String,
+    function: &SsaFunction,
     selector: &SliceSelector<SsaOperand>,
     extent: &str,
     prefix: &str,
+    types: &TypeArena,
 ) -> (String, String, bool) {
     match selector {
         SliceSelector::Full { .. } => ("0".into(), extent.into(), false),
         SliceSelector::Scalar {
             value, index_base, ..
         } => {
-            let value = llvm_operand(value);
+            let value =
+                emit_scalar_index_i64(output, function, value, &format!("{prefix}_index"), types);
             let offset = if *index_base == 0 {
                 value.clone()
             } else {
@@ -4742,39 +4759,57 @@ fn emit_slice_selector(
             index_base,
             ..
         } => {
-            let first = llvm_operand(first);
-            let last = llvm_operand(last);
+            // i65 is the smallest common mathematical domain for every native
+            // integer: [-2^63, 2^64-1]. Signed operands are sign-extended and
+            // unsigned operands zero-extended, so heterogeneous comparison is
+            // exact and uint64 never becomes negative.
+            let normalize = |output: &mut String, operand: &SsaOperand, name: &str| {
+                let ty = operand_type(function, operand);
+                let integer = types
+                    .integer_info(ty)
+                    .expect("verified slice endpoint is integer");
+                let result = format!("%{name}");
+                writeln!(
+                    output,
+                    "  {result} = {} {} {} to i65",
+                    if integer.is_signed() { "sext" } else { "zext" },
+                    llvm_type(types, ty),
+                    llvm_operand(operand)
+                )
+                .unwrap();
+                result
+            };
+            let first = normalize(output, first, &format!("{prefix}_first_wide"));
+            let last = normalize(output, last, &format!("{prefix}_last_wide"));
+            writeln!(output, "  %{prefix}_extent_wide = zext i64 {extent} to i65").unwrap();
             writeln!(
                 output,
-                "  %{prefix}_ordered = icmp ule i64 {first}, {last}\n  br i1 %{prefix}_ordered, label %{prefix}_bounds, label %trap_slice_order_error\n{prefix}_bounds:"
+                "  %{prefix}_ordered = icmp sle i65 {first}, {last}\n  br i1 %{prefix}_ordered, label %{prefix}_bounds, label %trap_slice_order_error\n{prefix}_bounds:"
             )
             .unwrap();
             let first_ok = if *index_base == 0 {
-                format!("icmp ult i64 {first}, {extent}")
+                writeln!(output, "  %{prefix}_first_lower = icmp sge i65 {first}, 0").unwrap();
+                format!("icmp slt i65 {first}, %{prefix}_extent_wide")
             } else {
-                writeln!(output, "  %{prefix}_first_lower = icmp uge i64 {first}, 1").unwrap();
-                format!("icmp ule i64 {first}, {extent}")
+                writeln!(output, "  %{prefix}_first_lower = icmp sge i65 {first}, 1").unwrap();
+                format!("icmp sle i65 {first}, %{prefix}_extent_wide")
             };
             writeln!(output, "  %{prefix}_first_upper = {first_ok}").unwrap();
-            if *index_base == 1 {
-                writeln!(
-                    output,
-                    "  %{prefix}_first_ok = and i1 %{prefix}_first_lower, %{prefix}_first_upper"
-                )
-                .unwrap();
-            }
-            let first_valid = if *index_base == 0 {
-                format!("%{prefix}_first_upper")
-            } else {
-                format!("%{prefix}_first_ok")
-            };
-            let last_cmp = if *index_base == 0 { "ult" } else { "ule" };
             writeln!(
                 output,
-                "  %{prefix}_last_upper = icmp {last_cmp} i64 {last}, {extent}"
+                "  %{prefix}_first_ok = and i1 %{prefix}_first_lower, %{prefix}_first_upper"
             )
             .unwrap();
-            writeln!(output, "  %{prefix}_in_bounds = and i1 {first_valid}, %{prefix}_last_upper\n  br i1 %{prefix}_in_bounds, label %{prefix}_valid, label %trap_slice_bounds_error\n{prefix}_valid:").unwrap();
+            let last_cmp = if *index_base == 0 { "slt" } else { "sle" };
+            writeln!(
+                output,
+                "  %{prefix}_last_upper = icmp {last_cmp} i65 {last}, %{prefix}_extent_wide"
+            )
+            .unwrap();
+            writeln!(output, "  %{prefix}_in_bounds = and i1 %{prefix}_first_ok, %{prefix}_last_upper\n  br i1 %{prefix}_in_bounds, label %{prefix}_valid, label %trap_slice_bounds_error\n{prefix}_valid:").unwrap();
+            writeln!(output, "  %{prefix}_first = trunc i65 {first} to i64\n  %{prefix}_last = trunc i65 {last} to i64").unwrap();
+            let first = format!("%{prefix}_first");
+            let last = format!("%{prefix}_last");
             let offset = if *index_base == 0 {
                 first.clone()
             } else {

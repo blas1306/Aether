@@ -8697,6 +8697,7 @@ fn operand_local_id(operand: &Operand) -> Option<LocalId> {
 
 fn validate_slice_selector_mir(
     function: &MirFunction,
+    types: &TypeArena,
     selector: &SliceSelector<Operand>,
     axis: aether_frontend::HirSubscriptAxis,
     semantics: IndexSemantics,
@@ -8725,8 +8726,11 @@ fn validate_slice_selector_mir(
         };
     for operand in operands {
         validate_operand(function, operand, initialized)?;
-        if operand_type(function, operand)? != TypeId::USIZE {
-            return Err("MIR slice selector operand is not usize".into());
+        if types
+            .integer_info(operand_type(function, operand)?)
+            .is_none()
+        {
+            return Err("MIR slice selector operand is not integer".into());
         }
     }
     let expected_base = u8::from(semantics != IndexSemantics::ZeroBased);
@@ -9634,6 +9638,7 @@ fn validate_rvalue(
             };
             let scalar = validate_slice_selector_mir(
                 function,
+                types,
                 selector,
                 aether_frontend::HirSubscriptAxis::Linear,
                 IndexSemantics::ZeroBased,
@@ -9681,6 +9686,7 @@ fn validate_rvalue(
             };
             let scalar = validate_slice_selector_mir(
                 function,
+                types,
                 selector,
                 aether_frontend::HirSubscriptAxis::Linear,
                 IndexSemantics::OneBased,
@@ -9724,6 +9730,7 @@ fn validate_rvalue(
             };
             let row_scalar = validate_slice_selector_mir(
                 function,
+                types,
                 &selectors[0],
                 aether_frontend::HirSubscriptAxis::Row,
                 IndexSemantics::OneBased2D,
@@ -9731,6 +9738,7 @@ fn validate_rvalue(
             )?;
             let column_scalar = validate_slice_selector_mir(
                 function,
+                types,
                 &selectors[1],
                 aether_frontend::HirSubscriptAxis::Column,
                 IndexSemantics::OneBased2D,
@@ -9812,6 +9820,7 @@ fn validate_rvalue(
                     } else {
                         let scalar = validate_slice_selector_mir(
                             function,
+                            types,
                             &selectors[0],
                             aether_frontend::HirSubscriptAxis::Linear,
                             IndexSemantics::ZeroBased,
@@ -9853,6 +9862,7 @@ fn validate_rvalue(
                         };
                         let scalar = validate_slice_selector_mir(
                             function,
+                            types,
                             &selectors[0],
                             aether_frontend::HirSubscriptAxis::Linear,
                             IndexSemantics::OneBased,
@@ -9877,6 +9887,7 @@ fn validate_rvalue(
                     } else {
                         let row = validate_slice_selector_mir(
                             function,
+                            types,
                             &selectors[0],
                             aether_frontend::HirSubscriptAxis::Row,
                             IndexSemantics::OneBased2D,
@@ -9884,6 +9895,7 @@ fn validate_rvalue(
                         )?;
                         let column = validate_slice_selector_mir(
                             function,
+                            types,
                             &selectors[1],
                             aether_frontend::HirSubscriptAxis::Column,
                             IndexSemantics::OneBased2D,

@@ -14183,9 +14183,6 @@ impl Analyzer<'_> {
             _ => unreachable!("type_subscript requires an indexable type"),
         };
 
-        let scalar_subscript = selectors
-            .iter()
-            .all(|selector| matches!(selector, AstSubscriptSelector::Scalar(_)));
         let mut typed = Vec::with_capacity(selectors.len());
         for (position, selector) in selectors.iter().enumerate() {
             let axis = if selectors.len() == 1 {
@@ -14197,10 +14194,8 @@ impl Analyzer<'_> {
             };
             let kind = match selector {
                 AstSubscriptSelector::Scalar(index) => {
-                    let index = self
-                        .expression(index, (!scalar_subscript).then_some(TypeId::USIZE))?
-                        .expr;
-                    if scalar_subscript && self.types.integer_info(index.ty).is_none() {
+                    let index = self.expression(index, None)?.expr;
+                    if self.types.integer_info(index.ty).is_none() {
                         return Err(vec![Diagnostic::new(
                             "E0480",
                             Phase::Semantic,
@@ -14215,10 +14210,26 @@ impl Analyzer<'_> {
                     HirSubscriptSelectorKind::Scalar(Box::new(index))
                 }
                 AstSubscriptSelector::Closed { first, last } => {
-                    let first = self.expression(first, Some(TypeId::USIZE))?.expr;
-                    let last = self.expression(last, Some(TypeId::USIZE))?.expr;
-                    if let (HirExprKind::Int(first_value), HirExprKind::Int(last_value)) =
-                        (&first.kind, &last.kind)
+                    let first = self.expression(first, None)?;
+                    let last = self.expression(last, None)?;
+                    for endpoint in [&first.expr, &last.expr] {
+                        if self.types.integer_info(endpoint.ty).is_none() {
+                            return Err(vec![Diagnostic::new(
+                                "E0480",
+                                Phase::Semantic,
+                                DiagnosticCategory::Type,
+                                format!(
+                                    "closed slice endpoint requires an integer type, found {}",
+                                    self.type_name(endpoint.ty)
+                                ),
+                                Some(endpoint.span),
+                            )]);
+                        }
+                    }
+                    if let (
+                        Some(ConstantValue::Integer(first_value)),
+                        Some(ConstantValue::Integer(last_value)),
+                    ) = (first.constant, last.constant)
                         && first_value > last_value
                     {
                         return Err(vec![Diagnostic::new(
@@ -14232,8 +14243,8 @@ impl Analyzer<'_> {
                         )]);
                     }
                     HirSubscriptSelectorKind::Closed {
-                        first: Box::new(first),
-                        last: Box::new(last),
+                        first: Box::new(first.expr),
+                        last: Box::new(last.expr),
                     }
                 }
                 AstSubscriptSelector::Full => HirSubscriptSelectorKind::Full,
@@ -20860,7 +20871,7 @@ fn verify_block(
                     let is_scalar = match &selector.kind {
                         HirSubscriptSelectorKind::Scalar(index) => {
                             verify_expr(index, f, sigs, structs, enums, types, fail)?;
-                            if index.ty != TypeId::USIZE {
+                            if types.integer_info(index.ty).is_none() {
                                 return Err(fail(
                                     "HIR SliceAssign scalar selector type invalid".into(),
                                 ));
@@ -20870,7 +20881,9 @@ fn verify_block(
                         HirSubscriptSelectorKind::Closed { first, last } => {
                             verify_expr(first, f, sigs, structs, enums, types, fail)?;
                             verify_expr(last, f, sigs, structs, enums, types, fail)?;
-                            if first.ty != TypeId::USIZE || last.ty != TypeId::USIZE {
+                            if types.integer_info(first.ty).is_none()
+                                || types.integer_info(last.ty).is_none()
+                            {
                                 return Err(fail(
                                     "HIR SliceAssign closed bounds type invalid".into(),
                                 ));
@@ -22148,7 +22161,7 @@ fn verify_expr(
                 let scalar = match &selector.kind {
                     HirSubscriptSelectorKind::Scalar(value) => {
                         verify_expr(value, f, sigs, structs, enums, types, fail)?;
-                        if value.ty != TypeId::USIZE {
+                        if types.integer_info(value.ty).is_none() {
                             return Err(fail("HIR SliceRead scalar selector type invalid".into()));
                         }
                         true
@@ -22156,7 +22169,9 @@ fn verify_expr(
                     HirSubscriptSelectorKind::Closed { first, last } => {
                         verify_expr(first, f, sigs, structs, enums, types, fail)?;
                         verify_expr(last, f, sigs, structs, enums, types, fail)?;
-                        if first.ty != TypeId::USIZE || last.ty != TypeId::USIZE {
+                        if types.integer_info(first.ty).is_none()
+                            || types.integer_info(last.ty).is_none()
+                        {
                             return Err(fail("HIR SliceRead closed bounds type invalid".into()));
                         }
                         false
@@ -27685,6 +27700,41 @@ mod vertical33_tests {
         };
         index.kind = HirExprKind::Bool(true);
         index.ty = TypeId::BOOL;
+        assert!(verify_hir(&hir).is_err());
+    }
+
+    #[test]
+    fn slice_hir_rejects_non_integer_endpoint_corruption() {
+        let mut hir = analyze(
+            parse_source(&SourceFile::new(
+                "integer-slice-corrupt.ae",
+                "int main(){Array<int>a={1,2};int8 x=0;uint16 y=1;Array<int>b=a[x:y];return b[0];}",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let slice = hir
+            .functions
+            .iter_mut()
+            .flat_map(|function| &mut function.body.statements)
+            .find_map(|statement| match &mut statement.kind {
+                HirStmtKind::Local { initializer, .. }
+                    if matches!(initializer.kind, HirExprKind::SliceRead { .. }) =>
+                {
+                    Some(initializer)
+                }
+                _ => None,
+            })
+            .expect("slice initializer");
+        let HirExprKind::SliceRead { subscript, .. } = &mut slice.kind else {
+            unreachable!()
+        };
+        let HirSubscriptSelectorKind::Closed { first, .. } = &mut subscript.selectors[0].kind
+        else {
+            unreachable!()
+        };
+        first.kind = HirExprKind::Bool(true);
+        first.ty = TypeId::BOOL;
         assert!(verify_hir(&hir).is_err());
     }
 }

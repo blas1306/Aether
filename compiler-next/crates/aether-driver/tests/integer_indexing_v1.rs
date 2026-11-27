@@ -163,7 +163,7 @@ fn signed_negative_empty_extreme_unsigned_and_arithmetic_overflow_trap() {
 }
 
 #[test]
-fn non_integer_scalar_indices_fail_and_slice_rules_do_not_expand() {
+fn non_integer_scalar_indices_fail() {
     for source in [
         "int main(){Array<int>a={1};bool i=true;return a[i];}",
         "int main(){Array<int>a={1};float64 i=0.0;return a[i];}",
@@ -177,20 +177,6 @@ fn non_integer_scalar_indices_fail_and_slice_rules_do_not_expand() {
         )
         .expect_err(source);
         assert_eq!(errors[0].code, "E0480", "{errors:#?}");
-    }
-    for source in [
-        "int main(){Array<int>a={1,2};int i=0;Array<int>b=a[i:1];return 0;}",
-        "int main(){Matrix<int>m=[1];int i=1;VectorView<int,Row>v=m[i,:];return 0;}",
-    ] {
-        assert!(
-            compile_source_with_optimization(
-                &SourceFile::new("slice_unchanged.ae", source),
-                &[],
-                OptimizationLevel::O0,
-            )
-            .is_err(),
-            "{source}"
-        );
     }
 }
 
