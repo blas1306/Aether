@@ -380,6 +380,7 @@ pub enum AstStmtKind {
         place: AstExpr,
         op: AstCompoundAssignOp,
         value: AstExpr,
+        origin: AstCompoundAssignOrigin,
     },
     /// A call used for its effect. Semantic analysis currently admits only
     /// the bootstrap structural List operations here.
@@ -433,6 +434,17 @@ pub enum AstCompoundAssignOp {
     Divide,
     /// `%=`.
     Remainder,
+}
+
+/// Source syntax that requested a compound scalar transaction. Postfix update
+/// is retained through AST validation, then normalized to the existing HIR
+/// compound-assignment transaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AstCompoundAssignOrigin {
+    /// An explicit `op=` statement with a source RHS.
+    Explicit,
+    /// A statement-only `place++` or `place--` with contextual unit RHS.
+    PostfixUpdate,
 }
 
 /// Source binding of a `for-in` statement. The optional type is resolved

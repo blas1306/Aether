@@ -1,0 +1,39 @@
+alias Count = int;
+
+int index(ref mut int calls) {
+    *calls = *calls + 1;
+    return 0;
+}
+
+struct Pair { int value; }
+
+class Counter {
+    public int value;
+    public init(int value) { this.value = value; }
+    public mut int bump() { value++; return value; }
+}
+
+int main() {
+    Count local = 4;
+    local++;
+    local--;
+
+    Pair pair = Pair(8);
+    pair.value++;
+
+    int calls = 0;
+    List<int> values = {10};
+    values[index(&mut calls)]++;
+
+    ref mut int slot = &mut values[0];
+    (*slot)--;
+
+    Counter counter = Counter(2);
+    counter.value++;
+    int classValue = counter.bump();
+
+    if (local != 4 || pair.value != 9 || calls != 1 || values[0] != 10 || classValue != 4) {
+        return 1;
+    }
+    return 0;
+}

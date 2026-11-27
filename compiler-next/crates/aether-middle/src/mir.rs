@@ -1785,6 +1785,7 @@ impl Builder<'_> {
                 HirStmtKind::CompoundAssign {
                     id,
                     destination,
+                    source: _,
                     op,
                     rhs,
                     destination_type,

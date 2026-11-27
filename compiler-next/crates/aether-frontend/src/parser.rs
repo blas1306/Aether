@@ -937,6 +937,12 @@ impl Parser<'_> {
             ));
         }
         let kind = match self.current().kind {
+            TokenKind::PlusPlus | TokenKind::MinusMinus => {
+                return Err(self.error(
+                    "E0100",
+                    "prefix `++` and `--` are not supported; postfix updates are standalone statements",
+                ));
+            }
             TokenKind::KwConst => {
                 let const_token = self.advance();
                 let ty = self.ty()?;
@@ -1002,6 +1008,26 @@ impl Parser<'_> {
                         place: expression,
                         op,
                         value,
+                        origin: crate::AstCompoundAssignOrigin::Explicit,
+                    }
+                } else if matches!(
+                    self.current().kind,
+                    TokenKind::PlusPlus | TokenKind::MinusMinus
+                ) {
+                    let operator = self.advance();
+                    let op = if operator.kind == TokenKind::PlusPlus {
+                        crate::AstCompoundAssignOp::Add
+                    } else {
+                        crate::AstCompoundAssignOp::Subtract
+                    };
+                    AstStmtKind::CompoundAssign {
+                        place: expression,
+                        op,
+                        value: AstExpr {
+                            kind: AstExprKind::Integer("1".into()),
+                            span: operator.span,
+                        },
+                        origin: crate::AstCompoundAssignOrigin::PostfixUpdate,
                     }
                 } else {
                     AstStmtKind::Expr(expression)
@@ -2287,8 +2313,19 @@ impl Parser<'_> {
     }
 
     fn expect(&mut self, kind: TokenKind, message: &'static str) -> Result<Token, Diagnostic> {
-        self.consume(kind)
-            .ok_or_else(|| self.error("E0100", message))
+        self.consume(kind).ok_or_else(|| {
+            if matches!(
+                self.current().kind,
+                TokenKind::PlusPlus | TokenKind::MinusMinus
+            ) {
+                self.error(
+                    "E0100",
+                    "postfix `++` and `--` are only allowed as standalone statements",
+                )
+            } else {
+                self.error("E0100", message)
+            }
+        })
     }
 
     fn error(&self, code: &'static str, message: impl Into<String>) -> Diagnostic {

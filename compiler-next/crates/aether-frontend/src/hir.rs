@@ -1286,6 +1286,7 @@ pub enum HirStmtKind {
     CompoundAssign {
         id: CompoundAssignId,
         destination: HirCompoundDestination,
+        source: HirCompoundAssignSource,
         op: HirBinaryOp,
         rhs: HirExpr,
         destination_type: TypeId,
@@ -1407,6 +1408,15 @@ pub struct CompoundAssignId {
     pub function: FunctionId,
     pub source: SourceId,
     pub start: usize,
+}
+
+/// Verified source spelling for a compound transaction. MIR normalization may
+/// discard this only after HIR proves the postfix/operator/unit correspondence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HirCompoundAssignSource {
+    Explicit,
+    PostfixIncrement,
+    PostfixDecrement,
 }
 
 /// Stabilized storage identity for one compound assignment. Scalar class fields
@@ -7271,6 +7281,7 @@ impl Monomorphizer<'_> {
                         HirStmtKind::CompoundAssign {
                             id,
                             destination,
+                            source,
                             op,
                             rhs,
                             destination_type,
@@ -7304,6 +7315,7 @@ impl Monomorphizer<'_> {
                                     initialized: *initialized,
                                 },
                             },
+                            source: *source,
                             op: *op,
                             rhs: self.substitute_expr(rhs, substitution)?,
                             destination_type: self.substitute_type(
@@ -12628,7 +12640,12 @@ impl Analyzer<'_> {
                         }
                     }
                 }
-                AstStmtKind::CompoundAssign { place, op, value } => {
+                AstStmtKind::CompoundAssign {
+                    place,
+                    op,
+                    value,
+                    origin,
+                } => {
                     let destination =
                         if let Some(destination) = self.class_scalar_compound_destination(place) {
                             destination?
@@ -12648,6 +12665,13 @@ impl Analyzer<'_> {
                         )]);
                     }
                     let destination_type = destination.ty();
+                    let postfix = matches!(origin, crate::AstCompoundAssignOrigin::PostfixUpdate);
+                    if postfix && self.types.integer_info(destination_type).is_none() {
+                        return Err(vec![type_error(
+                            "postfix `++` and `--` require a built-in integer scalar destination",
+                            s.span,
+                        )]);
+                    }
                     if !self.types.is_numeric(destination_type) {
                         return Err(vec![type_error(
                             "compound assignment requires a built-in numeric scalar destination",
@@ -12669,6 +12693,14 @@ impl Analyzer<'_> {
                             "floating `%=` is not supported; `%=` requires an integer destination",
                             Some(s.span),
                         )]);
+                    }
+                    if postfix
+                        && !matches!(
+                            op,
+                            crate::AstCompoundAssignOp::Add | crate::AstCompoundAssignOp::Subtract
+                        )
+                    {
+                        return Err(vec![type_error("invalid postfix update operator", s.span)]);
                     }
                     let rhs = self.expression(value, Some(destination_type))?.expr;
                     if rhs.ty != destination_type {
@@ -12721,6 +12753,20 @@ impl Analyzer<'_> {
                             start: s.span.start,
                         },
                         destination,
+                        source: match (origin, op) {
+                            (crate::AstCompoundAssignOrigin::Explicit, _) => {
+                                HirCompoundAssignSource::Explicit
+                            }
+                            (
+                                crate::AstCompoundAssignOrigin::PostfixUpdate,
+                                crate::AstCompoundAssignOp::Add,
+                            ) => HirCompoundAssignSource::PostfixIncrement,
+                            (
+                                crate::AstCompoundAssignOrigin::PostfixUpdate,
+                                crate::AstCompoundAssignOp::Subtract,
+                            ) => HirCompoundAssignSource::PostfixDecrement,
+                            _ => unreachable!("postfix operator checked above"),
+                        },
                         op: operation,
                         rhs,
                         destination_type,
@@ -21068,6 +21114,7 @@ fn verify_block(
             HirStmtKind::CompoundAssign {
                 id,
                 destination,
+                source,
                 op,
                 rhs,
                 destination_type,
@@ -21126,10 +21173,24 @@ fn verify_block(
                     | HirBinaryOp::DivideFloat => float,
                     _ => false,
                 };
+                let source_matches = match source {
+                    HirCompoundAssignSource::Explicit => true,
+                    HirCompoundAssignSource::PostfixIncrement => {
+                        integer.is_some()
+                            && *op == HirBinaryOp::AddIntegerChecked
+                            && matches!(rhs.kind, HirExprKind::Int(1))
+                    }
+                    HirCompoundAssignSource::PostfixDecrement => {
+                        integer.is_some()
+                            && *op == HirBinaryOp::SubtractIntegerChecked
+                            && matches!(rhs.kind, HirExprKind::Int(1))
+                    }
+                };
                 if id.function != f.function_id
                     || !destination_valid
                     || rhs.ty != *destination_type
                     || !operation_matches
+                    || !source_matches
                     || !types.guarantees_copy(*destination_type)
                 {
                     return Err(fail("HIR compound assignment contract invalid".into()));
@@ -28095,7 +28156,7 @@ mod vertical33_tests {
         )
         .unwrap();
         verify_hir(&hir).unwrap();
-        for mutation in 0..4 {
+        for mutation in 0..5 {
             let mut bad = hir.clone();
             let statement = bad.functions[0]
                 .body
@@ -28105,6 +28166,7 @@ mod vertical33_tests {
                 .unwrap();
             let HirStmtKind::CompoundAssign {
                 id,
+                source,
                 op,
                 rhs,
                 destination_type,
@@ -28118,6 +28180,7 @@ mod vertical33_tests {
                 1 => *op = HirBinaryOp::Equal,
                 2 => rhs.ty = TypeId::BOOL,
                 3 => *destination_type = TypeId::BOOL,
+                4 => *source = HirCompoundAssignSource::PostfixIncrement,
                 _ => unreachable!(),
             }
             assert!(verify_hir(&bad).is_err(), "accepted mutation {mutation}");

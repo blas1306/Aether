@@ -2803,3 +2803,32 @@ unique load/commit pair. It protects location and lifetime without implying
 and the final commit uses the previously captured old value. Relocation, owner
 replacement, invalid exceptional CFG and unknown invalidating effects fail
 closed. See [COMPOUND-ASSIGNMENT-V1 report](COMPOUND_ASSIGNMENT_V1_REPORT.md).
+
+## POSTFIX-UPDATE-V1 — statement-only integer update
+
+Status: **CLOSED — global workspace qualification exception documented.** The
+focal and differential gates pass; the workspace-global gate remains blocked by
+the independently reproduced pre-existing registry hang documented below.
+
+`place++` and `place--` are statements without a result. Prefix forms and every
+use in an expression are rejected. Their only admitted destination types are the
+ten canonical native integers (`int8` through `int64`, `uint8` through `uint64`,
+`isize`, and `usize`) and transparent aliases such as `int`.
+
+The AST retains `PostfixUpdate` source provenance. HIR independently verifies
+that postfix increment is exactly `AddIntegerChecked` with a contextual integer
+unit and postfix decrement is exactly `SubtractIntegerChecked` with that unit.
+After this check, both forms normalize to the existing compound-assignment
+transaction. MIR and SSA therefore use the same identified
+`CompoundLoad`/`CompoundCommit`, stabilized destination, access checks,
+provenance protection and single-commit rules as `+= 1` and `-= 1`. LLVM adds no
+postfix opcode or runtime helper and preserves the existing `IntegerOverflow`
+trap behavior.
+
+The writable destination surface is exactly the scalar-integer subset already
+admitted by compound assignment: mutable locals, struct and accessible mutable
+class fields, scalar collection/mathematical indices, mutable views, `ref mut`
+and nested projections. Receiver/reference/index evaluation occurs once before
+the old-value load; overflow, underflow, bounds failure or exceptional exit
+cannot publish a compound commit. See
+[POSTFIX-UPDATE-V1 report](POSTFIX_UPDATE_V1_REPORT.md).
