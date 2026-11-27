@@ -2054,6 +2054,7 @@ fn emit_function(
         })
         .collect();
     let mut overflow_trap = false;
+    let mut shift_count_trap = false;
     let mut division_trap = false;
     let mut conversion_trap = false;
     let mut division_overflow_trap = false;
@@ -4147,6 +4148,20 @@ fn emit_function(
                     )
                     .unwrap();
                 }
+                SsaOp::Unary {
+                    op: UnaryOp::BitwiseNot,
+                    operand,
+                    trap: None,
+                } => {
+                    writeln!(
+                        output,
+                        "  %v{} = xor {} {}, -1",
+                        instruction.result.0,
+                        llvm_type(types, instruction.ty),
+                        llvm_operand(operand)
+                    )
+                    .unwrap();
+                }
                 SsaOp::Unary { .. } => unreachable!("verified unary trap contract"),
                 SsaOp::Binary {
                     op,
@@ -4226,6 +4241,39 @@ fn emit_function(
                             llvm_operand(right)
                         )
                         .unwrap();
+                    }
+                    BinaryOp::BitwiseAnd | BinaryOp::BitwiseOr | BinaryOp::BitwiseXor => {
+                        let opcode = match op {
+                            BinaryOp::BitwiseAnd => "and",
+                            BinaryOp::BitwiseOr => "or",
+                            BinaryOp::BitwiseXor => "xor",
+                            _ => unreachable!(),
+                        };
+                        writeln!(
+                            output,
+                            "  %v{} = {opcode} {} {}, {}",
+                            instruction.result.0,
+                            llvm_type(types, instruction.ty),
+                            llvm_operand(left),
+                            llvm_operand(right)
+                        )
+                        .unwrap();
+                    }
+                    BinaryOp::ShiftLeftChecked
+                    | BinaryOp::ShiftRightArithmetic
+                    | BinaryOp::ShiftRightLogical => {
+                        shift_count_trap = true;
+                        overflow_trap |= matches!(op, BinaryOp::ShiftLeftChecked);
+                        emit_integer_shift(
+                            output,
+                            types,
+                            function,
+                            block.id,
+                            instruction.result.0,
+                            *op,
+                            left,
+                            right,
+                        );
                     }
                     BinaryOp::Less
                     | BinaryOp::LessEqual
@@ -4626,6 +4674,10 @@ fn emit_function(
                 overflow_trap = true;
                 writeln!(output, "  br label %trap_integer_overflow").unwrap();
             }
+            SsaTerminator::Trap(TrapKind::ShiftCountOutOfRange) => {
+                shift_count_trap = true;
+                writeln!(output, "  br label %trap_shift_count_out_of_range").unwrap();
+            }
             SsaTerminator::Trap(TrapKind::DivisionByZero) => {
                 division_trap = true;
                 writeln!(output, "  br label %trap_division_by_zero").unwrap();
@@ -4738,6 +4790,13 @@ fn emit_function(
         writeln!(
             output,
             "trap_integer_overflow:\n  call void @llvm.trap()\n  unreachable"
+        )
+        .unwrap();
+    }
+    if shift_count_trap {
+        writeln!(
+            output,
+            "trap_shift_count_out_of_range:\n  ; structured Aether trap: ShiftCountOutOfRange\n  call void @llvm.trap()\n  unreachable"
         )
         .unwrap();
     }
@@ -5285,6 +5344,154 @@ fn emit_integer_division(
     }
 }
 
+fn emit_integer_shift(
+    output: &mut String,
+    types: &TypeArena,
+    function: &SsaFunction,
+    block: BlockId,
+    result: u32,
+    op: BinaryOp,
+    left: &SsaOperand,
+    count: &SsaOperand,
+) {
+    let left_ty = operand_type(function, left);
+    let count_ty = operand_type(function, count);
+    let left_kind = types
+        .integer_info(left_ty)
+        .expect("verified shift left integer");
+    let count_kind = types
+        .integer_info(count_ty)
+        .expect("verified shift count integer");
+    let left_bits = left_kind.bits(TargetProperties::LINUX_X86_64);
+    let count_bits = count_kind.bits(TargetProperties::LINUX_X86_64);
+    let llvm_left = llvm_type(types, left_ty);
+    let llvm_count = llvm_type(types, count_ty);
+    let left_value = llvm_operand(left);
+    let count_value = llvm_operand(count);
+    let valid_label = if matches!(op, BinaryOp::ShiftLeftChecked) {
+        format!("bb{}_shift_count_valid_v{result}", block.0)
+    } else {
+        continuation_label(block, result)
+    };
+    if count_kind.is_signed() {
+        writeln!(
+            output,
+            "  %shift_negative{result} = icmp slt {llvm_count} {count_value}, 0"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "  %shift_too_large{result} = icmp uge {llvm_count} {count_value}, {left_bits}"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "  %shift_invalid{result} = or i1 %shift_negative{result}, %shift_too_large{result}"
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            output,
+            "  %shift_invalid{result} = icmp uge {llvm_count} {count_value}, {left_bits}"
+        )
+        .unwrap();
+    }
+    writeln!(
+        output,
+        "  br i1 %shift_invalid{result}, label %trap_shift_count_out_of_range, label %{valid_label}"
+    )
+    .unwrap();
+    writeln!(output, "{valid_label}:").unwrap();
+
+    let normalized = if count_bits == left_bits {
+        count_value.clone()
+    } else if count_bits < left_bits {
+        writeln!(
+            output,
+            "  %shift_count{result} = zext {llvm_count} {count_value} to {llvm_left}"
+        )
+        .unwrap();
+        format!("%shift_count{result}")
+    } else {
+        writeln!(
+            output,
+            "  %shift_count{result} = trunc {llvm_count} {count_value} to {llvm_left}"
+        )
+        .unwrap();
+        format!("%shift_count{result}")
+    };
+
+    if matches!(op, BinaryOp::ShiftLeftChecked) {
+        let count128 = if count_bits == 128 {
+            count_value.clone()
+        } else {
+            writeln!(
+                output,
+                "  %shift_count128_{result} = zext {llvm_count} {count_value} to i128"
+            )
+            .unwrap();
+            format!("%shift_count128_{result}")
+        };
+        let extension = if left_kind.is_signed() {
+            "sext"
+        } else {
+            "zext"
+        };
+        writeln!(
+            output,
+            "  %shift_left128_{result} = {extension} {llvm_left} {left_value} to i128"
+        )
+        .unwrap();
+        let loop_label = format!("bb{}_shift_check_loop_v{result}", block.0);
+        let double_label = format!("bb{}_shift_check_double_v{result}", block.0);
+        let bounds_label = format!("bb{}_shift_check_bounds_v{result}", block.0);
+        writeln!(
+            output,
+            "  br label %{loop_label}\n{loop_label}:\n  %shift_check_index{result} = phi i128 [ 0, %{valid_label} ], [ %shift_check_next_index{result}, %{double_label} ]\n  %shift_product128_{result} = phi i128 [ %shift_left128_{result}, %{valid_label} ], [ %shift_check_next_product{result}, %{double_label} ]\n  %shift_check_done{result} = icmp eq i128 %shift_check_index{result}, {count128}\n  br i1 %shift_check_done{result}, label %{bounds_label}, label %{double_label}\n{double_label}:\n  %shift_check_next_product{result} = add i128 %shift_product128_{result}, %shift_product128_{result}\n  %shift_check_next_index{result} = add i128 %shift_check_index{result}, 1\n  br label %{loop_label}\n{bounds_label}:"
+        )
+        .unwrap();
+        let (min, max) = left_kind.range(TargetProperties::LINUX_X86_64);
+        writeln!(
+            output,
+            "  %shift_below_min{result} = icmp slt i128 %shift_product128_{result}, {min}"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "  %shift_above_max{result} = icmp sgt i128 %shift_product128_{result}, {max}"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "  %shift_overflow{result} = or i1 %shift_below_min{result}, %shift_above_max{result}"
+        )
+        .unwrap();
+        writeln!(
+            output,
+            "  br i1 %shift_overflow{result}, label %trap_integer_overflow, label %{}",
+            continuation_label(block, result)
+        )
+        .unwrap();
+        writeln!(output, "{}:", continuation_label(block, result)).unwrap();
+        writeln!(
+            output,
+            "  %v{result} = shl {llvm_left} {left_value}, {normalized}"
+        )
+        .unwrap();
+    } else {
+        let opcode = if matches!(op, BinaryOp::ShiftRightArithmetic) {
+            "ashr"
+        } else {
+            "lshr"
+        };
+        writeln!(
+            output,
+            "  %v{result} = {opcode} {llvm_left} {left_value}, {normalized}"
+        )
+        .unwrap();
+    }
+}
+
 fn is_checked(op: &SsaOp) -> bool {
     matches!(
         op,
@@ -5310,6 +5517,12 @@ fn is_checked(op: &SsaOp) -> bool {
                     | BinaryOp::DivideIntegerUnsignedChecked
                     | BinaryOp::RemainderIntegerSignedChecked
                     | BinaryOp::RemainderIntegerUnsignedChecked,
+                ..
+            }
+            | SsaOp::Binary {
+                op: BinaryOp::ShiftLeftChecked
+                    | BinaryOp::ShiftRightArithmetic
+                    | BinaryOp::ShiftRightLogical,
                 ..
             }
     )

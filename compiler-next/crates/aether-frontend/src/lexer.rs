@@ -117,8 +117,14 @@ pub enum TokenKind {
     Ampersand,
     /// `&&`.
     AndAnd,
+    /// `|`.
+    Pipe,
     /// `||`.
     OrOr,
+    /// `^`.
+    Caret,
+    /// `~`.
+    Tilde,
     /// `!`.
     Bang,
     /// `?`.
@@ -133,10 +139,14 @@ pub enum TokenKind {
     BangEqual,
     /// `<`.
     Less,
+    /// `<<`.
+    ShiftLeft,
     /// `<=`.
     LessEqual,
     /// `>`.
     Greater,
+    /// `>>`.
+    ShiftRight,
     /// `>=`.
     GreaterEqual,
     /// End marker.
@@ -406,6 +416,9 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                 cursor += 2;
                 push(&mut tokens, TokenKind::OrOr, source, start, cursor);
             }
+            b'|' => single(&mut tokens, TokenKind::Pipe, source, &mut cursor),
+            b'^' => single(&mut tokens, TokenKind::Caret, source, &mut cursor),
+            b'~' => single(&mut tokens, TokenKind::Tilde, source, &mut cursor),
             b'?' => single(&mut tokens, TokenKind::Question, source, &mut cursor),
             b'=' if bytes.get(cursor + 1) == Some(&b'>') => {
                 cursor += 2;
@@ -418,6 +431,10 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                 TokenKind::Equal,
                 TokenKind::EqualEqual,
             ),
+            b'<' if bytes.get(cursor + 1) == Some(&b'<') => {
+                cursor += 2;
+                push(&mut tokens, TokenKind::ShiftLeft, source, start, cursor);
+            }
             b'<' => double_or_single(
                 &mut tokens,
                 source,
@@ -425,6 +442,10 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                 TokenKind::Less,
                 TokenKind::LessEqual,
             ),
+            b'>' if bytes.get(cursor + 1) == Some(&b'>') => {
+                cursor += 2;
+                push(&mut tokens, TokenKind::ShiftRight, source, start, cursor);
+            }
             b'>' => double_or_single(
                 &mut tokens,
                 source,

@@ -7794,6 +7794,7 @@ fn verify_op(
                     .integer_info(ty)
                     .is_some_and(aether_frontend::IntegerType::is_signed),
                 UnaryOp::NegateFloat => types.float_info(ty).is_some(),
+                UnaryOp::BitwiseNot => types.integer_info(ty).is_some(),
             };
             let required_trap =
                 matches!(op, UnaryOp::NegateIntegerChecked).then_some(TrapKind::IntegerOverflow);
@@ -7810,12 +7811,19 @@ fn verify_op(
         } => {
             let left = operand_ty(left)?;
             let right = operand_ty(right)?;
-            if left != right {
+            let shift = matches!(
+                op,
+                BinaryOp::ShiftLeftChecked
+                    | BinaryOp::ShiftRightArithmetic
+                    | BinaryOp::ShiftRightLogical
+            );
+            if !shift && left != right {
                 return Err("SSA binary operand type mismatch".into());
             }
             let (required, output, required_trap, required_secondary) =
                 crate::mir::binary_contract(types, enums, *op, left)?;
             if left != required
+                || (shift && types.integer_info(right).is_none())
                 || result != output
                 || *trap != required_trap
                 || *secondary_trap != required_secondary

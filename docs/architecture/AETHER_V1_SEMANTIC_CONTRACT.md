@@ -2832,3 +2832,42 @@ and nested projections. Receiver/reference/index evaluation occurs once before
 the old-value load; overflow, underflow, bounds failure or exceptional exit
 cannot publish a compound commit. See
 [POSTFIX-UPDATE-V1 report](POSTFIX_UPDATE_V1_REPORT.md).
+
+## BITWISE-OPERATORS-V1 — fixed-width integer bit operations
+
+Status: **CLOSED** in `compiler-next`; Compiler Core and Language Conformance
+passed through the reproducible qualification profiles. OAL Integration and
+Full Ecosystem were not executed for this closure. Detailed evidence and risks
+are recorded in
+[BITWISE_OPERATORS_V1_REPORT.md](BITWISE_OPERATORS_V1_REPORT.md).
+
+The admitted surface is `&`, `|`, `^`, prefix `~`, checked `<<`, and `>>`.
+`^` is exclusively XOR; `**`, `pow`, bitwise compound assignment, and union
+types are not admitted. Prefix `&`/`&mut`, `&&`, `||`, `!`, comparisons,
+ranges, selectors, and generic type syntax retain their existing meanings.
+Inside type grammar only, one `>>` token may be consumed as two contiguous
+generic closers while retaining the original source spans.
+
+Bitwise AND, OR, XOR, and NOT operate on the exact-width two's-complement bit
+pattern of the ten native integers and transparent aliases. Binary bitwise
+operators reuse ordinary lossless integer widening and then require one
+canonical operand/result `TypeId`; signed/unsigned and sized/fixed-width mixes
+remain invalid. NOT preserves its operand type exactly. These four operations
+cannot overflow or trap.
+
+For shifts, the left operand fixes result type, width, and signedness. The count
+independently retains any native integer type. Evaluation is left then count,
+once each. A signed negative count or any count greater than or equal to the
+left width produces `ShiftCountOutOfRange`; only a proven-valid count is
+normalized for LLVM. Signed right shift is arithmetic (`ashr`), unsigned right
+shift is logical (`lshr`). Left shift means the mathematical product by
+`2^count` and produces `IntegerOverflow` when that value is not representable.
+Count validation strictly precedes the overflow guard. The final LLVM shifts
+carry no `nsw`, `nuw`, or `exact` flags.
+
+The effective precedence from high to low is postfix/primary; prefix unary;
+multiplicative; additive; shifts; bitwise AND; bitwise XOR; bitwise OR;
+comparison; equality; range; logical AND; logical OR. New binary operators are
+left associative. AST, HIR, MIR, and SSA carry explicit operations; HIR/MIR/SSA
+verification reconstructs integer kinds, exact results, signed right-shift
+selection, heterogeneous shift counts, and the required trap ordering.

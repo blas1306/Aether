@@ -283,6 +283,7 @@ pub enum Operand {
 pub enum TrapKind {
     /// Checked arithmetic overflow.
     IntegerOverflow,
+    ShiftCountOutOfRange,
     /// Incompatible mathematical dimensions or rows/columns.
     ShapeMismatch,
     /// Integer division or remainder by zero.
@@ -331,6 +332,7 @@ pub enum UnaryOp {
     NegateIntegerChecked,
     /// IEEE floating negation.
     NegateFloat,
+    BitwiseNot,
 }
 
 /// Source-order role of a captured range operand.
@@ -354,6 +356,12 @@ pub enum BinaryOp {
     DivideIntegerUnsignedChecked,
     RemainderIntegerSignedChecked,
     RemainderIntegerUnsignedChecked,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    ShiftLeftChecked,
+    ShiftRightArithmetic,
+    ShiftRightLogical,
     /// IEEE floating operations.
     AddFloat,
     SubtractFloat,
@@ -2089,6 +2097,9 @@ impl Builder<'_> {
                     let trap = match trap {
                         aether_frontend::HirTrapKind::ShapeMismatch => TrapKind::ShapeMismatch,
                         aether_frontend::HirTrapKind::IntegerOverflow => {
+                            unreachable!("verified shapeGuard trap")
+                        }
+                        aether_frontend::HirTrapKind::ShiftCountOutOfRange => {
                             unreachable!("verified shapeGuard trap")
                         }
                     };
@@ -4616,6 +4627,7 @@ impl Builder<'_> {
                         Some(TrapKind::IntegerOverflow),
                     ),
                     HirUnaryOp::NegateFloat => (UnaryOp::NegateFloat, None),
+                    HirUnaryOp::BitwiseNot => (UnaryOp::BitwiseNot, None),
                 };
                 self.assign(
                     Place {
@@ -4880,6 +4892,24 @@ impl Builder<'_> {
                     HirBinaryOp::RemainderIntegerUnsignedChecked => (
                         BinaryOp::RemainderIntegerUnsignedChecked,
                         Some(TrapKind::DivisionByZero),
+                        None,
+                    ),
+                    HirBinaryOp::BitwiseAnd => (BinaryOp::BitwiseAnd, None, None),
+                    HirBinaryOp::BitwiseOr => (BinaryOp::BitwiseOr, None, None),
+                    HirBinaryOp::BitwiseXor => (BinaryOp::BitwiseXor, None, None),
+                    HirBinaryOp::ShiftLeftChecked => (
+                        BinaryOp::ShiftLeftChecked,
+                        Some(TrapKind::ShiftCountOutOfRange),
+                        Some(TrapKind::IntegerOverflow),
+                    ),
+                    HirBinaryOp::ShiftRightArithmetic => (
+                        BinaryOp::ShiftRightArithmetic,
+                        Some(TrapKind::ShiftCountOutOfRange),
+                        None,
+                    ),
+                    HirBinaryOp::ShiftRightLogical => (
+                        BinaryOp::ShiftRightLogical,
+                        Some(TrapKind::ShiftCountOutOfRange),
                         None,
                     ),
                     HirBinaryOp::AddFloat => (BinaryOp::AddFloat, None, None),
@@ -10822,6 +10852,7 @@ fn validate_rvalue(
                     .integer_info(operand_ty)
                     .is_some_and(aether_frontend::IntegerType::is_signed),
                 UnaryOp::NegateFloat => types.float_info(operand_ty).is_some(),
+                UnaryOp::BitwiseNot => types.integer_info(operand_ty).is_some(),
             };
             let required_trap =
                 matches!(op, UnaryOp::NegateIntegerChecked).then_some(TrapKind::IntegerOverflow);
@@ -10840,12 +10871,19 @@ fn validate_rvalue(
             validate_operand(function, right, initialized)?;
             let left_ty = operand_type(function, left)?;
             let right_ty = operand_type(function, right)?;
-            if left_ty != right_ty {
+            let shift = matches!(
+                op,
+                BinaryOp::ShiftLeftChecked
+                    | BinaryOp::ShiftRightArithmetic
+                    | BinaryOp::ShiftRightLogical
+            );
+            if !shift && left_ty != right_ty {
                 return Err("MIR binary operands have different types".into());
             }
             let (required_operand, result, required_trap, required_secondary) =
                 binary_contract(types, enums, *op, left_ty)?;
             if left_ty != required_operand
+                || (shift && types.integer_info(right_ty).is_none())
                 || destination != result
                 || *trap != required_trap
                 || *secondary_trap != required_secondary
@@ -11320,6 +11358,31 @@ pub(crate) fn binary_contract(
             if types.integer_info(operand).is_some() =>
         {
             Ok((operand, operand, Some(TrapKind::IntegerOverflow), None))
+        }
+        BinaryOp::BitwiseAnd | BinaryOp::BitwiseOr | BinaryOp::BitwiseXor
+            if types.integer_info(operand).is_some() =>
+        {
+            Ok((operand, operand, None, None))
+        }
+        BinaryOp::ShiftLeftChecked if types.integer_info(operand).is_some() => Ok((
+            operand,
+            operand,
+            Some(TrapKind::ShiftCountOutOfRange),
+            Some(TrapKind::IntegerOverflow),
+        )),
+        BinaryOp::ShiftRightArithmetic
+            if types
+                .integer_info(operand)
+                .is_some_and(aether_frontend::IntegerType::is_signed) =>
+        {
+            Ok((operand, operand, Some(TrapKind::ShiftCountOutOfRange), None))
+        }
+        BinaryOp::ShiftRightLogical
+            if types
+                .integer_info(operand)
+                .is_some_and(|kind| !kind.is_signed()) =>
+        {
+            Ok((operand, operand, Some(TrapKind::ShiftCountOutOfRange), None))
         }
         BinaryOp::DivideIntegerSignedChecked
             if types

@@ -717,8 +717,9 @@ impl Parser<'_> {
             let result = self
                 .ty()
                 .map_err(|_| self.function_type_error("expected Function return type"))?;
-            let end =
-                self.expect_function(TokenKind::Greater, "expected `>` after Function type")?;
+            let end = self
+                .expect_type_greater("expected `>` after Function type")
+                .map_err(|_| self.function_type_error("expected `>` after Function type"))?;
             span = span.through(end.span);
             return self.nullable_suffix(AstType {
                 kind: if owning {
@@ -848,8 +849,8 @@ impl Parser<'_> {
                                 "invalid Invocable signature; expected a result type",
                             )
                         })?;
-                        let end = self
-                            .expect(TokenKind::Greater, "expected `>` after Invocable signature")?;
+                        let end =
+                            self.expect_type_greater("expected `>` after Invocable signature")?;
                         span = span.through(end.span);
                         Some(crate::AstInvocableSignature {
                             parameters,
@@ -878,7 +879,7 @@ impl Parser<'_> {
                 break;
             }
         }
-        self.expect(TokenKind::Greater, "expected `>` after generic parameters")?;
+        self.expect_type_greater("expected `>` after generic parameters")?;
         Ok(parameters)
     }
 
@@ -893,7 +894,7 @@ impl Parser<'_> {
                 break;
             }
         }
-        self.expect(TokenKind::Greater, "expected `>` after type arguments")?;
+        self.expect_type_greater("expected `>` after type arguments")?;
         Ok(arguments)
     }
 
@@ -1394,7 +1395,7 @@ impl Parser<'_> {
     }
 
     fn comparison(&mut self) -> Result<AstExpr, Diagnostic> {
-        let mut expr = self.term()?;
+        let mut expr = self.bitwise_or()?;
         loop {
             let op = match self.current().kind {
                 TokenKind::Less => Some(AstBinaryOp::Less),
@@ -1405,11 +1406,67 @@ impl Parser<'_> {
             };
             let Some(op) = op else { break };
             self.advance();
-            let right = self.term()?;
+            let right = self.bitwise_or()?;
             let span = expr.span.through(right.span);
             expr = AstExpr {
                 kind: AstExprKind::Binary {
                     op,
+                    left: Box::new(expr),
+                    right: Box::new(right),
+                },
+                span,
+            };
+        }
+        Ok(expr)
+    }
+
+    fn bitwise_or(&mut self) -> Result<AstExpr, Diagnostic> {
+        self.left_binary(
+            Self::bitwise_xor,
+            &[(TokenKind::Pipe, AstBinaryOp::BitwiseOr)],
+        )
+    }
+
+    fn bitwise_xor(&mut self) -> Result<AstExpr, Diagnostic> {
+        self.left_binary(
+            Self::bitwise_and,
+            &[(TokenKind::Caret, AstBinaryOp::BitwiseXor)],
+        )
+    }
+
+    fn bitwise_and(&mut self) -> Result<AstExpr, Diagnostic> {
+        self.left_binary(
+            Self::shift,
+            &[(TokenKind::Ampersand, AstBinaryOp::BitwiseAnd)],
+        )
+    }
+
+    fn shift(&mut self) -> Result<AstExpr, Diagnostic> {
+        self.left_binary(
+            Self::term,
+            &[
+                (TokenKind::ShiftLeft, AstBinaryOp::ShiftLeft),
+                (TokenKind::ShiftRight, AstBinaryOp::ShiftRight),
+            ],
+        )
+    }
+
+    fn left_binary(
+        &mut self,
+        next: fn(&mut Self) -> Result<AstExpr, Diagnostic>,
+        operators: &[(TokenKind, AstBinaryOp)],
+    ) -> Result<AstExpr, Diagnostic> {
+        let mut expr = next(self)?;
+        loop {
+            let Some((_, op)) = operators.iter().find(|(kind, _)| self.at(*kind)) else {
+                break;
+            };
+            self.advance();
+            let right = next(self)?;
+            let span = expr.span.through(right.span);
+            expr = AstExpr {
+                kind: AstExprKind::Binary {
+                    op: *op,
                     left: Box::new(expr),
                     right: Box::new(right),
                 },
@@ -1468,7 +1525,17 @@ impl Parser<'_> {
     }
 
     fn unary(&mut self) -> Result<AstExpr, Diagnostic> {
-        if let Some(bang) = self.consume(TokenKind::Bang) {
+        if let Some(tilde) = self.consume(TokenKind::Tilde) {
+            let operand = self.unary()?;
+            let span = tilde.span.through(operand.span);
+            Ok(AstExpr {
+                kind: AstExprKind::Unary {
+                    op: AstUnaryOp::BitwiseNot,
+                    operand: Box::new(operand),
+                },
+                span,
+            })
+        } else if let Some(bang) = self.consume(TokenKind::Bang) {
             let operand = self.unary()?;
             let span = bang.span.through(operand.span);
             Ok(AstExpr {
@@ -2157,6 +2224,15 @@ impl Parser<'_> {
                         );
                     }
                 }
+                TokenKind::ShiftRight => {
+                    if depth <= 2 {
+                        return matches!(
+                            self.tokens.get(index + 1).map(|token| token.kind),
+                            Some(TokenKind::LeftParen | TokenKind::Dot)
+                        );
+                    }
+                    depth -= 2;
+                }
                 TokenKind::Semicolon | TokenKind::Eof if depth > 0 => return false,
                 _ => {}
             }
@@ -2167,6 +2243,32 @@ impl Parser<'_> {
 
     #[allow(clippy::too_many_lines)]
     fn looks_like_local_declaration(&self) -> bool {
+        // This is a non-consuming lookahead. Give its recursive type scanner
+        // the same contextual view of `>>` as the real type parser, without
+        // changing the authoritative token stream or source spans.
+        let mut expanded = Vec::with_capacity(self.tokens.len() + 2);
+        for (index, token) in self.tokens.iter().enumerate() {
+            if index >= self.cursor && token.kind == TokenKind::ShiftRight {
+                expanded.push(Token {
+                    kind: TokenKind::Greater,
+                    lexeme: ">".into(),
+                    span: Span::in_source(
+                        token.span.source,
+                        token.span.start,
+                        token.span.start + 1,
+                    ),
+                });
+                expanded.push(Token {
+                    kind: TokenKind::Greater,
+                    lexeme: ">".into(),
+                    span: Span::in_source(token.span.source, token.span.start + 1, token.span.end),
+                });
+            } else {
+                expanded.push(token.clone());
+            }
+        }
+        let tokens = &expanded;
+
         fn skip_type_atom(tokens: &[Token], mut index: usize) -> Option<usize> {
             if tokens.get(index)?.kind == TokenKind::LeftParen {
                 index = skip_type(tokens, index + 1)?;
@@ -2263,14 +2365,13 @@ impl Parser<'_> {
             Some(after_type)
         }
 
-        let Some(after_type) = skip_type(&self.tokens, self.cursor) else {
+        let Some(after_type) = skip_type(tokens, self.cursor) else {
             return false;
         };
-        self.tokens
+        tokens
             .get(after_type)
             .is_some_and(|token| token.kind == TokenKind::Identifier)
-            && self
-                .tokens
+            && tokens
                 .get(after_type + 1)
                 .is_some_and(|token| token.kind == TokenKind::Equal)
     }
@@ -2326,6 +2427,30 @@ impl Parser<'_> {
                 self.error("E0100", message)
             }
         })
+    }
+
+    /// In type grammar only, consume one closing angle from a maximal-munch
+    /// `>>` token. The returned and remaining spans continue to refer to the
+    /// two original source bytes.
+    fn expect_type_greater(&mut self, message: &'static str) -> Result<Token, Diagnostic> {
+        if self.at(TokenKind::Greater) {
+            return Ok(self.advance());
+        }
+        if self.at(TokenKind::ShiftRight) {
+            let token = self.current().clone();
+            let first = Token {
+                kind: TokenKind::Greater,
+                lexeme: ">".into(),
+                span: Span::in_source(token.span.source, token.span.start, token.span.start + 1),
+            };
+            self.tokens[self.cursor] = Token {
+                kind: TokenKind::Greater,
+                lexeme: ">".into(),
+                span: Span::in_source(token.span.source, token.span.start + 1, token.span.end),
+            };
+            return Ok(first);
+        }
+        Err(self.error("E0100", message))
     }
 
     fn error(&self, code: &'static str, message: impl Into<String>) -> Diagnostic {

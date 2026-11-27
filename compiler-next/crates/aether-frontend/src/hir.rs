@@ -1248,6 +1248,8 @@ pub enum HirTrapKind {
     ShapeMismatch,
     /// Closed non-source value retained so verification can reject trap corruption.
     IntegerOverflow,
+    /// A shift count was negative or not smaller than the left operand width.
+    ShiftCountOutOfRange,
 }
 
 /// Stable semantic identity of one source-authorized diagnostic trap site.
@@ -2455,6 +2457,7 @@ pub enum CastKind {
 pub enum HirUnaryOp {
     NegateIntegerChecked,
     NegateFloat,
+    BitwiseNot,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HirBinaryOp {
@@ -2465,6 +2468,12 @@ pub enum HirBinaryOp {
     DivideIntegerUnsignedChecked,
     RemainderIntegerSignedChecked,
     RemainderIntegerUnsignedChecked,
+    BitwiseAnd,
+    BitwiseOr,
+    BitwiseXor,
+    ShiftLeftChecked,
+    ShiftRightArithmetic,
+    ShiftRightLogical,
     AddFloat,
     SubtractFloat,
     MultiplyFloat,
@@ -15775,6 +15784,10 @@ impl Analyzer<'_> {
                 operand,
             } => self.negate(operand, e.span)?,
             AstExprKind::Unary {
+                op: AstUnaryOp::BitwiseNot,
+                operand,
+            } => self.bitwise_not(operand, expected, e.span)?,
+            AstExprKind::Unary {
                 op: AstUnaryOp::LogicalNot,
                 operand,
             } => {
@@ -16089,6 +16102,42 @@ impl Analyzer<'_> {
                 ),
                 None => None,
             },
+        })
+    }
+
+    fn bitwise_not(
+        &mut self,
+        operand: &AstExpr,
+        expected: Option<TypeId>,
+        span: Span,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        let context = expected.filter(|ty| self.types.integer_info(*ty).is_some());
+        let checked = self.expression(operand, context)?;
+        let ty = checked.expr.ty;
+        let Some(integer) = self.types.integer_info(ty) else {
+            return Err(vec![type_error(
+                "bitwise `~` requires an integer operand",
+                span,
+            )]);
+        };
+        let constant = checked.constant.and_then(|value| match value {
+            ConstantValue::Integer(value) => Some(ConstantValue::Integer(bitwise_not_value(
+                value,
+                integer,
+                self.target,
+            ))),
+            ConstantValue::Float(_) => None,
+        });
+        Ok(Checked {
+            expr: HirExpr {
+                kind: HirExprKind::Unary {
+                    op: HirUnaryOp::BitwiseNot,
+                    operand: Box::new(checked.expr),
+                },
+                ty,
+                span,
+            },
+            constant,
         })
     }
     fn buffer_init(
@@ -19049,6 +19098,9 @@ impl Analyzer<'_> {
             op,
             AstBinaryOp::LogicalAnd | AstBinaryOp::LogicalOr
         ));
+        if matches!(op, AstBinaryOp::ShiftLeft | AstBinaryOp::ShiftRight) {
+            return self.shift_binary(op, la, ra, expected, span);
+        }
         if matches!(
             op,
             AstBinaryOp::Equal
@@ -19527,6 +19579,16 @@ impl Analyzer<'_> {
                 span,
             )]
         })?;
+        let bitwise = matches!(
+            op,
+            AstBinaryOp::BitwiseAnd | AstBinaryOp::BitwiseOr | AstBinaryOp::BitwiseXor
+        );
+        if bitwise && self.types.integer_info(common).is_none() {
+            return Err(vec![type_error(
+                "bitwise operators require homogeneous integer operands",
+                span,
+            )]);
+        }
         let l = self.coerce(l, Some(common))?;
         let r = self.coerce(r, Some(common))?;
         if matches!(op, AstBinaryOp::Remainder) && self.types.float_info(common).is_some() {
@@ -19545,6 +19607,9 @@ impl Analyzer<'_> {
                 | AstBinaryOp::Multiply
                 | AstBinaryOp::Divide
                 | AstBinaryOp::Remainder
+                | AstBinaryOp::BitwiseAnd
+                | AstBinaryOp::BitwiseOr
+                | AstBinaryOp::BitwiseXor
         );
         let result = if arithmetic { common } else { TypeId::BOOL };
         let known_integer = self.types.integer_info(common).is_some()
@@ -19569,6 +19634,85 @@ impl Analyzer<'_> {
             check_value(self.types, v, common, span, self.target)?
         }
         Ok(bin_result(self.types, op, l, r, result, constant))
+    }
+
+    fn shift_binary(
+        &mut self,
+        op: AstBinaryOp,
+        left_ast: &AstExpr,
+        count_ast: &AstExpr,
+        expected: Option<TypeId>,
+        span: Span,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        let left_context = expected.filter(|ty| self.types.integer_info(*ty).is_some());
+        let left = self.readable_math_operand(left_ast, left_context)?;
+        let count = self.readable_math_operand(count_ast, None)?;
+        let Some(left_kind) = self.types.integer_info(left.expr.ty) else {
+            return Err(vec![type_error(
+                "shift left operand must be an integer",
+                left_ast.span,
+            )]);
+        };
+        if self.types.integer_info(count.expr.ty).is_none() {
+            return Err(vec![type_error(
+                "shift count must be an integer",
+                count_ast.span,
+            )]);
+        }
+        let width = left_kind.bits(self.target);
+        let constant = match count.constant {
+            Some(ConstantValue::Integer(k)) if k < 0 || k >= i128::from(width) => {
+                return Err(vec![Diagnostic::new(
+                    "E0240",
+                    Phase::Semantic,
+                    DiagnosticCategory::Integer,
+                    format!("shift count {k} is outside 0..{width}"),
+                    Some(count_ast.span),
+                )]);
+            }
+            Some(ConstantValue::Integer(k)) => match left.constant {
+                Some(ConstantValue::Integer(value)) => {
+                    let folded = fold_shift(
+                        value,
+                        u32::try_from(k).expect("validated shift count fits u32"),
+                        left_kind,
+                        op,
+                        self.target,
+                    )
+                    .ok_or_else(|| {
+                        vec![Diagnostic::new(
+                            "E0210",
+                            Phase::Semantic,
+                            DiagnosticCategory::Integer,
+                            format!("constant left shift overflows {}", left.expr.ty),
+                            Some(span),
+                        )]
+                    })?;
+                    Some(ConstantValue::Integer(folded))
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        let hir_op = match op {
+            AstBinaryOp::ShiftLeft => HirBinaryOp::ShiftLeftChecked,
+            AstBinaryOp::ShiftRight if left_kind.is_signed() => HirBinaryOp::ShiftRightArithmetic,
+            AstBinaryOp::ShiftRight => HirBinaryOp::ShiftRightLogical,
+            _ => unreachable!(),
+        };
+        let ty = left.expr.ty;
+        Ok(Checked {
+            expr: HirExpr {
+                kind: HirExprKind::Binary {
+                    op: hir_op,
+                    left: Box::new(left.expr),
+                    right: Box::new(count.expr),
+                },
+                ty,
+                span,
+            },
+            constant,
+        })
     }
 
     fn logical_binary(
@@ -20078,13 +20222,19 @@ fn bin_result(
                 HirBinaryOp::RemainderIntegerUnsignedChecked
             }
         }
+        AstBinaryOp::BitwiseAnd => HirBinaryOp::BitwiseAnd,
+        AstBinaryOp::BitwiseOr => HirBinaryOp::BitwiseOr,
+        AstBinaryOp::BitwiseXor => HirBinaryOp::BitwiseXor,
         AstBinaryOp::Less => HirBinaryOp::Less,
         AstBinaryOp::LessEqual => HirBinaryOp::LessEqual,
         AstBinaryOp::Greater => HirBinaryOp::Greater,
         AstBinaryOp::GreaterEqual => HirBinaryOp::GreaterEqual,
         AstBinaryOp::Equal => HirBinaryOp::Equal,
         AstBinaryOp::NotEqual => HirBinaryOp::NotEqual,
-        AstBinaryOp::LogicalAnd | AstBinaryOp::LogicalOr => {
+        AstBinaryOp::LogicalAnd
+        | AstBinaryOp::LogicalOr
+        | AstBinaryOp::ShiftLeft
+        | AstBinaryOp::ShiftRight => {
             unreachable!("logical operators use dedicated short-circuit HIR")
         }
     };
@@ -20138,9 +20288,73 @@ fn const_bin(
         AstBinaryOp::Divide => a.checked_div(b),
         AstBinaryOp::Remainder if ty.is_signed() && a == ty.range(target).0 && b == -1 => Some(0),
         AstBinaryOp::Remainder => a.checked_rem(b),
+        AstBinaryOp::BitwiseAnd => Some(bitwise_binary_value(a, b, ty, target, |x, y| x & y)),
+        AstBinaryOp::BitwiseOr => Some(bitwise_binary_value(a, b, ty, target, |x, y| x | y)),
+        AstBinaryOp::BitwiseXor => Some(bitwise_binary_value(a, b, ty, target, |x, y| x ^ y)),
         _ => return Ok(None),
     };
     Ok(value.map(ConstantValue::Integer))
+}
+
+fn integer_mask(bits: u16) -> u128 {
+    if bits == 128 {
+        u128::MAX
+    } else {
+        (1u128 << bits) - 1
+    }
+}
+
+fn bit_pattern(value: i128, bits: u16) -> u128 {
+    u128::from_ne_bytes(value.to_ne_bytes()) & integer_mask(bits)
+}
+
+fn from_bit_pattern(pattern: u128, ty: IntegerType, target: TargetProperties) -> i128 {
+    let bits = ty.bits(target);
+    let pattern = pattern & integer_mask(bits);
+    if ty.is_signed() && pattern & (1u128 << (bits - 1)) != 0 {
+        (pattern | !integer_mask(bits)) as i128
+    } else {
+        pattern as i128
+    }
+}
+
+fn bitwise_binary_value(
+    a: i128,
+    b: i128,
+    ty: IntegerType,
+    target: TargetProperties,
+    operation: impl FnOnce(u128, u128) -> u128,
+) -> i128 {
+    let bits = ty.bits(target);
+    from_bit_pattern(
+        operation(bit_pattern(a, bits), bit_pattern(b, bits)),
+        ty,
+        target,
+    )
+}
+
+fn bitwise_not_value(value: i128, ty: IntegerType, target: TargetProperties) -> i128 {
+    let bits = ty.bits(target);
+    from_bit_pattern(!bit_pattern(value, bits), ty, target)
+}
+
+fn fold_shift(
+    value: i128,
+    count: u32,
+    ty: IntegerType,
+    op: AstBinaryOp,
+    target: TargetProperties,
+) -> Option<i128> {
+    if op == AstBinaryOp::ShiftLeft {
+        let factor = 1i128 << count;
+        let shifted = value.checked_mul(factor)?;
+        let (min, max) = ty.range(target);
+        (shifted >= min && shifted <= max).then_some(shifted)
+    } else if ty.is_signed() {
+        Some(value >> count)
+    } else {
+        Some((bit_pattern(value, ty.bits(target)) >> count) as i128)
+    }
 }
 fn builtin(n: &str) -> Option<TypeId> {
     Some(match n {
@@ -23251,6 +23465,7 @@ fn verify_expr(
                     .integer_info(operand.ty)
                     .is_some_and(IntegerType::is_signed),
                 HirUnaryOp::NegateFloat => types.float_info(operand.ty).is_some(),
+                HirUnaryOp::BitwiseNot => types.integer_info(operand.ty).is_some(),
             } && e.ty == operand.ty;
             if !ok {
                 return Err(fail("HIR unary invalid".into()));
@@ -23606,13 +23821,22 @@ fn verify_expr(
         HirExprKind::Binary { op, left, right } => {
             verify_expr(left, f, sigs, structs, enums, types, fail)?;
             verify_expr(right, f, sigs, structs, enums, types, fail)?;
-            if left.ty != right.ty {
+            let shift = matches!(
+                op,
+                HirBinaryOp::ShiftLeftChecked
+                    | HirBinaryOp::ShiftRightArithmetic
+                    | HirBinaryOp::ShiftRightLogical
+            );
+            if !shift && left.ty != right.ty {
                 return Err(fail("HIR binary operand mismatch".into()));
             }
             let ok = match op {
                 HirBinaryOp::AddIntegerChecked
                 | HirBinaryOp::SubtractIntegerChecked
-                | HirBinaryOp::MultiplyIntegerChecked => {
+                | HirBinaryOp::MultiplyIntegerChecked
+                | HirBinaryOp::BitwiseAnd
+                | HirBinaryOp::BitwiseOr
+                | HirBinaryOp::BitwiseXor => {
                     types.integer_info(left.ty).is_some() && e.ty == left.ty
                 }
                 HirBinaryOp::DivideIntegerSignedChecked
@@ -23627,6 +23851,25 @@ fn verify_expr(
                     types
                         .integer_info(left.ty)
                         .is_some_and(|integer| !integer.is_signed())
+                        && e.ty == left.ty
+                }
+                HirBinaryOp::ShiftLeftChecked => {
+                    types.integer_info(left.ty).is_some()
+                        && types.integer_info(right.ty).is_some()
+                        && e.ty == left.ty
+                }
+                HirBinaryOp::ShiftRightArithmetic => {
+                    types
+                        .integer_info(left.ty)
+                        .is_some_and(IntegerType::is_signed)
+                        && types.integer_info(right.ty).is_some()
+                        && e.ty == left.ty
+                }
+                HirBinaryOp::ShiftRightLogical => {
+                    types
+                        .integer_info(left.ty)
+                        .is_some_and(|kind| !kind.is_signed())
+                        && types.integer_info(right.ty).is_some()
                         && e.ty == left.ty
                 }
                 HirBinaryOp::AddFloat
@@ -28265,6 +28508,37 @@ mod vertical33_tests {
         };
         first.kind = HirExprKind::Bool(true);
         first.ty = TypeId::BOOL;
+        assert!(verify_hir(&hir).is_err());
+    }
+
+    #[test]
+    fn bitwise_shift_hir_contract_fails_closed_when_corrupted() {
+        let mut hir = analyze(
+            parse_source(&SourceFile::new(
+                "bitwise_corrupt.ae",
+                "int main(){int x=8;uint8 c=1;return x<<c;}",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        verify_hir(&hir).unwrap();
+        let value = hir
+            .functions
+            .iter_mut()
+            .flat_map(|function| &mut function.body.statements)
+            .find_map(|statement| match &mut statement.kind {
+                HirStmtKind::Return { value, .. }
+                    if matches!(value.kind, HirExprKind::Binary { .. }) =>
+                {
+                    Some(value)
+                }
+                _ => None,
+            })
+            .expect("shift return");
+        let HirExprKind::Binary { op, .. } = &mut value.kind else {
+            unreachable!()
+        };
+        *op = HirBinaryOp::ShiftRightLogical;
         assert!(verify_hir(&hir).is_err());
     }
 }

@@ -662,6 +662,8 @@ pub enum AstUnaryOp {
     BorrowMutable,
     /// Short-circuit logical negation.
     LogicalNot,
+    /// Fixed-width bit complement.
+    BitwiseNot,
 }
 
 /// Infix operators.
@@ -677,6 +679,16 @@ pub enum AstBinaryOp {
     Divide,
     /// Integer remainder.
     Remainder,
+    /// Checked left shift.
+    ShiftLeft,
+    /// Arithmetic/logical right shift, selected by the left type.
+    ShiftRight,
+    /// Bitwise conjunction.
+    BitwiseAnd,
+    /// Bitwise exclusive disjunction.
+    BitwiseXor,
+    /// Bitwise disjunction.
+    BitwiseOr,
     /// Ordered comparison.
     Less,
     /// Ordered comparison.
