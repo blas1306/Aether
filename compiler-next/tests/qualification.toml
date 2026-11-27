@@ -1,0 +1,1821 @@
+# TEST-QUALIFICATION-V1 inventory. Commands run from compiler-next.
+version = 1
+profiles = ["core", "conformance", "oal", "full"]
+
+[[suite]]
+id = "runner:self-tests"
+kind = "runner-test"
+primary_responsibility = "qualification runner behavior"
+secondary_responsibilities = ["manifest validation","process-tree timeout","JSON reporting"]
+profiles = ["core","conformance","oal","full"]
+platform = ["any"]
+optimization = "not applicable"
+timeout_seconds = 120
+owner = "compiler-infrastructure"
+command = ["python3","-m","unittest","tests/qualification_runner_test.py"]
+full_gate = true
+
+[[suite]]
+id = "cargo:aether-frontend:lib"
+kind = "cargo-test"
+crate = "aether-frontend"
+target = "lib"
+target_kind = "lib"
+primary_responsibility = "aether-frontend internal invariants"
+secondary_responsibilities = ["compiler core"]
+profiles = ["core","conformance","full"]
+platform = ["any"]
+optimization = "not applicable"
+timeout_seconds = 300
+owner = "compiler-frontend"
+command = ["cargo","test","-p","aether-frontend","--lib"]
+
+[[suite]]
+id = "cargo:aether-middle:lib"
+kind = "cargo-test"
+crate = "aether-middle"
+target = "lib"
+target_kind = "lib"
+primary_responsibility = "aether-middle internal invariants"
+secondary_responsibilities = ["compiler core"]
+profiles = ["core","conformance","full"]
+platform = ["any"]
+optimization = "not applicable"
+timeout_seconds = 300
+owner = "compiler-middle"
+command = ["cargo","test","-p","aether-middle","--lib"]
+
+[[suite]]
+id = "cargo:aether-backend-llvm:lib"
+kind = "cargo-test"
+crate = "aether-backend-llvm"
+target = "lib"
+target_kind = "lib"
+primary_responsibility = "aether-backend-llvm internal invariants"
+secondary_responsibilities = ["compiler core"]
+profiles = ["core","conformance","full"]
+platform = ["any"]
+optimization = "not applicable"
+timeout_seconds = 300
+owner = "compiler-backend-llvm"
+command = ["cargo","test","-p","aether-backend-llvm","--lib"]
+
+[[suite]]
+id = "cargo:aether-cli:bootstrap"
+kind = "cargo-test"
+crate = "aether-cli"
+target = "bootstrap"
+target_kind = "integration"
+primary_responsibility = "CLI and toolchain ecosystem"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 600
+owner = "cli"
+command = ["cargo","test","-p","aether-cli","--test","bootstrap"]
+
+[[suite]]
+id = "cargo:aether-driver:anonymous_functions_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "anonymous_functions_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","anonymous_functions_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:bitwise_operators_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "bitwise_operators_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","bitwise_operators_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:borrow_ergonomics_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "borrow_ergonomics_v1"
+target_kind = "integration"
+primary_responsibility = "compiler invariants, verifiers, ownership, and native runtime"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["core","conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "compiler-core"
+command = ["cargo","test","-p","aether-driver","--test","borrow_ergonomics_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:borrowed_invocable_param_m2"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "borrowed_invocable_param_m2"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","borrowed_invocable_param_m2"]
+
+[[suite]]
+id = "cargo:aether-driver:borrowed_invocable_param_m3"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "borrowed_invocable_param_m3"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","borrowed_invocable_param_m3"]
+
+[[suite]]
+id = "cargo:aether-driver:class_buffer_fields_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "class_buffer_fields_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","class_buffer_fields_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:class_handle_references_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "class_handle_references_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","class_handle_references_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:cli_v1_api"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "cli_v1_api"
+target_kind = "integration"
+primary_responsibility = "CLI and toolchain ecosystem"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 600
+owner = "driver"
+command = ["cargo","test","-p","aether-driver","--test","cli_v1_api"]
+
+[[suite]]
+id = "cargo:aether-driver:compound_assignment_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "compound_assignment_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","compound_assignment_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:const_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "const_v1"
+target_kind = "integration"
+primary_responsibility = "compiler invariants, verifiers, ownership, and native runtime"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["core","conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "compiler-core"
+command = ["cargo","test","-p","aether-driver","--test","const_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:contextual_overloads_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "contextual_overloads_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","contextual_overloads_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:core_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "core_v1"
+target_kind = "integration"
+primary_responsibility = "compiler invariants, verifiers, ownership, and native runtime"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["core","conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "compiler-core"
+command = ["cargo","test","-p","aether-driver","--test","core_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:default_parameters_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "default_parameters_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","default_parameters_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:enum_equality_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "enum_equality_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","enum_equality_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:exception_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "exception_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","exception_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:exception_v2"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "exception_v2"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","exception_v2"]
+
+[[suite]]
+id = "cargo:aether-driver:exception_v3"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "exception_v3"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","exception_v3"]
+
+[[suite]]
+id = "cargo:aether-driver:exception_v4"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "exception_v4"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","exception_v4"]
+
+[[suite]]
+id = "cargo:aether-driver:expense_tracker_alpt1_codec_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "expense_tracker_alpt1_codec_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","expense_tracker_alpt1_codec_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:expense_tracker_next_port_complete"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "expense_tracker_next_port_complete"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","expense_tracker_next_port_complete"]
+
+[[suite]]
+id = "cargo:aether-driver:file_atomic_write_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "file_atomic_write_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","file_atomic_write_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:filled_init_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "filled_init_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","filled_init_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:format_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "format_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","format_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:format_v2"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "format_v2"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","format_v2"]
+
+[[suite]]
+id = "cargo:aether-driver:frontend_stack_usage_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "frontend_stack_usage_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","frontend_stack_usage_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:function_values_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "function_values_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","function_values_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:general_v1_string"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "general_v1_string"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","general_v1_string"]
+
+[[suite]]
+id = "cargo:aether-driver:general_v2_string_composition"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "general_v2_string_composition"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","general_v2_string_composition"]
+
+[[suite]]
+id = "cargo:aether-driver:generic_inference_ref_argument_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "generic_inference_ref_argument_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","generic_inference_ref_argument_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:generic_local_inference_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "generic_local_inference_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","generic_local_inference_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:graphics_foundation_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "graphics_foundation_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","graphics_foundation_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:graphics_svg_backend_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "graphics_svg_backend_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","graphics_svg_backend_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:ieee_float_constants_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "ieee_float_constants_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","ieee_float_constants_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:index_dereference_diagnostic_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "index_dereference_diagnostic_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","index_dereference_diagnostic_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:integer_indexing_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "integer_indexing_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","integer_indexing_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:integer_slice_bounds_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "integer_slice_bounds_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","integer_slice_bounds_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:invocable_capability_m3"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "invocable_capability_m3"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","invocable_capability_m3"]
+
+[[suite]]
+id = "cargo:aether-driver:invocable_capability_m4"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "invocable_capability_m4"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","invocable_capability_m4"]
+
+[[suite]]
+id = "cargo:aether-driver:io_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "io_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","io_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:iteration_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "iteration_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","iteration_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:iteration_v2"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "iteration_v2"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","iteration_v2"]
+
+[[suite]]
+id = "cargo:aether-driver:iteration_v3"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "iteration_v3"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","iteration_v3"]
+
+[[suite]]
+id = "cargo:aether-driver:language_parity"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "language_parity"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","language_parity"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_cholesky_det_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_cholesky_det_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_cholesky_det_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_cholesky_solve_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_cholesky_solve_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_cholesky_solve_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_cholesky_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_cholesky_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_cholesky_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_constructors_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_constructors_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_constructors_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_det_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_det_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_det_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_lu_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_lu_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_lu_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_ownership_ergonomics_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_ownership_ergonomics_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_ownership_ergonomics_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_qr_solve_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_qr_solve_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_qr_solve_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_qr_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_qr_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_qr_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_solve_matrix_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_solve_matrix_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_solve_matrix_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_solve_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_solve_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_solve_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_stable_norm_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_stable_norm_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_stable_norm_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_svd_assembly_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_svd_assembly_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_svd_assembly_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_svd_bidiagonal_qr_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_svd_bidiagonal_qr_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_svd_bidiagonal_qr_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_svd_bidiagonal_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_svd_bidiagonal_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_svd_bidiagonal_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_svd_cutoff_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_svd_cutoff_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_svd_cutoff_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_svd_derived_qualification_closure_1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_svd_derived_qualification_closure_1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_svd_derived_qualification_closure_1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_svd_least_squares_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_svd_least_squares_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_svd_least_squares_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_svd_low_rank_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_svd_low_rank_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_svd_low_rank_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_svd_pseudoinverse_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_svd_pseudoinverse_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_svd_pseudoinverse_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_svd_qualification_closure_1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_svd_qualification_closure_1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_svd_qualification_closure_1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_svd_rank_condition_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_svd_rank_condition_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_svd_rank_condition_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_symmetric_eigen_assembly_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_symmetric_eigen_assembly_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_symmetric_eigen_assembly_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_symmetric_eigen_qualification_closure_1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_symmetric_eigen_qualification_closure_1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_symmetric_eigen_qualification_closure_1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_symmetric_tridiagonal_qr_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_symmetric_tridiagonal_qr_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_symmetric_tridiagonal_qr_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:linear_algebra_symmetric_tridiagonal_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "linear_algebra_symmetric_tridiagonal_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","linear_algebra_symmetric_tridiagonal_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:managed_tool_build_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "managed_tool_build_v1"
+target_kind = "integration"
+primary_responsibility = "CLI and toolchain ecosystem"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 600
+owner = "driver"
+command = ["cargo","test","-p","aether-driver","--test","managed_tool_build_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:matrix_add_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "matrix_add_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","matrix_add_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:module_std_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "module_std_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","module_std_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:nullable_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "nullable_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","nullable_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:numeric_capabilities_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "numeric_capabilities_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","numeric_capabilities_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:numeric_generic_migration_closure_1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "numeric_generic_migration_closure_1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","numeric_generic_migration_closure_1"]
+
+[[suite]]
+id = "cargo:aether-driver:numeric_parsing_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "numeric_parsing_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","numeric_parsing_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:oop_opt_1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "oop_opt_1"
+target_kind = "integration"
+primary_responsibility = "compiler invariants, verifiers, ownership, and native runtime"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["core","conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "compiler-core"
+command = ["cargo","test","-p","aether-driver","--test","oop_opt_1"]
+
+[[suite]]
+id = "cargo:aether-driver:oop_owning_string_fields_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "oop_owning_string_fields_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","oop_owning_string_fields_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:oop_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "oop_v1"
+target_kind = "integration"
+primary_responsibility = "compiler invariants, verifiers, ownership, and native runtime"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["core","conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "compiler-core"
+command = ["cargo","test","-p","aether-driver","--test","oop_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:oop_v2"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "oop_v2"
+target_kind = "integration"
+primary_responsibility = "compiler invariants, verifiers, ownership, and native runtime"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["core","conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "compiler-core"
+command = ["cargo","test","-p","aether-driver","--test","oop_v2"]
+
+[[suite]]
+id = "cargo:aether-driver:oop_v3"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "oop_v3"
+target_kind = "integration"
+primary_responsibility = "compiler invariants, verifiers, ownership, and native runtime"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["core","conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "compiler-core"
+command = ["cargo","test","-p","aether-driver","--test","oop_v3"]
+
+[[suite]]
+id = "cargo:aether-driver:owning_closures_read_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "owning_closures_read_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","owning_closures_read_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:owning_collection_fields_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "owning_collection_fields_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","owning_collection_fields_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:owning_param_early_return_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "owning_param_early_return_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","owning_param_early_return_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:owning_struct_field_replacement_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "owning_struct_field_replacement_v1"
+target_kind = "integration"
+primary_responsibility = "compiler invariants, verifiers, ownership, and native runtime"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["core","conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "compiler-core"
+command = ["cargo","test","-p","aether-driver","--test","owning_struct_field_replacement_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:package_ergonomics_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "package_ergonomics_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","package_ergonomics_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:plots_2d_line_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "plots_2d_line_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","plots_2d_line_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:plots_function_sampling_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "plots_function_sampling_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","plots_function_sampling_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:plots_invocable_integration_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "plots_invocable_integration_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","plots_invocable_integration_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:plots_multiseries_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "plots_multiseries_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","plots_multiseries_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:plots_tick_label_format_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "plots_tick_label_format_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","plots_tick_label_format_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:postfix_update_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "postfix_update_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","postfix_update_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:print_value_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "print_value_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","print_value_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:process_args_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "process_args_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","process_args_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:registry_materialization_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "registry_materialization_v1"
+target_kind = "integration"
+primary_responsibility = "official Aether library integration"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "oal"
+command = ["cargo","test","-p","aether-driver","--test","registry_materialization_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:shape_contract_diagnostics_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "shape_contract_diagnostics_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","shape_contract_diagnostics_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:shape_guard_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "shape_guard_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","shape_guard_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:slice_assignment_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "slice_assignment_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","slice_assignment_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:slice_read_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "slice_read_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","slice_read_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:slice_selectors_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "slice_selectors_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","slice_selectors_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:ssa_store_provenance_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "ssa_store_provenance_v1"
+target_kind = "integration"
+primary_responsibility = "compiler invariants, verifiers, ownership, and native runtime"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["core","conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "compiler-core"
+command = ["cargo","test","-p","aether-driver","--test","ssa_store_provenance_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:text_byte_access_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "text_byte_access_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","text_byte_access_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:text_utf8_builder_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "text_utf8_builder_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","text_utf8_builder_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:text_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "text_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","text_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:uncaught_exception_diagnostics_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "uncaught_exception_diagnostics_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","uncaught_exception_diagnostics_v1"]
+
+[[suite]]
+id = "cargo:aether-driver:vertical"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "vertical"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","vertical"]
+
+[[suite]]
+id = "cargo:aether-frontend:symbol_source_mapping"
+kind = "cargo-test"
+crate = "aether-frontend"
+target = "symbol_source_mapping"
+target_kind = "integration"
+primary_responsibility = "frontend source mapping invariants"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["core","conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 300
+owner = "compiler-frontend"
+command = ["cargo","test","-p","aether-frontend","--test","symbol_source_mapping"]
+
+[[suite]]
+id = "cargo:aether-lsp:protocol"
+kind = "cargo-test"
+crate = "aether-lsp"
+target = "protocol"
+target_kind = "integration"
+primary_responsibility = "LSP protocol ecosystem"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 600
+owner = "lsp"
+command = ["cargo","test","-p","aether-lsp","--test","protocol"]
+
+[[suite]]
+id = "cargo:aether-package:publish"
+kind = "cargo-test"
+crate = "aether-package"
+target = "publish"
+target_kind = "integration"
+primary_responsibility = "package and registry materialization"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "package"
+command = ["cargo","test","-p","aether-package","--test","publish"]
+
+[[suite]]
+id = "cargo:aether-package:registry_cache"
+kind = "cargo-test"
+crate = "aether-package"
+target = "registry_cache"
+target_kind = "integration"
+primary_responsibility = "package and registry materialization"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "package"
+command = ["cargo","test","-p","aether-package","--test","registry_cache"]
+
+[[suite]]
+id = "cargo:aether-package:resolution"
+kind = "cargo-test"
+crate = "aether-package"
+target = "resolution"
+target_kind = "integration"
+primary_responsibility = "package and registry materialization"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1200
+owner = "package"
+command = ["cargo","test","-p","aether-package","--test","resolution"]
+
+[[suite]]
+id = "cargo:aether-registry:registry"
+kind = "cargo-test"
+crate = "aether-registry"
+target = "registry"
+target_kind = "integration"
+primary_responsibility = "registry publication and end-to-end consumers"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["oal","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 1500
+owner = "registry"
+command = ["cargo","test","-p","aether-registry","--test","registry"]
+
+[[suite]]
+id = "script:test-differential-harness"
+kind = "script"
+primary_responsibility = "differential harness integrity"
+secondary_responsibilities = ["infrastructure failure detection"]
+profiles = ["conformance","full"]
+platform = ["linux"]
+optimization = "not applicable"
+timeout_seconds = 300
+owner = "language-conformance"
+command = ["bash","tests/test-differential-harness.sh"]
+full_gate = true
+
+[[suite]]
+id = "script:run-differential"
+kind = "script"
+primary_responsibility = "normative 96-case differential contract"
+secondary_responsibilities = ["diagnostics","traps","native execution"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0 as owned by differential.tsv and script"
+timeout_seconds = 1200
+owner = "language-conformance"
+command = ["bash","tests/run-differential.sh"]
+full_gate = true
+
+[[suite]]
+id = "full:cargo-workspace"
+kind = "cargo-workspace"
+primary_responsibility = "complete Cargo workspace without exclusions"
+secondary_responsibilities = ["all unit, integration, and doc tests"]
+profiles = ["full"]
+platform = ["linux","x86_64"]
+optimization = "all modes asserted by tests"
+timeout_seconds = 2400
+owner = "compiler-infrastructure"
+command = ["cargo","test","--workspace","-j","1","--no-fail-fast"]
+full_gate = true
+
+[[suite]]
+id = "full:clippy"
+kind = "cargo-gate"
+primary_responsibility = "workspace static quality"
+secondary_responsibilities = ["all targets"]
+profiles = ["full"]
+platform = ["any"]
+optimization = "not applicable"
+timeout_seconds = 900
+owner = "compiler-infrastructure"
+command = ["cargo","clippy","--workspace","--all-targets","--","-D","warnings"]
+full_gate = true
+
+[[suite]]
+id = "full:fmt"
+kind = "cargo-gate"
+primary_responsibility = "workspace formatting"
+secondary_responsibilities = []
+profiles = ["full"]
+platform = ["any"]
+optimization = "not applicable"
+timeout_seconds = 300
+owner = "compiler-infrastructure"
+command = ["cargo","fmt","--all","--","--check"]
+full_gate = true
