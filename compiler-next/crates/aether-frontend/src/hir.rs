@@ -10819,7 +10819,7 @@ impl OwnershipAnalysis<'_> {
                         ("column", column, shape.map(|s| s.1)),
                     ] {
                         if let HirExprKind::Int(value) = expr.kind
-                            && (value == 0 || extent.is_some_and(|n| value > i128::from(n)))
+                            && (value < 1 || extent.is_some_and(|n| value > i128::from(n)))
                         {
                             return Err(self.error("E0296", format!("IndexOutOfBounds: constant Matrix {axis} {value}, extent {extent:?}"), expr.span));
                         }
@@ -10829,7 +10829,9 @@ impl OwnershipAnalysis<'_> {
                     && let HirPlaceBase::Local(local) = place.base
                     && position == 0
                     && let Some(length) = self.buffer_lengths[local.0 as usize]
-                    && u64::try_from(value).is_ok_and(|index| !semantics.contains(index, length))
+                    && (value < i128::from(subscript.selectors[0].index_base)
+                        || u64::try_from(value)
+                            .is_ok_and(|index| !semantics.contains(index, length)))
                 {
                     return Err(self.error(
                         "E0296",
@@ -14181,6 +14183,9 @@ impl Analyzer<'_> {
             _ => unreachable!("type_subscript requires an indexable type"),
         };
 
+        let scalar_subscript = selectors
+            .iter()
+            .all(|selector| matches!(selector, AstSubscriptSelector::Scalar(_)));
         let mut typed = Vec::with_capacity(selectors.len());
         for (position, selector) in selectors.iter().enumerate() {
             let axis = if selectors.len() == 1 {
@@ -14191,9 +14196,24 @@ impl Analyzer<'_> {
                 HirSubscriptAxis::Column
             };
             let kind = match selector {
-                AstSubscriptSelector::Scalar(index) => HirSubscriptSelectorKind::Scalar(Box::new(
-                    self.expression(index, Some(TypeId::USIZE))?.expr,
-                )),
+                AstSubscriptSelector::Scalar(index) => {
+                    let index = self
+                        .expression(index, (!scalar_subscript).then_some(TypeId::USIZE))?
+                        .expr;
+                    if scalar_subscript && self.types.integer_info(index.ty).is_none() {
+                        return Err(vec![Diagnostic::new(
+                            "E0480",
+                            Phase::Semantic,
+                            DiagnosticCategory::Type,
+                            format!(
+                                "scalar index requires an integer type, found {}",
+                                self.type_name(index.ty)
+                            ),
+                            Some(index.span),
+                        )]);
+                    }
+                    HirSubscriptSelectorKind::Scalar(Box::new(index))
+                }
                 AstSubscriptSelector::Closed { first, last } => {
                     let first = self.expression(first, Some(TypeId::USIZE))?.expr;
                     let last = self.expression(last, Some(TypeId::USIZE))?.expr;
@@ -23843,7 +23863,8 @@ fn verify_place(
                             };
                             matches!(
                                 &selector.kind,
-                                HirSubscriptSelectorKind::Scalar(value) if value.ty == TypeId::USIZE
+                                HirSubscriptSelectorKind::Scalar(value)
+                                    if types.integer_info(value.ty).is_some()
                             ) && selector.axis == expected_axis
                                 && Some(selector.semantics) == expected_semantics
                                 && selector.index_base == expected_base
@@ -27630,5 +27651,40 @@ mod vertical33_tests {
             }
             assert!(verify_hir(&bad).is_err(), "mutation {mutation}");
         }
+    }
+
+    #[test]
+    fn scalar_index_hir_rejects_non_integer_operand_corruption() {
+        let mut hir = analyze(
+            parse_source(&SourceFile::new(
+                "integer-index-corrupt.ae",
+                "int main(){Array<int>a={1};int8 i=0;return a[i];}",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let value = hir
+            .functions
+            .iter_mut()
+            .flat_map(|function| &mut function.body.statements)
+            .find_map(|statement| match &mut statement.kind {
+                HirStmtKind::Return { value, .. } if matches!(value.kind, HirExprKind::Load(_)) => {
+                    Some(value)
+                }
+                _ => None,
+            })
+            .expect("indexed return");
+        let HirExprKind::Load(place) = &mut value.kind else {
+            unreachable!()
+        };
+        let HirPlaceProjection::Index { subscript, .. } = &mut place.projections[0] else {
+            unreachable!()
+        };
+        let HirSubscriptSelectorKind::Scalar(index) = &mut subscript.selectors[0].kind else {
+            unreachable!()
+        };
+        index.kind = HirExprKind::Bool(true);
+        index.ty = TypeId::BOOL;
+        assert!(verify_hir(&hir).is_err());
     }
 }

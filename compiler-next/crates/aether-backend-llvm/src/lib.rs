@@ -5618,6 +5618,35 @@ fn llvm_projection_indices(
         .join(", ")
 }
 
+/// Normalize a verified scalar index to the runtime helper's i64 domain.
+/// Signed extension leaves negative values with a large unsigned bit pattern,
+/// so the existing unsigned bounds checks reject them before offset arithmetic.
+fn emit_scalar_index_i64(
+    output: &mut String,
+    function: &SsaFunction,
+    operand: &SsaOperand,
+    name: &str,
+    types: &TypeArena,
+) -> String {
+    let ty = operand_type(function, operand);
+    let integer = types
+        .integer_info(ty)
+        .expect("verified scalar index is integer");
+    if integer.bits(TargetProperties::LINUX_X86_64) == 64 {
+        return llvm_operand(operand);
+    }
+    let result = format!("%{name}");
+    writeln!(
+        output,
+        "  {result} = {} {} {} to i64",
+        if integer.is_signed() { "sext" } else { "zext" },
+        llvm_type(types, ty),
+        llvm_operand(operand)
+    )
+    .unwrap();
+    result
+}
+
 #[allow(clippy::too_many_lines)]
 fn emit_place_pointer(
     output: &mut String,
@@ -5652,6 +5681,22 @@ fn emit_place_pointer(
                 || types.borrowed_view_info(descriptor_ty).is_some()
         );
         let mut pointer = format!("%place{result}_index");
+        let index = emit_scalar_index_i64(
+            output,
+            function,
+            index,
+            &format!("place{result}_index_i64"),
+            types,
+        );
+        let column = column.as_ref().map(|column| {
+            emit_scalar_index_i64(
+                output,
+                function,
+                column,
+                &format!("place{result}_column_i64"),
+                types,
+            )
+        });
         if let Some(column) = column {
             writeln!(
                 output,
@@ -5663,8 +5708,8 @@ fn emit_place_pointer(
                 },
                 mangle_type(types, *element_type),
                 llvm_type(types, descriptor_ty),
-                llvm_operand(index),
-                llvm_operand(column)
+                index,
+                column
             )
             .unwrap();
         } else if types.vector_view_info(descriptor_ty).is_some() {
@@ -5673,7 +5718,7 @@ fn emit_place_pointer(
                 "  {pointer} = call ptr @aether_vector_view_index_{}({} {descriptor}, i64 {})",
                 mangle_type(types, *element_type),
                 llvm_type(types, descriptor_ty),
-                llvm_operand(index)
+                index
             )
             .unwrap();
         } else if types.list_element(descriptor_ty).is_some() {
@@ -5681,7 +5726,7 @@ fn emit_place_pointer(
                 output,
                 "  {pointer} = call ptr @aether_list_index_{}({{ ptr, i64, i64 }} {descriptor}, i64 {})",
                 mangle_type(types, *element_type),
-                llvm_operand(index)
+                index
             )
             .unwrap();
         } else {
@@ -5694,7 +5739,7 @@ fn emit_place_pointer(
                     ""
                 },
                 mangle_type(types, *element_type),
-                llvm_operand(index)
+                index
             )
             .unwrap();
         }
@@ -5737,14 +5782,30 @@ fn emit_place_pointer(
                     )
                     .unwrap();
                     let next = format!("%place{result}_index{projection_position}");
+                    let index = emit_scalar_index_i64(
+                        output,
+                        function,
+                        index,
+                        &format!("place{result}_index{projection_position}_i64"),
+                        types,
+                    );
+                    let column = column.as_ref().map(|column| {
+                        emit_scalar_index_i64(
+                            output,
+                            function,
+                            column,
+                            &format!("place{result}_column{projection_position}_i64"),
+                            types,
+                        )
+                    });
                     if let Some(column) = column {
-                        writeln!(output, "  {next} = call ptr @aether_matrix{}index_{}({} {descriptor}, i64 {}, i64 {})", if types.matrix_view_info(ty).is_some() { "_view_" } else { "_" }, mangle_type(types, *element_type), llvm_type(types, ty), llvm_operand(index), llvm_operand(column)).unwrap();
+                        writeln!(output, "  {next} = call ptr @aether_matrix{}index_{}({} {descriptor}, i64 {index}, i64 {column})", if types.matrix_view_info(ty).is_some() { "_view_" } else { "_" }, mangle_type(types, *element_type), llvm_type(types, ty)).unwrap();
                     } else if types.vector_view_info(ty).is_some() {
-                        writeln!(output, "  {next} = call ptr @aether_vector_view_index_{}({} {descriptor}, i64 {})", mangle_type(types, *element_type), llvm_type(types, ty), llvm_operand(index)).unwrap();
+                        writeln!(output, "  {next} = call ptr @aether_vector_view_index_{}({} {descriptor}, i64 {index})", mangle_type(types, *element_type), llvm_type(types, ty)).unwrap();
                     } else if types.list_element(ty).is_some() {
-                        writeln!(output, "  {next} = call ptr @aether_list_index_{}({{ ptr, i64, i64 }} {descriptor}, i64 {})", mangle_type(types, *element_type), llvm_operand(index)).unwrap();
+                        writeln!(output, "  {next} = call ptr @aether_list_index_{}({{ ptr, i64, i64 }} {descriptor}, i64 {index})", mangle_type(types, *element_type)).unwrap();
                     } else {
-                        writeln!(output, "  {next} = call ptr @aether_{}index_{}({{ ptr, i64 }} {descriptor}, i64 {})", if types.index_semantics(ty) == Some(IndexSemantics::OneBased) { "vector_" } else { "" }, mangle_type(types, *element_type), llvm_operand(index)).unwrap();
+                        writeln!(output, "  {next} = call ptr @aether_{}index_{}({{ ptr, i64 }} {descriptor}, i64 {index})", if types.index_semantics(ty) == Some(IndexSemantics::OneBased) { "vector_" } else { "" }, mangle_type(types, *element_type)).unwrap();
                     }
                     pointer = next;
                     ty = *element_type;

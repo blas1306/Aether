@@ -7420,10 +7420,13 @@ fn ssa_place_type(
                     .or_else(|| types.borrowed_view_info(ty).map(|(element, _)| element))
                     .ok_or_else(|| "SSA index projection has non-contiguous base".to_string())?;
                 if column.is_some() != types.matrix_like_element(ty).is_some()
-                    || column
-                        .as_ref()
-                        .is_some_and(|c| operand_ty(c).ok() != Some(TypeId::USIZE))
-                    || operand_ty(index)? != TypeId::USIZE
+                    || column.as_ref().is_some_and(|c| {
+                        operand_ty(c)
+                            .ok()
+                            .and_then(|ty| types.integer_info(ty))
+                            .is_none()
+                    })
+                    || types.integer_info(operand_ty(index)?).is_none()
                     || element != *element_type
                     || types.index_semantics(ty) != Some(*semantics)
                     || *bounds_trap != TrapKind::IndexOutOfBounds

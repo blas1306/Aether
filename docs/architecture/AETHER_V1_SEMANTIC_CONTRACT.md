@@ -718,7 +718,8 @@ representation.
 ### 6.0 `Buffer<T>` — NEXT-VERTICAL-10 DECIDED substrate
 
 `Buffer<T>(length, fill)` is the no-uninitialized-memory construction surface.
-Length and zero-based index operands are `usize`; every element is initialized
+Length operands are `usize`; scalar subscript operands follow section 6.4 and
+are zero-based. Every element is initialized
 from the Copy fill value. Indexing a Buffer or View is checked. A provable
 constant failure is a diagnostic; dynamic failure aborts with
 `IndexOutOfBounds`. Length-times-element-size overflow aborts with
@@ -759,7 +760,7 @@ Copy and no-drop without borrowed or owning substructure; symbolic `Array<T>`
 remains rejected in V15 because public Copy/Relocatable constraints do not
 express the full internal admission predicate.
 
-Index operands have semantic type `usize`, indexing is checked and zero-based,
+Scalar subscript operands follow section 6.4, indexing is checked and zero-based,
 and a dynamic failure is `IndexOutOfBounds`. `length(array_place)` is the
 provisional bootstrap query surface and resolves to semantic `ArrayLength` HIR,
 MIR and SSA rather than a stringly method call. Desired property syntax such as
@@ -867,7 +868,7 @@ only pointer and dimension. Dimension is fixed for each constructed value;
 ordinary whole-owner reassignment may install a different constructed value.
 
 `dimension(vector_place)` MUST resolve to VectorDimension and return usize
-without consuming the owner. Every index operand is usize. Vector indexing is
+without consuming the owner. Scalar subscript operands follow section 6.4. Vector indexing is
 valid exactly when `1 <= i <= dimension`; known-invalid direct constants are
 rejected, otherwise failure traps with IndexOutOfBounds. Lowering MUST prove or
 check the lower and upper bounds before computing i-1 or issuing an inbounds
@@ -952,6 +953,30 @@ Unchecked indexing requires an explicit low-level operation/region. Index base
 is type-dependent, never a configurable global switch. `Buffer`, `View`,
 `ViewMut`, `Array` and `List` are zero-based. Vector is one-based; future
 Matrix and mathematical views will also be one-based.
+
+**INTEGER-INDEXING-V1 amendment (2026-11-26).** For scalar `[]` subscripts
+only, every native integer type is admitted directly: `int8`, `int16`, `int32`,
+`int64`, `uint8`, `uint16`, `uint32`, `uint64`, `isize`, and `usize`; `int`
+inherits this rule as the transparent alias of `int64`. This is a contextual
+indexing rule, not a general implicit signed/unsigned conversion. Float, bool,
+string, char, references, aggregates, and every other non-integer type remain
+invalid scalar indices.
+
+Signed indices must be rejected when negative. Unsigned indices must be
+compared without narrowing or truncation. Every index is evaluated exactly
+once, in the ordinary left-to-right expression order. Bounds must dominate
+base adjustment, stride multiplication, linearization, and address formation;
+failure remains the abortive `IndexOutOfBounds` trap. Zero-based and one-based
+domains remain unchanged, as do logical domains and strides of borrowed views.
+HIR, MIR, and SSA retain the concrete integer `TypeId` and independently
+verify it. Backend normalization may sign-extend or zero-extend narrower
+integers to the target's offset width only when this preserves the complete
+source value; it must never truncate `uint64`.
+
+This amendment does not apply to slice/range endpoints, range expression
+types, iterator bindings, `row`/`column` projection arguments, collection
+mutation APIs such as `swap_remove`, or any other parameter whose contract is
+`usize`. It introduces no unchecked indexing and no general range analysis.
 
 ### 6.5 Initialized storage extraction — NEXT-VERTICAL-18 DECIDED
 
@@ -1596,7 +1621,7 @@ no implicit Clone or intermediate nested container. Matrix<T> works with
 symbolic T:Storable and with structurally Storable nested owning types.
 
 `rows(matrix_place)` and `columns(matrix_place)` return usize. `A[i,j]` takes
-two usize operands; a single index or three indices is invalid. Checks proceed
+two scalar integer operands under section 6.4; a single index or three indices is invalid. Checks proceed
 row >= 1, row <= rows, column >= 1, column <= columns. Any failure is
 IndexOutOfBounds. Only after all guards may the implementation subtract one,
 calculate the physical offset and form an address. Copy element reads and
@@ -1653,7 +1678,7 @@ its def-use ancestry, never introduce an independent owner.
 
 `rows(x)`/`columns(x)` MUST accept all three matrix types, return usize and
 preserve the source kind through IR. `v[i,j]` MUST carry OneBased2D with exactly
-two usize operands. Checks MUST establish `1<=i<=rows` and `1<=j<=columns` before
+two scalar integer operands under section 6.4. Checks MUST establish `1<=i<=rows` and `1<=j<=columns` before
 subtraction, stride multiplication, addition or address calculation. The offset
 is exactly `(i-1)*row_stride+(j-1)*column_stride`. No raw zero-based access or
 contiguity assumption is permitted for matrix views.
@@ -1716,7 +1741,7 @@ free and relocation deltas and MUST NOT read/write/transform elements. Source
 owners remain borrowed and live. V22 `transpose(Vector)` remains consuming.
 
 `dimension` accepts owners and both view capabilities and returns logical usize
-dimension. Indexing requires exactly one usize operand. Both guards
+dimension. Scalar indexing requires exactly one integer operand under section 6.4. Both guards
 `index >= 1` and `index <= dimension` MUST precede subtraction, multiplication
 and addressing. Addressing MUST use `(index-1)*stride`, including non-unit
 strides, without assuming contiguous view storage. Empty indexing traps before

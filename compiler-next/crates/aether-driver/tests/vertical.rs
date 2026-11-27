@@ -1195,7 +1195,7 @@ fn vertical10_buffer_diagnostics_fail_closed() {
         ),
         (
             "int main(){Buffer<int> a=Buffer<int>(2,0);float64 i=1.0;return a[i];}",
-            "E0218",
+            "E0480",
         ),
         (
             "int main(){Buffer<int> a=Buffer<int>(1.0,0);return 0;}",
@@ -1698,7 +1698,6 @@ fn vertical13_collection_literal_and_array_operations_survive_every_ir() {
 fn vertical13_array_diagnostics_fail_closed() {
     for (text, code) in [
         ("int main(){Array<int> a={1,2};return a[2];}", "E0296"),
-        ("int main(){Array<int> a={1};int i=0;return a[i];}", "E0218"),
         ("int main(){Array<int> a={true};return 0;}", "E0205"),
         (
             "int main(){int x=1;Array<float64> a={x};return 0;}",
@@ -5070,7 +5069,6 @@ fn vertical21_diagnostics_and_matrix_reservation() {
     for text in [
         "int main(){Vector<int,Row> v=[1,2];return v[0];}",
         "int main(){Vector<int,Column> v=[1,2];return v[3];}",
-        "int main(){Vector<int,Row> v=[1];int i=1;return v[i];}",
         "int main(){Vector<int,Row> v=[1];return v[-1];}",
         "int main(){Vector<int,Row> v=[1];return v[true];}",
         "int main(){Vector<int,Row> r=[1];Vector<int,Column> c=r;return 0;}",
@@ -6149,8 +6147,6 @@ fn vertical23_structured_diagnostics() {
     for source in [
         "Matrix<T> bad<T>(T x){return [x];}int main(){return 0;}",
         "Matrix<T> bad<T:Copy>(T x){return [x];}int main(){return 0;}",
-        "int main(){Matrix<int> a=[1];int i=1;return a[i,1];}",
-        "int main(){Matrix<int> a=[1];int i=1;return a[1,i];}",
         "int main(){Matrix<int> a=[1];return a[-1,1];}",
         "int main(){Matrix<int> a=[1];return a[1,true];}",
         "usize take(Matrix<int> a){return 1;}int main(){Matrix<int> a=[1];return a[1,take(a)];}",
@@ -6956,7 +6952,6 @@ fn vertical24_projected_provenance_and_cross_module_rejections() {
         "int consume(Matrix<int> a){return 0;}int read(MatrixView<int> v,int x){return v[1,1];}int main(){Matrix<int> a=[1];return read(transpose_view(a),consume(a));}",
         "int main(){Matrix<int> a=[1];MatrixView<int> v=matrix_view(a);return v[2,1];}",
         "int main(){Matrix<int> a=[1];MatrixView<int> v=transpose_view(a);return v[1,2];}",
-        "int main(){Matrix<int> a=[1];MatrixView<int> v=matrix_view(a);int i=1;return v[i,1];}",
         "int main(){Matrix<int> a=[1];MatrixView<int> v=matrix_view(a);MatrixView<int> u=matrix_view(a);v=u;return 0;}",
         "int grow(MatrixViewMut<List<int>> v){push(v[1,1],42);return 0;}int main(){Matrix<List<int>> a=[{1}];ref int x=&a[1,1][0];grow(matrix_view_mut(a));return *x;}",
         "int bad(MatrixViewMut<List<int>> v){ref int x=&v[1,1][0];MatrixViewMut<List<int>> w=v;push(w[1,1],42);return *x;}int main(){return 0;}",
@@ -7391,7 +7386,6 @@ fn vertical25_structured_diagnostics_and_owner_liveness() {
         "int main(){List<VectorViewMut<int,Column>> a={};return 0;}",
         "int main(){Matrix<VectorView<int,Row>> a=[];return 0;}",
         "int main(){Vector<VectorView<int,Row>,Column> a=[];return 0;}",
-        "int main(){Vector<int,Row> a=[1];VectorView<int,Row> v=vector_view(a);int i=1;return v[i];}",
         "int main(){Vector<int,Row> a=[1];VectorView<int,Row> v=vector_view(a);bool i=true;return v[i];}",
         "int main(){Vector<Buffer<int>,Row> a=[Buffer<int>(1,2)];VectorView<Buffer<int>,Row> v=vector_view(a);Buffer<int> b=v[1];return 0;}",
         "int main(){Vector<Buffer<int>,Row> a=[Buffer<int>(1,2)];VectorViewMut<Buffer<int>,Row> v=vector_view_mut(a);v[1]=Buffer<int>(1,3);return 0;}",
