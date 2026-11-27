@@ -375,6 +375,12 @@ pub enum AstStmtKind {
     },
     /// Assignment to a local or nested field place.
     Assign { place: AstExpr, value: AstExpr },
+    /// Statement-only numeric compound assignment.
+    CompoundAssign {
+        place: AstExpr,
+        op: AstCompoundAssignOp,
+        value: AstExpr,
+    },
     /// A call used for its effect. Semantic analysis currently admits only
     /// the bootstrap structural List operations here.
     Expr(AstExpr),
@@ -412,6 +418,21 @@ pub enum AstStmtKind {
         catches: Vec<AstCatch>,
         finally: Option<AstBlock>,
     },
+}
+
+/// Source compound-assignment operators admitted by V1.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AstCompoundAssignOp {
+    /// `+=`.
+    Add,
+    /// `-=`.
+    Subtract,
+    /// `*=`.
+    Multiply,
+    /// `/=`.
+    Divide,
+    /// `%=`.
+    Remainder,
 }
 
 /// Source binding of a `for-in` statement. The optional type is resolved

@@ -21,8 +21,9 @@ use aether_frontend::{
 };
 
 use crate::mir::{
-    CallBorrowMetadata, CallBorrowSourceKind, CollectionLoop, ExceptionEventId, FinallyRegion,
-    FormatBorrowMetadata, FormatBorrowSourceKind, RangeLoop, place_type,
+    CallBorrowMetadata, CallBorrowSourceKind, CollectionLoop, CompoundDestination,
+    ExceptionEventId, FinallyRegion, FormatBorrowMetadata, FormatBorrowSourceKind, RangeLoop,
+    place_type,
 };
 use crate::{
     BinaryOp, BlockId, ElementInitialization, MirDropFlag, MirFunction, Operand, Place, PlaceBase,
@@ -116,6 +117,19 @@ pub struct SsaClosureCapture {
 pub struct SsaPlace {
     pub base: SsaPlaceBase,
     pub projections: Vec<SsaPlaceProjection>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SsaCompoundDestination {
+    Place(SsaPlace),
+    ClassScalarField {
+        receiver: SsaOperand,
+        class: ClassId,
+        field: FieldId,
+        field_type: TypeId,
+        mutable: bool,
+        initialized: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -264,6 +278,17 @@ pub enum SsaOp {
     /// Alias-aware memory read from address-taken storage or a dereference.
     Load {
         place: SsaPlace,
+    },
+    CompoundLoad {
+        id: aether_frontend::CompoundAssignId,
+        destination: SsaCompoundDestination,
+        value_type: TypeId,
+    },
+    CompoundCommit {
+        id: aether_frontend::CompoundAssignId,
+        destination: SsaCompoundDestination,
+        value: SsaOperand,
+        value_type: TypeId,
     },
     /// Alias-aware memory write. Its SSA result is an intentionally unused
     /// copy of `value`; the observable operation is the store effect.
@@ -1412,6 +1437,26 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
                 place: rename_place(place, stacks, mir),
             },
         },
+        Rvalue::CompoundLoad {
+            id,
+            destination,
+            value_type,
+        } => SsaOp::CompoundLoad {
+            id: *id,
+            destination: rename_compound_destination(destination, stacks, mir),
+            value_type: *value_type,
+        },
+        Rvalue::CompoundCommit {
+            id,
+            destination,
+            value,
+            value_type,
+        } => SsaOp::CompoundCommit {
+            id: *id,
+            destination: rename_compound_destination(destination, stacks, mir),
+            value: rename_operand(value, stacks),
+            value_type: *value_type,
+        },
         Rvalue::Borrow {
             place,
             mutable,
@@ -2034,6 +2079,33 @@ fn rename_place(place: &Place, stacks: &[Vec<ValueId>], mir: &MirFunction) -> Ss
     }
 }
 
+fn rename_compound_destination(
+    destination: &CompoundDestination,
+    stacks: &[Vec<ValueId>],
+    mir: &MirFunction,
+) -> SsaCompoundDestination {
+    match destination {
+        CompoundDestination::Place(place) => {
+            SsaCompoundDestination::Place(rename_place(place, stacks, mir))
+        }
+        CompoundDestination::ClassScalarField {
+            receiver,
+            class,
+            field,
+            field_type,
+            mutable,
+            initialized,
+        } => SsaCompoundDestination::ClassScalarField {
+            receiver: rename_operand(receiver, stacks),
+            class: *class,
+            field: *field,
+            field_type: *field_type,
+            mutable: *mutable,
+            initialized: *initialized,
+        },
+    }
+}
+
 fn rvalue_result_type(
     function: &MirFunction,
     destination: &Place,
@@ -2586,6 +2658,15 @@ pub(crate) fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<Local
             .chain(operand_local(right))
             .collect(),
         Rvalue::NullablePayload { source, .. } => place_locals(function, source),
+        Rvalue::CompoundLoad { destination, .. } => {
+            compound_destination_locals(function, destination)
+        }
+        Rvalue::CompoundCommit {
+            destination, value, ..
+        } => compound_destination_locals(function, destination)
+            .into_iter()
+            .chain(operand_local(value))
+            .collect(),
         Rvalue::Class(op) => op
             .operands()
             .into_iter()
@@ -2632,6 +2713,18 @@ fn place_locals(function: &MirFunction, place: &Place) -> Vec<LocalId> {
         }
     }));
     locals
+}
+
+fn compound_destination_locals(
+    function: &MirFunction,
+    destination: &CompoundDestination,
+) -> Vec<LocalId> {
+    match destination {
+        CompoundDestination::Place(place) => place_locals(function, place),
+        CompoundDestination::ClassScalarField { receiver, .. } => {
+            operand_local(receiver).into_iter().collect()
+        }
+    }
 }
 
 fn terminator_locals(terminator: &Terminator) -> Vec<LocalId> {
@@ -3603,7 +3696,441 @@ fn verify_ssa_function(
     verify_borrowed_function_calls(function, types, fail)?;
     verify_closure_borrow_regions(function, types, fail)?;
     verify_format_borrow_regions(function, fail)?;
+    verify_compound_transactions(function, signatures, types, &definitions, &dominance, fail)?;
     Ok(())
+}
+
+fn verify_compound_transactions(
+    function: &SsaFunction,
+    signatures: &[FunctionInstanceInfo],
+    types: &TypeArena,
+    definitions: &BTreeMap<ValueId, impl Copy>,
+    dominance: &Dominance,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut loads = BTreeMap::new();
+    let mut commits = BTreeMap::new();
+    for block in &function.blocks {
+        for (index, instruction) in block.instructions.iter().enumerate() {
+            match &instruction.op {
+                SsaOp::CompoundLoad {
+                    id,
+                    destination,
+                    value_type,
+                } => {
+                    if loads
+                        .insert(
+                            *id,
+                            (
+                                block.id,
+                                index,
+                                destination,
+                                *value_type,
+                                instruction.result,
+                            ),
+                        )
+                        .is_some()
+                    {
+                        return Err(fail("SSA compound transaction has duplicate load".into()));
+                    }
+                }
+                SsaOp::CompoundCommit {
+                    id,
+                    destination,
+                    value,
+                    value_type,
+                } => {
+                    if commits
+                        .insert(*id, (block.id, index, destination, value, *value_type))
+                        .is_some()
+                    {
+                        return Err(fail("SSA compound transaction has duplicate commit".into()));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    if loads.len() != commits.len() || loads.keys().ne(commits.keys()) {
+        return Err(fail(
+            "SSA compound transaction load/commit cardinality mismatch".into(),
+        ));
+    }
+    for (id, (load_block, load_index, destination, value_type, old)) in loads {
+        let (commit_block, commit_index, committed_destination, value, committed_type) =
+            commits[&id];
+        if destination != committed_destination
+            || value_type != committed_type
+            || !dominance.dominates(load_block, commit_block)
+            || (load_block == commit_block && load_index >= commit_index)
+        {
+            return Err(fail(
+                "SSA compound transaction identity/order mismatch".into(),
+            ));
+        }
+        verify_ssa_compound_paths(
+            function,
+            signatures,
+            types,
+            destination,
+            load_block,
+            load_index,
+            commit_block,
+            commit_index,
+            fail,
+        )?;
+        let SsaOperand::Value(result) = value else {
+            return Err(fail(
+                "SSA compound commit does not consume a binary result".into(),
+            ));
+        };
+        if !definitions.contains_key(result) {
+            return Err(fail(
+                "SSA compound commit consumes an undefined result".into(),
+            ));
+        }
+        let defining = function
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .find(|instruction| instruction.result == *result);
+        if !matches!(
+            defining.map(|instruction| &instruction.op),
+            Some(SsaOp::Binary { left: SsaOperand::Value(left), .. }) if *left == old
+        ) {
+            return Err(fail(
+                "SSA compound result is not derived from its old value".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn verify_ssa_compound_paths(
+    function: &SsaFunction,
+    signatures: &[FunctionInstanceInfo],
+    types: &TypeArena,
+    protected: &SsaCompoundDestination,
+    load_block: BlockId,
+    load_index: usize,
+    commit_block: BlockId,
+    commit_index: usize,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    fn region_has_cycle(
+        function: &SsaFunction,
+        block: BlockId,
+        commit: BlockId,
+        visiting: &mut BTreeSet<BlockId>,
+        complete: &mut BTreeSet<BlockId>,
+    ) -> bool {
+        if block == commit || complete.contains(&block) {
+            return false;
+        }
+        if !visiting.insert(block) {
+            return true;
+        }
+        let cyclic = ssa_targets(&function.blocks[block.0 as usize].terminator)
+            .into_iter()
+            .any(|successor| region_has_cycle(function, successor, commit, visiting, complete));
+        visiting.remove(&block);
+        complete.insert(block);
+        cyclic
+    }
+    if load_block != commit_block
+        && region_has_cycle(
+            function,
+            load_block,
+            commit_block,
+            &mut BTreeSet::new(),
+            &mut BTreeSet::new(),
+        )
+    {
+        return Err(fail(
+            "SSA compound protected region contains a CFG cycle".into(),
+        ));
+    }
+    let reaches_commit = |start: BlockId| {
+        let mut pending = vec![start];
+        let mut seen = BTreeSet::new();
+        while let Some(block) = pending.pop() {
+            if !seen.insert(block) {
+                continue;
+            }
+            if block == commit_block {
+                return true;
+            }
+            pending.extend(ssa_targets(&function.blocks[block.0 as usize].terminator));
+        }
+        false
+    };
+
+    let mut pending = vec![(load_block, load_index + 1)];
+    let mut seen = BTreeSet::new();
+    while let Some((block_id, start)) = pending.pop() {
+        if !seen.insert((block_id, start)) {
+            continue;
+        }
+        let block = &function.blocks[block_id.0 as usize];
+        let end = if block_id == commit_block {
+            commit_index
+        } else {
+            block.instructions.len()
+        };
+        if start > end {
+            return Err(fail(
+                "SSA compound transaction has an invalid instruction range".into(),
+            ));
+        }
+        for instruction in &block.instructions[start..end] {
+            if ssa_compound_instruction_invalidates(
+                function,
+                signatures,
+                types,
+                protected,
+                instruction,
+            ) {
+                return Err(fail(
+                    "SSA operation may invalidate an active compound destination".into(),
+                ));
+            }
+            if instruction.unwind.is_some_and(&reaches_commit) {
+                return Err(fail(
+                    "SSA compound exceptional path can reach its commit".into(),
+                ));
+            }
+        }
+        if block_id == commit_block {
+            continue;
+        }
+        match &block.terminator {
+            SsaTerminator::Return(_) => {
+                return Err(fail("SSA compound normal path bypasses its commit".into()));
+            }
+            SsaTerminator::Trap(_)
+            | SsaTerminator::Throw { .. }
+            | SsaTerminator::Rethrow { .. }
+            | SsaTerminator::ResumeUnwind { .. }
+            | SsaTerminator::ForwardUnwind { .. } => {}
+            terminator => {
+                for successor in ssa_targets(terminator) {
+                    pending.push((successor, 0));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Default)]
+struct SsaCompoundProvenance {
+    values: BTreeSet<ValueId>,
+    memory: BTreeSet<LocalId>,
+}
+
+fn ssa_compound_provenance(function: &SsaFunction, place: &SsaPlace) -> SsaCompoundProvenance {
+    fn add_operand(
+        function: &SsaFunction,
+        operand: &SsaOperand,
+        roots: &mut SsaCompoundProvenance,
+    ) {
+        let SsaOperand::Value(value) = operand else {
+            return;
+        };
+        if !roots.values.insert(*value) {
+            return;
+        }
+        for phi in function.blocks.iter().flat_map(|block| &block.phis) {
+            if phi.result == *value {
+                for (_, incoming) in &phi.incoming {
+                    add_operand(function, &SsaOperand::Value(*incoming), roots);
+                }
+            }
+        }
+        for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+            if instruction.result != *value {
+                continue;
+            }
+            match &instruction.op {
+                SsaOp::Borrow { place, .. }
+                | SsaOp::Load { place }
+                | SsaOp::View { source: place, .. }
+                | SsaOp::VectorView { source: place, .. }
+                | SsaOp::MatrixView { source: place, .. }
+                | SsaOp::MatrixAxisVectorView { source: place, .. } => {
+                    add_place(function, place, roots);
+                }
+                SsaOp::Use(value) => add_operand(function, value, roots),
+                _ => {}
+            }
+        }
+    }
+    fn add_place(function: &SsaFunction, place: &SsaPlace, roots: &mut SsaCompoundProvenance) {
+        match &place.base {
+            SsaPlaceBase::MemoryLocal(local) => {
+                roots.memory.insert(*local);
+            }
+            SsaPlaceBase::Value(value) => add_operand(function, value, roots),
+            SsaPlaceBase::Dereference { reference, .. } => {
+                add_operand(function, reference, roots);
+            }
+            SsaPlaceBase::ClassField { receiver, .. } => add_operand(function, receiver, roots),
+        }
+    }
+
+    let mut roots = SsaCompoundProvenance::default();
+    add_place(function, place, &mut roots);
+    roots
+}
+
+fn ssa_compound_destination_provenance(
+    function: &SsaFunction,
+    destination: &SsaCompoundDestination,
+) -> SsaCompoundProvenance {
+    match destination {
+        SsaCompoundDestination::Place(place) => ssa_compound_provenance(function, place),
+        SsaCompoundDestination::ClassScalarField { receiver, .. } => ssa_compound_provenance(
+            function,
+            &SsaPlace {
+                base: SsaPlaceBase::Value(receiver.clone()),
+                projections: vec![],
+            },
+        ),
+    }
+}
+
+fn ssa_compound_instruction_invalidates(
+    function: &SsaFunction,
+    signatures: &[FunctionInstanceInfo],
+    types: &TypeArena,
+    protected: &SsaCompoundDestination,
+    instruction: &SsaInstruction,
+) -> bool {
+    let overlaps = |place: &SsaPlace| {
+        let protected = ssa_compound_destination_provenance(function, protected);
+        let candidate = ssa_compound_provenance(function, place);
+        !protected.values.is_disjoint(&candidate.values)
+            || !protected.memory.is_disjoint(&candidate.memory)
+    };
+    let mutating_call = |args: &[SsaOperand], parameters: &[TypeId]| {
+        args.iter().zip(parameters).any(|(argument, parameter)| {
+            let Some((pointee, true)) = types.reference_info(*parameter) else {
+                return false;
+            };
+            if types.is_numeric(pointee) {
+                return false;
+            }
+            let SsaOperand::Value(value) = argument else {
+                return true;
+            };
+            let argument = ssa_compound_provenance(
+                function,
+                &SsaPlace {
+                    base: SsaPlaceBase::Value(SsaOperand::Value(*value)),
+                    projections: vec![],
+                },
+            );
+            let protected = ssa_compound_destination_provenance(function, protected);
+            !argument.values.is_disjoint(&protected.values)
+                || !argument.memory.is_disjoint(&protected.memory)
+        })
+    };
+    match &instruction.op {
+        SsaOp::Store { place, .. } => {
+            overlaps(place)
+                && match protected {
+                    SsaCompoundDestination::Place(protected) => {
+                        place.projections.len() < protected.projections.len()
+                            || (protected.projections.iter().any(|projection| {
+                                matches!(projection, SsaPlaceProjection::Index { .. })
+                            }) && place.projections.is_empty())
+                    }
+                    SsaCompoundDestination::ClassScalarField { .. } => place.projections.is_empty(),
+                }
+        }
+        SsaOp::ListPush { source, .. }
+        | SsaOp::ListReserve { source, .. }
+        | SsaOp::ListSetLength { source, .. }
+        | SsaOp::MatrixAdd { source, .. } => overlaps(source),
+        SsaOp::Take { slot, .. } => overlaps(&slot.root),
+        SsaOp::Relocate {
+            source,
+            destination,
+            ..
+        } => overlaps(&source.root) || overlaps(&destination.root),
+        SsaOp::Move { source }
+        | SsaOp::Drop { owner: source }
+        | SsaOp::ConsumeEnum { owner: source } => overlaps(source),
+        SsaOp::ReplaceOwned { destination, .. } | SsaOp::ReplaceString { destination, .. } => {
+            overlaps(destination)
+        }
+        SsaOp::Call { callee, args, .. } => {
+            signatures.get(callee.0 as usize).is_none_or(|signature| {
+                mutating_call(
+                    args,
+                    &signature
+                        .parameters
+                        .iter()
+                        .map(|parameter| parameter.ty)
+                        .collect::<Vec<_>>(),
+                )
+            })
+        }
+        SsaOp::IndirectCall {
+            args, signature, ..
+        } => types
+            .function_signature(*signature)
+            .is_none_or(|(parameters, _)| mutating_call(args, parameters)),
+        SsaOp::ClosureCall { args, .. } => args.iter().any(|argument| {
+            let SsaOperand::Value(value) = argument else {
+                return false;
+            };
+            let argument = ssa_compound_provenance(
+                function,
+                &SsaPlace {
+                    base: SsaPlaceBase::Value(SsaOperand::Value(*value)),
+                    projections: vec![],
+                },
+            );
+            let protected = ssa_compound_destination_provenance(function, protected);
+            !argument.values.is_disjoint(&protected.values)
+                || !argument.memory.is_disjoint(&protected.memory)
+        }),
+        SsaOp::Class(operation)
+            if matches!(
+                operation.as_ref(),
+                ClassOp::VirtualCall { .. }
+                    | ClassOp::BaseMethodCall { .. }
+                    | ClassOp::InterfaceCall { .. }
+                    | ClassOp::DirectMethodCall { .. }
+                    | ClassOp::BaseInit { .. }
+                    | ClassOp::InitCall { .. }
+                    | ClassOp::ConstructionCleanup { .. }
+                    | ClassOp::HandleTransfer { .. }
+                    | ClassOp::ClassUpcast { transfer: true, .. }
+                    | ClassOp::InterfaceAdapt { transfer: true, .. }
+                    | ClassOp::ReceiverKeepalive { transfer: true, .. }
+                    | ClassOp::FieldWrite { .. }
+            ) =>
+        {
+            operation.operands().into_iter().any(|operand| {
+                let SsaOperand::Value(value) = operand else {
+                    return false;
+                };
+                let argument = ssa_compound_provenance(
+                    function,
+                    &SsaPlace {
+                        base: SsaPlaceBase::Value(SsaOperand::Value(*value)),
+                        projections: vec![],
+                    },
+                );
+                let protected = ssa_compound_destination_provenance(function, protected);
+                !argument.values.is_disjoint(&protected.values)
+                    || !argument.memory.is_disjoint(&protected.memory)
+            })
+        }
+        _ => false,
+    }
 }
 
 fn verify_borrowed_function_calls(
@@ -5811,6 +6338,48 @@ fn verify_op(
         }
         Ok(true)
     };
+    let compound_destination_type =
+        |destination: &SsaCompoundDestination| -> Result<TypeId, String> {
+            match destination {
+                SsaCompoundDestination::Place(place) => {
+                    verify_class_access(place)?;
+                    if !writable(place)? {
+                        return Err("SSA compound Place is not writable".into());
+                    }
+                    ssa_place_type(place, memory_locals, structs, types, operand_ty)
+                }
+                SsaCompoundDestination::ClassScalarField {
+                    receiver,
+                    class,
+                    field,
+                    field_type,
+                    mutable,
+                    initialized,
+                } => {
+                    let receiver_class = types
+                        .object_class(operand_ty(receiver)?)
+                        .ok_or("SSA compound class receiver has non-class type")?;
+                    let info = types
+                        .class_field(*field)
+                        .ok_or("SSA compound class field has unknown FieldId")?;
+                    let accessible = info.public
+                        || types.class_method(function_id).map(|(owner, _)| owner)
+                            == Some(info.class);
+                    if info.class != *class
+                        || info.ty != *field_type
+                        || !*mutable
+                        || !*initialized
+                        || !accessible
+                        || !types
+                            .class_chain(receiver_class)
+                            .is_ok_and(|chain| chain.contains(class))
+                    {
+                        return Err("SSA compound class field contract invalid".into());
+                    }
+                    Ok(*field_type)
+                }
+            }
+        };
     let validate_slice_selector = |selector: &SliceSelector<SsaOperand>,
                                    axis: aether_frontend::HirSubscriptAxis,
                                    semantics: IndexSemantics|
@@ -6083,6 +6652,34 @@ fn verify_op(
                     && !borrowed_nullable_class_read)
             {
                 return Err("SSA memory load type mismatch".into());
+            }
+        }
+        SsaOp::CompoundLoad {
+            id,
+            destination,
+            value_type,
+        } => {
+            if id.function != function_id
+                || result != *value_type
+                || compound_destination_type(destination)? != *value_type
+                || !types.guarantees_copy(*value_type)
+            {
+                return Err("SSA compound load contract invalid".into());
+            }
+        }
+        SsaOp::CompoundCommit {
+            id,
+            destination,
+            value,
+            value_type,
+        } => {
+            if id.function != function_id
+                || result != TypeId::BOOL
+                || compound_destination_type(destination)? != *value_type
+                || operand_ty(value)? != *value_type
+                || !types.guarantees_copy(*value_type)
+            {
+                return Err("SSA compound commit contract invalid".into());
             }
         }
         SsaOp::Store {
@@ -7602,6 +8199,7 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
             .chain(selectors.iter().flat_map(slice_selector_operands))
             .chain(place_operands(rhs))
             .collect(),
+        SsaOp::CompoundLoad { destination, .. } => compound_destination_operands(destination),
         SsaOp::Load { place }
         | SsaOp::NullablePayload { source: place, .. }
         | SsaOp::Borrow { place, .. }
@@ -7617,6 +8215,12 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         | SsaOp::ArrayLength { source: place }
         | SsaOp::ListLength { source: place }
         | SsaOp::ListCapacity { source: place } => place_operands(place),
+        SsaOp::CompoundCommit {
+            destination, value, ..
+        } => compound_destination_operands(destination)
+            .into_iter()
+            .chain(std::iter::once(value))
+            .collect(),
         SsaOp::ReplaceString { destination, value } => place_operands(destination)
             .into_iter()
             .chain(std::iter::once(value))
@@ -7733,6 +8337,13 @@ fn place_operands(place: &SsaPlace) -> Vec<&SsaOperand> {
         }
     }));
     operands
+}
+
+fn compound_destination_operands(destination: &SsaCompoundDestination) -> Vec<&SsaOperand> {
+    match destination {
+        SsaCompoundDestination::Place(place) => place_operands(place),
+        SsaCompoundDestination::ClassScalarField { receiver, .. } => vec![receiver],
+    }
 }
 
 fn mir_targets(terminator: &Terminator) -> Vec<BlockId> {
@@ -8515,6 +9126,201 @@ mod tests {
     fn raw_ssa(text: &str) -> SsaIr {
         let hir = analyze(parse_source(&SourceFile::new("test.ae", text)).unwrap()).unwrap();
         build_ssa(&verify_mir(lower_hir(hir)).unwrap())
+    }
+
+    fn compound_positions(function: &SsaFunction) -> ((usize, usize), (usize, usize)) {
+        let mut load = None;
+        let mut commit = None;
+        for (block, body) in function.blocks.iter().enumerate() {
+            for (index, instruction) in body.instructions.iter().enumerate() {
+                match instruction.op {
+                    SsaOp::CompoundLoad { .. } => load = Some((block, index)),
+                    SsaOp::CompoundCommit { .. } => commit = Some((block, index)),
+                    _ => {}
+                }
+            }
+        }
+        (load.unwrap(), commit.unwrap())
+    }
+
+    fn assert_compound_ssa_rejected(program: SsaIr, needle: &str) {
+        let errors = verify_ssa(program).unwrap_err();
+        assert!(
+            errors.iter().any(|error| error.message.contains(needle)),
+            "expected {needle:?}, got {errors:#?}"
+        );
+    }
+
+    #[test]
+    fn compound_transaction_corruption_corpus_fails_closed_in_ssa() {
+        let source = "int main(){List<int>x={1,2};x[0]+=3;return x[0];}";
+        let raw = raw_ssa(source);
+        verify_ssa(raw.clone()).unwrap();
+
+        let mut changed_index = raw.clone();
+        let function = &mut changed_index.functions[0];
+        let (_, (block, commit)) = compound_positions(function);
+        let SsaOp::CompoundCommit { destination, .. } =
+            &mut function.blocks[block].instructions[commit].op
+        else {
+            unreachable!()
+        };
+        let SsaCompoundDestination::Place(destination) = destination else {
+            unreachable!()
+        };
+        let SsaPlaceProjection::Index { index, .. } = &mut destination.projections[0] else {
+            unreachable!()
+        };
+        *index = SsaOperand::Int {
+            value: 1,
+            ty: TypeId::INT64,
+        };
+        assert_compound_ssa_rejected(changed_index, "identity/order mismatch");
+
+        let mut missing_commit = raw.clone();
+        let function = &mut missing_commit.functions[0];
+        let (_, (block, commit)) = compound_positions(function);
+        function.blocks[block].instructions[commit].op = SsaOp::Use(SsaOperand::Bool(false));
+        assert_compound_ssa_rejected(missing_commit, "cardinality mismatch");
+
+        let mut duplicate_commit = raw.clone();
+        let function = &mut duplicate_commit.functions[0];
+        let (_, (block, commit)) = compound_positions(function);
+        let mut copy = function.blocks[block].instructions[commit].clone();
+        copy.result = ValueId(
+            function
+                .blocks
+                .iter()
+                .flat_map(|block| &block.instructions)
+                .map(|instruction| instruction.result.0)
+                .max()
+                .unwrap()
+                + 1,
+        );
+        function.blocks[block].instructions.insert(commit + 1, copy);
+        assert_compound_ssa_rejected(duplicate_commit, "duplicate commit");
+
+        let mut unrelated_result = raw;
+        let function = &mut unrelated_result.functions[0];
+        let ((block, load), (_, commit)) = compound_positions(function);
+        for instruction in &mut function.blocks[block].instructions[load + 1..commit] {
+            if let SsaOp::Binary { left, right, .. } = &mut instruction.op {
+                *left = right.clone();
+                break;
+            }
+        }
+        assert_compound_ssa_rejected(unrelated_result, "not derived from its old value");
+
+        let mut normal_bypass = raw_ssa(source);
+        let function = &mut normal_bypass.functions[0];
+        let ((block, load), _) = compound_positions(function);
+        let suffix = function.blocks[block].instructions.split_off(load + 1);
+        let return_terminator = std::mem::replace(
+            &mut function.blocks[block].terminator,
+            SsaTerminator::Trap(TrapKind::IntegerOverflow),
+        );
+        let commit_block = BlockId(function.blocks.len() as u32);
+        let bypass_block = BlockId(commit_block.0 + 1);
+        function.blocks[block].terminator = SsaTerminator::Branch {
+            condition: SsaOperand::Bool(true),
+            then_block: commit_block,
+            else_block: bypass_block,
+        };
+        function.blocks.push(SsaBlock {
+            id: commit_block,
+            phis: vec![],
+            instructions: suffix,
+            terminator: return_terminator,
+            landing_pad: None,
+            landing_pad_catches: false,
+        });
+        function.blocks.push(SsaBlock {
+            id: bypass_block,
+            phis: vec![],
+            instructions: vec![],
+            terminator: SsaTerminator::Return(SsaOperand::Int {
+                value: 0,
+                ty: TypeId::INT64,
+            }),
+            landing_pad: None,
+            landing_pad_catches: false,
+        });
+        assert_compound_ssa_rejected(normal_bypass, "normal path bypasses its commit");
+    }
+
+    #[test]
+    fn class_scalar_compound_corruption_fails_closed_in_ssa() {
+        let source = "class C{public int x;public init(){x=1;}public mut int f(){x+=2;return x;}}int main(){return 0;}";
+        let raw = raw_ssa(source);
+        verify_ssa(raw.clone()).unwrap();
+        for mutation in 0..5 {
+            let mut bad = raw.clone();
+            for instruction in bad.functions.iter_mut().flat_map(|function| {
+                function
+                    .blocks
+                    .iter_mut()
+                    .flat_map(|block| &mut block.instructions)
+            }) {
+                let destination = match &mut instruction.op {
+                    SsaOp::CompoundLoad { destination, .. }
+                    | SsaOp::CompoundCommit { destination, .. } => destination,
+                    _ => continue,
+                };
+                let SsaCompoundDestination::ClassScalarField {
+                    class,
+                    field,
+                    field_type,
+                    mutable,
+                    initialized,
+                    ..
+                } = destination
+                else {
+                    unreachable!()
+                };
+                match mutation {
+                    0 => *class = ClassId(u32::MAX),
+                    1 => *field = FieldId(u32::MAX),
+                    2 => *field_type = TypeId::BOOL,
+                    3 => *mutable = false,
+                    4 => *initialized = false,
+                    _ => unreachable!(),
+                }
+            }
+            assert!(verify_ssa(bad).is_err(), "accepted mutation {mutation}");
+        }
+    }
+
+    #[test]
+    fn compound_region_rejects_reordered_structural_mutation_in_ssa() {
+        let mut raw = raw_ssa("int main(){List<int>x={1,2};x[0]+=1;reserve(x,8);return x[0];}");
+        verify_ssa(raw.clone()).unwrap();
+        let function = &mut raw.functions[0];
+        let (reserve_block, reserve_index) = function
+            .blocks
+            .iter()
+            .enumerate()
+            .find_map(|(block, body)| {
+                body.instructions
+                    .iter()
+                    .position(|instruction| matches!(instruction.op, SsaOp::ListReserve { .. }))
+                    .map(|index| (block, index))
+            })
+            .unwrap();
+        let reserve = function.blocks[reserve_block]
+            .instructions
+            .remove(reserve_index);
+        let descriptor_store = function.blocks[reserve_block]
+            .instructions
+            .remove(reserve_index);
+        assert!(matches!(descriptor_store.op, SsaOp::Store { .. }));
+        let ((block, load), _) = compound_positions(function);
+        function.blocks[block]
+            .instructions
+            .insert(load + 1, reserve);
+        function.blocks[block]
+            .instructions
+            .insert(load + 2, descriptor_store);
+        assert_compound_ssa_rejected(raw, "may invalidate an active compound destination");
     }
 
     #[test]

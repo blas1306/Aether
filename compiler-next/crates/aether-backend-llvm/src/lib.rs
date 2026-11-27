@@ -22,8 +22,9 @@ use aether_frontend::{
     layout_of,
 };
 use aether_middle::{
-    BinaryOp, BlockId, SliceSelector, SsaFunction, SsaIr, SsaOp, SsaOperand, SsaPlace,
-    SsaPlaceBase, SsaPlaceProjection, SsaTerminator, TrapKind, UnaryOp, VerifiedSsa,
+    BinaryOp, BlockId, SliceSelector, SsaCompoundDestination, SsaFunction, SsaIr, SsaOp,
+    SsaOperand, SsaPlace, SsaPlaceBase, SsaPlaceProjection, SsaTerminator, TrapKind, UnaryOp,
+    VerifiedSsa,
 };
 
 /// Minimal explicit target contract for the admitted bootstrap platform.
@@ -2062,6 +2063,7 @@ fn emit_function(
     let mut slice_order_trap = false;
     let mut slice_bounds_trap = false;
     let mut shape_trap = false;
+    let mut compound_destinations = BTreeMap::new();
     for block in &function.blocks {
         writeln!(output, "{}:", block_label(block.id)).unwrap();
         for phi in &block.phis {
@@ -2472,6 +2474,69 @@ fn emit_function(
                         "  %v{} = load {}, ptr {pointer}",
                         instruction.result.0,
                         llvm_type(types, instruction.ty)
+                    )
+                    .unwrap();
+                }
+                SsaOp::CompoundLoad {
+                    id,
+                    destination,
+                    value_type: _,
+                } => {
+                    let pointer = match destination {
+                        SsaCompoundDestination::Place(place) => emit_place_pointer(
+                            output,
+                            function,
+                            place,
+                            instruction.result.0,
+                            types,
+                            structs,
+                        ),
+                        SsaCompoundDestination::ClassScalarField {
+                            receiver, field, ..
+                        } => {
+                            let field = types
+                                .class_field(*field)
+                                .expect("verified compound class field");
+                            let pointer = format!("%compound_field{}", instruction.result.0);
+                            writeln!(
+                                output,
+                                "  {pointer} = getelementptr i8, ptr {}, i64 {}",
+                                llvm_operand(receiver),
+                                field.offset
+                            )
+                            .unwrap();
+                            pointer
+                        }
+                    };
+                    compound_destinations.insert(*id, pointer.clone());
+                    writeln!(
+                        output,
+                        "  %v{} = load {}, ptr {pointer}",
+                        instruction.result.0,
+                        llvm_type(types, instruction.ty)
+                    )
+                    .unwrap();
+                }
+                SsaOp::CompoundCommit {
+                    id,
+                    destination: _,
+                    value,
+                    value_type,
+                } => {
+                    let pointer = compound_destinations
+                        .get(id)
+                        .expect("verified compound commit has a dominating load");
+                    writeln!(
+                        output,
+                        "  store {} {}, ptr {pointer}",
+                        llvm_type(types, *value_type),
+                        llvm_operand(value)
+                    )
+                    .unwrap();
+                    writeln!(
+                        output,
+                        "  %v{} = select i1 true, i1 true, i1 true",
+                        instruction.result.0
                     )
                     .unwrap();
                 }

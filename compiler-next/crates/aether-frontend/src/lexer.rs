@@ -91,14 +91,24 @@ pub enum TokenKind {
     Dot,
     /// `+`.
     Plus,
+    /// `+=`.
+    PlusEqual,
     /// `-`.
     Minus,
+    /// `-=`.
+    MinusEqual,
     /// `*`.
     Star,
+    /// `*=`.
+    StarEqual,
     /// `/`.
     Slash,
+    /// `/=`.
+    SlashEqual,
     /// `%`.
     Percent,
+    /// `%=`.
+    PercentEqual,
     /// `&`.
     Ampersand,
     /// `&&`.
@@ -350,6 +360,26 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
             b',' => single(&mut tokens, TokenKind::Comma, source, &mut cursor),
             b':' => single(&mut tokens, TokenKind::Colon, source, &mut cursor),
             b'.' => single(&mut tokens, TokenKind::Dot, source, &mut cursor),
+            b'+' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                push(&mut tokens, TokenKind::PlusEqual, source, start, cursor);
+            }
+            b'-' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                push(&mut tokens, TokenKind::MinusEqual, source, start, cursor);
+            }
+            b'*' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                push(&mut tokens, TokenKind::StarEqual, source, start, cursor);
+            }
+            b'/' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                push(&mut tokens, TokenKind::SlashEqual, source, start, cursor);
+            }
+            b'%' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                push(&mut tokens, TokenKind::PercentEqual, source, start, cursor);
+            }
             b'+' => single(&mut tokens, TokenKind::Plus, source, &mut cursor),
             b'-' => single(&mut tokens, TokenKind::Minus, source, &mut cursor),
             b'*' => single(&mut tokens, TokenKind::Star, source, &mut cursor),

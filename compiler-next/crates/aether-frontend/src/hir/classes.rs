@@ -684,6 +684,69 @@ impl Analyzer<'_> {
                 .expr)
         })())
     }
+
+    pub(super) fn class_scalar_compound_destination(
+        &mut self,
+        place: &AstExpr,
+    ) -> Option<Result<super::HirCompoundDestination, Vec<Diagnostic>>> {
+        let (base, field) = self.class_field_source(place)?;
+        if self.types.buffer_element(field.ty).is_some() {
+            return None;
+        }
+        Some((|| {
+            self.check_member_access(field.class, field.public, place.span)?;
+            if !self.types.guarantees_copy(field.ty) || !self.types.is_numeric(field.ty) {
+                return Err(vec![error(
+                    "E0406",
+                    "compound assignment requires a Copy numeric class field",
+                    place.span,
+                )]);
+            }
+            let receiver = self.raw_receiver(&base)?;
+            let mutable = !matches!(
+                self.types.get(receiver.ty),
+                Some(TypeData::ClassToken {
+                    kind: ClassTokenKind::Receiver { mutable: false, .. }
+                        | ClassTokenKind::BorrowedHandleView
+                        | ClassTokenKind::BorrowedReceiver,
+                    ..
+                })
+            );
+            if !mutable {
+                return Err(vec![error(
+                    "E0405",
+                    "field mutation requires a declared mut receiver",
+                    place.span,
+                )]);
+            }
+            let initializing = matches!(
+                self.types.get(receiver.ty),
+                Some(TypeData::ClassToken {
+                    kind: ClassTokenKind::Receiver {
+                        initializing: true,
+                        ..
+                    },
+                    ..
+                })
+            );
+            let initialized = !initializing || self.initialized_fields.contains(&field.id);
+            if !initialized {
+                return Err(vec![error(
+                    "E0403",
+                    "field read before initialization",
+                    place.span,
+                )]);
+            }
+            Ok(super::HirCompoundDestination::ClassScalarField {
+                receiver: Box::new(receiver),
+                class: field.class,
+                field: field.id,
+                field_type: field.ty,
+                mutable,
+                initialized,
+            })
+        })())
+    }
     pub(super) fn class_expression(
         &mut self,
         e: &AstExpr,
@@ -1553,11 +1616,24 @@ pub(super) fn verify_body(
                     visit_expr(e, state, types, function, module, sigs)?;
                 }
             }
+            if let HirStmtKind::CompoundAssign { destination, .. } = &s.kind {
+                match destination {
+                    super::HirCompoundDestination::Place(place) => {
+                        for e in place_children(place) {
+                            visit_expr(e, state, types, function, module, sigs)?;
+                        }
+                    }
+                    super::HirCompoundDestination::ClassScalarField { receiver, .. } => {
+                        visit_expr(receiver, state, types, function, module, sigs)?;
+                    }
+                }
+            }
             match &s.kind {
                 HirStmtKind::Local {
                     initializer: value, ..
                 }
                 | HirStmtKind::Assign { value, .. }
+                | HirStmtKind::CompoundAssign { rhs: value, .. }
                 | HirStmtKind::ReplaceOwned { value, .. }
                 | HirStmtKind::SliceAssign { value, .. }
                 | HirStmtKind::Return { value, .. }

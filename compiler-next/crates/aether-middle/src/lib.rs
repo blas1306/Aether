@@ -19,8 +19,8 @@ pub use mir::{
 };
 pub use ssa::{
     ArcElision, ClassDevirtualization, DescriptorCommitKind, Devirtualization, OopOptimizations,
-    Phi, SsaBinding, SsaBlock, SsaCaptureSlot, SsaClosureCapture, SsaFunction, SsaInstruction,
-    SsaIr, SsaMemoryLocal, SsaOp, SsaOperand, SsaParameter, SsaPlace, SsaPlaceBase,
-    SsaPlaceProjection, SsaTerminator, StoreProvenance, ValueId, VerifiedSsa, build_ssa,
-    optimize_oop, verify_ssa,
+    Phi, SsaBinding, SsaBlock, SsaCaptureSlot, SsaClosureCapture, SsaCompoundDestination,
+    SsaFunction, SsaInstruction, SsaIr, SsaMemoryLocal, SsaOp, SsaOperand, SsaParameter, SsaPlace,
+    SsaPlaceBase, SsaPlaceProjection, SsaTerminator, StoreProvenance, ValueId, VerifiedSsa,
+    build_ssa, optimize_oop, verify_ssa,
 };

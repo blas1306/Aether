@@ -1,0 +1,30 @@
+class Counter {
+    public int value;
+    public int other;
+
+    public init() {
+        value = 5;
+        other = 1;
+    }
+
+    public mut int same() {
+        value = 20;
+        return 3;
+    }
+
+    public mut int disjoint() {
+        other = 9;
+        return 2;
+    }
+
+    public mut int run() {
+        value += same();
+        value += disjoint();
+        return value * 10 + other;
+    }
+}
+
+int main() {
+    Counter counter = Counter();
+    return counter.run() - 109;
+}

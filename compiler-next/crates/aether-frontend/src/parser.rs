@@ -996,6 +996,13 @@ impl Parser<'_> {
                         place: expression,
                         value,
                     }
+                } else if let Some(op) = self.compound_assign_op() {
+                    let value = self.expression()?;
+                    AstStmtKind::CompoundAssign {
+                        place: expression,
+                        op,
+                        value,
+                    }
                 } else {
                     AstStmtKind::Expr(expression)
                 }
@@ -1071,6 +1078,20 @@ impl Parser<'_> {
             kind,
             span: start.through(semicolon.span),
         })
+    }
+
+    fn compound_assign_op(&mut self) -> Option<crate::AstCompoundAssignOp> {
+        use crate::AstCompoundAssignOp;
+        let op = match self.current().kind {
+            TokenKind::PlusEqual => AstCompoundAssignOp::Add,
+            TokenKind::MinusEqual => AstCompoundAssignOp::Subtract,
+            TokenKind::StarEqual => AstCompoundAssignOp::Multiply,
+            TokenKind::SlashEqual => AstCompoundAssignOp::Divide,
+            TokenKind::PercentEqual => AstCompoundAssignOp::Remainder,
+            _ => return None,
+        };
+        self.advance();
+        Some(op)
     }
 
     fn for_statement(&mut self, start: crate::Span) -> Result<AstStmt, Diagnostic> {

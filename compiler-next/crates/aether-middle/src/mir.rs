@@ -13,13 +13,13 @@ use std::sync::Arc;
 
 use aether_frontend::{
     BindingId, CaptureMode, CastKind, ClosureEnvironmentInfo, ClosureRecipe, CoercionKind,
-    CollectionIterationSource, Diagnostic, DiagnosticCategory, EnumId, EnumInfo, FieldId,
-    FloatType, FloatValue, FunctionInstanceInfo, HirBinaryOp, HirBlock, HirCallTarget, HirDrop,
-    HirExpr, HirExprKind, HirFinally, HirFunction, HirMatchArm, HirPlace, HirPlaceBase,
-    HirPlaceProjection, HirStmtKind, HirSubscriptResult, HirSubscriptSelector,
-    HirSubscriptSelectorKind, HirUnaryOp, InstanceId, LocalId, MatchMode, ModuleInfo, Phase, Span,
-    StructId, StructInfo, StructuralMutation, Substitution, TrapDiagnosticSite, TypeArena,
-    TypeData, TypeId, TypedHir, VariantId, format_type,
+    CollectionIterationSource, CompoundAssignId, Diagnostic, DiagnosticCategory, EnumId, EnumInfo,
+    FieldId, FloatType, FloatValue, FunctionInstanceInfo, HirBinaryOp, HirBlock, HirCallTarget,
+    HirCompoundDestination, HirDrop, HirExpr, HirExprKind, HirFinally, HirFunction, HirMatchArm,
+    HirPlace, HirPlaceBase, HirPlaceProjection, HirStmtKind, HirSubscriptResult,
+    HirSubscriptSelector, HirSubscriptSelectorKind, HirUnaryOp, InstanceId, LocalId, MatchMode,
+    ModuleInfo, Phase, Span, StructId, StructInfo, StructuralMutation, Substitution,
+    TrapDiagnosticSite, TypeArena, TypeData, TypeId, TypedHir, VariantId, format_type,
 };
 
 /// Basic-block identity, equal to its stable vector index.
@@ -186,6 +186,19 @@ pub struct MirDropFlag {
 pub struct Place {
     pub base: PlaceBase,
     pub projections: Vec<PlaceProjection>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CompoundDestination {
+    Place(Place),
+    ClassScalarField {
+        receiver: Operand,
+        class: ClassId,
+        field: FieldId,
+        field_type: TypeId,
+        mutable: bool,
+        initialized: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -472,6 +485,19 @@ pub enum Rvalue {
     },
     /// Read a local or nested subobject place.
     Load(Place),
+    /// Read the old scalar value from a stabilized compound destination.
+    CompoundLoad {
+        id: CompoundAssignId,
+        destination: CompoundDestination,
+        value_type: TypeId,
+    },
+    /// Publish the completed scalar result to the same stabilized destination.
+    CompoundCommit {
+        id: CompoundAssignId,
+        destination: CompoundDestination,
+        value: Operand,
+        value_type: TypeId,
+    },
     /// Create an explicit typed non-owning view of stable storage.
     Borrow {
         place: Place,
@@ -1153,6 +1179,7 @@ fn conditional_drop_roots(block: &HirBlock) -> BTreeSet<LocalId> {
                 | HirStmtKind::Nop
                 | HirStmtKind::Local { .. }
                 | HirStmtKind::Assign { .. }
+                | HirStmtKind::CompoundAssign { .. }
                 | HirStmtKind::ReplaceOwned { .. }
                 | HirStmtKind::ListPush { .. }
                 | HirStmtKind::ListReserve { .. }
@@ -1754,6 +1781,121 @@ impl Builder<'_> {
                             self.set_drop_flag(local, true, statement.span);
                         }
                     }
+                }
+                HirStmtKind::CompoundAssign {
+                    id,
+                    destination,
+                    op,
+                    rhs,
+                    destination_type,
+                } => {
+                    // Capture receiver/reference/index operands and perform the
+                    // load (including bounds/access checks) before evaluating RHS.
+                    let stable_destination = match destination {
+                        HirCompoundDestination::Place(place) => {
+                            CompoundDestination::Place(self.lower_place(place))
+                        }
+                        HirCompoundDestination::ClassScalarField {
+                            receiver,
+                            class,
+                            field,
+                            field_type,
+                            mutable,
+                            initialized,
+                        } => CompoundDestination::ClassScalarField {
+                            receiver: self.lower_expr(receiver),
+                            class: *class,
+                            field: *field,
+                            field_type: *field_type,
+                            mutable: *mutable,
+                            initialized: *initialized,
+                        },
+                    };
+                    let old = self.temporary(*destination_type);
+                    self.assign(
+                        Place {
+                            base: PlaceBase::Local(old),
+                            projections: vec![],
+                        },
+                        Rvalue::CompoundLoad {
+                            id: *id,
+                            destination: stable_destination.clone(),
+                            value_type: *destination_type,
+                        },
+                        statement.span,
+                    );
+                    let right = self.lower_expr(rhs);
+                    let (binary_op, trap, secondary_trap) = match op {
+                        HirBinaryOp::AddIntegerChecked => (
+                            BinaryOp::AddIntegerChecked,
+                            Some(TrapKind::IntegerOverflow),
+                            None,
+                        ),
+                        HirBinaryOp::SubtractIntegerChecked => (
+                            BinaryOp::SubtractIntegerChecked,
+                            Some(TrapKind::IntegerOverflow),
+                            None,
+                        ),
+                        HirBinaryOp::MultiplyIntegerChecked => (
+                            BinaryOp::MultiplyIntegerChecked,
+                            Some(TrapKind::IntegerOverflow),
+                            None,
+                        ),
+                        HirBinaryOp::DivideIntegerSignedChecked => (
+                            BinaryOp::DivideIntegerSignedChecked,
+                            Some(TrapKind::DivisionByZero),
+                            Some(TrapKind::DivisionOverflow),
+                        ),
+                        HirBinaryOp::DivideIntegerUnsignedChecked => (
+                            BinaryOp::DivideIntegerUnsignedChecked,
+                            Some(TrapKind::DivisionByZero),
+                            None,
+                        ),
+                        HirBinaryOp::RemainderIntegerSignedChecked => (
+                            BinaryOp::RemainderIntegerSignedChecked,
+                            Some(TrapKind::DivisionByZero),
+                            None,
+                        ),
+                        HirBinaryOp::RemainderIntegerUnsignedChecked => (
+                            BinaryOp::RemainderIntegerUnsignedChecked,
+                            Some(TrapKind::DivisionByZero),
+                            None,
+                        ),
+                        HirBinaryOp::AddFloat => (BinaryOp::AddFloat, None, None),
+                        HirBinaryOp::SubtractFloat => (BinaryOp::SubtractFloat, None, None),
+                        HirBinaryOp::MultiplyFloat => (BinaryOp::MultiplyFloat, None, None),
+                        HirBinaryOp::DivideFloat => (BinaryOp::DivideFloat, None, None),
+                        _ => unreachable!("verified compound arithmetic op"),
+                    };
+                    let result = self.temporary(*destination_type);
+                    self.assign(
+                        Place {
+                            base: PlaceBase::Local(result),
+                            projections: vec![],
+                        },
+                        Rvalue::Binary {
+                            op: binary_op,
+                            left: Operand::Local(old),
+                            right,
+                            trap,
+                            secondary_trap,
+                        },
+                        statement.span,
+                    );
+                    let committed = self.temporary(TypeId::BOOL);
+                    self.assign(
+                        Place {
+                            base: PlaceBase::Local(committed),
+                            projections: vec![],
+                        },
+                        Rvalue::CompoundCommit {
+                            id: *id,
+                            destination: stable_destination,
+                            value: Operand::Local(result),
+                            value_type: *destination_type,
+                        },
+                        statement.span,
+                    );
                 }
                 HirStmtKind::ReplaceOwned {
                     destination,
@@ -6588,7 +6730,419 @@ fn verify_mir_function(
     verify_borrowed_function_calls(function, types, fail)?;
     verify_closure_borrow_regions(function, types, fail)?;
     verify_format_borrow_regions(function, fail)?;
+    verify_compound_transactions(function, signatures, types, fail)?;
     Ok(())
+}
+
+fn verify_compound_transactions(
+    function: &MirFunction,
+    signatures: &[FunctionInstanceInfo],
+    types: &TypeArena,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    let mut loads = BTreeMap::new();
+    let mut commits = BTreeMap::new();
+    for block in &function.blocks {
+        for (index, instruction) in block.instructions.iter().enumerate() {
+            match &instruction.value {
+                Rvalue::CompoundLoad {
+                    id,
+                    destination,
+                    value_type,
+                } => {
+                    let Some(old) = place_root_local(&instruction.destination)
+                        .filter(|_| instruction.destination.projections.is_empty())
+                    else {
+                        return Err(fail(
+                            "MIR compound load result is not a scalar local".into(),
+                        ));
+                    };
+                    if loads
+                        .insert(*id, (block.id, index, destination, *value_type, old))
+                        .is_some()
+                    {
+                        return Err(fail("MIR compound transaction has duplicate load".into()));
+                    }
+                }
+                Rvalue::CompoundCommit {
+                    id,
+                    destination,
+                    value,
+                    value_type,
+                } => {
+                    if commits
+                        .insert(*id, (block.id, index, destination, value, *value_type))
+                        .is_some()
+                    {
+                        return Err(fail("MIR compound transaction has duplicate commit".into()));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    if loads.len() != commits.len() || loads.keys().ne(commits.keys()) {
+        return Err(fail(
+            "MIR compound transaction load/commit cardinality mismatch".into(),
+        ));
+    }
+    for (id, (load_block, load_index, destination, value_type, old)) in loads {
+        let (commit_block, commit_index, committed_destination, value, committed_type) =
+            commits[&id];
+        if destination != committed_destination || value_type != committed_type {
+            return Err(fail("MIR compound transaction destination mismatch".into()));
+        }
+        if load_block == commit_block && load_index >= commit_index {
+            return Err(fail("MIR compound commit does not follow its load".into()));
+        }
+        verify_mir_compound_paths(
+            function,
+            signatures,
+            types,
+            destination,
+            load_block,
+            load_index,
+            commit_block,
+            commit_index,
+            fail,
+        )?;
+        let Operand::Local(result) = value else {
+            return Err(fail(
+                "MIR compound commit does not consume a binary result".into(),
+            ));
+        };
+        let definitions = function
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter(|instruction| {
+                place_root_local(&instruction.destination) == Some(*result)
+                    && instruction.destination.projections.is_empty()
+            })
+            .collect::<Vec<_>>();
+        if definitions.len() != 1
+            || !matches!(
+                &definitions[0].value,
+                Rvalue::Binary { left: Operand::Local(left), .. } if *left == old
+            )
+        {
+            return Err(fail(
+                "MIR compound commit operand is not derived from old value".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn verify_mir_compound_paths(
+    function: &MirFunction,
+    signatures: &[FunctionInstanceInfo],
+    types: &TypeArena,
+    protected: &CompoundDestination,
+    load_block: BlockId,
+    load_index: usize,
+    commit_block: BlockId,
+    commit_index: usize,
+    fail: &impl Fn(String) -> Vec<Diagnostic>,
+) -> Result<(), Vec<Diagnostic>> {
+    fn region_has_cycle(
+        function: &MirFunction,
+        block: BlockId,
+        commit: BlockId,
+        visiting: &mut BTreeSet<BlockId>,
+        complete: &mut BTreeSet<BlockId>,
+    ) -> bool {
+        if block == commit || complete.contains(&block) {
+            return false;
+        }
+        if !visiting.insert(block) {
+            return true;
+        }
+        let cyclic = function.blocks[block.0 as usize]
+            .terminator
+            .as_ref()
+            .is_some_and(|terminator| {
+                targets(terminator).into_iter().any(|successor| {
+                    region_has_cycle(function, successor, commit, visiting, complete)
+                })
+            });
+        visiting.remove(&block);
+        complete.insert(block);
+        cyclic
+    }
+    if load_block != commit_block
+        && region_has_cycle(
+            function,
+            load_block,
+            commit_block,
+            &mut BTreeSet::new(),
+            &mut BTreeSet::new(),
+        )
+    {
+        return Err(fail(
+            "MIR compound protected region contains a CFG cycle".into(),
+        ));
+    }
+    let reaches_commit = |start: BlockId| {
+        let mut pending = vec![start];
+        let mut seen = BTreeSet::new();
+        while let Some(block) = pending.pop() {
+            if !seen.insert(block) {
+                continue;
+            }
+            if block == commit_block {
+                return true;
+            }
+            if let Some(terminator) = &function.blocks[block.0 as usize].terminator {
+                pending.extend(targets(terminator));
+            }
+        }
+        false
+    };
+
+    let mut pending = vec![(load_block, load_index + 1)];
+    let mut seen = BTreeSet::new();
+    while let Some((block_id, start)) = pending.pop() {
+        if !seen.insert((block_id, start)) {
+            continue;
+        }
+        let block = &function.blocks[block_id.0 as usize];
+        let end = if block_id == commit_block {
+            commit_index
+        } else {
+            block.instructions.len()
+        };
+        if start > end {
+            return Err(fail(
+                "MIR compound transaction has an invalid instruction range".into(),
+            ));
+        }
+        for instruction in &block.instructions[start..end] {
+            if mir_compound_instruction_invalidates(
+                function,
+                signatures,
+                types,
+                protected,
+                instruction,
+            ) {
+                return Err(fail(
+                    "MIR operation may invalidate an active compound destination".into(),
+                ));
+            }
+            if instruction.unwind.is_some_and(&reaches_commit) {
+                return Err(fail(
+                    "MIR compound exceptional path can reach its commit".into(),
+                ));
+            }
+        }
+        if block_id == commit_block {
+            continue;
+        }
+        match block.terminator.as_ref().expect("verified MIR") {
+            Terminator::Return(_) => {
+                return Err(fail("MIR compound normal path bypasses its commit".into()));
+            }
+            Terminator::Trap(_)
+            | Terminator::Throw { .. }
+            | Terminator::Rethrow { .. }
+            | Terminator::ResumeUnwind { .. }
+            | Terminator::ForwardUnwind { .. } => {}
+            terminator => {
+                for successor in targets(terminator) {
+                    pending.push((successor, 0));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Rebuild the storage provenance used by a compound Place.  This deliberately
+/// follows only verifier-visible recipes; an unrecognised alias never proves
+/// disjointness from a protected destination.
+fn mir_compound_provenance(function: &MirFunction, place: &Place) -> BTreeSet<LocalId> {
+    fn add_operand(function: &MirFunction, operand: &Operand, roots: &mut BTreeSet<LocalId>) {
+        let Operand::Local(local) = operand else {
+            return;
+        };
+        if !roots.insert(*local) {
+            return;
+        }
+        for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+            if place_root_local(&instruction.destination) != Some(*local)
+                || !instruction.destination.projections.is_empty()
+            {
+                continue;
+            }
+            match &instruction.value {
+                Rvalue::Borrow { place, .. }
+                | Rvalue::Load(place)
+                | Rvalue::View { source: place, .. }
+                | Rvalue::VectorView { source: place, .. }
+                | Rvalue::MatrixView { source: place, .. }
+                | Rvalue::MatrixAxisVectorView { source: place, .. } => {
+                    add_place(function, place, roots);
+                }
+                Rvalue::Use(value) => add_operand(function, value, roots),
+                _ => {}
+            }
+        }
+    }
+    fn add_place(function: &MirFunction, place: &Place, roots: &mut BTreeSet<LocalId>) {
+        match &place.base {
+            PlaceBase::Local(local) => {
+                roots.insert(*local);
+            }
+            PlaceBase::Dereference { reference, .. } => add_operand(function, reference, roots),
+            PlaceBase::ClassField { receiver, .. } => add_operand(function, receiver, roots),
+        }
+    }
+
+    let mut roots = BTreeSet::new();
+    add_place(function, place, &mut roots);
+    roots
+}
+
+fn mir_compound_destination_provenance(
+    function: &MirFunction,
+    destination: &CompoundDestination,
+) -> BTreeSet<LocalId> {
+    match destination {
+        CompoundDestination::Place(place) => mir_compound_provenance(function, place),
+        CompoundDestination::ClassScalarField { receiver, .. } => {
+            let mut roots = BTreeSet::new();
+            if let Operand::Local(local) = receiver {
+                roots.insert(*local);
+            }
+            roots
+        }
+    }
+}
+
+fn mir_compound_instruction_invalidates(
+    function: &MirFunction,
+    signatures: &[FunctionInstanceInfo],
+    types: &TypeArena,
+    protected: &CompoundDestination,
+    instruction: &MirInstruction,
+) -> bool {
+    let overlaps = |place: &Place| {
+        !mir_compound_destination_provenance(function, protected)
+            .is_disjoint(&mir_compound_provenance(function, place))
+    };
+    let structural_write = |place: &Place| {
+        if !overlaps(place) {
+            return false;
+        }
+        // A write to the captured scalar itself is ElementMutation.  A write to
+        // an owner/descriptor or an enclosing path can move or destroy its slot.
+        match protected {
+            CompoundDestination::Place(protected) => {
+                place.projections.len() < protected.projections.len()
+                    || (protected
+                        .projections
+                        .iter()
+                        .any(|projection| matches!(projection, PlaceProjection::Index { .. }))
+                        && place.projections.is_empty())
+            }
+            CompoundDestination::ClassScalarField { .. } => place.projections.is_empty(),
+        }
+    };
+    if structural_write(&instruction.destination) {
+        return true;
+    }
+    let mutating_call = |args: &[Operand], parameters: &[TypeId]| {
+        args.iter().zip(parameters).any(|(argument, parameter)| {
+            let Some((pointee, true)) = types.reference_info(*parameter) else {
+                return false;
+            };
+            if types.is_numeric(pointee) {
+                return false;
+            }
+            let Operand::Local(local) = argument else {
+                return true;
+            };
+            !mir_compound_provenance(
+                function,
+                &Place {
+                    base: PlaceBase::Local(*local),
+                    projections: vec![],
+                },
+            )
+            .is_disjoint(&mir_compound_destination_provenance(function, protected))
+        })
+    };
+    match &instruction.value {
+        Rvalue::ListPush { source, .. }
+        | Rvalue::ListReserve { source, .. }
+        | Rvalue::ListSetLength { source, .. }
+        | Rvalue::MatrixAdd { source, .. } => overlaps(source),
+        Rvalue::Take { slot, .. } => overlaps(&slot.root),
+        Rvalue::Relocate {
+            source,
+            destination,
+            ..
+        } => overlaps(&source.root) || overlaps(&destination.root),
+        Rvalue::Move { source }
+        | Rvalue::Drop { owner: source }
+        | Rvalue::ConsumeEnum { owner: source } => overlaps(source),
+        Rvalue::ReplaceOwned { destination, .. } | Rvalue::ReplaceString { destination, .. } => {
+            overlaps(destination)
+        }
+        Rvalue::Call { callee, args, .. } => {
+            signatures.get(callee.0 as usize).is_none_or(|signature| {
+                mutating_call(
+                    args,
+                    &signature
+                        .parameters
+                        .iter()
+                        .map(|parameter| parameter.ty)
+                        .collect::<Vec<_>>(),
+                )
+            })
+        }
+        Rvalue::IndirectCall {
+            args, signature, ..
+        } => types
+            .function_signature(*signature)
+            .is_none_or(|(parameters, _)| mutating_call(args, parameters)),
+        // Closure calls do not expose a closed parameter signature in this op.
+        // Any protected provenance passed to one therefore fails closed.
+        Rvalue::ClosureCall { args, .. } => args.iter().any(|argument| {
+            matches!(argument, Operand::Local(local) if !mir_compound_provenance(
+                function,
+                &Place { base: PlaceBase::Local(*local), projections: vec![] },
+            ).is_disjoint(&mir_compound_destination_provenance(function, protected)))
+        }),
+        Rvalue::Class(operation)
+            if matches!(
+                operation.as_ref(),
+                ClassOp::VirtualCall { .. }
+                    | ClassOp::BaseMethodCall { .. }
+                    | ClassOp::InterfaceCall { .. }
+                    | ClassOp::DirectMethodCall { .. }
+                    | ClassOp::BaseInit { .. }
+                    | ClassOp::InitCall { .. }
+                    | ClassOp::ConstructionCleanup { .. }
+                    | ClassOp::HandleTransfer { .. }
+                    | ClassOp::ClassUpcast { transfer: true, .. }
+                    | ClassOp::InterfaceAdapt { transfer: true, .. }
+                    | ClassOp::ReceiverKeepalive { transfer: true, .. }
+                    | ClassOp::FieldWrite { .. }
+            ) =>
+        {
+            operation.operands().into_iter().any(|operand| {
+                matches!(operand, Operand::Local(local) if !mir_compound_provenance(
+                    function,
+                    &Place {
+                        base: PlaceBase::Local(*local),
+                        projections: vec![],
+                    },
+                ).is_disjoint(&mir_compound_destination_provenance(function, protected)))
+            })
+        }
+        _ => false,
+    }
 }
 
 fn verify_format_borrow_regions(
@@ -9055,6 +9609,49 @@ fn validate_rvalue(
                 return Err("MIR place load type mismatch".into());
             }
         }
+        Rvalue::CompoundLoad {
+            id,
+            destination: compound_destination,
+            value_type,
+        } => {
+            let compound_type = validate_compound_destination(
+                function,
+                compound_destination,
+                structs,
+                types,
+                initialized,
+            )?;
+            if id.function != function.function_id
+                || destination != *value_type
+                || compound_type != *value_type
+                || !types.guarantees_copy(*value_type)
+            {
+                return Err("MIR compound load contract invalid".into());
+            }
+        }
+        Rvalue::CompoundCommit {
+            id,
+            destination: compound_destination,
+            value,
+            value_type,
+        } => {
+            let compound_type = validate_compound_destination(
+                function,
+                compound_destination,
+                structs,
+                types,
+                initialized,
+            )?;
+            validate_operand(function, value, initialized)?;
+            if id.function != function.function_id
+                || destination != TypeId::BOOL
+                || compound_type != *value_type
+                || operand_type(function, value)? != *value_type
+                || !types.guarantees_copy(*value_type)
+            {
+                return Err("MIR compound commit contract invalid".into());
+            }
+        }
         Rvalue::Borrow {
             place,
             mutable,
@@ -10356,6 +10953,57 @@ fn validate_rvalue(
     Ok(())
 }
 
+fn validate_compound_destination(
+    function: &MirFunction,
+    destination: &CompoundDestination,
+    structs: &[StructInfo],
+    types: &TypeArena,
+    initialized: &[bool],
+) -> Result<TypeId, String> {
+    match destination {
+        CompoundDestination::Place(place) => {
+            validate_place_read(function, place, structs, types, initialized)?;
+            if !mir_place_writable(function, place, structs, types)? {
+                return Err("MIR compound Place is not writable".into());
+            }
+            place_type(function, place, structs, types)
+        }
+        CompoundDestination::ClassScalarField {
+            receiver,
+            class,
+            field,
+            field_type,
+            mutable,
+            initialized: field_initialized,
+        } => {
+            validate_operand(function, receiver, initialized)?;
+            let receiver_type = operand_type(function, receiver)?;
+            let receiver_class = types
+                .object_class(receiver_type)
+                .ok_or_else(|| "MIR compound class receiver has non-class type".to_string())?;
+            let info = types
+                .class_field(*field)
+                .ok_or_else(|| "MIR compound class field identity is invalid".to_string())?;
+            let accessible = info.public
+                || types
+                    .class_method(function.function_id)
+                    .is_some_and(|(owner, _)| owner == info.class);
+            if info.class != *class
+                || info.ty != *field_type
+                || !accessible
+                || !*mutable
+                || !*field_initialized
+                || !types
+                    .class_chain(receiver_class)
+                    .is_ok_and(|chain| chain.contains(class))
+            {
+                return Err("MIR compound class field contract invalid".into());
+            }
+            Ok(*field_type)
+        }
+    }
+}
+
 fn valid_list_relocation(
     types: &TypeArena,
     relocation: &Relocate,
@@ -11478,6 +12126,190 @@ mod tests {
 
     fn mir(text: &str) -> FlowMir {
         lower_hir(analyze(parse_source(&SourceFile::new("test.ae", text)).unwrap()).unwrap())
+    }
+
+    fn compound_positions(function: &MirFunction) -> ((usize, usize), (usize, usize)) {
+        let mut load = None;
+        let mut commit = None;
+        for (block, body) in function.blocks.iter().enumerate() {
+            for (index, instruction) in body.instructions.iter().enumerate() {
+                match instruction.value {
+                    Rvalue::CompoundLoad { .. } => load = Some((block, index)),
+                    Rvalue::CompoundCommit { .. } => commit = Some((block, index)),
+                    _ => {}
+                }
+            }
+        }
+        (load.unwrap(), commit.unwrap())
+    }
+
+    fn assert_compound_mir_rejected(program: FlowMir, needle: &str) {
+        let errors = verify_mir(program).unwrap_err();
+        assert!(
+            errors.iter().any(|error| error.message.contains(needle)),
+            "expected {needle:?}, got {errors:#?}"
+        );
+    }
+
+    #[test]
+    fn compound_transaction_corruption_corpus_fails_closed_in_mir() {
+        let source = "int main(){int x=1;int y=2;x+=3;return x+y;}";
+        let raw = mir(source);
+        verify_mir(raw.clone()).unwrap();
+
+        let mut different_destination = raw.clone();
+        let function = &mut different_destination.functions[0];
+        let ((_, _), (block, commit)) = compound_positions(function);
+        let other = function
+            .locals
+            .iter()
+            .find(|local| local.name.as_deref() == Some("y"))
+            .unwrap()
+            .id;
+        let Rvalue::CompoundCommit { destination, .. } =
+            &mut function.blocks[block].instructions[commit].value
+        else {
+            unreachable!()
+        };
+        let CompoundDestination::Place(destination) = destination else {
+            unreachable!()
+        };
+        destination.base = PlaceBase::Local(other);
+        assert_compound_mir_rejected(different_destination, "destination mismatch");
+
+        let mut duplicate_load = raw.clone();
+        let function = &mut duplicate_load.functions[0];
+        let ((block, load), _) = compound_positions(function);
+        let copy = function.blocks[block].instructions[load].clone();
+        function.blocks[block].instructions.insert(load + 1, copy);
+        assert_compound_mir_rejected(duplicate_load, "duplicate load");
+
+        let mut duplicate_commit = raw.clone();
+        let function = &mut duplicate_commit.functions[0];
+        let (_, (block, commit)) = compound_positions(function);
+        let copy = function.blocks[block].instructions[commit].clone();
+        function.blocks[block].instructions.insert(commit + 1, copy);
+        assert_compound_mir_rejected(duplicate_commit, "duplicate commit");
+
+        let mut missing_commit = raw.clone();
+        let function = &mut missing_commit.functions[0];
+        let (_, (block, commit)) = compound_positions(function);
+        function.blocks[block].instructions.remove(commit);
+        assert_compound_mir_rejected(missing_commit, "cardinality mismatch");
+
+        let mut early_commit = raw.clone();
+        let function = &mut early_commit.functions[0];
+        let ((block, load), (_, commit)) = compound_positions(function);
+        let commit = function.blocks[block].instructions.remove(commit);
+        function.blocks[block].instructions.insert(load, commit);
+        assert_compound_mir_rejected(early_commit, "read before initialization");
+
+        let mut unrelated_result = raw;
+        let function = &mut unrelated_result.functions[0];
+        let ((block, load), (_, commit)) = compound_positions(function);
+        for instruction in &mut function.blocks[block].instructions[load + 1..commit] {
+            if let Rvalue::Binary { left, right, .. } = &mut instruction.value {
+                *left = right.clone();
+                break;
+            }
+        }
+        assert_compound_mir_rejected(unrelated_result, "not derived from old value");
+
+        let mut normal_bypass = mir(source);
+        let function = &mut normal_bypass.functions[0];
+        let ((block, load), _) = compound_positions(function);
+        let suffix = function.blocks[block].instructions.split_off(load + 1);
+        let return_terminator = function.blocks[block].terminator.take().unwrap();
+        let commit_block = BlockId(function.blocks.len() as u32);
+        let bypass_block = BlockId(commit_block.0 + 1);
+        function.blocks[block].terminator = Some(Terminator::Branch {
+            condition: Operand::Bool(true),
+            then_block: commit_block,
+            else_block: bypass_block,
+        });
+        function.blocks.push(BasicBlock {
+            id: commit_block,
+            instructions: suffix,
+            terminator: Some(return_terminator),
+            landing_pad: None,
+            landing_pad_catches: false,
+        });
+        function.blocks.push(BasicBlock {
+            id: bypass_block,
+            instructions: vec![],
+            terminator: Some(Terminator::Return(Operand::Int {
+                value: 0,
+                ty: TypeId::INT64,
+            })),
+            landing_pad: None,
+            landing_pad_catches: false,
+        });
+        assert_compound_mir_rejected(normal_bypass, "normal path bypasses its commit");
+    }
+
+    #[test]
+    fn class_scalar_compound_corruption_fails_closed_in_mir() {
+        let source = "class C{public int x;public init(){x=1;}public mut int f(){x+=2;return x;}}int main(){return 0;}";
+        let raw = mir(source);
+        verify_mir(raw.clone()).unwrap();
+        for mutation in 0..5 {
+            let mut bad = raw.clone();
+            for instruction in bad.functions.iter_mut().flat_map(|function| {
+                function
+                    .blocks
+                    .iter_mut()
+                    .flat_map(|block| &mut block.instructions)
+            }) {
+                let destination = match &mut instruction.value {
+                    Rvalue::CompoundLoad { destination, .. }
+                    | Rvalue::CompoundCommit { destination, .. } => destination,
+                    _ => continue,
+                };
+                let CompoundDestination::ClassScalarField {
+                    class,
+                    field,
+                    field_type,
+                    mutable,
+                    initialized,
+                    ..
+                } = destination
+                else {
+                    unreachable!()
+                };
+                match mutation {
+                    0 => *class = ClassId(u32::MAX),
+                    1 => *field = FieldId(u32::MAX),
+                    2 => *field_type = TypeId::BOOL,
+                    3 => *mutable = false,
+                    4 => *initialized = false,
+                    _ => unreachable!(),
+                }
+            }
+            assert!(verify_mir(bad).is_err(), "accepted mutation {mutation}");
+        }
+    }
+
+    #[test]
+    fn compound_region_rejects_reordered_structural_mutation_in_mir() {
+        let mut raw = mir("int main(){List<int>x={1,2};x[0]+=1;reserve(x,8);return x[0];}");
+        verify_mir(raw.clone()).unwrap();
+        let function = &mut raw.functions[0];
+        let reserve = function
+            .blocks
+            .iter_mut()
+            .find_map(|block| {
+                block
+                    .instructions
+                    .iter()
+                    .position(|instruction| matches!(instruction.value, Rvalue::ListReserve { .. }))
+                    .map(|index| block.instructions.remove(index))
+            })
+            .unwrap();
+        let ((block, load), _) = compound_positions(function);
+        function.blocks[block]
+            .instructions
+            .insert(load + 1, reserve);
+        assert_compound_mir_rejected(raw, "may invalidate an active compound destination");
     }
 
     #[test]

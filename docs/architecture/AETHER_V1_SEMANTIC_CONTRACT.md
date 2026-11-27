@@ -2772,3 +2772,34 @@ Canonical Core identity and the selected homogeneous scalar signature survive
 HIR, MIR and SSA. Exact signatures, IEEE/libm behavior, checked signed `abs`
 and exclusions are recorded in [CORE_V1_REPORT.md](CORE_V1_REPORT.md). This does
 not admit `List<T>` as Core or a general overload facility.
+
+## COMPOUND-ASSIGNMENT-V1 — numeric transaction
+
+Status: **CLOSED** in `compiler-next`, under the normative contract in
+[COMPOUND-ASSIGNMENT-ARCH-1](COMPOUND_ASSIGNMENT_ARCH_1.md).
+
+The lexer and parser reserve statement-only `+=`, `-=`, `*=`, `/=` and `%=`.
+HIR retains a distinct numeric compound assignment and MIR/SSA retain paired,
+identified `CompoundLoad`/`CompoundCommit` operations. The destination is a
+closed sum of a generic Place and the nominal
+`ClassScalarField { receiver, class, field, field_type, mutable, initialized }`
+route. The latter lowers through the same physical field address contract as
+`FieldRead`/`FieldWrite`; it is never forged as the generic class-storage Place.
+Receiver/reference/index operands are captured before the old-value load; the
+RHS follows the load, checked/IEEE binary operations are reused, and LLVM
+publishes one final store only after successful arithmetic.
+
+Locals, scalar struct projections, scalar class fields, scalar
+Array/List/Buffer/Vector/Matrix indices, mutable views and `ref mut` scalar
+projections are implemented. Class access, receiver mutability, initialization,
+nominal ClassId/FieldId and receiver lifetime remain independently verified.
+Numeric built-ins and transparent aliases use exact destination typing; `%=`
+remains integer-only. Read-only receivers/references/views, inaccessible fields,
+const storage, nonnumeric values and expression contexts remain rejected.
+
+The protected region is reconstructed independently in MIR and SSA from the
+unique load/commit pair. It protects location and lifetime without implying
+`noalias`: scalar writes to the same or another field may occur during the RHS,
+and the final commit uses the previously captured old value. Relocation, owner
+replacement, invalid exceptional CFG and unknown invalidating effects fail
+closed. See [COMPOUND-ASSIGNMENT-V1 report](COMPOUND_ASSIGNMENT_V1_REPORT.md).

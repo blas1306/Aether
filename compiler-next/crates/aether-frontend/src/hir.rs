@@ -1283,6 +1283,13 @@ pub enum HirStmtKind {
         place: HirPlace,
         value: HirExpr,
     },
+    CompoundAssign {
+        id: CompoundAssignId,
+        destination: HirCompoundDestination,
+        op: HirBinaryOp,
+        rhs: HirExpr,
+        destination_type: TypeId,
+    },
     /// Total replacement of one initialized owning struct slot.
     ReplaceOwned {
         destination: HirPlace,
@@ -1392,6 +1399,40 @@ pub enum HirStmtKind {
         catches: Vec<HirCatch>,
         finally: Option<HirFinally>,
     },
+}
+
+/// Stable identity of one source compound-assignment transaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CompoundAssignId {
+    pub function: FunctionId,
+    pub source: SourceId,
+    pub start: usize,
+}
+
+/// Stabilized storage identity for one compound assignment. Scalar class fields
+/// deliberately remain on the nominal class field path instead of being forged
+/// into `HirPlaceBase::ClassField`, whose contract is indexed interior storage.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum HirCompoundDestination {
+    Place(HirPlace),
+    ClassScalarField {
+        receiver: Box<HirExpr>,
+        class: ClassId,
+        field: FieldId,
+        field_type: TypeId,
+        mutable: bool,
+        initialized: bool,
+    },
+}
+
+impl HirCompoundDestination {
+    #[must_use]
+    pub fn ty(&self) -> TypeId {
+        match self {
+            Self::Place(place) => place.ty,
+            Self::ClassScalarField { field_type, .. } => *field_type,
+        }
+    }
 }
 
 /// Ownership/provenance form of a collection iteration operand.
@@ -1824,7 +1865,8 @@ fn nullable_loop_block_effects(
             AstStmtKind::Local { initializer, .. } => {
                 nullable_loop_expression_effects(initializer, written_roots, has_call);
             }
-            AstStmtKind::Assign { place, value } => {
+            AstStmtKind::Assign { place, value }
+            | AstStmtKind::CompoundAssign { place, value, .. } => {
                 if let AstExprKind::Name(name) = &place.kind {
                     written_roots.insert(name.clone());
                 }
@@ -4319,7 +4361,8 @@ impl CaptureAnalyzer<'_> {
                         *next += 1;
                     }
                 }
-                AstStmtKind::Assign { place, value } => {
+                AstStmtKind::Assign { place, value }
+                | AstStmtKind::CompoundAssign { place, value, .. } => {
                     self.scan_expr(module, owner, place, scopes);
                     self.scan_expr(module, owner, value, scopes);
                 }
@@ -7225,6 +7268,50 @@ impl Monomorphizer<'_> {
                             place: self.substitute_place(place, substitution)?,
                             value: self.substitute_expr(value, substitution)?,
                         },
+                        HirStmtKind::CompoundAssign {
+                            id,
+                            destination,
+                            op,
+                            rhs,
+                            destination_type,
+                        } => HirStmtKind::CompoundAssign {
+                            id: *id,
+                            destination: match destination {
+                                HirCompoundDestination::Place(place) => {
+                                    HirCompoundDestination::Place(
+                                        self.substitute_place(place, substitution)?,
+                                    )
+                                }
+                                HirCompoundDestination::ClassScalarField {
+                                    receiver,
+                                    class,
+                                    field,
+                                    field_type,
+                                    mutable,
+                                    initialized,
+                                } => HirCompoundDestination::ClassScalarField {
+                                    receiver: Box::new(
+                                        self.substitute_expr(receiver, substitution)?,
+                                    ),
+                                    class: *class,
+                                    field: *field,
+                                    field_type: self.substitute_type(
+                                        *field_type,
+                                        substitution,
+                                        statement.span,
+                                    )?,
+                                    mutable: *mutable,
+                                    initialized: *initialized,
+                                },
+                            },
+                            op: *op,
+                            rhs: self.substitute_expr(rhs, substitution)?,
+                            destination_type: self.substitute_type(
+                                *destination_type,
+                                substitution,
+                                statement.span,
+                            )?,
+                        },
                         HirStmtKind::ReplaceOwned {
                             destination,
                             value,
@@ -9513,6 +9600,8 @@ struct OwnershipAnalysis<'a> {
     iteration_element_borrowed: Vec<BTreeSet<LocalId>>,
     borrow_indices: Vec<Option<u64>>,
     storage_references: Vec<bool>,
+    /// Owners whose slot identity must remain unchanged across a compound RHS.
+    compound_protected: Vec<BTreeSet<LocalId>>,
     loop_boundaries: Vec<usize>,
     capability_unwind: BTreeMap<CallSiteId, Vec<HirDrop>>,
 }
@@ -9537,6 +9626,7 @@ fn synthesize_ownership(
         iteration_element_borrowed: Vec::new(),
         borrow_indices: vec![None; locals.len()],
         storage_references: vec![false; locals.len()],
+        compound_protected: Vec::new(),
         loop_boundaries: Vec::new(),
         capability_unwind: BTreeMap::new(),
     };
@@ -9708,6 +9798,61 @@ impl OwnershipAnalysis<'_> {
                         self.buffer_lengths[local.0 as usize] = self.known_length(value);
                         self.matrix_shapes[local.0 as usize] = self.known_matrix_shape(value);
                     }
+                }
+                HirStmtKind::CompoundAssign {
+                    destination, rhs, ..
+                } => {
+                    // Compound assignment stabilizes its destination before the RHS. Keep the
+                    // owner/backing and the selected logical slot protected until the RHS has
+                    // completed: scalar writes through aliases remain legal, while the existing
+                    // structural-mutation and mutable-call checks reject anything that may move
+                    // the owner, relocate its backing, or invalidate/reorder this slot.
+                    let HirCompoundDestination::Place(place) = destination else {
+                        if let HirCompoundDestination::ClassScalarField { receiver, .. } =
+                            destination
+                        {
+                            self.expr(receiver)?;
+                            let owner = self.derived_owner(receiver).or_else(|| {
+                                if let HirExprKind::Local(local) = receiver.kind {
+                                    Some(local)
+                                } else {
+                                    None
+                                }
+                            });
+                            self.borrowed.push(owner.into_iter().collect());
+                            self.compound_protected.push(owner.into_iter().collect());
+                            let result = self.expr(rhs);
+                            self.compound_protected.pop();
+                            self.borrowed.pop();
+                            result?;
+                            continue;
+                        }
+                        self.expr(rhs)?;
+                        continue;
+                    };
+                    self.place(place, statement.span)?;
+                    let owner = self.owner_of_place(place);
+                    self.borrowed.push(owner.into_iter().collect());
+                    self.storage_borrowed.push(
+                        owner
+                            .filter(|_| self.place_uses_indexed_storage(place))
+                            .into_iter()
+                            .collect(),
+                    );
+                    self.storage_ranges.push(
+                        owner
+                            .filter(|_| self.place_uses_indexed_storage(place))
+                            .into_iter()
+                            .map(|root| (root, self.place_storage_index(place)))
+                            .collect(),
+                    );
+                    self.compound_protected.push(owner.into_iter().collect());
+                    let result = self.expr(rhs);
+                    self.compound_protected.pop();
+                    self.storage_ranges.pop();
+                    self.storage_borrowed.pop();
+                    self.borrowed.pop();
+                    result?;
                 }
                 HirStmtKind::ReplaceOwned {
                     destination, value, ..
@@ -10519,6 +10664,7 @@ impl OwnershipAnalysis<'_> {
                 self.place(source, expr.span)?;
                 self.expr(index)?;
                 if let Some(owner) = self.owner_of_place(source) {
+                    self.reject_compound_structural_invalidation(owner, expr.span)?;
                     let direct = source.projections.is_empty();
                     let tail = self.buffer_lengths[owner.0 as usize].and_then(|n| n.checked_sub(1));
                     let removed = match index.kind {
@@ -10548,6 +10694,7 @@ impl OwnershipAnalysis<'_> {
                 self.place(source, expr.span)?;
                 self.expr(index)?;
                 if let Some(owner) = self.owner_of_place(source) {
+                    self.reject_compound_structural_invalidation(owner, expr.span)?;
                     let direct = source.projections.is_empty();
                     let tail = self.buffer_lengths[owner.0 as usize].and_then(|n| n.checked_sub(1));
                     let removed = match index.kind {
@@ -10572,6 +10719,7 @@ impl OwnershipAnalysis<'_> {
             HirExprKind::ListPop { source, .. } => {
                 self.place(source, expr.span)?;
                 if let Some(owner) = self.owner_of_place(source) {
+                    self.reject_compound_structural_invalidation(owner, expr.span)?;
                     // Only a direct root and a direct constant element borrow have
                     // enough provenance to prove survival. Nested storage fails closed.
                     let direct = source.projections.is_empty();
@@ -10884,6 +11032,26 @@ impl OwnershipAnalysis<'_> {
                     self.active.push(*binding);
                 }
             }
+            if let Some((pointee, true)) = self.types.reference_info(argument.ty)
+                && !self.types.is_numeric(pointee)
+                && let Some(owner) = self.derived_owner(argument).or_else(|| {
+                    if let HirExprKind::Borrow { place, .. } = &argument.kind {
+                        self.owner_of_place(place)
+                    } else {
+                        None
+                    }
+                })
+                && self
+                    .compound_protected
+                    .iter()
+                    .any(|protected| protected.contains(&owner))
+            {
+                return Err(self.error(
+                    "E0313",
+                    "writable call argument may structurally invalidate the destination of an active compound assignment",
+                    argument.span,
+                ));
+            }
             if self
                 .types
                 .reference_info(argument.ty)
@@ -11055,6 +11223,25 @@ impl OwnershipAnalysis<'_> {
         Ok(())
     }
 
+    fn reject_compound_structural_invalidation(
+        &self,
+        owner: LocalId,
+        span: Span,
+    ) -> Result<(), Vec<Diagnostic>> {
+        if self
+            .compound_protected
+            .iter()
+            .any(|protected| protected.contains(&owner))
+        {
+            return Err(self.error(
+                "E0313",
+                "structural mutation may invalidate the destination of an active compound assignment",
+                span,
+            ));
+        }
+        Ok(())
+    }
+
     fn storage_index(&self, expr: &HirExpr) -> Option<u64> {
         match &expr.kind {
             HirExprKind::Local(local) => self.borrow_indices[local.0 as usize],
@@ -11080,6 +11267,31 @@ impl OwnershipAnalysis<'_> {
             }
             _ => None,
         }
+    }
+
+    fn place_uses_indexed_storage(&self, place: &HirPlace) -> bool {
+        place
+            .projections
+            .iter()
+            .any(|projection| matches!(projection, HirPlaceProjection::Index { .. }))
+    }
+
+    /// Return the first statically known indexed slot. Unknown and nested indices deliberately
+    /// fail closed as a whole-range protection in the existing mutation checks.
+    fn place_storage_index(&self, place: &HirPlace) -> Option<u64> {
+        place.projections.iter().find_map(|projection| {
+            let HirPlaceProjection::Index { subscript, .. } = projection else {
+                return None;
+            };
+            let (index, column) = subscript.scalar_indices()?;
+            if column.is_some() {
+                return None;
+            }
+            let HirExprKind::Int(index) = index.kind else {
+                return None;
+            };
+            u64::try_from(index).ok()
+        })
     }
 
     fn is_list_storage_borrow(&self, expr: &HirExpr) -> bool {
@@ -12414,6 +12626,104 @@ impl Analyzer<'_> {
                         } else {
                             HirStmtKind::Assign { place, value }
                         }
+                    }
+                }
+                AstStmtKind::CompoundAssign { place, op, value } => {
+                    let destination =
+                        if let Some(destination) = self.class_scalar_compound_destination(place) {
+                            destination?
+                        } else {
+                            HirCompoundDestination::Place(self.resolve_expr_place(place, true)?)
+                        };
+                    if let HirCompoundDestination::Place(place) = &destination
+                        && let Some(local) = self.const_inline_root(place)
+                    {
+                        let name = &self.locals[local.0 as usize].name;
+                        return Err(vec![Diagnostic::new(
+                            "E0372",
+                            Phase::Semantic,
+                            DiagnosticCategory::Type,
+                            format!("cannot mutate storage of const binding '{name}'"),
+                            Some(s.span),
+                        )]);
+                    }
+                    let destination_type = destination.ty();
+                    if !self.types.is_numeric(destination_type) {
+                        return Err(vec![type_error(
+                            "compound assignment requires a built-in numeric scalar destination",
+                            s.span,
+                        )]);
+                    }
+                    if let HirCompoundDestination::Place(place) = &destination
+                        && let HirPlaceBase::Local(local) = place.base
+                    {
+                        self.locals[local.0 as usize].address_taken = true;
+                    }
+                    if matches!(op, crate::AstCompoundAssignOp::Remainder)
+                        && self.types.integer_info(destination_type).is_none()
+                    {
+                        return Err(vec![Diagnostic::new(
+                            "E0235",
+                            Phase::Semantic,
+                            DiagnosticCategory::Division,
+                            "floating `%=` is not supported; `%=` requires an integer destination",
+                            Some(s.span),
+                        )]);
+                    }
+                    let rhs = self.expression(value, Some(destination_type))?.expr;
+                    if rhs.ty != destination_type {
+                        return Err(vec![type_error(
+                            "compound assignment result must exactly match the destination type",
+                            s.span,
+                        )]);
+                    }
+                    let float = self.types.float_info(destination_type).is_some();
+                    let signed = self
+                        .types
+                        .integer_info(destination_type)
+                        .is_some_and(crate::types::IntegerType::is_signed);
+                    let operation = match (*op, float, signed) {
+                        (crate::AstCompoundAssignOp::Add, true, _) => HirBinaryOp::AddFloat,
+                        (crate::AstCompoundAssignOp::Subtract, true, _) => {
+                            HirBinaryOp::SubtractFloat
+                        }
+                        (crate::AstCompoundAssignOp::Multiply, true, _) => {
+                            HirBinaryOp::MultiplyFloat
+                        }
+                        (crate::AstCompoundAssignOp::Divide, true, _) => HirBinaryOp::DivideFloat,
+                        (crate::AstCompoundAssignOp::Add, false, _) => {
+                            HirBinaryOp::AddIntegerChecked
+                        }
+                        (crate::AstCompoundAssignOp::Subtract, false, _) => {
+                            HirBinaryOp::SubtractIntegerChecked
+                        }
+                        (crate::AstCompoundAssignOp::Multiply, false, _) => {
+                            HirBinaryOp::MultiplyIntegerChecked
+                        }
+                        (crate::AstCompoundAssignOp::Divide, false, true) => {
+                            HirBinaryOp::DivideIntegerSignedChecked
+                        }
+                        (crate::AstCompoundAssignOp::Divide, false, false) => {
+                            HirBinaryOp::DivideIntegerUnsignedChecked
+                        }
+                        (crate::AstCompoundAssignOp::Remainder, false, true) => {
+                            HirBinaryOp::RemainderIntegerSignedChecked
+                        }
+                        (crate::AstCompoundAssignOp::Remainder, false, false) => {
+                            HirBinaryOp::RemainderIntegerUnsignedChecked
+                        }
+                        (crate::AstCompoundAssignOp::Remainder, true, _) => unreachable!(),
+                    };
+                    HirStmtKind::CompoundAssign {
+                        id: CompoundAssignId {
+                            function: self.function_id,
+                            source: s.span.source,
+                            start: s.span.start,
+                        },
+                        destination,
+                        op: operation,
+                        rhs,
+                        destination_type,
                     }
                 }
                 AstStmtKind::Expr(expression) => self.effect_statement(expression)?,
@@ -20755,6 +21065,76 @@ fn verify_block(
                     ));
                 }
             }
+            HirStmtKind::CompoundAssign {
+                id,
+                destination,
+                op,
+                rhs,
+                destination_type,
+            } => {
+                verify_expr(rhs, f, sigs, structs, enums, types, fail)?;
+                let destination_valid = match destination {
+                    HirCompoundDestination::Place(place) => {
+                        verify_place(place, f, sigs, structs, enums, types, fail)?;
+                        place.ty == *destination_type
+                            && hir_place_writable(place, f, types, structs, enums)
+                            && hir_const_inline_root(place, f).is_none()
+                    }
+                    HirCompoundDestination::ClassScalarField {
+                        receiver,
+                        class,
+                        field,
+                        field_type,
+                        mutable,
+                        initialized,
+                    } => {
+                        verify_expr(receiver, f, sigs, structs, enums, types, fail)?;
+                        types.class_field(*field).is_some_and(|info| {
+                            info.class == *class
+                                && info.ty == *field_type
+                                && (info.public
+                                    || types
+                                        .class_method(f.function_id)
+                                        .is_some_and(|(owner, _)| owner == info.class))
+                        }) && *field_type == *destination_type
+                            && *mutable
+                            && *initialized
+                            && types.object_class(receiver.ty).is_some_and(|actual| {
+                                types
+                                    .class_chain(actual)
+                                    .is_ok_and(|chain| chain.contains(class))
+                            })
+                    }
+                };
+                let integer = types.integer_info(*destination_type);
+                let float = types.float_info(*destination_type).is_some();
+                let operation_matches = match op {
+                    HirBinaryOp::AddIntegerChecked
+                    | HirBinaryOp::SubtractIntegerChecked
+                    | HirBinaryOp::MultiplyIntegerChecked => integer.is_some(),
+                    HirBinaryOp::DivideIntegerSignedChecked
+                    | HirBinaryOp::RemainderIntegerSignedChecked => {
+                        integer.is_some_and(crate::types::IntegerType::is_signed)
+                    }
+                    HirBinaryOp::DivideIntegerUnsignedChecked
+                    | HirBinaryOp::RemainderIntegerUnsignedChecked => {
+                        integer.is_some_and(|kind| !kind.is_signed())
+                    }
+                    HirBinaryOp::AddFloat
+                    | HirBinaryOp::SubtractFloat
+                    | HirBinaryOp::MultiplyFloat
+                    | HirBinaryOp::DivideFloat => float,
+                    _ => false,
+                };
+                if id.function != f.function_id
+                    || !destination_valid
+                    || rhs.ty != *destination_type
+                    || !operation_matches
+                    || !types.guarantees_copy(*destination_type)
+                {
+                    return Err(fail("HIR compound assignment contract invalid".into()));
+                }
+            }
             HirStmtKind::ReplaceOwned {
                 destination,
                 value,
@@ -24147,7 +24527,8 @@ fn ast_block_has_call(block: &AstBlock) -> bool {
         .iter()
         .any(|statement| match &statement.kind {
             AstStmtKind::Local { initializer, .. } => ast_expr_has_call(initializer),
-            AstStmtKind::Assign { place, value } => {
+            AstStmtKind::Assign { place, value }
+            | AstStmtKind::CompoundAssign { place, value, .. } => {
                 ast_expr_has_call(place) || ast_expr_has_call(value)
             }
             AstStmtKind::Expr(expr) => ast_expr_has_call(expr),
@@ -27701,6 +28082,92 @@ mod vertical33_tests {
         index.kind = HirExprKind::Bool(true);
         index.ty = TypeId::BOOL;
         assert!(verify_hir(&hir).is_err());
+    }
+
+    #[test]
+    fn compound_assignment_hir_corruption_fails_closed_independently() {
+        let hir = analyze(
+            parse_source(&SourceFile::new(
+                "compound-hir-corrupt.ae",
+                "int main(){int x=1;x+=2;return x;}",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        verify_hir(&hir).unwrap();
+        for mutation in 0..4 {
+            let mut bad = hir.clone();
+            let statement = bad.functions[0]
+                .body
+                .statements
+                .iter_mut()
+                .find(|statement| matches!(statement.kind, HirStmtKind::CompoundAssign { .. }))
+                .unwrap();
+            let HirStmtKind::CompoundAssign {
+                id,
+                op,
+                rhs,
+                destination_type,
+                ..
+            } = &mut statement.kind
+            else {
+                unreachable!()
+            };
+            match mutation {
+                0 => id.function = FunctionId(u32::MAX),
+                1 => *op = HirBinaryOp::Equal,
+                2 => rhs.ty = TypeId::BOOL,
+                3 => *destination_type = TypeId::BOOL,
+                _ => unreachable!(),
+            }
+            assert!(verify_hir(&bad).is_err(), "accepted mutation {mutation}");
+        }
+    }
+
+    #[test]
+    fn class_scalar_compound_hir_corruption_fails_closed() {
+        let hir = analyze(
+            parse_source(&SourceFile::new(
+                "compound-class-hir-corrupt.ae",
+                "class C{public int x;public init(){x=1;}public mut int f(){x+=2;return x;}}int main(){return 0;}",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        verify_hir(&hir).unwrap();
+        for mutation in 0..6 {
+            let mut bad = hir.clone();
+            let destination = bad
+                .functions
+                .iter_mut()
+                .flat_map(|function| &mut function.body.statements)
+                .find_map(|statement| match &mut statement.kind {
+                    HirStmtKind::CompoundAssign { destination, .. } => Some(destination),
+                    _ => None,
+                })
+                .unwrap();
+            let HirCompoundDestination::ClassScalarField {
+                receiver,
+                class,
+                field,
+                field_type,
+                mutable,
+                initialized,
+            } = destination
+            else {
+                unreachable!()
+            };
+            match mutation {
+                0 => *class = ClassId(u32::MAX),
+                1 => *field = FieldId(u32::MAX),
+                2 => *field_type = TypeId::BOOL,
+                3 => *mutable = false,
+                4 => *initialized = false,
+                5 => receiver.ty = TypeId::BOOL,
+                _ => unreachable!(),
+            }
+            assert!(verify_hir(&bad).is_err(), "accepted mutation {mutation}");
+        }
     }
 
     #[test]
