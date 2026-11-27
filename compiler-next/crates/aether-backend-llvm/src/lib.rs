@@ -7,6 +7,7 @@ mod elementwise;
 mod format;
 mod io;
 mod mathematical;
+mod power;
 mod process;
 mod strings;
 mod text;
@@ -18,8 +19,8 @@ use std::fmt::Write;
 use aether_frontend::{
     CaptureMode, CastKind, ClosureEnvironmentInfo, CoercionKind, CoreSymbol, EnumInfo, FieldId,
     FloatType, FloatValue, FunctionId, FunctionInstanceInfo, IndexSemantics, IntegerType, LambdaId,
-    MatchMode, ModuleInfo, StructInfo, Substitution, TargetProperties, TypeArena, TypeData, TypeId,
-    layout_of,
+    MatchMode, ModuleInfo, PowerMode, StructInfo, Substitution, TargetProperties, TypeArena,
+    TypeData, TypeId, layout_of,
 };
 use aether_middle::{
     BinaryOp, BlockId, SliceSelector, SsaCompoundDestination, SsaFunction, SsaIr, SsaOp,
@@ -241,6 +242,17 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
             _ => None,
         })
         .collect::<BTreeSet<_>>();
+    let power_specs = program
+        .functions
+        .iter()
+        .filter(|function| core_reachable.contains(&function.id))
+        .flat_map(|function| &function.blocks)
+        .flat_map(|block| &block.instructions)
+        .filter_map(|instruction| match instruction.op {
+            SsaOp::Power { spec, .. } => Some(spec),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
     let has_core_output = core_calls
         .iter()
         .any(|(symbol, _)| matches!(symbol, CoreSymbol::Print | CoreSymbol::Println));
@@ -394,6 +406,7 @@ pub fn emit_llvm(ssa: &VerifiedSsa, target: &TargetDescriptor) -> String {
         process::runtime(&mut output, types);
     }
     core::declarations(&mut output, &core_calls, types);
+    power::declarations(&mut output, &power_specs, types);
     if has_exception_routes {
         emit_exception_runtime(&mut output, types, suppressed_text_exception);
     }
@@ -2271,6 +2284,31 @@ fn emit_function(
                     block.id,
                     io::find_class_id(types, modules, "std.IO", "IOException").is_some(),
                 ),
+                SsaOp::Power {
+                    spec,
+                    base,
+                    exponent,
+                } => {
+                    let result_ty = llvm_type(types, spec.result_type);
+                    let exponent_ty = llvm_type(types, spec.exponent_type);
+                    let target = match spec.mode {
+                        PowerMode::FloatLibm => match types.float_info(spec.base_type).unwrap() {
+                            FloatType::Float32 => "powf".to_string(),
+                            FloatType::Float64 => "pow".to_string(),
+                        },
+                        PowerMode::IntegerChecked | PowerMode::FloatInteger => {
+                            power::helper_name(*spec)
+                        }
+                    };
+                    writeln!(
+                        output,
+                        "  %v{} = call {result_ty} @{target}({result_ty} {}, {exponent_ty} {})",
+                        instruction.result.0,
+                        llvm_operand(base),
+                        llvm_operand(exponent)
+                    )
+                    .unwrap();
+                }
                 SsaOp::Use(operand)
                 | SsaOp::RangeBinding {
                     current: operand, ..
@@ -4673,6 +4711,9 @@ fn emit_function(
             SsaTerminator::Trap(TrapKind::IntegerOverflow) => {
                 overflow_trap = true;
                 writeln!(output, "  br label %trap_integer_overflow").unwrap();
+            }
+            SsaTerminator::Trap(TrapKind::NegativeIntegerExponent) => {
+                writeln!(output, "  ; structured Aether trap: NegativeIntegerExponent\n  call void @llvm.trap()\n  unreachable").unwrap();
             }
             SsaTerminator::Trap(TrapKind::ShiftCountOutOfRange) => {
                 shift_count_trap = true;

@@ -172,7 +172,7 @@ fn vertical33_all_readable_families_and_builtin_scalars() {
                         format!("{a}({n})")
                     }
                 };
-                write!(helpers,"Matrix<T> mm{i}{j}<T:Storable+Copy+Add+Mul+Zero>({lf}<T>a,{rf}<T>b){{return {le}a*{re}b;}}").unwrap();
+                write!(helpers,"Matrix<T> mm{i}{j}<T:Storable+Copy+Add+Mul+Zero>({lf}<T>a,{rf}<T>b){{return {le}a * {re}b;}}").unwrap();
                 write!(body,"if(true){{Matrix<{scalar}>c=mm{i}{j}({},{});if(rows(c)!=2){{return 1;}}if(columns(c)!=2){{return 2;}}if(c[1,1]!=22){{return 3;}}if(c[1,2]!=28){{return 4;}}if(c[2,1]!=49){{return 5;}}if(c[2,2]!=64){{return 6;}}}}",arg(la,"a"),arg(ra,"b")).unwrap();
             }
         }

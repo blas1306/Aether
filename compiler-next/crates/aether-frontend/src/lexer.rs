@@ -103,6 +103,8 @@ pub enum TokenKind {
     MinusEqual,
     /// `*`.
     Star,
+    /// `**`.
+    StarStar,
     /// `*=`.
     StarEqual,
     /// `/`.
@@ -399,6 +401,10 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
             b'-' if bytes.get(cursor + 1) == Some(&b'-') => {
                 cursor += 2;
                 push(&mut tokens, TokenKind::MinusMinus, source, start, cursor);
+            }
+            b'*' if bytes.get(cursor + 1) == Some(&b'*') => {
+                cursor += 2;
+                push(&mut tokens, TokenKind::StarStar, source, start, cursor);
             }
             b'*' if bytes.get(cursor + 1) == Some(&b'=') => {
                 cursor += 2;

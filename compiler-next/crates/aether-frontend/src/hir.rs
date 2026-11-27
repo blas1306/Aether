@@ -1250,6 +1250,8 @@ pub enum HirTrapKind {
     IntegerOverflow,
     /// A shift count was negative or not smaller than the left operand width.
     ShiftCountOutOfRange,
+    /// A signed integer exponent was negative in integer power.
+    NegativeIntegerExponent,
 }
 
 /// Stable semantic identity of one source-authorized diagnostic trap site.
@@ -2071,6 +2073,13 @@ pub enum HirExprKind {
     },
     /// A fully resolved, canonically identified Core function call.
     Core(Box<crate::CoreCall<HirExpr>>),
+    /// Canonical exponentiation shared by the operator and Core `pow`.
+    Power {
+        spec: PowerSpec,
+        base: Box<HirExpr>,
+        exponent: Box<HirExpr>,
+        origin: PowerSurfaceOrigin,
+    },
     /// Parametric IEEE constant. Monomorphization must materialize exact bits.
     IEEEFloatConstant {
         kind: IEEEFloatConstantKind,
@@ -2484,6 +2493,67 @@ pub enum HirBinaryOp {
     GreaterEqual,
     Equal,
     NotEqual,
+}
+
+/// Closed exponentiation lowering family.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum PowerMode {
+    IntegerChecked,
+    FloatInteger,
+    FloatLibm,
+}
+
+/// Source provenance retained until the HIR verifier has authenticated Core.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PowerSurfaceOrigin {
+    Operator,
+    Core(crate::CoreSymbolKey),
+}
+
+/// Complete typed power contract.  MIR and SSA retain this object verbatim.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct PowerSpec {
+    pub mode: PowerMode,
+    pub base_type: TypeId,
+    pub exponent_type: TypeId,
+    pub result_type: TypeId,
+    pub negative_exponent_trap: bool,
+    pub overflow_trap: bool,
+}
+
+/// Reconstructs the closed power matrix without trusting a producer.
+pub fn verify_power_spec(spec: PowerSpec, types: &TypeArena) -> Result<(), String> {
+    let base_integer = types.integer_info(spec.base_type);
+    let exponent_integer = types.integer_info(spec.exponent_type);
+    let base_float = types.float_info(spec.base_type);
+    let exponent_float = types.float_info(spec.exponent_type);
+    let valid = match spec.mode {
+        PowerMode::IntegerChecked => {
+            base_integer.is_some()
+                && exponent_integer.is_some()
+                && spec.result_type == spec.base_type
+                && spec.negative_exponent_trap
+                    == exponent_integer.is_some_and(IntegerType::is_signed)
+                && spec.overflow_trap
+        }
+        PowerMode::FloatInteger => {
+            base_float.is_some()
+                && exponent_integer.is_some()
+                && spec.result_type == spec.base_type
+                && !spec.negative_exponent_trap
+                && !spec.overflow_trap
+        }
+        PowerMode::FloatLibm => {
+            base_float.is_some()
+                && base_float == exponent_float
+                && spec.result_type == spec.base_type
+                && !spec.negative_exponent_trap
+                && !spec.overflow_trap
+        }
+    };
+    valid
+        .then_some(())
+        .ok_or_else(|| "power specification violates the closed type/trap matrix".into())
 }
 
 fn merge_package_tables<T: Copy>(program: &ParsedProgram, tables: &mut [BTreeMap<String, T>]) {
@@ -8003,6 +8073,17 @@ impl Monomorphizer<'_> {
             HirExprKind::Core(op) => HirExprKind::Core(Box::new(
                 op.clone().map(|e| self.substitute_expr(&e, substitution))?,
             )),
+            HirExprKind::Power {
+                spec,
+                base,
+                exponent,
+                origin,
+            } => HirExprKind::Power {
+                spec: *spec,
+                base: Box::new(self.substitute_expr(base, substitution)?),
+                exponent: Box::new(self.substitute_expr(exponent, substitution)?),
+                origin: origin.clone(),
+            },
             HirExprKind::IEEEFloatConstant {
                 kind,
                 result_type,
@@ -10944,7 +11025,12 @@ impl OwnershipAnalysis<'_> {
                 }
                 Ok(())
             }
-            HirExprKind::ShortCircuitAnd { left, right }
+            HirExprKind::Power {
+                base: left,
+                exponent: right,
+                ..
+            }
+            | HirExprKind::ShortCircuitAnd { left, right }
             | HirExprKind::ShortCircuitOr { left, right }
             | HirExprKind::CapabilityBinary { left, right, .. }
             | HirExprKind::CapabilityCompare { left, right, .. }
@@ -17704,6 +17790,25 @@ impl Analyzer<'_> {
                 span,
             )]);
         }
+        if symbol == crate::CoreSymbol::Pow {
+            if args.len() != 2 {
+                return Err(vec![type_error(
+                    format!(
+                        "Core function `pow` expects 2 arguments, found {}",
+                        args.len()
+                    ),
+                    span,
+                )]);
+            }
+            let identity = crate::CoreFunction::resolve(symbol, TypeId::BOOL).identity;
+            return self.resolve_power(
+                &args[0],
+                &args[1],
+                expected,
+                PowerSurfaceOrigin::Core(identity),
+                span,
+            );
+        }
         let arity = crate::CoreFunction::resolve(symbol, TypeId::BOOL).arity();
         if args.len() != arity {
             return Err(vec![type_error(
@@ -17854,7 +17959,8 @@ impl Analyzer<'_> {
             | crate::CoreSymbol::Println
             | crate::CoreSymbol::ByteLength
             | crate::CoreSymbol::Str
-            | crate::CoreSymbol::Epsilon => unreachable!(),
+            | crate::CoreSymbol::Epsilon
+            | crate::CoreSymbol::Pow => unreachable!(),
         };
         if !signature_valid {
             return Err(vec![type_error(
@@ -19150,6 +19256,9 @@ impl Analyzer<'_> {
             op,
             AstBinaryOp::LogicalAnd | AstBinaryOp::LogicalOr
         ));
+        if op == AstBinaryOp::Power {
+            return self.resolve_power(la, ra, expected, PowerSurfaceOrigin::Operator, span);
+        }
         if matches!(op, AstBinaryOp::ShiftLeft | AstBinaryOp::ShiftRight) {
             return self.shift_binary(op, la, ra, expected, span);
         }
@@ -19686,6 +19795,132 @@ impl Analyzer<'_> {
             check_value(self.types, v, common, span, self.target)?
         }
         Ok(bin_result(self.types, op, l, r, result, constant))
+    }
+
+    /// The single semantic authority used by `**` and the official Core call.
+    fn resolve_power(
+        &mut self,
+        base_source: &AstExpr,
+        exponent_source: &AstExpr,
+        expected: Option<TypeId>,
+        origin: PowerSurfaceOrigin,
+        span: Span,
+    ) -> Result<Checked, Vec<Diagnostic>> {
+        let base_context = expected.filter(|ty| self.types.is_numeric(*ty));
+        let mut base = self.readable_math_operand(base_source, base_context)?;
+        if self.types.generic_param(base.expr.ty).is_some() {
+            return Err(vec![type_error(
+                "power is not defined for generic parameters in EXPONENTIATION-V1",
+                span,
+            )]);
+        }
+
+        let exponent_context = if self.types.float_info(base.expr.ty).is_some()
+            && matches!(exponent_source.kind, AstExprKind::Float(_))
+        {
+            Some(base.expr.ty)
+        } else {
+            None
+        };
+        let mut exponent = self.readable_math_operand(exponent_source, exponent_context)?;
+        if self.types.generic_param(exponent.expr.ty).is_some() {
+            return Err(vec![type_error(
+                "power is not defined for generic parameters in EXPONENTIATION-V1",
+                span,
+            )]);
+        }
+
+        let (mode, result_type) = if self.types.integer_info(base.expr.ty).is_some()
+            && self.types.integer_info(exponent.expr.ty).is_some()
+        {
+            if matches!(exponent.constant, Some(ConstantValue::Integer(value)) if value < 0) {
+                return Err(vec![Diagnostic::new(
+                    "E0500",
+                    Phase::Semantic,
+                    DiagnosticCategory::Type,
+                    "integer power requires a non-negative exponent",
+                    Some(exponent_source.span),
+                )]);
+            }
+            (PowerMode::IntegerChecked, base.expr.ty)
+        } else if self.types.float_info(base.expr.ty).is_some()
+            && self.types.integer_info(exponent.expr.ty).is_some()
+        {
+            (PowerMode::FloatInteger, base.expr.ty)
+        } else if self.types.float_info(base.expr.ty).is_some()
+            && self.types.float_info(exponent.expr.ty).is_some()
+        {
+            let common_type =
+                common(self.types, base.expr.ty, exponent.expr.ty).ok_or_else(|| {
+                    vec![type_error(
+                        "floating power operands have incompatible types",
+                        span,
+                    )]
+                })?;
+            base = self.coerce(base, Some(common_type))?;
+            exponent = self.coerce(exponent, Some(common_type))?;
+            (PowerMode::FloatLibm, common_type)
+        } else {
+            return Err(vec![type_error(
+                format!(
+                    "power has no v1 signature for {} and {}",
+                    self.type_name(base.expr.ty),
+                    self.type_name(exponent.expr.ty)
+                ),
+                span,
+            )]);
+        };
+
+        let exponent_signed = self
+            .types
+            .integer_info(exponent.expr.ty)
+            .is_some_and(IntegerType::is_signed);
+        let spec = PowerSpec {
+            mode,
+            base_type: base.expr.ty,
+            exponent_type: exponent.expr.ty,
+            result_type,
+            negative_exponent_trap: mode == PowerMode::IntegerChecked && exponent_signed,
+            overflow_trap: mode == PowerMode::IntegerChecked,
+        };
+        verify_power_spec(spec, self.types).expect("resolver constructs canonical power specs");
+        let constant = if mode == PowerMode::IntegerChecked
+            && let (
+                Some(ConstantValue::Integer(base_value)),
+                Some(ConstantValue::Integer(exponent_value)),
+            ) = (base.constant, exponent.constant)
+        {
+            let integer = self.types.integer_info(result_type).unwrap();
+            let Some(value) = const_integer_power(base_value, exponent_value, integer, self.target)
+            else {
+                return Err(vec![Diagnostic::new(
+                    "E0210",
+                    Phase::Semantic,
+                    DiagnosticCategory::Integer,
+                    format!("constant integer power overflows {result_type}"),
+                    Some(span),
+                )]);
+            };
+            Some(ConstantValue::Integer(value))
+        } else {
+            None
+        };
+        self.coerce(
+            Checked {
+                expr: HirExpr {
+                    kind: HirExprKind::Power {
+                        spec,
+                        base: Box::new(base.expr),
+                        exponent: Box::new(exponent.expr),
+                        origin,
+                    },
+                    ty: result_type,
+                    span,
+                },
+                constant,
+            },
+            expected,
+        )
     }
 
     fn shift_binary(
@@ -20283,7 +20518,8 @@ fn bin_result(
         AstBinaryOp::GreaterEqual => HirBinaryOp::GreaterEqual,
         AstBinaryOp::Equal => HirBinaryOp::Equal,
         AstBinaryOp::NotEqual => HirBinaryOp::NotEqual,
-        AstBinaryOp::LogicalAnd
+        AstBinaryOp::Power
+        | AstBinaryOp::LogicalAnd
         | AstBinaryOp::LogicalOr
         | AstBinaryOp::ShiftLeft
         | AstBinaryOp::ShiftRight => {
@@ -20346,6 +20582,43 @@ fn const_bin(
         _ => return Ok(None),
     };
     Ok(value.map(ConstantValue::Integer))
+}
+
+fn const_integer_power(
+    base: i128,
+    exponent: i128,
+    ty: IntegerType,
+    target: TargetProperties,
+) -> Option<i128> {
+    let mut n = u128::try_from(exponent).ok()?;
+    if n == 0 {
+        return Some(1);
+    }
+    if base == 0 || base == 1 {
+        return Some(base);
+    }
+    if base == -1 {
+        return Some(if n & 1 == 0 { 1 } else { -1 });
+    }
+    let (min, max) = ty.range(target);
+    let mut accumulator = 1i128;
+    let mut factor = base;
+    while n != 0 {
+        if n & 1 != 0 {
+            accumulator = accumulator.checked_mul(factor)?;
+            if accumulator < min || accumulator > max {
+                return None;
+            }
+        }
+        n >>= 1;
+        if n != 0 {
+            factor = factor.checked_mul(factor)?;
+            if factor < min || factor > max {
+                return None;
+            }
+        }
+    }
+    Some(accumulator)
 }
 
 fn integer_mask(bits: u16) -> u128 {
@@ -22475,6 +22748,33 @@ fn verify_expr(
                 verify_expr(operand, f, sigs, structs, enums, types, fail)?;
             }
             crate::verify_core_call(op, e.ty, types, |operand| Ok(operand.ty)).map_err(fail)?;
+        }
+        HirExprKind::Power {
+            spec,
+            base,
+            exponent,
+            origin,
+        } => {
+            verify_expr(base, f, sigs, structs, enums, types, fail)?;
+            verify_expr(exponent, f, sigs, structs, enums, types, fail)?;
+            verify_power_spec(*spec, types).map_err(fail)?;
+            let origin_valid = match origin {
+                PowerSurfaceOrigin::Operator => true,
+                PowerSurfaceOrigin::Core(identity) => {
+                    *identity
+                        == crate::CoreFunction::resolve(crate::CoreSymbol::Pow, TypeId::BOOL)
+                            .identity
+                }
+            };
+            if base.ty != spec.base_type
+                || exponent.ty != spec.exponent_type
+                || e.ty != spec.result_type
+                || !origin_valid
+            {
+                return Err(fail(
+                    "HIR power operands/result/provenance violate PowerSpec".into(),
+                ));
+            }
         }
         HirExprKind::IEEEFloatConstant {
             kind,
@@ -24952,6 +25252,57 @@ mod tests {
     use crate::{SourceFile, parse_source};
     fn check(s: &str) -> Result<TypedHir, Vec<Diagnostic>> {
         analyze(parse_source(&SourceFile::new("test.ae", s)).unwrap())
+    }
+    #[test]
+    fn exponentiation_hir_spec_and_core_provenance_corruption_fail_closed() {
+        let source = "int f(int x,uint8 e){return pow(x,e);}int main(){return f(2,3);}";
+        let hir = check(source).unwrap();
+        verify_hir(&hir).unwrap();
+
+        let mut bad_mode = hir.clone();
+        let f_id = bad_mode
+            .instances
+            .iter()
+            .find(|i| i.name == "f")
+            .unwrap()
+            .id;
+        let function = bad_mode
+            .functions
+            .iter_mut()
+            .find(|f| f.id == f_id)
+            .unwrap();
+        let HirStmtKind::Return { value, .. } = &mut function.body.statements[0].kind else {
+            unreachable!()
+        };
+        let HirExprKind::Power { spec, .. } = &mut value.kind else {
+            unreachable!()
+        };
+        spec.mode = PowerMode::FloatInteger;
+        assert!(verify_hir(&bad_mode).is_err());
+
+        let mut bad_origin = hir;
+        let f_id = bad_origin
+            .instances
+            .iter()
+            .find(|i| i.name == "f")
+            .unwrap()
+            .id;
+        let function = bad_origin
+            .functions
+            .iter_mut()
+            .find(|f| f.id == f_id)
+            .unwrap();
+        let HirStmtKind::Return { value, .. } = &mut function.body.statements[0].kind else {
+            unreachable!()
+        };
+        let HirExprKind::Power { origin, .. } = &mut value.kind else {
+            unreachable!()
+        };
+        let PowerSurfaceOrigin::Core(identity) = origin else {
+            unreachable!()
+        };
+        identity.ordinal = crate::CoreSymbol::Exp.ordinal();
+        assert!(verify_hir(&bad_origin).is_err());
     }
     #[test]
     fn invocable_requirements_have_canonical_owned_evidence() {

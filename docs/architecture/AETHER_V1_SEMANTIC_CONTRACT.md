@@ -2766,10 +2766,12 @@ rooted locals, per-identity lifecycle and independent HIR/MIR/SSA corruption.
 
 The admitted Core profile-v1 manifest contains only `print`, `println`,
 `byteLength`, `abs`, `min`, `max`, `clamp`, `sqrt`, `exp`, `ln`, `sin`, `cos`
-and `tan`. Unqualified lookup is lexical, current package, then this manifest;
+`tan`, `str`, `epsilon`, and `pow`. Unqualified lookup is lexical, current package, then this manifest;
 it opens no namespace and creates dependencies only for reached symbols.
-Canonical Core identity and the selected homogeneous scalar signature survive
-HIR, MIR and SSA. Exact signatures, IEEE/libm behavior, checked signed `abs`
+Canonical Core identity and the selected signature survive HIR. Ordinary Core
+calls retain their homogeneous signature through MIR and SSA; heterogeneous
+`pow` canonicalizes to the explicit `PowerSpec` shared with `**`. Exact
+signatures, IEEE/libm behavior, checked signed `abs`
 and exclusions are recorded in [CORE_V1_REPORT.md](CORE_V1_REPORT.md). This does
 not admit `List<T>` as Core or a general overload facility.
 
@@ -2842,7 +2844,7 @@ are recorded in
 [BITWISE_OPERATORS_V1_REPORT.md](BITWISE_OPERATORS_V1_REPORT.md).
 
 The admitted surface is `&`, `|`, `^`, prefix `~`, checked `<<`, and `>>`.
-`^` is exclusively XOR; `**`, `pow`, and union types are not admitted. Prefix
+`^` is exclusively XOR and is never exponentiation. Prefix
 `&`/`&mut`, `&&`, `||`, `!`, comparisons,
 ranges, selectors, and generic type syntax retain their existing meanings.
 Inside type grammar only, one `>>` token may be consumed as two contiguous
@@ -2865,8 +2867,8 @@ shift is logical (`lshr`). Left shift means the mathematical product by
 Count validation strictly precedes the overflow guard. The final LLVM shifts
 carry no `nsw`, `nuw`, or `exact` flags.
 
-The effective precedence from high to low is postfix/primary; prefix unary;
-multiplicative; additive; shifts; bitwise AND; bitwise XOR; bitwise OR;
+The effective precedence from high to low is postfix/primary; power; prefix
+unary; multiplicative; additive; shifts; bitwise AND; bitwise XOR; bitwise OR;
 comparison; equality; range; logical AND; logical OR. New binary operators are
 left associative. AST, HIR, MIR, and SSA carry explicit operations; HIR/MIR/SSA
 verification reconstructs integer kinds, exact results, signed right-shift
@@ -2901,3 +2903,45 @@ writes during RHS evaluation remain permitted and the final result uses the old
 value captured before the RHS. The existing provenance, backing, keepalive and
 invalidation rules remain unchanged; no new exclusivity or `noalias` premise is
 introduced.
+
+## EXPONENTIATION-V1 — checked integer and IEEE floating power
+
+Status: **IMPLEMENTED; qualification recorded in the milestone report**. The
+normative architecture is
+[EXPONENTIATION-ARCH-1](EXPONENTIATION_ARCH_1.md), and implementation evidence
+is recorded in [EXPONENTIATION-V1](EXPONENTIATION_V1_REPORT.md).
+
+The admitted surfaces are right-associative `base ** exponent` and the
+unqualified Core function `pow(base, exponent)`. Power binds above every prefix
+operator on its left and accepts a complete unary expression on its right:
+`-2 ** 2` is `-(2 ** 2)`, while `2 ** -3` is `2 ** (-3)`. `**=` is not
+admitted. Lexical/package lookup continues to shadow Core `pow`.
+
+The closed type matrix has three modes. `Integer ** Integer -> Integer`
+preserves the exact base `TypeId`, accepts any native integer exponent, rejects
+a known-negative exponent and traps a dynamic negative exponent with
+`NegativeIntegerExponent`; nonrepresentable results use `IntegerOverflow`.
+`Float ** Integer -> Float` preserves the base precision and processes the
+integer sign, magnitude and parity without converting it to float or i32.
+`Float ** Float -> Float` permits only the existing `float32 -> float64`
+widening and calls target `powf`/`pow`. `Integer ** Float`, aggregates,
+user-defined values, and generic parameters have no V1 signature. Transparent
+aliases remain transparent and contextual literals follow the base/result
+context without imposing it on an integer exponent.
+
+Integer and float-integer modes use binary exponentiation. Integer
+multiplications are checked in the base type, signed exponent domain validation
+precedes arithmetic, `0 ** 0` is one, bases `0`, `1`, and `-1` take constant
+time, and the final unused square is omitted. Float-integer negative exponents
+form their unsigned magnitude without signed `abs(MIN)` and first reciprocate
+the base. Floating operations carry no fast-math flags. Float-libm power does
+not translate floating conditions into Aether traps and does not use
+`exp(y*ln(x))`.
+
+HIR, MIR, and SSA retain explicit `PowerSpec { mode, base_type,
+exponent_type, result_type, traps }` nodes. Each verifier reconstructs the
+closed matrix; HIR additionally authenticates optional Core provenance. Exact
+integer constant folding uses the same binary algorithm and checks. Floating
+nontrivial cases remain runtime operations. LLVM emits reachability-driven,
+typed internal helpers for integer and float-integer modes and direct
+`powf`/`pow` calls for float-libm.

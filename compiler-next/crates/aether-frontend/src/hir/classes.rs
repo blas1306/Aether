@@ -1434,7 +1434,12 @@ fn expression_children(e: &HirExpr) -> Vec<&HirExpr> {
             .chain(invoke.arguments.iter())
             .collect(),
         E::StructInit { fields, .. } => fields.iter().map(|(_, e)| e).collect(),
-        E::CapabilityBinary { left, right, .. }
+        E::Power {
+            base: left,
+            exponent: right,
+            ..
+        }
+        | E::CapabilityBinary { left, right, .. }
         | E::CapabilityCompare { left, right, .. }
         | E::VectorScalarMultiply { left, right, .. }
         | E::MatrixScalarMultiply { left, right, .. }

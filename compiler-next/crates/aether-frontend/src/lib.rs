@@ -50,13 +50,13 @@ pub use hir::{
     MatrixAddMetadataRecipe, MatrixAddShapeRecipe, MatrixProductExtent, ModuleId, ModuleInfo,
     MutationEffect, NonNullProofId, NullableLayout, NullablePayloadAccess, OriginKey,
     OutputArgumentKind, PackageId, PackageInstanceKey, PackageKey, PackagePath, ParameterSignature,
-    ParsedModule, ParsedProgram, ResolvedImport, SatisfactionEvidence, ScalarSide, SemanticFacts,
-    SliceAssignmentContract, SliceAssignmentSnapshot, SourceUnitKey, StructInfo,
-    StructuralMutation, SymbolKey, TrapDiagnosticSite, TrapDiagnosticSiteId, TypeAliasInfo,
-    TypeLayout, TypedHir, VariantInfo, VariantPayloadInfo, analyze, analyze_bodies,
-    analyze_bodies_for_target, classify_enum_equality, collect_library_program_signatures,
-    collect_program_signatures, collect_signatures, format_type, layout_of, nullable_layout_of,
-    verify_hir,
+    ParsedModule, ParsedProgram, PowerMode, PowerSpec, PowerSurfaceOrigin, ResolvedImport,
+    SatisfactionEvidence, ScalarSide, SemanticFacts, SliceAssignmentContract,
+    SliceAssignmentSnapshot, SourceUnitKey, StructInfo, StructuralMutation, SymbolKey,
+    TrapDiagnosticSite, TrapDiagnosticSiteId, TypeAliasInfo, TypeLayout, TypedHir, VariantInfo,
+    VariantPayloadInfo, analyze, analyze_bodies, analyze_bodies_for_target, classify_enum_equality,
+    collect_library_program_signatures, collect_program_signatures, collect_signatures,
+    format_type, layout_of, nullable_layout_of, verify_hir, verify_power_spec,
 };
 pub use lexer::{Token, TokenKind, lex};
 pub use parser::parse;

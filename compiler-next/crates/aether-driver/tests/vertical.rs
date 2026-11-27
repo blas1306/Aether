@@ -9827,9 +9827,9 @@ fn vertical30_all_readable_families_orientations_and_behaviors() {
                 for left in [false, true] {
                     let name = format!("s{i}{}", usize::from(left));
                     let expr = if left {
-                        format!("s*{expr_a}")
+                        format!("s * {expr_a}")
                     } else {
-                        format!("{expr_a}*s")
+                        format!("{expr_a} * s")
                     };
                     write!(
                         helpers,

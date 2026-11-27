@@ -150,7 +150,7 @@ fn vertical32_all_readable_families_and_builtin_scalars() {
                         format!("{a}({n})")
                     }
                 };
-                write!(helpers,"Vector<T,Column> mc{i}{j}<T:Storable+Copy+Add+Mul+Zero>({mf}<T>a,{vf}<T,Column>x){{return {me}a*{ve}x;}}Vector<T,Row> rm{i}{j}<T:Storable+Copy+Add+Mul+Zero>({vf}<T,Row>x,{mf}<T>a){{return {ve}x*{me}a;}}").unwrap();
+                write!(helpers,"Vector<T,Column> mc{i}{j}<T:Storable+Copy+Add+Mul+Zero>({mf}<T>a,{vf}<T,Column>x){{return {me}a * {ve}x;}}Vector<T,Row> rm{i}{j}<T:Storable+Copy+Add+Mul+Zero>({vf}<T,Row>x,{mf}<T>a){{return {ve}x * {me}a;}}").unwrap();
                 write!(body,"if(true){{Vector<{scalar},Column>y=mc{i}{j}({},{});if(y[1]!=8){{return 1;}}if(y[2]!=18){{return 2;}}}}if(true){{Vector<{scalar},Row>y=rm{i}{j}({},{});if(y[1]!=11){{return 3;}}if(y[2]!=16){{return 4;}}}}",arg(ma,"a"),arg(va,"c"),arg(va,"r"),arg(ma,"a")).unwrap();
             }
         }

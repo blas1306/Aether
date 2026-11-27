@@ -18,7 +18,7 @@ use aether_frontend::{
     HirCompoundDestination, HirDrop, HirExpr, HirExprKind, HirFinally, HirFunction, HirMatchArm,
     HirPlace, HirPlaceBase, HirPlaceProjection, HirStmtKind, HirSubscriptResult,
     HirSubscriptSelector, HirSubscriptSelectorKind, HirUnaryOp, InstanceId, LocalId, MatchMode,
-    ModuleInfo, Phase, Span, StructId, StructInfo, StructuralMutation, Substitution,
+    ModuleInfo, Phase, PowerSpec, Span, StructId, StructInfo, StructuralMutation, Substitution,
     TrapDiagnosticSite, TypeArena, TypeData, TypeId, TypedHir, VariantId, format_type,
 };
 
@@ -283,6 +283,8 @@ pub enum Operand {
 pub enum TrapKind {
     /// Checked arithmetic overflow.
     IntegerOverflow,
+    /// Signed integer exponent outside the integer-power domain.
+    NegativeIntegerExponent,
     ShiftCountOutOfRange,
     /// Incompatible mathematical dimensions or rows/columns.
     ShapeMismatch,
@@ -408,6 +410,12 @@ pub enum Rvalue {
     },
     /// Canonically resolved Core function call.
     Core(Box<aether_frontend::CoreCall<Operand>>),
+    /// Explicit closed exponentiation operation.
+    Power {
+        spec: PowerSpec,
+        base: Operand,
+        exponent: Operand,
+    },
     /// Readable descriptor operands and an explicit structured initialization loop.
     /// Native oriented algebraic product with a closed concrete schedule.
     AlgebraicProduct {
@@ -2114,10 +2122,9 @@ impl Builder<'_> {
                     let success = self.new_block();
                     let trap = match trap {
                         aether_frontend::HirTrapKind::ShapeMismatch => TrapKind::ShapeMismatch,
-                        aether_frontend::HirTrapKind::IntegerOverflow => {
-                            unreachable!("verified shapeGuard trap")
-                        }
-                        aether_frontend::HirTrapKind::ShiftCountOutOfRange => {
+                        aether_frontend::HirTrapKind::IntegerOverflow
+                        | aether_frontend::HirTrapKind::ShiftCountOutOfRange
+                        | aether_frontend::HirTrapKind::NegativeIntegerExponent => {
                             unreachable!("verified shapeGuard trap")
                         }
                     };
@@ -4953,6 +4960,29 @@ impl Builder<'_> {
                         right,
                         trap,
                         secondary_trap,
+                    },
+                    expression.span,
+                );
+                Operand::Local(destination)
+            }
+            HirExprKind::Power {
+                spec,
+                base,
+                exponent,
+                ..
+            } => {
+                let base = self.lower_expr(base);
+                let exponent = self.lower_expr(exponent);
+                let destination = self.temporary(expression.ty);
+                self.assign(
+                    Place {
+                        base: PlaceBase::Local(destination),
+                        projections: vec![],
+                    },
+                    Rvalue::Power {
+                        spec: *spec,
+                        base,
+                        exponent,
                     },
                     expression.span,
                 );
@@ -10909,6 +10939,21 @@ fn validate_rvalue(
                 return Err(format!(
                     "MIR binary operation {op:?} violates its type/trap contract"
                 ));
+            }
+        }
+        Rvalue::Power {
+            spec,
+            base,
+            exponent,
+        } => {
+            validate_operand(function, base, initialized)?;
+            validate_operand(function, exponent, initialized)?;
+            aether_frontend::verify_power_spec(*spec, types)?;
+            if operand_type(function, base)? != spec.base_type
+                || operand_type(function, exponent)? != spec.exponent_type
+                || destination != spec.result_type
+            {
+                return Err("MIR Power operands/result violate PowerSpec".into());
             }
         }
         Rvalue::Call { callee, args, .. } => {

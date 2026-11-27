@@ -1586,8 +1586,28 @@ impl Parser<'_> {
                 span,
             })
         } else {
-            self.primary()
+            self.power()
         }
+    }
+
+    /// Power deliberately sits between postfix/primary and prefix unary.  The
+    /// recursive unary on the right gives `**` right associativity while still
+    /// admitting a negative exponent.
+    fn power(&mut self) -> Result<AstExpr, Diagnostic> {
+        let left = self.primary()?;
+        if self.consume(TokenKind::StarStar).is_none() {
+            return Ok(left);
+        }
+        let right = self.unary()?;
+        let span = left.span.through(right.span);
+        Ok(AstExpr {
+            kind: AstExprKind::Binary {
+                op: AstBinaryOp::Power,
+                left: Box::new(left),
+                right: Box::new(right),
+            },
+            span,
+        })
     }
 
     #[allow(clippy::too_many_lines)]

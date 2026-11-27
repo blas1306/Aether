@@ -679,6 +679,8 @@ pub enum AstUnaryOp {
 /// Infix operators.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AstBinaryOp {
+    /// Exponentiation; semantic analysis selects one of the closed power modes.
+    Power,
     /// Checked integer addition.
     Add,
     /// Checked integer subtraction.

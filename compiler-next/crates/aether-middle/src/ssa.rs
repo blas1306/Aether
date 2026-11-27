@@ -16,8 +16,9 @@ use std::sync::Arc;
 use aether_frontend::{
     CastKind, CatchId, ClassId, CoercionKind, CollectionKind, Diagnostic, DiagnosticCategory,
     EnumId, EnumInfo, FieldId, FinallyId, FloatValue, FunctionInstanceInfo, InstanceId,
-    IterationBindingCategory, LocalId, MatchMode, ModuleInfo, Phase, Span, StructId, StructInfo,
-    StructuralMutation, Substitution, TypeArena, TypeData, TypeId, VariantId, format_type,
+    IterationBindingCategory, LocalId, MatchMode, ModuleInfo, Phase, PowerSpec, Span, StructId,
+    StructInfo, StructuralMutation, Substitution, TypeArena, TypeData, TypeId, VariantId,
+    format_type,
 };
 
 use crate::mir::{
@@ -199,6 +200,12 @@ pub enum SsaOp {
     },
     /// Canonically resolved Core function call.
     Core(Box<aether_frontend::CoreCall<SsaOperand>>),
+    /// Explicit closed exponentiation operation.
+    Power {
+        spec: PowerSpec,
+        base: SsaOperand,
+        exponent: SsaOperand,
+    },
     /// Structured mathematical loop; inputs are Copy readable descriptors.
     /// Native oriented algebraic product with a closed concrete schedule.
     AlgebraicProduct {
@@ -1971,6 +1978,15 @@ fn rename_rvalue(value: &Rvalue, stacks: &[Vec<ValueId>], mir: &MirFunction) -> 
             trap: *trap,
             secondary_trap: *secondary_trap,
         },
+        Rvalue::Power {
+            spec,
+            base,
+            exponent,
+        } => SsaOp::Power {
+            spec: *spec,
+            base: rename_operand(base, stacks),
+            exponent: rename_operand(exponent, stacks),
+        },
         Rvalue::Call {
             call_site,
             callee,
@@ -2653,6 +2669,11 @@ pub(crate) fn rvalue_locals(function: &MirFunction, value: &Rvalue) -> Vec<Local
         }
         Rvalue::AlgebraicProduct { left, right, .. }
         | Rvalue::ElementwiseBinary { left, right, .. }
+        | Rvalue::Power {
+            base: left,
+            exponent: right,
+            ..
+        }
         | Rvalue::Binary { left, right, .. } => operand_local(left)
             .into_iter()
             .chain(operand_local(right))
@@ -7831,6 +7852,19 @@ fn verify_op(
                 return Err(format!("invalid SSA contract for {op:?}"));
             }
         }
+        SsaOp::Power {
+            spec,
+            base,
+            exponent,
+        } => {
+            aether_frontend::verify_power_spec(*spec, types)?;
+            if operand_ty(base)? != spec.base_type
+                || operand_ty(exponent)? != spec.exponent_type
+                || result != spec.result_type
+            {
+                return Err("SSA Power operands/result violate PowerSpec".into());
+            }
+        }
         SsaOp::Call { callee, args, .. } => {
             let signature = signatures
                 .get(callee.0 as usize)
@@ -8306,6 +8340,11 @@ fn op_operands(op: &SsaOp) -> Vec<&SsaOperand> {
         SsaOp::Unary { operand, .. } => vec![operand],
         SsaOp::AlgebraicProduct { left, right, .. }
         | SsaOp::ElementwiseBinary { left, right, .. }
+        | SsaOp::Power {
+            base: left,
+            exponent: right,
+            ..
+        }
         | SsaOp::Binary { left, right, .. } => {
             vec![left, right]
         }

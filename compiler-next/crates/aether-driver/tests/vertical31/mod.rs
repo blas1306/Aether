@@ -139,7 +139,7 @@ fn vertical31_all_readable_families_and_builtin_scalars() {
                 };
                 // Owning signatures independently require Storable; view-only inner does not.
                 let storage = if i == 0 || j == 0 { "Storable+" } else { "" };
-                write!(helpers,"T inner{i}{j}<T:{storage}Copy+Add+Mul+Zero>({lf}<T,Row>a,{rf}<T,Column>b){{return {le}a*{re}b;}}Matrix<T> product{i}{j}<T:Storable+Copy+Mul>({lf}<T,Column>a,{rf}<T,Row>b){{return {le}a*{re}b;}}").unwrap();
+                write!(helpers,"T inner{i}{j}<T:{storage}Copy+Add+Mul+Zero>({lf}<T,Row>a,{rf}<T,Column>b){{return {le}a * {re}b;}}Matrix<T> product{i}{j}<T:Storable+Copy+Mul>({lf}<T,Column>a,{rf}<T,Row>b){{return {le}a * {re}b;}}").unwrap();
                 write!(body,"if(inner{i}{j}({}, {})!=23){{return 1;}}if(true){{Matrix<{scalar}>m=product{i}{j}({},{});if(m[2,2]!=15){{return 2;}}}}",arg(la,"r"),arg(ra,"c"),arg(la,"c"),arg(ra,"r")).unwrap();
             }
         }
@@ -456,7 +456,7 @@ fn vertical31_mir_ssa_independent_corruption_rejection() {
         };
         let source = format!(
             "{result} product(ref Vector<int,Row>r,ref Vector<int,Column>c){{return {};}}int main(){{Vector<int,Row>r=[1];Vector<int,Column>c=[2];{result} x=product(&r,&c);return 0;}}",
-            expr.replace('r', "*r").replace('c', "*c")
+            expr.replace('r', "(*r)").replace('c', "(*c)")
         );
         let raw = lower_hir(
             analyze(parse_source(&SourceFile::new("corrupt.ae", source)).unwrap()).unwrap(),

@@ -256,6 +256,21 @@ owner = "language-conformance"
 command = ["cargo","test","-p","aether-driver","--test","contextual_overloads_v1"]
 
 [[suite]]
+id = "cargo:aether-driver:exponentiation_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "exponentiation_v1"
+target_kind = "integration"
+primary_responsibility = "EXPONENTIATION-V1 semantic, verifier, LLVM, and native conformance"
+secondary_responsibilities = ["operator/Core equivalence","checked traps","floating profile"]
+profiles = ["core","conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "compiler-core"
+command = ["cargo","test","-p","aether-driver","--test","exponentiation_v1"]
+
+[[suite]]
 id = "cargo:aether-driver:core_v1"
 kind = "cargo-test"
 crate = "aether-driver"
