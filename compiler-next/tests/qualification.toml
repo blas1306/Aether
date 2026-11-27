@@ -91,6 +91,21 @@ owner = "language-conformance"
 command = ["cargo","test","-p","aether-driver","--test","anonymous_functions_v1"]
 
 [[suite]]
+id = "cargo:aether-driver:bitwise_compound_assignment_v1"
+kind = "cargo-test"
+crate = "aether-driver"
+target = "bitwise_compound_assignment_v1"
+target_kind = "integration"
+primary_responsibility = "observable language and native-program conformance"
+secondary_responsibilities = ["workspace regression coverage"]
+profiles = ["conformance","full"]
+platform = ["linux","x86_64"]
+optimization = "O0/O2 where asserted by the suite"
+timeout_seconds = 900
+owner = "language-conformance"
+command = ["cargo","test","-p","aether-driver","--test","bitwise_compound_assignment_v1"]
+
+[[suite]]
 id = "cargo:aether-driver:bitwise_operators_v1"
 kind = "cargo-test"
 crate = "aether-driver"

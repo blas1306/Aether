@@ -2842,8 +2842,8 @@ are recorded in
 [BITWISE_OPERATORS_V1_REPORT.md](BITWISE_OPERATORS_V1_REPORT.md).
 
 The admitted surface is `&`, `|`, `^`, prefix `~`, checked `<<`, and `>>`.
-`^` is exclusively XOR; `**`, `pow`, bitwise compound assignment, and union
-types are not admitted. Prefix `&`/`&mut`, `&&`, `||`, `!`, comparisons,
+`^` is exclusively XOR; `**`, `pow`, and union types are not admitted. Prefix
+`&`/`&mut`, `&&`, `||`, `!`, comparisons,
 ranges, selectors, and generic type syntax retain their existing meanings.
 Inside type grammar only, one `>>` token may be consumed as two contiguous
 generic closers while retaining the original source spans.
@@ -2871,3 +2871,33 @@ comparison; equality; range; logical AND; logical OR. New binary operators are
 left associative. AST, HIR, MIR, and SSA carry explicit operations; HIR/MIR/SSA
 verification reconstructs integer kinds, exact results, signed right-shift
 selection, heterogeneous shift counts, and the required trap ordering.
+
+## BITWISE-COMPOUND-ASSIGNMENT-V1 — transactional integer update
+
+Status: **CLOSED** in `compiler-next`. Detailed implementation and
+qualification evidence is recorded in
+[BITWISE_COMPOUND_ASSIGNMENT_V1_REPORT.md](BITWISE_COMPOUND_ASSIGNMENT_V1_REPORT.md).
+
+The statement-only forms `&=`, `|=`, `^=`, `<<=` and `>>=` extend the existing
+compound-assignment transaction; they do not produce an expression value and
+cannot be chained. Their destination is any writable scalar Place or nominal
+class scalar field already admitted by COMPOUND-ASSIGNMENT-V1, restricted to
+the ten native integer types and transparent aliases.
+
+AND, OR and XOR require the RHS to resolve to the destination's exact canonical
+`TypeId`; ordinary binary-operator widening is not applied. Shift counts retain
+any native integer `TypeId`, independently of the destination. The destination
+alone fixes result width and signedness. `>>=` selects arithmetic shift for a
+signed destination and logical shift for an unsigned destination. `<<=` uses
+the checked left-shift operation.
+
+Destination operands and checks execute once, followed by `CompoundLoad`, RHS
+evaluation, count validation, optional left-shift representability validation,
+the bitwise operation and one `CompoundCommit` on the normal path. A negative
+count or a count at least the destination width traps with
+`ShiftCountOutOfRange`; a nonrepresentable left result traps with
+`IntegerOverflow`. Neither trap nor unwind publishes a commit. Scalar alias
+writes during RHS evaluation remain permitted and the final result uses the old
+value captured before the RHS. The existing provenance, backing, keepalive and
+invalidation rules remain unchanged; no new exclusivity or `noalias` premise is
+introduced.

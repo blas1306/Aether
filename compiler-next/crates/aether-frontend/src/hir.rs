@@ -12681,7 +12681,21 @@ impl Analyzer<'_> {
                             s.span,
                         )]);
                     }
-                    if !self.types.is_numeric(destination_type) {
+                    let bitwise = matches!(
+                        op,
+                        crate::AstCompoundAssignOp::BitwiseAnd
+                            | crate::AstCompoundAssignOp::BitwiseOr
+                            | crate::AstCompoundAssignOp::BitwiseXor
+                            | crate::AstCompoundAssignOp::ShiftLeft
+                            | crate::AstCompoundAssignOp::ShiftRight
+                    );
+                    if bitwise && self.types.integer_info(destination_type).is_none() {
+                        return Err(vec![type_error(
+                            "bitwise compound assignment requires a built-in integer scalar destination",
+                            s.span,
+                        )]);
+                    }
+                    if !bitwise && !self.types.is_numeric(destination_type) {
                         return Err(vec![type_error(
                             "compound assignment requires a built-in numeric scalar destination",
                             s.span,
@@ -12711,10 +12725,23 @@ impl Analyzer<'_> {
                     {
                         return Err(vec![type_error("invalid postfix update operator", s.span)]);
                     }
-                    let rhs = self.expression(value, Some(destination_type))?.expr;
-                    if rhs.ty != destination_type {
+                    let shift = matches!(
+                        op,
+                        crate::AstCompoundAssignOp::ShiftLeft
+                            | crate::AstCompoundAssignOp::ShiftRight
+                    );
+                    let rhs = self
+                        .expression(value, (!shift).then_some(destination_type))?
+                        .expr;
+                    if (!shift && rhs.ty != destination_type)
+                        || (shift && self.types.integer_info(rhs.ty).is_none())
+                    {
                         return Err(vec![type_error(
-                            "compound assignment result must exactly match the destination type",
+                            if shift {
+                                "shift compound assignment count must be a built-in integer scalar"
+                            } else {
+                                "compound assignment result must exactly match the destination type"
+                            },
                             s.span,
                         )]);
                     }
@@ -12753,7 +12780,32 @@ impl Analyzer<'_> {
                         (crate::AstCompoundAssignOp::Remainder, false, false) => {
                             HirBinaryOp::RemainderIntegerUnsignedChecked
                         }
-                        (crate::AstCompoundAssignOp::Remainder, true, _) => unreachable!(),
+                        (
+                            crate::AstCompoundAssignOp::Remainder
+                            | crate::AstCompoundAssignOp::BitwiseAnd
+                            | crate::AstCompoundAssignOp::BitwiseOr
+                            | crate::AstCompoundAssignOp::BitwiseXor
+                            | crate::AstCompoundAssignOp::ShiftLeft
+                            | crate::AstCompoundAssignOp::ShiftRight,
+                            true,
+                            _,
+                        ) => unreachable!(),
+                        (crate::AstCompoundAssignOp::BitwiseAnd, false, _) => {
+                            HirBinaryOp::BitwiseAnd
+                        }
+                        (crate::AstCompoundAssignOp::BitwiseOr, false, _) => HirBinaryOp::BitwiseOr,
+                        (crate::AstCompoundAssignOp::BitwiseXor, false, _) => {
+                            HirBinaryOp::BitwiseXor
+                        }
+                        (crate::AstCompoundAssignOp::ShiftLeft, false, _) => {
+                            HirBinaryOp::ShiftLeftChecked
+                        }
+                        (crate::AstCompoundAssignOp::ShiftRight, false, true) => {
+                            HirBinaryOp::ShiftRightArithmetic
+                        }
+                        (crate::AstCompoundAssignOp::ShiftRight, false, false) => {
+                            HirBinaryOp::ShiftRightLogical
+                        }
                     };
                     HirStmtKind::CompoundAssign {
                         id: CompoundAssignId {
@@ -21372,9 +21424,14 @@ fn verify_block(
                 let operation_matches = match op {
                     HirBinaryOp::AddIntegerChecked
                     | HirBinaryOp::SubtractIntegerChecked
-                    | HirBinaryOp::MultiplyIntegerChecked => integer.is_some(),
+                    | HirBinaryOp::MultiplyIntegerChecked
+                    | HirBinaryOp::BitwiseAnd
+                    | HirBinaryOp::BitwiseOr
+                    | HirBinaryOp::BitwiseXor
+                    | HirBinaryOp::ShiftLeftChecked => integer.is_some(),
                     HirBinaryOp::DivideIntegerSignedChecked
-                    | HirBinaryOp::RemainderIntegerSignedChecked => {
+                    | HirBinaryOp::RemainderIntegerSignedChecked
+                    | HirBinaryOp::ShiftRightArithmetic => {
                         integer.is_some_and(crate::types::IntegerType::is_signed)
                     }
                     HirBinaryOp::DivideIntegerUnsignedChecked
@@ -21385,8 +21442,15 @@ fn verify_block(
                     | HirBinaryOp::SubtractFloat
                     | HirBinaryOp::MultiplyFloat
                     | HirBinaryOp::DivideFloat => float,
+                    HirBinaryOp::ShiftRightLogical => integer.is_some_and(|kind| !kind.is_signed()),
                     _ => false,
                 };
+                let shift = matches!(
+                    op,
+                    HirBinaryOp::ShiftLeftChecked
+                        | HirBinaryOp::ShiftRightArithmetic
+                        | HirBinaryOp::ShiftRightLogical
+                );
                 let source_matches = match source {
                     HirCompoundAssignSource::Explicit => true,
                     HirCompoundAssignSource::PostfixIncrement => {
@@ -21402,7 +21466,8 @@ fn verify_block(
                 };
                 if id.function != f.function_id
                     || !destination_valid
-                    || rhs.ty != *destination_type
+                    || (!shift && rhs.ty != *destination_type)
+                    || (shift && types.integer_info(rhs.ty).is_none())
                     || !operation_matches
                     || !source_matches
                     || !types.guarantees_copy(*destination_type)
@@ -28424,6 +28489,45 @@ mod vertical33_tests {
                 2 => rhs.ty = TypeId::BOOL,
                 3 => *destination_type = TypeId::BOOL,
                 4 => *source = HirCompoundAssignSource::PostfixIncrement,
+                _ => unreachable!(),
+            }
+            assert!(verify_hir(&bad).is_err(), "accepted mutation {mutation}");
+        }
+    }
+
+    #[test]
+    fn bitwise_compound_hir_corruption_fails_closed_independently() {
+        let hir = analyze(
+            parse_source(&SourceFile::new(
+                "bitwise-compound-hir-corrupt.ae",
+                "int main(){int8 x=1;uint16 c=1;x<<=c;return x;}",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        verify_hir(&hir).unwrap();
+
+        for mutation in 0..3 {
+            let mut bad = hir.clone();
+            let HirStmtKind::CompoundAssign {
+                op,
+                rhs,
+                destination_type,
+                ..
+            } = &mut bad.functions[0]
+                .body
+                .statements
+                .iter_mut()
+                .find(|statement| matches!(statement.kind, HirStmtKind::CompoundAssign { .. }))
+                .unwrap()
+                .kind
+            else {
+                unreachable!()
+            };
+            match mutation {
+                0 => *op = HirBinaryOp::ShiftRightLogical,
+                1 => rhs.ty = TypeId::FLOAT64,
+                2 => *destination_type = TypeId::UINT8,
                 _ => unreachable!(),
             }
             assert!(verify_hir(&bad).is_err(), "accepted mutation {mutation}");

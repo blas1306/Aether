@@ -125,7 +125,7 @@ fn precedence_and_generic_closers_are_contextual() {
 }
 
 #[test]
-fn invalid_types_mixes_counts_compounds_and_power_fail_closed() {
+fn invalid_types_mixes_counts_and_power_fail_closed() {
     for source in [
         "int main(){bool x=true;return int(x&x);}",
         "int main(){int32 x=1;uint32 y=1;return int(x|y);}",
@@ -133,7 +133,6 @@ fn invalid_types_mixes_counts_compounds_and_power_fail_closed() {
         "int main(){int x=1;return x<<-1;}",
         "int main(){int8 x=1;return int(x<<8);}",
         "int main(){return int(int8(127)<<1);}",
-        "int main(){int x=1;x&=1;return x;}",
         "int main(){return 2**3;}",
     ] {
         assert!(

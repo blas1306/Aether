@@ -1115,6 +1115,11 @@ impl Parser<'_> {
             TokenKind::StarEqual => AstCompoundAssignOp::Multiply,
             TokenKind::SlashEqual => AstCompoundAssignOp::Divide,
             TokenKind::PercentEqual => AstCompoundAssignOp::Remainder,
+            TokenKind::AmpersandEqual => AstCompoundAssignOp::BitwiseAnd,
+            TokenKind::PipeEqual => AstCompoundAssignOp::BitwiseOr,
+            TokenKind::CaretEqual => AstCompoundAssignOp::BitwiseXor,
+            TokenKind::ShiftLeftEqual => AstCompoundAssignOp::ShiftLeft,
+            TokenKind::ShiftRightEqual => AstCompoundAssignOp::ShiftRight,
             _ => return None,
         };
         self.advance();

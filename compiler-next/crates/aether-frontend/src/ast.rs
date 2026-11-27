@@ -434,6 +434,16 @@ pub enum AstCompoundAssignOp {
     Divide,
     /// `%=`.
     Remainder,
+    /// `&=`.
+    BitwiseAnd,
+    /// `|=`.
+    BitwiseOr,
+    /// `^=`.
+    BitwiseXor,
+    /// `<<=`.
+    ShiftLeft,
+    /// `>>=`.
+    ShiftRight,
 }
 
 /// Source syntax that requested a compound scalar transaction. Postfix update

@@ -115,14 +115,20 @@ pub enum TokenKind {
     PercentEqual,
     /// `&`.
     Ampersand,
+    /// `&=`.
+    AmpersandEqual,
     /// `&&`.
     AndAnd,
     /// `|`.
     Pipe,
+    /// `|=`.
+    PipeEqual,
     /// `||`.
     OrOr,
     /// `^`.
     Caret,
+    /// `^=`.
+    CaretEqual,
     /// `~`.
     Tilde,
     /// `!`.
@@ -141,12 +147,16 @@ pub enum TokenKind {
     Less,
     /// `<<`.
     ShiftLeft,
+    /// `<<=`.
+    ShiftLeftEqual,
     /// `<=`.
     LessEqual,
     /// `>`.
     Greater,
     /// `>>`.
     ShiftRight,
+    /// `>>=`.
+    ShiftRightEqual,
     /// `>=`.
     GreaterEqual,
     /// End marker.
@@ -407,16 +417,34 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
             b'*' => single(&mut tokens, TokenKind::Star, source, &mut cursor),
             b'/' => single(&mut tokens, TokenKind::Slash, source, &mut cursor),
             b'%' => single(&mut tokens, TokenKind::Percent, source, &mut cursor),
+            b'&' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                push(
+                    &mut tokens,
+                    TokenKind::AmpersandEqual,
+                    source,
+                    start,
+                    cursor,
+                );
+            }
             b'&' if bytes.get(cursor + 1) == Some(&b'&') => {
                 cursor += 2;
                 push(&mut tokens, TokenKind::AndAnd, source, start, cursor);
             }
             b'&' => single(&mut tokens, TokenKind::Ampersand, source, &mut cursor),
+            b'|' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                push(&mut tokens, TokenKind::PipeEqual, source, start, cursor);
+            }
             b'|' if bytes.get(cursor + 1) == Some(&b'|') => {
                 cursor += 2;
                 push(&mut tokens, TokenKind::OrOr, source, start, cursor);
             }
             b'|' => single(&mut tokens, TokenKind::Pipe, source, &mut cursor),
+            b'^' if bytes.get(cursor + 1) == Some(&b'=') => {
+                cursor += 2;
+                push(&mut tokens, TokenKind::CaretEqual, source, start, cursor);
+            }
             b'^' => single(&mut tokens, TokenKind::Caret, source, &mut cursor),
             b'~' => single(&mut tokens, TokenKind::Tilde, source, &mut cursor),
             b'?' => single(&mut tokens, TokenKind::Question, source, &mut cursor),
@@ -431,6 +459,18 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                 TokenKind::Equal,
                 TokenKind::EqualEqual,
             ),
+            b'<' if bytes.get(cursor + 1) == Some(&b'<')
+                && bytes.get(cursor + 2) == Some(&b'=') =>
+            {
+                cursor += 3;
+                push(
+                    &mut tokens,
+                    TokenKind::ShiftLeftEqual,
+                    source,
+                    start,
+                    cursor,
+                );
+            }
             b'<' if bytes.get(cursor + 1) == Some(&b'<') => {
                 cursor += 2;
                 push(&mut tokens, TokenKind::ShiftLeft, source, start, cursor);
@@ -442,6 +482,18 @@ pub fn lex(source: &SourceFile) -> Result<Vec<Token>, Vec<Diagnostic>> {
                 TokenKind::Less,
                 TokenKind::LessEqual,
             ),
+            b'>' if bytes.get(cursor + 1) == Some(&b'>')
+                && bytes.get(cursor + 2) == Some(&b'=') =>
+            {
+                cursor += 3;
+                push(
+                    &mut tokens,
+                    TokenKind::ShiftRightEqual,
+                    source,
+                    start,
+                    cursor,
+                );
+            }
             b'>' if bytes.get(cursor + 1) == Some(&b'>') => {
                 cursor += 2;
                 push(&mut tokens, TokenKind::ShiftRight, source, start, cursor);

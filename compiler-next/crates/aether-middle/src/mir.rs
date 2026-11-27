@@ -1874,6 +1874,24 @@ impl Builder<'_> {
                         HirBinaryOp::SubtractFloat => (BinaryOp::SubtractFloat, None, None),
                         HirBinaryOp::MultiplyFloat => (BinaryOp::MultiplyFloat, None, None),
                         HirBinaryOp::DivideFloat => (BinaryOp::DivideFloat, None, None),
+                        HirBinaryOp::BitwiseAnd => (BinaryOp::BitwiseAnd, None, None),
+                        HirBinaryOp::BitwiseOr => (BinaryOp::BitwiseOr, None, None),
+                        HirBinaryOp::BitwiseXor => (BinaryOp::BitwiseXor, None, None),
+                        HirBinaryOp::ShiftLeftChecked => (
+                            BinaryOp::ShiftLeftChecked,
+                            Some(TrapKind::ShiftCountOutOfRange),
+                            Some(TrapKind::IntegerOverflow),
+                        ),
+                        HirBinaryOp::ShiftRightArithmetic => (
+                            BinaryOp::ShiftRightArithmetic,
+                            Some(TrapKind::ShiftCountOutOfRange),
+                            None,
+                        ),
+                        HirBinaryOp::ShiftRightLogical => (
+                            BinaryOp::ShiftRightLogical,
+                            Some(TrapKind::ShiftCountOutOfRange),
+                            None,
+                        ),
                         _ => unreachable!("verified compound arithmetic op"),
                     };
                     let result = self.temporary(*destination_type);
